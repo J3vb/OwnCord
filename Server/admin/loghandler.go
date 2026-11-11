@@ -9,15 +9,13 @@ import (
 	"time"
 )
 
-// multiHandler is an slog.Handler that tees records to two handlers:
-// the original stdout handler and a ring buffer handler.
+// multiHandler tees records to the stdout handler and a ring buffer handler.
 type multiHandler struct {
 	stdout slog.Handler
 	ring   *ringHandler
 }
 
-// ringHandler converts slog.Records into LogEntries and writes them
-// to the RingBuffer.
+// ringHandler converts slog.Records into LogEntries for the RingBuffer.
 type ringHandler struct {
 	buf    *RingBuffer
 	level  slog.Leveler
@@ -25,10 +23,9 @@ type ringHandler struct {
 	groups []string
 }
 
-// NewMultiHandler creates a handler that sends records to both stdout
-// and the ring buffer. The ring buffer captures all levels from minLevel;
-// pass a *slog.LevelVar to retune the threshold at runtime. Enabled reports
-// false below both thresholds, so gated Debug calls cost nothing.
+// NewMultiHandler sends records to stdout and the ring buffer (all levels from minLevel; pass a
+// *slog.LevelVar to retune at runtime). Enabled reports false below both thresholds, so gated Debug calls
+// cost nothing.
 func NewMultiHandler(stdout slog.Handler, buf *RingBuffer, minLevel slog.Leveler) slog.Handler {
 	return &multiHandler{
 		stdout: stdout,
@@ -71,19 +68,12 @@ func (rh *ringHandler) Enabled(level slog.Level) bool {
 	return level >= rh.level.Level()
 }
 
-// logAttrValue converts an slog.Value to the value stored in the ring buffer's
-// JSON attrs, matching slog's own JSONHandler for stdout:
-//
-//   - Resolve() first, so an slog.LogValuer (db.User, db.Session, config.Config
-//     and its secret-bearing sections) is redacted before it reaches JSON.
-//     Record.Attrs does not resolve on its own, so without this the ring
-//     buffer would bypass redaction that stdout honors.
-//   - error values marshal to "{}" (only unexported fields), so they are
-//     rendered as their Error() string instead.
-//   - a resolved group is walked into a map instead of json.Marshal-ed as-is:
-//     a bare []slog.Attr marshals to "{}" per element. Resolve() only resolves
-//     the outer LogValuer, so nested group members are resolved by the same
-//     recursive call.
+// logAttrValue converts an slog.Value to the value stored in the ring buffer's JSON attrs, matching slog's
+// JSONHandler for stdout. Resolve() runs first so an slog.LogValuer (db.User, db.Session, config.Config and
+// its secret-bearing sections) is redacted: Record.Attrs does not resolve, so without it the ring buffer
+// would bypass redaction stdout honors. Errors marshal to "{}" (only unexported fields), so they render as
+// Error(). A resolved group is walked into a map, since a bare []slog.Attr marshals to "{}" per element;
+// nested members resolve by the same recursive call.
 func logAttrValue(v slog.Value) any {
 	v = v.Resolve()
 	if v.Kind() == slog.KindGroup {
@@ -104,16 +94,12 @@ func logAttrValue(v slog.Value) any {
 }
 
 func (rh *ringHandler) Handle(r slog.Record) {
-	// Build source from file path.
 	source := categorizeSource(r)
 
-	// Collect attributes as a JSON object.
 	attrs := make(map[string]any)
-	// Add pre-set attrs from WithAttrs.
 	for _, a := range rh.attrs {
 		attrs[a.Key] = logAttrValue(a.Value)
 	}
-	// Add record attrs.
 	r.Attrs(func(a slog.Attr) bool {
 		key := a.Key
 		if len(rh.groups) > 0 {
@@ -163,12 +149,10 @@ func (rh *ringHandler) withGroup(name string) *ringHandler {
 	}
 }
 
-// categorizeSource extracts a human-readable source category from the log record.
 func categorizeSource(r slog.Record) string {
 	if r.PC == 0 {
 		return "server"
 	}
-	// Use runtime frame to get the source file path.
 	frames := runtime.CallersFrames([]uintptr{r.PC})
 	frame, _ := frames.Next()
 	file := frame.File

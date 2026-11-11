@@ -14,28 +14,26 @@ import (
 )
 
 const (
-	// banPurgeMaxRows bounds one ban purge. Past it the purge stops and
-	// reports itself incomplete; running the same purge again continues.
+	// banPurgeMaxRows bounds one ban purge; past it the purge reports itself incomplete and running it again
+	// continues.
 	banPurgeMaxRows = 10000
 	// banPurgeMaxWindow is the longest history window a ban purge accepts.
 	banPurgeMaxWindow = 7 * 24 * time.Hour
-	// banPurgeRateLimit and banPurgeRateWindow cap how often one actor may
-	// start a ban purge, so purges cannot queue behind banPurgeSem.
+	// banPurgeRateLimit and banPurgeRateWindow cap how often one actor may start a ban purge, so purges cannot
+	// queue behind banPurgeSem.
 	banPurgeRateLimit  = 1
 	banPurgeRateWindow = 2 * time.Second
 )
 
-// BanPurgeBatch is one committed batch of a ban purge: message ids soft-deleted
-// in one channel, ready to broadcast as one chat_bulk_deleted.
+// BanPurgeBatch is one committed batch: message ids soft-deleted in one channel, to broadcast as one
+// chat_bulk_deleted.
 type BanPurgeBatch struct {
 	ChannelID  int64
 	MessageIDs []int64
 }
 
-// BanPurgeResult is PurgeAfterBan's outcome. Batches lists every batch that
-// committed, including when Err is set, so the caller can broadcast them.
-// Complete is false when the purge stopped early (row cap, context end or an
-// error) and more of the target's messages in the window may remain.
+// BanPurgeResult is PurgeAfterBan's outcome. Batches lists every committed batch, even when Err is set.
+// Complete is false when the purge stopped early (row cap, context end, error).
 type BanPurgeResult struct {
 	Batches  []BanPurgeBatch
 	Deleted  int
@@ -43,9 +41,8 @@ type BanPurgeResult struct {
 	Err      error
 }
 
-// authorizeBanPurge runs the permission, existence and rank checks of a ban purge
-// without consuming the rate limit and returns the target. Authority comes first
-// (as in BanUser) so an actor without it learns nothing about which ids exist.
+// authorizeBanPurge runs the permission, existence and rank checks without consuming the rate limit.
+// Authority comes first (as in BanUser) so an actor without it learns nothing about which ids exist.
 func (s *ModerationService) authorizeBanPurge(ctx context.Context, actorID, targetID int64) (*db.User, error) {
 	if err := requireHumanActor(actorID); err != nil {
 		return nil, err
@@ -72,11 +69,9 @@ func (s *ModerationService) authorizeBanPurge(ctx context.Context, actorID, targ
 	return target, nil
 }
 
-// AuthorizeBanPurge runs every precondition of purging a member's recent messages
-// along with a ban, changing nothing: BAN_MEMBERS and MANAGE_MESSAGES, the target
-// exists, the actor strictly outranks it, and the actor is inside the rate limit.
-// A caller that bans and purges in one request calls it before the ban commits, so
-// a refusal leaves nothing half-applied.
+// AuthorizeBanPurge runs every precondition of a ban purge, changing nothing: BAN_MEMBERS and
+// MANAGE_MESSAGES, target exists, actor strictly outranks it, actor inside the rate limit. A ban-and-purge
+// request calls it before the ban commits so a refusal leaves nothing half-applied.
 func (s *ModerationService) AuthorizeBanPurge(ctx context.Context, actorID, targetID int64) error {
 	if _, err := s.authorizeBanPurge(ctx, actorID, targetID); err != nil {
 		return err
@@ -87,18 +82,15 @@ func (s *ModerationService) AuthorizeBanPurge(ctx context.Context, actorID, targ
 	return nil
 }
 
-// PurgeAfterBan soft-deletes the target's messages within window in every channel
-// where the actor holds READ_MESSAGES|MANAGE_MESSAGES, after the target was
-// banned. It repeats the authorization checks and requires the target to be
-// banned now, so it is never a purge without a ban.
-// Lock order: banPurgeSem is taken before any other lock and never while one is
-// held; the channel mention emit lock and the database writer are taken inside it. No hub lock.
+// PurgeAfterBan soft-deletes the target's messages within window in every channel where the actor holds
+// READ_MESSAGES|MANAGE_MESSAGES. It repeats the authorization checks and requires the target to be banned
+// now. Lock order: banPurgeSem is taken before any other lock and never while one is held; the channel
+// mention emit lock and the database writer are taken inside it. No hub lock.
 func (s *ModerationService) PurgeAfterBan(ctx context.Context, actorID, targetID int64, window time.Duration) BanPurgeResult {
 	if window <= 0 || window > banPurgeMaxWindow {
 		return BanPurgeResult{Err: fmt.Errorf("%w: invalid purge window", ErrBadRequest)}
 	}
-	// The window is measured from the request, not from when the wait below
-	// ends.
+	// The window is measured from the request, not from when the wait ends.
 	since := time.Now().UTC().Add(-window).Format(dbtime.SQLiteLayout)
 	if s.messages == nil {
 		return BanPurgeResult{Err: fmt.Errorf("%w: message purge unavailable", ErrInternal)}
@@ -134,9 +126,8 @@ func (s *ModerationService) PurgeAfterBan(ctx context.Context, actorID, targetID
 		return res
 	}
 
-	// The ledger and audit rows must survive a request canceled after the
-	// deletes committed; a failure to write either is logged and the deletes
-	// stand.
+	// Ledger and audit rows must survive a request canceled after the deletes committed; a failed write is
+	// logged and the deletes stand.
 	wc := context.WithoutCancel(ctx)
 	if err := s.st.RecordRemovalAction(wc, targetID, actorID, fmt.Sprintf("%d messages removed with ban", res.Deleted)); err != nil {
 		slog.Error("ModerationService.PurgeAfterBan record removal", "err", err, "actor_id", actorID, "target_id", targetID)
@@ -148,11 +139,9 @@ func (s *ModerationService) PurgeAfterBan(ctx context.Context, actorID, targetID
 	return res
 }
 
-// purgeUserMessagesSince soft-deletes userID's messages at or after since, channel
-// by channel in batches of maxPurgeLimit, up to maxRows. A channel is covered only
-// when actorID holds READ_MESSAGES and MANAGE_MESSAGES there; a lookup error skips
-// it. It returns every committed batch even when it stops early (complete false at
-// the row cap, context end, or a store error returned as err).
+// purgeUserMessagesSince soft-deletes userID's messages at or after since, channel by channel in batches of
+// maxPurgeLimit, up to maxRows. A channel is covered only when actorID holds READ_MESSAGES and
+// MANAGE_MESSAGES there; a lookup error skips it. Returns every committed batch even when stopping early.
 func (s *messageRemoval) purgeUserMessagesSince(ctx context.Context, actorID, userID int64, since string, maxRows int) (batches []BanPurgeBatch, complete bool, err error) {
 	channels, err := s.st.ListUserMessageChannelsSince(ctx, userID, since)
 	if err != nil {
@@ -169,8 +158,7 @@ func (s *messageRemoval) purgeUserMessagesSince(ctx context.Context, actorID, us
 			continue
 		}
 
-		// Flush queued mention-badge increments before the batches commit and the reversal
-		// below runs, as PurgeMessages does.
+		// Flush queued mention increments before the batches commit, as PurgeMessages does.
 		s.mentions.flushChannelMentionCounts(context.WithoutCancel(ctx), chID)
 
 		for {
@@ -202,8 +190,8 @@ func (s *messageRemoval) purgeUserMessagesSince(ctx context.Context, actorID, us
 	return batches, true, nil
 }
 
-// canModerateDelete reports whether actorID may delete others' messages in
-// chID under the message delete policy; a lookup error counts as no.
+// canModerateDelete reports whether actorID may delete others' messages in chID under the delete policy; a
+// lookup error counts as no.
 func (s *messageRemoval) canModerateDelete(ctx context.Context, actorID, chID int64) bool {
 	subj, err := s.perms.Subject(ctx, actorID, chID)
 	if err != nil {
@@ -218,14 +206,11 @@ func (s *messageRemoval) canModerateDelete(ctx context.Context, actorID, chID in
 	return true
 }
 
-// ValidateActionReason applies BanUser's moderation reason rules (length, control
-// characters) so a caller can reject a bad reason before spending a rate-limit
-// token.
+// ValidateActionReason applies BanUser's reason rules (length, control characters) so a caller can reject
+// before spending a rate-limit token.
 func ValidateActionReason(reason string) error {
 	return validateActionReason(reason)
 }
 
-// SetBanPurgeRowCapForTest lowers the number of messages one ban purge may
-// delete before it reports itself incomplete. It is for tests only; n <= 0
-// restores the default.
+// SetBanPurgeRowCapForTest lowers the ban purge row cap for tests; n <= 0 restores the default.
 func (s *ModerationService) SetBanPurgeRowCapForTest(n int) { s.banPurgeRowCap = n }

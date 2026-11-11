@@ -8,10 +8,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// sendMessagePrecheck runs every gate a new send must clear before anything
-// is written: channel lookup, send permission, content sanitization, and
-// attachment permission. It returns the resolved channel and the sanitized
-// content for the caller to persist.
+// sendMessagePrecheck runs every gate a new send must clear before anything is written and returns the
+// resolved channel and sanitized content.
 func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageParams) (*db.Channel, string, error) {
 	if p.StickerID != 0 {
 		if err := s.validateStickerSend(p); err != nil {
@@ -25,26 +23,21 @@ func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageP
 
 	isDM := ch.Type == "dm"
 
-	// Permission check. Also refuses a write against an archived channel — see
-	// requireChannelWritable in message_perms.go, the shared gate every
-	// message write sink routes through.
+	// Also refuses a write against an archived channel (requireChannelWritable, message_perms.go).
 	if err := s.checkSendPermission(ctx, p.UserID, ch); err != nil {
 		return nil, "", err
 	}
 
 	if p.StickerID != 0 {
-		// No text to sanitize and no attachments to gate: the content is
-		// filled in from the sticker once it is looked up.
+		// No text or attachments to gate: content is filled from the sticker once it is looked up.
 		return ch, "", nil
 	}
 
-	// Validate and sanitize content.
 	content, err := sanitizeContent(p.Content, len(p.AttachmentIDs) > 0)
 	if err != nil {
 		return nil, "", err
 	}
 
-	// Attachment permission (non-DM).
 	if !isDM && len(p.AttachmentIDs) > 0 {
 		if !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.AttachFiles) {
 			return nil, "", fmt.Errorf("%w: missing ATTACH_FILES permission", ErrForbidden)

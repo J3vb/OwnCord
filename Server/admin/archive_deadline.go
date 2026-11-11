@@ -9,40 +9,34 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// The server's global ReadTimeout/WriteTimeout are 30 s, which a
-// multi-gigabyte archive cannot be built and sent in. Like the transfer
-// routes (api/transfer_deadline.go, which admin cannot import), an archive
-// request instead gets a progress deadline: every chunk written pushes the
-// connection's deadlines out by archiveProgressTimeout, so a client that stops
-// reading is abandoned, while a slow but moving one is not cut.
-// archiveMaxLifetime is the hard bound on one archive request, build and
-// transfer together, however it progresses: 2 h carries tens of gigabytes
-// over an ordinary uplink. At shutdown, EndArchives pulls that bound in to
-// archiveShutdownGrace, so an archive cannot hold the 30 s drain.
+// The server's global 30 s Read/WriteTimeout cannot fit a multi-gigabyte archive. Like the transfer routes
+// (api/transfer_deadline.go, which admin cannot import), an archive request gets a progress deadline: each
+// written chunk pushes the connection's deadlines out by archiveProgressTimeout, so a stalled client is
+// abandoned and a slow moving one is not cut.
+// archiveMaxLifetime is the hard bound on one archive request, build and transfer together: 2 h carries tens
+// of gigabytes over an ordinary uplink. At shutdown EndArchives pulls it in to archiveShutdownGrace so an
+// archive cannot hold the 30 s drain.
 const (
 	archiveProgressTimeout = 30 * time.Second
 	archiveMaxLifetime     = 2 * time.Hour
 	archiveShutdownGrace   = 20 * time.Second
 )
 
-// archivesInFlight holds the archive requests still running, and the servers
-// that have begun shutting down.
+// archivesInFlight holds running archive requests and the servers that have begun shutting down.
 var archivesInFlight = struct {
 	mu      syncutil.Mutex
 	set     map[*archiveDeadline]struct{}
 	closing map[*http.Server]time.Time
 }{set: map[*archiveDeadline]struct{}{}, closing: map[*http.Server]time.Time{}}
 
-// EndArchives returns srv's shutdown hook: every archive request srv is
-// serving, and any that starts on srv afterwards, must end within
-// archiveShutdownGrace of the hook running. Register it with
-// http.Server.RegisterOnShutdown: Shutdown waits for every active handler.
+// EndArchives returns srv's shutdown hook: every archive request srv serves, and any started afterwards, ends
+// within archiveShutdownGrace of the hook running. Register with http.Server.RegisterOnShutdown, since
+// Shutdown waits for active handlers.
 func EndArchives(srv *http.Server) func() {
 	return shutdownArchives(srv, archiveShutdownGrace)
 }
 
-// shutdownArchives is EndArchives with the grace supplied, so tests can use a
-// short one.
+// shutdownArchives is EndArchives with the grace supplied, so tests can use a short one.
 func shutdownArchives(srv *http.Server, grace time.Duration) func() {
 	return func() {
 		archivesInFlight.mu.Lock()
@@ -57,9 +51,8 @@ func shutdownArchives(srv *http.Server, grace time.Duration) func() {
 	}
 }
 
-// archiveDeadline owns one archive request's deadlines. It is the io.Writer
-// the archive is copied through, and its context, which the build runs
-// under, ends at the lifetime bound.
+// archiveDeadline owns one archive request's deadlines; it is the io.Writer the archive is copied through,
+// and its context (the build's) ends at the lifetime bound.
 type archiveDeadline struct {
 	w     io.Writer
 	ctl   *http.ResponseController
@@ -71,10 +64,9 @@ type archiveDeadline struct {
 	until time.Time
 }
 
-// startArchive starts an archive request's deadlines; cancel ends the context
-// the build runs under, and is called at the lifetime bound. Nothing is
-// written while the archive builds, so the connection starts at the lifetime
-// bound; each written chunk re-arms it. The handler must defer release.
+// startArchive starts an archive request's deadlines; cancel ends the build's context at the lifetime bound.
+// Nothing is written while the archive builds, so the connection starts at the lifetime bound and each chunk
+// re-arms it. The handler must defer release.
 func startArchive(w http.ResponseWriter, r *http.Request, cancel context.CancelFunc, idle, lifetime time.Duration) *archiveDeadline {
 	srv, _ := r.Context().Value(http.ServerContextKey).(*http.Server)
 	d := &archiveDeadline{
@@ -98,7 +90,6 @@ func startArchive(w http.ResponseWriter, r *http.Request, cancel context.CancelF
 	return d
 }
 
-// release drops the request from the in-flight set once the handler is done.
 func (d *archiveDeadline) release() {
 	archivesInFlight.mu.Lock()
 	delete(archivesInFlight.set, d)
@@ -106,8 +97,7 @@ func (d *archiveDeadline) release() {
 	d.timer.Stop()
 }
 
-// capAt pulls the lifetime bound in to cutoff: the connection's deadlines and
-// the build's context both end by then.
+// capAt pulls the lifetime bound in to cutoff for both the connection's deadlines and the build's context.
 func (d *archiveDeadline) capAt(cutoff time.Time) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -135,10 +125,9 @@ func (d *archiveDeadline) arm() {
 	d.setDeadlines(deadline)
 }
 
-// setDeadlines sets both deadlines; the read one too, because on HTTP/1.1 an
-// expired read deadline cancels the request context mid-response. Errors are
-// ignored: the only realistic one is http.ErrNotSupported on a writer with no
-// connection, where there is no deadline to manage.
+// setDeadlines sets both deadlines; the read one too, because on HTTP/1.1 an expired read deadline cancels
+// the request context mid-response. Errors are ignored: the only realistic one is http.ErrNotSupported (no
+// connection).
 func (d *archiveDeadline) setDeadlines(deadline time.Time) {
 	_ = d.ctl.SetReadDeadline(deadline)
 	_ = d.ctl.SetWriteDeadline(deadline)

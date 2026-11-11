@@ -10,28 +10,24 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// threadArchiveBatch bounds one ArchiveDueThreads call.
 const threadArchiveBatch = 200
 
-// threadArchiveStore is the slice of ThreadStore the archiver reads and writes.
 type threadArchiveStore interface {
 	NextThreadArchiveDue(ctx context.Context) (time.Time, bool, error)
 	ArchiveDueThreads(ctx context.Context, now time.Time, limit int) (archived []db.DueThread, listed int, err error)
 }
 
-// ThreadNotifier is told when the archiver archived a thread, so live clients
-// can move it. The hub implements it (a coalesced thread_changed).
+// ThreadNotifier is told when the archiver archived a thread, so live clients can move it. The hub implements
+// it (a coalesced thread_changed).
 type ThreadNotifier interface {
 	ThreadChanged(threadID int64)
 }
 
-// ThreadArchiver archives idle threads: one goroutine (Run) sleeps until the
-// earliest open thread falls due (capped at expirerMaxSleep), archives every due
-// thread and tells the notifier. Wake makes it re-read the earliest due time when
-// a thread can fall due sooner than the planned wake-up (a shorter idle period).
-// A create or a post only moves a due time later, at least an hour out, which the
-// capped sleep always reaches in time, so neither wakes it. Correctness does not depend on it: a late flag
-// only keeps a thread showing active longer, and a post reopens an archived thread.
+// ThreadArchiver archives idle threads: one goroutine (Run) sleeps until the earliest open thread falls due
+// (capped at expirerMaxSleep), archives every due thread and tells the notifier. Wake makes it re-read the
+// earliest due time when a thread can fall due sooner than planned (a shorter idle period); a create or post
+// only moves a due time later, which the capped sleep always reaches in time. Correctness does not depend on
+// it: a late flag only keeps a thread showing active longer, and a post reopens an archived thread.
 type ThreadArchiver struct {
 	st   threadArchiveStore
 	wake chan struct{} // size 1: an idle period was shortened
@@ -46,9 +42,8 @@ type ThreadArchiver struct {
 	retryAfter time.Duration
 }
 
-// NewThreadArchiver returns an archiver over st's thread storage. A store
-// without it (a test double) gives an archiver that does nothing. st is only
-// checked for threadArchiveStore, so it takes any value.
+// NewThreadArchiver returns an archiver over st's thread storage; a store without it (a test double) gives
+// one that does nothing.
 func NewThreadArchiver(st any) *ThreadArchiver {
 	a := &ThreadArchiver{
 		wake: make(chan struct{}, 1),
@@ -67,8 +62,7 @@ func (a *ThreadArchiver) SetNotifier(n ThreadNotifier) {
 	a.notifier = n
 }
 
-// Wake makes Run re-read the earliest due time. It never blocks: a wake already
-// pending covers this one.
+// Wake makes Run re-read the earliest due time. It never blocks: a wake already pending covers this one.
 func (a *ThreadArchiver) Wake() {
 	select {
 	case a.wake <- struct{}{}:
@@ -76,8 +70,8 @@ func (a *ThreadArchiver) Wake() {
 	}
 }
 
-// Sweep archives every due thread once and returns the first error. The boot
-// stage calls it before the listener opens.
+// Sweep archives every due thread once and returns the first error. The boot stage calls it before the
+// listener opens.
 func (a *ThreadArchiver) Sweep(ctx context.Context) error {
 	if a.st == nil {
 		return nil
@@ -95,15 +89,15 @@ func (a *ThreadArchiver) Sweep(ctx context.Context) error {
 				notifier.ThreadChanged(t.ID)
 			}
 		}
-		// A full batch that archived something may have more behind it.
-		// Threads that listed but did not archive were posted to meanwhile.
+		// A full batch that archived something may have more behind it; threads that listed but did not archive
+		// were posted to meanwhile.
 		if listed < threadArchiveBatch || len(archived) == 0 {
 			return nil
 		}
 	}
 }
 
-// Run is the archiver loop. It returns when ctx is done.
+// Run is the archiver loop.
 func (a *ThreadArchiver) Run(ctx context.Context) {
 	if a.st == nil {
 		return
@@ -139,7 +133,6 @@ func (a *ThreadArchiver) Run(ctx context.Context) {
 	}
 }
 
-// sleepOrDone waits d or until ctx is done.
 func (a *ThreadArchiver) sleepOrDone(ctx context.Context, d time.Duration) {
 	t := time.NewTimer(d)
 	defer t.Stop()
@@ -149,9 +142,8 @@ func (a *ThreadArchiver) sleepOrDone(ctx context.Context, d time.Duration) {
 	}
 }
 
-// nextSleep reads the earliest due time and returns how long to sleep. failed
-// is true after a read error, where the sleep is the retry delay and the sweep
-// is skipped.
+// nextSleep reads the earliest due time and returns how long to sleep. failed is true after a read error,
+// where the sleep is the retry delay and the sweep is skipped.
 func (a *ThreadArchiver) nextSleep(ctx context.Context) (sleep time.Duration, failed bool) {
 	due, ok, err := a.st.NextThreadArchiveDue(ctx)
 	if err != nil {

@@ -19,10 +19,9 @@ import (
 // MessageRetryWindow bounds both client retry lifetime and server receipts.
 const MessageRetryWindow = 24 * time.Hour
 
-// messageDeliveryParams validates the immutable logical id. Embedding time in the
-// id lets the server reject old retries after receipt pruning. Content is left
-// empty: the caller fills in the sanitized text after the send gates, since a
-// receipt lookup does not need it.
+// messageDeliveryParams validates the immutable logical id; embedding time in the id lets
+// the server reject old retries after receipt pruning. Content is left empty: the caller
+// fills in the sanitized text after the send gates.
 func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliveryParams, error) {
 	if p.ClientMessageID == "" {
 		return nil, nil
@@ -41,16 +40,16 @@ func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliv
 	if expiresMS <= nowMS || createdMS > max(nowMS+db.MessageDeliveryClockSkew.Milliseconds(), floorMS) {
 		return nil, fmt.Errorf("%w: client_message_id expired or device clock is ahead", ErrBadRequest)
 	}
-	// Hash raw input, not the sanitized result: reusing a key for changed text
-	// is a conflict even when two inputs sanitize to the same stored string.
+	// Hash raw input, not the sanitized result: reusing a key for changed text is a conflict
+	// even when two inputs sanitize to the same string.
 	attachments := append([]string{}, p.AttachmentIDs...)
 	encoded, err := json.Marshal(struct {
 		ChannelID   int64
 		Content     string
 		ReplyTo     *int64
 		Attachments []string
-		// omitempty keeps a false ping hashing as before the field existed, so earlier
-		// receipts still match; the same holds for each field below.
+		// omitempty keeps a false ping hashing as before the field existed, so earlier receipts
+		// still match; likewise each field below.
 		ReplyPing bool   `json:",omitempty"`
 		ForwardOf int64  `json:",omitempty"`
 		Poll      string `json:",omitempty"`
@@ -68,10 +67,9 @@ func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliv
 	}, nil
 }
 
-// answerSendRetry runs ahead of the channel, permission and content gates. A retry
-// of an accepted send is answered from its receipt: the message exists, so a later
-// permission change must not turn its acknowledgment into a refusal. Otherwise it
-// returns the parsed key, or nil for a send without one.
+// answerSendRetry runs ahead of the channel, permission and content gates: a retry of an
+// accepted send is answered from its receipt, since a later permission change must not
+// turn its acknowledgment into a refusal. Otherwise returns the parsed key, or nil.
 func (s *MessageService) answerSendRetry(ctx context.Context, p SendMessageParams) (*db.MessageDeliveryParams, *SendMessageResult, error) {
 	if err := s.sendMessageRateGate(p); err != nil {
 		return nil, nil, err
@@ -93,8 +91,6 @@ func (s *MessageService) answerSendRetry(ctx context.Context, p SendMessageParam
 	return delivery, nil, nil
 }
 
-// sendMessageRateGate runs before anything reads the database, retries
-// included: the per-user chat rate limit, then the channel id's shape.
 func (s *MessageService) sendMessageRateGate(p SendMessageParams) error {
 	if s.limiter != nil && !s.limiter.Allow(auth.Key("chat", p.UserID), 10, time.Second) {
 		return ErrRateLimited
@@ -105,15 +101,12 @@ func (s *MessageService) sendMessageRateGate(p SendMessageParams) error {
 	return nil
 }
 
-// errAllAttachmentsSkipped is the error for a send with no text whose every
-// attachment was skipped; it matches ErrBadRequest (older callers) and
-// ErrAttachmentsUnavailable (the precise wire code).
+// errAllAttachmentsSkipped is the error for a send with no text whose every attachment was
+// skipped; matches ErrBadRequest (older callers) and ErrAttachmentsUnavailable (the wire code).
 func errAllAttachmentsSkipped() error {
 	return fmt.Errorf("%w: %w: none of the attachments could be sent", ErrBadRequest, ErrAttachmentsUnavailable)
 }
 
-// skippedAttachmentIDs returns the requested ids that are not in linked, in
-// request order, first occurrence only. It returns nil when nothing was skipped.
 func skippedAttachmentIDs(requested, linked []string) []string {
 	if len(requested) == 0 {
 		return nil
@@ -136,12 +129,10 @@ func skippedAttachmentIDs(requested, linked []string) []string {
 	return skipped
 }
 
-// replaySkipped derives the skipped ids for a retry answered from a receipt.
-// Receipts do not store them: the payload hash binds the retry to the same ordered
-// id list and a live message's attachment rows are never unlinked while its
-// receipt answers, so requested minus linked is exact. A read failure logs and
-// returns nil, so the ack is plain and never a false "skipped" that would make the
-// client re-attach files that did send.
+// replaySkipped derives the skipped ids for a receipt-answered retry. Receipts do not
+// store them, but the payload hash binds the same ordered id list and a live message's
+// attachment rows are never unlinked, so requested minus linked is exact. A read failure
+// logs and returns nil: never a false "skipped" that would make the client re-attach.
 func (s *MessageService) replaySkipped(ctx context.Context, p SendMessageParams, msgID int64) []string {
 	if len(p.AttachmentIDs) == 0 {
 		return nil
@@ -171,7 +162,6 @@ func messageDeliveryError(err error) error {
 	case errors.Is(err, db.ErrMessageDeliveryEmpty):
 		return errAllAttachmentsSkipped()
 	case errors.Is(err, db.ErrForwardSourceGone):
-		// The message being forwarded was deleted after the gates passed.
 		return fmt.Errorf("%w: message not found", ErrNotFound)
 	case errors.Is(err, db.ErrStickerGone):
 		return errStickerNotFound()
@@ -184,9 +174,9 @@ func messageDeliveryError(err error) error {
 	}
 }
 
-// persistMessage is the send path for clients without a key. Keyed sends commit
-// attachment links with the receipt so a retry never sees an accepted receipt for
-// a message whose attachment ownership later fails.
+// persistMessage is the send path for clients without a key. Keyed sends commit attachment
+// links with the receipt so a retry never sees an accepted receipt for a message whose
+// attachment ownership later fails.
 func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams, content string, mentions mentionSet, delivery *db.MessageDeliveryParams) (*db.Message, []db.AttachmentInfo, []string, bool, error) {
 	if delivery == nil {
 		msg, err := s.st.CreateMessageWithMentions(ctx, p.ChannelID, p.UserID, content, p.ReplyTo, mentions.UserIDs, mentions.ReplyPingUserID, mentions.Everyone, mentions.RoleIDs)
@@ -205,8 +195,7 @@ func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams
 	if saved.Duplicate || len(p.AttachmentIDs) == 0 {
 		return saved.Message, nil, nil, saved.Duplicate, nil
 	}
-	// The write is committed. A disconnect must not erase attachment metadata
-	// from the broadcast we still owe the channel.
+	// The write is committed. A disconnect must not erase attachment metadata from the broadcast we still owe.
 	attachments, err := s.st.GetAttachmentsByMessageIDs(context.WithoutCancel(ctx), []int64{saved.Message.ID})
 	if err != nil {
 		slog.Error("message delivery attachments lookup", "err", err, "msg_id", saved.Message.ID)
@@ -214,9 +203,6 @@ func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams
 	return saved.Message, attachments[saved.Message.ID], skippedAttachmentIDs(p.AttachmentIDs, saved.LinkedAttachmentIDs), false, nil
 }
 
-// checkMessageSlowMode is charged only for a new send: a matching receipt returns
-// before it, as before the permission gates; a retry meets only the general rate
-// limit.
 func (s *MessageService) checkMessageSlowMode(ctx context.Context, p SendMessageParams, ch *db.Channel) error {
 	if ch.Type != "dm" && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
 		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)

@@ -24,46 +24,39 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// Deps are the pieces main() owns and hands in: the build version, the logger
-// and ring buffer both log sinks are wired against, and the restart
-// coordinator whose handoff main() performs after Run returns.
+// Deps are the pieces main() owns and hands in.
 type Deps struct {
 	Version string
 	Log     *slog.Logger
 	LogBuf  *admin.RingBuffer
 	Restart *RestartCoordinator
-	// LogLevelVar is the *slog.LevelVar main's log sinks read. app.New wraps it
-	// in the admin API's log-level controller, with LogBaseLevel as the level a
-	// timed debug boost reverts to. Nil in tests without main's wiring; the
-	// endpoints then report 503.
+	// LogLevelVar is the *slog.LevelVar main's log sinks read; nil in tests,
+	// where the log-level endpoints report 503.
 	LogLevelVar  *slog.LevelVar
 	LogBaseLevel slog.Level
 }
 
-// closeStep is one teardown step: the stage that registered it, how that stage
-// stops, and its budget (zero means closeStepBudget). Steps are appended in
-// start order and Close walks them backwards.
+// closeStep is one teardown step; a zero budget means closeStepBudget.
 type closeStep struct {
 	stage  string
 	budget time.Duration
 	stop   func(context.Context) error
 }
 
-// App is one server process. Each stage the lifecycle starts owns a field here
-// and registers exactly one closeStep as it comes up, so there is a single
-// teardown path for a failed start, a serve error and a clean shutdown.
+// App is one server process; each stage registers exactly one closeStep as it
+// starts, so a failed start, a serve error and a clean shutdown share one
+// teardown path.
 type App struct {
 	cfg  *config.Config
 	deps Deps
 	log  *slog.Logger
 
 	// rootCtx is the context Run was given; every other context descends from
-	// it, so cancelling it stops the server as a signal does.
+	// it.
 	rootCtx context.Context
-	// bgCtx is the context every background goroutine (event persister,
-	// pruner, plugin loader, maintenance loop) runs under. bgCancel is the
-	// first-registered closer so it runs last, as a backstop: the persistence
-	// and maintenance steps cancel it and join their goroutines earlier.
+	// bgCtx is the context every background goroutine runs under. bgCancel is
+	// registered first so it runs last, as a backstop to the steps that join
+	// their goroutines earlier.
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 
@@ -82,66 +75,54 @@ type App struct {
 	persister   *ws.EventPersister
 	prunerDone  <-chan struct{}
 	auditWriter *db.AuditWriter
-	// background owns the request-path jobs that outlive their request (Web
-	// Push dispatch, the no-worker mention write); its close step joins or
-	// abandons them before the database closes.
+	// background owns request-path jobs that outlive their request; its close
+	// step joins or abandons them before the database closes.
 	background *syncutil.Group
-	// shutdown is closed at the start of Close, before the first step, to tell
-	// work that must not complete during a shutdown (the update apply tail's
-	// countdown and binary swap) to stop. The background group is deliberately
-	// not stopped early: handlers running during the HTTP drain keep spawning
-	// jobs.
+	// shutdown is closed at the start of Close to stop work that must not
+	// complete during shutdown (the update apply tail).
 	shutdown     chan struct{}
 	shutdownOnce sync.Once // Close's closed flag is not atomic; a second caller must not double-close
 	markers      *db.MarkerStore
-	// bootMarker is the current run's handle on boot.json; prevBoot is what the
-	// previous run left there, folded into the attention panel at start-up.
-	bootMarker *bootMarker
-	prevBoot   service.BootStatus
-	// restoreOutcome is the staged backup restore this start applied or
-	// refused, folded into the attention panel with prevBoot.
+	// bootMarker is this run's handle on boot.json; prevBoot is what the
+	// previous run left there.
+	bootMarker     *bootMarker
+	prevBoot       service.BootStatus
 	restoreOutcome service.RestoreOutcome
-	// pushVAPIDKey is loaded by startPushVAPIDKey and installed on svc.Push
-	// by startHub once the service layer exists.
+	// pushVAPIDKey is loaded by startPushVAPIDKey and installed on svc.Push by
+	// startHub.
 	pushVAPIDKey *ecdh.PrivateKey
-	// totpKey is loaded by startTOTPKey and consumed by StartRuntime, which
-	// builds the AuthService with it.
+	// totpKey is loaded by startTOTPKey and consumed by StartRuntime.
 	totpKey []byte
-	// storage is the one upload file store, opened by startErasureMarkers
-	// (nil when it could not be) and shared through StartRuntime.
+	// storage is the one upload file store, opened by startErasureMarkers (nil
+	// when it could not be).
 	storage  *storage.Storage
 	serveCtx context.Context
 
 	closers []closeStep
 	closed  bool
 
-	// failStage makes the named start stage fail instead of running; the
-	// failure-injection seam lifecycle_test.go drives, so assertions are about
-	// what teardown does with what was already up. Never set outside tests.
+	// failStage makes the named start stage fail, to test teardown. Never set
+	// outside tests.
 	failStage string
 
-	// closeStepBudget overrides the default per-step close budget so a test
-	// need not wait ten seconds. A step with its own budget keeps it. Never set
+	// closeStepBudget overrides the default per-step close budget. Never set
 	// outside tests.
 	closeStepBudget time.Duration
 
-	// teardownBudget overrides the overall close deadline so a test need not
-	// wait fifty seconds. Never set outside tests.
+	// teardownBudget overrides the overall close deadline. Never set outside
+	// tests.
 	teardownBudget time.Duration
 
 	// onCloseStep is called with each stage's name just before its close step
-	// runs, making the teardown walk observable. Never set outside tests.
+	// runs. Never set outside tests.
 	onCloseStep func(stage string)
 }
 
-// errStageInjected is what a failStage-selected stage returns, so the
-// injection is visibly a test seam in a stack trace.
+// errStageInjected is what a failStage-selected stage returns.
 var errStageInjected = errors.New("start failed (injected)")
 
-// New builds the App around an already-loaded configuration. It starts and
-// opens nothing: Run does, so every started stage has a matching close and an
-// App never run has nothing to release. The error is for a missing dependency,
-// which would otherwise surface as a panic several stages in.
+// New builds the App around a loaded configuration and starts nothing: Run
+// does, so an App never run has nothing to release.
 func New(cfg *config.Config, deps Deps) (*App, error) {
 	switch {
 	case cfg == nil:
@@ -160,31 +141,25 @@ func (a *App) onClose(stage string, stop func(context.Context) error) {
 	a.onCloseWithin(stage, 0, stop)
 }
 
-// onCloseWithin is onClose for a step that needs a budget other than
-// closeStepBudget.
+// onCloseWithin is onClose for a step with its own budget.
 func (a *App) onCloseWithin(stage string, budget time.Duration, stop func(context.Context) error) {
 	a.closers = append(a.closers, closeStep{stage: stage, budget: budget, stop: stop})
 }
 
-// Close stops every started stage in the reverse of start order and is the
-// only teardown path. The reverse walk (docs/architecture/server-boundaries.md,
-// "Start, drain, stop") guarantees:
+// Close stops every started stage in reverse start order and is the only
+// teardown path (docs/architecture/server-boundaries.md, "Start, drain, stop").
+// The reverse walk guarantees:
 //
-//   - the audit writer starts after the database opens, so it stops before
-//     database.Close and its queue is flushed while the handle is live;
-//   - event persistence likewise stops (cancelling bgCtx and joining the
-//     pruner) before the handle goes, so no prune is mid-query against a
-//     closing pool;
-//   - the hub's GracefulStop runs on every return from Run, including an
-//     early one, because it calls StopLiveKit, the sole caller of
-//     LiveKitProcess.Stop; skipping it orphans the supervised livekit-server.
+//   - the audit writer and event persistence stop before database.Close, so
+//     the queue is flushed and no prune is mid-query on a closing pool;
+//   - the hub's GracefulStop runs on every return from Run, because it calls
+//     StopLiveKit; skipping it orphans the supervised livekit-server.
 //
-// It reports the first error and runs every later step regardless: the steps
-// below a failing one release the database handle, the LiveKit process and the
-// audit queue. Later errors are logged. Each step runs under its own budget,
-// capped by what is left of one overall teardownBudget, and ctx lends it
-// values only: neither its cancellation nor an earlier step's overrun cuts a
-// later step short of that cap. Calling it twice is a no-op.
+// It reports the first error and runs every later step regardless, since those
+// release the database, LiveKit and audit queue. Each step runs under its own
+// budget, capped by what is left of teardownBudget; ctx lends values only, so a
+// cancelled ctx or an earlier overrun never cuts a later step short. Calling it
+// twice is a no-op.
 func (a *App) Close(ctx context.Context) error {
 	if a.closed {
 		return nil
@@ -209,10 +184,9 @@ func (a *App) Close(ctx context.Context) error {
 		if a.onCloseStep != nil {
 			a.onCloseStep(step.stage)
 		}
-		// Each step gets its own budget, not a share of one deadline: a step
-		// that overran (an HTTP drain held open by a long request) must not
-		// leave the hub's restart notice, audit drain and event flush on an
-		// expired context.
+		// Each step gets its own budget, not a share of one deadline: an
+		// overrunning step (an HTTP drain) must not leave the hub notice, audit
+		// drain and event flush on an expired context.
 		budget := step.budget
 		if budget <= 0 {
 			budget = defaultBudget

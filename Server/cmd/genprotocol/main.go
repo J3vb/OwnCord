@@ -102,8 +102,6 @@ func main() {
 		*codesOut, len(s.ErrorCodes.REST), *tsOut)
 }
 
-// validate rejects duplicate identifiers and empty fields early so a bad
-// schema edit fails the generator instead of producing broken output.
 func validate(s schema) error {
 	if s.ProtocolEpoch < 1 {
 		return fmt.Errorf("protocol_epoch must be >= 1, got %d", s.ProtocolEpoch)
@@ -138,9 +136,8 @@ func validate(s schema) error {
 	return validateCodes("rest", s.ErrorCodes.REST, map[string]bool{})
 }
 
-// validateCodes checks one error code list: every field set, no Go name,
-// TS key or wire value twice, and the TS key equal to the wire value, so a
-// client constant reads the same as the code it matches.
+// validateCodes checks one error code list: every field set, no Go name, TS key or wire value twice, and the
+// TS key equal to the wire value.
 func validateCodes(list string, codes []message, goNames map[string]bool) error {
 	if len(codes) == 0 {
 		return fmt.Errorf("error_codes.%s: at least one code is required", list)
@@ -165,8 +162,6 @@ func validateCodes(list string, codes []message, goNames map[string]bool) error 
 	return nil
 }
 
-// writeNote writes note as a // comment block above a declaration, wrapped
-// at about 76 columns after indent.
 func writeNote(b *strings.Builder, indent, note string) {
 	if note == "" {
 		return
@@ -185,8 +180,6 @@ func writeNote(b *strings.Builder, indent, note string) {
 	b.WriteString(indent + "// " + line + "\n")
 }
 
-// validateEnum checks one enum, recording its Go identifiers in goNames so
-// they cannot collide with message constants or another enum's.
 func validateEnum(e enum, goNames map[string]bool) error {
 	if e.Name == "" || e.Go == "" || e.TS == "" || len(e.Values) == 0 {
 		return fmt.Errorf("enum %+v: name, go, ts and at least one value are required", e)
@@ -268,7 +261,6 @@ func renderGo(s schema) ([]byte, error) {
 	return format.Source([]byte(b.String()))
 }
 
-// renderCodes writes the REST error codes as the typed httperr.Code.
 func renderCodes(s schema) ([]byte, error) {
 	var b strings.Builder
 	b.WriteString(header("//\n// REST error codes — single source of truth for both Server (Go) and\n" +

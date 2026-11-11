@@ -9,19 +9,19 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// VoiceMaxVideoKbpsKey holds the server-wide video upload cap per person, in
-// kbit/s, for camera and screen share together. 0 or a missing row means no cap.
+// VoiceMaxVideoKbpsKey holds the server-wide video upload cap per person in kbit/s, camera and screen share
+// together; 0 or a missing row means no cap.
 const VoiceMaxVideoKbpsKey = "voice_max_video_kbps"
 
-// Video cap bounds in kbit/s. The floor keeps a capped camera usable; the
-// ceiling is above every client preset, so it never raises one.
+// Video cap bounds in kbit/s. The floor keeps a capped camera usable; the ceiling is above every client
+// preset, so it never raises one.
 const (
 	VoiceMaxVideoKbpsMin = 300
 	VoiceMaxVideoKbpsMax = 50000
 )
 
-// normalizeVoiceMaxVideoKbps accepts 0 (no cap) or
-// [VoiceMaxVideoKbpsMin, VoiceMaxVideoKbpsMax], in canonical decimal form.
+// normalizeVoiceMaxVideoKbps accepts 0 (no cap) or [VoiceMaxVideoKbpsMin, VoiceMaxVideoKbpsMax], in canonical
+// decimal form.
 func normalizeVoiceMaxVideoKbps(key, value string) (string, error) {
 	kbps, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || kbps < 0 || (kbps != 0 && kbps < VoiceMaxVideoKbpsMin) || kbps > VoiceMaxVideoKbpsMax {
@@ -30,8 +30,8 @@ func normalizeVoiceMaxVideoKbps(key, value string) (string, error) {
 	return strconv.Itoa(kbps), nil
 }
 
-// VoiceMaxVideoBitrate reads a stored value as bits per second: 0 (no cap) for a
-// blank row, and for a hand-edited one outside the accepted range.
+// VoiceMaxVideoBitrate reads a stored value as bits per second: 0 (no cap) for a blank row or a hand-edited
+// one outside the accepted range.
 func VoiceMaxVideoBitrate(stored string) int {
 	normalized, err := normalizeVoiceMaxVideoKbps(VoiceMaxVideoKbpsKey, stored)
 	if err != nil {
@@ -44,8 +44,8 @@ func VoiceMaxVideoBitrate(stored string) int {
 	return kbps * 1000
 }
 
-// VoiceMaxVideoBitrateFromRead interprets a read of VoiceMaxVideoKbpsKey as bits
-// per second: a missing row is no cap. ok is false when the read failed.
+// VoiceMaxVideoBitrateFromRead interprets a read of VoiceMaxVideoKbpsKey as bits per second: a missing row is
+// no cap; ok is false when the read failed.
 func VoiceMaxVideoBitrateFromRead(stored string, err error) (bitrate int, ok bool, readErr error) {
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -56,16 +56,14 @@ func VoiceMaxVideoBitrateFromRead(stored string, err error) (bitrate int, ok boo
 	return VoiceMaxVideoBitrate(stored), true, nil
 }
 
-// ServerUploadMbpsKey holds the server's own upload speed in Mbit/s, as typed by
-// the admin. Only the admin panel reads it, to estimate how many people can
-// watch one stream at once. 0 or a missing row means not set.
+// ServerUploadMbpsKey holds the server's own upload speed in Mbit/s as typed by the admin; only the admin
+// panel reads it, to estimate how many people can watch one stream. 0 or a missing row means not set.
 const ServerUploadMbpsKey = "server_upload_mbps"
 
 // ServerUploadMbpsMax is the largest accepted upload speed in Mbit/s.
 const ServerUploadMbpsMax = 100000
 
-// normalizeServerUploadMbps accepts 0 (not set) or 1 to [ServerUploadMbpsMax],
-// in canonical decimal form.
+// normalizeServerUploadMbps accepts 0 (not set) or 1 to [ServerUploadMbpsMax], in canonical decimal form.
 func normalizeServerUploadMbps(key, value string) (string, error) {
 	mbps, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || mbps < 0 || mbps > ServerUploadMbpsMax {

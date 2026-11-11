@@ -10,17 +10,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
-// The settings rows the admin panel saves the upload file-type lists under,
-// comma-separated. A row replaces the matching config.yaml list; until one is
-// saved, config.yaml's list applies.
+// The settings rows the admin panel saves the upload file-type lists under, comma-separated. A row replaces
+// the matching config.yaml list; until saved, config.yaml's applies.
 const (
 	UploadBlockedExtensionsKey = "upload_blocked_extensions"
 	UploadAllowedExtensionsKey = "upload_allowed_extensions"
 )
 
-// FileTypePolicy returns the upload file-type policy in force: each list from
-// its settings row when the owner has saved one, else from config.yaml
-// (StorageLimits.FileTypes).
+// FileTypePolicy returns the upload file-type policy in force: each list from its settings row when the owner
+// has saved one, else from config.yaml.
 func (s *UploadService) FileTypePolicy(ctx context.Context) (storage.FileTypePolicy, error) {
 	s.quota.mu.Lock()
 	p := storage.FileTypePolicy{

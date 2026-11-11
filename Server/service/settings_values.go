@@ -11,27 +11,24 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// Limits on the settings the first-run wizard and the admin settings PATCH
-// both write. One copy, so the two entry points cannot drift apart.
+// Limits on the settings the first-run wizard and the admin settings PATCH both write; one copy so the two
+// cannot drift.
 const (
-	// MaxServerNameLen and MaxMotdLen bound the trimmed value in bytes, as the
-	// wizard always has.
+	// MaxServerNameLen and MaxMotdLen bound the trimmed value in bytes.
 	MaxServerNameLen = 100
 	MaxMotdLen       = 500
-	// MaxUploadSizeMB is the largest upload cap either surface accepts
-	// (10 GiB); the smallest is 1 MB.
+	// MaxUploadSizeMB is the largest upload cap either surface accepts (10 GiB); the smallest is 1 MB.
 	MaxUploadSizeMB = 10240
 )
 
-// voiceQualityPresets are the presets the voice code maps to a bitrate
-// (ws.voiceQualities); ws pins the two lists equal in a test.
+// voiceQualityPresets are the presets the voice code maps to a bitrate (ws.voiceQualities); ws pins the two
+// lists equal in a test.
 var voiceQualityPresets = []string{"low", "medium", "high"}
 
 // VoiceQualityPresets returns the accepted voice_quality values.
 func VoiceQualityPresets() []string { return slices.Clone(voiceQualityPresets) }
 
-// NormalizeServerName trims a server name and requires 1 to MaxServerNameLen
-// bytes.
+// NormalizeServerName trims a server name and requires 1 to MaxServerNameLen bytes.
 func NormalizeServerName(v string) (string, error) {
 	name := strings.TrimSpace(v)
 	if name == "" {
@@ -43,8 +40,7 @@ func NormalizeServerName(v string) (string, error) {
 	return name, nil
 }
 
-// NormalizeMotd trims a message of the day and bounds it to MaxMotdLen bytes.
-// Empty is allowed: it clears the message.
+// NormalizeMotd trims a message of the day and bounds it to MaxMotdLen bytes; empty clears it.
 func NormalizeMotd(v string) (string, error) {
 	motd := strings.TrimSpace(v)
 	if len(motd) > MaxMotdLen {
@@ -53,8 +49,7 @@ func NormalizeMotd(v string) (string, error) {
 	return motd, nil
 }
 
-// NormalizeVoiceQuality lower-cases and trims a voice quality preset and
-// requires one the voice code accepts.
+// NormalizeVoiceQuality lower-cases and trims a voice quality preset and requires one the voice code accepts.
 func NormalizeVoiceQuality(v string) (string, error) {
 	q := strings.ToLower(strings.TrimSpace(v))
 	if !slices.Contains(voiceQualityPresets, q) {
@@ -63,8 +58,8 @@ func NormalizeVoiceQuality(v string) (string, error) {
 	return q, nil
 }
 
-// normalizeMaxUploadBytes requires a whole number of bytes from 1 MB to
-// MaxUploadSizeMB and returns it in canonical decimal form.
+// normalizeMaxUploadBytes requires whole bytes from 1 MB to MaxUploadSizeMB and returns canonical decimal
+// form.
 func normalizeMaxUploadBytes(v string) (string, error) {
 	const minBytes, maxBytes = int64(1) << 20, int64(MaxUploadSizeMB) << 20
 	n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
@@ -74,9 +69,8 @@ func normalizeMaxUploadBytes(v string) (string, error) {
 	return strconv.FormatInt(n, 10), nil
 }
 
-// normalizeValueSetting validates the settings whose limits the wizard shares
-// (and the boolean switches voice_owner_movable and game_activity_enabled, and the
-// video cap), reporting ok=false for any other key.
+// normalizeValueSetting validates the settings whose limits the wizard shares (plus voice_owner_movable,
+// game_activity_enabled and the video cap); ok=false for any other key.
 func normalizeValueSetting(key, value string) (normalized string, ok bool, err error) {
 	switch key {
 	case "server_name":
@@ -103,7 +97,6 @@ func normalizeValueSetting(key, value string) (normalized string, ok bool, err e
 	return normalized, true, err
 }
 
-// settingGetter reads one server setting.
 type settingGetter interface {
 	GetSetting(ctx context.Context, key string) (string, error)
 }

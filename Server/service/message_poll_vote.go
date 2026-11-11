@@ -12,17 +12,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// pollVoteLimit and pollVoteWindow cap votes and ends together, per user: a vote
-// fans out to every reader like a reaction, and changing one's mind a few times a
-// minute is the worst honest case.
+// pollVoteLimit/pollVoteWindow cap votes and ends together, per user: a vote fans out to
+// every reader like a reaction, and changing one's mind a few times a minute is the worst honest case.
 const (
 	pollVoteLimit  = 10
 	pollVoteWindow = 10 * time.Second
 )
 
-// PollUpdate is the full state of a poll after a change, for poll_update. Counts
-// are absolute, never deltas, so any update with a higher Version is complete.
-// UserID and AnswerIDs are set only on a vote (AnswerIDs may be empty: a removal).
+// PollUpdate is the full state of a poll after a change, for poll_update. Counts are
+// absolute, never deltas, so any update with a higher Version is complete. UserID and
+// AnswerIDs are set only on a vote (AnswerIDs may be empty: a removal).
 type PollUpdate struct {
 	ChannelID   int64
 	MessageID   int64
@@ -33,15 +32,14 @@ type PollUpdate struct {
 	EndedAt     *string
 	UserID      int64
 	AnswerIDs   []int64
-	// IsDM and ParticipantIDs address a DM poll's update, resolved before the
-	// write as for a reaction.
+	// IsDM and ParticipantIDs address a DM poll's update, resolved before the write as for a reaction.
 	IsDM           bool
 	ParticipantIDs []int64
 }
 
-// PollVoteResult is the outcome of VotePoll. Update is nil when the selection was
-// already the voter's: the vote is acknowledged with the current Version and
-// nothing is emitted. AnswerIDs is the voter's selection after the call.
+// PollVoteResult is the outcome of VotePoll. Update is nil when the selection was already
+// the voter's: acknowledged with the current Version, nothing emitted. AnswerIDs is the
+// voter's selection after the call.
 type PollVoteResult struct {
 	MessageID int64
 	Version   int64
@@ -49,19 +47,15 @@ type PollVoteResult struct {
 	Update    *PollUpdate
 }
 
-// PollNotifier is told when the expirer ended a poll, so live clients learn the
-// final counts. The hub implements it.
+// PollNotifier is told when the expirer ended a poll, so live clients learn the final counts (the hub).
 type PollNotifier interface {
 	PollUpdated(ctx context.Context, u PollUpdate)
 }
 
-// errPollNotFound is the single answer for a poll that is missing, deleted,
-// not a poll, or in a channel the caller may not read.
 func errPollNotFound() error {
 	return fmt.Errorf("%w: poll not found", ErrNotFound)
 }
 
-// pollWriteError maps a database refusal onto the service's error kinds.
 func pollWriteError(err error, op string) error {
 	switch {
 	case errors.Is(err, db.ErrPollNotFound):
@@ -78,10 +72,9 @@ func pollWriteError(err error, op string) error {
 	}
 }
 
-// pollTarget is the shared front half of a vote and an end: the rate limit,
-// then the message, which must be readable by the caller. Every refusal before
-// the poll is known to be readable is the same NOT_FOUND an unknown id gets,
-// so nothing leaks about a poll in a channel the caller cannot read.
+// pollTarget is the shared front half of a vote and an end: the rate limit, then the
+// message, which the caller must be able to read. Every refusal before that is the same
+// NOT_FOUND an unknown id gets, so nothing leaks about an unreadable poll.
 func (s *MessageService) pollTarget(ctx context.Context, userID, msgID int64) (*db.Message, error) {
 	if s.poll.store == nil {
 		return nil, fmt.Errorf("%w: polls are not available", ErrInternal)
@@ -105,14 +98,13 @@ func (s *MessageService) pollTarget(ctx context.Context, userID, msgID int64) (*
 	return msg, nil
 }
 
-// VotePoll sets userID's whole selection on a poll, replacing any earlier one; an
-// empty selection removes the vote. Voting is reacting: the caller must be able to
-// read the message (a refusal is NOT_FOUND) and the reaction gates apply unchanged
-// (archive, ADD_REACTIONS, timeout, and for a DM membership and block), with a DM's
-// audience resolved before anything is written. Whether the poll is still open is
-// decided inside the write by the database clock, so a vote racing the end or
-// expiry is counted or refused with ErrPollEnded, never both. Idempotent: a retry
-// of the same selection answers with the current version and no Update.
+// VotePoll sets userID's whole selection, replacing any earlier one; an empty selection
+// removes the vote. Voting is reacting: the caller must be able to read the message
+// (refusal is NOT_FOUND) and the reaction gates apply unchanged (archive, ADD_REACTIONS,
+// timeout, DM membership and block), with a DM's audience resolved before the write.
+// Whether the poll is open is decided inside the write by the database clock, so a vote
+// racing the end is counted or refused with ErrPollEnded, never both. Idempotent: the
+// same selection answers with the current version and no Update.
 func (s *MessageService) VotePoll(ctx context.Context, userID, msgID int64, answerIDs []int64) (*PollVoteResult, error) {
 	msg, err := s.pollTarget(ctx, userID, msgID)
 	if err != nil {
@@ -141,12 +133,10 @@ func (s *MessageService) VotePoll(ctx context.Context, userID, msgID int64, answ
 	return out, nil
 }
 
-// EndPoll ends a poll now, following the delete rule: the caller must be able to
-// read the message (a refusal is NOT_FOUND), the channel must not be archived, and
-// the caller must be allowed to delete the message (its author, or a moderator with
-// MANAGE_MESSAGES). A timed-out author can still end their own poll, as they can
-// still delete it. In a DM only the author may end it. Ending removes nothing, so
-// no audit row is written. An already ended poll gives ErrPollEnded.
+// EndPoll ends a poll now, following the delete rule: the caller can read the message
+// (refusal is NOT_FOUND), the channel is not archived, and the caller may delete the
+// message (author, or MANAGE_MESSAGES). A timed-out author can still end their own poll,
+// as they can still delete it. In a DM only the author may. No audit row. Ended gives ErrPollEnded.
 func (s *MessageService) EndPoll(ctx context.Context, userID, msgID int64) (*PollUpdate, error) {
 	msg, err := s.pollTarget(ctx, userID, msgID)
 	if err != nil {
@@ -170,10 +160,9 @@ func (s *MessageService) EndPoll(ctx context.Context, userID, msgID int64) (*Pol
 	return s.endPoll(ctx, ch, msgID, msg.UserID)
 }
 
-// ExpirePoll is the expirer's entry: it ends a due poll without a user gate and
-// returns the update to announce, nil when there is nothing to announce (the poll
-// is gone, was ended meanwhile, or its message was deleted, which still ends it so
-// it leaves the set the expirer watches).
+// ExpirePoll is the expirer's entry: it ends a due poll without a user gate and returns the
+// update to announce, nil when there is nothing (the poll is gone, was ended meanwhile, or
+// its message was deleted, which still ends it so it leaves the set the expirer watches).
 func (s *MessageService) ExpirePoll(ctx context.Context, msgID int64) (*PollUpdate, error) {
 	if s.poll.store == nil {
 		return nil, fmt.Errorf("%w: polls are not available", ErrInternal)
@@ -200,9 +189,8 @@ func (s *MessageService) ExpirePoll(ctx context.Context, msgID int64) (*PollUpda
 	return u, nil
 }
 
-// endPoll resolves a DM's audience (as the author's frames reach it) before the
-// write, ends the poll and builds the update. A deleted poll is ended but reported
-// as not found, so nothing is announced about it.
+// endPoll resolves a DM's audience before the write, ends the poll and builds the update.
+// A deleted poll is ended but reported as not found, so nothing is announced about it.
 func (s *MessageService) endPoll(ctx context.Context, ch *db.Channel, msgID, authorID int64) (*PollUpdate, error) {
 	var participantIDs []int64
 	isDM := ch != nil && ch.Type == "dm"

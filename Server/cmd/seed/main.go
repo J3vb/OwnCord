@@ -21,14 +21,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// seedUser defines a user to create during seeding.
 type seedUser struct {
 	Username string
 	Password string
 	RoleID   int // 1=Owner, 2=Admin, 3=Moderator, 4=Member
 }
 
-// seedChannel defines a channel to create during seeding.
 type seedChannel struct {
 	Name     string
 	Type     string // "text" or "voice"
@@ -61,14 +59,12 @@ var seedChannels = []seedChannel{
 	{Name: "Gaming Voice", Type: "voice", Category: "Voice Channels", Position: 4},
 }
 
-// Channel indices for readability.
 const (
 	chGeneral = 0
 	chRandom  = 1
 	chGaming  = 2
 )
 
-// User indices for readability.
 const (
 	uAdmin   = 0
 	uAlice   = 1
@@ -110,7 +106,6 @@ var seedMessages = []seedMessage{
 	{chGaming, uBob, "No pressure, we'll be on for a while."},
 }
 
-// seedDMMessages are messages exchanged in the admin<->alice DM channel.
 var seedDMMessages = []struct {
 	FromIdx int // index into seedUsers
 	Content string
@@ -234,7 +229,6 @@ func createUsers(database *db.DB) ([]int64, error) {
 	return ids, nil
 }
 
-// roleNameFromID returns a human-readable role name for display purposes.
 func roleNameFromID(roleID int) string {
 	switch roleID {
 	case 1:
@@ -311,8 +305,6 @@ func createMessages(database *db.DB, channelIDs, userIDs []int64) (int, error) {
 	return created, nil
 }
 
-// messageExists checks whether a message with this content from this user
-// already exists in the channel, for idempotency.
 func messageExists(database *db.DB, channelID, userID int64, content string) (bool, error) {
 	var count int
 	err := database.QueryRowContext(context.Background(),

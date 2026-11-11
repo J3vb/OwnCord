@@ -8,18 +8,14 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// totpSealBudget bounds the startup conversion; it touches one row per
-// enrolled user, so it finishes in milliseconds on any real install.
+// totpSealBudget bounds the startup conversion, one row per enrolled user.
 const totpSealBudget = 30 * time.Second
 
-// startTOTPSecrets seals, under the key the totp-key stage loaded, every
-// stored TOTP secret still kept unsealed from before encryption at rest. It
-// runs on every start, after the migrations and before anything serves, so a
-// restored older backup is converted too. A store error stops the boot: the
-// pass is idempotent and the next start resumes it.
+// startTOTPSecrets seals every stored TOTP secret still unsealed from before
+// encryption at rest. A store error stops the boot; the pass is idempotent. Runs after migrations and before
+// anything serves, so a restored older backup is converted too.
 func (a *App) startTOTPSecrets() error {
-	// Not Run's context: cancelling it stops serving, not a start stage
-	// (lifecycle.go), and the pass is short and bounded by its own budget.
+	// Not Run's context: cancelling it stops serving, not a start stage; the pass has its own budget.
 	ctx, cancel := context.WithTimeout(context.Background(), totpSealBudget)
 	defer cancel()
 	sealed, unreadable, err := service.SealLegacyTOTPSecrets(ctx, a.database, a.totpKey)

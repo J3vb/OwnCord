@@ -12,34 +12,24 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 )
 
-// events.json detail: a record's attributes, so a coded failure carries its
-// reason. Two rules apply, keys first:
+// events.json detail: a record's attributes, so a coded failure carries its reason. Two rules apply, keys
+// first. (1) An attribute whose key names an identifier, person, address, location, credential or request
+// data (supportIdentifyingKey) is dropped whatever its value; only string, number and boolean values survive,
+// and groups and lists (resolved LogValuers such as db.User) are dropped. (2) Every surviving string is
+// reduced to an allowlist (supportScrub): only words in supportVocabulary, single characters, short numbers
+// and punctuation are kept, and every run of other words, with the path or host punctuation joining them,
+// becomes one [x]. Before that, values a kept word could expose are masked whole: identifying keys embedded
+// as JSON or key=value pairs, credentials after a label or auth scheme, IP addresses, and server-known
+// identifying values (usernames, display names, server name, hosts of configured addresses).
 //
-//   - An attribute whose key names an identifier, a person, an address, a
-//     location, a credential or request data (supportIdentifyingKey) is
-//     dropped whatever its value. Only string, number and boolean values
-//     survive; groups and lists (resolved LogValuers such as db.User) are
-//     dropped.
-//   - Every surviving string is reduced to an allowlist (supportScrub): only
-//     words in supportVocabulary, single characters, short numbers and
-//     punctuation are kept, and every run of other words, with the path or
-//     host punctuation joining them, becomes one [x]. Before that, values
-//     that a kept word could otherwise expose are masked whole: identifying
-//     keys embedded in the text as JSON or key=value pairs (LiveKit's own log
-//     fields), credentials after a label or auth scheme, IP addresses, and
-//     the values the server knows to be identifying (registered usernames and
-//     display names, the server name, the hosts of configured addresses).
-//
-// What remains readable is error vocabulary, so a path, host, name or secret
-// survives only where every word of it is itself an error-message word. The
-// free-form message itself is still never kept: only its fixed event code.
+// So a path, host, name or secret survives only where every word of it is an error-message word. The
+// free-form message itself is never kept: only its fixed event code.
 
 const (
 	supportDetailMaxKeys  = 8
 	supportDetailMaxValue = 1024
-	// supportDetailBudget bounds the serialized detail across all of
-	// events.json, so supportMaxBytes is never reached however long or
-	// numerous the attributes are. Newer events keep their detail first.
+	// supportDetailBudget bounds the serialized detail across all of events.json so supportMaxBytes is never
+	// reached; newer events keep their detail first.
 	supportDetailBudget = 128 << 10
 )
 
@@ -76,9 +66,8 @@ func supportIdentifyingKey(key string) bool {
 var (
 	supportJSONKeyPattern = regexp.MustCompile(`"([A-Za-z0-9_.-]+)"\s*:\s*`)
 	supportKVPattern      = regexp.MustCompile(`\b([A-Za-z0-9_.-]+)=("(?:[^"\\]|\\.)*"|[^\s,]+)`)
-	// A credential after its label runs to the next "," or ";", so a
-	// password with spaces is masked whole; after an auth scheme it is the
-	// next word.
+	// A credential after its label runs to the next "," or ";" (so a spaced password is masked whole); after an
+	// auth scheme it is the next word.
 	supportCredentialPattern = regexp.MustCompile(`(?i)\b(authorization|password|passwd|pwd|secret|token|api[_-]?key|credentials?)(\s*[:=]\s*)("[^"]*"|[^,;\r\n]+)`)
 	supportSchemePattern     = regexp.MustCompile(`(?i)\b(bearer|basic|digest)\s+[^\s,;]+`)
 	// Short numbers are kept, so addresses are masked before the allowlist.
@@ -96,8 +85,8 @@ var supportVocabularySet = func() map[string]bool {
 	return set
 }()
 
-// supportKnownValues lists the identifying values the server holds: the given
-// registered names plus the name and addresses in its configuration.
+// supportKnownValues lists the identifying values the server holds: registered names plus the name and
+// addresses in its configuration.
 func supportKnownValues(cfg *config.Config, names []string) []string {
 	out := slices.Clone(names)
 	if cfg == nil {
@@ -112,13 +101,10 @@ func supportKnownValues(cfg *config.Config, names []string) []string {
 	return out
 }
 
-// supportKnown holds the identifying values to redact in two tries: names
-// split into lowercase word tokens, and names with no letters or digits ("!!",
-// "[]", an emoji; not a lone separator) by their bytes. A match walks one trie path, so any number
-// of names, however many share a first word, costs O(name length) per
-// position. Matching is by whole words, so a name of any length is redacted
-// without mangling the words that contain it. It catches a name that is also a
-// vocabulary word, which the allowlist would keep.
+// supportKnown holds the identifying values to redact in two tries: names split into lowercase word tokens,
+// and names with no letters or digits ("!!", "[]", an emoji; not a lone separator) by their bytes. Matching
+// is by whole words, so any name is redacted without mangling words that contain it, including a name that is
+// also a vocabulary word the allowlist would keep; cost is O(name length) per position.
 type supportKnown struct {
 	words, literals supportTrie
 }
@@ -146,14 +132,13 @@ var (
 	supportAlnumPattern = regexp.MustCompile(`[\p{L}\p{N}]+`)
 )
 
-// supportSingleSeparator reports a value that is one separator rune, which
-// identifies no one and would only damage the text around every occurrence.
+// supportSingleSeparator reports a one-separator-rune value, which identifies no one and would only damage
+// the surrounding text.
 func supportSingleSeparator(v string) bool {
 	r, size := utf8.DecodeRuneInString(v)
 	return size == len(v) && supportStructural(r)
 }
 
-// newSupportKnown returns nil when no value is left.
 func newSupportKnown(values []string) *supportKnown {
 	k := &supportKnown{}
 	for _, v := range values {
@@ -207,11 +192,9 @@ func (k *supportKnown) scrub(s string) string {
 	return k.scrubLiterals(b.String())
 }
 
-// scrubLiterals masks the names with no letters or digits. One is masked only
-// between structural separators or the ends of s, so it never splits a
-// compound: a name "!!" or an emoji cannot unjoin a host or path. A single
-// separator is never a literal; a name of two or more separators ("[]", "::") is masked anywhere, before supportAllowlist
-// splits it into kept separators.
+// scrubLiterals masks the names with no letters or digits, only between structural separators or the ends of
+// s, so a name like "!!" or an emoji cannot unjoin a host or path. A single separator is never a literal; two
+// or more ("[]", "::") are masked anywhere, before supportAllowlist splits them.
 func (k *supportKnown) scrubLiterals(s string) string {
 	bounded := func(i int) bool {
 		r, _ := utf8.DecodeRuneInString(s[i:])
@@ -245,8 +228,7 @@ func (k *supportKnown) scrubLiterals(s string) string {
 	return b.String()
 }
 
-// supportMaskJSON masks the value of each identifying key embedded in s as
-// JSON, an array or object whole.
+// supportMaskJSON masks the value of each identifying key embedded in s as JSON, a whole array or object.
 func supportMaskJSON(s string) string {
 	var b strings.Builder
 	last := 0
@@ -315,9 +297,8 @@ func supportScrub(s string, known *supportKnown) string {
 	return supportAllowlist(known.scrub(s))
 }
 
-// supportStructural separators, like spaces, split a value into compounds;
-// they stay visible and shape an error ("dial tcp [x]:7880: connect"). A
-// compound ("nas", "not_found", "i/o") is kept only when every word in it is.
+// Structural separators split a value into compounds; they stay visible and shape an error ("dial tcp
+// [x]:7880: connect"). A compound is kept only when every word in it is.
 func supportStructural(r rune) bool {
 	return unicode.IsSpace(r) || strings.ContainsRune(`:,;"'()[]{}=<>`, r)
 }
@@ -326,9 +307,8 @@ func supportKeepWord(w string) bool {
 	return utf8.RuneCountInString(w) == 1 || supportVocabularySet[strings.ToLower(w)] || supportNumberPattern.MatchString(strings.ToLower(w))
 }
 
-// A compound joined by a path, host or address separator ("/backup",
-// "backups/archive.zip", "chat.example.rs", "a@b") is masked whole even when
-// its words are vocabulary, except the few slash words of error text.
+// A compound joined by a path, host or address separator is masked whole even when its words are vocabulary,
+// except the few slash words of error text.
 var (
 	supportJoinedPattern = regexp.MustCompile(`[/\\@]|\pL\.\pL`)
 	supportSlashWords    = []string{"i/o", "n/a", "and/or"}
@@ -341,8 +321,8 @@ func supportKeepCompound(c string) bool {
 	return !slices.ContainsFunc(supportAlnumPattern.FindAllString(c, -1), func(w string) bool { return !supportKeepWord(w) })
 }
 
-// supportAllowlist replaces each compound that is not kept with [x]; masked
-// compounds separated only by spaces ("Private Project") become one [x].
+// supportAllowlist replaces each non-kept compound with [x]; compounds separated only by spaces become one
+// [x].
 func supportAllowlist(s string) string {
 	var b strings.Builder
 	spaces := ""    // spaces after a masked compound, written only if a kept one follows
@@ -378,8 +358,7 @@ func supportAllowlist(s string) string {
 	return b.String()
 }
 
-// supportDetail returns the kept attributes of one record's attrs JSON, or nil
-// when none survive.
+// supportDetail returns the kept attributes of one record's attrs JSON, or nil when none survive.
 func supportDetail(attrs string, known *supportKnown) map[string]any {
 	var raw map[string]any
 	if attrs == "" || json.Unmarshal([]byte(attrs), &raw) != nil {
@@ -426,10 +405,9 @@ func supportTruncate(s string) string {
 	return s[:head] + "…" + s[tail:]
 }
 
-// supportAttachDetail fills Detail on events, newest first, until
-// supportDetailBudget is spent; older events past it keep only their code.
-// A failure that repeats logs the same attrs each time, so each distinct
-// attrs string is scrubbed once and its read-only detail shared.
+// supportAttachDetail fills Detail on events, newest first, until supportDetailBudget is spent; older ones
+// keep only their code. A repeating failure logs the same attrs each time, so each distinct attrs string is
+// scrubbed once and shared.
 func supportAttachDetail(events []supportEvent, attrs []string, known *supportKnown) {
 	type scrubbed struct {
 		detail map[string]any

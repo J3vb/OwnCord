@@ -14,11 +14,9 @@ type TOTPSecretStore interface {
 	ReplaceUserTOTPSecret(ctx context.Context, userID int64, old, next string) (bool, error)
 }
 
-// SealLegacyTOTPSecrets converts every unsealed stored TOTP secret. It returns
-// how many it sealed and the ids of the users whose stored value is neither
-// sealed nor usable. Each
-// write is a compare-and-set on the value read, so a row an enable or disable
-// changed in between is left to that writer.
+// SealLegacyTOTPSecrets converts every unsealed stored TOTP secret, returning how many it sealed and the ids
+// whose stored value is neither sealed nor usable. Each write is a compare-and-set on the value read, so a
+// row changed in between is left to that writer.
 func SealLegacyTOTPSecrets(ctx context.Context, st TOTPSecretStore, key []byte) (sealed int, unreadable []int64, err error) {
 	rows, err := st.ListUserTOTPSecrets(ctx)
 	if err != nil {
