@@ -12,6 +12,7 @@ import {
   supportsMessageDeduplication,
 } from "@lib/pendingMessages";
 import type { Disposable } from "@lib/disposable";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
 import type { MessageUser } from "@lib/types";
@@ -38,6 +39,29 @@ interface SendDraft {
   /** A sticker send, kept so a retry posts the same sticker. */
   readonly sticker?: { readonly id: number; readonly name: string };
 }
+
+/**
+ * The drafts of each thread, kept beyond one panel: a failed row survives the
+ * panel closing and reopening, and its Retry needs the draft that is held here.
+ */
+const draftsByThread = new Map<number, Map<string, SendDraft>>();
+void registerSessionReset("threads:sendDrafts", () => draftsByThread.clear()); // app-lifetime
+
+/** The thread's drafts, without those whose row is gone (settled while the panel was closed). */
+function draftsFor(threadId: number): Map<string, SendDraft> {
+  let drafts = draftsByThread.get(threadId);
+  if (drafts === undefined) {
+    drafts = new Map<string, SendDraft>();
+    draftsByThread.set(threadId, drafts);
+  }
+  const live = new Set(getChannelMessages(threadId).map((m) => m.correlationId));
+  for (const cid of drafts.keys()) if (!live.has(cid)) drafts.delete(cid);
+  return drafts;
+}
+
+/** True while a draft is held for the thread. */
+export const holdsThreadDrafts = (threadId: number): boolean =>
+  (draftsByThread.get(threadId)?.size ?? 0) > 0;
 
 type StickerRef = { readonly id: number; readonly name: string };
 
@@ -72,7 +96,6 @@ export interface ThreadSender {
   discardDraft(correlationId: string): void;
   /** Files a send did not carry go back into the composer. */
   watchUnsentFiles(owner: Disposable): void;
-  clear(): void;
 }
 
 export function createThreadSender(options: {
@@ -87,7 +110,7 @@ export function createThreadSender(options: {
   ) => void;
 }): ThreadSender {
   const { ws, api, threadId, signal, showToast, restoreUnsent } = options;
-  const drafts = new Map<string, SendDraft>();
+  const drafts = draftsFor(threadId);
 
   function sendText(
     content: string,
@@ -212,5 +235,5 @@ export function createThreadSender(options: {
     );
   }
 
-  return { sendText, retryDraft, discardDraft, watchUnsentFiles, clear: () => drafts.clear() };
+  return { sendText, retryDraft, discardDraft, watchUnsentFiles };
 }

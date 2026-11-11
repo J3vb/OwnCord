@@ -327,7 +327,6 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     disposable.destroy();
     root?.remove();
     root = null;
-    sender.clear();
   }
 
   return {

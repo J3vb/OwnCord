@@ -100,6 +100,7 @@ and only when it changes something a contributor or fork holder must do
 - A group DM icon you uploaded could never be deleted after you left or were removed from the group: it stayed listed under your uploads, counted against your storage and could not be removed. The group now drops that icon when its uploader leaves, and the file is yours to delete.
 - A forum set to "Require a tag" with no tags could not be posted in by anyone. Forum settings now refuse to require a tag until the forum has one, and a forum already in that state accepts posts without a tag.
 - After you blocked and unblocked someone and then wrote to them first, their reply was held as a new message request, or refused when your settings turn off direct messages from members. Writing to someone now counts as trusting them, so their reply arrives in the conversation. A message from them before you write is still a request.
+- A thread reply that failed to send can still be retried after you close and reopen the thread; Retry used to do nothing.
 - A thread or forum post that lost its newest replies (after a failed load, or after scrolling back through hundreds of replies) now recovers: Jump to present reloads the newest replies, scrolling to the bottom loads newer ones, and new replies from others appear again.
 - Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
 - Linux: switching audio devices or muting and unmuting no longer makes other voice controls wait.

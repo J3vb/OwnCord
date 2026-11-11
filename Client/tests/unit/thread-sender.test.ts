@@ -5,10 +5,10 @@ vi.mock("@lib/pendingMessages", async (importOriginal) => ({
   supportsMessageDeduplication: () => true,
 }));
 
-import { createThreadSender } from "../../src/features/threads/threadSender";
+import { createThreadSender, holdsThreadDrafts } from "../../src/features/threads/threadSender";
 import { Disposable } from "@lib/disposable";
 import { WsErrorCode } from "@lib/protocolTypes";
-import { messagesStore, resetMessagesStore } from "@stores/messages.store";
+import { messagesStore, removeOptimistic, resetMessagesStore } from "@stores/messages.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
@@ -164,14 +164,31 @@ describe("thread sender", () => {
     expect(restoreUnsent).not.toHaveBeenCalled();
   });
 
-  it("holds no drafts after clear", () => {
+  it("retries a failed reply from a second sender for the same thread", () => {
     setConnectionStatus("disconnected");
-    const sender = makeSender();
-    sender.sendText("x", null, false, []);
+    makeSender().sendText("offline words", 7, false, [FILE]);
     const cid = rows()[0]!.correlationId!;
-    sender.clear();
+    // The panel was closed and reopened: a new sender serves the same thread.
+    const reopened = makeSender();
     setConnectionStatus("connected");
-    sender.retryDraft(cid);
+    reopened.retryDraft(cid);
+    expect(frames()).toHaveLength(1);
+    expect(frames()[0]!.payload).toMatchObject({
+      content: "offline words",
+      reply_to: 7,
+      attachments: [FILE.id],
+    });
+  });
+
+  it("drops the draft of a row that is gone before the panel reopens", () => {
+    setConnectionStatus("disconnected");
+    makeSender().sendText("x", null, false, []);
+    const cid = rows()[0]!.correlationId!;
+    removeOptimistic(cid);
+    const reopened = makeSender();
+    setConnectionStatus("connected");
+    reopened.retryDraft(cid);
     expect(frames()).toHaveLength(0);
+    expect(holdsThreadDrafts(THREAD)).toBe(false);
   });
 });
