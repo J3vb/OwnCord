@@ -20,8 +20,7 @@ start with [Starting a change](../docs/contributing.md#starting-a-change).
 | `src/main.ts`            | Frontend entry point.                                                                   |
 | `src/stores/`            | Observable state stores. Server events reach them only through `src/lib/dispatcher.ts`. |
 | `src/lib/`               | Protocol, WebSocket, voice and E2EE modules. `protocolTypes.ts` is generated.           |
-| `src/pages/`             | Top-level pages (connect page, main page).                                              |
-| `src/components/`        | UI components.                                                                          |
+| `src/pages/`             | Top-level pages: wiring only (connect page, main page).                                 |
 | `src/features/`          | Feature modules, such as voice, messaging, moderation and navigation.                   |
 | `src/platform/`          | The desktop/browser seam. Only `platform/desktop/` may import `@tauri-apps`.            |
 | `src/i18n/`              | English text catalogs. New UI text goes here.                                           |

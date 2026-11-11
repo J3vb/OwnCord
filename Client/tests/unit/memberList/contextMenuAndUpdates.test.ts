@@ -12,8 +12,8 @@ import { addVoiceUser } from "../../helpers/voiceUsers";
 import { setMemberTimeouts } from "../../../src/features/moderation/store";
 import { claimComposer } from "../../../src/features/messaging/activeComposer";
 import { Permission } from "../../../src/lib/types";
-import "@components/UserProfilePopup";
-import "@components/AdminActions";
+import "../../../src/features/profiles/userProfilePopup";
+import "../../../src/features/moderation/AdminActions";
 import { makeChannelRow } from "../../helpers/storeSeeds";
 import {
   resetStore,

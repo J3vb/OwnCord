@@ -9,48 +9,42 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// maxMentionsPerMessage caps the mentions one message resolves (user tokens and
-// role tokens together); tokens past it stay text, bounding the stored rows and
-// read-state writes of a send.
+// maxMentionsPerMessage caps the mentions one message resolves (user and role tokens
+// together); the rest stay text, bounding the stored rows and read-state writes of a send.
 const maxMentionsPerMessage = 20
 
-// maxMentionCandidates caps the distinct tokens looked up per message, so a wall
-// of @words cannot become an unbounded query.
+// maxMentionCandidates caps the distinct tokens looked up per message, so a wall of @words is no unbounded
+// query.
 const maxMentionCandidates = 60
 
-// everyoneToken and hereToken are reserved: a user named "everyone" is not
-// resolvable by @everyone.
+// everyoneToken and hereToken are reserved: a user named "everyone" is not resolvable by @everyone.
 const (
 	everyoneToken = "everyone"
 	hereToken     = "here"
 )
 
 type mentionSet struct {
-	// UserIDs is ordered by first appearance, deduplicated and (after withReplyPing)
-	// capped at maxMentionsPerMessage content ids plus the reply-ping target. Never nil.
+	// UserIDs is in order of first appearance, deduplicated and (after withReplyPing) capped
+	// at maxMentionsPerMessage content ids plus the reply-ping target. Never nil.
 	UserIDs []int64
-	// Everyone reports an @everyone or @here that cleared the MENTION_EVERYONE gate;
-	// without the bit the token has no mention semantics.
+	// Everyone reports an @everyone or @here that cleared MENTION_EVERYONE; without the bit the token has no
+	// mention semantics.
 	Everyone bool
-	// HereOnly narrows an Everyone fan-out to non-offline users: @here matched, @everyone did not.
 	HereOnly bool
-	// RoleIDs lists roles whose <@&id> token resolved and cleared
-	// permissions.CanMentionRole, in order, counting against the same cap. Never nil;
-	// empty in a DM.
+	// RoleIDs lists roles whose <@&id> resolved and cleared permissions.CanMentionRole, in
+	// order, counting against the same cap. Never nil; empty in a DM.
 	RoleIDs []int64
-	// RoleUserIDs is every holder of a role in RoleIDs, read once and only when
-	// non-empty. It feeds badge, activity and push fan-out and never goes on the wire.
+	// RoleUserIDs is every holder of a RoleIDs role, read once and only when non-empty. Feeds
+	// badge, activity and push fan-out; never on the wire.
 	RoleUserIDs []int64
-	// ReplyPingUserID is the replied-to author a reply_ping added to UserIDs (0 for
-	// none); the cap never displaces it.
+	// ReplyPingUserID is the replied-to author a reply_ping added to UserIDs (0 for none); the cap never
+	// displaces it.
 	ReplyPingUserID int64
 }
 
-// withReplyPing finalizes the set: content mentions are capped at
-// maxMentionsPerMessage not counting targetID, then targetID (when non-zero) is
-// added unless the content already named it. resolveMentions keeps one spare id
-// so a target among the content mentions never costs another user their slot.
-// Every caller passes through here, with 0 for no reply ping.
+// withReplyPing finalizes the set: content mentions are capped at maxMentionsPerMessage
+// not counting targetID, then targetID (when non-zero) is added unless already named.
+// resolveMentions keeps one spare id so a target never costs another user their slot.
 func (m mentionSet) withReplyPing(targetID int64) mentionSet {
 	m.ReplyPingUserID = targetID
 	ids := make([]int64, 0, len(m.UserIDs)+1)
@@ -75,8 +69,6 @@ func (m mentionSet) withReplyPing(targetID int64) mentionSet {
 	return m
 }
 
-// reachIDs is every user the message pings directly: explicit mentions plus
-// holders of a pinged role (MentionReach's input).
 func (m mentionSet) reachIDs() []int64 {
 	if len(m.RoleUserIDs) == 0 {
 		return m.UserIDs
@@ -84,28 +76,24 @@ func (m mentionSet) reachIDs() []int64 {
 	return slices.Concat(m.UserIDs, m.RoleUserIDs)
 }
 
-// fill copies the mentions and the @everyone verdict onto a send result.
 func (m mentionSet) fill(r *SendMessageResult) {
 	r.Mentions, r.MentionRoles, r.RoleUserIDs = m.UserIDs, m.RoleIDs, m.RoleUserIDs
 	r.MentionsEveryone, r.MentionsHere = m.Everyone, m.HereOnly
 }
 
-// pings reports whether the message can raise any badge or push.
 func (m mentionSet) pings() bool {
 	return len(m.UserIDs) > 0 || len(m.RoleUserIDs) > 0 || m.Everyone
 }
 
 // resolveMentions turns sanitized content into a mentionSet. Unknown @words, and
-// @everyone/@here without MENTION_EVERYONE on the channel, stay plain text. DMs
-// have no @everyone or role semantics, so <@&id> stays text there. <@id> tokens
-// resolve like a typed @username (an existing, unbanned user); whether that user
-// can read the channel is decided where the badge is raised (mentionReaders). They
-// come first in UserIDs, then @username mentions, each in order of appearance. A
-// <@&id> token resolves to an existing role that clears permissions.CanMentionRole
-// for the author, else stays text; holders are read once, only when a role
-// resolved. Failures are logged and mean "no mentions": a message must not be
-// rejected for a failed lookup. UserIDs may hold one id past the cap for a
-// reply-ping target; withReplyPing applies the cap.
+// @everyone/@here without MENTION_EVERYONE, stay text; DMs have no @everyone or role
+// semantics. <@id> tokens resolve like a typed @username (existing, unbanned user);
+// whether that user can read the channel is decided where the badge is raised
+// (mentionReaders). They come first in UserIDs, then @username mentions. A <@&id> token
+// resolves to an existing role clearing CanMentionRole for the author, else stays text;
+// holders are read once, only when a role resolved. Failures are logged and mean "no
+// mentions": a message must not be rejected for a failed lookup. UserIDs may hold one id
+// past the cap for a reply-ping target; withReplyPing applies the cap.
 func (s *mentionState) resolveMentions(ctx context.Context, content string, authorID, channelID int64, isDM bool) mentionSet {
 	set := mentionSet{UserIDs: []int64{}, RoleIDs: []int64{}}
 
@@ -133,8 +121,6 @@ func (s *mentionState) resolveMentions(ctx context.Context, content string, auth
 	return set
 }
 
-// addNameMentions resolves legacy @username tokens, in order, through add; a
-// lookup failure is logged and leaves them as text.
 func (s *mentionState) addNameMentions(ctx context.Context, tokens []mentionCandidate, channelID int64, add func(int64)) {
 	if len(tokens) == 0 {
 		return
@@ -158,19 +144,16 @@ func (s *mentionState) addNameMentions(ctx context.Context, tokens []mentionCand
 	}
 }
 
-// MentionReach is the per-reader mention rule: direct when uid is among the
-// mentioned ids, broad when the message pinged @everyone (or @here and the
-// reader is present). It uses db.BroadcastStatus, not == "offline": the column
-// stores the status the user chose, so an invisible reader holds "invisible" and a
-// literal comparison would @here-ping them, the thing "appear offline" prevents.
-// liveStatus is read only for @here ("" means no live connection). The caller
-// removes the author and the author's blockers.
+// MentionReach is the per-reader mention rule: direct when uid is among the mentioned ids,
+// broad for @everyone (or @here and the reader present). Uses db.BroadcastStatus, not
+// == "offline": the column stores the chosen status, so an invisible reader holds
+// "invisible" and a literal comparison would @here-ping them. liveStatus is read only for
+// @here ("" means no live connection). The caller removes the author and their blockers.
 func MentionReach(ids []int64, everyone, hereOnly bool, uid int64, liveStatus string) (direct, broad bool) {
 	return MentionReachSet(MentionIDSet(ids), everyone, hereOnly, uid, liveStatus)
 }
 
-// MentionIDSet indexes a mention's ids so a fan-out over many readers tests each
-// in O(1) with MentionReachSet.
+// MentionIDSet indexes a mention's ids so a fan-out tests each reader in O(1) with MentionReachSet.
 func MentionIDSet(ids []int64) map[int64]struct{} {
 	set := make(map[int64]struct{}, len(ids))
 	for _, id := range ids {
@@ -188,13 +171,10 @@ func MentionReachSet(ids map[int64]struct{}, everyone, hereOnly bool, uid int64,
 	return direct, broad
 }
 
-// mentionEntries resolves a message's fan-out to the recipients whose badge it
-// raises, as one batch entry (or none). Split out so the mention worker can
-// resolve at flush time, after the coalesce window, and write many entries in one
-// transaction; the read-state guard still runs inside the increment. Edits never
-// call this: only the original insert raises a badge, which guarantees a counted
-// mention is not counted twice. The message is already committed, so failures are
-// logged, not surfaced.
+// mentionEntries resolves a message's fan-out to the recipients whose badge it raises, as
+// one batch entry (or none), so the worker can resolve at flush time; the read-state guard
+// still runs inside the increment. Edits never call this: only the original insert raises
+// a badge. The message is committed, so failures are logged, not surfaced.
 func (s *mentionState) mentionEntries(ctx context.Context, channelID, msgID, authorID int64, set mentionSet, isDM bool, participantIDs []int64) []db.MentionBatchEntry {
 	if !set.pings() {
 		return nil
@@ -204,7 +184,6 @@ func (s *mentionState) mentionEntries(ctx context.Context, channelID, msgID, aut
 	var readers []db.MentionTarget
 	var err error
 	if !isDM && !set.Everyone && len(set.RoleUserIDs) == 0 {
-		// Only named users can be reached, so read just them instead of every reader.
 		readers, err = s.mentionReadersAmong(ctx, channelID, set.UserIDs)
 	} else {
 		readers, err = s.mentionReaders(ctx, channelID, isDM, participantIDs)
@@ -216,10 +195,9 @@ func (s *mentionState) mentionEntries(ctx context.Context, channelID, msgID, aut
 
 	recipients := make(map[int64]struct{}, len(readers))
 	for _, r := range readers {
-		// The live status, when wired, stands in for the column, which keeps a chosen
-		// idle/dnd across a disconnect and lags a connect by up to one batched stamp
-		// flush. A reader with no live connection ("") is offline whatever the row says
-		// (ws/serve_ready.go presentableMembers).
+		// The live status, when wired, stands in for the column, which keeps a chosen idle/dnd
+		// across a disconnect and lags a connect by up to one stamp flush. A reader with no live
+		// connection ("") is offline whatever the row says.
 		status := ""
 		if set.Everyone && set.HereOnly {
 			status = r.Status
@@ -255,12 +233,10 @@ func (s *mentionState) mentionEntries(ctx context.Context, channelID, msgID, aut
 	return []db.MentionBatchEntry{{MsgID: msgID, UserIDs: ids}}
 }
 
-// mentionReaders lists the users who can read the channel, with the presence
-// status @here filters on. Each role resolves with its own channel override and a
-// member is a reader when ANY role they hold reads (OR'd, as
-// permissions.MemberChannelPerms does; ListMentionTargetsByRoles joins user_roles
-// so a multi-role holder is listed once). DM participation is membership, so DMs
-// skip the role walk.
+// mentionReaders lists the users who can read the channel, with the presence status @here
+// filters on. Each role resolves with its own channel override and a member is a reader
+// when ANY role reads (as permissions.MemberChannelPerms does; ListMentionTargetsByRoles
+// lists a multi-role holder once). DMs skip the role walk: participation is membership.
 func (s *mentionState) mentionReaders(ctx context.Context, channelID int64, isDM bool, participantIDs []int64) ([]db.MentionTarget, error) {
 	if isDM {
 		targets := make([]db.MentionTarget, 0, len(participantIDs))
@@ -281,11 +257,9 @@ func (s *mentionState) mentionReaders(ctx context.Context, channelID int64, isDM
 	return s.applyUserOverridesToReaders(ctx, channelID, targets, adminRoles, nil)
 }
 
-// mentionReadersAmong is mentionReaders for a message that can reach only the
-// named userIDs (no @everyone, @here or role mention): it reads those users and
-// applies the same role, channel override and per-user override rules to them,
-// so the result is mentionReaders' list filtered to userIDs without walking
-// every member who holds a reading role.
+// mentionReadersAmong is mentionReaders for a message that can reach only the named
+// userIDs (no @everyone, @here or role mention): same rules, filtered to userIDs without
+// walking every member holding a reading role.
 func (s *mentionState) mentionReadersAmong(ctx context.Context, channelID int64, userIDs []int64) ([]db.MentionTarget, error) {
 	if len(userIDs) == 0 {
 		return nil, nil
@@ -315,9 +289,6 @@ func (s *mentionState) mentionReadersAmong(ctx context.Context, channelID int64,
 	return s.applyUserOverridesToReaders(ctx, channelID, targets, adminRoles, byID)
 }
 
-// readingRoles resolves each role with its own channel override and returns the
-// roles that read the channel (ADMINISTRATOR always reads) and the roles that hold
-// ADMINISTRATOR.
 func (s *mentionState) readingRoles(ctx context.Context, channelID int64) ([]int64, map[int64]bool, error) {
 	roles, err := s.st.ListRoles(ctx)
 	if err != nil {
@@ -346,8 +317,6 @@ func (s *mentionState) readingRoles(ctx context.Context, channelID int64) ([]int
 	return readRoles, adminRoles, nil
 }
 
-// holdsAdminRole reports whether any role the target holds has ADMINISTRATOR; a
-// member with Administrator in a lower-ranked role also bypasses the per-user deny.
 func holdsAdminRole(t db.MentionTarget, adminRoles map[int64]bool) bool {
 	if adminRoles[t.RoleID] {
 		return true
@@ -355,17 +324,12 @@ func holdsAdminRole(t db.MentionTarget, adminRoles map[int64]bool) bool {
 	return slices.ContainsFunc(t.RoleIDs, func(id int64) bool { return adminRoles[id] })
 }
 
-// applyUserOverridesToReaders folds the per-user override layer (last in the
-// resolution order) into the role walk's readers, in both directions:
-//
-//   - a user DENY of READ_MESSAGES drops a member their role admitted (unless
-//     they hold ADMINISTRATOR, which bypasses every override);
-//   - a user ALLOW adds a member their role excluded.
-//
-// A user allow beats a user deny on the same bit, as permissions.EffectiveChannelPerms.
-//
-// among, when non-nil, is the only users a grant may add, already read (the
-// direct-mention path); nil lets a grant add any user and reads them here.
+// applyUserOverridesToReaders folds the per-user override layer (last in resolution
+// order) into the role walk's readers: a user DENY of READ_MESSAGES drops a member their
+// role admitted (unless ADMINISTRATOR, which bypasses every override); a user ALLOW adds
+// one their role excluded; allow beats deny on the same bit, as
+// permissions.EffectiveChannelPerms. among, when non-nil, is the only users a grant may
+// add, already read (the direct-mention path); nil reads them here.
 func (s *mentionState) applyUserOverridesToReaders(
 	ctx context.Context, channelID int64, targets []db.MentionTarget, adminRoles map[int64]bool,
 	among map[int64]db.MentionTarget,
@@ -405,7 +369,6 @@ func (s *mentionState) applyUserOverridesToReaders(
 			missing = append(missing, uid)
 		}
 	}
-	// Sorted so the fan-out (and its tests) do not depend on map order.
 	slices.Sort(missing)
 	if among != nil {
 		for _, uid := range missing {

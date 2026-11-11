@@ -2,10 +2,8 @@
  * Attachments in the message input: the drop overlay, paste, the preview bar
  * with spoiler and remove buttons, and the upload that follows a send.
  */
-import { Disposable } from "@lib/disposable";
-import { dialogOpen } from "@lib/ui/dialogOpen";
 import { desktop } from "../../../platform/desktop";
-import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
+import { createElement, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
 import { attachmentTtlMs } from "../attachmentTtl";
@@ -17,163 +15,22 @@ import {
   uploadsDisabledByServer,
   refusedExtension,
   MAX_ATTACHMENTS,
-  DROP_SLOTS,
   fileLabel,
   appendFileLabel,
   isPreviewableImage,
   relabelChip,
   paintSpoilerButton,
 } from "./inputShared";
+import { createDropOverlay } from "./inputDrop";
+import { looksLikeFileList, startUpload } from "./inputUpload";
 import type { InputState, InputApi } from "./inputState";
 import type { NativeFile } from "../../../platform/contracts/nativeFiles";
-import type { MessageInputOptions, DraftUpload } from "../MessageInput";
+import type { DraftUpload } from "../MessageInput";
 
-/** Start uploading `file`, after `before` when given; the returned upload
- *  outlives any one chip. */
-function startUpload(
-  upload: NonNullable<MessageInputOptions["onUploadFile"]>,
-  file: File,
-  before?: Promise<void>,
-): DraftUpload {
-  const owner = new Disposable();
-  let settledAt: number | undefined;
-  let fraction: number | null = null;
-  const onProgress = (f: number): void => {
-    fraction = f;
-    handle.onProgress?.(f);
-  };
-  const result =
-    before === undefined
-      ? upload(file, owner.signal, onProgress)
-      : before.then(() => {
-          owner.signal.throwIfAborted();
-          return upload(file, owner.signal, onProgress);
-        });
-  // Also keeps a rejection in a draft that is never restored from
-  // surfacing as unhandled; whichever chip follows the upload reads it.
-  result.then(
-    () => (settledAt = Date.now()),
-    () => {},
-  );
-  const handle: DraftUpload = {
-    filename: file.name,
-    file,
-    owner,
-    get settledAt() {
-      return settledAt;
-    },
-    get fraction() {
-      return fraction;
-    },
-    onProgress: null,
-    refreshing: null,
-    result,
-  };
-  return handle;
-}
-
-/** Clipboard text a file manager writes for copied files: nothing, or one
- *  file URI or absolute path per line. */
-export function looksLikeFileList(text: string): boolean {
-  const lines = text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l !== "");
-  if (lines.length === 0) return text === "";
-  // "/home/me/a.png", never a slash command such as "/shrug".
-  return lines.every((l) => l.startsWith("file://") || /^\/[^/\s][^/]*\/./.test(l));
-}
+export { looksLikeFileList };
 
 export function createInputAttachments(st: InputState, api: InputApi) {
-  /** "Upload to #channel" over the chat while a file from the OS is dragged
-   *  over a slot that takes the drop. It ignores the pointer, so the drop
-   *  still lands on the slot underneath. */
-  function wireDropOverlay(container: Element): void {
-    if (st.root === null) return;
-    const area = container.closest(st.options.dropZone ?? ".chat-area") ?? container;
-    const overlay = createElement("div", {
-      class: "drop-overlay",
-      "data-testid": "drop-overlay",
-      "aria-hidden": "true",
-    });
-    const card = createElement("div", { class: "drop-overlay-card" });
-    appendChildren(
-      card,
-      createElement("strong", {}, messagingText("drop.title", { channel: st.options.channelName })),
-      createElement("span", {}, messagingText("drop.hint")),
-    );
-    overlay.appendChild(card);
-    overlay.hidden = true;
-    st.root.appendChild(overlay);
-    const hide = (): void => {
-      overlay.hidden = true;
-    };
-    const showOver = (target: EventTarget | null): void => {
-      if (!acceptsDropAt(target)) {
-        hide();
-        return;
-      }
-      if (!overlay.hidden) return;
-      const r = area.getBoundingClientRect();
-      overlay.style.top = `${r.top}px`;
-      overlay.style.left = `${r.left}px`;
-      overlay.style.width = `${r.width}px`;
-      overlay.style.height = `${r.height}px`;
-      overlay.hidden = false;
-    };
-    document.addEventListener(
-      "dragover",
-      (e: DragEvent) => {
-        if (e.dataTransfer?.types.includes("Files") !== true) return;
-        showOver(e.target);
-      },
-      { signal: st.signal },
-    );
-    wireNativeDrops(showOver, hide);
-    // A null relatedTarget is the drag leaving the window.
-    document.addEventListener(
-      "dragleave",
-      (e: DragEvent) => {
-        if (e.relatedTarget === null) hide();
-      },
-      { signal: st.signal },
-    );
-    document.addEventListener("drop", hide, { signal: st.signal });
-    document.addEventListener("dragend", hide, { signal: st.signal });
-  }
-
-  /** A file dragged in from the OS lands on `target`: true when this
-   *  composer takes it. */
-  function acceptsDropAt(target: EventTarget | null): boolean {
-    return (
-      target instanceof Element &&
-      target.closest(st.options.dropZone ?? DROP_SLOTS) !== null &&
-      st.disabledReason === null &&
-      !uploadsDisabledByServer() &&
-      !dialogOpen()
-    );
-  }
-
-  /** Drops the host reads itself (Linux): the overlay follows the native
-   *  drag, and a drop over a slot that takes it attaches the files. */
-  function wireNativeDrops(showOver: (target: Element | null) => void, hide: () => void): void {
-    if (!desktop.nativeFiles.available) return;
-    const stop = desktop.nativeFiles.onDrag((drag) => {
-      if (st.signal.aborted) return;
-      if (drag.kind === "leave") {
-        hide();
-        return;
-      }
-      const target = document.elementFromPoint(drag.x, drag.y);
-      if (drag.kind === "over") {
-        showOver(target);
-        return;
-      }
-      hide();
-      if (acceptsDropAt(target)) void handleNativeFiles(drag.files);
-    });
-    st.signal.addEventListener("abort", stop, { once: true });
-  }
+  const wireDropOverlay = createDropOverlay(st, (files) => handleNativeFiles(files));
 
   function isStale(a: (typeof st.pendingAttachments)[number]): boolean {
     return a.uploadedAt !== undefined && Date.now() - a.uploadedAt >= attachmentTtlMs();

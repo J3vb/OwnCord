@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readSenderSample, senderSample, senderSampleFromReport } from "./shareSenderStats";
-import { layersText, senderText } from "../../components/video-grid/streamInfo";
+import { layersText, senderText } from "./videoGrid/streamInfo";
 
 const shareTrack = (entries: Array<[string, Record<string, unknown>]>) => ({
   sender: { getStats: async () => new Map(entries) as unknown as RTCStatsReport },
@@ -126,6 +126,14 @@ describe("shareSenderStats", () => {
     );
     expect(senderText({})).toBe("");
     expect(senderText(null)).toBe("Encoder details not available");
+  });
+
+  it("says when the server's video cap holds the share back, before the encoder's limit", () => {
+    expect(senderText({ serverLimit: 3_000_000 })).toBe("Limited by server to 3 Mbps");
+    expect(senderText({ serverLimit: 1_500_000, limitation: "cpu", codec: "video/VP8" })).toBe(
+      "Limited by server to 1.5 Mbps · Limited by CPU · VP8",
+    );
+    expect(senderText({ serverLimit: 2_040_000 })).toBe("Limited by server to 2 Mbps");
   });
 
   it("lists every layer only when there is more than one", () => {

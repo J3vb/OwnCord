@@ -9,9 +9,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// OpenCall is a live call log row as the call log worker reads it: where it
-// is, who started it, and when it started and was last seen occupied. Times
-// use the messages.timestamp layout.
+// OpenCall is a live call log row as the call log worker reads it: where it is, who
+// started it, and when it started and was last seen occupied.
 type OpenCall struct {
 	MessageID  int64
 	ChannelID  int64
@@ -51,9 +50,8 @@ func (d *DB) GetOpenCall(ctx context.Context, channelID int64) (*OpenCall, error
 	}, nil
 }
 
-// AddCallParticipants records userIDs as participants of a call in one
-// transaction. A user already recorded is left alone, and a user who no
-// longer exists is skipped.
+// AddCallParticipants records userIDs as participants of a call in one transaction,
+// skipping users already recorded or no longer existing.
 func (d *DB) AddCallParticipants(ctx context.Context, messageID int64, userIDs []int64) error {
 	if len(userIDs) == 0 {
 		return nil
@@ -70,8 +68,8 @@ func (d *DB) AddCallParticipants(ctx context.Context, messageID int64, userIDs [
 	})
 }
 
-// TouchCall moves a live call's last_seen_at forward to seenAt. It never moves
-// it back and does nothing for a call that has ended.
+// TouchCall moves a live call's last_seen_at forward to seenAt, never back, and
+// ignores ended calls.
 func (d *DB) TouchCall(ctx context.Context, messageID int64, seenAt string) error {
 	if err := d.q.TouchMessageCall(ctx, dbgen.TouchMessageCallParams{
 		LastSeenAt: seenAt, MessageID: messageID,
@@ -81,8 +79,7 @@ func (d *DB) TouchCall(ctx context.Context, messageID int64, seenAt string) erro
 	return nil
 }
 
-// GetCallInfo returns a call's block (times and participants), or (nil, nil)
-// when the message has no call row.
+// GetCallInfo returns a call's block, or (nil, nil) when the message has no call row.
 func (d *DB) GetCallInfo(ctx context.Context, messageID int64) (*CallInfo, error) {
 	ids := []int64{messageID}
 	calls, err := d.q.GetMessageCallsByMessageIDs(ctx, ids)

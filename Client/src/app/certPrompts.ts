@@ -30,10 +30,10 @@ let certModalActive = false;
 // the startup closure. A failed load (or a modal that throws while opening)
 // releases the guard so a later event retries, then runs `onFail`.
 function withCertModals(
-  open: (m: typeof import("@components/CertMismatchModal")) => void,
+  open: (m: typeof import("../features/connection/CertMismatchModal")) => void,
   onFail: () => void,
 ): void {
-  void import("@components/CertMismatchModal").then(open).catch((err: unknown) => {
+  void import("../features/connection/CertMismatchModal").then(open).catch((err: unknown) => {
     log.error("Failed to open certificate modal", err);
     certModalActive = false;
     onFail();
@@ -156,6 +156,9 @@ export function installCertPrompts(
             void (async () => {
               try {
                 await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
+                // As after a first-use accept: re-check the server and carry on
+                // with a sign-in the changed certificate held up.
+                rerunHealth(evt.host);
                 const target = sessionTarget();
                 if (target?.token && evt.host === normalizeHostForCertCompare(target.host)) {
                   reconnectAfterCertAccept(

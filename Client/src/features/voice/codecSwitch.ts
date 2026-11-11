@@ -34,7 +34,7 @@ import {
   type LiveCodec,
   type ScreenTrackState,
   type VideoTrackDeps,
-} from "../../lib/voice/screenShare";
+} from "./screenShare";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "../../stores/voice.store";
 import { pickCommonCodec } from "./decodeCaps";

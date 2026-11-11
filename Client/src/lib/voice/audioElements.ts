@@ -6,72 +6,37 @@
 import {
   RoomEvent,
   Track,
-  type Room,
   type RemoteTrack,
   type RemoteTrackPublication,
   type RemoteParticipant,
 } from "livekit-client";
-import { loadPref, savePref, STORAGE_PREFIX } from "@lib/prefs/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
-import { migrateLegacyValue } from "@lib/net/legacyKeyMigration";
 import { parseUserId } from "../../features/voice/sessionState";
 import { isUnencryptedPublication } from "../../features/voice/mediaEncryption";
 import { onRoom } from "../../features/voice/releaseRoom";
 import { voiceStore } from "@stores/voice.store";
-import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
+import {
+  announceLocalMute,
+  clampPercent,
+  getSavedUserVolume,
+  MAX_GAIN,
+  userLocalMuteKey,
+  userVolumeKey,
+} from "./audioVolumePrefs";
+import {
+  applySavedOutput,
+  attachMicAudioElement,
+  attachScreenshareAudio,
+  detachScreenshareAudio,
+} from "./audioTrackElements";
+import { ScreenshareAudioState } from "./audioScreenshareState";
+import { resendStreamAudioDelivery, syncScreenshareDelivery } from "./screenshareDelivery";
+import type { VoiceRemoteParticipant, VoiceRoom } from "@lib/voice/voiceRoom";
+
+export { setAudioVolumeHost } from "./audioVolumePrefs";
 
 const log = createLogger("audioElements");
-
-/**
- * Server host the per-user volume prefs below belong to. Mirrors
- * channel-mutes.ts's currentHost — the client is multi-server (one webview
- * origin means one localStorage) and userId is only unique per server, so
- * without a host component a volume set for user 7 on one server would
- * silence user 7 on every other server too. `setAudioVolumeHost` is always
- * called with a real host before any volume is read (see MainPage.ts), so
- * the `null` startup default is not what protects a pre-scoping install's
- * saved volumes — `getSavedUserVolume` does that below by reading through to
- * the original unscoped key on a miss at the scoped one.
- */
-let currentHost: string | null = null;
-
-/** Point per-user volume reads/writes at a specific server. Call on connect
- *  and on server switch — mirroring channel-mutes.ts's setChannelMutesHost. */
-export function setAudioVolumeHost(host: string | null): void {
-  currentHost = host;
-}
-
-function userVolumeKey(userId: number): string {
-  // i18n-exempt: localStorage key, not display text
-  return currentHost === null ? `userVolume_${userId}` : `userVolume_${userId}:${currentHost}`;
-}
-
-function userLocalMuteKey(userId: number): string {
-  const key = `userLocalMute_${userId}`;
-  // i18n-exempt: localStorage key, not display text
-  return currentHost === null ? key : `${key}:${currentHost}`;
-}
-
-function announceLocalMute(userId: number): void {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(USER_LOCAL_MUTE_CHANGED, { detail: { userId } }));
-}
-
-// setUserVolume always clamps to 0-200, so -1 is safe as a "nothing saved" sentinel.
-const VOLUME_NOT_SET = -1;
-
-/** Per-user and output volume sliders go to 200%. Above 100% a voice track
- *  needs its gain node: LiveKit's web setVolume writes HTMLMediaElement.volume,
- *  which throws above 1 and failed voice joins. */
-const MAX_VOLUME_PERCENT = 200;
-
-/** Per-user volume times output volume never plays louder than double. */
-const MAX_GAIN = 2;
-
-/** Clamp a stored or requested percentage into 0-200 (NaN reads as 100). */
-function clampPercent(v: number): number {
-  return Number.isNaN(v) ? 100 : Math.max(0, Math.min(MAX_VOLUME_PERCENT, v));
-}
 
 /** Where a remote voice track plays above 100%: its <audio> element stays
  *  attached (Chromium feeds a remote WebRTC track to Web Audio only while an
@@ -89,52 +54,12 @@ interface MicGraph {
 type SinkableContext = AudioContext & { setSinkId?: (sinkId: string) => Promise<void> };
 
 /** The native room plays voice in its own mixer, which takes gains above 1. */
-function hasNativePlayout(room: Room | null): boolean {
+function hasNativePlayout(room: VoiceRoom | null): boolean {
   return room !== null && "nativePlayout" in room;
 }
 
-/** Get saved per-user volume (0-200 range, default 100; a larger value reads
- *  as 200). On a miss at the host-scoped key, migrates
- *  the pre-scoping unscoped value through `migrateLegacyValue`, which moves
- *  it under the scoped key of the FIRST host that misses and no other. User
- *  ids are per-server autoincrement integers: a legacy value left readable
- *  would let every later brand-new host miss its own scoped key, read
- *  through to it and silence the unrelated user N there too — the
- *  shape channel-mutes.ts fixed for the same leak. */
-function getSavedUserVolume(userId: number): number {
-  return clampPercent(readSavedUserVolume(userId));
-}
-
-function readSavedUserVolume(userId: number): number {
-  const scopedKey = userVolumeKey(userId);
-  if (currentHost === null) return loadPref<number>(scopedKey, 100);
-
-  const scoped = loadPref<number>(scopedKey, VOLUME_NOT_SET);
-  if (scoped !== VOLUME_NOT_SET) return scoped;
-
-  const legacy = migrateLegacyValue(
-    `${STORAGE_PREFIX}userVolume_${userId}`,
-    STORAGE_PREFIX + scopedKey,
-  );
-  if (legacy !== null) {
-    const parsed = parseStoredVolume(legacy);
-    if (parsed !== null) return parsed;
-  }
-  return loadPref<number>(scopedKey, 100);
-}
-
-/** The stored form is loadPref's JSON; anything but a number is corrupt. */
-function parseStoredVolume(raw: string): number | null {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return typeof parsed === "number" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-export class AudioElements {
-  private room: Room | null = null;
+export class AudioElements extends ScreenshareAudioState {
+  private room: VoiceRoom | null = null;
 
   /** Shared by the gain nodes of boosted voice tracks. Created the first time
    *  a gain above 1 is needed in a web room and closed on leave, so a call
@@ -157,33 +82,30 @@ export class AudioElements {
 
   /** Remote microphone audio elements keyed by track SID for cleanup on disconnect. */
   private remoteMicAudioElements = new Map<string, HTMLAudioElement>();
-  /** Screenshare audio elements keyed by userId — separate from mic audio pipeline. */
-  private screenshareAudioElements = new Map<number, Set<HTMLAudioElement>>();
-  /** Persisted mute state for screenshare audio so replacement tracks inherit UI state. */
-  private screenshareAudioMutedByUser = new Map<number, boolean>();
-  /** Per-user screenshare volume (0-1, default 1) — kept independent of the
-   *  element map so a volume chosen before the track attaches still applies. */
-  private screenshareVolumeByUser = new Map<number, number>();
 
-  /** Told after a screen-share volume, mute or the output volume changes, for
-   *  a room that plays screen-share audio itself rather than through the
-   *  elements here (the Linux native room). */
-  private screenshareGainListener: (() => void) | null = null;
-
-  /** Master output volume multiplier (0-1.0). Per-user volumes are scaled by this. */
-  private outputVolumeMultiplier: number;
+  protected isLocalDeafened(): boolean {
+    return voiceStore.getState().localDeafened;
+  }
 
   constructor() {
+    super();
     this.outputVolumeMultiplier = clampPercent(loadPref<number>("outputVolume", 100)) / 100;
   }
 
-  setRoom(room: Room | null): void {
+  setRoom(room: VoiceRoom | null): void {
     if (room === this.room) return;
     this.room = room;
     if (room === null || hasNativePlayout(room)) {
       this.closeAudioContext();
       return;
     }
+    // A stream audio (re)subscribed may be a fresh server subscription, which
+    // starts delivered whatever livekit cached: send its state again.
+    onRoom(room, RoomEvent.TrackSubscriptionStatusChanged, (pub, status, participant) => {
+      if (this.room !== room || status !== "subscribed") return;
+      const userId = parseUserId(participant.identity);
+      resendStreamAudioDelivery(pub, !this.isScreenshareSilenced(userId));
+    });
     if (typeof AudioContext === "undefined") return;
     // Every output switch (settings, hot-plug fallback, join) goes through
     // room.switchActiveDevice, which only moves the elements; the context
@@ -339,7 +261,7 @@ export class AudioElements {
    *  as is. On the web the element plays it up to 1, where LiveKit's
    *  setVolume must never see more; above 1 every one of their tracks moves
    *  to a gain node, or stays on its element at 1 while no context runs. */
-  private applyUserGain(participant: RemoteParticipant, gain: number): void {
+  private applyUserGain(participant: VoiceRemoteParticipant, gain: number): void {
     if (hasNativePlayout(this.room)) {
       participant.setVolume(gain);
       return;
@@ -385,30 +307,6 @@ export class AudioElements {
     return Math.min(MAX_GAIN, (userVolumePercent / 100) * this.outputVolumeMultiplier);
   }
 
-  /** Effective element volume for a user's screenshare audio: per-user volume
-   *  scaled by the master output multiplier, clamped to the 0-1 range that
-   *  HTMLAudioElement.volume supports. */
-  private getEffectiveScreenshareVolume(userId: number): number {
-    const userVol = this.screenshareVolumeByUser.get(userId) ?? 1;
-    return Math.max(0, Math.min(1, userVol * this.outputVolumeMultiplier));
-  }
-
-  /** The gain a user's screen-share audio plays at: its effective volume, or
-   *  0 while muted. */
-  getScreenshareGain(userId: number): number {
-    return this.isScreenshareSilenced(userId) ? 0 : this.getEffectiveScreenshareVolume(userId);
-  }
-
-  /** Stream audio is silent while its own tile mute is on or while deafened.
-   *  Deafen leaves the tile mute untouched, so undeafen restores it as it was. */
-  private isScreenshareSilenced(userId: number): boolean {
-    return voiceStore.getState().localDeafened || this.getScreenshareAudioMuted(userId);
-  }
-
-  setScreenshareGainListener(listener: (() => void) | null): void {
-    this.screenshareGainListener = listener;
-  }
-
   // --- Track subscription handlers ---
 
   handleTrackSubscribedAudio(
@@ -431,41 +329,20 @@ export class AudioElements {
 
     const userId = parseUserId(participant.identity);
     if (publication.source === Track.Source.ScreenShareAudio) {
-      // Screenshare audio: manage via HTMLAudioElement volume (not participant.setVolume)
-      // Look up the tracking set before detaching so a fast re-subscribe
-      // (new TrackSubscribed before the old TrackUnsubscribed lands) drops
-      // the stale element from the set instead of leaking it forever — same
-      // hygiene as handleTrackUnsubscribedAudio below.
-      let audioEls = this.screenshareAudioElements.get(userId);
-      for (const el of track.detach()) {
-        el.remove();
-        audioEls?.delete(el);
-      }
-      const audioEl = track.attach();
-      audioEl.style.display = "none";
-      document.body.appendChild(audioEl);
-      audioEl.volume = this.getEffectiveScreenshareVolume(userId);
-      audioEl.muted = this.isScreenshareSilenced(userId);
-      if (audioEls === undefined) {
-        audioEls = new Set();
-        this.screenshareAudioElements.set(userId, audioEls);
-      }
-      audioEls.add(audioEl);
-      const savedOutput = loadPref<string>("audioOutputDevice", "");
-      if (savedOutput !== "" && typeof audioEl.setSinkId === "function") {
-        audioEl.setSinkId(savedOutput).catch((err) => {
-          log.warn("Failed to set output device on screenshare audio", err);
-        });
-      }
+      const audioEl = attachScreenshareAudio(
+        track,
+        this.screenshareAudioElements,
+        userId,
+        this.getEffectiveScreenshareVolume(userId),
+        this.isScreenshareSilenced(userId),
+      );
+      applySavedOutput(audioEl, "screenshare");
       log.debug("Screenshare audio track subscribed and attached", { userId, trackSid: track.sid });
     } else {
       // Microphone audio: LiveKit's setVolume (element volume, 0-1)
       // Detach any previous <audio> elements to prevent duplicate playback
       // on fast reconnects (new subscription fires before old unsubscription)
-      for (const el of track.detach()) el.remove();
-      const audioEl = track.attach();
-      audioEl.style.display = "none";
-      document.body.appendChild(audioEl);
+      const audioEl = attachMicAudioElement(track);
       // Track mic audio elements for cleanup on abnormal disconnect
       if (track.sid !== undefined) {
         this.remoteMicAudioElements.set(track.sid, audioEl);
@@ -473,12 +350,7 @@ export class AudioElements {
         this.dropMicGraph(track.sid);
       }
       this.applyUserGain(participant, this.getEffectiveVolume(userId));
-      const savedOutput = loadPref<string>("audioOutputDevice", "");
-      if (savedOutput !== "" && typeof audioEl.setSinkId === "function") {
-        audioEl.setSinkId(savedOutput).catch((err) => {
-          log.warn("Failed to set output device on remote audio", err);
-        });
-      }
+      applySavedOutput(audioEl, "remote");
       log.debug("Remote audio track subscribed and attached", { userId, trackSid: track.sid });
     }
   }
@@ -490,13 +362,7 @@ export class AudioElements {
   ): void {
     const userId = parseUserId(participant.identity);
     if (publication.source === Track.Source.ScreenShareAudio) {
-      const detachedEls = track.detach() as HTMLAudioElement[];
-      for (const el of detachedEls) el.remove();
-      const audioEls = this.screenshareAudioElements.get(userId);
-      if (audioEls !== undefined) {
-        for (const el of detachedEls) audioEls.delete(el);
-        if (audioEls.size === 0) this.screenshareAudioElements.delete(userId);
-      }
+      detachScreenshareAudio(track, this.screenshareAudioElements, userId);
       log.debug("Screenshare audio track unsubscribed and detached", {
         userId,
         trackSid: track.sid,
@@ -515,13 +381,7 @@ export class AudioElements {
   // --- Remote audio subscription state (deafen) ---
 
   applyRemoteAudioSubscriptionState(deafened: boolean): void {
-    // Deafen silences stream audio too (Discord's rule) by muting its
-    // elements, not unsubscribing, so undeafen restores each tile's own mute.
-    for (const [userId, audioEls] of this.screenshareAudioElements) {
-      const muted = deafened || this.getScreenshareAudioMuted(userId);
-      for (const el of audioEls) el.muted = muted;
-    }
-    this.screenshareGainListener?.();
+    this.applyScreenshareDeafen(deafened);
     if (this.room === null) return;
     for (const participant of this.room.remoteParticipants.values()) {
       for (const publication of participant.audioTrackPublications.values()) {
@@ -530,6 +390,17 @@ export class AudioElements {
         publication.setSubscribed(!deafened);
       }
     }
+    this.syncScreenshareDelivery(undefined, deafened);
+  }
+
+  /** The Linux native room plays stream audio itself and is left as it is. */
+  protected syncScreenshareDelivery(onlyUserId?: number, deafened = this.isLocalDeafened()): void {
+    if (hasNativePlayout(this.room)) return;
+    syncScreenshareDelivery(this.room, (identity) => {
+      const userId = parseUserId(identity);
+      if (onlyUserId !== undefined && userId !== onlyUserId) return null;
+      return !deafened && !this.getScreenshareAudioMuted(userId);
+    });
   }
 
   // --- Volume control ---
@@ -565,7 +436,7 @@ export class AudioElements {
 
   /** The gain a participant's voice plays at right now (diagnostics): their
    *  gain node's when they have one, else LiveKit's element volume. */
-  getPlayingVolume(participant: RemoteParticipant): number {
+  getPlayingVolume(participant: VoiceRemoteParticipant): number {
     const userId = parseUserId(participant.identity);
     for (const graph of this.micGraphs.values()) {
       if (graph.userId === userId) return graph.gain.gain.value;
@@ -590,49 +461,10 @@ export class AudioElements {
     savePref("outputVolume", clamped);
     this.outputVolumeMultiplier = clamped / 100;
     this.applyAllVolumes();
-    // Re-apply per-user screenshare volumes scaled by the new master value
-    // (BUG: previously overwrote them with just the master multiplier).
-    for (const [userId, audioEls] of this.screenshareAudioElements) {
-      const effective = this.getEffectiveScreenshareVolume(userId);
-      for (const audioEl of audioEls) {
-        audioEl.volume = effective;
-      }
-    }
-    this.screenshareGainListener?.();
+    this.applyScreenshareVolumes();
   }
 
   // --- Screenshare audio ---
-
-  setScreenshareAudioVolume(userId: number, volume: number): void {
-    const clamped = Math.max(0, Math.min(1, volume));
-    // Always store, even before the audio track attaches — the stored value
-    // is applied in handleTrackSubscribedAudio when the element appears.
-    this.screenshareVolumeByUser.set(userId, clamped);
-    this.screenshareGainListener?.();
-    const audioEls = this.screenshareAudioElements.get(userId);
-    if (audioEls === undefined) return;
-    const effective = this.getEffectiveScreenshareVolume(userId);
-    for (const el of audioEls) el.volume = effective;
-  }
-
-  /** Stored per-user screenshare volume (0-1, default 1) for slider init. */
-  getScreenshareAudioVolume(userId: number): number {
-    return this.screenshareVolumeByUser.get(userId) ?? 1;
-  }
-
-  muteScreenshareAudio(userId: number, muted: boolean): void {
-    this.screenshareAudioMutedByUser.set(userId, muted);
-    this.screenshareGainListener?.();
-    const audioEls = this.screenshareAudioElements.get(userId);
-    if (audioEls === undefined) return;
-    for (const el of audioEls) el.muted = muted || voiceStore.getState().localDeafened;
-  }
-
-  /** The tile's own stream mute. Not the element's muted flag: deafen mutes
-   *  the element too, and must not read back as the user's choice. */
-  getScreenshareAudioMuted(userId: number): boolean {
-    return this.screenshareAudioMutedByUser.get(userId) ?? false;
-  }
 
   // --- Cleanup ---
 

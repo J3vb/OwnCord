@@ -524,10 +524,11 @@ describe("SettingsOverlay", () => {
     expect(sliders.length).toBeGreaterThanOrEqual(1);
 
     const toggles = container.querySelectorAll(".toggle");
-    // 7 toggles: automatic input sensitivity, automatically play cameras,
-    // mirror my camera preview, echo cancellation, noise suppression, auto
-    // gain control, enhanced noise suppression (RNNoise)
-    expect(toggles.length).toBe(7);
+    // 8 toggles: automatic input sensitivity, automatically play cameras,
+    // mirror my camera preview, send a screen share backup copy, echo
+    // cancellation, noise suppression, auto gain control, enhanced noise
+    // suppression (RNNoise)
+    expect(toggles.length).toBe(8);
 
     overlay.destroy?.();
   });

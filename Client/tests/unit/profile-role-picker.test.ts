@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Loaded up front: the opener imports it lazily, and its module-level window
 // listeners would otherwise be counted against the first test.
-import "@components/UserProfilePopup";
+import "../../src/features/profiles/userProfilePopup";
 import {
   openUserProfilePopup,
   closeUserProfilePopup,

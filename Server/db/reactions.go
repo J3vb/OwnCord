@@ -52,8 +52,7 @@ func (d *DB) RemoveReaction(ctx context.Context, messageID, userID int64, emoji 
 	return nil
 }
 
-// GetReactions returns aggregated reaction counts for a message; MeReacted is
-// always false here.
+// GetReactions returns aggregated reaction counts for a message; MeReacted is always false here.
 func (d *DB) GetReactions(ctx context.Context, messageID int64) ([]ReactionCount, error) {
 	rows, err := d.q.GetReactionCounts(ctx, messageID)
 	if err != nil {
@@ -66,12 +65,11 @@ func (d *DB) GetReactions(ctx context.Context, messageID int64) ([]ReactionCount
 	return counts, nil
 }
 
-// MaxReactionUsers bounds the who-reacted list; the tooltip names only a
-// handful, so the query is capped rather than paginated.
+// MaxReactionUsers caps the who-reacted list, which the tooltip names only a handful of.
 const MaxReactionUsers = 100
 
-// GetReactionUsers returns up to limit reactors for one (message, emoji) pair,
-// oldest reaction first. limit is clamped to MaxReactionUsers.
+// GetReactionUsers returns up to limit reactors of one (message, emoji), oldest first;
+// limit clamps to MaxReactionUsers.
 func (d *DB) GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]ReactionUser, error) {
 	if limit <= 0 || limit > MaxReactionUsers {
 		limit = MaxReactionUsers
@@ -91,7 +89,6 @@ func (d *DB) GetReactionUsers(ctx context.Context, messageID int64, emoji string
 	return users, nil
 }
 
-// getReactionsBatch returns aggregated reactions for multiple messages.
 func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUserID int64) (map[int64][]ReactionInfo, error) {
 	if len(msgIDs) == 0 {
 		return map[int64][]ReactionInfo{}, nil

@@ -1,6 +1,6 @@
 /** Loading the server rail into the page on demand. */
 
-import type { ServerRailOptions } from "@components/ServerRail";
+import type { ServerRailOptions } from "./ServerRail";
 import { createLogger } from "@lib/logger";
 import { authStore } from "@stores/auth.store";
 import { addServer, loadSavedServers, switchToServer } from "./switchServer";
@@ -21,7 +21,7 @@ export interface ServerRailMount {
 /** The rail's code loads on demand, keeping it out of the eager MainPage chunk. */
 export function mountServerRail(opts: ServerRailMount): void {
   const { host, slot } = opts;
-  void import("@components/ServerRail")
+  void import("./ServerRail")
     .then(({ createServerRail }) => {
       if (opts.isTornDown()) return;
       const rail = createServerRail({

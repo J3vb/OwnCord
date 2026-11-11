@@ -4,6 +4,5 @@ package app
 
 import "log/slog"
 
-// raiseFileLimit is a no-op on Windows: the platform has no RLIMIT_NOFILE,
-// and the handle ceiling is not something a process raises for itself.
+// raiseFileLimit is a no-op on Windows, which has no RLIMIT_NOFILE.
 func raiseFileLimit(*slog.Logger, int) {}

@@ -102,6 +102,9 @@ var panelExcludedKeys = []string{
 	// Already editable live on the Settings page through their own rows,
 	// which replace config.yaml; a second panel value would be a third source.
 	"upload.blocked_extensions", "upload.allowed_extensions", "server.name",
+	// A voice grant rule the person running the server sets in config.yaml
+	// or the environment, read once at start-up.
+	"voice.restrict_data_publishing",
 }
 
 func TestEditableKeys_ExactInventory(t *testing.T) {
@@ -132,9 +135,9 @@ func TestEditableKeys_ProtectedKeysStayOut(t *testing.T) {
 			t.Errorf("IsEditable(%q) = true for a key that is not a config leaf", key)
 		}
 	}
-	// Every config key is classified exactly once (parity_test pins 78).
-	if n := len(panelEditableKeys) + len(panelExcludedKeys); n != 78 {
-		t.Errorf("editable %d + excluded %d = %d keys, want all 78 classified",
+	// The two lists together hold 79 distinct keys.
+	if n := len(panelEditableKeys) + len(panelExcludedKeys); n != 79 {
+		t.Errorf("editable %d + excluded %d = %d keys, want 79",
 			len(panelEditableKeys), len(panelExcludedKeys), n)
 	}
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { memberRow, useMemberPickerHarness } from "../helpers/memberPickerHarness";
-import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
+import { createMemberPickerModal } from "../../src/features/direct-messages/MemberPickerModal";
 import { membersStore } from "@stores/members.store";
 import { MAX_GROUP_DM_PARTICIPANTS } from "@lib/constants";
 

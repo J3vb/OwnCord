@@ -1,7 +1,7 @@
 // WP 3B-5 (D13): the new-DM picker's search, sort, avatars, status labels and chips.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
+import { createMemberPickerModal } from "../../src/features/direct-messages/MemberPickerModal";
 import { membersStore } from "../../src/stores/members.store";
 import type { Member } from "../../src/stores/members.store";
 import { signInAs } from "../helpers/storeSeeds";

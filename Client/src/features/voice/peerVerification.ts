@@ -204,7 +204,7 @@ export async function openIdentityMismatchModal(
   if (lifetimeSignal.aborted) return;
   closeIdentityModal();
   // Lazy: a feature must not statically import the UI layer.
-  const { createIdentityMismatchModal } = await import("../../components/IdentityMismatchModal");
+  const { createIdentityMismatchModal } = await import("./IdentityMismatchModal");
   if (lifetimeSignal.aborted) return;
   const modal = createIdentityMismatchModal({
     username,

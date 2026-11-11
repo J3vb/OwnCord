@@ -25,7 +25,7 @@ import {
   createUpdateNotifier,
   formatDownloadProgress,
   formatDownloadSize,
-} from "../../src/components/UpdateNotifier";
+} from "../../src/features/updates/UpdateNotifier";
 import { getAvailableUpdate } from "../../src/features/updates/availableUpdate";
 import { uiStore } from "../../src/stores/ui.store";
 import type { UpdateInstallState } from "../../src/lib/net/updater";

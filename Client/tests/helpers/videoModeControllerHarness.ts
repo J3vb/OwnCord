@@ -8,7 +8,7 @@ import {
   mockGetLocalScreenshareStream,
   mockVoiceStoreGetState,
 } from "./videoModeControllerMocks";
-import { createVideoGrid } from "../../src/components/VideoGrid";
+import { createVideoGrid } from "../../src/features/voice/videoGrid/VideoGrid";
 
 // ---------------------------------------------------------------------------
 // Helpers

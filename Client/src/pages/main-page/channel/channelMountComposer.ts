@@ -10,7 +10,7 @@ import {
   type SentAttachment,
 } from "../../../features/messaging/MessageInput";
 import { onSendAcknowledged } from "../../../features/messaging/sendAcknowledged";
-import { createTypingIndicator } from "@components/TypingIndicator";
+import { createTypingIndicator } from "../../../features/messaging/TypingIndicator";
 import { getChannelMessages } from "@stores/messages.store";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
@@ -95,7 +95,7 @@ export function mountComposer(st: ChannelState, cc: ChannelApi, ms: MountScope):
     onDraftChange: cc.scheduleDraftSave,
     onReplyTargetChange: (messageId) => st.messageList?.setReplyTarget(messageId),
     onCreatePoll: () => {
-      import("../../../components/PollComposer").then(
+      import("../../../features/messaging/PollComposer").then(
         ({ openPollComposer }) => {
           if (ms.signal.aborted) return;
           openPollComposer({

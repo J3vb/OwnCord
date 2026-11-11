@@ -31,6 +31,7 @@ func (v VoiceConfig) LogValue() slog.Value {
 		slog.Bool("advertise_internal_ip", v.AdvertiseInternalIP),
 		slog.Int("udp_port", v.UDPPort),
 		slog.String("quality", v.Quality),
+		slog.Bool("restrict_data_publishing", v.RestrictDataPublishing),
 	)
 }
 

@@ -25,6 +25,8 @@ type RetentionStore interface {
 	RetentionWindows(ctx context.Context) ([]db.RetentionWindow, error)
 	CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error)
 	SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error)
+	RetentionSwept(ctx context.Context, channelID int64) (sweep string, ok bool, err error)
+	RecordRetentionSwept(ctx context.Context, channelID int64, sweep string) error
 	DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, error)
 	SequenceValue(ctx context.Context, table string) (int64, error)
 	StartRetentionRun(ctx context.Context) (int64, error)
@@ -36,16 +38,14 @@ type RetentionStore interface {
 	ListChannels(ctx context.Context) ([]db.Channel, error)
 }
 
-// RetentionMinDays is the smallest window the policy accepts. RetentionMaxDays
-// mirrors db.RetentionMaxDays, one source: the db read paths fail closed on the
-// same ceiling this write-side check enforces, and a copy could drift.
+// RetentionMinDays is the smallest window the policy accepts. RetentionMaxDays mirrors
+// db.RetentionMaxDays (one source: db read paths fail closed on the same ceiling).
 const RetentionMinDays = 1
 
 const RetentionMaxDays = db.RetentionMaxDays
 
-// RetentionTickBudget is the most messages one maintenance tick removes across
-// channels, in batches of RetentionBatch; the rest waits so a backlog never holds
-// the writer long.
+// RetentionTickBudget is the most messages one maintenance tick removes across channels, in batches of
+// RetentionBatch; the rest waits so a backlog never holds the writer long.
 const (
 	RetentionTickBudget = 5000
 	RetentionBatch      = 500
@@ -54,19 +54,16 @@ const (
 // ErrRetentionDMChannel is returned for a policy on a DM channel: DMs are never in scope.
 var ErrRetentionDMChannel = errors.New("retention does not apply to direct messages")
 
-// RetentionHub is the sweep's slice of the hub: the replay purge for removed
-// messages. *ws.Hub satisfies it.
+// RetentionHub is the sweep's slice of the hub: the replay purge for removed messages.
 type RetentionHub interface {
 	PurgeMessagesFromReplay(ctx context.Context, ids []int64) error
 }
 
-// RetentionService is the message-retention policy and sweep: indefinite by
-// default, a server-wide window in settings, a per-channel override either way,
-// pinned messages exempt, DMs never in scope, no hold. A sweep hard-deletes
-// past-window messages with the erasure's mechanics (mention reversal, FTS via
-// trigger, attachment rows), journals the files in retention_runs and removes them
-// after commit, and records a messages-scoped deletion marker per channel so a
-// restored backup is swept again to the same cutoff.
+// RetentionService is the message-retention policy and sweep: indefinite by default, a server-wide window, a
+// per-channel override either way, pinned messages exempt, DMs never in scope. A sweep hard-deletes
+// past-window messages with the erasure's mechanics, journals the files in retention_runs and removes them
+// after commit, and records a messages-scoped deletion marker per channel so a restored backup is swept again
+// to the same cutoff.
 type RetentionService struct {
 	previewKey [32]byte
 	mu         syncutil.Mutex
@@ -90,20 +87,18 @@ func (s *RetentionService) SetFiles(f FileRemover) { s.files = f }
 // SetMarkers installs the deletion-marker store the sweep records into.
 func (s *RetentionService) SetMarkers(m *db.MarkerStore) { s.markers = m }
 
-// SetHub installs the hub: a sweep then purges the whole replay pipeline (ring
-// buffer, persister barrier, events rows, producer tombstone), not only persisted
-// rows. Call it at the composition root before serving.
+// SetHub installs the hub: a sweep then purges the whole replay pipeline (ring buffer, persister barrier,
+// events rows, producer tombstone), not only persisted rows. Call before serving.
 func (s *RetentionService) SetHub(h RetentionHub) { s.hub = h }
 
 // SetClock replaces the clock (tests).
 func (s *RetentionService) SetClock(now func() time.Time) { s.now = now }
 
-// RetentionPolicy is what the admin panel reads: the server window and every
-// channel override.
+// RetentionPolicy is what the admin panel reads: the server window and every channel override.
 type RetentionPolicy = db.RetentionPolicySnapshot
 
-// ServerDays returns only the server-default window (0 keeps indefinitely);
-// channel overrides stay on the admin-only Policy path.
+// ServerDays returns only the server-default window (0 keeps indefinitely); channel overrides stay on the
+// admin-only Policy path.
 func (s *RetentionService) ServerDays(ctx context.Context) (int, error) {
 	return s.st.ServerRetentionDays(ctx)
 }
@@ -126,9 +121,8 @@ func (s *RetentionService) ChannelPolicy(ctx context.Context, channelID int64) (
 	return p, nil
 }
 
-// SetChannelPolicy sets a channel's window (days >= RetentionMinDays, or 0 to
-// keep the channel forever under a server window) and audits old -> new. Refused
-// for DM and unknown channels.
+// SetChannelPolicy sets a channel's window (days >= RetentionMinDays, or 0 to keep the channel forever under
+// a server window) and audits old -> new. Refused for DM and unknown channels.
 func (s *RetentionService) SetChannelPolicy(ctx context.Context, actorID, channelID int64, days int) (*db.ChannelRetention, error) {
 	if days != 0 && (days < RetentionMinDays || days > RetentionMaxDays) {
 		return nil, fmt.Errorf("%w: days must be 0 (keep forever) or between %d and %d", ErrBadRequest, RetentionMinDays, RetentionMaxDays)
@@ -148,8 +142,8 @@ func (s *RetentionService) SetChannelPolicy(ctx context.Context, actorID, channe
 	return s.st.GetChannelRetention(ctx, channelID)
 }
 
-// ClearChannelPolicy removes a channel's override so the server window applies
-// (audited); not-found when it has none.
+// ClearChannelPolicy removes a channel's override so the server window applies (audited); not-found when it
+// has none.
 func (s *RetentionService) ClearChannelPolicy(ctx context.Context, actorID, channelID int64) error {
 	if err := s.retentionChannel(ctx, channelID); err != nil {
 		return err
@@ -184,8 +178,7 @@ type RetentionPreview struct {
 	WouldDelete int64  `json:"would_delete"`
 }
 
-// Preview reports, per channel with an effective window, how many messages the
-// next sweep would remove.
+// Preview reports, per channel with an effective window, how many messages the next sweep would remove.
 func (s *RetentionService) Preview(ctx context.Context) ([]RetentionPreview, error) {
 	windows, err := s.st.RetentionWindows(ctx)
 	if err != nil {
@@ -203,14 +196,13 @@ func (s *RetentionService) Preview(ctx context.Context) ([]RetentionPreview, err
 	return out, nil
 }
 
-// cutoff is now minus the window in UTC: message timestamps are UTC strings, so
-// DST or a local-zone host never moves the boundary.
+// cutoff is now minus the window in UTC: message timestamps are UTC strings, so DST or a local-zone host
+// never moves the boundary.
 func (s *RetentionService) cutoff(days int) time.Time {
 	return s.now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
 }
 
-// RetentionChannel is a channel a policy can be set on: id and name only, so the
-// page needs nothing beyond MANAGE_SERVER to list them.
+// RetentionChannel is a channel a policy can be set on: id and name only.
 type RetentionChannel struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`

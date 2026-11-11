@@ -1,12 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import { Encryption_Type, VideoQuality, type Room } from "livekit-client";
 
-vi.mock("../../lib/voice/screenShare", () => ({
+vi.mock("./screenShare", () => ({
   getLocalCameraStream: vi.fn(() => "camera"),
   getLocalScreenshareStream: vi.fn(() => "screen"),
 }));
 
-import { getLocalCameraStream, getLocalScreenshareStream } from "../../lib/voice/screenShare";
+import { getLocalCameraStream, getLocalScreenshareStream } from "./screenShare";
 import { RemoteTracks } from "./remoteTracks";
 
 function roomWith(identity: string, source: string, track: unknown): Room {

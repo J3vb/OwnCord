@@ -18,9 +18,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/updater"
 )
 
-// configEnumOptions lists the allowed values of the four enum keys, so the
-// panel can render a select. Kept beside the handlers rather than in config
-// because it is an API presentation detail; config only enforces membership.
+// configEnumOptions lists the allowed values of the four enum keys so the panel can render a select; kept
+// here, not in config, as an API presentation detail (config only enforces membership).
 var configEnumOptions = map[string][]string{
 	"logging.level":       {"debug", "info", "warn", "error"},
 	"server.waf_crs_mode": {"off", "detect", "block"},
@@ -28,8 +27,8 @@ var configEnumOptions = map[string][]string{
 	"voice.quality":       {"low", "medium", "high"},
 }
 
-// confirmHeader names the lock-out-capable keys a PATCH deliberately changes.
-// The panel sends it after the owner types the confirmation.
+// confirmHeader names the lock-out-capable keys a PATCH deliberately changes; sent after the owner types the
+// confirmation.
 const confirmHeader = "X-OwnCord-Confirm"
 
 // configSettingRow is one editable key in GET/PATCH /config/settings. A secret
@@ -55,11 +54,9 @@ type configSettingsResponse struct {
 	Settings       []configSettingRow `json:"settings"`
 }
 
-// restartHandoff names how this process comes back after a panel restart, for
-// the confirm dialog: "container" (the engine's restart policy), "supervisor"
-// (systemd or NSSM), "spawn" (it starts its own replacement) or
-// "unsupervised" (restart_mode is supervised but no supervisor is detected,
-// so nothing may start it again).
+// restartHandoff names how this process comes back after a panel restart: "container" (engine restart
+// policy), "supervisor" (systemd or NSSM), "spawn" (starts its own replacement), or "unsupervised"
+// (restart_mode is supervised but none is detected, so nothing may restart it).
 func restartHandoff(cfg *config.Config) string {
 	mode, _ := updater.ResolveRestartMode(cfg.Server.RestartMode)
 	switch {
@@ -74,9 +71,8 @@ func restartHandoff(cfg *config.Config) string {
 	}
 }
 
-// buildConfigSettings renders one row per editable key, in EditableKeys order.
-// It iterates EditableKeys only — never the whole config — so secrets and the
-// other excluded keys can never reach this response.
+// buildConfigSettings renders one row per editable key. It iterates EditableKeys only, never the whole
+// config, so secrets and other excluded keys cannot reach this response.
 func buildConfigSettings(cfg, fallback *config.Config, overrides map[string]any, pending bool) configSettingsResponse {
 	keys := config.EditableKeys()
 	rows := make([]configSettingRow, 0, len(keys))
@@ -89,8 +85,7 @@ func buildConfigSettings(cfg, fallback *config.Config, overrides map[string]any,
 		}
 		row.SettingCopy, _ = config.SettingCopyFor(key)
 		if config.IsSecret(key) {
-			// Never place a secret value in the row: the panel only needs to
-			// know whether one is configured and whether an override is set.
+			// Never place a secret value in the row: only whether one is configured and an override set.
 			configured := secretConfigured(cfg, key)
 			overrideSet := overrides[key] != nil
 			row.Type = "secret"
@@ -105,8 +100,8 @@ func buildConfigSettings(cfg, fallback *config.Config, overrides map[string]any,
 			if override, ok := overrides[key]; ok && !envLocked {
 				row.Override = override
 			}
-			// The value a reset would fall back to (config.yaml plus env),
-			// so the panel can show the post-restart address after a reset.
+			// The value a reset would fall back to (config.yaml plus env), so the panel can show the post-reset
+			// address.
 			if fallback != nil {
 				if fv, ok := config.Lookup(fallback, key); ok {
 					row.Fallback = normalizeSettingValue(fv)
@@ -121,16 +116,15 @@ func buildConfigSettings(cfg, fallback *config.Config, overrides map[string]any,
 	return configSettingsResponse{RestartPending: pending, RestartHandoff: restartHandoff(cfg), Settings: rows}
 }
 
-// secretConfigured reports whether the running config holds a non-empty value
-// for a secret key, without ever returning the value itself.
+// secretConfigured reports whether a secret key holds a non-empty value, never returning it.
 func secretConfigured(cfg *config.Config, key string) bool {
 	value, _ := config.Lookup(cfg, key)
 	s, _ := value.(string)
 	return s != ""
 }
 
-// unconfirmedKeys returns the lock-out-capable keys in a PATCH body that the
-// comma-separated confirmation header does not name, sorted.
+// unconfirmedKeys returns the lock-out-capable keys in a PATCH that the confirmation header does not name,
+// sorted.
 func unconfirmedKeys(changes map[string]any, header string) []string {
 	confirmed := make(map[string]bool)
 	for key := range strings.SplitSeq(header, ",") {
@@ -188,10 +182,8 @@ func guardDatabasePath(ctx context.Context, w http.ResponseWriter, g guardContex
 	return true
 }
 
-// normalizeSettingValue turns a nil slice into an empty one, so a list key
-// with no running value serialises as [] rather than null. The panel reads a
-// null list as an empty list and would otherwise write a spurious [] override
-// on any save.
+// normalizeSettingValue turns a nil slice into an empty one so a list key with no running value serialises as
+// [], not null: the panel reads null as empty and would write a spurious [] override on any save.
 func normalizeSettingValue(value any) any {
 	rv := reflect.ValueOf(value)
 	if rv.Kind() == reflect.Slice && rv.IsNil() {
@@ -234,10 +226,9 @@ func handleGetConfigOverrides(opts SetupOptions, pending *atomic.Bool) http.Hand
 	}
 }
 
-// fallbackConfig builds the configuration as it would be without any panel
-// override, so a row can report the value a reset falls back to. Preview with
-// every current override removed yields config.yaml plus the environment; on
-// error the rows simply carry no fallback.
+// fallbackConfig builds the configuration without any panel override (Preview with every override removed =
+// config.yaml plus environment), so a row can report what a reset falls back to; on error rows carry no
+// fallback.
 func fallbackConfig(cfgPath, overridesPath string, overrides map[string]any) *config.Config {
 	stripped := make(map[string]any, len(overrides))
 	for key := range overrides {
@@ -253,9 +244,8 @@ func fallbackConfig(cfgPath, overridesPath string, overrides map[string]any) *co
 }
 
 func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *atomic.Bool) http.HandlerFunc {
-	// patchMu makes Preview, the guards and the save one step: two PATCHes
-	// that are each valid against the saved file must not merge into a config
-	// the guards would refuse.
+	// patchMu makes Preview, the guards and the save one step: two PATCHes each valid against the saved file
+	// must not merge into a config the guards would refuse.
 	var patchMu syncutil.Mutex
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := opts.RunningCfg
@@ -271,8 +261,7 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "a JSON object of config keys is required")
 			return
 		}
-		// The environment applies last, so a saved value would lose at the
-		// next boot; refuse the whole request rather than accept it silently.
+		// The environment applies last, so a saved value would lose at next boot; refuse the whole request.
 		for key := range changes {
 			if config.EnvOverridden(key) {
 				writeErr(w, http.StatusConflict, httperr.CodeEnvOverridden,
@@ -326,9 +315,8 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 	}
 }
 
-// handleRestartForConfig restarts the server — to apply saved overrides, or
-// on its own from the panel's Restart server button — through the same
-// restart machinery update, restore and the setup wizard use.
+// handleRestartForConfig restarts the server to apply saved overrides, or on demand from the panel's Restart
+// button, through the machinery update, restore and setup use.
 func handleRestartForConfig(database *db.DB, opts SetupOptions, pending *atomic.Bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !tryDirectRestartPending() {

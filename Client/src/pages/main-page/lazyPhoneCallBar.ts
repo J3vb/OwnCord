@@ -11,11 +11,11 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { voiceStore } from "@stores/voice.store";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
-import type { PhoneCallBar, PhoneCallBarOptions } from "@components/PhoneCallBar";
+import type { PhoneCallBar, PhoneCallBarOptions } from "../../features/voice/PhoneCallBar";
 
 const phoneCallBarScreen = createLazyScreen(
   "phone-call-bar",
-  () => import("@components/PhoneCallBar"),
+  () => import("../../features/voice/PhoneCallBar"),
 );
 
 export interface LazyPhoneCallBar extends MountableComponent {

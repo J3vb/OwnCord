@@ -8,17 +8,15 @@ import (
 	"strings"
 )
 
-// DefaultLiveKitAPIKey and DefaultLiveKitAPISecret are the well-known dev
-// credentials that ship in the default config. They must never be used in
-// production — NewLiveKitClient rejects them.
+// DefaultLiveKitAPIKey and DefaultLiveKitAPISecret are the public dev credentials; NewLiveKitClient rejects
+// them.
 const (
 	DefaultLiveKitAPIKey    = "devkey"
 	DefaultLiveKitAPISecret = "owncord-dev-secret-key-min-32chars" //nolint:gosec // G101: false positive — config key name, not a credential
 )
 
-// placeholderCredentialPrefix starts the LiveKit key and secret in
-// Server/.env.example. Those values are public, so an install that copied the
-// file unedited is treated like one on the dev defaults.
+// placeholderCredentialPrefix starts the LiveKit key and secret in Server/.env.example; those values are
+// public, so an unedited copy is treated like the dev defaults.
 const placeholderCredentialPrefix = "change-me"
 
 // IsDefaultVoiceCredentials reports whether the voice config still uses the
@@ -38,12 +36,8 @@ func generateRandomKey(byteLen int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// ensureVoiceCredentials generates unique random LiveKit credentials when
-// API key/secret are empty, so voice works out of the box without shipping
-// known-public defaults. It also refills URL and quality: Unmarshal leaves them
-// alone when the section is merely empty, but a document that NAMES one with an
-// explicit `livekit_url: ""` overwrites the default, and an empty URL makes
-// NewLiveKitClient refuse and disables voice.
+// ensureVoiceCredentials generates random LiveKit credentials when key/secret are empty. It also refills URL
+// and quality: an explicit `livekit_url: ""` overwrites the default, and an empty URL disables voice.
 func ensureVoiceCredentials(v *VoiceConfig) error {
 	if v.LiveKitAPIKey == "" {
 		key, err := generateRandomKey(8)

@@ -2,7 +2,7 @@
 // it. A new one adds an entry here, not to MainPage.
 import { bracketBareIPv6Host } from "@lib/ws";
 import { openSettings } from "@stores/ui.store";
-import { createUpdateNotifier } from "@components/UpdateNotifier";
+import { createUpdateNotifier } from "../../features/updates/UpdateNotifier";
 import { desktop } from "../../platform/desktop";
 import { startVoiceUiSounds } from "../../features/voice/uiSounds";
 import type { PageState } from "./pageState";

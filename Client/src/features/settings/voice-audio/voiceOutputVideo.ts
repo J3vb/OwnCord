@@ -13,6 +13,7 @@ import {
 } from "@lib/prefs/appearance";
 import { setOutputVolume } from "@lib/voice/livekitSession";
 import { isLinuxDesktop } from "../../voice/native/platform";
+import { SCREEN_SHARE_BACKUP_LAYER_PREF, getScreenShareBackupLayer } from "@lib/voice/videoPresets";
 import {
   getVideoCodecPref,
   h264Offered,
@@ -24,6 +25,44 @@ import { settingsText as t } from "../../../i18n/settings";
 import { micTestVolume } from "./voiceTabShared";
 import { mountGpuAdapterRow } from "./voiceGpuAdapter";
 import type { VoiceTabScope } from "./voiceTabScope";
+
+/**
+ * A saved codec that is no longer offered reads as VP8, as the resolver
+ * does; the pref itself is left alone for a build that offers it.
+ */
+function isCodecUnoffered(
+  savedCodec: string,
+  offerVp9: boolean,
+  offerH265: boolean,
+  h264Available: boolean,
+): boolean {
+  return (
+    (savedCodec === "vp9" && !offerVp9) ||
+    (savedCodec === "h265" && !offerH265) ||
+    (savedCodec === "h264" && !h264Available)
+  );
+}
+
+/** The codec choices on offer, in display order. */
+function codecOptions(
+  linux: boolean,
+  h264Available: boolean,
+  offerVp9: boolean,
+  offerH265: boolean,
+): Array<[string, string]> {
+  return [
+    ["vp8", t("voiceAudio.videoCodec.vp8")],
+    [
+      "h264",
+      h264Available
+        ? t(linux ? "voiceAudio.videoCodec.h264Linux" : "voiceAudio.videoCodec.h264")
+        : t("voiceAudio.videoCodec.h264Unavailable"),
+    ],
+    ...(offerVp9 ? [["vp9", t("voiceAudio.videoCodec.vp9")] as [string, string]] : []),
+    ...(offerH265 ? [["h265", t("voiceAudio.videoCodec.h265")] as [string, string]] : []),
+    ["auto", t(linux ? "voiceAudio.videoCodec.autoLinux" : "voiceAudio.videoCodec.auto")],
+  ];
+}
 
 export function mountOutputAndVideo(sc: VoiceTabScope): void {
   // Output device selector
@@ -130,7 +169,7 @@ export function mountOutputAndVideo(sc: VoiceTabScope): void {
     t("voiceAudio.cameraQualityDesc"),
     "streamQuality",
     // The defaults match getCameraQuality/getScreenShareQuality in
-    // lib/voice/screenShare, which this tab does not import (it pulls in the
+    // features/voice/screenShare, which this tab does not import (it pulls in the
     // voice store).
     loadPref<string>("streamQuality", "medium"),
     [
@@ -301,7 +340,8 @@ export function mountOutputAndVideo(sc: VoiceTabScope): void {
 
   sc.cameraCard.append(...sc.cameraQualityGroup);
 
-  if (!sc.android) sc.cameraCard.append(...sc.screenQualityGroup, ...sc.fpsGroup);
+  if (!sc.android)
+    sc.cameraCard.append(...sc.screenQualityGroup, ...sc.fpsGroup, buildBackupLayerRow(sc.signal));
 
   // The codec choice. Off Linux the webview's own encoders decide what is
   // offered; on Linux the native engine offers VP8, Auto (VP8), and H.264 and
@@ -311,30 +351,14 @@ export function mountOutputAndVideo(sc: VoiceTabScope): void {
     const offerVp9 = linux ? vp9Native : vp9Offered();
     const offerH265 = h265Offered();
     const savedCodec = getVideoCodecPref();
-    // A saved codec that is no longer offered reads as VP8, as the resolver
-    // does; the pref itself is left alone for a build that offers it.
-    const unoffered =
-      (savedCodec === "vp9" && !offerVp9) ||
-      (savedCodec === "h265" && !offerH265) ||
-      (savedCodec === "h264" && !h264Available);
+    const unoffered = isCodecUnoffered(savedCodec, offerVp9, offerH265, h264Available);
     return [
       ...sc.qualityGroup(
         t("voiceAudio.videoCodec"),
         t(linux ? "voiceAudio.videoCodecDescLinux" : "voiceAudio.videoCodecDesc"),
         "videoCodec",
         unoffered ? "vp8" : savedCodec,
-        [
-          ["vp8", t("voiceAudio.videoCodec.vp8")],
-          [
-            "h264",
-            h264Available
-              ? t(linux ? "voiceAudio.videoCodec.h264Linux" : "voiceAudio.videoCodec.h264")
-              : t("voiceAudio.videoCodec.h264Unavailable"),
-          ],
-          ...(offerVp9 ? [["vp9", t("voiceAudio.videoCodec.vp9")] as [string, string]] : []),
-          ...(offerH265 ? [["h265", t("voiceAudio.videoCodec.h265")] as [string, string]] : []),
-          ["auto", t(linux ? "voiceAudio.videoCodec.autoLinux" : "voiceAudio.videoCodec.auto")],
-        ],
+        codecOptions(linux, h264Available, offerVp9, offerH265),
         h264Available ? new Set() : new Set(["h264"]),
       ),
       createElement(
@@ -360,4 +384,25 @@ export function mountOutputAndVideo(sc: VoiceTabScope): void {
   // WebView2 picks its graphics card at start. The row mounts on the
   // Windows desktop app only.
   mountGpuAdapterRow(sc.cameraCard, sc.signal);
+}
+
+/** The "Send a backup copy" switch, read when a share starts. */
+function buildBackupLayerRow(signal: AbortSignal): HTMLDivElement {
+  const row = createElement("div", { class: "setting-row", "data-testid": "screen-backup-layer" });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, t("voiceAudio.screenBackupLayer")),
+    createElement("div", { class: "setting-desc" }, t("voiceAudio.screenBackupLayerDesc")),
+  );
+  appendChildren(
+    row,
+    info,
+    createToggle(getScreenShareBackupLayer(), {
+      signal,
+      label: t("voiceAudio.screenBackupLayer"),
+      onChange: (nowOn) => savePref(SCREEN_SHARE_BACKUP_LAYER_PREF, nowOn),
+    }),
+  );
+  return row;
 }

@@ -5,40 +5,36 @@ import (
 	"fmt"
 )
 
-// The read-state commands: channel_focus, mark_read and mark_unread. They live
-// beside command.go, not in it, because command.go is at its size ceiling.
+// The read-state commands (channel_focus, mark_read, mark_unread), split from
+// command.go which is at its size ceiling.
 
 // ChannelFocusCmd represents a channel_focus message.
 type ChannelFocusCmd struct {
 	userID    int64
 	ChannelID int64
-	// NoRead is true only when the client sent read:false: focus and subscribe
-	// without marking the channel read. Absent means read:true (old clients),
-	// and the zero value keeps that meaning.
+	// NoRead is true only when the client sent read:false; absent means read:true
+	// (old clients).
 	NoRead bool
 }
 
 func (c ChannelFocusCmd) Type() string  { return MsgTypeChannelFocus }
 func (c ChannelFocusCmd) UserID() int64 { return c.userID }
 
-// MarkReadCmd represents a mark_read message: advance the caller's read state
-// for a channel without making it their focused channel. channel_focus already
-// marks read, but it also rebinds the connection's focused channel, so it is
-// the wrong tool for "mark that other channel read from its context menu".
+// MarkReadCmd advances the caller's read state without making the channel focused
+// (channel_focus would rebind the focused channel).
 type MarkReadCmd struct {
 	userID    int64
 	ChannelID int64
 	// MessageID is the message to read up to; 0 marks the channel read at its
-	// latest message, as before the field existed.
+	// latest message.
 	MessageID int64
 }
 
 func (c MarkReadCmd) Type() string  { return MsgTypeMarkRead }
 func (c MarkReadCmd) UserID() int64 { return c.userID }
 
-// MarkUnreadCmd represents a mark_unread message: move the caller's read
-// pointer to just before MessageID, so that message and everything after it
-// is unread again.
+// MarkUnreadCmd moves the read pointer to just before MessageID, so it and
+// everything after are unread.
 type MarkUnreadCmd struct {
 	userID    int64
 	ChannelID int64

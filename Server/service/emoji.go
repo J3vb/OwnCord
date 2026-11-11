@@ -11,8 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// EmojiStore is the data access the emoji service needs: the emoji table plus the
-// audit write. *db.DB satisfies it; Store embeds it.
+// EmojiStore is the data access the emoji service needs: the emoji table plus the audit write.
 type EmojiStore interface {
 	ListEmoji(ctx context.Context) ([]*db.Emoji, error)
 	GetEmoji(ctx context.Context, id int64) (*db.Emoji, error)
@@ -22,12 +21,9 @@ type EmojiStore interface {
 	LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error
 }
 
-// EmojiService owns the server-wide custom emoji set: who may change it, what a
-// shortcode may look like, and uniqueness.
-// Emoji are gated on MANAGE_SERVER rather than a new bit: adding a permission bit
-// is a schema-visible, forever decision, and MANAGE_SERVER already answers "who
-// may change server-wide branding". Reading is ungated: the set is server-wide
-// with no per-channel scope to leak.
+// EmojiService owns the server-wide custom emoji set: who may change it, shortcode rules,
+// uniqueness. Gated on MANAGE_SERVER (which already answers "who may change server-wide
+// branding"; a new bit is a forever schema decision). Reading is ungated: no per-channel scope to leak.
 type EmojiService struct {
 	st    EmojiStore
 	perms *PermissionService
@@ -39,32 +35,28 @@ func NewEmojiService(st EmojiStore, perms *PermissionService) *EmojiService {
 }
 
 const (
-	// MinShortcodeLen / MaxShortcodeLen bound `:name:`: two characters is the
-	// shortest worth typing; 32 keeps a shortcode from dominating the composer,
-	// picker and reaction pill.
+	// MinShortcodeLen / MaxShortcodeLen bound `:name:`: two characters is the shortest worth
+	// typing; 32 keeps a shortcode from dominating the composer, picker and reaction pill.
 	MinShortcodeLen = 2
 	// MaxShortcodeLen is the upper bound on a shortcode's length.
 	MaxShortcodeLen = 32
-	// MaxEmojiCount bounds the set. Every client holds the whole list and re-receives
-	// it on every emoji_update, so this caps what one MANAGE_SERVER holder can push to
-	// every session.
+	// MaxEmojiCount bounds the set: every client holds the whole list and re-receives it on
+	// every emoji_update, so this caps what one MANAGE_SERVER holder can push to every session.
 	MaxEmojiCount = 200
 )
 
-// EmojiImageURL is the server-relative path an emoji's bytes are served from,
-// defined once because the REST list, the emoji_update broadcast and the docs must
-// agree.
+// EmojiImageURL is the server-relative path an emoji's bytes are served from, defined once
+// because the REST list, the emoji_update broadcast and the docs must agree.
 func EmojiImageURL(id int64) string {
 	return fmt.Sprintf("/api/v1/emoji/%d/image", id)
 }
 
-// shortcodeRe is the exact spelling a shortcode may take. Lowercase only, so the
-// plain UNIQUE index enforces case-insensitive uniqueness without a COLLATE
-// change; no colons, which are the delimiter.
+// shortcodeRe is the exact spelling a shortcode may take: lowercase only, so the plain
+// UNIQUE index enforces case-insensitive uniqueness; no colons, the delimiter.
 var shortcodeRe = regexp.MustCompile(`^[a-z0-9_]{2,32}$`)
 
-// NormalizeShortcode strips optional surrounding colons and lowercases, so
-// `:WAVE:`, `WAVE` and `wave` are one shortcode. It does not validate.
+// NormalizeShortcode strips optional colons and lowercases (`:WAVE:`, `WAVE`, `wave` are
+// one shortcode). It does not validate.
 func NormalizeShortcode(raw string) string {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	s = strings.TrimPrefix(s, ":")
@@ -72,8 +64,7 @@ func NormalizeShortcode(raw string) string {
 	return s
 }
 
-// ValidateShortcode normalizes and checks a shortcode, returning the canonical
-// (lowercase, colon-free) form.
+// ValidateShortcode normalizes and checks a shortcode, returning the canonical form.
 func ValidateShortcode(raw string) (string, error) {
 	s := NormalizeShortcode(raw)
 	if s == "" {
@@ -87,9 +78,8 @@ func ValidateShortcode(raw string) (string, error) {
 	return s, nil
 }
 
-// RequireManage reports whether actorID may add or remove emoji. Handlers call it
-// BEFORE reading an upload body, so a user without the bit cannot spend the
-// server's disk on a multipart parse.
+// RequireManage reports whether actorID may add or remove emoji. Handlers call it BEFORE
+// reading an upload body, so a user without the bit cannot spend disk on a multipart parse.
 func (s *EmojiService) RequireManage(ctx context.Context, actorID int64) error {
 	if s.perms == nil {
 		return fmt.Errorf("%w: permission service unavailable", ErrForbidden)
@@ -104,7 +94,7 @@ func (s *EmojiService) RequireManage(ctx context.Context, actorID int64) error {
 	return nil
 }
 
-// List returns every custom emoji, ordered by shortcode. Ungated.
+// List returns every custom emoji, ordered by shortcode.
 func (s *EmojiService) List(ctx context.Context) ([]*db.Emoji, error) {
 	list, err := s.st.ListEmoji(ctx)
 	if err != nil {
@@ -113,11 +103,9 @@ func (s *EmojiService) List(ctx context.Context) ([]*db.Emoji, error) {
 	return list, nil
 }
 
-// Create records an already-stored image as a custom emoji. The caller has
-// validated and stored the bytes; this owns the permission gate, shortcode rules,
-// count cap and audit entry. A shortcode collision is ErrConflict, not
-// ErrBadRequest (well-formed, name taken). Callers delete the orphaned file when
-// this errors.
+// Create records an already-stored image as a custom emoji. The caller validated and
+// stored the bytes; this owns the permission gate, shortcode rules, count cap and audit
+// entry. A shortcode collision is ErrConflict. Callers delete the orphaned file on error.
 func (s *EmojiService) Create(ctx context.Context, actorID int64, rawShortcode, storedAs, mimeType string) (*db.Emoji, error) {
 	if err := s.RequireManage(ctx, actorID); err != nil {
 		return nil, err
@@ -146,7 +134,6 @@ func (s *EmojiService) Create(ctx context.Context, actorID int64, rawShortcode, 
 	created, err := s.st.CreateEmoji(ctx, shortcode, storedAs, mimeType, actorID)
 	if err != nil {
 		if db.IsUniqueConstraintError(err) {
-			// Lost a race with another Create: report the conflict, not a server fault.
 			return nil, fmt.Errorf("%w: an emoji named :%s: already exists", ErrConflict, shortcode)
 		}
 		return nil, fmt.Errorf("%w: failed to create emoji: %w", ErrInternal, err)
@@ -158,8 +145,8 @@ func (s *EmojiService) Create(ctx context.Context, actorID int64, rawShortcode, 
 	return created, nil
 }
 
-// Delete removes an emoji and returns the removed row, the only source of the
-// storage id the caller must unlink.
+// Delete removes an emoji and returns the removed row, the only source of the storage id the caller must
+// unlink.
 func (s *EmojiService) Delete(ctx context.Context, actorID, emojiID int64) (*db.Emoji, error) {
 	if err := s.RequireManage(ctx, actorID); err != nil {
 		return nil, err
@@ -176,7 +163,6 @@ func (s *EmojiService) Delete(ctx context.Context, actorID, emojiID int64) (*db.
 		return nil, fmt.Errorf("%w: failed to delete emoji: %w", ErrInternal, err)
 	}
 	if !deleted {
-		// Lost a race with another delete -- report it as the 404 it now is.
 		return nil, fmt.Errorf("%w: emoji not found", ErrNotFound)
 	}
 
@@ -186,7 +172,7 @@ func (s *EmojiService) Delete(ctx context.Context, actorID, emojiID int64) (*db.
 	return existing, nil
 }
 
-// Get returns one emoji by id, or ErrNotFound. Used by the image route.
+// Get returns one emoji by id, or ErrNotFound.
 func (s *EmojiService) Get(ctx context.Context, emojiID int64) (*db.Emoji, error) {
 	e, err := s.st.GetEmoji(ctx, emojiID)
 	if err != nil {

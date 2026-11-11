@@ -1,10 +1,23 @@
 import { WsErrorCode } from "@lib/protocolTypes";
+import { joinRefusalsCarryIds } from "@lib/net/serverCapabilities";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
+import { setSwitchingTo, voiceStore } from "@stores/voice.store";
 import { clearOwedLeave } from "./leaveOwed";
 // Which error frame answers the voice_join in flight. Servers echo the join's
 // envelope id on every refusal, so an error for any other command (a refused
 // chat_edit, a rate-limited typing frame) must not cancel the join. Older
 // servers send join refusals with no id; for those only a code the join
-// handler can emit counts.
+// handler can emit counts. A server known to echo the id never gets that
+// fallback: there an id-less error always answers something else.
+//
+// A join also waits a bounded time for its answer (a voice_token or a
+// refusal). A frame lost with its socket has neither, and without the bound
+// the call would read "Connecting…" until the user gave up.
+//
+// Each join sent is also remembered as the stay in a channel it asked for,
+// because a voice_leave names only the channel: when the user goes back to a
+// channel faster than the server answers, the leave of the earlier stay there
+// arrives while the store already names the newer one.
 
 /** Codes an older server's voice_join refusal can carry without an id. */
 export const OLD_SERVER_JOIN_CODES: ReadonlySet<string> = Object.freeze(
@@ -38,6 +51,86 @@ let nonRetryJoinListener: (() => void) | null = null;
 // Counts every join sent, so work started for one join can tell a newer one began.
 let joinCount = 0;
 
+/** How long a join waits for its answer. The server answers in one round trip. */
+export const JOIN_ANSWER_WAIT_MS = 15_000;
+
+export interface JoinAnswerWait {
+  /** False while the chat socket is between connections. */
+  readonly socketSettled: () => boolean;
+  /** The latest join got no answer: end it. */
+  readonly onUnanswered: () => void;
+}
+
+/** One voice_join this device sent: the stay in `channelId` it asked for. */
+interface SentJoin {
+  readonly seq: number;
+  readonly id: string;
+  readonly channelId: number;
+  /** When to stop waiting for this stay's voice_leave; set once a later join was granted. */
+  expiresAt: number | null;
+}
+
+/** How long an earlier stay's voice_leave may trail the grant of a later join.
+ *  The server queues the leave before it answers the next command. */
+export const LEAVE_ECHO_WAIT_MS = 10_000;
+const MAX_SENT_JOINS = 8;
+// Oldest first. An entry goes when the server's voice_leave for its channel
+// arrives, when its join is refused, or when its wait above runs out.
+let sentJoins: SentJoin[] = [];
+
+let answerWait: JoinAnswerWait | null = null;
+let answerTimer: ReturnType<typeof setTimeout> | null = null;
+// The channel of the latest join while its answer is still out, else null.
+let awaitedChannelId: number | null = null;
+
+/** Who ends a join that got no answer: the voice routes, for as long as they are wired. */
+export function setJoinAnswerWait(wait: JoinAnswerWait | null): void {
+  answerWait = wait;
+  // Unwired, nothing could end the join: drop its wait with the wiring.
+  if (wait === null) settleAnswerWait();
+}
+
+function clearAnswerTimer(): void {
+  if (answerTimer !== null) clearTimeout(answerTimer);
+  answerTimer = null;
+}
+
+function armAnswerTimer(seq: number, channelId: number): void {
+  clearAnswerTimer();
+  answerTimer = setTimeout(() => {
+    answerTimer = null;
+    if (joinCount !== seq || awaitedChannelId !== channelId) return;
+    const { currentChannelId, voiceStatus, switchingTo } = voiceStore.getState();
+    // A switch out of a live call waits with that call still shown.
+    const waiting =
+      switchingTo === channelId || (currentChannelId === channelId && voiceStatus === "joining");
+    // Left, rolled back or moved on since: nothing is waiting any more.
+    if (!waiting) {
+      awaitedChannelId = null;
+      return;
+    }
+    // A socket still reconnecting can carry neither the answer nor the leave.
+    if (answerWait !== null && !answerWait.socketSettled()) {
+      armAnswerTimer(seq, channelId);
+      return;
+    }
+    awaitedChannelId = null;
+    answerWait?.onUnanswered();
+  }, JOIN_ANSWER_WAIT_MS);
+}
+
+/** A voice_token for `channelId` arrived: the join for that channel is answered. */
+export function noteJoinAnswered(channelId: number): void {
+  // Every stay asked for before the granted one has ended on the server, and
+  // its voice_leave is already queued.
+  const granted = sentJoins.findLastIndex((join) => join.channelId === channelId);
+  const expiresAt = Date.now() + LEAVE_ECHO_WAIT_MS;
+  for (const join of sentJoins.slice(0, Math.max(granted, 0))) join.expiresAt ??= expiresAt;
+  if (awaitedChannelId !== channelId) return;
+  awaitedChannelId = null;
+  clearAnswerTimer();
+}
+
 /** How many joins have been sent; compare two reads to see whether a newer join started. */
 export function joinSequence(): number {
   return joinCount;
@@ -53,11 +146,40 @@ export function onNonRetryJoin(listener: () => void): void {
 }
 
 /**
+ * The self voice_leave for `channelId` ends the oldest stay this device asked
+ * for there. True when a later join for the same channel is out or granted:
+ * the leave is then about an earlier stay, not the call the user is back in
+ * (or on the way into). False for the stay wanted now, and for a leave no join
+ * sent from here accounts for.
+ */
+export function leaveEndsEarlierStay(channelId: number, now = Date.now()): boolean {
+  sentJoins = sentJoins.filter((join) => join.expiresAt === null || join.expiresAt > now);
+  const index = sentJoins.findIndex((join) => join.channelId === channelId);
+  if (index === -1) return false;
+  sentJoins.splice(index, 1);
+  return sentJoins.slice(index).some((join) => join.channelId === channelId);
+}
+
+/** The server refused join `id`: whichever join that is, wanted still or not,
+ *  the stay it asked for never began and no voice_leave will come for it. */
+export function forgetRefusedStay(id: string | undefined): void {
+  if (id !== undefined) sentJoins = sentJoins.filter((join) => join.id !== id);
+}
+
+/**
  * Records the envelope id of the voice_join just sent; a newer join replaces an
  * older one. `passwordRetry` marks the user's retry with a typed password.
+ * `switchTo` is the channel of a switch that keeps the live call until the
+ * server acts on it (the store's switchingTo); any other join is for the
+ * channel the store already names, and ends such a wait.
  */
-export function noteJoinSent(id: string | undefined, passwordRetry = false): void {
+export function noteJoinSent(
+  id: string | undefined,
+  passwordRetry = false,
+  switchTo: number | null = null,
+): void {
   if (!passwordRetry) nonRetryJoinListener?.();
+  if (switchTo === null) setSwitchingTo(null);
   // Even a join dropped on a down socket: the server's resume check ends a
   // membership that never reaches the SFU.
   clearOwedLeave();
@@ -65,6 +187,13 @@ export function noteJoinSent(id: string | undefined, passwordRetry = false): voi
   pendingId = id ?? null;
   pendingPasswordRetry = id !== undefined && passwordRetry;
   refusal = null;
+  // Every caller records the join in the store before it sends the frame.
+  awaitedChannelId = switchTo ?? voiceStore.getState().currentChannelId;
+  if (awaitedChannelId === null) clearAnswerTimer();
+  else armAnswerTimer(joinCount, awaitedChannelId);
+  if (id === undefined || awaitedChannelId === null) return;
+  sentJoins.push({ seq: joinCount, id, channelId: awaitedChannelId, expiresAt: null });
+  if (sentJoins.length > MAX_SENT_JOINS) sentJoins.shift();
 }
 
 /**
@@ -77,12 +206,25 @@ export function takeJoinRefusal(
   id: string | undefined,
   channelId: number | null = null,
 ): boolean {
-  if (id === undefined) return OLD_SERVER_JOIN_CODES.has(code);
+  if (id === undefined) {
+    if (joinRefusalsCarryIds() || !OLD_SERVER_JOIN_CODES.has(code)) return false;
+    // A refused join asked for a stay that never began.
+    sentJoins = sentJoins.filter((join) => join.seq !== joinCount);
+    settleAnswerWait();
+    return true;
+  }
+  forgetRefusedStay(id);
   if (pendingId === null || id !== pendingId) return false;
   refusal = { id, channelId, passwordRetry: pendingPasswordRetry };
   pendingId = null;
   pendingPasswordRetry = false;
+  settleAnswerWait();
   return true;
+}
+
+function settleAnswerWait(): void {
+  awaitedChannelId = null;
+  clearAnswerTimer();
 }
 
 /** True when the refusal of join `id` (already taken) answered a typed password. */
@@ -104,9 +246,14 @@ export function takeRefusedJoin(
   return { channelId: taken.channelId, passwordRetry: taken.passwordRetry };
 }
 
-/** Test seam: forget the pending join. */
+/** Forget the pending join: the session ended (and the tests' seam). */
 export function resetJoinRequest(): void {
   pendingId = null;
   pendingPasswordRetry = false;
   refusal = null;
+  sentJoins = [];
+  settleAnswerWait();
 }
+
+// App-lifetime: a session that ended has no join left to wait for.
+void registerSessionReset("voice:join-request", resetJoinRequest, { phase: "cache" });

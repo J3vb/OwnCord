@@ -14,15 +14,10 @@ import (
 // for), so the smoke has to turn it on to see what the binary embeds.
 const browserClientEnv = "OWNCORD_SERVER_BROWSER_CLIENT_ENABLED=true"
 
-// maxClientBody caps what the smoke reads of any browser-client response, only
-// to keep a misbehaving server from filling memory.
 const maxClientBody = 16 << 20
 
-// assetScriptPattern finds a hashed script under /assets/ in the index page.
-// Vite writes `<script type="module" crossorigin src="/assets/index-HASH.js">`.
 var assetScriptPattern = regexp.MustCompile(`/assets/[A-Za-z0-9._\-/]+\.js`)
 
-// firstAssetScript returns the first /assets/*.js path the index references.
 func firstAssetScript(index string) (string, bool) {
 	p := assetScriptPattern.FindString(index)
 	return p, p != ""
@@ -49,9 +44,8 @@ func checkClientIndex(status int, contentType, body string) (string, error) {
 	return script, nil
 }
 
-// runBrowserClient is phase 5: boot the binary a third time with the browser
-// client on and fetch what a browser would. Phases 1-4 prove the asset runs;
-// this proves the asset ships the client it is meant to carry.
+// runBrowserClient is phase 5: boot a third time with the browser client on and fetch what a browser would;
+// phases 1-4 prove the asset runs, this proves it ships the client.
 func runBrowserClient(bin, dir string) error {
 	third, err := start(bin, dir, "boot3.log", browserClientEnv)
 	if err != nil {

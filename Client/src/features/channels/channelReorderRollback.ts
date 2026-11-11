@@ -1,7 +1,7 @@
 /** Undoing the optimistic order of a channel drop whose save was rejected. */
 
 import { channelsStore, updateChannel, updateChannelPosition } from "@stores/channels.store";
-import type { ChannelReorderData } from "./ChannelSidebar";
+import type { ChannelReorderData } from "./channelSidebarTypes";
 
 export interface ReorderOutcome {
   failed: boolean;

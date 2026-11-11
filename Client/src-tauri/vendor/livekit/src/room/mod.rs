@@ -595,7 +595,16 @@ impl Room {
             key_provider.set_sif_trailer(join_response.sif_trailer);
         }
 
-        let pi = join_response.participant.unwrap();
+        // OWNCORD-PATCH (signal input): an incomplete join response fails the connect.
+        let (pi, local_sid, room_info) =
+            match split_join_response(join_response.participant, join_response.room) {
+                Ok(parts) => parts,
+                Err(reason) => {
+                    log::warn!("unusable join response: {}", reason);
+                    rtc_engine.close(DisconnectReason::UnknownReason).await;
+                    return Err(RoomError::Internal(reason));
+                }
+            };
         let pi_kind = pi.kind().into();
         let pi_kind_details = crate::utils::convert_kind_details(&pi.kind_details);
         let pi_state = pi.state().into();
@@ -603,7 +612,7 @@ impl Room {
             rtc_engine.clone(),
             pi_kind,
             pi_kind_details,
-            pi.sid.try_into().unwrap(),
+            local_sid,
             pi.identity.into(),
             pi.name,
             pi_state,
@@ -720,7 +729,6 @@ impl Room {
             ds::incoming::Manager::new(options.data_stream.max_payload_byte_length);
         let (outgoing_stream_manager, packet_rx) = ds::outgoing::Manager::new();
 
-        let room_info = join_response.room.unwrap();
         let inner = Arc::new(RoomSession {
             sid_promise: Promise::new(),
             info: RwLock::new(RoomInfo {
@@ -785,6 +793,11 @@ impl Room {
         });
 
         for pi in join_response.other_participants {
+            // OWNCORD-PATCH (signal input): entries with an invalid sid are skipped.
+            let Ok(pi_sid) = ParticipantSid::try_from(pi.sid.clone()) else {
+                log::warn!("ignoring participant with invalid sid: {:?}", pi.sid);
+                continue;
+            };
             let participant = {
                 let pi = pi.clone();
                 let pi_kind = pi.kind().into();
@@ -793,7 +806,7 @@ impl Room {
                 inner.create_participant(
                     pi_kind,
                     pi_kind_details,
-                    pi.sid.try_into().unwrap(),
+                    pi_sid,
                     pi.identity.into(),
                     pi.name,
                     pi_state,
@@ -1268,7 +1281,11 @@ impl RoomSession {
         // only update non-disconnected participants to refresh info
         let mut participants: Vec<Participant> = Vec::new();
         for pi in updates {
-            let participant_sid = pi.sid.clone().try_into().unwrap();
+            // OWNCORD-PATCH (signal input): entries with an invalid sid are skipped.
+            let Ok(participant_sid) = ParticipantSid::try_from(pi.sid.clone()) else {
+                log::warn!("ignoring participant update with invalid sid: {:?}", pi.sid);
+                continue;
+            };
             let participant_identity: ParticipantIdentity = pi.identity.clone().into();
 
             if participant_sid == self.local_participant.sid()
@@ -1317,7 +1334,7 @@ impl RoomSession {
                     self.create_participant(
                         pi_kind,
                         pi_kind_details,
-                        pi.sid.try_into().unwrap(),
+                        participant_sid.clone(),
                         pi.identity.into(),
                         pi.name,
                         pi_state,
@@ -1399,7 +1416,11 @@ impl RoomSession {
             );
         }
 
-        let participant_sid: ParticipantSid = participant_sid.to_owned().try_into().unwrap();
+        // OWNCORD-PATCH (signal input)
+        let Ok(participant_sid) = ParticipantSid::try_from(participant_sid.to_owned()) else {
+            log::warn!("dropping remote track with invalid participant sid in stream id");
+            return;
+        };
         let track_id: TrackSid = match track_id.to_owned().try_into() {
             Ok(track_id) => track_id,
             Err(err) => {
@@ -1437,7 +1458,11 @@ impl RoomSession {
         let mut speakers = Vec::new();
 
         for speaker in speakers_info {
-            let sid: ParticipantSid = speaker.sid.try_into().unwrap();
+            // OWNCORD-PATCH (signal input): entries with an invalid sid are skipped.
+            let Ok(sid) = ParticipantSid::try_from(speaker.sid) else {
+                log::warn!("ignoring speaker update with invalid sid");
+                continue;
+            };
             let participant = {
                 if sid == self.local_participant.sid() {
                     Participant::Local(self.local_participant.clone())
@@ -1449,14 +1474,16 @@ impl RoomSession {
             };
 
             participant.set_speaking(speaker.active);
-            participant.set_audio_level(speaker.level);
+            // OWNCORD-PATCH (signal input)
+            participant.set_audio_level(sanitize_audio_level(speaker.level));
 
             if speaker.active {
                 speakers.push(participant);
             }
         }
 
-        speakers.sort_by(|a, b| a.audio_level().partial_cmp(&b.audio_level()).unwrap());
+        // OWNCORD-PATCH (signal input)
+        sort_by_audio_level(&mut speakers, |p| p.audio_level());
         *self.active_speakers.write() = speakers.clone();
 
         self.dispatcher.dispatch(&RoomEvent::ActiveSpeakersChanged { speakers });
@@ -1467,7 +1494,11 @@ impl RoomSession {
     fn handle_connection_quality_update(&self, updates: Vec<proto::ConnectionQualityInfo>) {
         for update in updates {
             let quality: ConnectionQuality = update.quality().into();
-            let sid: ParticipantSid = update.participant_sid.try_into().unwrap();
+            // OWNCORD-PATCH (signal input): entries with an invalid sid are skipped.
+            let Ok(sid) = ParticipantSid::try_from(update.participant_sid) else {
+                log::warn!("ignoring connection quality update with invalid sid");
+                continue;
+            };
             let participant = {
                 if sid == self.local_participant.sid() {
                     Participant::Local(self.local_participant.clone())
@@ -1487,11 +1518,19 @@ impl RoomSession {
     /// Pass this event forward
     fn handle_track_subscribed(&self, track_sid: String) {
         let publications = self.local_participant.track_publications().clone();
-        let publication = publications.get(&track_sid.to_owned().try_into().unwrap());
-        if let Some(publication) = publication {
-            self.dispatcher
-                .dispatch(&RoomEvent::LocalTrackSubscribed { track: publication.track().unwrap() });
-        }
+        // OWNCORD-PATCH (signal input): an invalid sid or a publication without a track is skipped.
+        let Ok(track_sid) = TrackSid::try_from(track_sid) else {
+            log::warn!("ignoring track subscribed with invalid track sid");
+            return;
+        };
+        let Some(publication) = publications.get(&track_sid) else {
+            return;
+        };
+        let Some(track) = publication.track() else {
+            log::warn!("ignoring track subscribed for a publication without a track");
+            return;
+        };
+        self.dispatcher.dispatch(&RoomEvent::LocalTrackSubscribed { track });
     }
 
     async fn send_sync_state(self: &Arc<Self>) {
@@ -1814,10 +1853,18 @@ impl RoomSession {
         join_response: proto::JoinResponse,
         tx: oneshot::Sender<()>,
     ) {
-        self.local_participant.update_info(join_response.participant.unwrap()); // The sid may have changed
+        // OWNCORD-PATCH (signal input): missing parts are skipped so the restart still completes.
+        match join_response.participant {
+            // The sid may have changed
+            Some(participant) => self.local_participant.update_info(participant),
+            None => log::warn!("restarted join response without participant info"),
+        }
 
         self.handle_participant_update(join_response.other_participants);
-        self.handle_room_update(join_response.room.unwrap());
+        match join_response.room {
+            Some(room) => self.handle_room_update(room),
+            None => log::warn!("restarted join response without room info"),
+        }
 
         let _ = tx.send(());
     }
@@ -1920,7 +1967,11 @@ impl RoomSession {
         segments: Vec<TranscriptionSegment>,
     ) {
         let participant = self.get_local_or_remote_participant(&participant_identity);
-        let track_sid: TrackSid = track_sid.to_owned().try_into().unwrap();
+        // OWNCORD-PATCH (signal input)
+        let Ok(track_sid) = TrackSid::try_from(track_sid) else {
+            log::warn!("ignoring transcription with invalid track sid");
+            return;
+        };
         let track_publication: Option<TrackPublication> = match &participant {
             Some(Participant::Local(ref participant)) => {
                 participant.get_track_publication(&track_sid).map(TrackPublication::Local)
@@ -2546,6 +2597,28 @@ async fn outgoing_data_stream_task(
     }
 }
 
+// OWNCORD-PATCH (signal input)
+fn split_join_response(
+    participant: Option<proto::ParticipantInfo>,
+    room: Option<proto::Room>,
+) -> Result<(proto::ParticipantInfo, ParticipantSid, proto::Room), String> {
+    let participant = participant.ok_or_else(|| "join response without participant".to_string())?;
+    let room = room.ok_or_else(|| "join response without room".to_string())?;
+    let sid = ParticipantSid::try_from(participant.sid.clone())
+        .map_err(|sid| format!("join response with invalid participant sid: {:?}", sid))?;
+    Ok((participant, sid, room))
+}
+
+// OWNCORD-PATCH (signal input)
+fn sort_by_audio_level<T>(items: &mut [T], level: impl Fn(&T) -> f32) {
+    items.sort_by(|a, b| level(a).total_cmp(&level(b)));
+}
+
+// OWNCORD-PATCH (signal input): non-finite levels count as silence.
+fn sanitize_audio_level(level: f32) -> f32 {
+    if level.is_finite() { level } else { 0.0 }
+}
+
 fn unpack_stream_id(stream_id: &str) -> Option<(&str, &str)> {
     let split: Vec<&str> = stream_id.split('|').collect();
     if split.len() == 2 {
@@ -2554,5 +2627,44 @@ fn unpack_stream_id(stream_id: &str) -> Option<(&str, &str)> {
         Some((participant_sid, track_sid))
     } else {
         None
+    }
+}
+
+// OWNCORD-PATCH (signal input)
+#[cfg(test)]
+mod signal_input_tests {
+    use super::*;
+
+    #[test]
+    fn join_response_requires_participant_room_and_valid_sid() {
+        let participant =
+            proto::ParticipantInfo { sid: "PA_abc".to_string(), ..Default::default() };
+        let room = proto::Room::default();
+
+        let (_, sid, _) =
+            split_join_response(Some(participant.clone()), Some(room.clone())).unwrap();
+        assert_eq!(sid.as_str(), "PA_abc");
+
+        assert!(split_join_response(None, Some(room.clone())).is_err());
+        assert!(split_join_response(Some(participant.clone()), None).is_err());
+
+        let bad = proto::ParticipantInfo { sid: "bad".to_string(), ..Default::default() };
+        assert!(split_join_response(Some(bad), Some(room)).is_err());
+    }
+
+    #[test]
+    fn non_finite_audio_levels_become_silence() {
+        assert_eq!(sanitize_audio_level(0.5), 0.5);
+        assert_eq!(sanitize_audio_level(f32::NAN), 0.0);
+        assert_eq!(sanitize_audio_level(f32::INFINITY), 0.0);
+        assert_eq!(sanitize_audio_level(f32::NEG_INFINITY), 0.0);
+    }
+
+    #[test]
+    fn speakers_sort_by_level_without_failing_on_nan() {
+        let mut speakers = vec![("b", 0.7), ("nan", f32::NAN), ("a", 0.2)];
+        sort_by_audio_level(&mut speakers, |s| s.1);
+        assert_eq!(speakers[0].0, "a");
+        assert_eq!(speakers[1].0, "b");
     }
 }

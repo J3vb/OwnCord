@@ -10,8 +10,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// ErrPendingQueueFull is CreatePendingUser refusing the application because
-// the approval queue already holds maxPending rows.
+// ErrPendingQueueFull is CreatePendingUser refusing because the approval queue holds
+// maxPending rows.
 var ErrPendingQueueFull = errors.New("approval queue is full")
 
 // CreatePendingUser records an approval-mode application: the account row
@@ -68,8 +68,7 @@ func (d *DB) CountPendingUsers(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-// ApprovePendingUser unlocks an application. ErrNotFound when the id is not a
-// pending application.
+// ApprovePendingUser unlocks an application; ErrNotFound when the id is not pending.
 func (d *DB) ApprovePendingUser(ctx context.Context, userID int64) error {
 	res, err := d.q.ApprovePendingUser(ctx, userID)
 	if err != nil {
@@ -89,10 +88,9 @@ func (d *DB) ApprovePendingUser(ctx context.Context, userID int64) error {
 // canonical "[denied-<id>]" plus randomly suffixed variants.
 const anonymiseNameAttempts = 4
 
-// DenyPendingUser anonymises an application (username released as
-// "[denied-{id}]", password and profile cleared) and locks it as 'denied' for
-// good, because audit rows reference the id. Only a still-pending row is
-// touched; ErrNotFound when nothing pending matches.
+// DenyPendingUser anonymises an application (username released as "[denied-{id}]",
+// password and profile cleared) and locks it as 'denied' for good, because audit rows
+// reference the id. Only a still-pending row is touched; ErrNotFound otherwise.
 func (d *DB) DenyPendingUser(ctx context.Context, userID int64) error {
 	// users.username is UNIQUE COLLATE NOCASE and the "[denied-...]" namespace is
 	// reserved at registration, but an older row could hold the plain name; fall

@@ -19,6 +19,7 @@ import { makeListOptions } from "../helpers/messageListHarness";
 import { resetMessagesState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
+import { hoverRows } from "../helpers/hoverRows";
 
 const ME = 1;
 const OTHER = 2;
@@ -85,10 +86,14 @@ describe("channel permission bits (3A-13)", () => {
     list.mount(container);
   }
 
-  const has = (testid: string): boolean =>
-    container.querySelector(`[data-testid='${testid}']`) !== null;
-  const reactBtn = (): HTMLElement =>
-    container.querySelector<HTMLElement>("[data-testid='msg-react-11']")!;
+  const has = (testid: string): boolean => {
+    hoverRows(container);
+    return container.querySelector(`[data-testid='${testid}']`) !== null;
+  };
+  const reactBtn = (): HTMLElement => {
+    hoverRows(container);
+    return container.querySelector<HTMLElement>("[data-testid='msg-react-11']")!;
+  };
 
   useMountContainer(
     (c) => {

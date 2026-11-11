@@ -7,19 +7,14 @@ import (
 	"strconv"
 )
 
-// Params is everything BuildReport needs from the server's configuration.
-// It is a plain struct rather than a *config.Config so this package stays a
-// leaf and a test can state a topology without a server. It has nowhere to
-// put an http.Client or context.Context, so the no-outbound-probe rule is
-// enforced by the signature.
+// Params is everything BuildReport needs from the configuration. It has nowhere
+// to put an http.Client or context, so the no-outbound-probe rule is enforced by the signature.
 type Params struct {
 	ListenPort   int
 	TLSMode      string
 	VoiceEnabled bool
 	VoiceNodeIP  string
-	// VoiceUDPPort, when non-zero, is the single UDP port LiveKit carries all
-	// media on (voice.udp_port); the required-ports list then names it instead
-	// of the 50000-60000 range.
+	// VoiceUDPPort, when non-zero, is the single LiveKit media port (voice.udp_port).
 	VoiceUDPPort int
 }
 
@@ -29,20 +24,18 @@ type LocalAddress struct {
 	Kind Kind   `json:"kind"`
 }
 
-// RequiredPort is one forwarding rule an owner has to create. Port is a string
-// because the LiveKit media range is a range, not a number.
+// RequiredPort is one forwarding rule an owner has to create; Port is a string because it may be a range.
 type RequiredPort struct {
 	Port     string `json:"port"`
 	Protocol string `json:"protocol"`
 	Purpose  string `json:"purpose"`
 }
 
-// Unknown is one thing this server cannot determine about its own
-// reachability, why it cannot, and the check the owner runs instead.
-// This is the report's actual deliverable. A diagnostic that reports only what
-// it can measure reads as a clean bill of health; the failures it is about (a
-// blocked port, carrier NAT, a router that will not hairpin) are invisible from
-// in here, and saying so is the honest answer.
+// Unknown is one thing this server cannot determine about its reachability,
+// why, and the check the owner runs instead. It is the report's real
+// deliverable: the failures it is about (blocked port, carrier NAT, no
+// hairpin) are invisible from inside, and a report of only what it can
+// measure would read as a clean bill of health.
 type Unknown struct {
 	Fact       string `json:"fact"`
 	Why        string `json:"why"`
@@ -62,32 +55,25 @@ type Report struct {
 	VoiceNodeIPKind    Kind           `json:"voice_node_ip_kind,omitempty"`
 	TLSMode            string         `json:"tls_mode"`
 
-	// PublicIPHTTPSSupported is false in every shipped build: a public-IP
-	// certificate flow is deferred and loadACME rejects an IP for tls.domain.
-	// It is a field so the report changes with the flow instead of continuing
-	// to say "no".
+	// PublicIPHTTPSSupported is false in every shipped build: loadACME rejects an
+	// IP for tls.domain.
 	PublicIPHTTPSSupported bool   `json:"public_ip_https_supported"`
 	PublicIPHTTPSReason    string `json:"public_ip_https_reason"`
 
 	Undeterminable []Unknown `json:"undeterminable"`
 }
 
-// cgnatNote names both explanations for a 100.64.0.0/10 address, because
-// nothing observable from this host tells them apart; either alone would be a
-// confident wrong answer.
+// cgnatNote names both explanations for a 100.64.0.0/10 address;
+// either alone would be a confident wrong answer.
 const cgnatNote = "An address in 100.64.0.0/10 is either a carrier-grade NAT (RFC6598) address " +
 	"from your ISP, in which case inbound port forwarding cannot be made to work, or a Tailscale " +
 	"tailnet address, in which case it is working as intended. This server cannot tell which from here."
 
-// BuildReport classifies addrs and states what it cannot determine.
-//
-// It performs no network I/O; see the package comment for why there is no probe.
+// BuildReport classifies addrs and states what it cannot determine; it performs no network I/O.
 func BuildReport(addrs []netip.Addr, p Params) Report {
 	r := Report{
 		ListenPort: p.ListenPort,
-		// The listener is built as ":port" (Server/internal/app/lifecycle.go),
-		// never bound to one interface, so "listening on the wrong NIC" is
-		// not a failure mode an owner has to rule out.
+		// The listener is built as ":port" (internal/app/lifecycle.go), never one interface.
 		BindsAllInterfaces:     true,
 		TLSMode:                p.TLSMode,
 		PublicIPHTTPSSupported: false,
@@ -105,9 +91,8 @@ func BuildReport(addrs []netip.Addr, p Params) Report {
 		case KindCGNAT:
 			r.CGNATRangePresent = true
 		default:
-			// Other classes are recorded in LocalAddresses and set no summary
-			// flag: the two flags answer only "is this host directly on the
-			// internet" and "is the ambiguous 100.64/10 range in play".
+			// Other classes set no summary flag; the two flags answer only
+			// "directly on the internet" and "is 100.64/10 in play".
 		}
 	}
 	if r.CGNATRangePresent {
@@ -130,7 +115,7 @@ func BuildReport(addrs []netip.Addr, p Params) Report {
 }
 
 func requiredPorts(p Params) []RequiredPort {
-	// Capacity 3: the chat port, plus LiveKit's two when voice is on.
+	// Capacity 3: the chat port plus LiveKit's two.
 	ports := make([]RequiredPort, 0, 3)
 	ports = append(ports,
 		RequiredPort{Port: strconv.Itoa(p.ListenPort), Protocol: "tcp", Purpose: "OwnCord HTTPS, REST API and WebSocket"},
@@ -138,13 +123,9 @@ func requiredPorts(p Params) []RequiredPort {
 	if !p.VoiceEnabled {
 		return ports
 	}
-	// Voice is where direct port forwarding actually fails: the media range
-	// is UDP and no HTTP reverse proxy can carry it. LiveKit's own API port
-	// (7880) is deliberately absent: clients tunnel signalling through
-	// /livekit on the chat port, so forwarding it only exposes LiveKit's API.
-	//
-	// voice.udp_port switches LiveKit to one UDP port; report that one, not the
-	// range the operator is no longer asked to forward.
+	// LiveKit's API port (7880) is deliberately absent: clients tunnel signalling
+	// through /livekit on the chat port, so forwarding it only exposes the API.
+	// voice.udp_port switches media to one UDP port; report that, not the range.
 	return append(ports,
 		RequiredPort{Port: "7881", Protocol: "tcp", Purpose: "LiveKit TCP media fallback"},
 		RequiredPort{Port: VoiceUDPLabel(p.VoiceUDPPort), Protocol: "udp", Purpose: "LiveKit WebRTC media (ICE)"},
@@ -160,9 +141,8 @@ func VoiceUDPLabel(port int) string {
 	return "50000-60000"
 }
 
-// undeterminable is unconditional. It does not shrink when the topology looks
-// healthy, which is exactly when an owner most needs to be told what was not
-// checked.
+// undeterminable is unconditional: it does not shrink when the topology looks
+// healthy, when an owner most needs to be told what was not checked.
 func undeterminable(p Params) []Unknown {
 	const selfCheck = "Test from a network that is not your own — a phone on mobile data works — " +
 		"never from inside the LAN. See docs/port-forwarding.md."
@@ -208,8 +188,7 @@ func undeterminable(p Params) []Unknown {
 	}
 
 	if p.VoiceEnabled {
-		// Name the port(s) the operator actually forwarded: one UDP port in
-		// single-port mode (voice.udp_port), the range otherwise.
+		// Name the port(s) the operator actually forwarded.
 		ports := "UDP " + VoiceUDPLabel(p.VoiceUDPPort)
 		list = append(list, Unknown{
 			Fact: "Whether WebRTC media can actually flow on " + ports,
@@ -224,15 +203,9 @@ func undeterminable(p Params) []Unknown {
 	return list
 }
 
-// LocalAddrs returns every address on every interface of this host, as
-// netip.Addr values ready for BuildReport.
-//
-// net.InterfaceAddrs reads the kernel's interface table: nothing is sent or
-// resolved. TestReport_MakesNoOutboundCall asserts that at runtime.
-//
-// Errors are swallowed into an empty slice on purpose: an unreadable interface
-// table means "unknown", which BuildReport's Undeterminable list already says,
-// and failing the diagnostics endpoint over it would be worse.
+// LocalAddrs returns every address on every interface, ready for BuildReport;
+// it sends and resolves nothing. Errors become an empty slice on purpose: an
+// unreadable table means "unknown", which the Undeterminable list already says.
 func LocalAddrs() []netip.Addr {
 	ifaceAddrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -248,8 +221,7 @@ func LocalAddrs() []netip.Addr {
 		if !ok {
 			continue
 		}
-		// Drop the zone: a zoned address is scoped by definition, and the
-		// zone name is host-specific noise in a report an owner reads.
+		// Drop the zone: host-specific noise in an owner's report.
 		out = append(out, addr.Unmap().WithZone(""))
 	}
 	return out

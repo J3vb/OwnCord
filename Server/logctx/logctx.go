@@ -1,11 +1,6 @@
-// Package logctx provides a slog.Handler that enriches every log record with
-// correlation IDs pulled from the context: the chi request ID (as req_id) and,
-// under -tags otel, the OpenTelemetry trace ID (as trace_id).
-//
-// Wrapping the base handler with New means any log call using the ...Context
-// variants (slog.InfoContext, slog.ErrorContext, …) automatically carries
-// these IDs, so a log line can be tied back to its HTTP request and its
-// distributed trace without threading the IDs through by hand at every site.
+// Package logctx provides a slog.Handler that adds correlation IDs from the
+// context to every record: the chi request ID (req_id) and, under -tags otel,
+// the trace ID (trace_id), so ...Context log calls tie back to their request and trace.
 package logctx
 
 import (
@@ -20,9 +15,8 @@ type handler struct {
 	inner slog.Handler
 }
 
-// New wraps inner so that records handled with a context carrying a chi request
-// ID (and, in the otel build, an active span) are enriched with req_id and
-// trace_id attributes.
+// New wraps inner so records handled with a context carrying a request ID (and,
+// in the otel build, an active span) gain req_id and trace_id attributes.
 func New(inner slog.Handler) slog.Handler {
 	return handler{inner: inner}
 }
@@ -45,10 +39,8 @@ func (h handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return handler{inner: h.inner.WithAttrs(attrs)}
 }
 
-// WithGroup re-wraps so enrichment survives logger.WithGroup.
-// req_id/trace_id are added at the record's top level; the codebase
-// opens no logger-level groups, so there is no group-nesting concern to handle
-// here. Revisit if slog group usage is introduced.
+// WithGroup re-wraps so enrichment survives logger.WithGroup; IDs go at the
+// record's top level, as the codebase opens no logger-level groups.
 func (h handler) WithGroup(name string) slog.Handler {
 	return handler{inner: h.inner.WithGroup(name)}
 }

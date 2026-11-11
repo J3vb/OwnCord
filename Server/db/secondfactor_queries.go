@@ -10,12 +10,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Second-factor state (migration 032): the durable backend behind the
-// auth service's partial-auth, pending-enrolment and used-code stores
-// (auth.SecondFactorPersister) and the emergency recovery-code rows. Nothing
-// here sees a secret in the clear — callers hand over SHA-256 digests, AES-GCM
-// ciphertext or bcrypt hashes. Timestamps are RFC3339 UTC text compared as
-// text, the sessions/rate_lockouts convention.
+// Second-factor state (migration 032): the durable backend behind the auth
+// service's partial-auth, pending-enrolment and used-code stores
+// (auth.SecondFactorPersister) and the recovery-code rows. Nothing here sees a
+// secret in the clear: callers hand over SHA-256 digests, AES-GCM ciphertext or
+// bcrypt hashes. Timestamps are RFC3339 UTC text compared as text.
 
 func secondFactorTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
@@ -29,10 +28,7 @@ func parseSecondFactorTime(s string) (time.Time, error) {
 	return t, nil
 }
 
-// ── auth.SecondFactorPersister ────────────────────────────────────────────────
-
-// UpsertPartialAuth writes or refreshes a login challenge keyed by the
-// token's digest.
+// UpsertPartialAuth writes or refreshes a login challenge keyed by the token's digest.
 func (d *DB) UpsertPartialAuth(ctx context.Context, tokenHash string, userID int64, device, ip string, failures int, expiresAt time.Time) error {
 	if err := d.q.UpsertPartialAuthChallenge(ctx, dbgen.UpsertPartialAuthChallengeParams{
 		TokenHash: tokenHash,
@@ -63,10 +59,9 @@ func (d *DB) GetPartialAuth(ctx context.Context, tokenHash string) (userID int64
 	return row.UserID, row.Device, row.IpAddress, int(row.Failures), exp, true, nil
 }
 
-// IncrementPartialAuthFailures counts one failure against a live challenge
-// and returns the new total. found is false when the challenge is gone or
-// expired; the conditional update never creates a row, so a failure racing
-// a Consume cannot bring the consumed challenge back.
+// IncrementPartialAuthFailures counts one failure against a live challenge and returns
+// the total; found is false when gone or expired. It never creates a row, so a failure
+// racing a Consume cannot revive the challenge.
 func (d *DB) IncrementPartialAuthFailures(ctx context.Context, tokenHash string, now time.Time) (failures int, found bool, err error) {
 	n, err := d.q.IncrementPartialAuthFailures(ctx, dbgen.IncrementPartialAuthFailuresParams{
 		TokenHash: tokenHash,
@@ -81,8 +76,8 @@ func (d *DB) IncrementPartialAuthFailures(ctx context.Context, tokenHash string,
 	return int(n), true, nil
 }
 
-// DeletePartialAuth removes a challenge and reports whether a row went —
-// the single-winner decision behind PartialAuthStore.Consume.
+// DeletePartialAuth removes a challenge and reports whether a row went: the
+// single-winner decision behind Consume.
 func (d *DB) DeletePartialAuth(ctx context.Context, tokenHash string) (bool, error) {
 	res, err := d.q.DeletePartialAuthChallenge(ctx, tokenHash)
 	if err != nil {
@@ -131,8 +126,7 @@ func (d *DB) DeletePendingTOTP(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// InsertUsedTOTPCode records a code's use and reports whether the row was
-// new; false means the code was already spent inside its window.
+// InsertUsedTOTPCode records a code's use; false means it was already spent inside its window.
 func (d *DB) InsertUsedTOTPCode(ctx context.Context, userID int64, codeHash string, expiresAt time.Time) (bool, error) {
 	res, err := d.q.InsertUsedTOTPCode(ctx, dbgen.InsertUsedTOTPCodeParams{
 		UserID:    userID,
@@ -157,8 +151,8 @@ func (d *DB) DeleteUsedTOTPCode(ctx context.Context, userID int64, codeHash stri
 	return nil
 }
 
-// CleanupExpiredSecondFactorState removes challenges, staged enrolments and
-// used-code rows past their expiry. Driven by the maintenance tick.
+// CleanupExpiredSecondFactorState removes expired challenges, enrolments and used-code
+// rows (maintenance tick).
 func (d *DB) CleanupExpiredSecondFactorState(ctx context.Context) error {
 	now := secondFactorTime(time.Now())
 	var errs []error
@@ -177,11 +171,8 @@ func (d *DB) CleanupExpiredSecondFactorState(ctx context.Context) error {
 	return nil
 }
 
-// ── Recovery codes ────────────────────────────────────────────────────────────
-
-// ReplaceRecoveryCodes drops the user's current set and stores a new one in
-// one transaction, so a regeneration can never leave both sets live or
-// neither.
+// ReplaceRecoveryCodes swaps the user's code set in one transaction, never leaving
+// both sets live or neither.
 func (d *DB) ReplaceRecoveryCodes(ctx context.Context, userID int64, codeHashes []string) error {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -205,8 +196,8 @@ func (d *DB) ReplaceRecoveryCodes(ctx context.Context, userID int64, codeHashes 
 	return nil
 }
 
-// ListUnusedRecoveryCodes returns the ids and hashes of the codes still
-// available to the user, oldest first, as parallel slices.
+// ListUnusedRecoveryCodes returns the ids and hashes of the user's unused codes,
+// oldest first, as parallel slices.
 func (d *DB) ListUnusedRecoveryCodes(ctx context.Context, userID int64) (ids []int64, hashes []string, err error) {
 	rows, err := d.q.ListUnusedRecoveryCodes(ctx, userID)
 	if err != nil {
@@ -221,9 +212,8 @@ func (d *DB) ListUnusedRecoveryCodes(ctx context.Context, userID int64) (ids []i
 	return ids, hashes, nil
 }
 
-// MarkRecoveryCodeUsed spends one code and reports whether this call was
-// the one that spent it — the conditional update is what makes a code
-// single-use under concurrent verifications.
+// MarkRecoveryCodeUsed spends one code and reports whether this call did; the
+// conditional update makes it single-use.
 func (d *DB) MarkRecoveryCodeUsed(ctx context.Context, id int64) (bool, error) {
 	now := secondFactorTime(time.Now())
 	res, err := d.q.MarkRecoveryCodeUsed(ctx, dbgen.MarkRecoveryCodeUsedParams{UsedAt: &now, ID: id})

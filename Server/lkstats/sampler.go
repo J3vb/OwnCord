@@ -42,7 +42,6 @@ const (
 	StatusRestarting Status = "restarting"
 )
 
-// Where the figures come from.
 const (
 	// SourceMetrics is LiveKit's Prometheus page.
 	SourceMetrics = "metrics"
@@ -63,8 +62,7 @@ type Point struct {
 	TracksSubscribed *int     `json:"tracks_subscribed"`
 	BytesInPerSec    *float64 `json:"bytes_in_per_sec"`
 	BytesOutPerSec   *float64 `json:"bytes_out_per_sec"`
-	// Cores is how many cores LiveKit may use: the container's CPU limit,
-	// or the host's cores when there is none.
+	// Cores is how many cores LiveKit may use: the container's limit, else the host's.
 	Cores *int `json:"cores"`
 }
 
@@ -81,7 +79,6 @@ type Snapshot struct {
 	Points []Point
 }
 
-// sample is one ring slot. NaN marks a missing figure.
 type sample struct {
 	at                     int64
 	cpu, mem               float32
@@ -208,7 +205,6 @@ func (s *Sampler) Run(ctx context.Context) <-chan struct{} {
 	return done
 }
 
-// sample reads the page outside the lock and records it.
 func (s *Sampler) sample(ctx context.Context) {
 	r := s.fetch(ctx)
 	if ctx.Err() != nil {
@@ -285,8 +281,8 @@ func optional(v float64, ok bool) float32 {
 	return float32(v)
 }
 
-// rate is (cur-prev)/elapsed*scale, or NaN when a figure is missing, the
-// counter went down or no time has passed.
+// rate is (cur-prev)/elapsed*scale, or NaN for a missing figure, a counter that went down, or no elapsed
+// time.
 func rate(prev, cur float64, ok bool, elapsed, scale float64) float32 {
 	if !ok || cur < prev || elapsed <= 0 {
 		return float32(math.NaN())
@@ -374,7 +370,6 @@ func (s sample) point() Point {
 	}
 }
 
-// round1 rounds to one decimal; NaN is missing.
 func round1(v float32) *float64 {
 	if math.IsNaN(float64(v)) {
 		return nil

@@ -25,6 +25,7 @@ import { loadPref } from "@lib/prefs/preferences";
 import { isAnimatedImage, motionReduced } from "@lib/ui/animatedStill";
 import type { MessageStickerInfo } from "@lib/types";
 import { showStillFrame } from "../emojiStill";
+import { dataSaverActive } from "../content/dataSaver";
 import { stickersText } from "../../../i18n/stickers";
 import {
   cachedImageBytes,
@@ -76,6 +77,7 @@ export function loadStickerImage(
   autoPause = false,
 ): void {
   const full = resolveServerUrl(url);
+  const saveData = dataSaverActive();
   recoverEvictedImage(img, { url: full });
   void fetchImageAsObjectUrl(full).then((objectUrl) => {
     if (signal.aborted) return;
@@ -83,6 +85,10 @@ export function loadStickerImage(
     // was cached or replayed): the caller shows the deleted box instead.
     if (objectUrl === null) {
       onMissing?.();
+      return;
+    }
+    if (saveData) {
+      showStillFrame(img, objectUrl);
       return;
     }
     if (!motionReduced()) {

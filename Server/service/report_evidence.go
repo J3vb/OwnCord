@@ -13,18 +13,13 @@ const (
 	EvidenceSourceChannelUnavailable    = "SOURCE_CHANNEL_UNAVAILABLE"
 )
 
-// evidenceWithheld applies the NSFW consent rule to the evidence snapshot, a second
-// content path into its source channel: a moderator reads labelled evidence
-// only with their own acknowledgement of that channel, like anyone else,
-// with no bit or administrator bypass. Both the label and the
-// acknowledgement are read live, so a revoke, an unlabel-then-relabel (which
-// clears every acknowledgement) or a fresh label takes effect on the next
-// read. A source channel that no longer exists has no label to read and no
-// acknowledgement left to hold (047 cascades): its snapshot stays readable
-// only when migration 052's sticky flag says the channel was never
-// labelled, and is withheld when it was or when that is unknown. So is one
-// whose label or acknowledgement cannot be read. A report with no source
-// channel (a user target) has nothing to gate.
+// evidenceWithheld applies the NSFW consent rule to the evidence snapshot, a second content path into its
+// source channel: a moderator reads labelled evidence only with their own acknowledgement of that channel,
+// with no bit or administrator bypass. Label and acknowledgement are read live, so a revoke or relabel takes
+// effect on the next read. A source channel that no longer exists has no label to read and no acknowledgement
+// left (047 cascades): its snapshot stays readable only when migration 052's sticky flag says it was never
+// labelled, and is withheld when it was or when that is unknown, or when the label or acknowledgement cannot
+// be read. A report with no source channel (a user target) has nothing to gate.
 func (s *ReportService) evidenceWithheld(ctx context.Context, actorID int64, report *db.Report) string {
 	if report.ChannelID == nil {
 		return ""

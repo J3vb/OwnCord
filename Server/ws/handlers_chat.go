@@ -10,7 +10,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// registerChatHandlers registers all chat-related V2 message handlers.
 func registerChatHandlers(r *HandlerRegistry, deps ChatDeps) {
 	r.RegisterV2(MsgTypeChatSend, handleChatSendV2, deps)
 	r.RegisterV2(MsgTypeChatForward, handleChatForwardV2, deps)
@@ -20,7 +19,6 @@ func registerChatHandlers(r *HandlerRegistry, deps ChatDeps) {
 	r.RegisterV2(MsgTypeChatDelete, handleChatDeleteV2, deps)
 }
 
-// handleChatSendV2 processes a chat_send command via the MessageService.
 func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	sendCmd := cmd.(ChatSendCmd)
@@ -49,11 +47,10 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	return sendResultEvents(d, info, sendCmd.ClientMessageID, sendCmd.ChannelID, sendCmd.ReplyTo, reply, result)
 }
 
-// sendResultEvents turns a committed SendMessageResult into the ws Result both
-// chat_send and chat_forward return: the reply, then the sequenced chat_message
-// for the channel or, for a DM, the dm_channel_open and dm_request events and
-// the participant-addressed chat_message. Sharing it is what makes a forward's
-// fan-out literally the send path's.
+// sendResultEvents turns a committed send into the Result chat_send and
+// chat_forward share: the reply, then the sequenced chat_message (or, for a DM,
+// dm_channel_open, dm_request and the participant-addressed message), so a
+// forward's fan-out is the send path's.
 func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, channelID int64, replyTo *int64, reply []byte, result *service.SendMessageResult) Result {
 	attData := make([]map[string]any, 0, len(result.Attachments))
 	for _, ai := range result.Attachments {
@@ -95,9 +92,9 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 
 	var events []Event
 	if len(result.OpenedDMFor) > 0 {
-		// One payload per recipient, not one for all of them: `recipient` and
-		// `recipients` are defined relative to who is reading, so a shared
-		// payload would list a group member as their own DM partner.
+		// One payload per recipient: `recipient` and `recipients` are relative to
+		// the reader, so a shared payload would list a group member as their own
+		// DM partner.
 		chName := ""
 		if result.Channel != nil {
 			chName = result.Channel.Name
@@ -120,10 +117,9 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 		}
 	}
 
-	// one dm_request per recipient a first-contact request was just
-	// created for. Skipped (not a fallback shape) when the sender lookup
-	// failed — SenderUser nil means the frame has no profile to carry, and
-	// the recipient still recovers the request from GET /api/v1/dm-requests.
+	// One dm_request per recipient of a first-contact request. Skipped when the
+	// sender lookup failed (no profile to carry); the recipient recovers it from
+	// GET /api/v1/dm-requests.
 	if result.SenderUser != nil {
 		for _, req := range result.RequestCreatedFor {
 			events = append(events, DMRequestEvent{
@@ -141,8 +137,6 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 	return Result{Reply: reply, Events: events}
 }
 
-// handleChatForwardV2 processes a chat_forward command via the
-// MessageService. The reply is chat_forward_ok; the events are the send path's.
 func handleChatForwardV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	fwd := cmd.(ChatForwardCmd)
@@ -164,11 +158,10 @@ func handleChatForwardV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	return sendResultEvents(d, info, fwd.ClientMessageID, fwd.ChannelID, nil, reply, result)
 }
 
-// handleForumPostCreateV2 processes a forum_post_create via the
-// MessageService. The reply is forum_post_create_ok; the events are the send
-// path's, addressed to the new post's thread: its opening chat_message, and a
-// thread note that tells the forum's viewers (thread_changed, coalesced). A
-// retry answered from the receipt announces nothing.
+// handleForumPostCreateV2 replies forum_post_create_ok; the events are the send
+// path's, addressed to the new thread: its opening chat_message and a coalesced
+// thread note for the forum's viewers. A retry answered from the receipt
+// announces nothing.
 func handleForumPostCreateV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	post := cmd.(ForumPostCreateCmd)
@@ -192,8 +185,6 @@ func handleForumPostCreateV2(ctx context.Context, cmd Command, info ClientInfo, 
 	return sendResultEvents(d, info, post.ClientMessageID, res.Thread.ID, nil, reply, res.Send)
 }
 
-// channelSendResult is a committed non-DM send: the sequenced chat_message,
-// then the note the channel_activity coalescer records.
 func channelSendResult(reply, broadcast []byte, channelID, authorID int64, result *service.SendMessageResult) Result {
 	events := []Event{
 		channelEvt{evType: MsgTypeChatMessage, channelID: channelID, payload: broadcast},
@@ -203,14 +194,13 @@ func channelSendResult(reply, broadcast []byte, channelID, authorID int64, resul
 		},
 	}
 	if result.Channel != nil && result.Channel.IsThread() {
-		// The post moved the thread's count and last activity, and reopened it
-		// if it was archived: tell the parent's viewers (coalesced).
+		// The post moved the thread's count and last activity (and reopened it if
+		// archived): tell the parent's viewers (coalesced).
 		events = append(events, threadNoteEvt{threadID: channelID})
 	}
 	return Result{Reply: reply, Events: events}
 }
 
-// handleChatEditV2 processes a chat_edit command via the MessageService.
 func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	editCmd := cmd.(ChatEditCmd)
@@ -223,19 +213,16 @@ func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	return Result{Events: chatEditedEvents(result)}
 }
 
-// chatEditedEvents is the fan-out of a committed edit: the sequenced chat_edited to
-// the channel or, for a DM, to its participants.
 func chatEditedEvents(result *service.EditMessageResult) []Event {
 	payload := buildChatEdited(result.MessageID, result.ChannelID, result.Content, result.EditedAt,
 		result.Mentions, result.MentionRoles, result.MentionsEveryone, result.MentionsHere)
 	return editedFrameEvents(payload, result.ChannelID, result.IsDM, result.ParticipantIDs, result.PostOpening)
 }
 
-// editedFrameEvents addresses one chat_edited payload: to a DM's participants
-// (the channel topic only when the list is empty), or to the channel with, for a
-// forum post's opening message, a coalesced thread note so the forum's viewers
-// hear the new preview. Edits and file removals share it, so both reach exactly
-// the same readers.
+// editedFrameEvents addresses one chat_edited payload to a DM's participants
+// (topic only when the list is empty) or the channel plus, for a forum post's
+// opening message, a coalesced thread note. Edits and file removals share it so
+// they reach the same readers.
 func editedFrameEvents(payload []byte, channelID int64, isDM bool, participantIDs []int64, postOpening bool) []Event {
 	if isDM {
 		return []Event{dmEventOrFallback(
@@ -246,13 +233,12 @@ func editedFrameEvents(payload []byte, channelID int64, isDM bool, participantID
 	events := []Event{channelEvt{evType: MsgTypeChatEdited, channelID: channelID, payload: payload}}
 	if postOpening {
 		// A forum post's opening message is the list's preview: the forum's
-		// viewers hear the new text as a thread_changed (coalesced).
+		// viewers hear the new text as a thread_changed.
 		events = append(events, threadNoteEvt{threadID: channelID})
 	}
 	return events
 }
 
-// handleChatDeleteV2 processes a chat_delete command via the MessageService.
 func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	deleteCmd := cmd.(ChatDeleteCmd)
@@ -265,8 +251,6 @@ func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 	return Result{Events: chatDeletedEvents(result)}
 }
 
-// chatDeletedEvents is the fan-out of a committed delete: the sequenced
-// chat_deleted to the channel or, for a DM, to its participants.
 func chatDeletedEvents(result *service.DeleteMessageResult) []Event {
 	payload := buildChatDeleted(result.MessageID, result.ChannelID)
 	if result.IsDM {
@@ -277,17 +261,17 @@ func chatDeletedEvents(result *service.DeleteMessageResult) []Event {
 	}
 	events := []Event{channelEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, payload: payload}}
 	if result.IsThread {
-		// The delete moved the thread's count and last message: tell the
-		// parent's viewers (coalesced).
+		// The delete moved the thread's count and last message: tell the parent's
+		// viewers (coalesced).
 		events = append(events, threadNoteEvt{threadID: result.ChannelID})
 	}
 	return events
 }
 
-// dmEventOrFallback returns the participant-targeted DM event, falling back to the
-// channel-topic broadcast when the participant list is empty (the shape a failed
-// post-commit participant lookup leaves). A sequenced frame addressed to nobody would
-// consume a seq and reach no one; the fallback still reaches whoever has the DM focused.
+// dmEventOrFallback returns the participant-targeted DM event, falling back to
+// the channel-topic broadcast when the participant list is empty (a failed post-
+// commit lookup): a sequenced frame addressed to nobody would consume a seq and
+// reach no one.
 func dmEventOrFallback(dmEvent, fallback Event, participantIDs []int64) Event {
 	if len(participantIDs) == 0 {
 		return fallback
@@ -295,7 +279,6 @@ func dmEventOrFallback(dmEvent, fallback Event, participantIDs []int64) Event {
 	return dmEvent
 }
 
-// serviceErrorToResult converts a service-layer error to a WS Result.
 func serviceErrorToResult(err error) Result {
 	switch {
 	case errors.Is(err, service.ErrRateLimited):
@@ -319,8 +302,8 @@ func serviceErrorToResult(err error) Result {
 	case errors.Is(err, service.ErrCallNeedsAcceptance):
 		return Result{Error: ClientError{Code: ErrCodeCallRequiresAcceptance, Message: err.Error()}}
 	case errors.Is(err, permissions.ErrThreadLocked):
-		// A locked thread refuses a post, reaction, pin or change
-		// with its own code; it wraps ErrForbidden, so this precedes it.
+		// A locked thread refuses with its own code; it wraps ErrForbidden, so
+		// this precedes it.
 		return Result{Error: ClientError{Code: ErrCodeThreadLocked, Message: err.Error()}}
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):
 		return Result{Error: ClientError{Code: ErrCodeForbidden, Message: err.Error()}}
@@ -330,12 +313,9 @@ func serviceErrorToResult(err error) Result {
 	case errors.Is(err, service.ErrConflict):
 		return Result{Error: ClientError{Code: ErrCodeConflict, Message: err.Error()}}
 	default:
-		// Internal errors (service.ErrInternal wrappers embed the underlying
-		// driver error via %v) must not reach the client verbatim, matching
-		// the REST twin writeServiceError (Server/api/channel_handler.go) and
-		// every other ErrCodeInternal site in this package. Log server-side
-		// since this is the only ErrCodeInternal path whose caller
-		// (handlers.go) skips its own logging for ClientError results.
+		// Internal errors (service.ErrInternal embeds the driver error via %v)
+		// must not reach the client verbatim, like REST's writeServiceError.
+		// Logged here because handlers.go skips logging for ClientError results.
 		slog.Error("ws service internal error", "err", err)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "internal error"}}
 	}

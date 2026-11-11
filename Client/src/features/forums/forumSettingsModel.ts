@@ -158,11 +158,13 @@ export type DraftProblem =
   | { readonly kind: "name"; readonly key: number }
   | { readonly kind: "duplicate"; readonly key: number }
   | { readonly kind: "emoji"; readonly key: number }
-  | { readonly kind: "count" };
+  | { readonly kind: "count" }
+  | { readonly kind: "requireTag" };
 
 /** The first thing the server would refuse, so the form can say it without a round trip. */
 export function validateDraft(draft: ForumDraft): DraftProblem | null {
   if (draft.tags.length > MAX_FORUM_TAGS) return { kind: "count" };
+  if (draft.requireTag && draft.tags.length === 0) return { kind: "requireTag" };
   const seen = new Set<string>();
   for (const t of draft.tags) {
     const name = t.name.trim();

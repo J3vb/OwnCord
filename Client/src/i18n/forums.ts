@@ -93,5 +93,6 @@ export const forumsText = defineCatalog("forums", {
   "settings.error.duplicate": "Tag names must be different",
   "settings.error.emoji": "A tag's emoji must be a single emoji",
   "settings.error.count": "A forum holds at most {max} tags",
+  "settings.error.requireTag": "Add a tag before requiring one on every post",
   "settings.error.other": "Couldn't save the forum settings",
 });

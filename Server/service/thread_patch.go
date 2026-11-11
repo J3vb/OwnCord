@@ -1,7 +1,5 @@
 package service
 
-// thread_patch.go - the validation steps of ThreadService.Update.
-
 import (
 	"context"
 	"fmt"
@@ -9,8 +7,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// cleanThreadPatch validates the name and period of an update and builds the
-// patch from them; the tag step needs the thread and is postTagsPatch.
+// cleanThreadPatch validates the name and period of an update and builds the patch; the tag step needs the
+// thread and is postTagsPatch.
 func cleanThreadPatch(p UpdateThreadParams) (db.ThreadPatch, error) {
 	patch := db.ThreadPatch{Archived: p.Archived, Locked: p.Locked}
 	if p.Name != nil {
@@ -30,8 +28,7 @@ func cleanThreadPatch(p UpdateThreadParams) (db.ThreadPatch, error) {
 	return patch, nil
 }
 
-// postTagsPatch is the tag step of an update: nil when the update carries no
-// tags, else the validated set.
+// postTagsPatch is the tag step of an update: nil when the update carries no tags, else the validated set.
 func (s *ThreadService) postTagsPatch(ctx context.Context, cur *db.ThreadInfo, in *[]int64) (*[]int64, error) {
 	if in == nil {
 		return nil, nil

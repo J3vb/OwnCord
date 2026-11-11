@@ -5,7 +5,7 @@
 // messagesStore.setState and keep the documented contracts. Returning `prev`
 // by identity when nothing changed is behavior: selector subscriptions
 // compare with ===.
-import type { MessageResponse } from "../../lib/types";
+import type { Attachment, MessageResponse, MessageStickerInfo, MessageUser } from "../../lib/types";
 import { MAX_MESSAGES_PER_CHANNEL, messageResponseToMessage } from "./messageModel";
 import type { Message, MessagesState } from "./messageModel";
 import { isUnreconciledEcho } from "./echoReconcile";
@@ -89,6 +89,44 @@ export function reduceAddMessage(prev: MessagesState, message: Message): Message
     updatedHasMore.set(channelId, true);
   }
   return { ...prev, messagesByChannel: updated, hasMore: updatedHasMore };
+}
+
+/** What addOptimisticMessage takes: the send as the composer made it. */
+export interface OptimisticMessageParams {
+  correlationId: string;
+  clientMessageId?: string;
+  channelId: number;
+  user: MessageUser;
+  content: string;
+  replyTo: number | null;
+  attachments?: readonly Attachment[];
+  /** A sticker send: the row shows the image at once; `content` is the server's fallback text. */
+  sticker?: MessageStickerInfo;
+  timestamp: string;
+  /** "uploading" for a send queued behind its files; absent means "pending". */
+  status?: "uploading";
+}
+
+/** The pending row for a send the user just made. */
+export function buildOptimisticMessage(params: OptimisticMessageParams): Message {
+  return {
+    id: 0,
+    channelId: params.channelId,
+    user: params.user,
+    content: params.content,
+    replyTo: params.replyTo,
+    attachments: params.attachments ?? [],
+    reactions: [],
+    pinned: false,
+    editedAt: null,
+    deleted: false,
+    timestamp: params.timestamp,
+    status: params.status ?? "pending",
+    correlationId: params.correlationId,
+    clientMessageId: params.clientMessageId,
+    errorCode: null,
+    ...(params.sticker !== undefined && { sticker: params.sticker }),
+  };
 }
 
 /** addOptimisticMessage's reducer: add the row. A pending row is registered by correlation id and

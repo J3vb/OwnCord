@@ -26,15 +26,12 @@ const (
 )
 
 // SecondFactorPersister is the optional durable backend behind the three
-// second-factor stores, in the LockoutPersister shape: stdlib types only, so db
-// can implement it without importing this package back. With a persister the
-// database is the store and every read goes to it, so a restart keeps an
-// in-flight login challenge, a pending enrolment and the replay window, and no
-// process trusts a copy another has spent. Rows never carry a secret in the
-// clear: the partial-auth token and used code arrive as SHA-256 digests
-// (HashToken), and the pending enrolment secret as AES-GCM ciphertext under the
-// TOTP key, as users.totp_secret has. nil means process-local (tests and the
-// memory-only constructors).
+// second-factor stores (stdlib types only, so db can implement it without an
+// import cycle). With one, the database is the store and every read goes to it,
+// so a restart keeps challenges and the replay window and no process trusts a
+// copy another has spent. Rows never hold a secret in the clear: tokens and used
+// codes arrive as SHA-256 digests (HashToken), the enrolment secret as AES-GCM
+// ciphertext under the TOTP key. nil means process-local.
 type SecondFactorPersister interface {
 	UpsertPartialAuth(ctx context.Context, tokenHash string, userID int64, device, ip string, failures int, expiresAt time.Time) error
 	GetPartialAuth(ctx context.Context, tokenHash string) (userID int64, device, ip string, failures int, expiresAt time.Time, found bool, err error)
@@ -169,8 +166,7 @@ func (s *PartialAuthStore) load(ctx context.Context, token string) (PartialAuthC
 	return PartialAuthChallenge{UserID: userID, Device: device, IP: ip, Failures: failures, ExpiresAt: expiresAt}, true
 }
 
-// Consume claims the challenge for exactly one caller. With a persister the
-// row delete decides the winner; without one the map delete does.
+// Consume claims the challenge for exactly one caller; the row or map delete decides the winner.
 func (s *PartialAuthStore) Consume(ctx context.Context, token string) (PartialAuthChallenge, bool) {
 	if s.persist != nil {
 		entry, ok := s.load(ctx, token)
@@ -199,10 +195,8 @@ func (s *PartialAuthStore) Consume(ctx context.Context, token string) (PartialAu
 	return entry, true
 }
 
-// Restore puts a challenge Consume returned back under its original token, for
-// a caller that claimed it and then could not finish the login. The entry keeps
-// its expiry and failure count, so a challenge that expired meanwhile is
-// dropped by the next Lookup.
+// Restore puts a Consume'd challenge back under its token for a caller that
+// could not finish the login. It keeps its expiry and failure count.
 func (s *PartialAuthStore) Restore(ctx context.Context, token string, challenge PartialAuthChallenge) {
 	if s.persist != nil {
 		if err := s.persist.UpsertPartialAuth(ctx, HashToken(token), challenge.UserID, challenge.Device, challenge.IP, challenge.Failures, challenge.ExpiresAt); err != nil {
@@ -215,10 +209,9 @@ func (s *PartialAuthStore) Restore(ctx context.Context, token string, challenge 
 	s.entries[token] = challenge
 }
 
-// RegisterFailure counts a wrong code against the challenge and reports whether
-// it is still alive. With a persister the count is one conditional update, so
-// it never loses an increment or recreates a challenge a concurrent Consume
-// deleted; without one the read-increment-write runs under the lock.
+// RegisterFailure counts a wrong code and reports whether the challenge is
+// still alive. With a persister the count is one conditional update, so it never
+// loses an increment or recreates a challenge a concurrent Consume deleted.
 func (s *PartialAuthStore) RegisterFailure(ctx context.Context, token string, maxFailures int) bool {
 	if s.persist != nil {
 		failures, found, err := s.persist.IncrementPartialAuthFailures(ctx, HashToken(token), time.Now())
@@ -335,9 +328,8 @@ func (s *PendingTOTPStore) cleanupExpiredLocked() {
 	}
 }
 
-// UsedTOTPCodeStore tracks recently verified TOTP codes to prevent replay
-// within the ±1 period validity window (~90 seconds). With a persister the
-// window survives a restart and the persisted insert decides first use.
+// UsedTOTPCodeStore tracks recently verified TOTP codes to prevent replay within
+// the ±1 period window. With a persister the insert decides first use.
 type UsedTOTPCodeStore struct {
 	mu      syncutil.Mutex
 	entries map[string]time.Time // key: "userID:code" → expiry
@@ -360,12 +352,10 @@ func usedCodeKey(userID int64, code string) string {
 	return fmt.Sprintf("%d:%s", userID, code)
 }
 
-// MarkUsed records a TOTP code as used for the user. It returns false if the
-// code was already used (replay) or, with a persister, if the use could not be
-// recorded: a code whose single use cannot be guaranteed is refused.
+// MarkUsed records a code as used; false on replay or, with a persister, when
+// the use could not be recorded (a code whose single use cannot be guaranteed is refused).
 func (s *UsedTOTPCodeStore) MarkUsed(ctx context.Context, userID int64, code string) bool {
 	key := usedCodeKey(userID, code)
-	// Codes are valid for at most 90 seconds (current period ± 1).
 	expiresAt := time.Now().Add(usedTOTPCodeTTL)
 
 	if s.persist != nil {
@@ -387,9 +377,8 @@ func (s *UsedTOTPCodeStore) MarkUsed(ctx context.Context, userID int64, code str
 	return true
 }
 
-// Unmark forgets a code MarkUsed recorded so it can be accepted once more, the
-// companion of PartialAuthStore.Restore: a verification the caller could not
-// complete is released with its challenge.
+// Unmark forgets a MarkUsed code so it can be accepted again, the companion of
+// PartialAuthStore.Restore.
 func (s *UsedTOTPCodeStore) Unmark(ctx context.Context, userID int64, code string) {
 	key := usedCodeKey(userID, code)
 	if s.persist != nil {

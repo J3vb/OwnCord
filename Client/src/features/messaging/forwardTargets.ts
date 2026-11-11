@@ -16,7 +16,7 @@
 import { Permission } from "@lib/types";
 import { hasPermission, permissionsForMemberIn } from "@lib/permissions";
 import { authStore } from "@stores/auth.store";
-import { channelsStore } from "@stores/channels.store";
+import { channelsStore, type Channel } from "@stores/channels.store";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 
@@ -35,12 +35,9 @@ export function isLabelledSource(sourceChannelId: number): boolean {
   return channelsStore.getState().channels.get(sourceChannelId)?.nsfw === true;
 }
 
-/** Every target the viewer can forward a message from `sourceChannelId` to, in list order. */
-export function listForwardTargets(
-  sourceChannelId: number,
-  sourceHasFiles = false,
-): readonly ForwardTarget[] {
-  const labelledOnly = isLabelledSource(sourceChannelId);
+/** Whether the viewer may attach files: the role's bits, since the client has no
+ *  per-channel overrides. Only matters when the source message has files. */
+function canAttachFiles(sourceHasFiles: boolean): boolean {
   // The client has the role's bits, not per-channel overrides: this only hides the
   // channels that would certainly refuse; an override the server denies is a failed row.
   const me = authStore.getState().user;
@@ -50,21 +47,40 @@ export function listForwardTargets(
       ? null
       : permissionsForMemberIn(channelsStore.getState().roles, me?.role_ids, role);
   // An unknown role (before `ready`, an older server) hides nothing: the server decides.
-  const canAttach =
-    !sourceHasFiles || perms === null || hasPermission(perms, Permission.ATTACH_FILES);
+  return !sourceHasFiles || perms === null || hasPermission(perms, Permission.ATTACH_FILES);
+}
+
+/** The target kind of `ch` when it may be offered, or null. */
+function forwardKind(
+  ch: Channel,
+  labelledOnly: boolean,
+  canAttach: boolean,
+): "text" | "announcement" | null {
+  if (ch.type !== "text" && ch.type !== "announcement") return null;
+  if (!ch.canSend || !canAttach) return null;
+  // Withheld until acknowledged, so the sender could not even see the result.
+  if (ch.nsfw && ch.nsfwAcknowledged !== true) return null;
+  if (labelledOnly && !ch.nsfw) return null;
+  return ch.type;
+}
+
+/** The channels a message can go to, in position order. */
+function channelTargets(labelledOnly: boolean, canAttach: boolean): ForwardTarget[] {
   const targets: ForwardTarget[] = [];
   const channels = [...channelsStore.getState().channels.values()].toSorted(
     (a, b) => a.position - b.position,
   );
   for (const ch of channels) {
-    if (ch.type !== "text" && ch.type !== "announcement") continue;
-    if (!ch.canSend || !canAttach) continue;
-    // Withheld until acknowledged, so the sender could not even see the result.
-    if (ch.nsfw && ch.nsfwAcknowledged !== true) continue;
-    if (labelledOnly && !ch.nsfw) continue;
-    targets.push({ id: ch.id, name: ch.name, kind: ch.type, category: ch.category });
+    const kind = forwardKind(ch, labelledOnly, canAttach);
+    if (kind === null) continue;
+    targets.push({ id: ch.id, name: ch.name, kind, category: ch.category });
   }
-  if (labelledOnly) return targets;
+  return targets;
+}
+
+/** The DMs the viewer can write to, in list order. */
+function dmTargets(): ForwardTarget[] {
+  const targets: ForwardTarget[] = [];
   const blocks = blocksStore.getState();
   for (const dm of dmStore.getState().channels) {
     // Block gating is 1:1 only; the server exempts group DMs.
@@ -72,6 +88,17 @@ export function listForwardTargets(
     targets.push({ id: dm.channelId, name: dmDisplayName(dm), kind: "dm", category: null });
   }
   return targets;
+}
+
+/** Every target the viewer can forward a message from `sourceChannelId` to, in list order. */
+export function listForwardTargets(
+  sourceChannelId: number,
+  sourceHasFiles = false,
+): readonly ForwardTarget[] {
+  const labelledOnly = isLabelledSource(sourceChannelId);
+  const targets = channelTargets(labelledOnly, canAttachFiles(sourceHasFiles));
+  if (labelledOnly) return targets;
+  return [...targets, ...dmTargets()];
 }
 
 /**

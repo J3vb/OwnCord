@@ -722,6 +722,56 @@ impl Feed {
     }
 }
 
+/// A [`Capture`]'s shared state: settings and the open-stream count, none of
+/// which waits on the audio driver.
+#[derive(Clone)]
+pub struct Controls {
+    feed: Feed,
+    stream: Input,
+}
+
+impl Controls {
+    pub fn configure(
+        &self,
+        apm: Arc<Apm>,
+        enhanced_noise_suppression: bool,
+        on_voice_gate: GateSink,
+        on_level: LevelSink,
+    ) {
+        self.set_processing(apm, enhanced_noise_suppression);
+        let mut voice = lock(&self.feed.voice);
+        voice.report_to(on_voice_gate);
+        voice.report_levels_to(on_level);
+    }
+
+    pub fn set_processing(&self, apm: Arc<Apm>, enhanced_noise_suppression: bool) {
+        self.feed
+            .processing
+            .set(Some((apm, enhanced_noise_suppression)));
+    }
+
+    pub fn set_voice_gate(&self, threshold: f32, retune: bool, speech: bool) {
+        let mut voice = lock(&self.feed.voice);
+        if retune {
+            voice.retune(threshold);
+        } else {
+            voice.set_threshold(threshold, speech);
+        }
+    }
+
+    pub fn set_input_gain(&self, gain: f32) {
+        self.feed.gain.set(gain);
+    }
+
+    pub fn set_ptt_gated(&self, gated: bool) {
+        self.feed.gated.store(gated, Ordering::Relaxed);
+    }
+
+    pub fn streams(&self) -> usize {
+        usize::from(lock(&self.stream).is_some())
+    }
+}
+
 impl Capture {
     /// `on_voice_gate` is told each time the voice gate opens or closes,
     /// `on_level` each level report.
@@ -732,21 +782,25 @@ impl Capture {
         on_voice_gate: GateSink,
         on_level: LevelSink,
     ) {
-        self.feed
-            .processing
-            .set(Some((apm, enhanced_noise_suppression)));
-        let mut voice = lock(&self.feed.voice);
-        voice.report_to(on_voice_gate);
-        voice.report_levels_to(on_level);
+        self.controls()
+            .configure(apm, enhanced_noise_suppression, on_voice_gate, on_level);
+    }
+
+    /// The parts of this capture that only touch shared state, for callers
+    /// that must not wait on the device while another thread opens or closes it.
+    pub fn controls(&self) -> Controls {
+        Controls {
+            feed: self.feed.clone(),
+            stream: self.stream.clone(),
+        }
     }
 
     /// Replace the audio processing, on a running stream too: the input
     /// callback takes it on a later frame, without waiting for this thread,
     /// and a stopped (muted) capture opens its next stream with it.
     pub fn set_processing(&self, apm: Arc<Apm>, enhanced_noise_suppression: bool) {
-        self.feed
-            .processing
-            .set(Some((apm, enhanced_noise_suppression)));
+        self.controls()
+            .set_processing(apm, enhanced_noise_suppression);
     }
 
     /// Set the input-sensitivity gate's threshold (0: no gate), on the web
@@ -754,28 +808,23 @@ impl Capture {
     /// the detector (automatic sensitivity's steps); `speech` adds RNNoise's
     /// verdict to the rule on a restart.
     pub fn set_voice_gate(&self, threshold: f32, retune: bool, speech: bool) {
-        let mut voice = lock(&self.feed.voice);
-        if retune {
-            voice.retune(threshold);
-        } else {
-            voice.set_threshold(threshold, speech);
-        }
+        self.controls().set_voice_gate(threshold, retune, speech);
     }
 
     /// Set the input volume as a linear gain (0 to 2).
     pub fn set_input_gain(&self, gain: f32) {
-        self.feed.gain.set(gain);
+        self.controls().set_input_gain(gain);
     }
 
     /// Close or open push-to-talk's gate. The input stream stays as it is:
     /// a closed gate sends silence from an open capture (D5), so a press
     /// never waits on the device. Only a mute (`stop`) closes the capture.
     pub fn set_ptt_gated(&self, gated: bool) {
-        self.feed.gated.store(gated, Ordering::Relaxed);
+        self.controls().set_ptt_gated(gated);
     }
 
     pub fn streams(&self) -> usize {
-        usize::from(self.stream().is_some())
+        self.controls().streams()
     }
 
     /// Start capturing into `sink` (the first unmute publishes a track's
@@ -808,7 +857,9 @@ impl Capture {
 
     /// Stop the input stream (mute), so the system's in-use indicator goes out.
     pub fn stop(&mut self) {
-        *lock(&self.stream) = None;
+        // The stream closes after the slot's lock is released.
+        let old = lock(&self.stream).take();
+        drop(old);
     }
 
     fn stream(&self) -> Option<()> {

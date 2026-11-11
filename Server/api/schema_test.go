@@ -254,7 +254,8 @@ CREATE TABLE IF NOT EXISTS attachments (
     width       INTEGER,
     height      INTEGER,
     duration_ms INTEGER,
-    waveform    TEXT
+    waveform    TEXT,
+    uploader_id INTEGER REFERENCES users(id)
 );
 CREATE TABLE IF NOT EXISTS reactions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

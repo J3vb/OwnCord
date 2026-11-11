@@ -157,6 +157,11 @@ function withoutRings(
   return next;
 }
 
+/** Record (or clear) the channel a switch out of a live call is waiting for. */
+export function withSwitchingTo(prev: VoiceState, channelId: number | null): VoiceState {
+  return (prev.switchingTo ?? null) === channelId ? prev : { ...prev, switchingTo: channelId };
+}
+
 /** Enter a channel locally. Already in it: the same state, so the timer is kept. */
 export function withJoinedChannel(prev: VoiceState, channelId: number, now: number): VoiceState {
   if (prev.currentChannelId === channelId) return prev;
@@ -167,6 +172,8 @@ export function withJoinedChannel(prev: VoiceState, channelId: number, now: numb
     voiceUsers: withoutRings(prev.voiceUsers, prev.currentChannelId),
     currentChannelId: channelId,
     joinedAt: now,
+    // Whatever switch was waiting, this is where the user is heading now.
+    switchingTo: null,
     // Optimistic: the widget shows "Connecting…" the moment the user clicks,
     // before the voice_token round-trip. livekitSession advances it from here.
     voiceStatus: "joining",
@@ -182,6 +189,7 @@ export function withLeftChannel(prev: VoiceState, currentUserId: number): VoiceS
   const cleared = {
     currentChannelId: null,
     joinedAt: null,
+    switchingTo: null,
     voiceStatus: "idle" as const,
     // Server mute lives with the voice session; a new session starts clean.
     localServerMuted: false,

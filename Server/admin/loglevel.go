@@ -12,15 +12,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
-// LogLevelController owns the runtime log-level override for a bounded window.
-// An operator raises the level to debug to watch a problem live, and
-// it reverts to the base level on its own — a boost that outlived its window
-// would quietly grow disk use and log noise, and the base level is what the
-// next restart returns to anyway.
+// LogLevelController owns the runtime log-level override for a bounded window: an operator raises the level
+// to debug to watch a problem live and it reverts on its own, since a boost outliving its window would grow
+// disk use and log noise.
 type LogLevelController struct {
 	level *slog.LevelVar
-	// base is the level the server booted with and reverts to.
-	base slog.Level
+	base  slog.Level
 
 	mu       sync.Mutex
 	timer    *time.Timer
@@ -34,8 +31,8 @@ func NewLogLevelController(level *slog.LevelVar, base slog.Level) *LogLevelContr
 	return &LogLevelController{level: level, base: base}
 }
 
-// Boost raises the level to debug for window and returns the deadline it
-// reverts at. Every boost is timed: a non-positive window is refused.
+// Boost raises the level to debug for window and returns the revert deadline; a non-positive window is
+// refused.
 func (c *LogLevelController) Boost(window time.Duration) (time.Time, error) {
 	if window <= 0 {
 		return time.Time{}, fmt.Errorf("log level window must be positive, got %s", window)
@@ -85,8 +82,8 @@ func (c *LogLevelController) resetLocked() {
 	c.level.Set(c.base)
 }
 
-// Current reports the level in force and, when a timed boost is active, when
-// it reverts. The name is the lower-case form the API and config share.
+// Current reports the level in force and, for a timed boost, when it reverts; the name is the lower-case form
+// the API and config share.
 func (c *LogLevelController) Current() (string, *time.Time) {
 	name := levelName(c.level.Level())
 	c.mu.Lock()
@@ -98,8 +95,7 @@ func (c *LogLevelController) Current() (string, *time.Time) {
 	return name, &deadline
 }
 
-// Close stops a pending revert. The server is exiting with the level it is
-// running; a timer firing against a dead process is pointless.
+// Close stops a pending revert; a timer firing against an exiting process is pointless.
 func (c *LogLevelController) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -133,9 +129,8 @@ type logLevelRequest struct {
 
 const logLevelBoostWindow = 15 * time.Minute
 
-// logLevelResponse is GET/PATCH/DELETE /logs/level: the level in force, the base
-// level it reverts to, and, for a timed boost, when it reverts (empty for a
-// level with no pending revert).
+// logLevelResponse is the level in force, the base it reverts to, and the revert time for a timed boost
+// (empty otherwise).
 type logLevelResponse struct {
 	Level     string `json:"level"`
 	BaseLevel string `json:"base_level"`

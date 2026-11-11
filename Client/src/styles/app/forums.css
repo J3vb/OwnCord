@@ -344,18 +344,18 @@
   -webkit-line-clamp: 1;
   line-clamp: 1;
 }
-.app.thread-open:has(.forum-view--split) > .chat-area {
+.app.thread-open.app--forum-split > .chat-area {
   flex: 0 0 clamp(300px, 32%, 440px);
   min-width: 0;
 }
-.app.thread-open:has(.forum-view--split) > .thread-panel-slot.open {
+.app.thread-open.app--forum-split > .thread-panel-slot.open {
   flex: 1 1 auto;
   min-width: 0;
 }
-.app.thread-open:has(.forum-view--split) .thread-panel {
+.app.thread-open.app--forum-split .thread-panel {
   width: 100%;
 }
-.app.thread-open:has(.forum-view--split) .thread-panel-resize {
+.app.thread-open.app--forum-split .thread-panel-resize {
   display: none;
 }
 

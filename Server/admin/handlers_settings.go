@@ -14,9 +14,8 @@ import (
 )
 
 //
-// Thin adapters over service.SettingsService:
-// the whitelist, boolean normalization, require_2fa preconditions, atomic
-// apply and audit rows all live in the service.
+// Thin adapters over service.SettingsService, which owns the whitelist, boolean normalization, require_2fa
+// preconditions, atomic apply and audit rows.
 
 func handleGetSettings(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -33,25 +32,18 @@ func handleGetSettings(settings *service.SettingsService) http.HandlerFunc {
 	}
 }
 
-// configFactsResponse is GET /config: the running configuration the Settings
-// page's read-only "running configuration" card shows. They come from the
-// configuration the server booted with, not from the settings rows of the
-// same name, which only the setup wizard writes and which go stale when
+// configFactsResponse is GET /config: the running configuration for the Settings card, taken from what the
+// server booted with, not the same-named settings rows, which only the wizard writes and which go stale when
 // config.yaml is edited.
 //
-// Secrets are NEVER emitted as values: the GIF API key and the GitHub token
-// cross this boundary only as `*_configured` booleans, so the card can say
-// "configured" without handing the value to the admin panel (or, since the
-// panel is a browser page, to the browser).
-//
-// The host path and endpoints (backup_dir, voice_url, tls_domain) are sent
-// only to an ADMINISTRATOR or the owner; a MANAGE_SERVER-only caller gets the
-// response without them, like the support bundle leaves them out.
+// Secrets are NEVER emitted as values: the GIF API key and GitHub token cross only as `*_configured`
+// booleans. The host path and endpoints (backup_dir, voice_url, tls_domain) go only to an ADMINISTRATOR or
+// the owner, as the support bundle leaves them out.
 type configFactsResponse struct {
 	UploadMaxSizeMB int    `json:"upload_max_size_mb"`
 	VoiceQuality    string `json:"voice_quality"`
-	// config.yaml's upload file-type lists: the Settings page's values until
-	// the owner saves the upload_*_extensions rows that replace them.
+	// config.yaml's upload file-type lists: the Settings page's values until the upload_*_extensions rows
+	// replace them.
 	UploadBlockedExtensions []string `json:"upload_blocked_extensions"`
 	UploadAllowedExtensions []string `json:"upload_allowed_extensions"`
 
@@ -105,9 +97,8 @@ func handleGetConfigFacts(cfg *config.Config) http.HandlerFunc {
 	}
 }
 
-// runningLogLevel names the level the server runs for a logging.level value:
-// the normalized name, or info for a value boot did not recognise. An empty
-// value stays empty so the card reads "Not set".
+// runningLogLevel names the running level for a logging.level value: the normalized name, info for an
+// unrecognised value; empty stays empty (the card reads "Not set").
 func runningLogLevel(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return ""
@@ -116,19 +107,44 @@ func runningLogLevel(value string) string {
 	return levelName(level)
 }
 
-// uploadPolicyBroadcaster is the hub capability that sends the saved upload
-// file-type lists to connected clients; *ws.Hub implements it
-// (hub_wiring_test.go pins that).
+// uploadPolicyBroadcaster is the hub capability that sends saved upload file-type lists to clients (pinned by
+// hub_wiring_test.go).
 type uploadPolicyBroadcaster interface {
 	BroadcastUploadPolicy()
 }
 
-// gameActivityPolicyApplier is the hub capability that makes the hub follow
-// the saved game activity switch: it clears every shown game when
-// the switch is off and sends game_activity_policy to connected clients.
-// *ws.Hub implements it (hub_wiring_test.go pins that).
+// gameActivityPolicyApplier is the hub capability that follows the game activity switch: off clears every
+// shown game and sends game_activity_policy (pinned by hub_wiring_test.go).
 type gameActivityPolicyApplier interface {
 	ApplyGameActivityPolicy(saved bool)
+}
+
+// videoBitrateCapApplier is the hub capability that follows the saved video upload cap and sends
+// video_bitrate_cap (pinned by hub_wiring_test.go).
+type videoBitrateCapApplier interface {
+	ApplyVideoBitrateCap(savedKbps int)
+}
+
+// applyLiveSettings hands the hub the saved settings it follows live: game activity off must clear shown
+// games and a new video cap must reach live streams, not wait for the next connect. all is Patch's result
+// (nil on an early failure); the stored value wins over the requested one.
+func applyLiveSettings(hub HubBroadcaster, updates, all map[string]string) {
+	if value, changing := updates[service.GameActivityEnabledKey]; changing {
+		if a, ok := hub.(gameActivityPolicyApplier); ok {
+			if stored, read := all[service.GameActivityEnabledKey]; read {
+				value = stored
+			}
+			a.ApplyGameActivityPolicy(service.GameActivityEnabled(value))
+		}
+	}
+	if value, changing := updates[service.VoiceMaxVideoKbpsKey]; changing {
+		if a, ok := hub.(videoBitrateCapApplier); ok {
+			if stored, read := all[service.VoiceMaxVideoKbpsKey]; read {
+				value = stored
+			}
+			a.ApplyVideoBitrateCap(service.VoiceMaxVideoBitrate(value) / 1000)
+		}
+	}
 }
 
 func handlePatchSettings(settings *service.SettingsService, retention *service.RetentionService, hub HubBroadcaster) http.HandlerFunc {
@@ -142,12 +158,10 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 			return
 		}
 
-		// The backup policy is owner-only: these keys decide which
-		// scheduled copies survive and whether new ones are taken, so a
-		// MANAGE_SERVER (or ADMINISTRATOR) non-owner must not reach them even
-		// though the rest of the settings page is theirs. Refuse the whole
-		// request rather than silently dropping the keys — a partial write
-		// would report success for a policy the caller cannot set.
+		// The backup policy is owner-only: these keys decide which scheduled copies survive and whether new ones
+		// are taken, so a MANAGE_SERVER or ADMINISTRATOR non-owner must not reach them. Refuse the whole request
+		// rather than silently drop the keys: a partial write would report success for a policy the caller cannot
+		// set.
 		for key := range updates {
 			if service.IsOwnerOnlySettingKey(key) && !isOwnerFromContext(r) {
 				writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "owner role required")
@@ -178,27 +192,16 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return
 		}
-		// Turning game activity off must clear the games already shown and
-		// tell open clients, not wait for their next connect. It runs before
-		// the error check: Patch can fail after its commit (the response read
-		// on a cancelled request), and the hub re-reads the stored value
-		// itself, so a save that did land still reaches it.
-		if value, changing := updates[service.GameActivityEnabledKey]; changing {
-			if a, ok := hub.(gameActivityPolicyApplier); ok {
-				if stored, read := all[service.GameActivityEnabledKey]; read {
-					value = stored
-				}
-				a.ApplyGameActivityPolicy(service.GameActivityEnabled(value))
-			}
-		}
+		// Before the error check: Patch can fail after its commit (response read on a cancelled request) and the
+		// hub re-reads stored values, so a save that landed still reaches it.
+		applyLiveSettings(hub, updates, all)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "settings patch failed", "error", err)
 			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to update settings")
 			return
 		}
-		// Composers check the file-type lists before uploading, from what
-		// auth_ok gave them; without this a saved list only reached a client
-		// on its next connect.
+		// Composers check the file-type lists from auth_ok; without this a saved list only reached a client on its
+		// next connect.
 		_, blocked := updates[service.UploadBlockedExtensionsKey]
 		_, allowed := updates[service.UploadAllowedExtensionsKey]
 		if blocked || allowed {

@@ -4,6 +4,7 @@
 // once the request settles.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { tauriEventMock } from "../helpers/tauriEventMock";
+import { validReply } from "../helpers/restReplyFixtures";
 
 const { mockFetch, handlers } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
@@ -63,20 +64,20 @@ describe("uploadFile progress", () => {
     emit({ id, sent: 50, total: 100 });
     expect(progress).toEqual([0.5]);
 
-    settle(jsonResponse({ id: "srv", url: "/f", filename: "a.png", size: 1, mime: "image/png" }));
+    settle(jsonResponse(validReply("UploadResponse")));
     await upload;
     expect(mockFetch.mock.calls[0]![0]).toBe("https://localhost:8443/api/v1/uploads");
   });
 
   it("unsubscribes once the upload settles", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ id: "srv", url: "/f", filename: "a.png" }));
+    mockFetch.mockResolvedValue(jsonResponse(validReply("UploadResponse")));
     const file = new File(["x"], "a.png", { type: "image/png" });
     await api.uploadFile(file, undefined, () => {});
     expect(handlers.get("upload-progress")?.size ?? 0).toBe(0);
   });
 
   it("sends no correlation header when no progress callback is given", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ id: "srv", url: "/f", filename: "a.png" }));
+    mockFetch.mockResolvedValue(jsonResponse(validReply("UploadResponse")));
     const file = new File(["x"], "a.png", { type: "image/png" });
     await api.uploadFile(file);
     const headers = mockFetch.mock.calls[0]![1].headers as Record<string, string>;

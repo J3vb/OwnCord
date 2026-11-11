@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createCertFirstUseModal } from "../../src/components/CertMismatchModal";
+import { createCertFirstUseModal } from "../../src/features/connection/CertMismatchModal";
 
 describe("createCertFirstUseModal (F4/F8)", () => {
   it("renders the host + fingerprint and wires accept/reject", () => {

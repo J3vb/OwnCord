@@ -6,7 +6,9 @@ import { appendChildren, createElement, setText } from "@lib/dom";
 import { resetExternalConsent } from "../content-consent/external";
 import { externalConsentText } from "../../i18n/externalConsent";
 import { composerButtonPrefKey, type ComposerButton } from "../messaging/composerButtons";
-import { appendToggleRows, platformText } from "./helpers";
+import { appendToggleRows, platformText, savePref } from "./helpers";
+import { isAndroidHost } from "../../lib/hostPlatform";
+import { dataSaverPreference, type DataSaverPreference } from "../messaging/content/dataSaver";
 import { settingsText as t } from "../../i18n/settings";
 
 export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
@@ -46,6 +48,7 @@ export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
   ];
 
   appendToggleRows(section, toggles, signal);
+  if (isAndroidHost()) section.appendChild(buildDataSaverRow(signal));
   section.appendChild(buildConsentResetRow(signal));
 
   section.appendChild(
@@ -86,6 +89,28 @@ export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
   );
 
   return section;
+}
+
+function buildDataSaverRow(signal: AbortSignal): HTMLDivElement {
+  const row = createElement("div", { class: "setting-row stacked" });
+  const info = createElement("div", { class: "setting-info" });
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, t("images.dataSaver.label")),
+    createElement("div", { class: "setting-desc" }, t("images.dataSaver.desc")),
+  );
+  const select = createElement("select", {
+    class: "settings-select",
+    "aria-label": t("images.dataSaver.label"),
+  });
+  const choices: readonly DataSaverPreference[] = ["off", "mobile", "always"];
+  for (const value of choices) {
+    select.appendChild(createElement("option", { value }, t(`images.dataSaver.${value}`)));
+  }
+  select.value = dataSaverPreference();
+  select.addEventListener("change", () => savePref("dataSaver", select.value), { signal });
+  appendChildren(row, info, select);
+  return row;
 }
 
 /** Forget every server's external-content choice. Turning off one

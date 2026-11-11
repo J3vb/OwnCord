@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 const srcRoot = path.resolve(__dirname, "../../src");
 
 const HAND_WRITTEN_SIGNATURE: Readonly<Record<string, number>> = {
-  "components/DmSidebar.ts": 1,
-  "pages/main-page/SidebarDmSection.ts": 1,
+  "features/direct-messages/DmSidebar.ts": 1,
+  "features/direct-messages/SidebarDmSection.ts": 1,
 };
 
 function sourceFiles(dir: string): string[] {

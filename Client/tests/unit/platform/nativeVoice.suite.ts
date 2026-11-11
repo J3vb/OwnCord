@@ -50,6 +50,8 @@ export interface NativeControl {
   refusesScreenChange(reason: string): void;
   /** The host answers the next live quality change with this publication. */
   setsScreenQualityAs(set: { sid: string; width: number; height: number }): void;
+  /** The host refuses the next video bitrate change with this reason. */
+  refusesVideoBitrate(reason: string): void;
   /** The host rejects the next live quality change with this value. */
   rejectsScreenQuality(rejection: unknown): void;
   /** The host refuses the next screen audio publish with this reason. */
@@ -385,6 +387,32 @@ export function describeNativeVoiceSuite(
       ];
       expect(ctx.native.commands()).toEqual([call, call, call, call]);
     });
+
+    check(
+      "holds a live publication under a bitrate and rejects with the host's reason",
+      async () => {
+        await ctx.subject.setVideoBitrate(7, "camera", "TR_cam", 1_000_000);
+        await ctx.subject.setVideoBitrate(7, "screen", "TR_screen", 0);
+        ctx.native.refusesVideoBitrate("the encoder refused");
+        const refused = ctx.subject.setVideoBitrate(7, "screen", "TR_screen", 500_000);
+        await expect(refused).rejects.toBeInstanceOf(Error);
+        await expect(refused).rejects.toThrow("the encoder refused");
+        expect(ctx.native.commands()).toEqual([
+          [
+            "native_voice_set_video_bitrate",
+            { session: 7, kind: "camera", sid: "TR_cam", maxBitrate: 1_000_000 },
+          ],
+          [
+            "native_voice_set_video_bitrate",
+            { session: 7, kind: "screen", sid: "TR_screen", maxBitrate: 0 },
+          ],
+          [
+            "native_voice_set_video_bitrate",
+            { session: 7, kind: "screen", sid: "TR_screen", maxBitrate: 500_000 },
+          ],
+        ]);
+      },
+    );
 
     check("lists the host's devices and switches by their ids", async () => {
       const devices = {

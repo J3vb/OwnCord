@@ -2,15 +2,13 @@ package ws
 
 import "time"
 
-// beginTargetedFanout and endTargetedFanout bracket an unsequenced, targeted
-// fan-out that walks a snapshot of connected users outside seqMu. While one is
-// in flight mustFullResyncAtRegister forces every reconnect onto a full ready:
-// the reconnect may have been skipped by the loop, and its last_seq can be
-// above the leading watermark bump. Both take seqMu, the lock
-// reconnectRegister holds across its check-then-register, so a reconnect
-// either registers before begin (and is in the snapshot), sees the counter, or
-// checks after end against a watermark covering every seq allocated during the
-// fan-out. Do not call either while holding seqMu.
+// beginTargetedFanout and endTargetedFanout bracket an unsequenced, targeted fan-out that walks a
+// snapshot of connected users outside seqMu. While one is in flight mustFullResyncAtRegister forces
+// every reconnect onto a full ready: the loop may have skipped it and its last_seq can exceed the
+// leading watermark bump. Both take seqMu, which reconnectRegister holds across check-then-
+// register, so a reconnect either registers before begin (and is in the snapshot), sees the
+// counter, or checks after end against a watermark covering the fan-out. Never call either holding
+// seqMu.
 func (h *Hub) beginTargetedFanout() {
 	h.seqMu.Lock()
 	start := time.Now()
@@ -29,10 +27,9 @@ func (h *Hub) endTargetedFanout() {
 	h.targetedFanouts--
 }
 
-// broadcastChannelCreateRaceHook, when non-nil, runs once per audience member
-// inside BroadcastChannelCreate's fan-out loop. Test-only (always nil in
-// production): it lands a reconnect's watermark re-check mid-fan-out
-// deterministically, same pattern as refreshChannelVisibilityRaceHook.
+// broadcastChannelCreateRaceHook runs per audience member in BroadcastChannelCreate's fan-out;
+// test-only, lands a reconnect's watermark re-check mid-fan-out (like
+// refreshChannelVisibilityRaceHook).
 var broadcastChannelCreateRaceHook func(userID int64)
 
 func fireBroadcastChannelCreateRaceHook(userID int64) {

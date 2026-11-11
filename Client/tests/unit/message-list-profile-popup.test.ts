@@ -12,7 +12,9 @@ const { createPopupMock, destroyMock } = vi.hoisted(() => {
     })),
   };
 });
-vi.mock("@components/UserProfilePopup", () => ({ createUserProfilePopup: createPopupMock }));
+vi.mock("../../src/features/profiles/userProfilePopup", () => ({
+  createUserProfilePopup: createPopupMock,
+}));
 
 import { createMessageList } from "../../src/features/messaging/MessageList";
 import type { MessageListOptions } from "../../src/features/messaging/MessageList";

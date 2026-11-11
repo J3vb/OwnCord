@@ -61,7 +61,7 @@ decision table, don't improvise.
 
 | Primitive                                                                                                                                                                                                                                         | Source                                                               | Use for                                                                                        | Do **not** use for                                                   |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| **Toast** (5 s auto-dismiss, but an `error` stays until dismissed; max 5; may carry one action button; stacked just above the composer, at the window edge while settings or a dialog is open, at the top on a phone with a sheet or dialog open) | `lib/ui/toast.ts` → `components/Toast.ts`                            | Transient results of an explicit user action (sent, copied, saved, "couldn't reach server")    | Anything the user must act on; anything that must survive navigation |
+| **Toast** (5 s auto-dismiss, but an `error` stays until dismissed; max 5; may carry one action button; stacked just above the composer, at the window edge while settings or a dialog is open, at the top on a phone with a sheet or dialog open) | `lib/ui/toast.ts` → `lib/ui/toastContainer.ts`                       | Transient results of an explicit user action (sent, copied, saved, "couldn't reach server")    | Anything the user must act on; anything that must survive navigation |
 | **Inline field error**                                                                                                                                                                                                                            | per-form                                                             | Validation and per-field server rejections (bad password, weak input)                          | Global/connection state                                              |
 | **Inline section error + Retry**                                                                                                                                                                                                                  | per-view                                                             | A failed load of a view's own data (messages, invites, pins)                                   | One-shot actions (use a toast)                                       |
 | **Persistent banner**                                                                                                                                                                                                                             | `components/ServerBanner.ts` (reconnect/restart), ad-hoc cert banner | Connection status: reconnecting, server-restart countdown, first-trust cert notice             | Per-action results                                                   |
@@ -80,8 +80,9 @@ source of truth in `ui.store.connectionStatus`
 `onStateChange`, and read by any control that needs a live socket.
 
 > **✓ Implemented (2026-07).** `ui.store.connectionStatus` is now the single
-> source of truth: `main.ts` calls `wireConnectionStatus(ws)`, whose writer
-> lives in `lib/dispatcher.ts`
+> source of truth: `app/session.ts` calls `wireConnectionStatus(ws)` once, on
+> the first load of `lib/dispatcher.ts` (before the first dial), whose writer
+> lives there
 > (`ws.onStateChange` → `toConnectionStatus` → `setConnectionStatus`), mapping
 > the internal 5-state machine onto the 3-state status (`connecting` /
 > `authenticating` read as `reconnecting`, since a reconnect cycle passes

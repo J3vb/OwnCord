@@ -7,21 +7,14 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// coalesceAudience narrows userIDs (push subscribers already past
-// prefilterAudience) to the users a push is actually sent to: not the author,
-// currently eligible (offline and permitted, see eligibleFor) and, for a
-// one-to-one DM, trusting the author.
-// Eligibility is checked BEFORE coalescing: an online or unauthorized candidate
-// must not reserve the 60s window for a channel they were never pushed about, or a
-// later genuinely eligible mention would silently get nothing. It is re-checked
-// before every delivery attempt in stillEligible, since a slow dispatch (retries,
-// worker pool) can outlast it.
-// For a DM, permission IS participation (permissions.CanViewChannel checks only
-// DMParticipant). Notify already refused a group DM, so "dm" here is one-to-one and
-// a push additionally requires the candidate trusts the author (the trusted_senders
-// row Message Requests gates on, as DMAudience applies to chat_message delivery),
-// so a first-contact message cannot ring a stranger's phone before they accept it.
-// Fail closed: a lookup error counts as untrusted.
+// coalesceAudience narrows userIDs (subscribers past prefilterAudience) to the users a push is sent to: not
+// the author, currently eligible (offline and permitted, see eligibleFor) and, for a one-to-one DM, trusting
+// the author. Eligibility is checked BEFORE coalescing: an online or unauthorized candidate must not reserve
+// the 60s window, or a later genuinely eligible mention would get nothing. It is re-checked in stillEligible
+// before every attempt. For a DM, permission IS participation (CanViewChannel checks only DMParticipant);
+// Notify already refused a group DM, so a push additionally requires the candidate trusts the author (the
+// trusted_senders row Message Requests gates on), so a first-contact message cannot ring a stranger's phone
+// before they accept it. Fail closed: a lookup error counts as untrusted.
 func (d *PushDispatcher) coalesceAudience(ctx context.Context, ch *db.Channel, userIDs []int64, authorID int64) []int64 {
 	out := make([]int64, 0, len(userIDs))
 	for _, uid := range userIDs {
@@ -33,10 +26,8 @@ func (d *PushDispatcher) coalesceAudience(ctx context.Context, ch *db.Channel, u
 	return out
 }
 
-// prefilterAudience is the in-memory half of the audience: distinct, not the
-// author, not a blocker of the author, not connected (their client already has
-// the message) and not inside their coalescing window for the channel. It
-// reads no store.
+// prefilterAudience is the in-memory half of the audience: distinct, not the author, not a blocker of the
+// author, not connected, not inside their coalescing window. Reads no store.
 func (d *PushDispatcher) prefilterAudience(candidateIDs []int64, authorID, channelID int64, blockedByAuthor map[int64]bool) []int64 {
 	seen := make(map[int64]bool, len(candidateIDs))
 	out := make([]int64, 0, len(candidateIDs))
@@ -54,7 +45,6 @@ func (d *PushDispatcher) prefilterAudience(candidateIDs []int64, authorID, chann
 	return out
 }
 
-// subscribedUserIDs lists the distinct users of subs in order.
 func subscribedUserIDs(subs []db.PushSubscriptionForDispatch) []int64 {
 	seen := make(map[int64]bool, len(subs))
 	out := make([]int64, 0, len(subs))

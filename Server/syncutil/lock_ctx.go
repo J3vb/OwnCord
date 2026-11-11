@@ -9,10 +9,9 @@ import (
 // lockPollMax caps the wait between LockContext attempts.
 const lockPollMax = 5 * time.Millisecond
 
-// LockContext acquires mu unless ctx ends first. It returns nil with the lock
-// held, or ctx's error wrapped, with the lock not held. It polls TryLock with a
-// short growing backoff and starts no goroutine, so a caller whose context
-// expires returns promptly and nothing is left behind to take the lock later.
+// LockContext acquires mu unless ctx ends first, returning nil with the lock
+// held or ctx's error wrapped with it not held. It polls TryLock and starts no
+// goroutine, so nothing is left behind to take the lock after ctx expires.
 func LockContext(ctx context.Context, mu *Mutex) error {
 	if mu.TryLock() {
 		return nil

@@ -14,6 +14,7 @@ import {
   setMessages,
 } from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
+import { hoverRows } from "../helpers/hoverRows";
 
 describe("MessageList focus retention across a virtualized rebuild", () => {
   let container: HTMLDivElement;
@@ -38,6 +39,7 @@ describe("MessageList focus retention across a virtualized rebuild", () => {
   it("restores focus to the action button on its row after a full rebuild", async () => {
     const list = createMessageList(options);
     list.mount(container);
+    hoverRows(container);
 
     const replyBtn = container.querySelector<HTMLButtonElement>("[data-testid='msg-reply-2']");
     expect(replyBtn).not.toBeNull();
@@ -105,6 +107,7 @@ describe("MessageList focus retention across a virtualized rebuild", () => {
   it("restores focus without scrolling the list to the focused row", async () => {
     const list = createMessageList(options);
     list.mount(container);
+    hoverRows(container);
     container.querySelector<HTMLButtonElement>("[data-testid='msg-reply-2']")!.focus();
 
     const focusSpy = vi.spyOn(HTMLElement.prototype, "focus");

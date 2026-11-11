@@ -7,7 +7,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import { type WsClient } from "@lib/ws";
 import { type ApiClient } from "@lib/api";
 import { createRateLimiterSet } from "@lib/net/rateLimiter";
-import { createToastContainer } from "@components/Toast";
+import { createToastContainer } from "@lib/ui/toastContainer";
 import { initToast, teardownToast, showToast } from "@lib/ui/toast";
 import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { Disposable } from "@lib/disposable";
@@ -36,8 +36,8 @@ import { createReactionController } from "./main-page/ReactionController";
 import { createChannelController } from "./main-page/ChannelController";
 import { log, resolveChannelName, getCurrentUserId } from "./main-page/pageShared";
 import type { PageState, PageApi } from "./main-page/pageState";
-import { createDmProfilePanel } from "./main-page/dmProfilePanel";
-import { createDmCalls } from "./main-page/dmCalls";
+import { createDmProfilePanel } from "../features/direct-messages/dmProfilePanel";
+import { createPageDmCalls } from "./main-page/pageDmCalls";
 import { createPagePresence } from "./main-page/pagePresence";
 import { mountConnectionBanner, mountLayout } from "./main-page/pageMountShell";
 import { mountSettings } from "./main-page/pageMountSettings";
@@ -168,7 +168,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   Object.assign(
     pg,
     createDmProfilePanel(st, pg),
-    createDmCalls(st, pg),
+    createPageDmCalls(st, pg),
     createPagePresence(st, pg),
   );
 
@@ -203,7 +203,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onSearch: () => ms.chatAreaResult.searchCtrl.open(),
         onOpenSettings: () => openSettings(),
         onOpenShortcuts: () =>
-          void import("@components/ShortcutsOverlay")
+          void import("../features/navigation/ShortcutsOverlay")
             .then((m) => {
               // The page may have unmounted while the chunk loaded.
               if (ms.shortcutsClosed) return;

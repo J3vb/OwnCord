@@ -10,8 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// ListUnfinishedErasureJobs returns every job whose files are not yet gone,
-// oldest first.
+// ListUnfinishedErasureJobs returns every job whose files are not yet gone, oldest first.
 func (d *DB) ListUnfinishedErasureJobs(ctx context.Context) ([]ErasureJob, error) {
 	rows, err := d.q.ListUnfinishedErasureJobs(ctx)
 	if err != nil {
@@ -66,8 +65,8 @@ func erasureJobFromRow(id, userID int64, state, files string, removed, attempts 
 	return job, nil
 }
 
-// RecordErasureJobAttempt records a run that left files behind: the count
-// removed so far and the last error, and bumps the attempt counter.
+// RecordErasureJobAttempt records a run that left files behind (count removed, last
+// error) and bumps the attempt counter.
 func (d *DB) RecordErasureJobAttempt(ctx context.Context, id int64, filesRemoved int, lastError string) error {
 	var errText *string
 	if lastError != "" {

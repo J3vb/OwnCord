@@ -474,6 +474,7 @@ describeNativeVoiceSuite(async () => {
     failsVideoCodecs: () => undefined,
     refusesCameraChange: () => undefined,
     refusesScreenChange: () => undefined,
+    refusesVideoBitrate: () => undefined,
     setsScreenQualityAs: () => undefined,
     rejectsScreenQuality: () => undefined,
     refusesScreenAudio: () => undefined,

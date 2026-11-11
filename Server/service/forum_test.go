@@ -166,6 +166,28 @@ func TestAdminUpdateForumSettings(t *testing.T) {
 	}
 }
 
+// Requiring a tag with no tag to pick, or deleting the last tag while the
+// switch stays on, is refused and leaves the stored settings as they were.
+func TestAdminUpdateForumSettings_RequireTagNeedsATag(t *testing.T) {
+	svc, _, forum := newForumSettingsService(t)
+	ctx := context.Background()
+	if _, err := svc.AdminUpdateForumSettings(ctx, 7, forum, ForumSettingsInput{
+		RequireTag: true, DefaultAutoArchiveMinutes: 60,
+	}); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("require tag with no tags: err = %v, want ErrBadRequest", err)
+	}
+	if _, err := svc.AdminUpdateForumSettings(ctx, 7, forum, ForumSettingsInput{
+		RequireTag: true, DefaultAutoArchiveMinutes: 60, Tags: []ForumTagInput{{Name: "bug"}},
+	}); err != nil {
+		t.Fatalf("require tag with one tag: %v", err)
+	}
+	if _, err := svc.AdminUpdateForumSettings(ctx, 7, forum, ForumSettingsInput{
+		RequireTag: true, DefaultAutoArchiveMinutes: 60,
+	}); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("deleting the last tag with require tag on: err = %v, want ErrBadRequest", err)
+	}
+}
+
 // Every validation refusal answers ErrBadRequest and writes nothing.
 func TestAdminUpdateForumSettings_RefusalsWriteNothing(t *testing.T) {
 	svc, database, forum := newForumSettingsService(t)

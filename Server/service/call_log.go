@@ -12,18 +12,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// Timing of the call log worker. A call ends callEndGrace after its room
-// empties, so a quick rejoin is the same call. Notes are coalesced for
-// callLogCoalesce before a reconcile, and callLogTick is the period of the
-// level-triggered pass that heals a missed note and refreshes last_seen_at.
+// Call log worker timing: a call ends callEndGrace after its room empties (a quick rejoin
+// is the same call); notes coalesce for callLogCoalesce; callLogTick heals missed notes.
 const (
 	callLogCoalesce = 2 * time.Second
 	callLogTick     = 60 * time.Second
 	callEndGrace    = 10 * time.Second
 )
 
-// CallLogStore is the data access the call log worker needs beyond the reads
-// Store already offers. *db.DB satisfies it; Store embeds it.
+// CallLogStore is the data access the call log worker needs beyond Store's reads.
 type CallLogStore interface {
 	CreateCallLog(ctx context.Context, p db.CallLogParams) (*db.CallLogRow, error)
 	EndCall(ctx context.Context, messageID int64, endedAt, content string) (bool, error)
@@ -34,9 +31,8 @@ type CallLogStore interface {
 	GetCallInfo(ctx context.Context, messageID int64) (*db.CallInfo, error)
 }
 
-// CallLogEvent is what the sink needs to build the frames for one call log
-// row. Author and AuthorRole are set only on a created row. Audience is who
-// the DM frame goes to (the same rule as a chat message from the author).
+// CallLogEvent is what the sink needs to build the frames for one call log row. Author
+// and AuthorRole are set only on a created row; Audience is who the DM frame goes to.
 type CallLogEvent struct {
 	MessageID  int64
 	ChannelID  int64
@@ -46,25 +42,21 @@ type CallLogEvent struct {
 	Timestamp  string
 	Call       db.CallInfo
 	Audience   []int64
-	// Reopens are the DMs reopened for a recipient, announced ahead of the row.
-	Reopens []RingReopen
+	Reopens    []RingReopen
 }
 
-// CallLogSink delivers a call log row to connected clients. The hub
-// implements it. The worker holds no lock while it calls the sink.
+// CallLogSink delivers a call log row to connected clients (the hub). The worker holds no lock while calling
+// it.
 type CallLogSink interface {
 	CallLogCreated(ctx context.Context, ev CallLogEvent)
 	CallLogEnded(ctx context.Context, ev CallLogEvent)
 }
 
-// callLogPending is what the notes recorded for one channel since the last
-// reconcile: the first note time per joiner and the latest leave.
 type callLogPending struct {
 	joiners   map[int64]time.Time
 	lastLeave time.Time
 }
 
-// callLogServiceStore is what CallLogService reads and writes. *db.DB satisfies it.
 type callLogServiceStore interface {
 	CallLogStore
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
@@ -75,48 +67,41 @@ type callLogServiceStore interface {
 	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 }
 
-// CallLogService derives one message row per DM call from voice presence. Joins
-// and leaves only post notes; a single worker goroutine owns every write and
-// reconciles a channel's voice_states rows with its live call row, so a missed
-// note heals on the next pass.
+// CallLogService derives one message row per DM call from voice presence. Joins and leaves
+// only post notes; one worker goroutine owns every write and reconciles voice_states with
+// the live call row, so a missed note heals on the next pass.
 type CallLogService struct {
 	st   callLogServiceStore
 	dms  *DMService
 	sink atomic.Pointer[CallLogSink]
 
-	// now is the clock; the durations below default to the package constants.
 	now      func() time.Time
 	coalesce time.Duration
 	tick     time.Duration
 	grace    time.Duration
 
-	// callLogMu guards the fields below. It is a leaf lock: nothing is read,
-	// written or called while it is held except these maps. Callers may hold
-	// voiceLock(userID) (ws) when they post a note, so the order is
-	// voiceLock -> callLogMu and never the reverse.
+	// callLogMu guards the fields below. Leaf lock: only these maps are touched under it.
+	// Callers may hold voiceLock(userID) (ws) when posting a note, so the order is
+	// voiceLock -> callLogMu, never the reverse.
 	callLogMu syncutil.Mutex
-	// running is true between StartCallLogWorker and stop. A note posted while
-	// it is false does nothing (unit tests, boot before the worker starts).
+	// running is true between StartCallLogWorker and stop; a note posted while false does nothing.
 	running    bool
 	dirty      map[int64]*callLogPending
 	emptySince map[int64]time.Time
 	suppressed map[int64]struct{}
-	// retryAt and retryDelay back a channel off after a failed reconcile (growing
-	// delay, no tight loop). recorded holds the participants already written for a
-	// live call (by message id) so an unchanged room costs no write; audiences holds
-	// the audience a call's start went to so its end reaches the same people.
+	// retryAt/retryDelay back a channel off after a failed reconcile. recorded holds the
+	// participants already written for a live call (by message id) so an unchanged room costs
+	// no write; audiences holds where a call's start went so its end reaches the same people.
 	retryAt    map[int64]time.Time
 	retryDelay map[int64]time.Duration
 	recorded   map[int64]map[int64]struct{}
 	audiences  map[int64][]int64
 
 	wake chan struct{}
-	// done is closed when the current loop exits.
 	done chan struct{}
 }
 
-// NewCallLogService creates a CallLogService. dms may be nil, in which case a
-// created row reopens no closed DM.
+// NewCallLogService creates a CallLogService. dms may be nil: a created row then reopens no closed DM.
 func NewCallLogService(st callLogServiceStore, dms *DMService) *CallLogService {
 	return &CallLogService{
 		st: st, dms: dms,
@@ -133,8 +118,7 @@ func NewCallLogService(st callLogServiceStore, dms *DMService) *CallLogService {
 	}
 }
 
-// SetSink installs the sink that delivers created and ended rows. Called
-// before the worker starts.
+// SetSink installs the sink for created and ended rows; call before the worker starts.
 func (s *CallLogService) SetSink(sink CallLogSink) {
 	if s == nil {
 		return
@@ -149,8 +133,8 @@ func (s *CallLogService) loadSink() CallLogSink {
 	return nil
 }
 
-// NoteJoin records that userID completed a voice join into channelID at the given
-// time. It never blocks and does no I/O; the worker drops anything not a DM.
+// NoteJoin records that userID completed a voice join into channelID at the given time.
+// Never blocks, no I/O; the worker drops anything not a DM.
 func (s *CallLogService) NoteJoin(channelID, userID int64, at time.Time) {
 	if s == nil {
 		return
@@ -168,8 +152,7 @@ func (s *CallLogService) NoteJoin(channelID, userID int64, at time.Time) {
 	s.signal()
 }
 
-// NoteLeave records that a voice row in channelID was deleted at the given
-// time. Same contract as NoteJoin.
+// NoteLeave records that a voice row in channelID was deleted at the given time.
 func (s *CallLogService) NoteLeave(channelID int64, at time.Time) {
 	if s == nil {
 		return
@@ -187,8 +170,7 @@ func (s *CallLogService) NoteLeave(channelID int64, at time.Time) {
 	s.signal()
 }
 
-// pendingLocked returns the channel's pending entry, creating it. Caller
-// holds callLogMu.
+// pendingLocked returns the channel's pending entry, creating it. Caller holds callLogMu.
 func (s *CallLogService) pendingLocked(channelID int64) *callLogPending {
 	p := s.dirty[channelID]
 	if p == nil {
@@ -198,7 +180,6 @@ func (s *CallLogService) pendingLocked(channelID int64) *callLogPending {
 	return p
 }
 
-// signal wakes the worker without ever blocking the caller.
 func (s *CallLogService) signal() {
 	select {
 	case s.wake <- struct{}{}:
@@ -206,7 +187,6 @@ func (s *CallLogService) signal() {
 	}
 }
 
-// takeDirty swaps out the dirty map.
 func (s *CallLogService) takeDirty() map[int64]*callLogPending {
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
@@ -215,7 +195,6 @@ func (s *CallLogService) takeDirty() map[int64]*callLogPending {
 	return out
 }
 
-// requeue puts a failed reconcile's notes back so the next pass retries them.
 func (s *CallLogService) requeue(channelID int64, p *callLogPending) {
 	if p == nil {
 		return
@@ -233,7 +212,6 @@ func (s *CallLogService) requeue(channelID int64, p *callLogPending) {
 	}
 }
 
-// dropState forgets everything held for a channel.
 func (s *CallLogService) dropState(channelID int64) {
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
@@ -280,9 +258,8 @@ func (s *CallLogService) clearEmptySince(channelID int64) {
 	delete(s.emptySince, channelID)
 }
 
-// nextDue is the earliest moment the worker has timed work: a room that may
-// end after its grace period, or a channel whose retry delay runs out. Zero
-// when there is none. A channel waiting out a retry delay is not due before it.
+// nextDue is the earliest moment the worker has timed work (a room's grace period or a
+// retry delay running out); zero when none.
 func (s *CallLogService) nextDue() time.Time {
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
@@ -305,8 +282,6 @@ func (s *CallLogService) nextDue() time.Time {
 	return next
 }
 
-// dueChannels lists the channels with timed work due at now: a room whose
-// grace period has run out, or a retry delay that has passed.
 func (s *CallLogService) dueChannels(now time.Time) []int64 {
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
@@ -333,8 +308,6 @@ func (s *CallLogService) dueChannels(now time.Time) []int64 {
 	return due
 }
 
-// pendingLeave returns the latest leave time still waiting in the channel's
-// pending notes, zero when there is none.
 func (s *CallLogService) pendingLeave(channelID int64) time.Time {
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
@@ -344,7 +317,6 @@ func (s *CallLogService) pendingLeave(channelID int64) time.Time {
 	return time.Time{}
 }
 
-// takeDirtyFor removes and returns one channel's pending notes.
 func (s *CallLogService) takeDirtyFor(channelID int64) *callLogPending {
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
@@ -353,8 +325,6 @@ func (s *CallLogService) takeDirtyFor(channelID int64) *callLogPending {
 	return p
 }
 
-// inBackoff reports whether a failed reconcile of the channel is still being
-// waited out.
 func (s *CallLogService) inBackoff(channelID int64) bool {
 	now := s.now()
 	s.callLogMu.Lock()
@@ -363,8 +333,6 @@ func (s *CallLogService) inBackoff(channelID int64) bool {
 	return ok && now.Before(r)
 }
 
-// noteFailure backs the channel off: at least the coalesce interval, doubling
-// per failure up to the tick.
 func (s *CallLogService) noteFailure(channelID int64) {
 	now := s.now()
 	s.callLogMu.Lock()
@@ -383,7 +351,6 @@ func (s *CallLogService) clearRetry(channelID int64) {
 	delete(s.retryDelay, channelID)
 }
 
-// recordedSet returns a copy of the participants written for a call.
 func (s *CallLogService) recordedSet(messageID int64) map[int64]struct{} {
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
@@ -413,8 +380,6 @@ func (s *CallLogService) setAudience(messageID int64, audience []int64) {
 	s.audiences[messageID] = slices.Clone(audience)
 }
 
-// forgetCall drops what is held for a call that has ended, returning the
-// audience its start went to.
 func (s *CallLogService) forgetCall(messageID int64) []int64 {
 	s.callLogMu.Lock()
 	defer s.callLogMu.Unlock()
@@ -427,7 +392,6 @@ func (s *CallLogService) forgetCall(messageID int64) []int64 {
 // callLiveContent is the text only old clients show for a live call row.
 const callLiveContent = "started a call."
 
-// callEndedContent is the fallback text of an ended call.
 func callEndedContent(d time.Duration) string {
 	if d < time.Minute {
 		return "started a call that lasted a few seconds."

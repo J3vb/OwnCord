@@ -11,7 +11,10 @@ import {
   type GridSyncDeps,
 } from "../../features/voice/videoGridSync";
 import { toastOutgoingCallOutcome } from "../../features/direct-messages/outgoingCallFeedback";
-import { syncCallsWithVoice } from "../../features/direct-messages/callVoiceSync";
+import {
+  inRoomOnAnyDevice,
+  syncCallsWithVoice,
+} from "../../features/direct-messages/callVoiceSync";
 import { uiStore } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
 import { watchGroupDmExits } from "../../features/direct-messages/groupExitWatch";
@@ -28,7 +31,7 @@ import {
   forgetRemoteVideoWatch,
 } from "@lib/voice/livekitSession";
 import { createSidebarVoiceCallbacks } from "./VoiceCallbacks";
-import { createIncomingCallBanner } from "@components/IncomingCallBanner";
+import { createIncomingCallBanner } from "../../features/direct-messages/IncomingCallBanner";
 import { createRingController, createOutgoingCall } from "@lib/voice/callRing";
 import {
   startRingChime,
@@ -164,6 +167,9 @@ export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
         // Being in the room already answers the ring (a redial from
         // someone in the call re-rings everyone else in the DM).
         if (voiceStore.getState().currentChannelId === payload.channel_id) return;
+        // Likewise when another device of this account is already in the room.
+        if (inRoomOnAnyDevice(voiceStore.getState(), payload.channel_id, getCurrentUserId()))
+          return;
         // A call in the DM you are already sitting in still rings: the
         // channel being open does not mean the app has focus, and Discord
         // rings there too.
@@ -192,6 +198,11 @@ export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
       // The caller hears about it too: in a 1:1 a decline ends the ring,
       // in a group it takes that callee off the list.
       st.outgoingCall?.declined(payload.channel_id, payload.from_user);
+      // This account declined on another device: stop ringing here too.
+      if (payload.from_user === getCurrentUserId()) {
+        st.ringCtrl?.cancel(payload.channel_id);
+        return;
+      }
       const ringing = st.ringCtrl?.current();
       if (ringing === null || ringing === undefined) return;
       if (payload.from_user === ringing.fromUserId) {

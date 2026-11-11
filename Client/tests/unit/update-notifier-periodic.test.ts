@@ -17,7 +17,7 @@ vi.mock("@lib/net/updater", () => ({
   subscribeToUpdateInstall: mockSubscribeToUpdateInstall,
 }));
 
-import { createUpdateNotifier } from "../../src/components/UpdateNotifier";
+import { createUpdateNotifier } from "../../src/features/updates/UpdateNotifier";
 import {
   MIN_BACKGROUND_GAP_MS,
   RECONNECT_SPREAD_MS,

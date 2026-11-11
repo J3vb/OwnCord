@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { createDeleteChannelModal } from "@components/DeleteChannelModal";
-import type { DeleteChannelModalOptions } from "@components/DeleteChannelModal";
+import { createDeleteChannelModal } from "../../src/features/channels/DeleteChannelModal";
+import type { DeleteChannelModalOptions } from "../../src/features/channels/DeleteChannelModal";
 import {
   checkBackdropClickCloses,
   checkClickCloses,

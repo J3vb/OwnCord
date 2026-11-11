@@ -196,6 +196,7 @@ test.describe("moderation notices", () => {
     await expect(page.locator("[data-testid='voice-timeout-3']")).toHaveText(
       /^You can't join voice until /,
     );
+    await page.locator("[data-testid='message-101']").hover();
     const react = page.locator("[data-testid='msg-react-101']");
     await expect(react).toHaveAttribute("aria-disabled", "true");
     await expect(react).toHaveAttribute("title", /^You can't add reactions until /);

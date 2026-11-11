@@ -8,19 +8,13 @@ import { messagingText } from "../../../i18n/messaging";
 
 // The pickers load on their first open, so their code stays out of the
 // main-page chunk.
-export const emojiPickerScreen = createLazyScreen(
-  "emoji-picker",
-  () => import("@components/EmojiPicker"),
-);
+export const emojiPickerScreen = createLazyScreen("emoji-picker", () => import("../EmojiPicker"));
 
-export const gifPickerScreen = createLazyScreen(
-  "gif-picker",
-  () => import("@components/GifPicker"),
-);
+export const gifPickerScreen = createLazyScreen("gif-picker", () => import("../GifPicker"));
 
 export const stickerPickerScreen = createLazyScreen(
   "sticker-picker",
-  () => import("@components/StickerPicker"),
+  () => import("../StickerPicker"),
 );
 
 export const TYPING_THROTTLE_MS = 3_000;

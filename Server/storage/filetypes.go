@@ -8,11 +8,9 @@ import (
 	"unicode"
 )
 
-// DefaultBlockedExtensions is upload.blocked_extensions when config.yaml does
-// not set it: scripts, installers, shortcuts and disk images that run or mount
-// on a double-click, plus web pages and SVG, macro-enabled Office documents and
-// Linux/macOS launchers. Most are plain text with no magic signature for
-// ValidateFileType to catch; the rest (exe, dll, msi) are also caught there.
+// DefaultBlockedExtensions is upload.blocked_extensions when unset: scripts,
+// installers, shortcuts, disk images, web pages and SVG, macro Office documents
+// and launchers. Most have no magic signature for ValidateFileType to catch.
 var DefaultBlockedExtensions = []string{
 	"bat", "cmd", "ps1", "psm1", "ps1xml", "vbs", "vbe", "js", "jse", "wsf", "wsh", "wsc",
 	"sct", "hta", "scr", "msi", "msp", "msc", "msix", "msixbundle", "appx", "appxbundle",
@@ -23,12 +21,10 @@ var DefaultBlockedExtensions = []string{
 	"sh", "docm", "xlsm", "desktop", "command",
 }
 
-// maxExtensionLen bounds one list entry, so a list stays a list of extensions.
 const maxExtensionLen = 32
 
-// FileTypePolicy is the owner's upload policy by file extension. It narrows
-// what ValidateFileType allows and can never widen it: the magic-byte blocks
-// in Save apply to every file whatever its name.
+// FileTypePolicy is the owner's upload policy by extension. It can only narrow
+// what ValidateFileType allows; the magic-byte blocks in Save always apply.
 type FileTypePolicy struct {
 	// Blocked extensions are refused as the final extension of the name.
 	Blocked []string
@@ -37,12 +33,11 @@ type FileTypePolicy struct {
 	Allowed []string
 }
 
-// Check refuses filename when the policy blocks it, with the same "blocked
-// file type:" error shape as ValidateFileType. Only the final extension
-// counts, as it picks the program Windows opens the file with: report.pdf.bat
-// is refused for bat and report.bat.pdf is not. Matching is case-insensitive;
-// trailing dots and spaces, which Windows drops when it saves the file, are
-// ignored.
+// Check refuses filename when the policy blocks it, with ValidateFileType's
+// "blocked file type:" error shape. Only the final extension counts (it picks
+// the program Windows opens the file with): report.pdf.bat is refused,
+// report.bat.pdf is not. Matching ignores case and trailing dots and spaces,
+// which Windows drops on save.
 func (p FileTypePolicy) Check(filename string) error {
 	name := strings.ToLower(strings.TrimRight(filename, ". "))
 	_, rawExt, found := strings.CutLast(name, ".")
@@ -59,17 +54,14 @@ func (p FileTypePolicy) Check(filename string) error {
 	return nil
 }
 
-// ParseExtensionList parses an extension list as the admin panel sends it:
-// entries separated by commas or whitespace, each with or without its dot.
+// ParseExtensionList parses the admin panel's list: comma- or whitespace-separated, dots optional.
 func ParseExtensionList(s string) ([]string, error) {
 	return NormalizeExtensions(strings.FieldsFunc(s, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }))
 }
 
-// NormalizeExtensions lower-cases each entry and strips its leading dots,
-// dropping blank entries and duplicates. An entry that cannot be one
-// extension (nothing but dots, a dot, a path or stream separator, a space or
-// an invisible character inside it, or over 32 bytes) is an error rather than
-// an entry that silently never matches.
+// NormalizeExtensions lower-cases entries, strips leading dots and drops blanks
+// and duplicates. An entry that cannot be one extension (only dots, a separator,
+// a space or invisible character, or over 32 bytes) is an error, not a silent non-match.
 func NormalizeExtensions(list []string) ([]string, error) {
 	out := make([]string, 0, len(list))
 	for _, raw := range list {

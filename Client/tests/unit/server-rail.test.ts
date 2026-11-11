@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { makeDm } from "../helpers/dmHarness";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createServerRail } from "@components/ServerRail";
+import { createServerRail } from "../../src/features/server-rail/ServerRail";
 import { setSidebarMode, uiStore } from "@stores/ui.store";
 import { dmStore, setDmChannels, type DmChannel } from "@stores/dm.store";
 import {
@@ -392,7 +392,7 @@ describe("web portal", () => {
     const shell = readFileSync("src/pages/main-page/pageMountShell.ts", "utf8");
     expect(shell).toMatch(/if \(!__OWNCORD_WEB__\) \{[\s\S]{0,400}mountServerRail\(/);
     const loader = readFileSync("src/features/server-rail/mountServerRail.ts", "utf8");
-    expect(loader).toMatch(/import\("@components\/ServerRail"\)/);
+    expect(loader).toMatch(/import\("\.\/ServerRail"\)/);
     expect(loader.match(/createServerRail/g)?.length).toBe(2);
   });
 });

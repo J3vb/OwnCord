@@ -9,11 +9,9 @@ import (
 // GIFFavorite is one saved GIF; the api layer uses this name rather than db's.
 type GIFFavorite = db.GIFFavorite
 
-// ErrGIFFavoritesFull is returned when a new favorite would exceed the
-// per-user cap.
+// ErrGIFFavoritesFull is returned when a new favorite would exceed the per-user cap.
 var ErrGIFFavoritesFull = db.ErrGIFFavoritesFull
 
-// gifFavoriteStore is what GIFFavoriteService reads and writes. *db.DB satisfies it.
 type gifFavoriteStore interface {
 	AddGIFFavorite(ctx context.Context, userID int64, f db.GIFFavorite) error
 	RemoveGIFFavorite(ctx context.Context, userID int64, url string) error

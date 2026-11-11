@@ -1,6 +1,7 @@
 //! Graphics card for video (Windows).
 //!
-//! WebView2 picks its graphics card when it starts, so the choice is applied
+//! WebView2 picks its graphics card when it starts. Auto leaves that choice
+//! to Windows (its per-app graphics setting); an explicit card is applied
 //! at launch: before the main window is built, `--use-adapter-luid=<card>` is
 //! added to the webview's start flags and the whole app (drawing, decode,
 //! encode) follows that card. A card's LUID changes on every reboot, so the
@@ -25,8 +26,6 @@ use crate::json_store;
 
 const CHOICE_KEY: &str = "owncord:video:gpuAdapter";
 const PENDING_KEY: &str = "owncord:video:gpuAdapterPending";
-/// Set when a start on the Auto pick never finished.
-const AUTO_OFF_KEY: &str = "owncord:video:gpuAdapterAutoOff";
 const AUTO: &str = "auto";
 /// The longest choice string the command accepts.
 const MAX_CHOICE_LEN: usize = 256;
@@ -114,37 +113,27 @@ pub struct Resolution {
     pub fell_back: bool,
 }
 
-/// Auto picks only when there is a real choice: with fewer than two hardware
-/// cards nothing is added and the webview behaves as before.
-#[cfg(test)]
+/// Only an explicit, present card adds a flag. Auto, and a saved card that is
+/// gone, leave the card to Windows.
 pub fn resolve(saved: &SavedChoice, cards: &[GpuCard]) -> Resolution {
-    resolve_with(saved, cards, false)
-}
-
-/// `auto_off`: an earlier start on the Auto pick never finished, so Auto
-/// leaves the card to Windows until the user picks again.
-pub fn resolve_with(saved: &SavedChoice, cards: &[GpuCard], auto_off: bool) -> Resolution {
-    let by_card = |card: &GpuCard, fell_back: bool| Resolution {
-        luid: Some(card.luid()),
-        active: Some(card.id()),
-        fell_back,
-    };
-    let mut fell_back = false;
-    if *saved != SavedChoice::Auto {
-        if let Some(card) = cards.iter().find(|c| saved.matches(c)) {
-            return by_card(card, false);
-        }
-        fell_back = true;
+    if *saved == SavedChoice::Auto {
+        return Resolution {
+            luid: None,
+            active: None,
+            fell_back: false,
+        };
     }
-    if !auto_off && cards.len() >= 2 {
-        if let Some(card) = cards.iter().min_by_key(|c| c.high_performance_rank) {
-            return by_card(card, fell_back);
-        }
-    }
-    Resolution {
-        luid: None,
-        active: None,
-        fell_back,
+    match cards.iter().find(|c| saved.matches(c)) {
+        Some(card) => Resolution {
+            luid: Some(card.luid()),
+            active: Some(card.id()),
+            fell_back: false,
+        },
+        None => Resolution {
+            luid: None,
+            active: None,
+            fell_back: true,
+        },
     }
 }
 
@@ -175,13 +164,8 @@ pub struct StartupPlan {
     pub set_pending: bool,
 }
 
-pub fn plan_startup(
-    saved: &SavedChoice,
-    cards: &[GpuCard],
-    pending: bool,
-    auto_off: bool,
-) -> StartupPlan {
-    let resolution = resolve_with(saved, cards, auto_off);
+pub fn plan_startup(saved: &SavedChoice, cards: &[GpuCard], pending: bool) -> StartupPlan {
+    let resolution = resolve(saved, cards);
     if resolution.luid.is_some() && pending {
         return StartupPlan {
             resolution: Resolution {
@@ -205,7 +189,6 @@ pub struct GpuAdapterState {
     active: Option<String>,
     not_found: bool,
     reset_after_crash: bool,
-    auto_off: bool,
     cards: Mutex<Vec<GpuCard>>,
 }
 
@@ -259,17 +242,13 @@ pub fn prepare<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
     let cards = enumerate();
     let saved = read_choice(app);
     let pending = read_flag(app, PENDING_KEY);
-    let mut auto_off = read_flag(app, AUTO_OFF_KEY);
-    let plan = plan_startup(&saved, &cards, pending, auto_off);
+    let plan = plan_startup(&saved, &cards, pending);
     if plan.reset_after_crash {
         log::warn!("[gpu] the last start on a chosen card did not finish; back to Auto");
         if let Err(e) = write_choice(app, &SavedChoice::Auto) {
             log::warn!("[gpu] cannot reset the choice: {e}");
         }
         write_pending(app, false);
-        // Auto would pick the same card again, so it stands down too.
-        write_flag(app, AUTO_OFF_KEY, true);
-        auto_off = true;
     } else if plan.set_pending {
         write_pending(app, true);
     } else if pending {
@@ -283,7 +262,6 @@ pub fn prepare<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
         active: plan.resolution.active,
         not_found: plan.resolution.fell_back,
         reset_after_crash: plan.reset_after_crash,
-        auto_off,
         cards: Mutex::new(cards),
     });
     flag
@@ -322,14 +300,15 @@ pub struct GpuAdapters {
     active: Option<String>,
     not_found: bool,
     reset_after_crash: bool,
-    /// Auto leaves the card to Windows after a start that did not finish.
-    auto_off: bool,
 }
 
-/// The cards, deduplicated by id (two identical cards cannot be told apart).
+/// The cards in Windows' high-performance order, deduplicated by id (two
+/// identical cards cannot be told apart).
 fn listed(cards: &[GpuCard]) -> Vec<GpuCardInfo> {
+    let mut ordered: Vec<&GpuCard> = cards.iter().collect();
+    ordered.sort_by_key(|c| c.high_performance_rank);
     let mut out: Vec<GpuCardInfo> = Vec::new();
-    for card in cards {
+    for card in ordered {
         let id = card.id();
         if out.iter().all(|c| c.id != id) {
             out.push(GpuCardInfo {
@@ -378,7 +357,6 @@ pub fn get_gpu_adapters(app: AppHandle, state: State<'_, GpuAdapterState>) -> Gp
         active: state.active.clone(),
         not_found: state.not_found,
         reset_after_crash: state.reset_after_crash,
-        auto_off: state.auto_off,
     }
 }
 
@@ -393,8 +371,6 @@ pub fn set_gpu_adapter(
         parse_choice(&choice, &cards)?
     };
     write_choice(&app, &choice)?;
-    // A fresh pick, Auto included, gets a fresh try.
-    write_flag(&app, AUTO_OFF_KEY, false);
     Ok(())
 }
 
@@ -531,10 +507,11 @@ mod tests {
     }
 
     #[test]
-    fn auto_with_two_cards_picks_high_performance() {
+    fn auto_with_two_cards_leaves_the_card_to_windows() {
         let r = resolve(&SavedChoice::Auto, &two_cards());
-        assert_eq!(r.luid, Some(Luid { high: 0, low: 200 }));
-        assert_eq!(r.active.as_deref(), Some("10de:1234:NVIDIA GeForce RTX"));
+        assert_eq!(r.luid, None);
+        assert_eq!(r.active, None);
+        assert!(!r.fell_back);
     }
 
     #[test]
@@ -554,7 +531,8 @@ mod tests {
         };
         let r = resolve(&saved, &two_cards());
         assert!(r.fell_back);
-        assert_eq!(r.luid, Some(Luid { high: 0, low: 200 }));
+        assert_eq!(r.luid, None);
+        assert_eq!(r.active, None);
         let r = resolve(&saved, &[card(0x10de, "Only", 0, 1)]);
         assert!(r.fell_back);
         assert_eq!(r.luid, None);
@@ -563,34 +541,43 @@ mod tests {
     #[test]
     fn crash_guard_skips_the_flag_and_resets() {
         let saved = SavedChoice::of(&two_cards()[0]);
-        let plan = plan_startup(&saved, &two_cards(), true, false);
+        let plan = plan_startup(&saved, &two_cards(), true);
         assert!(plan.reset_after_crash);
         assert_eq!(plan.resolution.luid, None);
         assert!(!plan.set_pending);
     }
 
     #[test]
-    fn auto_stands_down_after_a_crash_until_picked_again() {
-        let plan = plan_startup(&SavedChoice::Auto, &two_cards(), true, false);
-        assert!(plan.reset_after_crash);
-        let plan = plan_startup(&SavedChoice::Auto, &two_cards(), false, true);
-        assert_eq!(plan.resolution.luid, None);
-        assert!(!plan.set_pending && !plan.reset_after_crash);
-        // An explicit card still applies while Auto is off.
-        let saved = SavedChoice::of(&two_cards()[0]);
-        let plan = plan_startup(&saved, &two_cards(), false, true);
-        assert!(plan.resolution.luid.is_some() && plan.set_pending);
+    fn auto_ignores_a_stale_marker() {
+        for pending in [false, true] {
+            let plan = plan_startup(&SavedChoice::Auto, &two_cards(), pending);
+            assert_eq!(plan.resolution.luid, None);
+            assert!(!plan.set_pending && !plan.reset_after_crash);
+        }
     }
 
     #[test]
     fn marker_is_set_only_when_a_flag_is_applied() {
-        let plan = plan_startup(&SavedChoice::Auto, &two_cards(), false, false);
+        let saved = SavedChoice::of(&two_cards()[1]);
+        let plan = plan_startup(&saved, &two_cards(), false);
         assert!(plan.set_pending && !plan.reset_after_crash);
-        let plan = plan_startup(&SavedChoice::Auto, &[card(1, "One", 0, 1)], false, false);
+        let plan = plan_startup(&SavedChoice::Auto, &two_cards(), false);
         assert!(!plan.set_pending);
         // A stale marker with no flag to apply is not a crash.
-        let plan = plan_startup(&SavedChoice::Auto, &[card(1, "One", 0, 1)], true, false);
+        let plan = plan_startup(&SavedChoice::Auto, &[card(1, "One", 0, 1)], true);
         assert!(!plan.reset_after_crash);
+    }
+
+    #[test]
+    fn list_puts_the_high_performance_card_first() {
+        let ids: Vec<String> = listed(&two_cards()).into_iter().map(|c| c.id).collect();
+        assert_eq!(
+            ids,
+            [
+                "10de:1234:NVIDIA GeForce RTX",
+                "8086:1234:Intel(R) UHD Graphics"
+            ]
+        );
     }
 
     #[test]

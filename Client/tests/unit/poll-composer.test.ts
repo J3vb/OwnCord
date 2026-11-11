@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let pickerOptions: { onSelect: (emoji: string) => void; onClose: () => void } | null = null;
-vi.mock("@components/EmojiPicker", () => ({
+vi.mock("../../src/features/messaging/EmojiPicker", () => ({
   createEmojiPicker: (opts: NonNullable<typeof pickerOptions>) => {
     pickerOptions = opts;
     return { element: document.createElement("div"), destroy: vi.fn() };
   },
 }));
 
-import { openPollComposer } from "../../src/components/PollComposer";
+import { openPollComposer } from "../../src/features/messaging/PollComposer";
+import { activatePendingMessages, deactivatePendingMessages } from "@lib/pendingMessages";
 import { POLL_REPLY_TIMEOUT_MS } from "../../src/features/messaging/pollSend";
 import { createMockWsClient, type MockWsClient } from "../helpers/mock-ws";
 
@@ -259,5 +260,26 @@ describe("the poll dialog", () => {
     overlay.dispatchEvent(new Event("pointerdown", { bubbles: true }));
     overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(document.querySelector('[data-testid="poll-composer"]')).toBeNull();
+  });
+
+  it("keys the poll at or above the server's restore floor", async () => {
+    const floor = Date.now() + 10 * 60 * 1000;
+    activatePendingMessages(
+      { host: "h", userId: 7 },
+      { id: 7, username: "me", avatar: null },
+      true,
+      floor,
+    );
+    try {
+      open();
+      fillTwo();
+      $<HTMLButtonElement>("poll-post").click();
+      await flush();
+      const id = (): number =>
+        Number(String(sent()[0]!.payload["client_message_id"]).split(":")[0]);
+      expect(id()).toBeGreaterThanOrEqual(floor);
+    } finally {
+      deactivatePendingMessages();
+    }
   });
 });

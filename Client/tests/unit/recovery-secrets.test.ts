@@ -19,6 +19,7 @@ vi.mock("../../src/lib/net/httpProxy", () => ({
 }));
 vi.mock("../../src/lib/net/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
+  resumeSavedSession: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@stores/ui.store", () => ({
   uiStore: {

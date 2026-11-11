@@ -12,6 +12,9 @@ import {
 import {
   getChannelMessages,
   isChannelLoaded,
+  isWindowDetached,
+  messagesStore,
+  setMessages,
   resetMessagesStore,
 } from "../../src/stores/messages.store";
 import { setThreadResume } from "../../src/stores/threadsLoader";
@@ -239,5 +242,74 @@ describe("a panel open across a reconnect", () => {
     ws.simulateMessage("auth_ok", AUTH_OK);
     await vi.waitFor(() => expect(threadsStore.getState().focusedThreadId).toBeNull());
     expect(getThread(91)).toBeDefined();
+  });
+
+  it("detaches the window and says so when the refetch fails with rows on screen", async () => {
+    const getMessages = vi.fn(async () => {
+      throw new Error("server error");
+    });
+    wire(getMessages);
+    ws.simulateMessage("thread_changed", { thread: makeThread() });
+    setMessages(91, [row(4, 91)], false);
+    setFocusedThread(91);
+    ws.simulateMessage("auth_ok", AUTH_OK);
+    await vi.waitFor(() => expect(isWindowDetached(91)).toBe(true));
+    expectConsole("warn", /Thread history refetch after reconnect failed/);
+    expect(showToast).toHaveBeenCalledWith(expect.any(String), "error");
+    expect(getChannelMessages(91).map((m) => m.id)).toEqual([4]);
+  });
+
+  it("keeps an edit that arrives during the refetch, and closes the journal when it fails", async () => {
+    let release!: (v: { messages: MessageResponse[]; has_more: boolean }) => void;
+    let fail!: (e: Error) => void;
+    const getMessages = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise((r) => (release = r)))
+      .mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)));
+    wire(getMessages);
+    ws.simulateMessage("thread_changed", { thread: makeThread() });
+    setMessages(91, [row(4, 91)], false);
+    setFocusedThread(91);
+    ws.simulateMessage("auth_ok", AUTH_OK);
+    await vi.waitFor(() => expect(getMessages).toHaveBeenCalledTimes(1));
+    ws.simulateMessage("chat_edited", {
+      channel_id: 91,
+      message_id: 4,
+      content: "edited",
+      edited_at: "2026-10-21T09:05:00Z",
+      mentions: [],
+      mentions_everyone: false,
+      mention_roles: [],
+    });
+    release({ messages: [row(4, 91)], has_more: false });
+    await vi.waitFor(() => expect(getChannelMessages(91)[0]?.content).toBe("edited"));
+    expect(messagesStore.getState().loadJournal?.has(91)).toBe(false);
+
+    ws.simulateMessage("auth_ok", AUTH_OK);
+    await vi.waitFor(() => expect(getMessages).toHaveBeenCalledTimes(2));
+    expect(messagesStore.getState().loadJournal?.has(91)).toBe(true);
+    fail(new Error("server error"));
+    await vi.waitFor(() => expect(messagesStore.getState().loadJournal?.has(91)).toBe(false));
+    expectConsole("warn", /Thread history refetch after reconnect failed/);
+  });
+
+  it("leaves the window alone when a newer reconnect superseded the failed refetch", async () => {
+    let fail!: (e: Error) => void;
+    const getMessages = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)))
+      .mockImplementation(async () => ({ messages: [row(8, 91)], has_more: false }));
+    wire(getMessages);
+    ws.simulateMessage("thread_changed", { thread: makeThread() });
+    setMessages(91, [row(4, 91)], false);
+    setFocusedThread(91);
+    ws.simulateMessage("auth_ok", AUTH_OK);
+    await vi.waitFor(() => expect(getMessages).toHaveBeenCalledTimes(1));
+    ws.simulateMessage("auth_ok", AUTH_OK);
+    await vi.waitFor(() => expect(getChannelMessages(91).map((m) => m.id)).toEqual([8]));
+    fail(new Error("late"));
+    await flush();
+    expect(isWindowDetached(91)).toBe(false);
+    expect(showToast).not.toHaveBeenCalled();
   });
 });

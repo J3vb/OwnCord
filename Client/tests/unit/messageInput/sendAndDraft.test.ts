@@ -10,8 +10,8 @@ import {
 } from "../../helpers/messageInputHarness";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
-vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
+vi.mock("../../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../../src/features/messaging/GifPicker", () => mocks.gifPickerMock());
 
 describe("MessageInput", () => {
   let container: HTMLDivElement;

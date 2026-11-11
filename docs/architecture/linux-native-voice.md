@@ -36,12 +36,12 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   back over the frame socket. Screen share captures in the backend
   (`src-tauri/src/native_voice/screen.rs`, libwebrtc's `DesktopCapturer`):
   `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
-  on Wayland, and `lib/voice/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
+  on Wayland, and `features/voice/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
   `createLocalScreenTracks` for `NativeRoom`'s `createScreenTracks`; the
   picker's Share audio switch (on when a PulseAudio-protocol sound server
   answers) adds a `NativeScreenAudioTrack` that follows the share. Change source there is the
   track's own (`NativeScreenTrack.changeSource`, the host's
-  `native_voice_change_screen`), reached through `lib/voice/screenShare.ts`'s
+  `native_voice_change_screen`), reached through `features/voice/screenShare.ts`'s
   capability check `inPlaceSourceChange`, never an `isLinuxDesktop()` branch.
   A camera switch is the track's own too (`NativeCameraTrack.setDeviceId`, the
   host's `native_voice_change_camera`); `mediaControl` restarts the camera only
@@ -80,3 +80,14 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   re-arms on `global-keys-changed` (loss arrives as the host's `ptt-error`).
   Host side: `src-tauri/src/portal_shortcuts.rs`; only a real GNOME 48+/KDE
   Wayland desktop proves the dialog and key delivery.
+- Native voice commands take locks in one order: the camera or screen
+  command gate first, then `NativeVoiceState.inner`, and never a gate while
+  `inner` is held. Camera and screen commands queue on their gate through
+  the release of a stopped capture, so a start waits for the old device or
+  portal session to close; microphone, device and leave commands never take a
+  gate. A gate is dropped before waiting for a first frame or a portal dialog.
+  Audio device work follows three steps: decide under `inner` (which also
+  takes the call's place in the device's ordered line), open or close the
+  device on a blocking thread without `inner`, then take `inner` again and
+  commit only if the call is still the latest on a live session. Operations
+  of one kind on one device run in the order the calls arrived.

@@ -11,9 +11,9 @@ import {
 } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { pressComposingEnter } from "../helpers/keyEvents";
-import { createEmojiPicker } from "@components/EmojiPicker";
+import { createEmojiPicker } from "../../src/features/messaging/EmojiPicker";
 import { quickReactionEmoji } from "../../src/features/messaging/message-list/quickReactions";
-import type { EmojiPickerOptions } from "@components/EmojiPicker";
+import type { EmojiPickerOptions } from "../../src/features/messaging/EmojiPicker";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "@stores/emoji.store";
 import { expectConsole } from "../helpers/console";
 import { loadEmojiCatalog, skinTone } from "../../src/features/messaging/emojiCatalog";
@@ -112,6 +112,29 @@ describe("EmojiPicker", () => {
     const { picker } = makePicker();
     const emojiSpans = picker.element.querySelectorAll(".ep-emoji");
     expect(emojiSpans.length).toBeGreaterThan(0);
+    picker.destroy();
+  });
+
+  it("sets --ep-rows on each grid to its number of rows of 8", () => {
+    const { picker } = makePicker();
+    const grids = Array.from(picker.element.querySelectorAll<HTMLElement>(".ep-grid"));
+    expect(grids.length).toBeGreaterThan(1);
+    for (const grid of grids) {
+      const cells = grid.querySelectorAll(".ep-emoji").length;
+      expect(grid.style.getPropertyValue("--ep-rows")).toBe(String(Math.ceil(cells / 8)));
+    }
+    picker.destroy();
+  });
+
+  it("sizes a filtered grid whose last row is not full", () => {
+    const { picker } = makePicker();
+    searchFor(picker, "heart");
+    const grids = Array.from(picker.element.querySelectorAll<HTMLElement>(".ep-grid"));
+    expect(grids.length).toBeGreaterThan(0);
+    for (const grid of grids) {
+      const cells = grid.querySelectorAll(".ep-emoji").length;
+      expect(grid.style.getPropertyValue("--ep-rows")).toBe(String(Math.ceil(cells / 8)));
+    }
     picker.destroy();
   });
 
@@ -690,6 +713,116 @@ describe("EmojiPicker", () => {
 
     expect(cellTitles).toContain(":blobwave:");
     reopened.destroy();
+  });
+
+  describe("lazy categories", () => {
+    let callback: IntersectionObserverCallback;
+    let observed: Set<Element>;
+
+    beforeEach(() => {
+      observed = new Set();
+      class FakeObserver {
+        constructor(cb: IntersectionObserverCallback) {
+          callback = cb;
+        }
+        observe(el: Element): void {
+          observed.add(el);
+        }
+        unobserve(el: Element): void {
+          observed.delete(el);
+        }
+        disconnect(): void {
+          observed.clear();
+        }
+      }
+      vi.stubGlobal("IntersectionObserver", FakeObserver);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function mount() {
+      const picker = createEmojiPicker({ onSelect: vi.fn(), onClose: vi.fn() });
+      container.appendChild(picker.element);
+      return picker;
+    }
+
+    function grids(picker: { element: HTMLElement }): HTMLElement[] {
+      return Array.from(picker.element.querySelectorAll<HTMLElement>(".ep-grid"));
+    }
+
+    function reach(el: Element): void {
+      callback([{ isIntersecting: true, target: el } as IntersectionObserverEntry], {} as never);
+    }
+
+    it("builds only the first categories at open and the rest when they come near", () => {
+      const picker = mount();
+      const all = grids(picker);
+      const waiting = all.filter((g) => g.classList.contains("ep-lazy"));
+      expect(all[0]!.children.length).toBeGreaterThan(0);
+      expect(waiting.length).toBeGreaterThan(0);
+      expect(waiting.every((g) => g.children.length === 0)).toBe(true);
+      expect(picker.element.querySelectorAll(".ep-emoji").length).toBeLessThan(400);
+
+      const target = waiting[0]!;
+      reach(target);
+      expect(target.classList.contains("ep-lazy")).toBe(false);
+      expect(target.children.length).toBeGreaterThan(0);
+      expect(Array.from(target.children).every((c) => c.getAttribute("tabindex") === "-1")).toBe(
+        true,
+      );
+      expect(waiting[1]!.children.length).toBe(0);
+      picker.destroy();
+    });
+
+    it("builds everything when there is no IntersectionObserver", () => {
+      vi.stubGlobal("IntersectionObserver", undefined);
+      const picker = mount();
+      expect(grids(picker).some((g) => g.classList.contains("ep-lazy"))).toBe(false);
+      expect(grids(picker).every((g) => g.children.length > 0)).toBe(true);
+      picker.destroy();
+    });
+
+    it("End builds every category first and lands on the very last cell", () => {
+      const picker = mount();
+      const first = picker.element.querySelector<HTMLElement>(".ep-emoji")!;
+      first.focus();
+      first.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }),
+      );
+      const cells = Array.from(picker.element.querySelectorAll<HTMLElement>(".ep-emoji"));
+      expect(grids(picker).some((g) => g.classList.contains("ep-lazy"))).toBe(false);
+      expect(document.activeElement).toBe(cells[cells.length - 1]);
+      expect(cells.filter((c) => c.getAttribute("tabindex") === "0")).toHaveLength(1);
+      picker.destroy();
+    });
+
+    it("a search key drops waiting fills: no cell of the old render appears afterwards", () => {
+      const picker = mount();
+      const stale = grids(picker).filter((g) => g.classList.contains("ep-lazy"));
+      const input = picker.element.querySelector<HTMLInputElement>(".ep-search")!;
+      input.value = "fire";
+      input.dispatchEvent(new Event("input"));
+      const before = picker.element.querySelectorAll(".ep-emoji").length;
+      for (const grid of stale) reach(grid);
+      expect(stale.every((g) => g.children.length === 0)).toBe(true);
+      expect(picker.element.querySelectorAll(".ep-emoji").length).toBe(before);
+      picker.destroy();
+    });
+
+    it("Enter in the search box still picks the first match", () => {
+      const onSelect = vi.fn();
+      const picker = createEmojiPicker({ onSelect, onClose: vi.fn() });
+      container.appendChild(picker.element);
+      const input = picker.element.querySelector<HTMLInputElement>(".ep-search")!;
+      input.value = "smile";
+      input.dispatchEvent(new Event("input"));
+      const firstCell = picker.element.querySelector<HTMLElement>(".ep-emoji")!;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(onSelect).toHaveBeenCalledWith(firstCell.dataset.emoji);
+      picker.destroy();
+    });
   });
 });
 

@@ -60,6 +60,7 @@ export const ServerMessageType = {
   STICKER_UPDATE: "sticker_update",
   UPLOAD_POLICY: "upload_policy", // the upload file-type lists after the owner saves them in the admin panel
   GAME_ACTIVITY_POLICY: "game_activity_policy", // WP 8.3e-2: whether game activity is shown on this server, unsequenced, after an admin saves the switch; auth_ok carries it on every connect and resume
+  VIDEO_BITRATE_CAP: "video_bitrate_cap", // the per-person video upload cap in bits/s (0 = none), unsequenced, after an admin saves it; auth_ok carries it on every connect and resume
   SERVER_RESTART: "server_restart",
   MOD_QUEUE: "mod_queue", // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
   MOD_ACTION: "mod_action", // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed

@@ -14,36 +14,27 @@ import (
 )
 
 const (
-	// maxDeleteMessageSeconds is the longest history window a ban may delete:
-	// seven days.
 	maxDeleteMessageSeconds = 7 * 24 * 60 * 60
-	// banPurgeBudget bounds the message deletion that follows a ban. Past it
-	// the response reports purge.complete=false and the same request can be
-	// repeated to continue.
+	// banPurgeBudget bounds the message deletion after a ban; past it the response reports purge.complete=false
+	// and the request can be repeated to continue.
 	banPurgeBudget = 20 * time.Second
-	// banRetryExpirySlack is how far a requested temporary-ban expiry may sit
-	// past the stored one before the request counts as changing the ban. A
-	// repeated request computes its expiry from a later "now".
+	// banRetryExpirySlack is how far a requested temporary-ban expiry may exceed the stored one before it counts
+	// as changing the ban: a repeat computes expiry from a later "now".
 	banRetryExpirySlack = time.Hour
 )
 
-// banPurgeOutcome is the "purge" object of a PATCH response.
 type banPurgeOutcome struct {
 	Deleted  int  `json:"deleted"`
 	Complete bool `json:"complete"`
 }
 
-// patchUserPurgeResponse is the PATCH response when delete_message_seconds
-// was above zero: the user object plus the purge outcome.
 type patchUserPurgeResponse struct {
 	adminUserResponse
 	Purge *banPurgeOutcome `json:"purge"`
 }
 
-// patchUserValidatePurge checks delete_message_seconds before anything is
-// changed and returns its value (0 when absent). The value must lie in
-// 0..604800, and a non-zero value is accepted only together with banned=true.
-// On false it has already written the 400.
+// patchUserValidatePurge checks delete_message_seconds before anything changes and returns it (0 when
+// absent). It must lie in 0..604800 and be non-zero only with banned=true. False means the 400 is written.
 func patchUserValidatePurge(w http.ResponseWriter, req patchUserRequest) (int, bool) {
 	if req.DeleteMessageSeconds == nil {
 		return 0, true
@@ -60,10 +51,9 @@ func patchUserValidatePurge(w http.ResponseWriter, req patchUserRequest) (int, b
 	return secs, true
 }
 
-// patchUserValidateBan checks the ban fields of a PATCH (ban_duration_hours
-// and, for a ban, the reason) before anything is changed or any rate-limit
-// token is spent, and returns the temporary ban's expiry (nil = permanent or
-// no ban). On false it has already written the 400.
+// patchUserValidateBan checks the ban fields (ban_duration_hours, and the reason for a ban) before anything
+// changes or a rate-limit token is spent; it returns the temporary ban's expiry (nil = permanent or no ban).
+// False means the 400 is written.
 func patchUserValidateBan(w http.ResponseWriter, req patchUserRequest) (*time.Time, bool) {
 	if req.Banned == nil {
 		return nil, true
@@ -87,10 +77,9 @@ func patchUserValidateBan(w http.ResponseWriter, req patchUserRequest) (*time.Ti
 	return banExpires, true
 }
 
-// patchUserAuthorizePurge runs every precondition of deleting the target's
-// recent messages along with the ban, without changing anything, so a refusal
-// (403, or 429 from the per-actor rate limit) happens before the ban is
-// written. On false it has already written the error response.
+// patchUserAuthorizePurge runs every precondition of deleting the target's recent messages with the ban,
+// changing nothing, so a refusal (403, or 429 from the per-actor rate limit) comes before the ban is written.
+// False means the error is written.
 func patchUserAuthorizePurge(w http.ResponseWriter, r *http.Request, mod *service.ModerationService, actor, id int64) bool {
 	if mod == nil {
 		// Fail closed rather than ban without the purge's checks.
@@ -108,12 +97,10 @@ func patchUserAuthorizePurge(w http.ResponseWriter, r *http.Request, mod *servic
 	return true
 }
 
-// patchUserIsPurgeRetry reports whether the target is already banned and the
-// request carries the same ban values, so it only adds the message deletion
-// (a repeat of a purge that came back incomplete). The ban write is then
-// skipped: no second ledger row and no refreshed reason or expiry. Any doubt
-// (a failed read, an invalid duration) answers false and the ban is written
-// as usual.
+// patchUserIsPurgeRetry reports whether the target is already banned and the request carries the same ban
+// values, so it only adds message deletion (a repeat of an incomplete purge). The ban write is then skipped:
+// no second ledger row, reason or expiry refresh. Any doubt (failed read, invalid duration) answers false and
+// the ban is written as usual.
 func patchUserIsPurgeRetry(r *http.Request, users *service.UserService, id int64, req patchUserRequest) bool {
 	if req.Banned == nil || !*req.Banned {
 		return false
@@ -154,11 +141,10 @@ func patchUserIsPurgeRetry(r *http.Request, users *service.UserService, id int64
 	return !have.After(want) && want.Sub(have) <= banRetryExpirySlack
 }
 
-// patchUserPurge deletes the freshly banned target's messages from the last
-// seconds seconds and broadcasts every committed batch, including those of a
-// purge that stopped early. The purge outlives a client that hangs up (the
-// ban already committed) but is bounded by banPurgeBudget. The outcome is
-// partial when Complete is false; repeating the request continues it.
+// patchUserPurge deletes the freshly banned target's messages from the last seconds and broadcasts every
+// committed batch, including those of an early-stopped purge. It outlives a client that hangs up (the ban
+// already committed) but is bounded by banPurgeBudget; Complete=false means repeating the request continues
+// it.
 func patchUserPurge(r *http.Request, hub HubBroadcaster, mod *service.ModerationService, actor, id int64, seconds int) *banPurgeOutcome {
 	pctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), banPurgeBudget)
 	defer cancel()

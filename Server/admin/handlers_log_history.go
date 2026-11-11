@@ -27,10 +27,9 @@ const (
 	logHistoryChunk     = 64 << 10
 	logHistoryMaxLine   = 1 << 20
 	logHistoryScanLimit = 64 << 20
-	// logHistoryOrderSlack is how far a line may sit out of time order in a
-	// file: a record keeps its creation time but reaches the writer after
-	// any record logged at the same moment by another goroutine. The scan
-	// only stops once a line is this far before "from".
+	// logHistoryOrderSlack is how far a line may sit out of time order in a file: a record keeps its creation
+	// time but may reach the writer after one logged at the same moment by another goroutine. The scan stops
+	// only once a line is this far before "from".
 	logHistoryOrderSlack = time.Minute
 	// logHistoryDaySlack lets a file dated the day after "to" still be read:
 	// a line logged just before midnight can land in the next day's file.
@@ -39,10 +38,9 @@ const (
 	logHistoryOpenRetry = 20 * time.Millisecond
 )
 
-// logHistoryResponse is GET /logs/history's answer. Entries are newest first.
-// NextCursor continues to older entries; empty means the start of the saved
-// history was reached. Partial means the page stopped at the scan limit before
-// it filled, so fewer than a page of matches does not mean there are no more.
+// logHistoryResponse is GET /logs/history's answer, newest first. NextCursor continues to older entries
+// (empty = start of history reached). Partial means the scan limit stopped the page before it filled, so a
+// short page does not mean no more matches.
 type logHistoryResponse struct {
 	Enabled    bool       `json:"enabled"`
 	Entries    []LogEntry `json:"entries"`
@@ -50,12 +48,10 @@ type logHistoryResponse struct {
 	Partial    bool       `json:"partial,omitempty"`
 }
 
-// logHistoryQuery is a parsed, validated GET /logs/history request.
 type logHistoryQuery struct {
 	from, to time.Time
 	levels   map[string]bool
-	// levelTags are the `"level":"X"` texts a wanted line carries, checked
-	// on the raw line before it is decoded.
+	// levelTags are the `"level":"X"` texts a wanted line carries, checked on the raw line before decoding.
 	levelTags [][]byte
 	text      string
 	raw       []byte // lower-case search for the raw-line pre-check, nil when it cannot be used
@@ -63,8 +59,8 @@ type logHistoryQuery struct {
 	limit     int
 }
 
-// logHistoryCursor is a position to read backwards from: entries before byte
-// offset in file key. The zero value starts at the newest entry.
+// logHistoryCursor is a read-backwards position: entries before byte offset in file key; zero starts at the
+// newest.
 type logHistoryCursor struct {
 	set    bool
 	key    logFileKey
@@ -147,10 +143,9 @@ func parseLogHistoryQuery(r *http.Request, now time.Time) (logHistoryQuery, stri
 	return q, ""
 }
 
-// rawSearchable reports whether text appears verbatim in a saved line whenever
-// it appears in a decoded field, so a raw byte search can skip lines before
-// decoding them. JSON escapes quotes, backslashes, <, > and &, and may escape
-// other non-ASCII or control text, so those searches always decode.
+// rawSearchable reports whether text appears verbatim in a saved line whenever it appears in a decoded field,
+// so a raw byte search can skip lines before decoding. JSON escapes quotes, backslashes, <, > and &, and may
+// escape other non-ASCII or control text; those always decode.
 func rawSearchable(text string) bool {
 	for _, c := range text {
 		if c > unicode.MaxASCII || c < 0x20 || strings.ContainsRune(`"\<>&`, c) {
@@ -160,8 +155,8 @@ func rawSearchable(text string) bool {
 	return true
 }
 
-// lineTime reads the timestamp a saved line starts with, without decoding the
-// rest. LogEntry marshals ts first.
+// lineTime reads the leading timestamp of a saved line without decoding the rest (LogEntry marshals ts
+// first).
 func lineTime(line []byte) (time.Time, bool) {
 	const prefix = `{"ts":"`
 	if !bytes.HasPrefix(line, []byte(prefix)) {
@@ -190,10 +185,9 @@ func (q *logHistoryQuery) matches(e *LogEntry) bool {
 // errLogScanStop ends a backwards scan early; it is not a failure.
 var errLogScanStop = errors.New("stop")
 
-// scanLinesBackward calls fn for each complete line in f before byte end,
-// newest first, with the line's start offset. A trailing line with no newline
-// (the writer's buffer flushed mid-line) is skipped, as is any line longer
-// than logHistoryMaxLine. It returns fn's error, or ctx's.
+// scanLinesBackward calls fn for each complete line before byte end, newest first, with its start offset. A
+// trailing line with no newline (writer flushed mid-line) is skipped, as is any longer than
+// logHistoryMaxLine. Returns fn's error or ctx's.
 func scanLinesBackward(ctx context.Context, f io.ReaderAt, end int64, fn func(line []byte, start int64) error) error {
 	pos := end
 	var tail []byte
@@ -245,7 +239,6 @@ func scanLinesBackward(ctx context.Context, f io.ReaderAt, end int64, fn func(li
 	return nil
 }
 
-// readLogHistory pages through the files in dir, newest first.
 func readLogHistory(ctx context.Context, dir string, q logHistoryQuery) (logHistoryResponse, error) {
 	resp := logHistoryResponse{Enabled: true, Entries: []LogEntry{}}
 	files, err := listLogFiles(dir)
@@ -283,8 +276,7 @@ func readLogHistory(ctx context.Context, dir string, q logHistoryQuery) (logHist
 	return resp, nil
 }
 
-// openLogFile opens a history file, trying again for a moment while Windows
-// holds it busy, which happens while the cleanup deletes it.
+// openLogFile retries for a moment while Windows holds a file busy, which happens while cleanup deletes it.
 func openLogFile(ctx context.Context, path string) (*os.File, error) {
 	for range logHistoryOpenTries - 1 {
 		f, err := os.Open(path) //nolint:gosec // G304: path is built from a name checked by parseLogFileName
@@ -301,10 +293,9 @@ func openLogFile(ctx context.Context, path string) (*os.File, error) {
 	return f, err
 }
 
-// readLogFile scans one file backwards from end, adding matches to resp. It
-// reports true when the page is complete, the scan limit was hit, or the scan
-// went past "from", so no older file needs reading. A file deleted by cleanup
-// after it was listed reads as empty.
+// readLogFile scans one file backwards from end, adding matches to resp. True means the page is complete, the
+// scan limit was hit, or the scan passed "from", so no older file is needed. A file deleted by cleanup after
+// listing reads as empty.
 func readLogFile(ctx context.Context, dir string, key logFileKey, end int64, q *logHistoryQuery, resp *logHistoryResponse, scanned *int64) (bool, error) {
 	f, err := openLogFile(ctx, filepath.Join(dir, key.name()))
 	if err != nil {
@@ -361,10 +352,8 @@ func readLogFile(ctx context.Context, dir string, key logFileKey, end int64, q *
 	return pastFrom, nil
 }
 
-// handleLogHistory serves GET /logs/history: saved log lines, newest first,
-// filtered by time range, level and text, a page at a time. An empty dir means
-// history is off, which is answered as enabled:false rather than an error so
-// the page can say why.
+// handleLogHistory serves GET /logs/history: saved log lines newest first, filtered by time, level and text.
+// An empty dir means history is off, answered as enabled:false, not an error, so the page can say why.
 func handleLogHistory(dir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if dir == "" {

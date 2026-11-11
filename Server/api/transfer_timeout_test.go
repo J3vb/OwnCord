@@ -181,18 +181,22 @@ func profileImageRoutes(t *testing.T) []profileImageRoute {
 }
 
 // slowUploadIdle is the idle rule for the slow-upload test. Once the last byte
-// arrives the handler has only this long to decode, store and answer, which a
-// loaded CI runner with the race detector can take past testTransferIdle. The
-// body still takes about twice as long as the rule, so it only arrives if each
-// chunk re-arms the deadline.
-const slowUploadIdle = 500 * time.Millisecond
+// arrives the handler has only this long to decode, store and answer: a loaded
+// Windows runner with the race detector took past 500 ms there, and an expired
+// deadline both cancels the request and cuts the answer. slowUploadPad makes
+// the body take about twice the rule at postSlow's pace (4 KiB every 40 ms),
+// so it still only arrives if each chunk re-arms the deadline.
+const (
+	slowUploadIdle = 2 * time.Second
+	slowUploadPad  = 400 << 10
+)
 
 func TestProfileImageUploads_SlowProgressingBodySurvivesRequestTimeout(t *testing.T) {
 	api.SetTransferProgressTimeoutForTest(t, slowUploadIdle)
 	for _, route := range profileImageRoutes(t) {
 		t.Run(route.name, func(t *testing.T) {
 			srv := startTransferServer(t, route.handler)
-			body, contentType := paddedImageForm(t, makePNGBytes(t, 64, 64), 96<<10)
+			body, contentType := paddedImageForm(t, makePNGBytes(t, 64, 64), slowUploadPad)
 			resp := postSlow(t, srv.URL+route.path, route.token, contentType, body)
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {

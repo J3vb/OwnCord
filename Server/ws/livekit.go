@@ -18,35 +18,34 @@ import (
 	"github.com/J3vb/OwnCord/Server/livekitproc"
 )
 
-// tokenTTL is the validity of generated LiveKit access tokens: short (5 min) to
-// limit the replay window; the client requests a refresh via voice_token_refresh.
-// Mitigations:
-//   - Tokens are scoped to a single room
-//   - Server can revoke room access via LiveKit API on ban/kick
-//   - The polling reconciler (voice_reconcile.go) removes any SFU participant
-//     with no matching voice_states row once a tick; the participant_joined
-//     webhook does the same at join time where configured
-//   - CanPublishSources restricts track types per permission
+// tokenTTL is the validity of LiveKit access tokens: short (5 min) to limit the replay window; the
+// client refreshes via voice_token_refresh. Tokens are scoped to one room; the server revokes room
+// access on ban/kick; the polling reconciler (voice_reconcile.go) and the participant_joined
+// webhook remove SFU participants with no voice_states row; CanPublishSources restricts track types
+// per permission; the signalling proxy admits a session only for a current join and connects with
+// a credential issued at that moment (voice_session_admit.go).
 const tokenTTL = 5 * time.Minute
 
-// LiveKitClient provides token generation and room management via the LiveKit
-// server SDK.
+// LiveKitClient provides token generation and room management via the LiveKit server SDK.
 type LiveKitClient struct {
 	apiKey    string
 	apiSecret string
 	url       string
 	roomSvc   *lksdk.RoomServiceClient
 
-	// removed holds identities RemoveParticipant removed, kept removed for
-	// tokenTTL by the hub's watch (voice_removed_watch.go).
+	// restrictData is voice.restrict_data_publishing: when set, no grant carries the right to
+	// publish data packets.
+	restrictData bool
+
+	// removed holds identities RemoveParticipant removed, kept removed for voiceRemovedWatchWindow
+	// by the hub's watch (voice_removed_watch.go).
 	removed removedIdentities
 
-	// health is the shared, short-lived reachability verdict (livekit_health.go).
 	health liveKitHealthCache
 }
 
-// NewLiveKitClient creates a client from the voice config. It errors if credentials
-// are missing or still the well-known default dev values (public in the source).
+// NewLiveKitClient creates a client from the voice config; errors if credentials are missing or
+// still the public default dev values.
 func NewLiveKitClient(cfg *config.VoiceConfig) (*LiveKitClient, error) {
 	if cfg.LiveKitAPIKey == "" || cfg.LiveKitAPISecret == "" {
 		return nil, fmt.Errorf("livekit: api_key and api_secret are required")
@@ -58,7 +57,7 @@ func NewLiveKitClient(cfg *config.VoiceConfig) (*LiveKitClient, error) {
 		return nil, fmt.Errorf("livekit: refusing to start with default dev credentials — set voice.livekit_api_key and voice.livekit_api_secret in config.yaml")
 	}
 
-	// The room service client uses the HTTP URL: ws:// becomes http://, wss:// https://.
+	// The room service client uses the HTTP URL (ws:// becomes http://, wss:// https://).
 	httpURL := livekitproc.HTTPURL(cfg.LiveKitURL)
 
 	roomSvc := lksdk.NewRoomServiceClient(httpURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
@@ -68,11 +67,19 @@ func NewLiveKitClient(cfg *config.VoiceConfig) (*LiveKitClient, error) {
 		"http_url", httpURL)
 
 	return &LiveKitClient{
-		apiKey:    cfg.LiveKitAPIKey,
-		apiSecret: cfg.LiveKitAPISecret,
-		url:       cfg.LiveKitURL,
-		roomSvc:   roomSvc,
+		apiKey:       cfg.LiveKitAPIKey,
+		apiSecret:    cfg.LiveKitAPISecret,
+		url:          cfg.LiveKitURL,
+		roomSvc:      roomSvc,
+		restrictData: cfg.RestrictDataPublishing,
 	}, nil
+}
+
+// canPublishData is the one rule for the data-packet grant, shared by fresh and refreshed tokens
+// and live-participant updates so they cannot disagree: data follows the microphone grant unless
+// voice.restrict_data_publishing withholds it from everyone.
+func (c *LiveKitClient) canPublishData(microphone bool) bool {
+	return microphone && !c.restrictData
 }
 
 // RoomName returns the LiveKit room name for an OwnCord channel.
@@ -87,9 +94,9 @@ func participantIdentity(userID int64, voiceJoinToken string) string {
 	return fmt.Sprintf("user-%d:%s", userID, voiceJoinToken)
 }
 
-// GenerateToken creates a LiveKit access token for userID to join channelID's voice
-// room. canPublish is the SpeakVoice permission; canVideo and canScreenShare set
-// the extra CanPublishSources, so raw LiveKit cannot bypass USE_VIDEO/SHARE_SCREEN.
+// GenerateToken creates an access token for userID to join channelID's voice room. canPublish is
+// SpeakVoice; canVideo and canScreenShare set the extra CanPublishSources so raw LiveKit cannot
+// bypass USE_VIDEO/SHARE_SCREEN.
 func (c *LiveKitClient) GenerateToken(
 	userID int64,
 	username string,
@@ -102,8 +109,8 @@ func (c *LiveKitClient) GenerateToken(
 	roomName := RoomName(channelID)
 	identity := participantIdentity(userID, voiceJoinToken)
 
-	// Every voice token grants CanSubscribe: a server-deafened or non-speaking
-	// participant must still receive other people's audio and streams.
+	// Every token grants CanSubscribe: a server-deafened or non-speaking participant must still
+	// receive audio and streams.
 	canSubscribeAlways := true
 
 	at := auth.NewAccessToken(c.apiKey, c.apiSecret)
@@ -113,19 +120,18 @@ func (c *LiveKitClient) GenerateToken(
 		CanSubscribe: &canSubscribeAlways,
 	}
 
-	// CanPublishSources restricts the publishable track types and supersedes
-	// CanPublish. SPEAK_VOICE, USE_VIDEO and SHARE_SCREEN are independent bits (a
-	// channel override can deny SPEAK_VOICE yet grant USE_VIDEO), so the source list is
-	// built from all three. CanPublish is a hard deny only when none grant anything,
-	// because LiveKit's GetCanPublishSource treats CanPublish=false as an override that
-	// blocks every source.
+	// CanPublishSources supersedes CanPublish. SPEAK_VOICE, USE_VIDEO and SHARE_SCREEN are
+	// independent bits (an override can deny one yet grant another), so the list is built from all
+	// three. CanPublish is a hard deny only when none grant anything, because LiveKit treats
+	// CanPublish=false as blocking every source.
 	sources := liveKitPublishSources(canPublish, canVideo, canScreenShare)
 	if len(sources) > 0 {
 		grant.SetCanPublishSources(sources)
 	} else {
 		grant.CanPublish = &canPublish
 	}
-	grant.CanPublishData = &canPublish
+	canData := c.canPublishData(canPublish)
+	grant.CanPublishData = &canData
 
 	at.SetVideoGrant(grant).
 		SetIdentity(identity).
@@ -148,8 +154,6 @@ func (c *LiveKitClient) GenerateToken(
 	return token, nil
 }
 
-// liveKitPublishSources is shared by fresh tokens and active permissions; the
-// three grants are independent.
 func liveKitPublishSources(microphone, camera, screenshare bool) []livekit.TrackSource {
 	var sources []livekit.TrackSource
 	if microphone {
@@ -164,8 +168,8 @@ func liveKitPublishSources(microphone, camera, screenshare bool) []livekit.Track
 	return sources
 }
 
-// updateParticipantPublishing applies current grants to an exact live join.
-// Updating permission also withdraws tracks whose source is no longer allowed.
+// updateParticipantPublishing applies current grants to an exact live join; updating permission
+// also withdraws tracks whose source is no longer allowed.
 func (c *LiveKitClient) updateParticipantPublishing(ctx context.Context, channelID, userID int64, joinToken string, microphone, camera, screenshare bool) error {
 	sources := liveKitPublishSources(microphone, camera, screenshare)
 	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
@@ -176,7 +180,7 @@ func (c *LiveKitClient) updateParticipantPublishing(ctx context.Context, channel
 		Permission: &livekit.ParticipantPermission{
 			CanSubscribe:      true,
 			CanPublish:        len(sources) > 0,
-			CanPublishData:    microphone,
+			CanPublishData:    c.canPublishData(microphone),
 			CanPublishSources: sources,
 		},
 	})
@@ -191,12 +195,11 @@ func (c *LiveKitClient) URL() string {
 	return c.url
 }
 
-// lkTimeout bounds LiveKit SDK calls.
 const lkTimeout = 5 * time.Second
 
-// ListParticipants returns the identities in a channel's room, for the polling
-// reconciler. A failure is returned, never collapsed to an empty set: the reconciler
-// must not read "the SFU did not answer" as "the room is empty".
+// ListParticipants returns the identities in a channel's room for the reconciler. A failure is
+// returned, never collapsed to an empty set: "the SFU did not answer" must not read as "the room is
+// empty".
 func (c *LiveKitClient) ListParticipants(ctx context.Context, channelID int64) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
 	defer cancel()
@@ -213,9 +216,8 @@ func (c *LiveKitClient) ListParticipants(ctx context.Context, channelID int64) (
 	return ids, nil
 }
 
-// ListRoomChannelIDs returns the channel IDs of the OwnCord rooms the SFU has open,
-// for the reconciler: a room can hold participants after its last voice_states row
-// is gone. Non-OwnCord rooms are skipped.
+// ListRoomChannelIDs returns the OwnCord rooms the SFU has open, for the reconciler: a room can
+// hold participants after its last voice_states row is gone. Other rooms are skipped.
 func (c *LiveKitClient) ListRoomChannelIDs(ctx context.Context) ([]int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
 	defer cancel()
@@ -232,8 +234,7 @@ func (c *LiveKitClient) ListRoomChannelIDs(ctx context.Context) ([]int64, error)
 	return ids, nil
 }
 
-// RoomUsage returns how many rooms the SFU has open and how many participants
-// are in them, counting every room, OwnCord's or not.
+// RoomUsage counts open rooms and participants, every room included.
 func (c *LiveKitClient) RoomUsage(ctx context.Context) (rooms, participants int, err error) {
 	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
 	defer cancel()
@@ -247,23 +248,20 @@ func (c *LiveKitClient) RoomUsage(ctx context.Context) (rooms, participants int,
 	return len(resp.GetRooms()), participants, nil
 }
 
-// RemoveParticipant forcefully disconnects a participant from a room and
-// keeps that exact identity out of the room until any token minted for it
-// has expired (voice_removed_watch.go).
+// RemoveParticipant forcefully disconnects a participant and keeps that exact identity out until
+// any token minted for it has expired (voice_removed_watch.go).
 func (c *LiveKitClient) RemoveParticipant(ctx context.Context, channelID int64, userID int64, voiceJoinToken string) error {
 	c.removed.record(channelID, userID, voiceJoinToken, false)
 	return c.removeIdentity(ctx, channelID, participantIdentity(userID, voiceJoinToken))
 }
 
-// RemoveParticipantAfterOwnLeave is RemoveParticipant for a leave the client asked
-// for itself: the identity is still kept out of the room, on the watch's slower
-// own-leave cadence.
+// RemoveParticipantAfterOwnLeave is RemoveParticipant for a client-requested leave, kept out on the
+// watch's slower own-leave cadence.
 func (c *LiveKitClient) RemoveParticipantAfterOwnLeave(ctx context.Context, channelID int64, userID int64, voiceJoinToken string) error {
 	c.removed.record(channelID, userID, voiceJoinToken, true)
 	return c.removeIdentity(ctx, channelID, participantIdentity(userID, voiceJoinToken))
 }
 
-// removeIdentity disconnects one exact identity from a channel's room.
 func (c *LiveKitClient) removeIdentity(ctx context.Context, channelID int64, identity string) error {
 	roomName := RoomName(channelID)
 
@@ -296,8 +294,6 @@ func (c *LiveKitClient) HealthCheck(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// loopbackURLOrEmpty returns rawURL when its host is localhost or a loopback
-// IP, and "" otherwise.
 func loopbackURLOrEmpty(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {

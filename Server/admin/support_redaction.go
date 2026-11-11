@@ -31,6 +31,7 @@ func supportConfig(cfg *config.Config) map[string]any {
 		"voice.advertise_internal_ip":         cfg.Voice.AdvertiseInternalIP,
 		"voice.livekit_metrics_url_set":       cfg.Voice.LiveKitMetricsURL != "",
 		"voice.quality":                       supportEnum(cfg.Voice.Quality, "low", "medium", "high"),
+		"voice.restrict_data_publishing":      cfg.Voice.RestrictDataPublishing,
 		"event_persistence.enabled":           cfg.EventPersistence.Enabled,
 		"event_persistence.retention_hours":   cfg.EventPersistence.RetentionHours,
 		"event_persistence.replay_ring_size":  cfg.EventPersistence.ReplayRingSize,
@@ -75,22 +76,16 @@ type supportEvent struct {
 	Detail    map[string]any `json:"detail,omitempty"`
 }
 
-// supportEventsMax bounds events.json. The bundle used to keep the
-// last 200 records at ANY level, so an INFO/DEBUG burst pushed the
-// Warn-and-above records an operator needs out of the bundle. supportEvents
-// keeps Warn/Error first and fills the rest with the most recent lower-level
-// records.
+// supportEventsMax bounds events.json. supportEvents keeps Warn/Error first and fills the rest with the most
+// recent lower-level records, so an INFO/DEBUG burst cannot push out the failures an operator needs.
 const supportEventsMax = 200
 
-// Free-form messages and source paths are always omitted. Exact known
-// application messages become fixed event codes; unknown messages only
-// contribute their timestamp and normalized level. Attributes survive only as
-// redacted detail (support_event_detail.go).
+// Free-form messages and source paths are always omitted. Exact known application messages become fixed event
+// codes; unknown messages contribute only timestamp and normalized level. Attributes survive only as redacted
+// detail (support_event_detail.go).
 //
-// Selection: the last supportEventsMax records that are WARN or above
-// are kept, and any remaining slots are filled with the most recent
-// lower-level records, so a routine INFO burst can never evict a failure. The
-// result is returned in chronological order.
+// Selection: the last supportEventsMax WARN+ records are kept and remaining slots filled with the most recent
+// lower-level ones, so a routine INFO burst can never evict a failure. Result is chronological.
 func supportEvents(rb *RingBuffer, known ...string) []supportEvent {
 	if rb == nil {
 		return []supportEvent{}
@@ -120,7 +115,6 @@ func supportEvents(rb *RingBuffer, known ...string) []supportEvent {
 			keep = append(keep, i)
 		}
 	} else {
-		// Walk from the newest backwards, keeping WARN+ first until the cap is hit.
 		for i := len(valid) - 1; i >= 0 && len(keep) < supportEventsMax; i-- {
 			if valid[i].warn {
 				keep = append(keep, i)
@@ -142,10 +136,8 @@ func supportEvents(rb *RingBuffer, known ...string) []supportEvent {
 	return out
 }
 
-// supportEventPrefixCodes maps the constant prefix of a Warn/Error message
-// built with a variable suffix to its code. supportEventCode tries an exact
-// match first, then the longest matching prefix here, so these dynamic messages
-// are coded without depending on their runtime suffix.
+// supportEventPrefixCodes maps the constant prefix of a Warn/Error message with a variable suffix to its
+// code; supportEventCode tries an exact match first, then the longest prefix here.
 var supportEventPrefixCodes = map[string]string{
 	"DeleteOtherSessions after ":             "deleteothersessions_after",
 	"DeleteOtherSessions retry after ":       "deleteothersessions_retry_after",
@@ -157,9 +149,8 @@ func supportEventCode(message string) string {
 	if code, ok := supportEventCodes[message]; ok {
 		return code
 	}
-	// A message built with a variable suffix ("... dropping "+kind) matches on
-	// its constant prefix. Longest prefix wins, so a more specific entry cannot
-	// be shadowed by a shorter one.
+	// A message with a variable suffix matches on its constant prefix; longest wins, so a specific entry is not
+	// shadowed by a shorter one.
 	best := ""
 	for prefix := range supportEventPrefixCodes {
 		if strings.HasPrefix(message, prefix) && len(prefix) > len(best) {
