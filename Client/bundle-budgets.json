@@ -19,7 +19,7 @@
     "livekitSession": {
       "budget": 37500,
       "lazy": true,
-      "note": "The voice session facades (livekitSession, livekitE2EE) and the voice modules they import statically. 34500 -> 35000 for the video cap follower's hooks (34554 B)."
+      "note": "The voice session facades (livekitSession, livekitE2EE) and the voice modules they import statically. 34500 -> 35000 for the video cap follower's hooks (34554 B). 37000 -> 37500 for the tile size icons in the shared icon set (37001 B)."
     },
     "restShapes": {
       "budget": 2800,

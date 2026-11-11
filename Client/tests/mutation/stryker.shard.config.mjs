@@ -143,7 +143,9 @@ export const shards = {
     "src/features/voice/videoGrid/gridConstants.ts",
     "src/features/voice/videoGrid/gridPeopleStrip.ts",
     "src/features/voice/videoGrid/gridSizing.ts",
+    "src/features/voice/videoGrid/gridTileSize.ts",
     "src/features/voice/videoGrid/packLayout.ts",
+    "src/features/voice/videoGrid/tileArrange.ts",
     "src/lib/voice/shareDiagnostics.ts",
   ],
   "livekit-14": [

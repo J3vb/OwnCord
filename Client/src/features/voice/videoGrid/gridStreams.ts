@@ -169,6 +169,7 @@ export function createGridStreams(st: GridState, api: GridApi) {
     const entry = buildTile(userId, stream, config);
     applyNames(entry, username, config?.name ?? username);
     st.cells.set(userId, entry);
+    api.syncTileArrange();
     st.pendingWatch.delete(userId);
     if (stream !== null) attachTrackLifecycle(userId, stream);
     else api.setStopped(userId, true, false);
@@ -280,6 +281,8 @@ export function createGridStreams(st: GridState, api: GridApi) {
       entry.trackCleanup();
       entry.trackCleanup = undefined;
     }
+    // The same stream coming back on a new tile keeps its size and pin.
+    if (!keepWatch) api.forgetTileSize(userId);
     entry.listeners.destroy();
     st.resizeObserver?.unobserve(entry.el);
     if (st.theatreTile === userId) api.leaveTheatre();
@@ -328,6 +331,7 @@ export function createGridStreams(st: GridState, api: GridApi) {
   function clearStreams(): void {
     for (const id of st.pendingWatch) api.forgetWatch(id);
     st.pendingWatch.clear();
+    api.forgetTileSizes();
     for (const userId of st.cells.keys()) {
       dropTile(userId);
     }

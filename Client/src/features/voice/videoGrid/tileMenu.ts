@@ -4,7 +4,8 @@
  * (screen-share audio, 0-100 %) and the person's voice volume (mic, 0-200 %),
  * kept apart and labelled apart, local Mute, Focus, Full screen, Pop out,
  * Stop watching and, where the server allows it, voice moderation. Your own
- * camera tile gets a small one: Hide my camera and Turn off camera. Same
+ * camera tile gets a small one: Hide my camera and Turn off camera. In the
+ * grid layout both menus end with Size and Pin rows. Same
  * keyboard model and dismissal as the voice-roster volume menu
  * (channel-sidebar/volumeMenu.ts), whose Mute and moderation rows it reuses.
  */
@@ -29,6 +30,7 @@ import {
 } from "../../channels/sidebar/volumeMenu";
 import { voiceText as t } from "../../../i18n/voice";
 import { isAndroidApp } from "../native/platform";
+import { appendArrangeRows, type TileMenuArrange } from "./tileArrange";
 
 export interface TileMenuOptions {
   readonly x: number;
@@ -45,6 +47,8 @@ export interface TileMenuOptions {
   readonly onStopWatching: () => void;
   /** Focus view, full screen and pop out for this tile, in their state now. */
   readonly view: TileMenuView;
+  /** Size and Pin rows, in the grid layout. */
+  readonly arrange?: TileMenuArrange;
   /** The person's own actions; each row is left out without its handler. */
   readonly person?: TileMenuPerson;
 }
@@ -75,6 +79,8 @@ export interface SelfTileMenuOptions {
   /** Turn off camera; `cameraLocked` greys it with that reason. */
   readonly onCameraOff?: () => void;
   readonly cameraLocked?: string | null;
+  /** Size and Pin rows, in the grid layout. */
+  readonly arrange?: TileMenuArrange;
 }
 
 function volumeRow(
@@ -161,10 +167,17 @@ function openMenu(
 
 /** Your own camera tile's menu. Nothing opens when it would be empty. */
 export function showSelfTileMenu(opts: SelfTileMenuOptions): void {
-  const { onHide, onCameraOff } = opts;
+  const { onHide, onCameraOff, arrange } = opts;
   const locked = opts.cameraLocked ?? null;
-  // A menu whose only row is greyed could not take focus or close by keyboard.
-  if (onHide === undefined && (onCameraOff === undefined || locked !== null)) return;
+  // Nothing to offer: no size rows (focus mode, full screen) and no camera row
+  // that works. A menu with only a greyed row could not take focus or close
+  // by keyboard.
+  if (
+    arrange === undefined &&
+    onHide === undefined &&
+    (onCameraOff === undefined || locked !== null)
+  )
+    return;
   openMenu(
     opts.x,
     opts.y,
@@ -183,6 +196,10 @@ export function showSelfTileMenu(opts: SelfTileMenuOptions): void {
         }
         menu.append(off);
       }
+      if (arrange !== undefined) {
+        if (menu.childElementCount > 0) menu.append(sep());
+        appendArrangeRows(menu, arrange, close);
+      }
     },
     opts.doc,
   );
@@ -197,6 +214,35 @@ export function showTileMenu(opts: TileMenuOptions): void {
     (menu, close) => buildTileMenu(menu, opts, close),
     opts.doc,
   );
+}
+
+/** Focus, full screen and, where there is more than one window, Pop out. */
+function appendViewRows(menu: HTMLElement, view: TileMenuView, closeMenu: () => void): void {
+  menu.append(
+    actionItem(
+      view.focused ? t("tile.backToGrid") : t("tile.focus"),
+      "focus",
+      closeMenu,
+      view.onFocus,
+    ),
+    actionItem(
+      view.fullscreen ? t("tile.exitFullscreen") : t("tile.fullscreen"),
+      "fullscreen",
+      closeMenu,
+      view.onFullscreen,
+    ),
+  );
+  // The Android app has one window, so there is nothing to pop out to.
+  if (!isAndroidApp()) {
+    menu.append(
+      actionItem(
+        view.poppedOut ? t("tile.popIn") : t("tile.popOut"),
+        "popout",
+        closeMenu,
+        view.onPopout,
+      ),
+    );
+  }
 }
 
 function buildTileMenu(menu: HTMLElement, opts: TileMenuOptions, closeMenu: () => void): void {
@@ -268,31 +314,8 @@ function buildTileMenu(menu: HTMLElement, opts: TileMenuOptions, closeMenu: () =
   });
   menu.append(...voice.rows, localMute.item, sep());
 
-  menu.append(
-    actionItem(
-      view.focused ? t("tile.backToGrid") : t("tile.focus"),
-      "focus",
-      closeMenu,
-      view.onFocus,
-    ),
-    actionItem(
-      view.fullscreen ? t("tile.exitFullscreen") : t("tile.fullscreen"),
-      "fullscreen",
-      closeMenu,
-      view.onFullscreen,
-    ),
-  );
-  // The Android app has one window, so there is nothing to pop out to.
-  if (!isAndroidApp()) {
-    menu.append(
-      actionItem(
-        view.poppedOut ? t("tile.popIn") : t("tile.popOut"),
-        "popout",
-        closeMenu,
-        view.onPopout,
-      ),
-    );
-  }
+  appendViewRows(menu, view, closeMenu);
+  if (opts.arrange !== undefined) appendArrangeRows(menu, opts.arrange, closeMenu);
   menu.append(actionItem(t("tile.stopWatching"), "stop-watching", closeMenu, opts.onStopWatching));
 
   if (person?.moderation !== undefined) appendVoiceModeration(menu, person.moderation, closeMenu);
