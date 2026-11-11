@@ -81,6 +81,7 @@ and only when it changes something a contributor or fork holder must do
 ### Fixed
 
 - Server owners: backups, the safety copy before a restore, the full archive download and the backup taken before an update all failed when the server's folder path held characters such as an accented letter, brackets, `+`, `@` or an apostrophe (for example a Windows user name like `Jörg` or a folder like `Program Files (x86)`). After an update that changed the database, such a server refused to start. Folder names with those characters now work.
+- Unread hints: after one of your devices disconnected while it was switching channels quickly, your other devices could stop showing new activity for one channel until the server restarted. The disconnect now always releases that channel.
 - Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
 - Linux: switching audio devices or muting and unmuting no longer makes other voice controls wait.
 - Linux: stopping a camera or screen share no longer makes other voice controls wait, and starting the camera again right after waits for the old one to close.
