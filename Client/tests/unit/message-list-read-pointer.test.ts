@@ -37,6 +37,13 @@ import { resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNEL_ID = 1;
 
+function openDialog(): HTMLElement {
+  const dialog = document.createElement("div");
+  dialog.className = "modal-overlay";
+  document.body.appendChild(dialog);
+  return dialog;
+}
+
 function resetStores(): void {
   resetGateStores();
   resetMessagesState();
@@ -479,13 +486,6 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     describe("the dialog check", () => {
-      function openDialog(): HTMLElement {
-        const dialog = document.createElement("div");
-        dialog.className = "modal-overlay";
-        document.body.appendChild(dialog);
-        return dialog;
-      }
-
       it("a dialog over the chat holds the marker, and it moves once the dialog closes", () => {
         setMessages(CHANNEL_ID, Array.from({ length: 40 }, (_, i) => i + 1).map(msg));
         openChannel(30, 5);
