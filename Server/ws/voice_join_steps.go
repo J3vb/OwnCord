@@ -111,8 +111,9 @@ func (h *Hub) voiceJoinPublishPerms(ctx context.Context, userID, channelID int64
 // voiceJoinGrantToken mints the LiveKit credential and delivers it, withholding it
 // if the join was superseded meanwhile. granted is false once the join was
 // abandoned; rolledBack is true only for the rollback this function performed
-// itself (a failed mint, announced to nobody). A superseded join returns false,
-// false: the evictor that won announced its end.
+// itself (a failed mint, announced to nobody, the row's flags back on the
+// client). A superseded join returns false, false: the evictor that won
+// announced its end.
 func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, afk bool, state *db.VoiceState, reqID string) (granted, rolledBack bool) {
 	// Token generation failure is fatal (the client cannot reach the SFU), so roll
 	// back the DB join. rollbackVoiceJoin is called with broadcast=false: nobody else
@@ -126,7 +127,8 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client,
 		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canVideo, canScreenShare)
 		if tokenErr != nil {
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
-			h.rollbackVoiceJoin(ctx, txn, c, channelID, state.JoinedAt, false)
+			h.rollbackVoiceJoinKeepingModFlags(ctx, txn, c, channelID, state.JoinedAt,
+				modFlagStash{muted: state.ServerMuted, deafened: state.ServerDeafened, mutedBy: state.ServerMutedBy}, false)
 			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "failed to generate voice token", reqID))
 			return false, true
 		}
@@ -163,8 +165,8 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client,
 // subscription, key-holder election, the joiner's voice_state fan-out, existing
 // participants' states and E2EE keys, and voice_config. Returns false when the
 // join was superseded or rolled back; rolledBack is true only for the rollback
-// this function performed itself (the row and the flags it held are gone, so the
-// caller puts the moderator stash back). A superseded join returns false with
+// this function performed itself (the row is gone and the flags it held are
+// back on the client for the retry). A superseded join returns false with
 // rolledBack false: the evictor that won owns the flags.
 func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, ch *db.Channel, channelID int64, state *db.VoiceState, reqID string) (completed, rolledBack bool) {
 	// Tail guard: a concurrent eviction (revocation sweep, participant_left webhook,
@@ -200,7 +202,8 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 	existing, err := h.voice.ChannelStates(ctx, channelID)
 	if err != nil {
 		slog.Error("ws handleVoiceJoin ChannelStates", "err", err)
-		h.rollbackVoiceJoin(ctx, txn, c, channelID, state.JoinedAt, true)
+		h.rollbackVoiceJoinKeepingModFlags(ctx, txn, c, channelID, state.JoinedAt,
+			modFlagStash{muted: state.ServerMuted, deafened: state.ServerDeafened, mutedBy: state.ServerMutedBy}, true)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "failed to join voice channel", reqID))
 		return false, true
 	}

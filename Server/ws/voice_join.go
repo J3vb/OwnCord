@@ -81,28 +81,27 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 
 	granted, tokenRolledBack := h.voiceJoinGrantToken(ctx, txn, c, channelID, ch.AFK, state, reqID)
 	if !granted {
-		// voiceJoinRestoreModFlags wrote these flags into the row this join no longer
-		// holds; re-stash as above. Kept for a superseded join too: not every evictor
-		// carries the flags, and a mute applied twice is the same mute.
-		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 		if tokenRolledBack {
-			// Only this join's own rollback is silent. A superseded join was
-			// announced by the evictor that ended it.
+			// This join's own rollback already put back the flags its row held when
+			// it was deleted, and it is silent: announce the held-back leave. A
+			// superseded join was announced by the evictor that ended it.
 			h.announceUnconfirmedMoveLeave(ctx, c, unannounced)
+			return
 		}
+		// Superseded: voiceJoinRestoreModFlags wrote these flags into a row the
+		// evictor deleted. Not every evictor carries the flags, and a mute applied
+		// twice is the same mute, so re-stash as above.
+		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 		return
 	}
 	tokenDone := time.Now()
 
-	completed, rolledBack := h.voiceJoinComplete(ctx, txn, c, ch, channelID, state, reqID)
-	if completed {
+	// A join rolled back by its own last step (the ChannelStates read failed) has
+	// already put back the flags its row held when it was deleted. A superseded
+	// join's evictor owns the flags.
+	if completed, _ := h.voiceJoinComplete(ctx, txn, c, ch, channelID, state, reqID); completed {
 		h.voice.NoteJoinCompleted(channelID, c.userID)
 		h.stats.latency.ObserveVoiceJoin(start, precheckDone, leaveDone, persistDone, tokenDone, time.Now())
-	} else if rolledBack {
-		// The ChannelStates read failed and the join deleted the row holding the
-		// flags; re-stash as above. A superseded join is not rolledBack: its
-		// evictor owns the flags.
-		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 	}
 }
 
@@ -356,6 +355,28 @@ func (h *Hub) rollbackVoiceJoin(ctx context.Context, txn *voiceTxn, c *Client, c
 				"user_id", c.userID, "channel_id", channelID)
 		}
 	}
+	if broadcast {
+		h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, c.userID), c.userID)
+	}
+}
+
+// rollbackVoiceJoinKeepingModFlags is the rollback for a join whose row
+// moderators could already act on. The read of the row's mute/deafen and the
+// delete share one hold of the member's moderation lock, and what the row held
+// then goes back onto c for the retry: a mute or unmute that landed after the
+// join wrote its flags is carried, not the flags the join started with. held,
+// the flags as the join last wrote them, stands in when the row cannot be read
+// or is no longer this join's.
+func (h *Hub) rollbackVoiceJoinKeepingModFlags(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, joinedAt string, held modFlagStash, broadcast bool) {
+	flags := held
+	unlockMod := h.voiceHub.mod.Lock(c.userID)
+	row, err := h.voice.State(context.WithoutCancel(ctx), c.userID)
+	if err == nil && row != nil && row.ChannelID == channelID && row.JoinedAt == joinedAt {
+		flags = modFlagStash{muted: row.ServerMuted, deafened: row.ServerDeafened, mutedBy: row.ServerMutedBy}
+	}
+	h.rollbackVoiceJoin(ctx, txn, c, channelID, joinedAt, false)
+	unlockMod()
+	h.restorePendingModFlags(c, flags.muted, flags.deafened, flags.mutedBy)
 	if broadcast {
 		h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, c.userID), c.userID)
 	}
