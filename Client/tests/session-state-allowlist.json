@@ -57,6 +57,18 @@
     },
     {
       "file": "features/profiles/avatar.ts",
+      "binding": "flyingTimer",
+      "category": "transient",
+      "reason": "Settle timer of a flying list; fires within 100 ms and holds no server data"
+    },
+    {
+      "file": "features/profiles/avatar.ts",
+      "binding": "flyingWaiters",
+      "category": "dom-owned",
+      "reason": "Keyed by live avatar element; emptied when the list settles or the element leaves the page"
+    },
+    {
+      "file": "features/profiles/avatar.ts",
       "binding": "visibilityCallbacks",
       "category": "dom-owned",
       "reason": "Keyed by live avatar element; removed when the element leaves the page"
