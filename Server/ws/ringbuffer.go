@@ -34,7 +34,7 @@ func NewEventRingBuffer(size int) *EventRingBuffer {
 
 // Push adds an event to the ring buffer; channelID is the channel scope (0 = global).
 func (rb *EventRingBuffer) Push(seq uint64, channelID int64, data []byte) {
-	rb.pushEntry(seq, channelID, contentBearingKinds[extractEventType(data)], data)
+	rb.pushEntry(seq, channelID, frameIsContentBearing(data), data)
 }
 
 // pushEntry is Push with the content-bearing flag worked out by the caller, so the hub can read a frame's
