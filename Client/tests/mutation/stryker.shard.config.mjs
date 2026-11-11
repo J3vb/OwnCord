@@ -241,6 +241,10 @@ export const shards = {
     "src/features/connection/logout.ts",
     "src/features/message-requests/sync.ts",
     "src/features/messaging/wsHandlers.ts",
+    "src/features/messaging/sendErrors.ts",
+    "src/features/messaging/readyResync.ts",
+    "src/features/messaging/dmPreview.ts",
+    "src/features/messaging/chatNotify.ts",
     "src/features/profiles/openUserProfilePopup.ts",
     "src/features/profiles/profileRoleControls.ts",
     "src/lib/apiAdmin.ts",
@@ -462,6 +466,7 @@ export const shards = {
     "src/features/voice/mediaControl.ts",
     "src/stores/gifFavorites.store.ts",
     "src/stores/messages.store.ts",
+    "src/stores/messagesSelectors.ts",
   ],
   "stores-2": [
     "src/features/messaging/inlineEditLoader.ts",

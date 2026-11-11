@@ -153,3 +153,25 @@ export function reduceSetMessagePinned(
   updatedMessages.set(channelId, updatedList);
   return { ...prev, messagesByChannel: updatedMessages, pinRevision, messagePinRevision };
 }
+
+/** markStickersDeleted's reducer: a sticker message whose sticker left `liveIds` becomes a deleted-sticker row. */
+export function reduceMarkStickersDeleted(
+  prev: MessagesState,
+  liveIds: ReadonlySet<number>,
+): MessagesState {
+  let changed: Map<number, readonly Message[]> | null = null;
+  for (const [channelId, list] of prev.messagesByChannel) {
+    const stale = (m: Message): boolean =>
+      m.sticker?.id !== null && m.sticker !== undefined && !liveIds.has(m.sticker.id);
+    if (!list.some(stale)) continue;
+    const next: Map<number, readonly Message[]> = changed ?? new Map(prev.messagesByChannel);
+    changed = next;
+    next.set(
+      channelId,
+      list.map((m) =>
+        stale(m) ? { ...m, sticker: { id: null, name: m.sticker!.name, url: null } } : m,
+      ),
+    );
+  }
+  return changed === null ? prev : { ...prev, messagesByChannel: changed };
+}
