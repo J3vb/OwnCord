@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoGridMocks";
 import { packTiles } from "../../../src/features/voice/videoGrid/packLayout";
 import { aspectMoved, tileSizeOf } from "../../../src/features/voice/videoGrid/gridSizing";
+import { SURFACE_RESIZE_EVENT } from "../../../src/lib/voice/videoSurface";
 import type { VideoGridComponent } from "../../../src/features/voice/videoGrid/VideoGrid";
 import {
   fakePopup,
@@ -104,6 +105,13 @@ describe("VideoGrid packed layout", () => {
       expect(frames).not.toHaveBeenCalled();
       sizeVideo(2, 1280, 600).dispatchEvent(new Event("resize"));
       expect(frames).toHaveBeenCalledTimes(1);
+    });
+
+    it("packs again when a canvas-drawn picture in the tile changes size", () => {
+      settle();
+      sizeVideo(2, 1000, 1000).dispatchEvent(new Event(SURFACE_RESIZE_EVENT, { bubbles: true }));
+      vi.advanceTimersByTime(50);
+      expect(px(tile(2), "width") / px(tile(2), "height")).toBeCloseTo(1, 1);
     });
 
     it("stops listening when the tile goes", () => {

@@ -3,6 +3,7 @@
  * `packTiles` gives it, drawn in the shape of its own picture.
  */
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
+import { SURFACE_RESIZE_EVENT } from "@lib/voice/videoSurface";
 import {
   CALL_BAR_SPACE,
   CALL_BAR_SPACE_PHONE,
@@ -108,6 +109,8 @@ export function createGridSizing(st: GridState, api: GridApi) {
     const opts = { signal: entry.listeners.signal };
     entry.video.addEventListener("resize", onShape, opts);
     entry.video.addEventListener("loadedmetadata", onShape, opts);
+    // A canvas-drawn picture (Linux) reports its new size from inside the tile.
+    entry.el.addEventListener(SURFACE_RESIZE_EVENT, onShape, opts);
   }
 
   return { applyGridSizes, watchTileShape };
