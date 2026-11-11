@@ -72,6 +72,34 @@ describe("press-to-warm first page", () => {
     expect(isChannelLoaded(1)).toBe(true);
   });
 
+  it("keeps an older page the reader scrolled to before the top-up refetch returned", async () => {
+    const span = (from: number, to: number): Page => ({
+      messages: Array.from({ length: to - from + 1 }, (_, i) => response(to - i)),
+      has_more: true,
+    });
+    const topUp = deferred<Page>();
+    const getMessages = vi
+      .fn()
+      .mockResolvedValueOnce(span(81, 130))
+      .mockReturnValueOnce(topUp.promise)
+      .mockResolvedValueOnce(span(31, 80));
+    const ctrl = setup(getMessages);
+    const signal = new AbortController().signal;
+    warmChannel(1);
+    await ctrl.loadMessages(1, signal);
+    expect(getMessages).toHaveBeenNthCalledWith(2, 1, { limit: 100 }, expect.anything());
+
+    await ctrl.loadOlderMessages(1, signal);
+    expect(getMessages).toHaveBeenNthCalledWith(3, 1, { before: 81, limit: 50 }, expect.anything());
+    topUp.resolve(span(31, 130));
+
+    // The older page stays above the reader: not dropped, not asked for again.
+    const expected = Array.from({ length: 100 }, (_, i) => 31 + i);
+    await vi.waitFor(() => expect(isChannelLoaded(1)).toBe(true));
+    expect(ids(1)).toEqual(expected);
+    expect(getMessages).toHaveBeenCalledTimes(3);
+  });
+
   it("waits for a warm request still in flight instead of asking again", async () => {
     const warm = deferred<Page>();
     const getMessages = vi
