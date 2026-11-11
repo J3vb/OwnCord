@@ -1,6 +1,6 @@
 /**
- * The participant strip: while a camera or screen share is shown in the grid
- * layout, the people without video leave the packed area and sit in a strip
+ * The participant strip: while a camera or screen share is shown (in focus
+ * too), the people without video leave the packed area and sit in a strip
  * of compact tiles, at the bottom or (on a very wide grid) down the right.
  * The cells are the avatar tiles themselves, moved, never rebuilt.
  */
@@ -118,12 +118,16 @@ export function createPeopleStrip(st: GridState, api: GridApi) {
     });
   }
 
-  /** Whether the layout wants the strip: grid layout, a video tile shown and
-   *  people without video to seat. */
+  /** Whether the layout wants the strip: a video tile shown and people
+   *  without video to seat. */
   function wanted(shown: readonly HTMLElement[]): boolean {
-    return (
-      st.focusedTileId === null && st.personCells.size > 0 && shown.some((el) => !isAvatarCell(el))
-    );
+    return st.personCells.size > 0 && shown.some((el) => !isAvatarCell(el));
+  }
+
+  /** The call view's "Show participant strip" toggle; the strip is always on
+   *  where the host has no such toggle. */
+  function stripOn(): boolean {
+    return !st.callView || st.viewOn.strip;
   }
 
   /** Seat the strip for the grid's size, or take it away, and say how much
@@ -134,7 +138,7 @@ export function createPeopleStrip(st: GridState, api: GridApi) {
     shown: readonly HTMLElement[],
     barSpace: number,
   ): StripSpace {
-    if (st.root === null || st.focusedTileId !== null) return NO_STRIP;
+    if (st.root === null) return NO_STRIP;
     // No size to lay out in (a window moving, a hidden panel): leave things be.
     const cells = peopleCells();
     if (cw <= 0 || ch <= 0) {
@@ -144,12 +148,7 @@ export function createPeopleStrip(st: GridState, api: GridApi) {
       return last;
     }
     const space = wanted(shown)
-      ? fit(
-          cw,
-          ch,
-          barSpace,
-          cells.some((c) => !c.hidden),
-        )
+      ? fit(cw, ch, barSpace, stripOn() && cells.some((c) => !c.hidden))
       : NO_STRIP;
     if (!space.active) {
       dissolve();

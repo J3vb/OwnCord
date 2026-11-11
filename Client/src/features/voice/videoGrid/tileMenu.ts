@@ -5,7 +5,7 @@
  * kept apart and labelled apart, local Mute, Focus, Full screen, Pop out,
  * Stop watching and, where the server allows it, voice moderation. Your own
  * camera tile gets a small one: Hide my camera and Turn off camera. In the
- * grid layout both menus end with Size and Pin rows. Same
+ * grid both menus end with Size and Pin rows. Same
  * keyboard model and dismissal as the voice-roster volume menu
  * (channel-sidebar/volumeMenu.ts), whose Mute and moderation rows it reuses.
  */
@@ -45,9 +45,10 @@ export interface TileMenuOptions {
   /** The tiles' own sliders show the same settings; keep them in step. */
   readonly onVolumeChange: (isScreenshare: boolean, volume: number, muted: boolean) => void;
   readonly onStopWatching: () => void;
-  /** Focus view, full screen and pop out for this tile, in their state now. */
+  /** Focus (pin the tile, the others Small), full screen and pop out for this
+   *  tile, in their state now. */
   readonly view: TileMenuView;
-  /** Size and Pin rows, in the grid layout. */
+  /** Size and Pin rows, except on a full-screen tile. */
   readonly arrange?: TileMenuArrange;
   /** The person's own actions; each row is left out without its handler. */
   readonly person?: TileMenuPerson;
@@ -79,7 +80,7 @@ export interface SelfTileMenuOptions {
   /** Turn off camera; `cameraLocked` greys it with that reason. */
   readonly onCameraOff?: () => void;
   readonly cameraLocked?: string | null;
-  /** Size and Pin rows, in the grid layout. */
+  /** Size and Pin rows, except on a full-screen tile. */
   readonly arrange?: TileMenuArrange;
 }
 
@@ -169,7 +170,7 @@ function openMenu(
 export function showSelfTileMenu(opts: SelfTileMenuOptions): void {
   const { onHide, onCameraOff, arrange } = opts;
   const locked = opts.cameraLocked ?? null;
-  // Nothing to offer: no size rows (focus mode, full screen) and no camera row
+  // Nothing to offer: no size rows (full screen) and no camera row
   // that works. A menu with only a greyed row could not take focus or close
   // by keyboard.
   if (

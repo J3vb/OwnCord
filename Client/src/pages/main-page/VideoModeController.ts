@@ -67,7 +67,7 @@ export interface VideoModeController {
   isVideoMode(): boolean;
   /** The grid is up in this window (open and not popped out). */
   isGridInWindow(): boolean;
-  /** Set focus on a specific video tile (focus mode). */
+  /** Focus a specific video tile (pinned, the rest small). */
   setFocus(tileId: number): void;
   /** Get the currently focused tile ID, or null if none. */
   getFocusedTileId(): number | null;

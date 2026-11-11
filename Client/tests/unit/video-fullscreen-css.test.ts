@@ -1,6 +1,6 @@
-// The theatre view (VideoGrid's fallback when the full-screen API is refused)
-// must fill the window whatever inline size the grid layout or the filmstrip
-// gave the tile, and the tile menu must open above it.
+// A full-screen tile and the theatre view (VideoGrid's fallback when the
+// full-screen API is refused) must fill the screen whatever inline size the
+// packed grid gave the tile, and the tile menu must open above the theatre.
 //
 // jsdom never applies app.css, so these assert the parsed stylesheet rules
 // (tests/helpers/app-css.ts).
@@ -8,15 +8,24 @@ import { cascadedDeclaration } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
 describe("video full-screen CSS", () => {
-  it.each(["width", "height"])(
-    "the theatre tile's %s fills the window, over any inline size",
+  it.each(
+    [".video-cell--theatre", ".video-cell:fullscreen"].flatMap((sel) => [
+      [sel, "width"],
+      [sel, "height"],
+    ]),
+  )("%s's %s fills the screen, over the packed grid's inline size", (selector, prop) => {
+    const d = cascadedDeclaration(selector!, prop!);
+    expect(d?.important).toBe(true);
+    expect(d?.value.value).toEqual({
+      type: "length-percentage",
+      value: { type: "percentage", value: 1 },
+    });
+  });
+
+  it.each(["position", "left", "top"])(
+    "the theatre tile's %s wins over the packed grid's placement",
     (prop) => {
-      const d = cascadedDeclaration(".video-cell--theatre", prop);
-      expect(d?.important).toBe(true);
-      expect(d?.value.value).toEqual({
-        type: "length-percentage",
-        value: { type: "percentage", value: 1 },
-      });
+      expect(cascadedDeclaration(".video-cell--theatre", prop)?.important).toBe(true);
     },
   );
 

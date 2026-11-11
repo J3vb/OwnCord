@@ -150,8 +150,8 @@ export function createGridTileBuild(st: GridState, api: GridApi, menus: GridMenu
     return { nav, back };
   }
 
-  /** A click anywhere on a filmstrip thumb (not on one of its controls)
-   *  swaps it into focus, as the tile button does. On a phone a tap on the
+  /** A click anywhere on another tile while one is focused (not on one of its
+   *  controls) focuses it instead, as the tile button does. On a phone a tap on the
    *  focused tile itself gives the focus back (a tile is focused by a tap on
    *  it, so it is unfocused the same way); an open tile menu or a pinch-zoomed
    *  picture takes the tap for itself. */
@@ -247,7 +247,7 @@ export function createGridTileBuild(st: GridState, api: GridApi, menus: GridMenu
     });
 
     // The whole tile is one real button (click, Enter, Space) that opens it
-    // in focus view; the tile's own controls sit above it, never inside it.
+    // in focus; the tile's own controls sit above it, never inside it.
     const select = createElement("button", {
       type: "button",
       class: "video-cell-select",

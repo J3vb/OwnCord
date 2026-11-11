@@ -105,8 +105,7 @@ describe("VideoGrid on a phone", () => {
         document.querySelector<HTMLElement>(`[data-testid='view-menu-${key}']`);
       expect(row("nonVideo")!.getAttribute("aria-checked")).toBe("true");
       expect(row("selfCamera")!.getAttribute("aria-checked")).toBe("true");
-      // The strip only means something in focus view.
-      expect(row("strip")).toBeNull();
+      expect(row("strip")!.getAttribute("aria-checked")).toBe("true");
 
       row("selfCamera")!.click();
       expect(localStorage.getItem("owncord:settings:callShowSelfCamera")).toBe("false");
@@ -203,7 +202,7 @@ describe("VideoGrid on a phone", () => {
       expect(grid.getFocusedTileId()).toBeNull();
     });
 
-    it("a tap on a strip tile moves the focus to it instead", () => {
+    it("a tap on another tile moves the focus to it instead", () => {
       usePhone(true);
       grid.setFocusedTile(3);
       tap(SHARE);
