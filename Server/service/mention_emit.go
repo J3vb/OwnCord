@@ -85,7 +85,9 @@ func (s *mentionState) reverseMentionCounts(ctx context.Context, channelID int64
 func (s *mentionState) removeAndReverseMentions(ctx context.Context, channelID int64, write func() ([]int64, error)) (ids []int64, reverseErr, err error) {
 	mu := s.mentionEmitLocks.forChannel(channelID)
 	if lockErr := syncutil.LockContext(ctx, mu); lockErr != nil {
-		return nil, nil, fmt.Errorf("remove messages: %w", lockErr)
+		// Not a refusal: answered like a store failure, with the context error kept
+		// so a caller can still tell a deadline from a hang-up.
+		return nil, nil, fmt.Errorf("%w: remove messages: %w", ErrInternal, lockErr)
 	}
 	defer mu.Unlock()
 	ids, err = write()
