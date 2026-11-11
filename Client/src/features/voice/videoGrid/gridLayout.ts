@@ -208,7 +208,12 @@ export function createGridLayout(st: GridState, api: GridApi) {
     if (watching !== null && watching !== tileId) leaveFullscreen();
     const savedFocus = captureFocusedControl();
     if (tileId !== null && st.cells.has(tileId)) enterFocus(st, tileId);
-    else leaveFocus(st);
+    else {
+      leaveFocus(st);
+      // A tile still on its way (a stream just watched) takes the focus when
+      // it arrives.
+      st.focusedTileId = tileId;
+    }
     syncTileNav();
     applyGridSizes();
     restoreFocusedControl(savedFocus);

@@ -151,11 +151,12 @@ describe("VideoGrid", () => {
       expect(grid.getFocusedTileId()).toBe(1);
     });
 
-    it("focuses a lone tile, and ignores a tile that is not up", () => {
+    it("focuses a lone tile, and keeps a tile that is not up waiting", () => {
       addTiles(1);
 
       grid.setFocusedTile(9);
-      expect(grid.getFocusedTileId()).toBeNull();
+      expect(grid.getFocusedTileId()).toBe(9);
+      expect(isPinned(1)).toBe(false);
 
       grid.setFocusedTile(1);
       expect(isPinned(1)).toBe(true);

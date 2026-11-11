@@ -182,7 +182,9 @@ export function createGridStreams(st: GridState, api: GridApi) {
     api.syncTileNav();
     api.relayout();
     api.syncViews();
-    if (refocus) api.setFocusedTile(userId);
+    if (refocus || (st.focusedTileId === userId && st.focusSaved === null)) {
+      api.setFocusedTile(userId);
+    }
   }
 
   /** Update an already-open tile's label in place. No-op if the tile isn't
