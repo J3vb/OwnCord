@@ -14,7 +14,7 @@ import (
 )
 
 // The settings family's service-level characterization (B3-8). The admin
-// handler surface is pinned by admin/api_test.go's TestAdminAPI_PatchSettings_*
+// handler surface is pinned by admin/api_settings_test.go's TestAdminAPI_PatchSettings_*
 // rows; these tests pin the same policy at the service seam the handlers now
 // delegate to, plus the contracts only the service exposes (Setting's
 // ErrNotFound wrap, the audit rows, multi-key atomic apply).

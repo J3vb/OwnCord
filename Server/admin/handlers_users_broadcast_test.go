@@ -10,7 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// unbanMockHub wraps mockHub (admin/api_test.go) and additionally implements
+// unbanMockHub wraps mockHub (admin/api_mockhub_test.go) and additionally implements
 // the optional memberUnbanBroadcaster capability handlePatchUser looks for
 // via a type assertion, so these tests can observe whether an unban fired
 // the mirror of BroadcastMemberBan.
