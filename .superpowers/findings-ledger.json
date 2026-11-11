@@ -1,5 +1,5 @@
 {
-  "nextId": 581,
+  "nextId": 586,
   "findings": [
     {
       "id": "OC-0001",
@@ -13409,6 +13409,121 @@
       "finder": "claude",
       "note": "owner chose to leave it as it is, 2026-11-11",
       "rationale": "owner chose to leave it as it is, 2026-11-11: a banned owner keeps the group, and it is theirs again when the ban ends."
+    },
+    {
+      "id": "OC-0581",
+      "title": "A thread whose message window got detached could not jump to present or load newer replies",
+      "file": "Client/src/features/threads/ThreadPanel.ts",
+      "line": 194,
+      "severity": "medium",
+      "why": "When a thread or forum post's message window got detached from the present (more than 500 replies loaded while scrolling up, or a failed reload), the thread panel had no way back: Jump to present did nothing, newer replies could not be paged in and other people's new replies were dropped until the panel was closed and reopened.",
+      "repro": "Open a thread with more than 500 replies and scroll up until the newest rows are trimmed, then scroll back down and click Jump to present: nothing happens and the newest replies stay missing.",
+      "evidence": "Client/tests/unit/thread-panel.test.ts (Jump to present reattaches the window and reloads the newest replies; pages newer replies when the detached list is scrolled to the bottom)",
+      "suggestedFix": "Give the thread panel the same two recoveries the channel list has: Jump to present reloads the newest page and reattaches, and reaching the bottom of a detached window pages newer replies.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/thread-panel.test.ts",
+        "revertProof": "without the handlers 'Jump to present reattaches the window and reloads the newest replies' fails"
+      },
+      "lens": "client-state",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0582",
+      "title": "Retry on a failed thread reply did nothing after the thread panel was closed and reopened",
+      "file": "Client/src/features/threads/ThreadPanel.ts",
+      "line": 245,
+      "severity": "low",
+      "why": "A failed thread reply keeps its text for Retry in the sender that tried to send it. That sender belonged to the open thread panel, so closing and reopening the panel (or switching thread or channel) left the failed row on screen with a Retry button that had nothing to resend.",
+      "repro": "Send a thread reply that fails, close the thread panel, open the thread again and click Retry on the failed row: nothing happens.",
+      "evidence": "Client/tests/unit/thread-sender.test.ts (retries a failed reply from a second sender for the same thread; drops the draft of a row that is gone before the panel reopens)",
+      "suggestedFix": "Keep failed replies per thread outside the panel, cleared with the session, so any sender for that thread can retry them.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/thread-sender.test.ts",
+        "revertProof": "with per-panel storage 'retries a failed reply from a second sender for the same thread' fails"
+      },
+      "lens": "client-state",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0583",
+      "title": "A failed thread history reload after a reconnect left a silent hole in the thread",
+      "file": "Client/src/features/messaging/threadResume.ts",
+      "line": 38,
+      "severity": "low",
+      "why": "After a reconnect the open thread reloads its newest page to pick up replies posted while offline. When that reload failed for a reason other than the thread being gone (a timeout, a server still starting), the failure was swallowed: the thread kept a hole with no message and no way to retry.",
+      "repro": "Keep a thread open, drop the connection while others reply, and make the reload after the reconnect fail with a 5xx: the replies are missing and nothing says so.",
+      "evidence": "Client/tests/unit/threads-dispatcher.test.ts (detaches the window and says so when the refetch fails with rows on screen; leaves the window alone when a newer reconnect superseded the failed refetch)",
+      "suggestedFix": "On a failed reload, mark the window detached and tell the user, so Jump to present reloads it; ignore the failure when a newer reconnect has taken over.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/threads-dispatcher.test.ts",
+        "revertProof": "with the failure swallowed 'detaches the window and says so when the refetch fails with rows on screen' fails"
+      },
+      "lens": "error-paths",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0584",
+      "title": "A second message list took over the reading anchor, so a full ready threw a reader of old messages to the newest ones",
+      "file": "Client/src/features/messaging/readingAnchor.ts",
+      "line": 8,
+      "severity": "low",
+      "why": "The app remembers one reading anchor, owned by the newest mounted message list. Opening a thread mounts a second list, which took the slot over and never gave it back. After that a full state from the server (a restart, a long disconnect) found no anchor for the channel and threw a reader of old messages to the newest ones.",
+      "repro": "Jump to an old message in a channel, open and close any thread, then have the server send a full ready: the channel list jumps to the present instead of staying on the old message.",
+      "evidence": "Client/src/features/messaging/readingAnchor.test.ts (keeps a channel's anchor while a list for another channel is mounted and gone again; falls back to an older list when the newest has no answer for the channel)",
+      "suggestedFix": "Keep one anchor source per mounted list and ask them newest first, so a list that knows nothing about the channel does not hide the one that does.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src/features/messaging/readingAnchor.test.ts",
+        "revertProof": "with a single slot \"keeps a channel's anchor while a list for another channel is mounted and gone again\" fails"
+      },
+      "lens": "client-state",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0585",
+      "title": "Forward and Create Poll were refused for a few minutes after the server database was restored",
+      "file": "Client/src/features/messaging/forwardSend.ts",
+      "line": 87,
+      "severity": "low",
+      "why": "After a database restore the server refuses, for about five minutes, any new message whose client id is dated before the restore floor it announces. Ordinary sends already respected that floor; Forward and Create Poll built their ids from the device clock alone, so both were refused during that window, and Retry reused the same refused id.",
+      "repro": "Restore the server database, then within five minutes forward a message or post a poll: refused, while a plain message sends.",
+      "evidence": "Client/src/features/messaging/forwardSend.test.ts (keys the forward and the comment at or above the server's restore floor), Client/tests/unit/poll-composer.test.ts (keys the poll at or above the server's restore floor)",
+      "suggestedFix": "Build forward and poll ids through the same helper ordinary sends use, which never dates an id before the announced floor.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src/features/messaging/forwardSend.test.ts",
+        "revertProof": "with the device clock alone \"keys the forward and the comment at or above the server's restore floor\" fails"
+      },
+      "lens": "flow-message",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
     }
   ]
 }

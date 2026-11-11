@@ -24,8 +24,10 @@ import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import {
   isChannelLoaded,
+  isWindowDetached,
   messagesStore,
   resetMessagesStore,
+  setChannelLoadError,
   type Message,
 } from "@stores/messages.store";
 import { safetyStore } from "../../src/features/safety/store";
@@ -1001,5 +1003,48 @@ describe("files in a thread", () => {
     expect(api.uploadFile).not.toHaveBeenCalled();
     drop(q('[data-testid="thread-panel-messages"]'));
     await vi.waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("ThreadPanel detached window", () => {
+  const pill = (): HTMLButtonElement => q<HTMLButtonElement>('[data-testid="jump-to-present"]');
+
+  it("Jump to present reattaches the window and reloads the newest replies", async () => {
+    mountPanel();
+    await flush();
+    setChannelLoadError(THREAD);
+    messagesStore.flush();
+    expect(isWindowDetached(THREAD)).toBe(true);
+    expect(pill().classList.contains("visible")).toBe(true);
+    loadMessages.mockClear();
+    pill().click();
+    expect(loadMessages).toHaveBeenCalledWith(THREAD, expect.any(AbortSignal));
+    expect(isChannelLoaded(THREAD)).toBe(false);
+  });
+
+  it("a reply sent from a detached window reattaches it and reloads the newest replies", async () => {
+    setConnectionStatus("connected");
+    mountPanel();
+    await flush();
+    setChannelLoadError(THREAD);
+    messagesStore.flush();
+    loadMessages.mockClear();
+    textarea().value = "from the past";
+    textarea().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(loadMessages).toHaveBeenCalledWith(THREAD, expect.any(AbortSignal));
+    const sent = ws.getSentMessages() as unknown as { type: string }[];
+    expect(sent.some((m) => m.type === "chat_send")).toBe(true);
+  });
+
+  it("pages newer replies when the detached list is scrolled to the bottom", async () => {
+    mountPanel();
+    await flush();
+    setChannelLoadError(THREAD);
+    messagesStore.flush();
+    const root = q<HTMLElement>(".messages-container");
+    root.scrollTop = 1_000_000;
+    root.dispatchEvent(new Event("scroll"));
+    await flush();
+    expect(msgCtrl.loadNewerMessages).toHaveBeenCalledWith(THREAD, expect.any(AbortSignal));
   });
 });

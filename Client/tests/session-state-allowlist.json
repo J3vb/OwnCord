@@ -2,6 +2,12 @@
   "_doc": "Top-level per-server-looking state that registers no session reset (tests/unit/session-state-ownership.test.ts). This list only shrinks: the test fails an entry whose binding is gone or whose file now registers a reset. Keys are file + binding, never a line number. Categories: app-lifetime, host-keyed, dom-owned, pure-cache, transient, reset-elsewhere.",
   "entries": [
     {
+      "file": "features/messaging/readingAnchor.ts",
+      "binding": "lookups",
+      "category": "dom-owned",
+      "reason": "Lookups of the mounted message lists, each added on mount and removed by that list's own destroy; a session reset must not drop the registration of a list that stays mounted"
+    },
+    {
       "file": "app/serverHealth.ts",
       "binding": "serverInfoByHost",
       "category": "host-keyed",

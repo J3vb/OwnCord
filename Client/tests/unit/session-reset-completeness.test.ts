@@ -19,6 +19,10 @@ import {
 } from "../../src/features/messaging/forwardRequests";
 import { claimPollRequest, isPollRequest } from "../../src/features/messaging/pollRequests";
 import { pollCardState } from "../../src/features/messaging/message-list/pollCard";
+import { createThreadSender, holdsThreadDrafts } from "../../src/features/threads/threadSender";
+import { createMockWsClient } from "../helpers/mock-ws";
+import type { WsClient } from "../../src/lib/ws";
+import type { ApiClient } from "../../src/lib/api";
 import { withThreadsStore } from "../../src/stores/threadsLoader";
 import { acceptSharesFor, sendShareTo } from "../../src/features/share/shareInbox";
 import { setFocusedThread, threadsStore, upsertThread } from "../../src/stores/threads.store";
@@ -600,6 +604,23 @@ const PROBES: readonly Probe[] = [
       await vi.dynamicImportSettled();
       return !threadsJobRan;
     },
+  },
+  {
+    name: "threads:sendDrafts",
+    mutate: () => {
+      const priorStatus = uiStore.getState().connectionStatus;
+      setConnectionStatus("disconnected");
+      createThreadSender({
+        ws: createMockWsClient() as unknown as WsClient,
+        api: { getConfig: () => ({ host: "h" }) } as unknown as ApiClient,
+        threadId: 9_002,
+        signal: new AbortController().signal,
+        showToast: () => {},
+        restoreUnsent: () => {},
+      }).sendText("probe", null, false, []);
+      setConnectionStatus(priorStatus);
+    },
+    isInitial: () => !holdsThreadDrafts(9_002),
   },
   {
     name: "share-inbox",
