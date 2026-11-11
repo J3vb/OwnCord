@@ -27,6 +27,7 @@ import { RoomLifecycle } from "./roomLifecycle";
 import { MediaControl } from "./mediaControl";
 import { restoreLocalVoiceState } from "./localVoiceRestore";
 import { dismissMediaLostNotice } from "./mediaLostNotice";
+import { noteVoiceLeave } from "./leaveOwed";
 import { isLinuxDesktop } from "./native/platform";
 import { nativeCounters } from "./native/counters";
 import { speechDetectionOf } from "./sileroDetection";
@@ -73,6 +74,10 @@ export class LiveKitSession extends SessionReconnect {
     startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
     syncModuleRooms: () => this.syncModuleRooms(),
     leaveVoice: (sendWs, keepWatched) => this.leaveVoice(sendWs, keepWatched),
+    sendVoiceLeave: () => {
+      noteVoiceLeave();
+      this.ws?.send({ type: "voice_leave", payload: {} });
+    },
     sweepPublications: (room) => this.sweepPublications(room),
     handleVoiceTokenRefresh: (token) => this.handleVoiceTokenRefresh(token),
     connectAndSetup: (t, u, c, d, k) => this.connectAndSetup(t, u, c, d, k),

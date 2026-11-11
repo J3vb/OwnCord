@@ -3,7 +3,7 @@ import * as dispatcherMocks from "../../helpers/dispatcherMocks";
 import { expectConsole } from "../../helpers/console";
 import { authStore } from "../../../src/stores/auth.store";
 import { voiceStore } from "../../../src/stores/voice.store";
-import { uiStore } from "../../../src/stores/ui.store";
+import { setConnectionStatus, uiStore } from "../../../src/stores/ui.store";
 import {
   leaveVoice as mockLeaveVoice,
   disableCamera as mockDisableCamera,
@@ -15,7 +15,11 @@ import {
 } from "@lib/voice/livekitSession";
 import { rollbackPendingVideo as mockRollbackPendingVideo } from "../../../src/features/voice/screenShare";
 import { takeVoiceMoved } from "../../../src/features/voice/moveHint";
-import { noteJoinSent, takeJoinRefusal } from "../../../src/features/voice/joinRequest";
+import {
+  JOIN_ANSWER_WAIT_MS,
+  noteJoinSent,
+  takeJoinRefusal,
+} from "../../../src/features/voice/joinRequest";
 import {
   useDispatcherHarness,
   setMeUser,
@@ -306,7 +310,8 @@ describe("WS Dispatcher", () => {
     patchVoice({ currentChannelId: 3 });
 
     mock.dispatch("voice_moved", { to_channel_id: 7 });
-    await vi.runAllTimersAsync();
+    // Only the lazy session import: the re-join's own answer wait stays armed.
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(voiceStore.getState().currentChannelId).toBe(7);
     expect(mock.ws.send).toHaveBeenCalledWith(
@@ -537,6 +542,99 @@ describe("WS Dispatcher", () => {
   // client deliberately does not pre-block the click — its participant list can
   // lag, and a refusal it invented would be uncorrectable — so the only thing
   // standing between the user and a silent no-op is this toast.
+
+  describe("a voice join waiting for its answer", () => {
+    const leaves = (): number =>
+      vi.mocked(mock.ws.send).mock.calls.filter(([m]) => m.type === "voice_leave").length;
+
+    /** The user's click: the store names the channel, then the frame goes out. */
+    function sendJoin(channelId: number): void {
+      patchVoice({ currentChannelId: channelId, voiceStatus: "joining" });
+      noteJoinSent("join-1");
+    }
+
+    beforeEach(() => {
+      setConnectionStatus("connected");
+    });
+
+    it("ends a join that gets neither a token nor a refusal, and tells the server", async () => {
+      sendJoin(3);
+
+      await vi.advanceTimersByTimeAsync(JOIN_ANSWER_WAIT_MS - 1);
+      expect(voiceStore.getState().voiceStatus).toBe("joining");
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(voiceStore.getState()).toMatchObject({ currentChannelId: null, voiceStatus: "idle" });
+      expect(leaves()).toBe(1);
+      expect(mockLeaveVoice).toHaveBeenCalledWith(false);
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "Could not join voice: the server did not answer. Try again.",
+        "error",
+      );
+    });
+
+    it("keeps waiting while the chat socket is between connections", async () => {
+      setConnectionStatus("reconnecting");
+      sendJoin(3);
+
+      await vi.advanceTimersByTimeAsync(JOIN_ANSWER_WAIT_MS * 2);
+      expect(voiceStore.getState().currentChannelId).toBe(3);
+      expect(leaves()).toBe(0);
+
+      setConnectionStatus("connected");
+      await vi.advanceTimersByTimeAsync(JOIN_ANSWER_WAIT_MS);
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(leaves()).toBe(1);
+    });
+
+    it("sends no leave on a socket that closed for good", async () => {
+      setConnectionStatus("disconnected");
+      sendJoin(3);
+
+      await vi.advanceTimersByTimeAsync(JOIN_ANSWER_WAIT_MS);
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(leaves()).toBe(0);
+    });
+
+    it("leaves a join alone once its token arrived, however long the connect takes", async () => {
+      sendJoin(3);
+      mock.dispatch("voice_token", { channel_id: 3, token: "t", url: "/livekit" });
+
+      await vi.advanceTimersByTimeAsync(JOIN_ANSWER_WAIT_MS * 2);
+      expect(voiceStore.getState()).toMatchObject({ currentChannelId: 3, voiceStatus: "joining" });
+      expect(mockShowToast).not.toHaveBeenCalled();
+    });
+
+    it("keeps waiting after a token for a channel the user clicked away from", async () => {
+      sendJoin(3);
+      mock.dispatch("voice_token", { channel_id: 8, token: "t", url: "/livekit" });
+
+      await vi.advanceTimersByTimeAsync(JOIN_ANSWER_WAIT_MS);
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+    });
+
+    it("stands down for a refusal, a leave and a newer join", async () => {
+      sendJoin(3);
+      mock.dispatch("error", { code: "FORBIDDEN", message: "no" }, "join-1");
+      expectConsole("error", /\[dispatcher\] Server error/);
+      mockShowToast.mockClear();
+      await vi.advanceTimersByTimeAsync(JOIN_ANSWER_WAIT_MS);
+      expect(mockShowToast).not.toHaveBeenCalled();
+
+      sendJoin(3);
+      patchVoice({ currentChannelId: null, voiceStatus: "idle" });
+      await vi.advanceTimersByTimeAsync(JOIN_ANSWER_WAIT_MS);
+      expect(mockShowToast).not.toHaveBeenCalled();
+
+      sendJoin(3);
+      await vi.advanceTimersByTimeAsync(JOIN_ANSWER_WAIT_MS - 1);
+      sendJoin(4);
+      await vi.advanceTimersByTimeAsync(JOIN_ANSWER_WAIT_MS - 1);
+      expect(voiceStore.getState().currentChannelId).toBe(4);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+    });
+  });
 
   describe("voice capacity errors", () => {
     beforeEach(() => {

@@ -33,6 +33,9 @@ export interface JoinHost {
   startTokenRefreshTimer(): void;
   syncModuleRooms(): void;
   leaveVoice(sendWs: boolean, keepWatched?: boolean): void;
+  /** Send a bare voice_leave: ends the membership the server holds for this
+   *  socket, and nothing when it holds none. No local teardown. */
+  sendVoiceLeave(): void;
   /** Offer the adopted room's already-published streams (Watch stream tiles). */
   sweepPublications(room: Room): void;
   handleVoiceTokenRefresh(token: string): void;
