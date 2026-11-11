@@ -37,7 +37,10 @@ export function armGapResume(s: WsState, detail: object): void {
 
 // Tear down like the liveness deadline does and redial at once: the jitter
 // already spread this client's resume, and the server answers it with the
-// full ready it owes.
+// full ready it owes (after an unreadable frame the auth frame asks for one,
+// see `fullStateOwed`). The streak and the time of the last resume are kept,
+// so a server that keeps sending the bad frame is redialled at growing
+// intervals, never faster than the last window.
 function resumeForGap(s: WsState): void {
   if (s.intentionalClose || s.certMismatchBlock || !s.config) return;
   if (s.state !== "connected" || !s.proxyOpen) return;

@@ -1,5 +1,5 @@
 {
-  "nextId": 571,
+  "nextId": 574,
   "findings": [
     {
       "id": "OC-0001",
@@ -13177,6 +13177,75 @@
         "revertProof": "without the capacity exemption TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsSlot fails; without the announce TestMultiDevice_SameChannelMoveFailingLaterStepAnnouncesLeave fails"
       },
       "lens": "flow-voice",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0571",
+      "title": "A live update the client could not read was never recovered by the redial that followed",
+      "file": "Client/src/lib/net/ws/wsGapResume.ts",
+      "line": 44,
+      "severity": "low",
+      "why": "When a sequenced frame fails the client's shape check, the client redials to resync. The frame's number had already been counted as received, so the redial resumed from a point that included it: the server replayed nothing and sent no full state, and the update stayed lost until the next full reload.",
+      "repro": "Deliver a sequenced frame whose payload fails the generated shape check, let the gap-resume timer fire and read the auth frame of the redial: it carries the rejected frame's number as last_seq, so the server treats the client as up to date.",
+      "evidence": "Client/tests/unit/ws-frame-shape.test.ts (a bad sequenced frame redials as a fresh connect, so the server answers with a full state)",
+      "suggestedFix": "Redial a shape reject as a fresh connect (last_seq 0) so the server answers with a full ready, and back off when the same frame is rejected again right after it.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/ws-frame-shape.test.ts",
+        "revertProof": "without the fresh connect the test 'a bad sequenced frame redials as a fresh connect' fails"
+      },
+      "lens": "flow-reconnect",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0572",
+      "title": "A thread first learned from a history row never picked up later changes from history",
+      "file": "Client/src/stores/threads.store.ts",
+      "line": 129,
+      "severity": "medium",
+      "why": "A thread first learned from a history row was never refreshed by a later history fetch, because snapshots only filled in threads the store did not have. A rename, lock, archive or delete made while its parent channel was not open, which sends no live frame to that client, stayed invisible: stale name, a chip for a deleted thread, a composer wrongly locked.",
+      "repro": "Open a channel whose history carries a thread, switch to another channel, have a moderator rename or lock the thread, then open the first channel again: the refetched history carries the new state and the store keeps the old one.",
+      "evidence": "Client/tests/unit/threads-snapshot-freshness.test.ts (replaces an earlier snapshot even with the same last activity; replaces a live frame once the parent stopped being the open channel; drops the thread a snapshot taught)",
+      "suggestedFix": "Remember which threads were set by a live frame while their parent was the open channel, and let a history snapshot replace every other entry; forget those marks when the parent is left or the connection is re-authenticated.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/threads-snapshot-freshness.test.ts",
+        "revertProof": "with snapshots only filling in missing threads, 'replaces an earlier snapshot even with the same last activity' fails"
+      },
+      "lens": "client-state",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0573",
+      "title": "A block or unblock made on one device did not reach the other signed-in devices until a full reload",
+      "file": "Client/src/lib/dispatcher.ts",
+      "line": 184,
+      "severity": "low",
+      "why": "The block list is fetched only when the server sends a full ready. A connection that resumes gets no ready, so a block or unblock made on another device while this one was briefly offline stayed unknown here: the blocked person's messages kept notifying, or an unblocked person stayed hidden, until a full reload.",
+      "repro": "Sign in on two devices, drop the second one's socket for a few seconds, block someone on the first, let the second resume from the replay buffer: its block list is not refetched.",
+      "evidence": "Client/tests/unit/dispatcher/core.test.ts (refetches the block list on a resumed connection, which gets no ready; does not let a slow block list fetched on resume revert a fresher local block)",
+      "suggestedFix": "Refetch the block list on a resumed connection too, behind the same revision guard the ready path uses. A live frame to the blocker's other devices would close the remaining gap while both stay connected; that is a protocol change and is not part of this fix.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/dispatcher/core.test.ts",
+        "revertProof": "without the refetch 'refetches the block list on a resumed connection, which gets no ready' fails"
+      },
+      "lens": "client-state",
       "confidence": "high",
       "status": "fixed",
       "found": "2026-11-11",
