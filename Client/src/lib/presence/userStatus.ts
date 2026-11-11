@@ -81,6 +81,38 @@ export function onUserStatusChange(
 }
 
 // ---------------------------------------------------------------------------
+// The status last agreed with a server
+// ---------------------------------------------------------------------------
+
+const USER_STATUS_AGREED_PREF_KEY = "userStatusAgreed";
+
+/**
+ * The chosen status this device and one server account last agreed on. The
+ * saved status is one per device while a server keeps one per account, so on
+ * connect this tells "another device chose a status since" (the saved one still
+ * equals it) from "this device did" (it no longer does), and one server's
+ * status from another's.
+ */
+interface AgreedStatus {
+  /** The server and account it was agreed with. */
+  readonly owner: string;
+  readonly status: UserStatus;
+}
+
+/** The stored agreement, or null when there is none or it is malformed. */
+export function loadAgreedStatus(): AgreedStatus | null {
+  const raw = loadPref<Record<string, unknown> | null>(USER_STATUS_AGREED_PREF_KEY, null);
+  if (raw === null || typeof raw !== "object") return null;
+  const { owner, status } = raw;
+  if (typeof owner !== "string" || typeof status !== "string" || !isUserStatus(status)) return null;
+  return { owner, status };
+}
+
+export function saveAgreedStatus(owner: string, status: UserStatus): void {
+  savePref(USER_STATUS_AGREED_PREF_KEY, { owner, status });
+}
+
+// ---------------------------------------------------------------------------
 // Custom status text
 // ---------------------------------------------------------------------------
 

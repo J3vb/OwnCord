@@ -17,8 +17,9 @@
  *  - The timer follows the *locally saved* status. A live presence for us
  *    that differs from the saved one (another device changed it) cancels the
  *    timer, if any, and adopts that status locally, sending nothing. A reconnect's
- *    auth_ok is not such a signal: the page re-asserts the saved status to
- *    the server on reconnect, so the timed status and its timer carry on.
+ *    auth_ok is not such a signal here: the page settles it (pagePresence.ts),
+ *    and the timed status and its timer carry on unless another device chose
+ *    a different status meanwhile.
  *  - The timer firing re-reads the stored timer and the saved status first, so
  *    it can never override a newer manual choice it has not heard about yet.
  */
@@ -100,12 +101,8 @@ export function startStatusTimerWatcher(options: StatusTimerWatcherOptions): Sta
     // adopted (any status but idle, which only that device's own idle
     // watcher produces); otherwise this device would keep its old saved
     // status and put it back on the next reconnect or return from idle.
-    if (
-      timer === null
-        ? reported === "idle" || reported === loadUserStatus()
-        : reported === timer.status
-    )
-      return;
+    if (timer !== null && reported === timer.status) return;
+    if (timer === null && (reported === "idle" || reported === loadUserStatus())) return;
     // The frame carrying our latest pick may still be queued behind the
     // presence limiter, so the server can still be echoing the status we had.
     const t = now();

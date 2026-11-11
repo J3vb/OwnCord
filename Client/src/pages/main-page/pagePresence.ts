@@ -5,60 +5,83 @@
 import type { UserStatus } from "@lib/types";
 import { authStore } from "@stores/auth.store";
 import {
+  loadAgreedStatus,
   loadUserStatus,
   loadUserStatusOrigin,
   onUserStatusChange,
+  saveAgreedStatus,
   saveUserStatus,
 } from "@lib/presence/userStatus";
+import { getChannelMutesHost } from "@lib/prefs/channelMutes";
 import { uiStore } from "@stores/ui.store";
 import type { PageState, PageApi } from "./pageState";
+
+/** The statuses a server keeps for the whole account. Idle is one connection's. */
+function isAccountStatus(status: UserStatus | undefined): status is UserStatus {
+  return status === "online" || status === "dnd" || status === "invisible";
+}
+
+/** What the user chose on this device: an idle the idle watcher set stands for
+ *  the Online it goes back to. */
+function chosenStatus(status: UserStatus): UserStatus {
+  return status === "idle" && loadUserStatusOrigin() === "auto" ? "online" : status;
+}
 
 export function createPagePresence(st: PageState, _pg: PageApi) {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
 
-  /** A status was picked by hand on this device while the socket was down (or
-   *  before the first connect of this page, such as a timer that ended while
-   *  the app was closed), so the server has not heard it and must not overrule
-   *  it on reconnect. */
-  let pickedUnsent = false;
-  let connectedOnce = false;
+  /** The server account this page is connected to, once a connect has said so. */
+  let owner: string | null = null;
+
+  // A status saved while the socket is up is one the server hears (a pick
+  // here) or already holds (another device's, adopted from a live presence),
+  // so it becomes the agreed one. One saved while the socket is down does
+  // not: the next connect finds it differs from the agreement and sends it.
   st.unsubscribers.push(
-    onUserStatusChange(() => {
-      const live = connectedOnce && uiStore.getState().connectionStatus === "connected";
-      if (!live && loadUserStatusOrigin() === "manual") pickedUnsent = true;
+    onUserStatusChange((status) => {
+      if (owner === null || uiStore.getState().connectionStatus !== "connected") return;
+      saveAgreedStatus(owner, chosenStatus(status));
     }),
   );
 
   /**
-   * Re-assert the status the user picked, if the server disagrees.
+   * Bring the saved status and the server's into line on connect.
    *
-   * This used to fire on every connect, because the server stamped everyone
-   * online at handshake and the client had to race to correct it — which is
-   * what made a chosen Do Not Disturb (and "appear offline") flash online on
-   * every reconnect. The server now reads the saved status and announces
-   * *that*, so this is a no-op in the normal case. When the two differ, the
-   * server is the newer one unless the user picked a status on this device
-   * while the socket was down: then that pick is sent. Otherwise another
-   * device chose it, and it is adopted here, so this device does not put its
-   * own old status back over it. An older server that reports no status, or
-   * an idle one, is still answered with the saved status.
+   * The server announces the account's stored status at handshake, so the two
+   * are equal in the normal case. When they differ, the one that changed since
+   * they last agreed wins:
+   *  - the saved status still equals the agreement with this server account
+   *    (or there is none yet, a first sign-in): another device chose the
+   *    server's, and it is adopted here, so this device does not put its own
+   *    old status back over it;
+   *  - otherwise the user chose here while the socket was down, or was last
+   *    connected to another server (the saved status and its timer are one per
+   *    device, and follow the user from server to server): the saved status is
+   *    sent.
+   * A server that reports no status, or an idle one, is answered with the
+   * saved status as well.
    */
   function restoreSavedPresence(): void {
+    const user = authStore.getState().user;
+    const account = `${getChannelMutesHost() ?? ""}#${user?.id ?? 0}`;
+    owner = account;
     const status = loadUserStatus();
-    const serverStatus = authStore.getState().user?.status;
-    const pickedWhileOffline = pickedUnsent;
-    pickedUnsent = false;
-    connectedOnce = true;
-    if (serverStatus === status) return;
-    const adoptable =
-      serverStatus === "online" || serverStatus === "dnd" || serverStatus === "invisible";
-    if (adoptable && !pickedWhileOffline) {
-      saveUserStatus(serverStatus);
-      return;
+    const chosen = chosenStatus(status);
+    const serverStatus = user?.status;
+    const agreed = loadAgreedStatus();
+    if (serverStatus !== status && isAccountStatus(serverStatus)) {
+      const unchangedHere =
+        agreed === null || (agreed.owner === account && agreed.status === chosen);
+      if (unchangedHere) {
+        saveUserStatus(serverStatus);
+        saveAgreedStatus(account, serverStatus);
+        return;
+      }
     }
-    applyPresence(status);
+    if (serverStatus !== status) applyPresence(status);
+    saveAgreedStatus(account, chosen);
   }
 
   /** Send a presence change and reflect it locally. Shared by the settings
