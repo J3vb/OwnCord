@@ -119,6 +119,21 @@ describe("VideoGrid tile size and pin", () => {
     expect(control(2, "size-large").getAttribute("aria-checked")).toBe("true");
   });
 
+  it("gives a stream that ends and starts again during focus its default size after focus", () => {
+    addCamera(2);
+    addCamera(3);
+    settle();
+    control(3, "size-large").click();
+    grid.setFocusedTile(2);
+    settle();
+
+    grid.removeStream(3);
+    addCamera(3);
+    grid.setFocusedTile(null);
+    settle();
+    expect(control(3, "size-medium").getAttribute("aria-checked")).toBe("true");
+  });
+
   it("keeps the pin and size of a share through a republish hold", () => {
     grid.setCallbacks({ isStreamLive: () => true });
     grid.addStream(SHARE, "Otto (Screen)", fakeStream(), makeTileConfig({ isScreenshare: true }));

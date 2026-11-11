@@ -84,6 +84,8 @@ export function createGridTileSize(st: GridState, api: GridApi) {
   function forgetTileSize(tileId: number): void {
     st.tileSizes.delete(tileId);
     st.pinned.delete(tileId);
+    st.focusSaved?.sizes.delete(tileId);
+    st.focusSaved?.pinned.delete(tileId);
   }
 
   function forgetTileSizes(): void {
