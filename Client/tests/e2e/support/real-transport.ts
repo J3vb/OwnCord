@@ -30,6 +30,9 @@ export async function installRealTransport(page: Page, server: TestServer) {
   let httpHold:
     | { filter: (request: { path: string; method: string }) => boolean; gate: Promise<void> }
     | undefined;
+  let responseHold:
+    | { filter: (request: { path: string; method: string }) => boolean; gate: Promise<void> }
+    | undefined;
   const pendingEvents = new Set<Promise<void>>();
   // Main-frame navigations replace the document, and with it the frontend that
   // owned the current socket. The native proxy's frames for that document then
@@ -104,6 +107,8 @@ export async function installRealTransport(page: Page, server: TestServer) {
           });
           const id = ++resource;
           bodies.set(id, Array.from(new Uint8Array(await response.arrayBuffer())));
+          if (responseHold?.filter({ path: forward.pathname, method: request.method }))
+            await responseHold.gate;
           return {
             status: response.status,
             statusText: response.statusText,
@@ -352,6 +357,15 @@ export async function installRealTransport(page: Page, server: TestServer) {
       httpHold = { filter, gate: new Promise<void>((resolve) => (release = resolve)) };
       return () => {
         httpHold = undefined;
+        release();
+      };
+    },
+    /** Let selected HTTP sends reach the server now, but hold their answers back until the returned release runs. */
+    holdHttpResponses(filter: (request: { path: string; method: string }) => boolean) {
+      let release!: () => void;
+      responseHold = { filter, gate: new Promise<void>((resolve) => (release = resolve)) };
+      return () => {
+        responseHold = undefined;
         release();
       };
     },
