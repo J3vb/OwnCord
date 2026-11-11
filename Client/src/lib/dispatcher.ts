@@ -176,12 +176,12 @@ export function wireDispatcher(
       // thread_focus is not carried across a connection: say it again, and
       // refetch the open panel's history (it missed frames while down).
       resumeThreadFocus(ws, api);
-      // A resumed connection gets no ready, so refetch Message Requests here;
-      // a full flow ("none") refetches them from ready instead.
+      // A resume gets no ready (a full flow, "none", refetches these from ready), and
+      // these changes are not replayed: refetch them so one missed while down shows.
+      // (sticker_update is unsequenced; a block or unblock may come from another device.)
       if (payload.replay_source === "buffer" || payload.replay_source === "db") {
         applyReadyDmRequests(api);
-        // sticker_update is unsequenced and not replayed, and a resume gets no
-        // ready: refetch the set so a change missed while down is recovered.
+        applyReadyBlocks(api, "resume");
         applyReadyStickers(api);
       }
     }),

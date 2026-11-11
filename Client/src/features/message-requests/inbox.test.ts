@@ -55,7 +55,7 @@ function deferredApi() {
     reject: (err: unknown) => void;
   }> = [];
   const api = {
-    listBlocks: vi.fn(),
+    listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
     listDmRequests: vi.fn(
       () =>
         new Promise<{ requests: DmRequestListItem[] }>((resolve, reject) => {

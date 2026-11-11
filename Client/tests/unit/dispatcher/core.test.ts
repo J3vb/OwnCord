@@ -5,7 +5,11 @@ import { authStore } from "../../../src/stores/auth.store";
 import { channelsStore, setRoles, getRoleIdByName } from "../../../src/stores/channels.store";
 import { messagesStore } from "../../../src/stores/messages.store";
 import { membersStore } from "../../../src/stores/members.store";
-import { blocksStore, setUserBlockedByMe } from "../../../src/stores/blocks.store";
+import {
+  blocksStore,
+  setUserBlockedByMe,
+  setUserBlockedByThem,
+} from "../../../src/stores/blocks.store";
 import { uiStore, setUpdateRequiredHost } from "../../../src/stores/ui.store";
 import { PROTOCOL_EPOCH } from "../../../src/lib/protocolTypes";
 import {
@@ -35,6 +39,18 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 );
 
 const { mockShowToast } = dispatcherMocks;
+
+/** A `listBlocks` whose reply the test releases by hand. */
+function pendingListBlocks() {
+  let resolve!: (v: { blocked_user_ids: number[] }) => void;
+  const listBlocks = vi.fn(
+    () =>
+      new Promise<{ blocked_user_ids: number[] }>((r) => {
+        resolve = r;
+      }),
+  );
+  return { listBlocks, resolve: (v: { blocked_user_ids: number[] }) => resolve(v) };
+}
 
 describe("WS Dispatcher", () => {
   useDispatcherHarness();
@@ -515,13 +531,7 @@ describe("WS Dispatcher", () => {
   // but its reply can land after the user's own fresher action — applying it
   // unconditionally reverts what the user just did.
   it("does not let a slow-to-resolve ready-time listBlocks revert a fresher local unblock", async () => {
-    let resolveListBlocks!: (v: { blocked_user_ids: number[] }) => void;
-    const listBlocks = vi.fn(
-      () =>
-        new Promise<{ blocked_user_ids: number[] }>((resolve) => {
-          resolveListBlocks = resolve;
-        }),
-    );
+    const { listBlocks, resolve: resolveListBlocks } = pendingListBlocks();
     replaceDispatcher({ listBlocks });
 
     // Local user 42 is blocked from a previous session.
@@ -544,6 +554,44 @@ describe("WS Dispatcher", () => {
 
     // The user's unblock must win — 42 must not be silently re-added.
     expect([...blocksStore.getState().blockedByMe]).toEqual([]);
+  });
+
+  it("refetches the block list on a resumed connection, which gets no ready", async () => {
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [7] });
+    replaceDispatcher({ listBlocks });
+    blocksStore.setState(() => ({ blockedByMe: new Set(), blockedByThem: new Set() }));
+
+    mock.dispatch("auth_ok", authOkEvent({ replay_source: "none" }) as never);
+    expect(listBlocks).not.toHaveBeenCalled();
+
+    mock.dispatch("auth_ok", authOkEvent({ replay_source: "buffer" }) as never);
+    expect(listBlocks).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect([...blocksStore.getState().blockedByMe]).toEqual([7]);
+  });
+
+  it("keeps what a refused send taught about the other side across a resume", () => {
+    replaceDispatcher({ listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }) });
+    setUserBlockedByThem(9, true);
+
+    mock.dispatch("auth_ok", authOkEvent({ replay_source: "buffer" }) as never);
+
+    expect([...blocksStore.getState().blockedByThem]).toEqual([9]);
+  });
+
+  it("does not let a slow block list fetched on resume revert a fresher local block", async () => {
+    const { listBlocks, resolve: resolveListBlocks } = pendingListBlocks();
+    replaceDispatcher({ listBlocks });
+    blocksStore.setState(() => ({ blockedByMe: new Set(), blockedByThem: new Set() }));
+
+    mock.dispatch("auth_ok", authOkEvent({ replay_source: "db" }) as never);
+    setUserBlockedByMe(42, true);
+    resolveListBlocks({ blocked_user_ids: [] });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect([...blocksStore.getState().blockedByMe]).toEqual([42]);
   });
 
   it("auth_ok with null token uses empty string fallback", () => {
