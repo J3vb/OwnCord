@@ -44,24 +44,41 @@ func (d *mdDev) voiceLeaves(ch, uid int64) int {
 	}
 }
 
-// A same-channel call move into a channel that is already over its cap must keep
-// the slot the user held: the move succeeds and nobody sees the user leave.
-func TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsSlot(t *testing.T) {
-	f := newMDFix(t)
-	obs := f.observer(f.voiceA)
-	a := f.dev("session-a", f.text)
-	b := f.dev("session-b", f.text)
+// newSameChannelMove puts the account's call on device A in voiceA, with an
+// observer in the room, and returns a second device B of the account that has
+// no call yet.
+func newSameChannelMove(t *testing.T) (f *mdFix, obs, a, b *mdDev) {
+	t.Helper()
+	f = newMDFix(t)
+	obs = f.observer(f.voiceA)
+	a = f.dev("session-a", f.text)
+	b = f.dev("session-b", f.text)
 	f.join(a, f.voiceA)
 	f.join(obs, f.voiceA)
-	if err := f.db.SetChannelVoiceMaxUsers(context.Background(), f.voiceA, 1); err != nil {
-		t.Fatalf("SetChannelVoiceMaxUsers: %v", err)
-	}
+	return f, obs, a, b
+}
+
+// takeOverSameChannel has B join the channel A's call is in, which moves the
+// call to B, and collects what each device was sent from then on.
+func takeOverSameChannel(t *testing.T, f *mdFix, obs, a, b *mdDev) {
+	t.Helper()
 	obs.pump()
 	obs.got = nil
-
 	f.hub.handleMessage(b.c, voiceFrame(t, "voice_join", "join", map[string]any{"channel_id": f.voiceA}))
 	b.settle()
 	obs.settle()
+	a.settle()
+}
+
+// A same-channel call move into a channel that is already over its cap must keep
+// the slot the user held: the move succeeds and nobody sees the user leave.
+func TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsSlot(t *testing.T) {
+	f, obs, a, b := newSameChannelMove(t)
+	if err := f.db.SetChannelVoiceMaxUsers(context.Background(), f.voiceA, 1); err != nil {
+		t.Fatalf("SetChannelVoiceMaxUsers: %v", err)
+	}
+
+	takeOverSameChannel(t, f, obs, a, b)
 
 	if b.sawErrorCode(ErrCodeChannelFull) {
 		t.Fatalf("the move was refused as full although the user already held the slot; got %s", b.types())
@@ -81,22 +98,11 @@ func TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsSlot(t *testing.T) {
 // announcement (here: the token cannot be minted) must announce that leave, so
 // no roster keeps showing the user in the channel.
 func TestMultiDevice_SameChannelMoveFailingLaterStepAnnouncesLeave(t *testing.T) {
-	f := newMDFix(t)
-	obs := f.observer(f.voiceA)
-	a := f.dev("session-a", f.text)
-	b := f.dev("session-b", f.text)
-	f.join(a, f.voiceA)
-	f.join(obs, f.voiceA)
-	obs.pump()
-	obs.got = nil
-
+	f, obs, a, b := newSameChannelMove(t)
 	// An empty signing secret makes the next token mint fail.
 	f.hub.livekit.apiSecret = ""
 
-	f.hub.handleMessage(b.c, voiceFrame(t, "voice_join", "join", map[string]any{"channel_id": f.voiceA}))
-	b.settle()
-	obs.settle()
-	a.settle()
+	takeOverSameChannel(t, f, obs, a, b)
 
 	if !b.sawErrorCode(ErrCodeInternal) {
 		t.Fatalf("B got no INTERNAL error; got %s", b.types())
@@ -118,20 +124,11 @@ func TestMultiDevice_SameChannelMoveFailingLaterStepAnnouncesLeave(t *testing.T)
 // A same-channel move whose check that the old row is gone cannot be read must
 // announce the leave it held back: no device holds the call any more.
 func TestMultiDevice_SameChannelMoveUnverifiedLeaveIsAnnounced(t *testing.T) {
-	f := newMDFix(t)
-	obs := f.observer(f.voiceA)
-	a := f.dev("session-a", f.text)
-	b := f.dev("session-b", f.text)
-	f.join(a, f.voiceA)
-	f.join(obs, f.voiceA)
-	obs.pump()
-	obs.got = nil
+	f, obs, a, b := newSameChannelMove(t)
 	store := &stateFailsAfterLeaveVoice{VoiceStore: f.hub.voice}
 	f.hub.voice = store
 
-	f.hub.handleMessage(b.c, voiceFrame(t, "voice_join", "join", map[string]any{"channel_id": f.voiceA}))
-	b.settle()
-	obs.settle()
+	takeOverSameChannel(t, f, obs, a, b)
 
 	if !store.failed.Load() {
 		t.Fatal("the state read never failed: the test does not exercise the abort")
@@ -150,20 +147,11 @@ func TestMultiDevice_SameChannelMoveUnverifiedLeaveIsAnnounced(t *testing.T) {
 // A same-channel move rolled back by its last step (the roster read) announces
 // the leave once: the rollback's own broadcast, with no second one on top.
 func TestMultiDevice_SameChannelMoveRolledBackAtRosterReadAnnouncesOnce(t *testing.T) {
-	f := newMDFix(t)
-	obs := f.observer(f.voiceA)
-	a := f.dev("session-a", f.text)
-	b := f.dev("session-b", f.text)
-	f.join(a, f.voiceA)
-	f.join(obs, f.voiceA)
-	obs.pump()
-	obs.got = nil
+	f, obs, a, b := newSameChannelMove(t)
 	store := &failOnceStatesVoice{VoiceStore: f.hub.voice}
 	f.hub.voice = store
 
-	f.hub.handleMessage(b.c, voiceFrame(t, "voice_join", "join", map[string]any{"channel_id": f.voiceA}))
-	b.settle()
-	obs.settle()
+	takeOverSameChannel(t, f, obs, a, b)
 
 	if !store.failed.Load() {
 		t.Fatal("the roster read never failed: the test does not exercise the rollback")
@@ -179,12 +167,7 @@ func TestMultiDevice_SameChannelMoveRolledBackAtRosterReadAnnouncesOnce(t *testi
 // A moderator mute follows a same-channel move into a channel over its cap: the
 // slot is kept and the new row is still muted.
 func TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsModeratorMute(t *testing.T) {
-	f := newMDFix(t)
-	obs := f.observer(f.voiceA)
-	a := f.dev("session-a", f.text)
-	b := f.dev("session-b", f.text)
-	f.join(a, f.voiceA)
-	f.join(obs, f.voiceA)
+	f, obs, a, b := newSameChannelMove(t)
 	ctx := context.Background()
 	if ok, err := f.hub.voice.SetServerMute(ctx, f.uid, f.voiceA, true); err != nil || !ok {
 		t.Fatalf("SetServerMute = %v, %v", ok, err)
@@ -193,8 +176,7 @@ func TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsModeratorMute(t *tes
 		t.Fatalf("SetChannelVoiceMaxUsers: %v", err)
 	}
 
-	f.hub.handleMessage(b.c, voiceFrame(t, "voice_join", "join", map[string]any{"channel_id": f.voiceA}))
-	b.settle()
+	takeOverSameChannel(t, f, obs, a, b)
 
 	row := f.row(f.uid)
 	if row == nil || row.ChannelID != f.voiceA {
