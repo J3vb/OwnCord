@@ -7,6 +7,8 @@ import { createElement } from "@lib/dom";
 import klipyWatermark from "../../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "./mediaVisibility";
+import { dataSaverActive } from "./dataSaver";
+import { mediaName, renderDeferredMedia } from "./deferredMedia";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import {
   bindImageMenu,
@@ -146,7 +148,10 @@ export function setInlineImageDecorator(fn: ((url: string) => HTMLElement | null
 }
 
 /** Render a direct image/GIF URL as an inline image with lightbox. */
-export function renderInlineImage(url: string): HTMLDivElement {
+export function renderInlineImage(url: string, tapped = false): HTMLDivElement {
+  if (!tapped && dataSaverActive()) {
+    return renderDeferredMedia(mediaName(url), () => renderInlineImage(url, true));
+  }
   // Reserve the box a previous render (this session or an earlier one) or a
   // header sniff measured; otherwise 200px until the bytes say. Either way a
   // virtual-scroll rebuild starts at the right height and nothing shifts on load.
