@@ -111,9 +111,9 @@ func TestVoiceRemovedWatch_ListFailureRetries(t *testing.T) {
 	}
 }
 
-// TestVoiceRemovedWatch_ExpiresAfterTokenTTL: once no token for the identity
+// TestVoiceRemovedWatch_ExpiresAfterWindow: once no token for the identity
 // can still be valid, the entry is dropped and the room is not listed.
-func TestVoiceRemovedWatch_ExpiresAfterTokenTTL(t *testing.T) {
+func TestVoiceRemovedWatch_ExpiresAfterWindow(t *testing.T) {
 	h := newVMHarness(t, 1)
 	alice := h.members[0]
 	chID, identity := joinedIdentity(t, h, alice, "watch-expiry")
@@ -121,7 +121,7 @@ func TestVoiceRemovedWatch_ExpiresAfterTokenTTL(t *testing.T) {
 	h.evict(alice)
 	waitRemoved(t, h, chID, identity)
 
-	later := time.Now().Add(tokenTTL + time.Second)
+	later := time.Now().Add(voiceRemovedWatchWindow + time.Second)
 	h.hub.livekit.removed.mu.Lock()
 	h.hub.livekit.removed.now = func() time.Time { return later }
 	h.hub.livekit.removed.mu.Unlock()
@@ -129,7 +129,7 @@ func TestVoiceRemovedWatch_ExpiresAfterTokenTTL(t *testing.T) {
 	h.sfu.setListFailure(true) // an expired entry must not even list the room
 	h.watchTick()
 	if h.hub.livekit.removed.pending() {
-		t.Fatal("entry survived past tokenTTL")
+		t.Fatal("entry survived past the watch window")
 	}
 }
 
@@ -148,17 +148,17 @@ func TestRemovedIdentities_SkipsLegacyIdentity(t *testing.T) {
 }
 
 // TestRemovedIdentities_RecordExtendsExpiry: removing the same identity again
-// restarts its tokenTTL window.
+// restarts its window.
 func TestRemovedIdentities_RecordExtendsExpiry(t *testing.T) {
 	start := time.Now()
 	now := start
 	s := removedIdentities{now: func() time.Time { return now }}
 	s.record(1, 2, "tok", false)
-	now = start.Add(tokenTTL - time.Second)
+	now = start.Add(voiceRemovedWatchWindow - time.Second)
 	s.record(1, 2, "tok", false)
-	now = start.Add(tokenTTL + time.Second)
+	now = start.Add(voiceRemovedWatchWindow + time.Second)
 	if len(s.snapshot(true)) != 1 {
-		t.Fatal("a repeat removal did not restart the entry's tokenTTL window")
+		t.Fatal("a repeat removal did not restart the entry's window")
 	}
 }
 
@@ -228,11 +228,11 @@ func TestRemovedIdentities_MintExtendsExpiry(t *testing.T) {
 	lk.removed.now = func() time.Time { return now }
 
 	lk.removed.record(7, 42, "tok", false)
-	now = start.Add(tokenTTL - time.Second)
+	now = start.Add(voiceRemovedWatchWindow - time.Second)
 	if _, err := lk.GenerateToken(42, "u", 7, "tok", true, false, false); err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
-	now = start.Add(tokenTTL + time.Second)
+	now = start.Add(voiceRemovedWatchWindow + time.Second)
 	if len(lk.removed.snapshot(true)) != 1 {
 		t.Fatal("a token minted for a remembered identity did not restart its window")
 	}
@@ -304,5 +304,43 @@ func TestVoiceLeaveIsOwn(t *testing.T) {
 		if got := voiceLeaveIsOwn(reason); got != want {
 			t.Errorf("voiceLeaveIsOwn(%q) = %v, want %v", reason, got, want)
 		}
+	}
+}
+
+// TestVoiceRemovedWatch_SightingRestartsWindow: an identity the watch finds
+// back in its room stays remembered for a full window from that sighting.
+func TestVoiceRemovedWatch_SightingRestartsWindow(t *testing.T) {
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chID, identity := joinedIdentity(t, h, alice, "watch-sighting")
+
+	h.evict(alice)
+	waitRemoved(t, h, chID, identity)
+
+	start := time.Now()
+	now := start
+	removed := &h.hub.livekit.removed
+	removed.mu.Lock()
+	removed.now = func() time.Time { return now }
+	removed.mu.Unlock()
+	setNow := func(at time.Time) {
+		removed.mu.Lock()
+		now = at
+		removed.mu.Unlock()
+	}
+
+	setNow(start.Add(voiceRemovedWatchWindow - time.Minute))
+	h.sfu.add(RoomName(chID), identity)
+	h.watchTick()
+	if h.sfu.has(RoomName(chID), identity) {
+		t.Fatalf("identity %q still in the room after a watch tick", identity)
+	}
+
+	// Past the first window, inside the one the sighting started.
+	setNow(start.Add(voiceRemovedWatchWindow + time.Minute))
+	h.sfu.add(RoomName(chID), identity)
+	h.watchTick()
+	if h.sfu.has(RoomName(chID), identity) {
+		t.Fatalf("identity %q came back after its first window and was not removed", identity)
 	}
 }
