@@ -76,9 +76,7 @@ func TestRecipientsFrame_ResumeLoopNeverMissesOrDuplicates(t *testing.T) {
 
 	stop := make(chan struct{})
 	var dispatchWG, wg sync.WaitGroup
-	dispatchWG.Add(1)
-	go func() {
-		defer dispatchWG.Done()
+	dispatchWG.Go(func() {
 		for {
 			select {
 			case bm := <-h.broadcast:
@@ -94,36 +92,32 @@ func TestRecipientsFrame_ResumeLoopNeverMissesOrDuplicates(t *testing.T) {
 				}
 			}
 		}
-	}()
+	})
 
 	var producing atomic.Int32
 	producing.Store(3)
 	// Two producers through the real queued producer, one through the sync one.
 	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer producing.Add(-1)
-			for i := 0; i < nFrames/2; i++ {
+			for i := range nFrames / 2 {
 				h.broadcastChannelScoped(ctx, f.chID, renameFrame(), "channel_update")
 				if i%3 == 0 {
 					h.BroadcastToAll([]byte(`{"type":"roles_update","payload":{}}`))
 				}
 				time.Sleep(50 * time.Microsecond)
 			}
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer producing.Add(-1)
-		for i := 0; i < nFrames/4; i++ {
+		for range nFrames / 4 {
 			mark := h.audienceMark()
 			aud := h.channelReadAudience(ctx, f.chID)
 			h.sendSequencedToUsers(f.chID, aud, mark, renameFrame())
 			time.Sleep(80 * time.Microsecond)
 		}
-	}()
+	})
 
 	var uwg sync.WaitGroup
 	cycle := func(u *stressDevice, i int, prev *Client, final bool) *Client {
@@ -145,7 +139,7 @@ func TestRecipientsFrame_ResumeLoopNeverMissesOrDuplicates(t *testing.T) {
 			return prev
 		}
 		u.resumes++
-		var connMax uint64 = u.lastSeq
+		connMax := u.lastSeq
 		for _, e := range events {
 			u.take(t, e, false, &connMax)
 		}
@@ -170,9 +164,7 @@ func TestRecipientsFrame_ResumeLoopNeverMissesOrDuplicates(t *testing.T) {
 	}
 	conns := make([]*Client, nUsers)
 	for idx, u := range users {
-		uwg.Add(1)
-		go func() {
-			defer uwg.Done()
+		uwg.Go(func() {
 			var cur *Client
 			for i := 0; producing.Load() > 0; i++ {
 				// Odd users drop the socket before resuming; even ones resume over
@@ -184,7 +176,7 @@ func TestRecipientsFrame_ResumeLoopNeverMissesOrDuplicates(t *testing.T) {
 				cur = cycle(u, i, cur, false)
 			}
 			conns[idx] = cur
-		}()
+		})
 	}
 	wg.Wait()
 	uwg.Wait()
