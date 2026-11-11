@@ -2,10 +2,12 @@
 // host registers this with the dispatcher's hook (stores/threadsLoader) while
 // it is mounted, so none of it weighs on startup.
 import { removeThread, setFocusedThread, threadsStore } from "@stores/threads.store";
-import { setMessages } from "@stores/messages.store";
+import { getChannelMessages, setChannelLoadError, setMessages } from "@stores/messages.store";
 import { ApiClientError, type ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
+import { showToast } from "@lib/ui/toast";
 import type { WsClient } from "@lib/ws";
+import { connectText } from "../../i18n/connect";
 
 const log = createLogger("dispatcher");
 
@@ -50,6 +52,13 @@ export function resumeThreadFocus(
         return;
       }
       log.warn("Thread history refetch after reconnect failed", { threadId, error: String(err) });
+      // Rows that were on screen may now end short of the live tail: detach the
+      // window so no live reply lands across the gap, and let "Jump to present"
+      // refetch it. The rows hide the inline error, so say it with a toast.
+      setChannelLoadError(threadId);
+      if (getChannelMessages(threadId).length > 0) {
+        showToast(connectText("app.loadHistoryFailed"), "error");
+      }
     },
   );
 }
