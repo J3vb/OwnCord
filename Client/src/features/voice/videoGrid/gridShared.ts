@@ -20,6 +20,7 @@ import type { StreamSample } from "../remoteTracks";
 import type { Popout } from "../popout";
 import type { MiniPlayer } from "../miniPlayer";
 import type { TileConfig } from "./VideoGrid";
+import { GRID_GAP, GRID_PAD, ASPECT } from "./gridConstants";
 
 /** How often a watched stream's quality chip refreshes. */
 export const STATS_POLL_MS = 2000;
@@ -82,11 +83,7 @@ export interface GridLayout {
   readonly tileH: number;
 }
 
-export const GRID_GAP = 4;
-
-export const GRID_PAD = 8;
-
-export const ASPECT = 16 / 9;
+export { GRID_GAP, GRID_PAD, ASPECT };
 
 /**
  * Compute optimal tile arrangement that maximises tile area while fitting

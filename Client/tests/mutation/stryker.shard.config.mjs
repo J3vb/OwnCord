@@ -139,6 +139,8 @@ export const shards = {
     "src/features/voice/screenShare.ts",
     "src/features/voice/sessionTokens.ts",
     "src/features/voice/talkSlot.ts",
+    "src/features/voice/videoGrid/gridConstants.ts",
+    "src/features/voice/videoGrid/packLayout.ts",
     "src/lib/voice/shareDiagnostics.ts",
   ],
   "livekit-14": [
