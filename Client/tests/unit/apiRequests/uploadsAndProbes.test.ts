@@ -192,13 +192,15 @@ describe("REST client requests", () => {
       expect(callUrl(2)).toBe(`${BASE}/moderation/members?limit=500&offset=1000`);
     });
 
+    // 100,000 rows each pass the reply shape check, which is slow when the
+    // nightly test-depth run has rewritten that check.
     it("stops after 200 pages when a server never sends a short one", async () => {
       mockFetch.mockImplementation(() => Promise.resolve(okResponse(page(0, 500))));
       const users = await api.adminListUsers();
       expect(mockFetch).toHaveBeenCalledTimes(200);
       expect(users).toHaveLength(200 * 500);
       expect(callUrl(199)).toBe(`${BASE}/moderation/members?limit=500&offset=${199 * 500}`);
-    });
+    }, 20_000);
   });
 
   describe("logout", () => {
