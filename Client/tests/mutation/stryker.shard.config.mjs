@@ -225,6 +225,7 @@ export const shards = {
   ],
   "transport-auth-5": [
     "src/lib/apiDms.ts",
+    "src/lib/apiFetchParts.ts",
     "src/lib/apiShared.ts",
     "src/lib/nav/deepLink.ts",
     "src/lib/net/certReconnect.ts",

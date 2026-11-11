@@ -15,21 +15,17 @@ import {
   nsfwContentBlocked,
 } from "../features/content-consent/nsfw";
 import { setNsfwAcknowledged } from "../stores/channels.store";
-import { connectText } from "../i18n/connect";
 import type { ApiError } from "./types";
 import type { RestReplyShapes } from "./net/restReplies";
 import { readReply } from "./apiReply";
 import {
   type ApiClientConfig,
   ApiClientError,
-  httpError,
-  isNotJsonError,
   log,
   type OnUnauthorized,
-  parseRetryAfterMs,
   type RequestOptions,
-  TransportError,
 } from "./apiShared";
+import { bodyReadFailure, buildRequestInit, failedReply, transportFailure } from "./apiFetchParts";
 export {
   TLS_CERT_CODE,
   REPLY_SHAPE_CODE,
@@ -134,40 +130,15 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       opts?.timeoutMs === undefined ? undefined : setTimeout(() => owner.dispose(), opts.timeoutMs);
     try {
       owner.assertCurrent();
-      const headers: Record<string, string> = {};
-      if (!opts?.multipart) headers["Content-Type"] = "application/json";
-      const token = opts?.token ?? snapshot.token;
-      // i18n-exempt: wire header value, never rendered
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      const init: RequestInit = { method, headers, signal: transport.signal };
-      if (body !== undefined)
-        init.body = opts?.multipart ? (body as FormData) : JSON.stringify(body);
-      // Subscribe before the request goes out (the proxy can emit as soon as
-      // the body starts moving) and let the request scope unsubscribe it.
-      if (opts?.onUploadProgress !== undefined) {
-        // The Rust proxy echoes this id back in its upload-progress events, so
-        // the caller can tell its own upload's ticks from any other in flight.
-        const id = crypto.randomUUID();
-        headers["X-Upload-Id"] = id;
-        const onProgress = opts.onUploadProgress;
-        const unsubscribe = desktop.http.onUploadProgress((p) => {
-          if (p.id === id) {
-            // A 0–1 fraction; the native <progress> renders and announces it.
-            onProgress(p.total > 0 ? Math.min(1, Math.max(0, p.sent / p.total)) : 0);
-          }
-        });
-        owner.addCleanup(unsubscribe);
-      }
+      const init = buildRequestInit(owner, method, body, opts, snapshot.token, transport.signal);
       let origin: string;
       try {
         origin = await owner.run(ensureHttpProxy(snapshot.host));
       } catch (proxyErr) {
         owner.assertCurrent();
         // start_http_proxy rejects with a bare string; type it like a failed fetch.
-        log.error(`${label} proxy start failed`, { method, path, error: String(proxyErr) });
-        throw new TransportError(proxyErr instanceof Error ? proxyErr.message : String(proxyErr), {
-          cause: proxyErr,
-        });
+        // i18n-exempt: log text, never rendered
+        throw transportFailure(label, "proxy start", method, path, proxyErr);
       }
       owner.assertCurrent();
       log.debug(`${label} →`, { method, path });
@@ -176,32 +147,14 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         res = await owner.run(desktop.http.fetch(`${origin}${prefix}${path}`, init));
       } catch (fetchErr) {
         owner.assertCurrent();
-        // The raw detail stays in the log; the caller gets a typed error so
-        // display copy can be friendly.
-        log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
-        throw new TransportError(fetchErr instanceof Error ? fetchErr.message : String(fetchErr), {
-          cause: fetchErr,
-        });
+        throw transportFailure(label, "fetch", method, path, fetchErr);
       }
       owner.assertCurrent();
       log.debug(`${label} ←`, { method, path, status: res.status });
       if (!res.ok) {
         const err = await owner.run(parseError(res)).finally(releaseTransport);
         owner.assertCurrent();
-        if (res.status === 401 && !opts?.skipUnauthorized) {
-          // Parse first: the session can change while the error body is arriving.
-          // This callback is allowed to synchronously dispose the current session.
-          onUnauthorized?.();
-        }
-        log.warn(`${label} error`, {
-          method,
-          path,
-          status: res.status,
-          code: err.error,
-          message: err.message,
-          reqId: res.headers.get("x-request-id") ?? undefined,
-        });
-        throw httpError(res.status, err.error, err.message, parseRetryAfterMs(res));
+        throw failedReply(label, method, path, res, err, opts, onUnauthorized);
       }
       if (res.status === 204) {
         releaseTransport();
@@ -212,16 +165,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         data = await owner.run(res.json() as Promise<unknown>).finally(releaseTransport);
       } catch (jsonErr) {
         owner.assertCurrent();
-        // A 2xx that is not JSON (a proxy's web page in front of the API): the
-        // webview's parse error says nothing a user can act on.
-        if (!isNotJsonError(jsonErr)) throw jsonErr;
-        log.warn(`${label} response is not JSON`, {
-          method,
-          path,
-          status: res.status,
-          contentType: res.headers.get("content-type") ?? undefined,
-        });
-        throw new ApiClientError(res.status, "NOT_JSON", connectText("error.notJson"));
+        throw bodyReadFailure(label, method, path, res, jsonErr);
       }
       owner.assertCurrent();
       const checked = await owner.run(readReply(reply, data, { method, path, status: res.status }));

@@ -109,60 +109,39 @@ function isSessionExpired(message: string): boolean {
   );
 }
 
+/** The auth slice's server sentences and the catalog copy each one gets. */
+const AUTH_SLICE_COPY: Readonly<Record<string, Parameters<typeof connectText>[0]>> = {
+  "account temporarily locked due to too many failed attempts": "error.accountLocked",
+  "recovery temporarily locked due to too many failed attempts": "error.recoveryLocked",
+  "too many failed attempts, try again later": "error.tooManyAttempts",
+  "registration queue is full, try again later": "error.registrationQueueFull",
+  "too many registrations from this address, try again later": "error.registrationRateLimited",
+  "too many authentication attempts in progress, try again later": "error.authBusy",
+  "too many recovery credentials issued; try again later": "error.recoveryCredentialBudget",
+  "login temporarily unavailable": "error.loginUnavailable",
+  "failed to load authentication policy": "error.couldNotComplete",
+  "failed to process registration": "error.couldNotComplete",
+  "failed to load registration policy": "error.registrationUnavailable",
+  "registration failed — please try again": "error.registrationFailed",
+  "failed to create session": "error.sessionFailed",
+  "registration succeeded but user fetch failed": "error.registeredSignInFailed",
+  "failed to start two-factor challenge": "error.totpUnavailable",
+  "failed to verify two-factor code": "error.totpUnavailable",
+  "two-factor verification temporarily unavailable": "error.totpUnavailable",
+  "failed to logout": "error.logoutFailed",
+  "failed to delete account": "error.deleteAccountFailed",
+  "failed to generate two-factor secret": "error.totpEnableFailed",
+  "failed to stage two-factor enrolment": "error.totpEnableFailed",
+  "failed to enable two-factor authentication": "error.totpEnableFailed",
+  "failed to disable two-factor authentication": "error.totpDisableFailed",
+  "failed to issue recovery codes": "error.recoveryCodesFailed",
+  "recovery failed — please try again": "error.recoveryFailed",
+  "failed to issue the recovery kit": "error.recoveryKitFailed",
+  "failed to issue the recovery credential": "error.recoveryCredentialFailed",
+};
+
 function authSliceCopy(message: string): string | null {
-  switch (message) {
-    case "account temporarily locked due to too many failed attempts":
-      return connectText("error.accountLocked");
-    case "recovery temporarily locked due to too many failed attempts":
-      return connectText("error.recoveryLocked");
-    case "too many failed attempts, try again later":
-      return connectText("error.tooManyAttempts");
-    case "registration queue is full, try again later":
-      return connectText("error.registrationQueueFull");
-    case "too many registrations from this address, try again later":
-      return connectText("error.registrationRateLimited");
-    case "too many authentication attempts in progress, try again later":
-      return connectText("error.authBusy");
-    case "too many recovery credentials issued; try again later":
-      return connectText("error.recoveryCredentialBudget");
-    case "login temporarily unavailable":
-      return connectText("error.loginUnavailable");
-    case "failed to load authentication policy":
-    case "failed to process registration":
-      return connectText("error.couldNotComplete");
-    case "failed to load registration policy":
-      return connectText("error.registrationUnavailable");
-    case "registration failed — please try again":
-      return connectText("error.registrationFailed");
-    case "failed to create session":
-      return connectText("error.sessionFailed");
-    case "registration succeeded but user fetch failed":
-      return connectText("error.registeredSignInFailed");
-    case "failed to start two-factor challenge":
-    case "failed to verify two-factor code":
-    case "two-factor verification temporarily unavailable":
-      return connectText("error.totpUnavailable");
-    case "failed to logout":
-      return connectText("error.logoutFailed");
-    case "failed to delete account":
-      return connectText("error.deleteAccountFailed");
-    case "failed to generate two-factor secret":
-    case "failed to stage two-factor enrolment":
-    case "failed to enable two-factor authentication":
-      return connectText("error.totpEnableFailed");
-    case "failed to disable two-factor authentication":
-      return connectText("error.totpDisableFailed");
-    case "failed to issue recovery codes":
-      return connectText("error.recoveryCodesFailed");
-    case "recovery failed — please try again":
-      return connectText("error.recoveryFailed");
-    case "failed to issue the recovery kit":
-      return connectText("error.recoveryKitFailed");
-    case "failed to issue the recovery credential":
-      return connectText("error.recoveryCredentialFailed");
-    default:
-      return null;
-  }
+  return Object.hasOwn(AUTH_SLICE_COPY, message) ? connectText(AUTH_SLICE_COPY[message]!) : null;
 }
 
 /** Codes whose copy never depends on the server's message. */
