@@ -3,13 +3,18 @@
  * factor and auto-connect overlays, and the server-wait and busy-retry lines.
  */
 import { createElement, appendChildren, qs } from "@lib/dom";
-import { isImeCommit } from "@lib/text/ime";
 import { createIcon } from "@lib/icons";
 import { setAddressInputHints } from "@lib/net/hostNormalize";
 import { isAndroidHost } from "@lib/hostPlatform";
 import { connectText } from "../../../i18n/connect";
 import { portalText } from "../../../i18n/portal";
 import { attachLimitHint, usernameHintText, MAX_USERNAME_LEN } from "@lib/text/nameLimits";
+import {
+  buildTotpOverlay as buildTotpOverlayDom,
+  buildAutoConnectOverlay as buildAutoConnectOverlayDom,
+  buildServerWait as buildServerWaitDom,
+  buildAuthBusyRetry as buildAuthBusyRetryDom,
+} from "../../../features/connection/loginOverlays";
 import { SAVED_PASSWORD_PLACEHOLDER } from "./loginShared";
 import type { LoginFormState, LoginFormInternals } from "./loginState";
 
@@ -427,161 +432,10 @@ export function createLoginFormDom(st: LoginFormState, lf: LoginFormInternals) {
     return group;
   }
 
-  function buildTotpOverlay(): HTMLDivElement {
-    const overlay = createElement("div", { class: "totp-overlay totp-overlay--hidden" });
-    const card = createElement("div", { class: "totp-card" });
-    const title = createElement("h2", { class: "totp-title" }, connectText("totp.title"));
-    const description = createElement(
-      "p",
-      {
-        class: "totp-subtitle",
-      },
-      connectText("totp.description"),
-    );
-
-    // Not numeric-only: an emergency recovery code is letters and digits,
-    // 11 characters with its separator, and goes in this same box.
-    st.totpInput = createElement("input", {
-      class: "form-input",
-      type: "text",
-      maxlength: "11",
-      placeholder: connectText("totp.placeholder"),
-      inputmode: "text",
-      pattern: "[0-9]{6}|[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}",
-      autocomplete: "one-time-code",
-      "aria-label": connectText("totp.inputLabel"),
-      "aria-describedby": "totp-error",
-    });
-    // A malformed code used to be a 500 ms red border with no text and no
-    // announcement, so a screen reader got nothing. The message is the
-    // input's description and focus returns to the input, so it is read once
-    // with the field; it is a live alert only when the input already has
-    // focus and so is not re-read.
-    st.totpError = createElement("div", {
-      class: "form-error",
-      id: "totp-error",
-      "data-testid": "totp-invalid",
-    });
-
-    st.totpSubmitBtn = createElement(
-      "button",
-      {
-        class: "btn-primary",
-        type: "button",
-      },
-      connectText("totp.verify"),
-    );
-
-    const cancelBtn = createElement(
-      "button",
-      {
-        class: "totp-back",
-        type: "button",
-      },
-      connectText("common.cancel"),
-    );
-
-    st.totpSubmitBtn.addEventListener("click", lf.handleTotpSubmit, { signal: st.signal });
-    cancelBtn.addEventListener("click", lf.handleTotpCancel, { signal: st.signal });
-
-    // Allow Enter key in TOTP input
-    st.totpInput.addEventListener(
-      "keydown",
-      (e) => {
-        if (e.key === "Enter" && !isImeCommit(e)) {
-          e.preventDefault();
-          void lf.handleTotpSubmit();
-        }
-      },
-      { signal: st.signal },
-    );
-
-    appendChildren(
-      card,
-      title,
-      description,
-      st.totpInput,
-      st.totpError,
-      st.totpSubmitBtn,
-      cancelBtn,
-    );
-    overlay.appendChild(card);
-    return overlay;
-  }
-
-  function buildAutoConnectOverlay(): HTMLDivElement {
-    const overlay = createElement("div", {
-      class: "auto-connect-overlay auto-connect-overlay--hidden",
-    });
-    const card = createElement("div", { class: "auto-connect-card" });
-
-    const spinner = createElement("div", { class: "auto-connect-spinner" });
-    const spinnerEl = createElement("div", { class: "spinner" });
-    spinner.appendChild(spinnerEl);
-
-    const title = createElement(
-      "h2",
-      { class: "auto-connect-title" },
-      connectText("login.autoConnecting"),
-    );
-    st.autoConnectServerName = createElement("span", { class: "auto-connect-server" });
-
-    const cancelBtn = createElement(
-      "button",
-      {
-        class: "btn-ghost auto-connect-cancel",
-        type: "button",
-      },
-      connectText("common.cancel"),
-    );
-
-    cancelBtn.addEventListener(
-      "click",
-      () => {
-        lf.transitionTo("idle");
-        st.onAutoLoginCancel?.();
-      },
-      { signal: st.signal },
-    );
-
-    appendChildren(card, spinner, title, st.autoConnectServerName, cancelBtn);
-    overlay.appendChild(card);
-    return overlay;
-  }
-
-  function buildServerWait(): HTMLDivElement {
-    // A live status line, not a modal: the form beneath stays usable.
-    const wait = createElement("div", { class: "server-wait", role: "status" });
-    wait.hidden = true;
-    st.serverWaitText = createElement("span", { class: "server-wait-text" });
-    const cancelBtn = createElement(
-      "button",
-      { class: "btn-ghost server-wait-cancel", type: "button" },
-      connectText("common.cancel"),
-    );
-    cancelBtn.addEventListener("click", lf.cancelServerWait, { signal: st.signal });
-    appendChildren(wait, st.serverWaitText, cancelBtn);
-    return wait;
-  }
-
-  function buildAuthBusyRetry(): HTMLDivElement {
-    // The server-wait line's look: a live status while a busy login retries.
-    const line = createElement("div", { class: "server-wait auth-busy-retry", role: "status" });
-    line.hidden = true;
-    const text = createElement(
-      "span",
-      { class: "server-wait-text" },
-      connectText("login.serverBusyRetrying"),
-    );
-    const cancelBtn = createElement(
-      "button",
-      { class: "btn-ghost server-wait-cancel", type: "button" },
-      connectText("common.cancel"),
-    );
-    cancelBtn.addEventListener("click", () => st.cancelAuthBusyRetry?.(), { signal: st.signal });
-    appendChildren(line, text, cancelBtn);
-    return line;
-  }
+  const buildTotpOverlay = (): HTMLDivElement => buildTotpOverlayDom(st, lf);
+  const buildAutoConnectOverlay = (): HTMLDivElement => buildAutoConnectOverlayDom(st, lf);
+  const buildServerWait = (): HTMLDivElement => buildServerWaitDom(st, lf);
+  const buildAuthBusyRetry = (): HTMLDivElement => buildAuthBusyRetryDom(st);
 
   return {
     clearSavedPasswordPlaceholder,

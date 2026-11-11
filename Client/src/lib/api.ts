@@ -6,6 +6,7 @@ import { ensureHttpProxy } from "./net/httpProxy";
 import { isValidHost } from "./net/hostValidation";
 import { createAccountApi } from "./apiAccount";
 import { createAdminApi } from "./apiAdmin";
+import { createModerationApi } from "./apiModeration";
 import { createChannelsApi } from "./apiChannels";
 import { createDmsApi } from "./apiDms";
 import type { ApiTransport } from "./apiShared";
@@ -282,6 +283,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return { ...config, token: config.token ? "[redacted]" : undefined };
     },
     ...createAccountApi(t),
+    ...createModerationApi(t),
     ...createChannelsApi(t),
     ...createDmsApi(t),
     ...createAdminApi(t),
