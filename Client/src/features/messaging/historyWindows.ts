@@ -204,12 +204,7 @@ export function reduceSetMessages(
   // the watermark) is still newer than either bound and survives either way.
   const carryFloor = Math.max(maxSnapshotId, prev.loadWatermark?.get(channelId) ?? 0);
   const carried = carryRows(previous, trimmed, carryFloor);
-  const snapshot = replayLoadJournal(
-    prev,
-    channelId,
-    reuseUnchangedRows(previous, trimmed),
-    previous,
-  );
+  const snapshot = replayLoadJournal(prev, channelId, reuseUnchangedRows(previous, trimmed));
   const older = olderThanPage(prev, channelId, previous, trimmed, hasMore, splice);
   const { merged, mergeTrimmed, keepHead } = capMerged(
     [...older, ...snapshot, ...carried],
@@ -295,7 +290,7 @@ export function reduceSetAroundMessages(
 ): MessagesState {
   const { converted, trimmed: fetched } = aroundRows(prev, channelId, messages);
   const previous = prev.messagesByChannel.get(channelId) ?? [];
-  const trimmed = replayLoadJournal(prev, channelId, fetched, previous);
+  const trimmed = replayLoadJournal(prev, channelId, fetched);
   // Reattaches iff the window reaches the live tail with nothing stranded —
   // the exact negation of the detached condition below. Only then does the
   // window claim to BE "now", so only then may a live "sent" row newer than

@@ -12,8 +12,9 @@ import type { MessagesState } from "./messageModel";
 
 const MAX_JOURNAL_ENTRIES = 1000;
 
-/** One change received during the fetch. A reaction names only the message:
- *  its count has no version, so it is replayed from the live row, not as a delta. */
+/** One change received during the fetch. Reactions are not journaled: their
+ *  counts carry no version, and a frame that arrived mid-fetch is usually
+ *  already in the page. */
 export type JournalEntry =
   | { readonly kind: "edit"; readonly payload: ChatEditedPayload }
   | { readonly kind: "delete"; readonly payload: ChatDeletedPayload }
@@ -22,8 +23,7 @@ export type JournalEntry =
       readonly kind: "pin";
       readonly messageId: number;
       readonly pinned: boolean;
-    }
-  | { readonly kind: "reaction"; readonly messageId: number };
+    };
 
 /** `next` with `entry` appended to the channel's journal, when a fetch for the
  *  channel is in flight; `next` itself otherwise. */

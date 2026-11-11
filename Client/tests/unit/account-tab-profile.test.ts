@@ -109,11 +109,19 @@ describe("Account tab profile fields", () => {
 
   /** Focus only lands on what is shown, so open the collapsed editor first. */
   /** Opens the profile editor over a save that stays pending until `settle` is called. */
-  function openEditorWithHeldSave() {
+  function openEditorWithHeldSave(onStored: () => void = () => {}) {
     setUser({});
     let settle!: () => void;
     const options = makeOptions({
-      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
+      onUpdateProfile: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            settle = () => {
+              onStored();
+              resolve();
+            };
+          }),
+      ),
     });
     container.appendChild(buildAccountTab(options, ac.signal));
 
@@ -223,6 +231,27 @@ describe("Account tab profile fields", () => {
       expect(save.disabled).toBe(false);
     });
     expect(document.activeElement).toBe(about);
+  });
+
+  it("keeps what was typed while the save was in flight and shows the stored name in the header", async () => {
+    // The server cleans the name it was sent.
+    const { settle, save } = openEditorWithHeldSave(() =>
+      updateUser({ display_name: "Bob by.", about: "sent" }),
+    );
+    const name = container.querySelector<HTMLInputElement>('[data-testid="display-name-input"]')!;
+    const about = container.querySelector<HTMLTextAreaElement>('[data-testid="about-input"]')!;
+    name.value = "Bob  by";
+    about.value = "sent";
+    save.click();
+    about.value = "sent and more";
+    settle();
+
+    await vi.waitFor(() => {
+      expect(save.disabled).toBe(false);
+    });
+    expect(about.value).toBe("sent and more");
+    expect(name.value).toBe("Bob by.");
+    expect(container.querySelector(".account-header-name")?.textContent).toBe("Bob by.");
   });
 
   it("puts focus back on Save when it fell to the page during the save", async () => {

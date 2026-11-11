@@ -440,13 +440,16 @@ export function buildProfileFields(
           bannerEditor?.commit();
           // Show what the server stored: it may have cleaned the text, and the
           // unsaved-changes check compares the fields with the stored profile.
+          // A field the user kept typing in while the save ran keeps its text.
           const stored = authStore.getState().user;
-          nameInput.value = stored?.display_name ?? "";
-          aboutInput.value = stored?.about ?? "";
+          if (collapseSpaces(nameInput.value) === displayName) {
+            nameInput.value = stored?.display_name ?? "";
+          }
+          if (aboutInput.value.trim() === about) aboutInput.value = stored?.about ?? "";
           showOutcome(statusEl, "success", t("profile.saved"));
-          onSaved(
-            displayName.length > 0 ? displayName : (authStore.getState().user?.username ?? ""),
-          );
+          const storedName = stored?.display_name ?? "";
+          const sentName = displayName.length > 0 ? displayName : (stored?.username ?? "");
+          onSaved(storedName.length > 0 ? storedName : sentName);
         })
         .catch((err: unknown) => {
           const message = errorText(err, t("profile.saveFailed"));
