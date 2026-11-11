@@ -14,6 +14,7 @@ import {
 } from "./gridShared";
 import { packTiles, type PackTile, type TileSize } from "./packLayout";
 import type { GridState, GridApi } from "./gridState";
+import { createPeopleStrip, isAvatarCell } from "./gridPeopleStrip";
 
 /** The shape of a tile whose picture has no size yet, and of an avatar tile. */
 const DEFAULT_ASPECT = 16 / 9;
@@ -51,6 +52,7 @@ export function clearTileLayout(tiles: readonly HTMLElement[]): void {
 export function createGridSizing(st: GridState, api: GridApi) {
   /** The aspect each tile was last packed with. */
   const packedAspect = new WeakMap<HTMLElement, number>();
+  const peopleStrip = createPeopleStrip(st, api);
 
   /** The room the call view's control bar takes below the tiles. */
   function barSpaceOf(viewsAbove: boolean): number {
@@ -60,10 +62,10 @@ export function createGridSizing(st: GridState, api: GridApi) {
   }
 
   /** The shown tiles in layout order, with what the packer needs of each. */
-  function packInput(): { el: HTMLDivElement; tile: PackTile }[] {
+  function packInput(shown: readonly HTMLDivElement[]): { el: HTMLDivElement; tile: PackTile }[] {
     const byEl = new Map<HTMLElement, CellEntry>();
     for (const entry of st.cells.values()) byEl.set(entry.el, entry);
-    return api.shownTiles().map((el, id) => {
+    return shown.map((el, id) => {
       const entry = byEl.get(el);
       const aspect = entry === undefined ? DEFAULT_ASPECT : aspectOf(entry.video);
       return { el, tile: { id, aspect, size: tileSizeOf(entry) } };
@@ -76,16 +78,22 @@ export function createGridSizing(st: GridState, api: GridApi) {
     const { width: cw, height: ch } = st.root.getBoundingClientRect();
     const viewsAbove = st.callBar !== null && !isPhoneLayout() && cw > 0 && cw <= VIEWS_ABOVE_PX;
     st.root.classList.toggle("video-grid--views-above", viewsAbove);
-    const input = packInput();
+    const sized = cw > 0 && ch > 0;
+    const shown = api.shownTiles();
+    const barSpace = barSpaceOf(viewsAbove);
+    // With a video tile on show the people leave the packed area for the strip.
+    const space = peopleStrip.seat(cw, ch, shown, barSpace);
+    const input = packInput(space.active ? shown.filter((el) => !isAvatarCell(el)) : shown);
     // Tiles go absolute only once there is a size to place them in.
-    const packed = st.focusedTileId === null && input.length > 0 && cw > 0 && ch > 0;
+    const packed = st.focusedTileId === null && input.length > 0 && sized;
     st.root.classList.toggle("video-grid--packed", packed);
     if (!packed) return;
+    peopleStrip.place(space, cw, ch, barSpace);
 
     // The bar sits below the tiles, so the tiles start at the top.
     const rects = packTiles(
-      cw,
-      ch - barSpaceOf(viewsAbove),
+      cw - space.w,
+      ch - barSpace - space.h,
       input.map((i) => i.tile),
     );
     input.forEach(({ el, tile }, i) => {
@@ -113,5 +121,11 @@ export function createGridSizing(st: GridState, api: GridApi) {
     entry.el.addEventListener(SURFACE_RESIZE_EVENT, onShape, opts);
   }
 
-  return { applyGridSizes, watchTileShape };
+  return {
+    applyGridSizes,
+    watchTileShape,
+    inPeopleStrip: peopleStrip.holds,
+    keepFocus: peopleStrip.keepFocus,
+    resetPeopleStrip: peopleStrip.reset,
+  };
 }

@@ -334,6 +334,10 @@ export const browser: Platform = {
   appProcess,
   autostart,
   callService,
+  meteredNetwork: {
+    isMetered: () => false,
+    start: async () => undefined,
+  },
   deepLinks,
   devTools,
   fileSaver,

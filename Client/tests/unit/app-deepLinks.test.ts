@@ -47,6 +47,9 @@ vi.mock("@lib/nav/inviteNavigation", () => ({
 }));
 vi.mock("../../src/platform/desktop", () => ({ desktop: { deepLinks: { init: hoisted.init } } }));
 vi.mock("../../src/app/serverHealth", () => ({ serverInfoFor: vi.fn(() => undefined) }));
+vi.mock("../../src/app/networkStartup", () => ({
+  startNetworkMonitoring: () => Promise.resolve(),
+}));
 vi.mock("../../src/app/session", () => ({
   sessionInFlight: () => hoisted.inFlight,
   abandonInFlight: () => events.push("abandonInFlight"),

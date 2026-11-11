@@ -100,6 +100,67 @@
   display: none;
 }
 
+/* Participant strip: the people without video while a video tile is packed.
+   JS places it (left, top, width, height); its tiles keep a fixed size and
+   the strip scrolls rather than shrink them. */
+.video-people-strip {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  background: var(--bg-tertiary);
+}
+.video-people-strip[hidden] {
+  display: none;
+}
+.video-people-strip--side {
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.video-people-strip .video-cell {
+  flex: 0 0 auto;
+  width: 120px;
+  /* Leaves room under the cells for a scrollbar that takes layout space. */
+  height: 76px;
+  min-width: 120px;
+  min-height: 76px;
+}
+.video-people-strip--side .video-cell {
+  width: auto;
+  min-width: 0;
+  height: 56px;
+  min-height: 56px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding-inline: 8px;
+}
+.video-people-strip--side .video-cell > :first-child {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  font-size: var(--font-size-sm);
+}
+.video-people-strip--side .video-username {
+  position: static;
+  flex: 1;
+  min-width: 0;
+}
+.video-people-strip .video-username {
+  bottom: 4px;
+  left: 4px;
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .video-cell {
   position: relative;
   overflow: hidden;

@@ -1026,6 +1026,9 @@ export function buildTauriMockScript(opts: {
         if (cmd === "set_unread_badge") return null;
         // The Android call service; calls stay in __invokeLog.
         if (cmd === "set_call_service") return null;
+        if (cmd === "is_metered") return { metered: false };
+        if (["plugin:owncord-metered-network|register_listener",
+             "plugin:owncord-metered-network|remove_listener"].includes(cmd)) return null;
         if (cmd === "ptt_polling_supported") return false;
         // Windows per-app share audio (6.7): no WASAPI host, no picker switch.
         if (cmd === "app_audio_available") return false;

@@ -31,6 +31,7 @@ describe("browser platform registry", () => {
         "identity",
         "logFiles",
         "mediaDetector",
+        "meteredNetwork",
         "nativeFiles",
         "nativeProxies",
         "nativeVoice",

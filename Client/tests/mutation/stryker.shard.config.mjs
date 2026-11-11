@@ -141,6 +141,7 @@ export const shards = {
     "src/features/voice/sessionTokens.ts",
     "src/features/voice/talkSlot.ts",
     "src/features/voice/videoGrid/gridConstants.ts",
+    "src/features/voice/videoGrid/gridPeopleStrip.ts",
     "src/features/voice/videoGrid/gridSizing.ts",
     "src/features/voice/videoGrid/packLayout.ts",
     "src/lib/voice/shareDiagnostics.ts",
@@ -647,6 +648,8 @@ export const shards = {
   "safety-moderation-10": [
     "src/features/message-requests/Inbox.ts",
     "src/features/message-requests/api.ts",
+    "src/features/messaging/content/dataSaver.ts",
+    "src/features/messaging/content/deferredMedia.ts",
     "src/features/messaging/emojiStill.ts",
     "src/features/moderation/api.ts",
     "src/features/moderation/timeoutPresets.ts",

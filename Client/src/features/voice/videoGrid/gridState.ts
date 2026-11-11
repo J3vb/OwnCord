@@ -64,6 +64,8 @@ export interface GridState {
 export interface GridApi {
   doc(): Document;
   applyGridSizes(): void;
+  /** Forget the participant strip (the grid is torn down). */
+  resetPeopleStrip(): void;
   /** Pack again when the tile's picture changes shape. */
   watchTileShape(entry: CellEntry): void;
   syncPeople(): void;
