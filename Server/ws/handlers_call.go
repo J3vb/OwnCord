@@ -73,7 +73,7 @@ func handleCallRingV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 // handleCallDeclineV2 tells the DM's other participants the caller is not picking
 // up. Addressed to everyone else because there is no call state to say who was
 // ringing; advisory, ignored by a client already answered. It also reaches the
-// decliner's own connections, so a device of theirs still ringing stops.
+// decliner's own call_sync sockets, so a device of theirs still ringing stops.
 func handleCallDeclineV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(CallDeps)
 	declineCmd := cmd.(CallDeclineCmd)
@@ -98,11 +98,12 @@ func handleCallDeclineV2(ctx context.Context, cmd Command, info ClientInfo, deps
 		})
 	}
 	// The decliner's other signed-in devices stop ringing too. The declining
-	// connection gets it as well; its client has already ended that ring.
+	// socket may get it as well; its client has already ended that ring.
 	events = append(events, CallSignalEvent{
 		eventType:    MsgTypeCallDeclined,
 		targetUserID: info.UserID,
 		payload:      payload,
+		ownDevices:   true,
 	})
 	return Result{Events: events}
 }

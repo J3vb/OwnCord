@@ -168,6 +168,14 @@ func (h *Hub) emitCallSignal(ctx context.Context, _ int64, ev Event) bool {
 	// earlier voice events are queued ahead; a cancelled ctx sends without the
 	// barrier.
 	_ = h.awaitDispatch(ctx)
+	if own, isCall := ev.(CallSignalEvent); isCall && own.ownDevices {
+		for _, c := range h.clientsOf(own.targetUserID) {
+			if c.features.callSync {
+				c.trySendMsg(own.payload)
+			}
+		}
+		return true
+	}
 	h.SendToUser(e.TargetUserID(), e.Payload())
 	return true
 }

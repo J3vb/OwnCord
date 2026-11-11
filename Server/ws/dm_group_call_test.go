@@ -303,14 +303,19 @@ func TestCallDecline_ReachesTheDeclinersOtherDevices(t *testing.T) {
 	bob := seedMemberUser(t, database, "decline-dev-bob")
 	chID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	// Two devices of one account are two connections with their own sessions.
+	// Three devices of one account are three connections with their own
+	// sessions. Only the second declares call_sync; the third is an older client.
 	sendBobFirst := make(chan []byte, 64)
 	cBob := ws.NewTestClientWithTokenHash(hub, bob, "decline-dev-hash-1", chID, sendBobFirst)
 	hub.Register(cBob)
 	sendBobSecond := make(chan []byte, 64)
 	cBob2 := ws.NewTestClientWithTokenHash(hub, bob, "decline-dev-hash-2", chID, sendBobSecond)
+	ws.DeclareFeaturesForTest(cBob2, "call_sync")
 	hub.Register(cBob2)
-	waitRegistered(t, hub, cBob2)
+	sendBobOld := make(chan []byte, 64)
+	cBobOld := ws.NewTestClientWithTokenHash(hub, bob, "decline-dev-hash-3", chID, sendBobOld)
+	hub.Register(cBobOld)
+	waitRegistered(t, hub, cBobOld)
 	_, sendAlice := connectClient(t, hub, alice, chID, 64)
 
 	hub.HandleMessageForTest(cBob, callMsg("call_decline", chID))
@@ -329,6 +334,9 @@ func TestCallDecline_ReachesTheDeclinersOtherDevices(t *testing.T) {
 	}
 	if dmWaitMsgType(sendAlice, "call_declined", 150*time.Millisecond) != nil {
 		t.Error("the ringer received call_declined twice")
+	}
+	if dmWaitMsgType(sendBobOld, "call_declined", 150*time.Millisecond) != nil {
+		t.Error("a device that did not declare call_sync received its own account's decline")
 	}
 }
 

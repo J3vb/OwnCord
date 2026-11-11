@@ -106,7 +106,7 @@ describe("contract: auth frame key set (epoch 1)", () => {
     expect(frame.payload.last_seq).toBe(0);
     expect(frame.payload.epoch).toBe(PROTOCOL_EPOCH);
     expect(PROTOCOL_EPOCH).toBe(1);
-    expect(frame.payload.features).toEqual(["forums"]);
+    expect(frame.payload.features).toEqual(["forums", "call_sync"]);
   });
 
   it("resume with a registered active-channel provider: payload keys exactly [token, last_seq, active_channel_id, epoch, features]", async () => {

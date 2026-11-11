@@ -814,3 +814,6 @@ func (h *Hub) newestLocked(userID int64) *Client {
 
 // MarkMobileForTest makes c a connection that declared the "mobile" client feature.
 func MarkMobileForTest(c *Client) { c.features.mobile = true }
+
+// DeclareFeaturesForTest gives c the client features an auth frame naming them would.
+func DeclareFeaturesForTest(c *Client, names ...string) { c.features = parseClientFeatures(names) }

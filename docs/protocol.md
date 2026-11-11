@@ -393,10 +393,11 @@ first such declaration. Names the server does not know are ignored, the list is
 capped (32 names of at most 32 bytes each), and it grants nothing: it only
 narrows what the socket is sent.
 
-| Feature  | Declared by            | Effect on a socket that does **not** declare it                                                                                                                                                                                                                                                                                                                              |
-| -------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `forums` | clients from WP 6.9d-b | No `type: "forum"` row in `ready.channels`, and no forum `channel_create` (channel creation, visibility refresh, timeout refresh and role refresh alike). Those frames are per recipient and unsequenced, so skipping one allocates no sequence number. It also gets no frame for a forum's posts (see [Forum posts](#forum-posts)).                                         |
-| `mobile` | the Android app        | Nothing is withheld. It decides only whether this connection can make the user's presence show the phone: the merged `presence` carries `"mobile": true` when the connection the shown status comes from declared `mobile` and every other connection in the same idle class (all active, or all idle) did too. A phone browser does not declare it and counts as a desktop. |
+| Feature     | Declared by                                  | Effect on a socket that does **not** declare it                                                                                                                                                                                                                                                                                                                              |
+| ----------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `forums`    | clients from WP 6.9d-b                       | No `type: "forum"` row in `ready.channels`, and no forum `channel_create` (channel creation, visibility refresh, timeout refresh and role refresh alike). Those frames are per recipient and unsequenced, so skipping one allocates no sequence number. It also gets no frame for a forum's posts (see [Forum posts](#forum-posts)).                                         |
+| `mobile`    | the Android app                              | Nothing is withheld. It decides only whether this connection can make the user's presence show the phone: the merged `presence` carries `"mobile": true` when the connection the shown status comes from declared `mobile` and every other connection in the same idle class (all active, or all idle) did too. A phone browser does not declare it and counts as a desktop. |
+| `call_sync` | clients that end a ring on their own decline | No `call_declined` for a decline made by the same account on another connection. The other participants' copy is not affected.                                                                                                                                                                                                                                               |
 
 `channel_update` for a forum is **not** filtered: it is one shared sequenced
 frame, and dropping it for some sockets would allocate a sequence number and
@@ -3814,8 +3815,9 @@ Answered with `call_declined` (same payload shape as `call_incoming`) to the
 DM's other participants. It is addressed to all of them rather than to "the
 ringer" because the server does not know who that was — no call state, by
 design — and in a group more than one person may be ringing. The decliner's own
-connections receive it too (`from_user` is their own id), so another signed-in
-device of theirs that is still ringing stops.
+connections that declared the `call_sync` [client feature](#client-features)
+receive it too (`from_user` is their own id), so another signed-in device of
+theirs that is still ringing stops.
 
 A declining client stops its own ring; a ringing client stops on
 `call_declined`, on a `voice_leave` that empties the room, or after a 30 second timeout.
