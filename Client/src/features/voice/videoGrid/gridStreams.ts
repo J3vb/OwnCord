@@ -172,7 +172,7 @@ export function createGridStreams(st: GridState, api: GridApi) {
     st.pendingWatch.delete(userId);
     if (stream !== null) attachTrackLifecycle(userId, stream);
     else api.setStopped(userId, true, false);
-    st.root.appendChild(entry.el);
+    api.beforeChrome(entry.el);
     applySpeaking();
     applyUserAudioState();
     applyStreamViewers();
