@@ -12,7 +12,7 @@ import (
 // TestFileSizes_Rule locks OC-0400 and the default-ceiling inversion: an
 // unlisted file is capped at DefaultFileLimit, a declared exemption is capped
 // at its own ceiling, a file at exactly its limit passes, one line over fails,
-// and cmd/ is out of scope entirely.
+// and cmd/ is held to the default like the rest of the tree.
 func TestFileSizes_Rule(t *testing.T) {
 	// build returns a syntactically valid file of exactly n lines: a package
 	// clause, then n-1 blank comment lines.
@@ -36,12 +36,9 @@ func TestFileSizes_Rule(t *testing.T) {
 		{"unlisted file at the default", "ws/unrelated.go", build(500), 0},
 		{"unlisted file one line over the default", "ws/unrelated.go", build(501), 1},
 		{"unlisted file, arbitrarily long", "ws/unrelated.go", build(5000), 1},
-		// cmd/ holds entry points and one-shot tooling; a long main there is a
-		// shape, not a smell. The largest Go file in the tree lives in it.
-		{"cmd/ is out of scope", "cmd/smoke/drills.go", build(5000), 0},
-		{"cmd/ at the root is out of scope", "cmd/seed/main.go", build(5000), 0},
-		// Not a cmd/ prefix: a sibling directory whose name merely starts with it.
-		{"a directory named cmdfoo/ is not cmd/", "cmdfoo/x.go", build(501), 1},
+		// cmd/ is tooling and entry points, held to the same default.
+		{"cmd/ file at the default", "cmd/seed/main.go", build(500), 0},
+		{"cmd/ file one line over the default", "cmd/smoke/drills.go", build(501), 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
