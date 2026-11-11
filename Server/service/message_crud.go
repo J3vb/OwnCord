@@ -43,7 +43,8 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkMessageSlowMode(ctx, p, ch); err != nil {
+	refundSlow, err := s.checkMessageSlowMode(ctx, p, ch)
+	if err != nil {
 		return nil, err
 	}
 
@@ -55,9 +56,12 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	msg, attachments, skipped, duplicate, err := s.persistMessage(ctx, p, content, mentions, delivery)
 	if err != nil {
+		refundSlow()
 		return nil, err
 	}
 	if duplicate {
+		// The attempt that committed this message holds its own token.
+		refundSlow()
 		return &SendMessageResult{
 			MessageID: msg.ID, Timestamp: msg.Timestamp, Duplicate: true,
 			SkippedAttachmentIDs: s.replaySkipped(ctx, p, msg.ID),
