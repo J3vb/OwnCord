@@ -30,6 +30,34 @@ export function onChannelReselect(cb: (channelId: number) => void): () => void {
   return () => reselectListeners.delete(cb);
 }
 
+export interface ChannelWarmHandler {
+  warm(channelId: number): void;
+  cancel(channelId: number): void;
+}
+
+let warmHandler: ChannelWarmHandler | null = null;
+
+/**
+ * Register what a press on a channel row starts and what a drag or leave
+ * cancels. One owner at a time (the message controller); returns the unregister.
+ */
+export function setChannelWarmHandler(handler: ChannelWarmHandler): () => void {
+  warmHandler = handler;
+  return () => {
+    if (warmHandler === handler) warmHandler = null;
+  };
+}
+
+/** The mouse button went down on a row for `channelId`: it may be about to open. */
+export function warmChannel(channelId: number): void {
+  warmHandler?.warm(channelId);
+}
+
+/** The press on `channelId`'s row will not become a click. */
+export function cancelChannelWarm(channelId: number): void {
+  warmHandler?.cancel(channelId);
+}
+
 /**
  * Activate `channelId`, clearing its unread and mention badges.
  *

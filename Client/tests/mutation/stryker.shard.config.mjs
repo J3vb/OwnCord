@@ -304,11 +304,13 @@ export const shards = {
     "src/lib/ws.ts",
   ],
   "transport-auth-8": [
+    "src/features/messaging/channelWarmup.ts",
     "src/features/messaging/chatNotify.ts",
     "src/features/safety/wsHandlers.ts",
     "src/lib/apiAccount.ts",
     "src/lib/dispatcher.ts",
     "src/lib/nav/deepLink.ts",
+    "src/lib/nav/pressWarm.ts",
     "src/lib/net/httpProxy.ts",
     "src/lib/net/identityPins.ts",
     "src/lib/permissions.ts",
