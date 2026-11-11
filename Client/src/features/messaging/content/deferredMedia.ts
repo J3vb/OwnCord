@@ -12,19 +12,13 @@ export function renderDeferredMedia(
   const button = createElement("button", {
     type: "button",
     class: "messages-retry-btn data-saver-placeholder",
-    style:
-      "display:grid; place-content:center; width:100%; min-height:140px; padding:var(--space-4); background:var(--bg-secondary); overflow-wrap:anywhere;",
   });
   button.appendChild(createElement("span", { class: "data-saver-name" }, name));
   if (size !== undefined && size >= 0) {
     button.appendChild(createElement("span", { class: "data-saver-size" }, formatFileSize(size)));
   }
   button.appendChild(
-    createElement(
-      "span",
-      { class: "data-saver-action", style: "color:var(--accent-text);" },
-      contentText("media.tapToLoad"),
-    ),
+    createElement("span", { class: "data-saver-action" }, contentText("media.tapToLoad")),
   );
   let loaded = false;
   button.addEventListener("click", (event) => {

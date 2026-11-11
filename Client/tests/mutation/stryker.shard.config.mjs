@@ -643,6 +643,8 @@ export const shards = {
   "safety-moderation-10": [
     "src/features/message-requests/Inbox.ts",
     "src/features/message-requests/api.ts",
+    "src/features/messaging/content/dataSaver.ts",
+    "src/features/messaging/content/deferredMedia.ts",
     "src/features/messaging/emojiStill.ts",
     "src/features/moderation/api.ts",
     "src/features/moderation/timeoutPresets.ts",
