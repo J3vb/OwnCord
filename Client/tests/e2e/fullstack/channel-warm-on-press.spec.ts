@@ -47,7 +47,7 @@ test("a message posted between the press and the click is on screen after the op
   const reads = await pageReads(bob, warm);
   expect(reads).toHaveLength(2);
   expect(reads[0]).toContain("limit=50");
-  expect(reads[1]).toContain("after=");
+  expect(reads[1]).toContain("limit=100");
   alice.close();
 });
 

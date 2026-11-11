@@ -52,18 +52,22 @@ describe("press-to-warm first page", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("opens with the warm page and tops up what was posted after it", async () => {
+  it("opens with the warm page, then reconciles what changed since it was read", async () => {
     const getMessages = vi
       .fn()
       .mockResolvedValueOnce(page(12, 11, 10))
-      .mockResolvedValueOnce({ messages: [response(13)], has_more: false });
+      .mockResolvedValueOnce({
+        messages: [response(13), response(12), response(10)],
+        has_more: false,
+      });
     const ctrl = setup(getMessages);
     warmChannel(1);
     await ctrl.loadMessages(1, new AbortController().signal);
 
     expect(getMessages).toHaveBeenNthCalledWith(1, 1, { limit: 50 }, expect.anything());
-    await vi.waitFor(() => expect(ids(1)).toEqual([10, 11, 12, 13]));
-    expect(getMessages).toHaveBeenNthCalledWith(2, 1, { after: 12, limit: 50 }, expect.anything());
+    // 11 was deleted and 13 posted after the press-time read.
+    await vi.waitFor(() => expect(ids(1)).toEqual([10, 12, 13]));
+    expect(getMessages).toHaveBeenNthCalledWith(2, 1, { limit: 100 }, expect.anything());
     expect(getMessages).toHaveBeenCalledTimes(2);
     expect(isChannelLoaded(1)).toBe(true);
   });

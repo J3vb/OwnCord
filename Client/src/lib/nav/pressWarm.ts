@@ -11,6 +11,7 @@ export function attachPressWarm(el: HTMLElement, channelId: number, signal: Abor
     "pointerdown",
     (e: PointerEvent) => {
       if (e.pointerType !== "mouse" || e.button !== 0) return;
+      if (e.target instanceof Element && e.target.closest("button") !== null) return;
       if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return;
       warmChannel(channelId);
     },

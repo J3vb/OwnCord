@@ -46,6 +46,23 @@ describe("attachPressWarm", () => {
     expect(warm).not.toHaveBeenCalled();
   });
 
+  it("ignores a press on a button inside the row", () => {
+    const button = document.createElement("button");
+    el.appendChild(button);
+    button.dispatchEvent(
+      Object.assign(new Event("pointerdown", { bubbles: true }), {
+        pointerType: "mouse",
+        button: 0,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        metaKey: false,
+      }),
+    );
+    expect(warm).not.toHaveBeenCalled();
+    button.remove();
+  });
+
   it.each(["dragstart", "pointercancel", "pointerleave"])("cancels on %s", (type) => {
     el.dispatchEvent(new Event(type));
     expect(cancel).toHaveBeenCalledWith(5);

@@ -156,11 +156,12 @@ export function createMessageController(opts: MessageControllerOptions): Message
       // the race is discarded instead of clobbering the jump's window.
       if (!signal.aborted && !isChannelLoaded(channelId)) {
         installTail(channelId, fetched, hasMoreBefore, cached, head);
-        // The page was read before channel_focus left, so a message posted in
-        // between is in neither the page nor the live feed: fetch what follows.
+        // The page was read before channel_focus left, so a message posted, edited
+        // or deleted in between reached neither the page nor the live feed: the
+        // revisit refetch reconciles the rows just shown, off the paint path.
         if (warmed !== null) {
-          const newest = Math.max(...warmed.messages.map((m) => m.id));
-          void recoverRefusedTail(channelId, newest, signal);
+          invalidateChannelMessageWindow(channelId);
+          void loadMessages(channelId, signal);
         }
       }
     } catch (err) {
