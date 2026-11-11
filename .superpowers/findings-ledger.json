@@ -13672,11 +13672,11 @@
       "why": "The start-up replay of retention markers swept each channel to the cutoff recorded outside the database without looking at the current policy or at what the database had already swept. A message that was pinned during the sweeps and unpinned after retention was turned off (or its window made longer) was removed for good on the next start.",
       "repro": "Set a 7-day retention, pin an old message, turn retention off, unpin the message, restart the server: the message is gone.",
       "evidence": "Server/service/retention_test.go (TestRetention_ReplayKeepsAMessageUnpinnedAfterRetentionWasTurnedOff)",
-      "suggestedFix": "Record in the database how far each channel was swept and replay a marker only when the database is behind it, as after a restore of an older backup.",
+      "suggestedFix": "Give each sweep of a channel an id in the marker file, record in the database the last one it finished, and replay a marker only when the database does not name the marker's last sweep, as after a restore of an older backup.",
       "fix": {
         "commit": "pending",
         "test": "Server/service/retention_test.go",
-        "revertProof": "without the swept-cutoff check TestRetention_ReplayKeepsAMessageUnpinnedAfterRetentionWasTurnedOff fails"
+        "revertProof": "without the finished-sweep check TestRetention_ReplayKeepsAMessageUnpinnedAfterRetentionWasTurnedOff fails"
       },
       "lens": "correctness",
       "confidence": "high",

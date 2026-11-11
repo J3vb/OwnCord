@@ -142,7 +142,7 @@ type ChannelRetention struct {
 
 type ChannelRetentionSwept struct {
 	ChannelID int64  `json:"channelId"`
-	Cutoff    string `json:"cutoff"`
+	Sweep     string `json:"sweep"`
 	UpdatedAt string `json:"updatedAt"`
 }
 

@@ -509,11 +509,15 @@ purge that fails or is interrupted is retried on the next tick. A client
 resuming across the holes falls to the full ready, which no longer holds
 the messages. A channel swept clean to its cutoff gets a
 `messages`-scoped deletion marker (`MarkerStore.RecordMessagesSweep`, the
-cutoff only ever moving forward); a budgeted channel records nothing and
+cutoff only ever moving forward, its `sweep_id` new with every sweep);
+a budgeted channel records nothing and
 continues next tick. At start-up the `erasure-markers` stage replays those
 markers too: a restored backup holding messages past a channel's recorded
 cutoff loses them again before anything serves, their persisted replay rows
-with them (nothing is buffered before the hub exists); the marker carries
+with them (nothing is buffered before the hub exists). A channel whose
+`channel_retention_swept` row names the marker's `sweep_id` is skipped: the
+database itself finished that sweep, so nothing a restore brought back is in
+it, and a message unpinned since is left to the current policy. The marker carries
 the `channels` sequence as a floor, as the account markers carry `users`. Policy changes are audited
 (`retention_policy_change` with the old and new server window,
 `channel_retention_change` per channel); `GET /admin/api/retention/preview`

@@ -397,32 +397,30 @@ func (d *DB) DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, e
 	return n, nil
 }
 
-// RetentionSweptCutoff returns the cutoff the channel's retention sweep last
-// completed up to in this database, in the messages.timestamp layout, or ""
-// when none is recorded (a database from before the record, or a restored older
-// backup).
-func (d *DB) RetentionSweptCutoff(ctx context.Context, channelID int64) (string, error) {
-	var cutoff string
-	err := d.reader.QueryRowContext(ctx,
-		`SELECT cutoff FROM channel_retention_swept WHERE channel_id = ?`, channelID).Scan(&cutoff)
+// RetentionSwept returns the id of the marker sweep this database last
+// finished for the channel. ok is false when none is recorded: a database from
+// before the record, or a restored older backup.
+func (d *DB) RetentionSwept(ctx context.Context, channelID int64) (sweep string, ok bool, err error) {
+	err = d.reader.QueryRowContext(ctx,
+		`SELECT sweep FROM channel_retention_swept WHERE channel_id = ?`, channelID).Scan(&sweep)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+		return "", false, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("RetentionSweptCutoff: %w", err)
+		return "", false, fmt.Errorf("RetentionSwept: %w", err)
 	}
-	return cutoff, nil
+	return sweep, true, nil
 }
 
-// RecordRetentionSwept records that the channel has been swept clean up to
-// cutoff (pinned messages exempt). The recorded cutoff only moves forward, and
-// a channel that no longer exists records nothing.
-func (d *DB) RecordRetentionSwept(ctx context.Context, channelID int64, cutoff time.Time) error {
+// RecordRetentionSwept records that the channel finished the marker sweep
+// named sweep (MarkerStore.MessagesSweepID), pinned messages exempt. A channel
+// that no longer exists records nothing.
+func (d *DB) RecordRetentionSwept(ctx context.Context, channelID int64, sweep string) error {
 	if _, err := d.writer.ExecContext(ctx,
-		`INSERT INTO channel_retention_swept (channel_id, cutoff)
+		`INSERT INTO channel_retention_swept (channel_id, sweep)
 		 SELECT id, ? FROM channels WHERE id = ?
-		 ON CONFLICT(channel_id) DO UPDATE SET cutoff = MAX(cutoff, excluded.cutoff), updated_at = datetime('now')`,
-		cutoff.UTC().Format(dbtime.SQLiteLayout), channelID); err != nil {
+		 ON CONFLICT(channel_id) DO UPDATE SET sweep = excluded.sweep, updated_at = datetime('now')`,
+		sweep, channelID); err != nil {
 		return fmt.Errorf("RecordRetentionSwept: %w", err)
 	}
 	return nil

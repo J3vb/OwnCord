@@ -76,11 +76,11 @@ func (f *faultRetentionStore) ListUnfinishedRetentionRuns(ctx context.Context) (
 	return f.RetentionStore.ListUnfinishedRetentionRuns(ctx)
 }
 
-func (f *faultRetentionStore) RecordRetentionSwept(ctx context.Context, channelID int64, cutoff time.Time) error {
+func (f *faultRetentionStore) RecordRetentionSwept(ctx context.Context, channelID int64, sweep string) error {
 	if f.fail["record-swept"] {
 		return errRetentionStore
 	}
-	return f.RetentionStore.RecordRetentionSwept(ctx, channelID, cutoff)
+	return f.RetentionStore.RecordRetentionSwept(ctx, channelID, sweep)
 }
 
 type retentionFixture struct {
@@ -183,7 +183,7 @@ func TestRetentionTickSweepsWhenRunJournalFails(t *testing.T) {
 	}
 }
 
-// A swept cutoff that cannot be recorded costs only a repeat of the start-up
+// A finished sweep that cannot be recorded costs only a repeat of the start-up
 // replay: the tick still sweeps every later channel and reports no error, and
 // start-up is not refused.
 func TestRetentionRecordFailureDoesNotStopLaterChannelsOrStartUp(t *testing.T) {

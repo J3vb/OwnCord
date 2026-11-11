@@ -307,7 +307,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"retention markers replayed":                                                                                   "retention_markers_replayed",
 	"retention: journaled replay purge failed again":                                                               "retention_journaled_replay_purge_failed_again",
 	"retention: replay purge failed, journaled for the next tick":                                                  "retention_replay_purge_failed",
-	"retention: recording the swept cutoff failed, the start-up replay will run again":                             "retention_swept_record_failed",
+	"retention: recording the finished sweep failed, the start-up replay will run again":                           "retention_swept_record_failed",
 	"retention: resuming unfinished runs":                                                                          "retention_resuming_unfinished_runs",
 	"role deleted":                                                                                                 "role_deleted",
 	"role service: failed to list role members":                                                                    "role_service_list_role_members_failed",

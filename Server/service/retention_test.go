@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -483,7 +484,7 @@ func TestRetention_ReplayKeepsAMessageUnpinnedAfterRetentionWasTurnedOff(t *test
 	mustDo(t, "unpin", err)
 
 	if n := replayAtStartup(t, database, dir, markers); n != 0 {
-		t.Errorf("replay removed %d message(s) from a database that already swept to the recorded cutoff", n)
+		t.Errorf("replay removed %d message(s) from a database that already finished the recorded sweep", n)
 	}
 	// The recent message and the unpinned one remain.
 	if got := countMessages(t, database, chID); got != 2 {
@@ -491,17 +492,137 @@ func TestRetention_ReplayKeepsAMessageUnpinnedAfterRetentionWasTurnedOff(t *test
 	}
 }
 
-func TestRetention_ReplayStillSweepsWhenTheDatabaseHasNoRecordOfTheCutoff(t *testing.T) {
+func TestRetention_ReplayStillSweepsWhenTheDatabaseHasNoRecordOfTheSweep(t *testing.T) {
 	ctx := context.Background()
 	database, dir, markers, chID, pinnedID := pinnedRetentionFixture(t)
-	// A restored older backup (or a sweep interrupted before it recorded its
-	// cutoff) carries no swept record: the replay must still run.
+	// A restored older backup (or a sweep interrupted before it was recorded)
+	// carries no swept record: the replay must still run.
 	_, err := database.ExecContext(ctx, `DELETE FROM channel_retention_swept WHERE channel_id = ?`, chID)
-	mustDo(t, "forget the swept cutoff", err)
+	mustDo(t, "forget the finished sweep", err)
 	_, err = database.ExecContext(ctx, `UPDATE messages SET pinned = 0, pinned_at = NULL WHERE id = ?`, pinnedID)
 	mustDo(t, "unpin", err)
 
 	if n := replayAtStartup(t, database, dir, markers); n != 1 {
 		t.Errorf("replay removed %d message(s), want the 1 past the recorded cutoff", n)
+	}
+}
+
+// fileRetentionDB opens a migrated database in a file, which a test can back
+// up and restore over.
+func fileRetentionDB(t *testing.T) (database *db.DB, dbPath string) {
+	t.Helper()
+	dbPath = filepath.Join(t.TempDir(), "main.sqlite")
+	database, err := db.Open(dbPath)
+	mustDo(t, "Open", err)
+	mustDo(t, "Migrate", db.Migrate(database))
+	return database, dbPath
+}
+
+func backUp(t *testing.T, database *db.DB, name string) string {
+	t.Helper()
+	backup := filepath.Join(t.TempDir(), name)
+	mustDo(t, "BackupToSafe", database.BackupToSafe(context.Background(), backup, filepath.Dir(backup)))
+	return backup
+}
+
+// restoreOver closes database, puts backup in its place and opens the result.
+func restoreOver(t *testing.T, database *db.DB, dbPath, backup string) *db.DB {
+	t.Helper()
+	mustDo(t, "Close", database.Close())
+	data, err := os.ReadFile(backup)
+	mustDo(t, "ReadFile", err)
+	mustDo(t, "WriteFile", os.WriteFile(dbPath, data, 0o600))
+	restored, err := db.Open(dbPath)
+	mustDo(t, "Open", err)
+	t.Cleanup(func() { _ = restored.Close() })
+	mustDo(t, "Migrate", db.Migrate(restored))
+	return restored
+}
+
+func tickingRetention(t *testing.T, database *db.DB, dir string, markers *db.MarkerStore) *RetentionService {
+	t.Helper()
+	svc := NewRetentionService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	svc.SetClock(func() time.Time { return retentionNow })
+	return svc
+}
+
+// A later sweep under a longer window removes a message the first sweep left
+// pinned, without moving the marker's cutoff. A backup taken between the two
+// still gets the start-up replay: the marker names the second sweep and the
+// backup names the first.
+func TestRetention_ReplayResweepsABackupTakenBeforeASweepThatKeptTheCutoff(t *testing.T) {
+	ctx := context.Background()
+	database, dbPath := fileRetentionDB(t)
+	dir := t.TempDir()
+	uid, _ := database.CreateUser(ctx, "ret-owner", "hash", 1)
+	chID, _ := seedRetentionChannel(t, database, "longer", uid, dir, 3)
+	res, err := database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp, pinned) VALUES (?, ?, 'pinned rules', ?, 1)`,
+		chID, uid, retentionNow.Add(-40*24*time.Hour).Format("2006-01-02 15:04:05"))
+	mustDo(t, "insert pinned", err)
+	pinnedID, _ := res.LastInsertId()
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}))
+	markers := newTestMarkers(t)
+	svc := tickingRetention(t, database, dir, markers)
+	if rep, err := svc.Tick(ctx); err != nil || rep.Messages != 3 {
+		t.Fatalf("first Tick = %+v, %v", rep, err)
+	}
+	_, err = database.ExecContext(ctx, `UPDATE messages SET pinned = 0, pinned_at = NULL WHERE id = ?`, pinnedID)
+	mustDo(t, "unpin", err)
+	backup := backUp(t, database, "between.db")
+
+	mustDo(t, "longer window", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "30"}))
+	if rep, err := svc.Tick(ctx); err != nil || rep.Messages != 1 {
+		t.Fatalf("second Tick = %+v, %v; want the unpinned 40-day-old message swept", rep, err)
+	}
+	restored := restoreOver(t, database, dbPath, backup)
+	if countMessages(t, restored, chID) != 2 {
+		t.Fatal("the restore did not bring the swept message back")
+	}
+
+	if n := replayAtStartup(t, restored, dir, markers); n != 1 {
+		t.Errorf("replay removed %d message(s), want the 1 the later sweep had removed", n)
+	}
+	if got := countMessages(t, restored, chID); got != 1 {
+		t.Errorf("messages after the replay = %d, want only the fresh one", got)
+	}
+	// The replayed database now names the marker's sweep: the next start leaves it alone.
+	if n := replayAtStartup(t, restored, dir, markers); n != 0 {
+		t.Errorf("a second start-up replay removed %d message(s), want 0", n)
+	}
+}
+
+// A marker file can hold two markers for one channel, the older written under
+// an erasure key since replaced. The replay decides once for the channel, so
+// finishing the older marker's sweep does not make the newer one look done.
+func TestRetention_ReplayRunsEveryMarkerOfAChannelOnARestoredBackup(t *testing.T) {
+	ctx := context.Background()
+	database, dbPath := fileRetentionDB(t)
+	dir := t.TempDir()
+	uid, _ := database.CreateUser(ctx, "ret-owner", "hash", 1)
+	chID, _ := seedRetentionChannel(t, database, "rekeyed", uid, dir, 3)
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}))
+	backup := backUp(t, database, "before.db")
+	markers := newTestMarkers(t)
+	if rep, err := tickingRetention(t, database, dir, markers).Tick(ctx); err != nil || rep.Messages != 3 {
+		t.Fatalf("Tick = %+v, %v", rep, err)
+	}
+	// The older marker reaches only the oldest of the three messages and is replayed first.
+	rawFile, err := sql.Open("sqlite", markers.Path())
+	mustDo(t, "Open", err)
+	defer rawFile.Close()
+	_, err = rawFile.ExecContext(ctx,
+		`INSERT INTO deletion_markers (subject_token, scope, channel_id, cutoff, state, erased_at)
+		 VALUES ('written-under-the-previous-key', 'messages', ?, ?, 'recorded', '2020-01-01 00:00:00')`,
+		chID, retentionNow.Add(-31*24*time.Hour-12*time.Hour).Format("2006-01-02 15:04:05"))
+	mustDo(t, "insert the older marker", err)
+
+	restored := restoreOver(t, database, dbPath, backup)
+	if n := replayAtStartup(t, restored, dir, markers); n != 3 {
+		t.Errorf("replay removed %d message(s), want all 3 the sweep had removed", n)
+	}
+	if got := countMessages(t, restored, chID); got != 1 {
+		t.Errorf("messages after the replay = %d, want only the fresh one", got)
 	}
 }

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -15,7 +16,7 @@ import (
 // Markers lists every marker, oldest first.
 func (m *MarkerStore) Markers(ctx context.Context) ([]DeletionMarker, error) {
 	rows, err := m.sqlDB.QueryContext(ctx,
-		`SELECT subject_token, scope, channel_id, cutoff, state, erased_at, replays, last_replay
+		`SELECT subject_token, scope, channel_id, cutoff, state, erased_at, replays, last_replay, sweep_id
 		   FROM deletion_markers ORDER BY erased_at, subject_token`)
 	if err != nil {
 		return nil, fmt.Errorf("marker store: list: %w", err)
@@ -24,7 +25,7 @@ func (m *MarkerStore) Markers(ctx context.Context) ([]DeletionMarker, error) {
 	var out []DeletionMarker
 	for rows.Next() {
 		var mk DeletionMarker
-		if err := rows.Scan(&mk.SubjectToken, &mk.Scope, &mk.ChannelID, &mk.Cutoff, &mk.State, &mk.ErasedAt, &mk.Replays, &mk.LastReplay); err != nil {
+		if err := rows.Scan(&mk.SubjectToken, &mk.Scope, &mk.ChannelID, &mk.Cutoff, &mk.State, &mk.ErasedAt, &mk.Replays, &mk.LastReplay, &mk.SweepID); err != nil {
 			return nil, fmt.Errorf("marker store: scan: %w", err)
 		}
 		out = append(out, mk)
@@ -127,9 +128,11 @@ func (m *MarkerStore) MessagesToken(channelID int64) string {
 
 // RecordMessagesSweep records that retention removed everything older than
 // cutoff (SQLite UTC layout) in channelID: one marker per channel, its cutoff
-// only moving forward, so an older backup re-sweeps to the newest cutoff. The
-// channels sequence is recorded as a floor so a restore cannot hand this
-// channel's id, and marker, to a new channel.
+// only moving forward, so an older backup re-sweeps to the newest cutoff. Every
+// call gives the marker a new random sweep id, also when the cutoff stays (a
+// longer window sweeps to an older cutoff and can still remove a message
+// unpinned since). The channels sequence is recorded as a floor so a restore
+// cannot hand this channel's id, and marker, to a new channel.
 func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, cutoff string, channelsSeq int64) error {
 	tx, err := m.sqlDB.BeginTx(ctx, nil)
 	if err != nil {
@@ -137,10 +140,10 @@ func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, 
 	}
 	defer tx.Rollback() //nolint:errcheck
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO deletion_markers (subject_token, scope, channel_id, cutoff, state)
-		 VALUES (?, 'messages', ?, ?, 'recorded')
-		 ON CONFLICT(subject_token) DO UPDATE SET cutoff = MAX(cutoff, excluded.cutoff), erased_at = datetime('now')`,
-		m.MessagesToken(channelID), channelID, cutoff); err != nil {
+		`INSERT INTO deletion_markers (subject_token, scope, channel_id, cutoff, state, sweep_id)
+		 VALUES (?, 'messages', ?, ?, 'recorded', ?)
+		 ON CONFLICT(subject_token) DO UPDATE SET cutoff = MAX(cutoff, excluded.cutoff), erased_at = datetime('now'), sweep_id = excluded.sweep_id`,
+		m.MessagesToken(channelID), channelID, cutoff, rand.Text()); err != nil {
 		return fmt.Errorf("marker store: record messages sweep: %w", err)
 	}
 	if err := raiseSequenceFloor(ctx, tx, SequenceFloorChannels, channelsSeq); err != nil {
@@ -150,6 +153,23 @@ func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, 
 		return fmt.Errorf("marker store: record messages sweep commit: %w", err)
 	}
 	return nil
+}
+
+// MessagesSweepID returns the id of the last sweep the channel's retention
+// marker recorded: "" when it has no marker, or none since the file gained the
+// id. A database that names the same id is the one that sweep ran on, or a
+// backup taken after it.
+func (m *MarkerStore) MessagesSweepID(ctx context.Context, channelID int64) (string, error) {
+	var id string
+	err := m.sqlDB.QueryRowContext(ctx,
+		`SELECT sweep_id FROM deletion_markers WHERE subject_token = ?`, m.MessagesToken(channelID)).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("marker store: messages sweep id: %w", err)
+	}
+	return id, nil
 }
 
 // ReplayMessages re-applies every messages marker: sweep removes everything in the
