@@ -61,9 +61,19 @@ export function loadedThreadsStore(): ThreadsModule | null {
 }
 
 /** The `thread` on each fetched starter row: a REST snapshot (see adoptThreadSnapshots). */
-export function adoptStarterThreads(rows: readonly { readonly thread?: ThreadInfo }[]): void {
+export function adoptStarterThreads(
+  rows: readonly { readonly id?: number; readonly thread?: ThreadInfo }[],
+): void {
   const found = rows.flatMap((row) => (row.thread === undefined ? [] : [row.thread]));
   if (found.length > 0) withThreadsStore((m) => m.adoptThreadSnapshots(found));
+  // A row with no thread has none now: an earlier snapshot's entry for it is stale.
+  const bare = rows.flatMap((row) =>
+    row.thread === undefined && row.id !== undefined ? [row.id] : [],
+  );
+  // A session that has met no thread holds none, so it never loads the store for this.
+  if (bare.length > 0 && threadsStoreInUse()) {
+    withThreadsStore((m) => m.dropStartersWithoutThread(bare));
+  }
 }
 
 type ResumeHook = (
@@ -84,5 +94,7 @@ export function resumeThreadFocus(
   ws: Pick<WsClient, "send">,
   api: Pick<Partial<ApiClient>, "getMessages"> | undefined,
 ): void {
+  // Frames missed while down: no thread's state is guaranteed live any more.
+  loaded?.clearLiveThreads();
   resumeHook?.(ws, api);
 }

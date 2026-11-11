@@ -20,12 +20,19 @@
  * counts (only through the dispatcher). Every change is published to
  * `followedThreads.store`, which the sidebar and the badge read.
  *
+ * `live` holds the thread ids whose held state came from a live frame whose
+ * delivery is still guaranteed (see `adoptThreadSnapshots`). The server sends
+ * `thread_changed` only to clients focused on the parent channel, so the marks
+ * of a parent's threads are cleared when that parent stops being the open
+ * channel, and all of them on every authenticated (re)connect.
+ *
  * A `thread_changed` can be sequenced after the `thread_deleted` it raced, so a
  * deleted id is remembered for the session and every later write for it is
  * ignored. Ids are never reused by the server.
  */
 
 import { createStore } from "@lib/store";
+import { channelsStore } from "./channels.store";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { setKnownThreadCheck, setThreadReadPointer } from "@lib/readState";
 import type { ReadyThread, ThreadInfo } from "@lib/types";
@@ -46,6 +53,8 @@ export interface ThreadsState {
   readonly byStarter: ReadonlyMap<number, number>;
   /** Thread ids a `thread_deleted` named; later writes for them are dropped. */
   readonly deleted: ReadonlySet<number>;
+  /** Thread ids whose state a live frame set and whose later frames are still guaranteed. */
+  readonly live: ReadonlySet<number>;
   /** The thread the side panel has open (the second focus slot), or null. */
   readonly focusedThreadId: number | null;
   /** Threads this member follows, by thread id. */
@@ -56,6 +65,7 @@ const INITIAL: ThreadsState = {
   byId: new Map(),
   byStarter: new Map(),
   deleted: new Set(),
+  live: new Set(),
   focusedThreadId: null,
   followed: new Map(),
 };
@@ -108,9 +118,50 @@ function withThread(prev: ThreadsState, info: ThreadInfo): ThreadsState {
   return { ...prev, byId, byStarter };
 }
 
+/** `withThread`, and the thread is marked as set by a live frame. */
+function withLiveThread(prev: ThreadsState, info: ThreadInfo): ThreadsState {
+  const next = withThread(prev, info);
+  if (next === prev || next.live.has(info.id)) return next;
+  return { ...next, live: new Set(next.live).add(info.id) };
+}
+
 /** Record a thread's whole state from a live frame (create ack, change frame). */
 export function upsertThread(info: ThreadInfo): void {
-  commit((prev) => withThread(prev, info));
+  commit((prev) => withLiveThread(prev, info));
+}
+
+/** Forget which threads a live frame set: those of `parentId`, or all of them. */
+export function clearLiveThreads(parentId?: number): void {
+  commit((prev) => {
+    if (prev.live.size === 0) return prev;
+    const live = new Set(prev.live);
+    for (const id of prev.live) {
+      if (parentId === undefined || prev.byId.get(id)?.parent_id === parentId) live.delete(id);
+    }
+    return live.size === prev.live.size ? prev : { ...prev, live };
+  });
+}
+
+/**
+ * A history page was installed: a starter row in it that carries no `thread`
+ * has no thread any more, so drop what an earlier snapshot taught for it
+ * (a thread a live frame set is left to its own frames).
+ */
+export function dropStartersWithoutThread(starterIds: readonly number[]): void {
+  commit((prev) => {
+    const stale = starterIds.filter((starter) => {
+      const id = prev.byStarter.get(starter);
+      return id !== undefined && !prev.live.has(id);
+    });
+    if (stale.length === 0) return prev;
+    const byId = new Map(prev.byId);
+    const byStarter = new Map(prev.byStarter);
+    for (const starter of stale) {
+      byId.delete(byStarter.get(starter) ?? -1);
+      byStarter.delete(starter);
+    }
+    return { ...prev, byId, byStarter };
+  });
 }
 
 /** Time of a thread's last activity, 0 when it has none. */
@@ -122,16 +173,18 @@ function activityAt(t: ThreadInfo): number {
 /**
  * Record REST snapshots (a history page's starter rows, a thread list page).
  * Such a snapshot may have been read before a live frame that has since landed,
- * and the protocol carries no version to tell, so it only fills in what is
- * missing or shows newer activity; it never rewrites flags or names a live
- * frame set. (A live frame always replaces: see `upsertThread`.)
+ * and the protocol carries no version to tell, so a thread marked `live` only
+ * takes one that shows newer activity; it never rewrites flags or names a live
+ * frame set. Any other entry (missing, or itself only a snapshot) is replaced:
+ * its renames, locks and archives made while the parent was not open went
+ * unheard. (A live frame always replaces: see `upsertThread`.)
  */
 export function adoptThreadSnapshots(infos: readonly ThreadInfo[]): void {
   if (infos.length === 0) return;
   commit((prev) =>
     infos.reduce((state, info) => {
       const known = state.byId.get(info.id);
-      return known === undefined || activityAt(info) > activityAt(known)
+      return known === undefined || !state.live.has(info.id) || activityAt(info) > activityAt(known)
         ? withThread(state, info)
         : state;
     }, prev),
@@ -152,6 +205,7 @@ export function removeThread(threadId: number): void {
       byId,
       byStarter,
       deleted: new Set(prev.deleted).add(threadId),
+      live: prev.live,
       focusedThreadId: prev.focusedThreadId === threadId ? null : prev.focusedThreadId,
       followed,
     };
@@ -273,7 +327,7 @@ export function applyFollowUpdate(threadId: number, following: boolean, thread?:
       return { ...prev, followed };
     }
     if (prev.deleted.has(threadId)) return prev;
-    const state = thread === undefined ? prev : withThread(prev, thread);
+    const state = thread === undefined ? prev : withLiveThread(prev, thread);
     if (!state.byId.has(threadId) || state.followed.has(threadId)) return state;
     return { ...state, followed: new Map(state.followed).set(threadId, NO_COUNTS) };
   });
@@ -369,6 +423,16 @@ export function noteOpenThreadMessage(threadId: number, messageId: number): void
 export function clearFollowedCounts(threadId: number): void {
   commit((prev) => withCountsCleared(prev, threadId));
 }
+// Leaving a parent channel ends the guarantee for its threads' frames.
+let openParentId = channelsStore.getState().activeChannelId;
+void channelsStore.subscribeSelector(
+  (s) => s.activeChannelId,
+  (next) => {
+    const left = openParentId;
+    openParentId = next;
+    if (left !== null && left !== next) clearLiveThreads(left);
+  },
+); // app-lifetime: the store lives as long as the app
 void registerSessionReset("threads:store", resetThreadsStore); // app-lifetime
 // A thread id is a valid target for mark_read (the read-state helpers ask).
 setKnownThreadCheck((id) => threadsStore.getState().byId.has(id)); // app-lifetime
