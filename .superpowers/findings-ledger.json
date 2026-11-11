@@ -1,5 +1,5 @@
 {
-  "nextId": 560,
+  "nextId": 561,
   "findings": [
     {
       "id": "OC-0001",
@@ -12930,6 +12930,29 @@
       "hunt": "fuzzing-fz-4",
       "finder": "claude",
       "fixedDate": "2026-11-05"
+    },
+    {
+      "id": "OC-0560",
+      "title": "Backups were refused when the backup folder's path held characters outside a short allowed list",
+      "file": "Server/db/backup_queries.go",
+      "line": 84,
+      "severity": "high",
+      "why": "BackupToSafe checked every character of the destination's absolute path against letters, digits and a few signs. A server installed under a folder with an accented letter, brackets, a plus sign, an at sign or an apostrophe could not write a scheduled or manual backup, a pre-restore safety copy or an archive snapshot, and the backup taken before a pending migration failed too, so the server refused to start after such an update.",
+      "repro": "Call BackupToSafe with a destination under a directory named \"Jörg (x86)\": it returned a forbidden character error before the fix.",
+      "evidence": "Server/db/backup_test.go TestBackupToSafe_AcceptsAnyNameTheFilesystemAllows",
+      "suggestedFix": "Bind the destination as a value in VACUUM INTO and drop the character list; keep the safe-root check and the null byte refusal.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/backup_test.go",
+        "revertProof": "restore the character list and TestBackupToSafe_AcceptsAnyNameTheFilesystemAllows fails on every name"
+      },
+      "lens": "db-storage",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
     }
   ]
 }
