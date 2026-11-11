@@ -37,6 +37,9 @@ type maintenance struct {
 	erasureCtx context.Context
 	// stepsOverride replaces steps() when non-nil; a test seam.
 	stepsOverride []maintenanceStep
+	// holdLoggedUntil is the end of the restore hold last written to the log, so
+	// a hold is announced once and not on every pass. Only the loop touches it.
+	holdLoggedUntil time.Time
 }
 
 // maintenanceStep is one sweep: job is its attention-panel name, failLog the
@@ -398,13 +401,15 @@ func (m *maintenance) recountStorage(ctx context.Context) error {
 	return err
 }
 
-// restoreHoldsReclaim reports whether this pass must stand down, and logs why.
+// restoreHoldsReclaim reports whether this pass must stand down, and logs why: once
+// per hold for a fresh safety copy, on every pass for a folder it cannot read.
 func (m *maintenance) restoreHoldsReclaim(now time.Time) bool {
 	held, until, err := restoreHoldActive(admin.ResolveBackupDir(m.backupDir), now)
 	switch {
 	case err != nil:
 		m.log.Warn("storage reconciliation skipped: backup folder could not be read", "err", err)
-	case held:
+	case held && !until.Equal(m.holdLoggedUntil):
+		m.holdLoggedUntil = until
 		m.log.Info("storage reconciliation skipped while a restore safety copy is fresh", "until", until.UTC().Format(time.RFC3339))
 	}
 	return held

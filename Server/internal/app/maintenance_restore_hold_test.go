@@ -66,6 +66,15 @@ func TestReconcileFiles_KeepsUnreferencedUploadsWhileARestoreSafetyCopyIsFresh(t
 	if out := logs.String(); !strings.Contains(out, "skipped while a restore safety copy is fresh") || !strings.Contains(out, "until=") {
 		t.Fatalf("no log line saying the pass was held and until when: %q", out)
 	}
+	// A later pass under the same hold still stands down, and says nothing new.
+	logs.Reset()
+	mustDo(t, "reconcileFiles again", m.reconcileFiles(context.Background()))
+	if !fileExists(uploadFile) {
+		t.Fatal("the second pass under the same hold removed the upload")
+	}
+	if out := logs.String(); strings.Contains(out, "skipped while a restore safety copy is fresh") {
+		t.Fatalf("the same hold was announced twice: %q", out)
+	}
 }
 
 func TestReconcileFiles_KeepsUploadsWhenTheBackupFolderCannotBeRead(t *testing.T) {
