@@ -229,8 +229,7 @@ export function createVideoZoomNavigator(
       video === null ||
       video.srcObject === null ||
       host.classList.contains("track-muted") ||
-      host.classList.contains("video-cell--stopped") ||
-      host.classList.contains("thumb");
+      host.classList.contains("video-cell--stopped");
     root.hidden =
       view.scale <= 1 || unavailable || host.clientWidth === 0 || host.clientHeight === 0;
     if (root.hidden) {

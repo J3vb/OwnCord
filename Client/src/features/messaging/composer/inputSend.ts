@@ -113,10 +113,69 @@ export function createInputSend(st: InputState, api: InputApi) {
     }
   }
 
+  /** The refusal that blocks a send right now, or null. A send gate (slow
+   *  mode) refuses the send but, unlike `disabledReason`, leaves the draft
+   *  editable — the user can keep typing and retry. */
+  function sendRefusal(): string | null {
+    return st.disabledReason ?? st.sendGateReason;
+  }
+
+  /** Refuse an over-long message, offering to send it as a file. True when refused. */
+  function refuseTooLong(content: string, textarea: HTMLTextAreaElement): boolean {
+    // The expanded content is what the server counts: a picked `@name` is sent
+    // as a longer `<@id>`. The spread counts code points, as the server does;
+    // a `.length` check would count UTF-16 units and refuse ~2000 astral emoji
+    // the server accepts. Checked before the debounce stamp below so a refused
+    // send does not suppress the next one.
+    if ([...content].length <= MAX_MESSAGE_LEN) return false;
+    showUploadError(
+      messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }),
+      canAttachLongText(textarea.value.trim())
+        ? {
+            label: messagingText("error.tooLongAsFile", { name: LONG_PASTE_FILENAME }),
+            onClick: sendDraftAsFile,
+          }
+        : undefined,
+    );
+    return true;
+  }
+
+  /** Refuse a send while a chip is expired or refreshing. True when refused. */
+  function refuseStaleAttachments(): boolean {
+    // The age timer can fire late (a sleeping machine, a throttled window), so
+    // Send checks the age itself and never posts an id the sweep may have taken.
+    const stale = st.pendingAttachments.filter((a) => a.expired === true || api.isStale(a));
+    if (stale.length === 0) return false;
+    for (const a of stale) api.refreshStale(a);
+    showUploadError(
+      messagingText(
+        stale.some((a) => a.expired === true)
+          ? "error.attachmentExpired"
+          : "error.attachmentRefreshing",
+      ),
+    );
+    return true;
+  }
+
+  /** An upload still running does not hold the message back: the host queues
+   *  it, takes the handles over and posts once they all land (3A-9). Undefined
+   *  when nothing is uploading. */
+  function queueRunningUploads(): QueuedAttachment[] | undefined {
+    if (!st.pendingAttachments.some((a) => a.upload !== undefined)) return undefined;
+    return st.pendingAttachments.map((a): QueuedAttachment => {
+      if (a.upload !== undefined) a.upload.onProgress = null;
+      return {
+        filename: a.filename,
+        ...(a.file === undefined ? {} : { file: a.file }),
+        ...(a.upload === undefined
+          ? { id: a.id, ...(a.uploadedAt === undefined ? {} : { uploadedAt: a.uploadedAt }) }
+          : { upload: a.upload }),
+      };
+    });
+  }
+
   function handleSend(): void {
-    // A send gate (slow mode) refuses the send but, unlike `disabledReason`,
-    // leaves the draft editable — the user can keep typing and retry.
-    const refusal = st.disabledReason ?? st.sendGateReason;
+    const refusal = sendRefusal();
     if (refusal !== null) {
       showUploadError(refusal);
       return;
@@ -134,39 +193,8 @@ export function createInputSend(st: InputState, api: InputApi) {
     const content = applyPickedMentions(typed, idMentionsEnabled() ? st.pickedMentions : []);
     const hasAttachments = st.pendingAttachments.length > 0;
     if (content.length === 0 && !hasAttachments) return;
-
-    // The expanded content is what the server counts: a picked `@name` is sent
-    // as a longer `<@id>`. The spread counts code points, as the server does;
-    // a `.length` check would count UTF-16 units and refuse ~2000 astral emoji
-    // the server accepts. Checked before the debounce stamp below so a refused
-    // send does not suppress the next one.
-    if ([...content].length > MAX_MESSAGE_LEN) {
-      showUploadError(
-        messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }),
-        canAttachLongText(st.textarea.value.trim())
-          ? {
-              label: messagingText("error.tooLongAsFile", { name: LONG_PASTE_FILENAME }),
-              onClick: sendDraftAsFile,
-            }
-          : undefined,
-      );
-      return;
-    }
-
-    // The age timer can fire late (a sleeping machine, a throttled window), so
-    // Send checks the age itself and never posts an id the sweep may have taken.
-    const stale = st.pendingAttachments.filter((a) => a.expired === true || api.isStale(a));
-    if (stale.length > 0) {
-      for (const a of stale) api.refreshStale(a);
-      showUploadError(
-        messagingText(
-          stale.some((a) => a.expired === true)
-            ? "error.attachmentExpired"
-            : "error.attachmentRefreshing",
-        ),
-      );
-      return;
-    }
+    if (refuseTooLong(content, st.textarea)) return;
+    if (refuseStaleAttachments()) return;
 
     // Debounce to prevent double-click duplicate sends
     const now = Date.now();
@@ -180,20 +208,7 @@ export function createInputSend(st: InputState, api: InputApi) {
         ? []
         : [{ id: a.id, filename: a.filename, ...(a.file === undefined ? {} : { file: a.file }) }],
     );
-    // An upload still running does not hold the message back: the host queues
-    // it, takes the handles over and posts once they all land (3A-9).
-    const queued = st.pendingAttachments.some((a) => a.upload !== undefined)
-      ? st.pendingAttachments.map((a): QueuedAttachment => {
-          if (a.upload !== undefined) a.upload.onProgress = null;
-          return {
-            filename: a.filename,
-            ...(a.file === undefined ? {} : { file: a.file }),
-            ...(a.upload === undefined
-              ? { id: a.id, ...(a.uploadedAt === undefined ? {} : { uploadedAt: a.uploadedAt }) }
-              : { upload: a.upload }),
-          };
-        })
-      : undefined;
+    const queued = queueRunningUploads();
     st.options.onSend(
       content,
       st.state.replyTo?.messageId ?? null,

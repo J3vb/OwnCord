@@ -10,7 +10,6 @@ import (
 	"strings"
 )
 
-// maxBody caps how much of the page is read.
 const maxBody = 1 << 20
 
 // Metrics holds the figures the card shows. A figure the page did not carry
@@ -24,8 +23,7 @@ type Metrics struct {
 	TracksSubscribed float64 // livekit_track_subscribed_total
 	BytesIn          float64 // livekit_packet_bytes{direction="incoming"}
 	BytesOut         float64 // livekit_packet_bytes{direction="outgoing"}
-	// Cores is GOMAXPROCS, which Go sets from the container's CPU limit
-	// (or the host's cores when there is none).
+	// Cores is GOMAXPROCS, set from the container's CPU limit or the host's cores.
 	Cores float64 // go_sched_gomaxprocs_threads
 
 	HasCPU, HasRSS, HasRooms, HasParticipants bool
@@ -141,7 +139,6 @@ func splitSample(line string) (name, labels, rest string, ok bool) {
 	return "", "", "", false
 }
 
-// labelValue returns the value of one label in a label block, or "".
 func labelValue(labels, key string) string {
 	needle := key + `="`
 	for from := 0; from < len(labels); {

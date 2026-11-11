@@ -138,18 +138,18 @@ describe("auth frame: features", () => {
     return features;
   }
 
-  it("declares the forums feature on every auth, so the server sends forum channels", async () => {
-    expect(await dial()).toEqual(["forums"]);
+  it("declares forums and call_sync on every auth, so the server sends forum channels and its own declines", async () => {
+    expect(await dial()).toEqual(["forums", "call_sync"]);
   });
 
   it("adds mobile only in the Android app, not in a phone browser", async () => {
     // A phone browser: Android user agent, no native host.
     vi.stubGlobal("navigator", { ...navigator, userAgent: "Mozilla/5.0 (Linux; Android 14)" });
-    expect(await dial()).toEqual(["forums"]);
+    expect(await dial()).toEqual(["forums", "call_sync"]);
 
     // The Android app: a Tauri host on an Android user agent.
     vi.stubGlobal("__TAURI_INTERNALS__", {});
-    expect(await dial()).toEqual(["forums", "mobile"]);
+    expect(await dial()).toEqual(["forums", "call_sync", "mobile"]);
 
     vi.unstubAllGlobals();
   });

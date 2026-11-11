@@ -12,6 +12,7 @@ vi.mock("../../src/lib/net/httpProxy", () => ({
   ensureHttpProxy: (host: string) => Promise.resolve(`https://${host}`),
 }));
 import { createApiClient } from "../../src/lib/api";
+import { validReply } from "../helpers/restReplyFixtures";
 
 const apiDocs = readFileSync(path.join(repoRoot, "docs/api.md"), "utf8");
 const routes = new Set(
@@ -22,7 +23,12 @@ const routes = new Set(
 
 describe("client profile route matches the server API", () => {
   it("reads authentication and 2FA state from a registered GET endpoint", async () => {
-    const profile = { id: 7, username: "member", totp_enabled: true };
+    const profile = {
+      ...validReply("MemberResponse"),
+      id: 7,
+      username: "member",
+      totp_enabled: true,
+    };
     mockFetch.mockImplementation(async (url: string, init: RequestInit) => {
       const registered = routes.has(`${init.method} ${new URL(url).pathname}`);
       return {

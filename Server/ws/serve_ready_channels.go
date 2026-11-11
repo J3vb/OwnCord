@@ -6,9 +6,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// filterChannels is chs without the rows these features do not allow. It
-// returns chs itself when nothing is dropped, which is every server without a
-// forum, so the common path allocates nothing.
+// filterChannels is chs without the rows these features do not allow; returns chs itself when nothing is
+// dropped, so the common path allocates nothing.
 func (f clientFeatures) filterChannels(chs []db.Channel) []db.Channel {
 	if f.forums {
 		return chs
@@ -27,13 +26,10 @@ func (f clientFeatures) filterChannels(chs []db.Channel) []db.Channel {
 	return chs
 }
 
-// readyChannelPayloads builds the ready payload's channel objects — one entry
-// per visible channel, with the per-user unread fields folded in. ackMap
-// carries the caller's own acknowledgement per NSFW-labelled channel id
-// (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
-// gets one) reads as false, which is correct either way — nothing needs
-// acknowledging there. timedOut is the caller's current timeout verdict,
-// fed into every channel's affordances — see readyAffordances.
+// readyChannelPayloads builds the ready's channel objects, one per visible channel with
+// per-user unread fields folded in. ackMap carries the caller's acknowledgement per
+// NSFW-labelled channel (readyNSFWAcknowledgements); a missing entry reads as false.
+// timedOut is the caller's timeout verdict, fed into every channel's affordances.
 func readyChannelPayloads(visibleChannels []db.Channel, grants permissions.MemberGrants, unreadMap map[int64]db.ChannelUnread, ackMap map[int64]bool, timedOut bool, privacy service.ChannelPrivacySnapshot) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
 	for i := range visibleChannels {
@@ -42,47 +38,37 @@ func readyChannelPayloads(visibleChannels []db.Channel, grants permissions.Membe
 			"name":     visibleChannels[i].Name,
 			"type":     visibleChannels[i].Type,
 			"category": visibleChannels[i].Category,
-			// The category object behind the name: 0/0 when the
-			// channel is uncategorized. Derived from the channel's own row, so
-			// a non-manager learns only the categories of channels they see.
+			// 0/0 when uncategorized. Derived from the channel's own row, so a non-manager learns only
+			// categories of channels they see.
 			"category_id":       visibleChannels[i].CategoryID,
 			"category_position": visibleChannels[i].CategoryPosition,
 			"topic":             visibleChannels[i].Topic,
 			"position":          visibleChannels[i].Position,
-			// Cooldown in seconds (0 = off). Lets the composer disable itself
-			// for the window instead of accepting a send the server refuses
-			// with SLOW_MODE. The server still enforces.
+			// Cooldown in seconds (0 = off): lets the composer disable itself instead of sending into
+			// SLOW_MODE. The server still enforces.
 			"slow_mode": visibleChannels[i].SlowMode,
-			// Age-gate flag. The server enforces content behaviour on a
-			// flagged channel now (permissions.CanReadContent); see
-			// nsfw_acknowledged below for the caller's own consent state.
+			// Age-gate flag; the server enforces it (permissions.CanReadContent). nsfw_acknowledged below is
+			// the caller's consent.
 			"nsfw": visibleChannels[i].NSFW,
-			// The server's one AFK voice channel (migration 068):
-			// listen-only, and what the idle sweep moves members into.
+			// The server's one AFK voice channel: listen-only, and the idle sweep's destination.
 			"afk": visibleChannels[i].AFK,
-			// Whether a voice channel has a password. The same for every
-			// viewer; the join itself says whether this one must enter it.
+			// Whether a voice channel has a password; the same for every viewer.
 			"password_protected": visibleChannels[i].JoinLocked,
 			"private":            privacy.PrivateOf(&visibleChannels[i]), // 3D-6, channel-level
-			// Whether THIS caller has acknowledged the label. Always
-			// present, like nsfw itself — false for an unlabelled channel,
-			// where it means nothing but must not be omitted (two different
-			// meanings for "absent" is exactly what the other always-shipped NSFW
-			// fields avoid).
+			// Whether THIS caller acknowledged the label. Always present, like nsfw: false for an
+			// unlabelled channel (two meanings for "absent" is what the other NSFW fields avoid).
 			"nsfw_acknowledged": ackMap[visibleChannels[i].ID],
-			// Voice capacity limits (0 = unlimited) — the same values the
-			// voice-join path enforces with CHANNEL_FULL / VIDEO_LIMIT.
+			// Voice capacity limits (0 = unlimited), as enforced by the join path (CHANNEL_FULL /
+			// VIDEO_LIMIT).
 			"voice_max_users": visibleChannels[i].VoiceMaxUsers,
 			"voice_max_video": visibleChannels[i].VoiceMaxVideo,
 		}
-		// Per-viewer affordances (can_send, can_moderate_voice,
-		// can_delete_others, can_pin, can_react): the predicates' verdicts
-		// over one subject, asked only in affordancesFor. The server remains
+		// Per-viewer affordances (can_send, can_moderate_voice, can_delete_others, can_pin,
+		// can_react): verdicts over one subject, asked only in affordancesFor. The server remains
 		// the authority; these only pre-disable controls.
 		readyAffordances(grants, &visibleChannels[i], timedOut).spreadInto(entry)
 		if visibleChannels[i].Forum != nil {
-			// The forum's settings and tags. can_send above means "may create
-			// posts"; a forum has no unread state (it holds no messages).
+			// The forum's settings and tags. can_send means "may create posts"; a forum has no unread state.
 			entry["forum"] = visibleChannels[i].Forum
 		}
 		if carriesChatState(visibleChannels[i].Type) {

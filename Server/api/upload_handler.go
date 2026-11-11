@@ -38,34 +38,25 @@ type uploadResponse struct {
 	Waveform   string `json:"waveform,omitempty"`
 }
 
-// sanitizeUploadFilename strips control and invisible formatting characters and
-// path separators, and truncates to a safe length.
 func sanitizeUploadFilename(name string) string {
 	name = filepath.Base(name)
-	// filepath.Base only understands the *server* OS's separator, so a
-	// backslash survives on a Linux server and is then a path separator on the
-	// victim's Windows client, where the name is pre-filled into a save dialog.
+	// filepath.Base knows only the server OS's separator, so a backslash survives on Linux and is a path
+	// separator on the victim's Windows client, where the name pre-fills a save dialog.
 	if i := strings.LastIndexByte(name, '\\'); i >= 0 {
 		name = name[i+1:]
 	}
 	var sb strings.Builder
 	for _, r := range name {
-		// unicode.Cf covers the bidi overrides (U+202A-U+202E, U+2066-U+2069),
-		// which reorder how a name renders so an attachment can show a harmless
-		// extension while being a script, and the native save dialog pre-fills
-		// the same string. auth.ValidateUsername applies the same rule.
-		// A forward slash is dropped too: filepath.Base("/") returns "/", so an
-		// upload named "/" would otherwise slip past the reserved-name check
-		// below with a separator intact.
+		// unicode.Cf covers the bidi overrides, which let an attachment show a harmless extension while being
+		// a script (auth.ValidateUsername applies the same rule). A forward slash is dropped too:
+		// filepath.Base("/") returns "/", which would slip past the reserved-name check.
 		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) || r == '/' {
 			continue
 		}
 		sb.WriteRune(r)
 	}
 	name = strings.TrimSpace(sb.String())
-	// Slicing by byte can split a multibyte rune, so trim back to the last full
-	// rune to keep valid UTF-8 (an invalid name misbehaves in JSON, on disk and
-	// in the client's download-name handling).
+	// Slicing by byte can split a multibyte rune; trim back to the last full rune to keep valid UTF-8.
 	if len(name) > maxUploadFilenameLength {
 		name = name[:maxUploadFilenameLength]
 		for len(name) > 0 && !utf8.ValidString(name) {
@@ -78,8 +69,6 @@ func sanitizeUploadFilename(name string) string {
 	return name
 }
 
-// isUnsafeInlineMIME reports MIME types that could run active content if served
-// inline under the OwnCord origin.
 func isUnsafeInlineMIME(mimeType string) bool {
 	base, _, _ := strings.Cut(mimeType, ";")
 	base = strings.TrimSpace(strings.ToLower(base))
@@ -93,16 +82,12 @@ func isUnsafeInlineMIME(mimeType string) bool {
 	return false
 }
 
-// sniffMIME is http.DetectContentType plus QuickTime and 3GPP, which the WHATWG
-// table leaves out (a .mov with the "qt  " brand would be stored as
-// application/octet-stream and never play inline). It also names HEIC/HEIF and
-// TIFF, which the thumbnail route previews as JPEG.
+// sniffMIME is http.DetectContentType plus QuickTime and 3GPP (which the WHATWG table leaves out, so a .mov
+// would never play inline), and HEIC/HEIF and TIFF, which the thumbnail route previews as JPEG.
 func sniffMIME(header []byte) string {
 	if len(header) >= 12 && string(header[4:12]) == "ftypqt  " {
 		return "video/quicktime"
 	}
-	// 3GPP and 3GPP2 clips carry a "3gp*" / "3g2*" major brand, which the
-	// WHATWG table does not know either.
 	if len(header) >= 12 && string(header[4:8]) == "ftyp" &&
 		(string(header[8:11]) == "3gp" || string(header[8:11]) == "3g2") {
 		return "video/3gpp"
@@ -116,11 +101,9 @@ func sniffMIME(header []byte) string {
 	return http.DetectContentType(header)
 }
 
-// safeStorageErrorMessage maps a storage.Save error to a client-safe body;
-// detail goes to slog.Warn at the call site. Save's errors wrap path-bearing OS
-// errors, so echoing them would hand any authenticated user the server's storage
-// layout. Only the two validation failures below never embed a path, so only
-// their detail is forwarded.
+// Maps a storage.Save error to a client-safe body; detail goes to slog.Warn at the call site. Save's
+// errors wrap path-bearing OS errors that would reveal the storage layout, so only the two validation
+// failures below, which never embed a path, are forwarded.
 func safeStorageErrorMessage(err error) string {
 	msg := err.Error()
 	switch {
@@ -132,17 +115,14 @@ func safeStorageErrorMessage(err error) string {
 	}
 }
 
-// writeStorageSaveError maps a storage.Save failure to an HTTP class:
-// server-side filesystem failures (storage.ErrIO) become 507 so status
-// dashboards tell them from bad uploads; everything else is 400. Detail never
-// crosses the boundary (see safeStorageErrorMessage).
+// writeStorageSaveError maps storage.ErrIO to 507 so dashboards tell it from bad uploads; everything else
+// is 400. Detail never crosses the boundary (see safeStorageErrorMessage).
 func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
 	if writeTransferTimedOut(w, saveErr, what) {
 		return
 	}
-	// The two bounds refuse with 507 and their own codes so a client can tell
-	// "your quota is full" from "the server is out of disk" from a filesystem
-	// failure; no body carries a path.
+	// Distinct 507 codes let a client tell "your quota is full" from "the server is out of disk"; no body
+	// carries a path.
 	if errors.Is(saveErr, service.ErrQuotaExceeded) {
 		slog.Info(what+" refused: user storage quota", "error", saveErr)
 		writeErr(w, http.StatusInsufficientStorage, httperr.CodeStorageQuotaExceeded, "upload rejected: your storage quota is full")
@@ -162,29 +142,25 @@ func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
 	writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, safeStorageErrorMessage(saveErr))
 }
 
-// MountUploadRoutes registers upload and file-serving endpoints; allowedOrigins
-// sets Access-Control-Allow-Origin on served files. uploads MUST be non-nil: it
-// owns the access decision on every download and the attachment row behind every
-// upload, so fail fast at mount time.
+// MountUploadRoutes registers upload and file-serving endpoints; allowedOrigins sets
+// Access-Control-Allow-Origin on served files. uploads MUST be non-nil: it owns the access decision on
+// every download, so fail fast at mount time.
 func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store FileStore, limiter *auth.RateLimiter, allowedOrigins []string, uploads *service.UploadService) {
 	if uploads == nil {
 		panic("api: MountUploadRoutes requires a non-nil UploadService")
 	}
-	// handleUpload applies its own body cap (uploadBodyCap), which follows
-	// upload.max_size_mb.
 	r.With(AuthMiddleware(sessions)).Post("/api/v1/uploads", handleUpload(uploads, store, limiter))
 	r.With(AuthMiddleware(sessions)).Delete("/api/v1/uploads/{id}", handleDiscardUpload(uploads, store))
-	// A <video> element cannot send a header, so this one route also accepts a
-	// short-lived file link (file_link.go); a thumbnail does not.
+	// A <video> element cannot send a header, so this route also accepts a short-lived file link; a thumbnail
+	// does not.
 	links := newFileLinks()
 	r.With(fileLinkAuth(sessions, links)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
 	r.With(AuthMiddleware(sessions)).Post("/api/v1/files/{id}/link", handleIssueFileLink(uploads, links, limiter))
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}/thumb", handleServeThumb(uploads, store, allowedOrigins))
 }
 
-// handleDiscardUpload deletes the caller's own upload that no message holds,
-// returning its quota. Anything else (unknown, another user's, already sent, a
-// live avatar) is a 404, revealing nothing about files the caller does not own.
+// handleDiscardUpload deletes the caller's own unsent upload, returning its quota. Anything else is a
+// 404, revealing nothing about files the caller does not own.
 func handleDiscardUpload(uploads *service.UploadService, store FileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -227,39 +203,32 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		}
 		defer slots.release(user.ID)
 
-		// The voice pair is validated before any quota is reserved and
-		// before a byte of the body is read.
+		// Validated before any quota is reserved or a body byte is read.
 		voice, err := parseVoiceMeta(r.URL.Query())
 		if err != nil {
 			writeVoiceParamError(w, err)
 			return
 		}
 
-		// The global 30 s Read/WriteTimeout bound the WHOLE request, so a 25 MB
-		// upload on a slow uplink is cut mid-body and its 201 never lands. The
-		// route-scoped body wrapper pushes the read and write deadlines out on
-		// every chunk that moves, so a progressing transfer survives until its
-		// lifetime (sized from the body cap) and a stalled peer does not. The
-		// global timeouts stay: they still bound the header phase and slowloris.
+		// The global 30 s Read/WriteTimeout would cut a slow-uplink upload mid-body. The route-scoped wrapper
+		// pushes the deadlines out on every chunk that moves, so a progressing transfer survives until its
+		// lifetime and a stalled peer does not; the global timeouts still bound the header phase and
+		// slowloris.
 		fileCap := uploads.MaxUploadBytes()
 		release := transferBody(w, r, uploadBodyCap(fileCap))
 		defer release()
 
-		// Stream the multipart body instead of buffering or spooling it: no
-		// part is read until the bytes it could cost are admitted below.
+		// Stream the multipart body: no part is read until the bytes it could cost are admitted.
 		mr, err := r.MultipartReader()
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
 			return
 		}
 
-		// Admit the bytes before reading any. The declared length is untrusted
-		// and a chunked request carries none (-1), so reserve the envelope: the
-		// declared length when sane, else the worst case one file can cost (the
-		// per-file cap upload.max_size_mb when set, else the request cap).
-		// Reserving the whole request cap for every chunked upload would starve
-		// users with smaller quota or headroom. The deferred Settle returns the
-		// charge on every path that does not reach Record, a panic included.
+		// The declared length is untrusted and a chunked request carries none (-1), so reserve the declared
+		// length when sane, else the worst case one file can cost; reserving the whole request cap would
+		// starve users with less quota. The deferred Settle returns the charge on every path that skips
+		// Record, a panic included.
 		worstCase := fileCap
 		if worstCase <= 0 {
 			worstCase = uploadMaxBodySize
@@ -282,8 +251,8 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		}
 		defer part.Close() //nolint:errcheck
 
-		// The owner's file-type policy judges the name the file will carry;
-		// storage.Save's content blocks still apply to whatever it allows.
+		// The owner's file-type policy judges the name the file will carry; storage.Save's content blocks
+		// still apply.
 		safeFilename := sanitizeUploadFilename(part.FileName())
 		if !checkUploadFileType(r.Context(), w, uploads, safeFilename) {
 			return
@@ -296,9 +265,8 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			return
 		}
 
-		// Drain the rest of the body: the tail meets the body cap and the
-		// multipart parser too, so a padded or malformed tail refuses the
-		// upload instead of riding in behind the file part.
+		// The tail meets the body cap and the multipart parser too, so a padded or malformed tail refuses the
+		// upload.
 		if err := drainMultipartTail(mr); err != nil {
 			if delErr := store.Delete(stored.id); delErr != nil {
 				slog.Error("failed to clean up refused upload file", "stored_as", stored.id, "error", delErr)
@@ -307,8 +275,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			return
 		}
 
-		// Record the attachment (unlinked — message_id is NULL) and commit
-		// the reservation under the same lock.
+		// Record the unlinked attachment and commit the reservation under the same lock.
 		rec := voice.record(user.ID, safeFilename, stored)
 		if err := uploads.Record(r.Context(), rec, res); err != nil {
 			if delErr := store.Delete(stored.id); delErr != nil {
@@ -335,10 +302,8 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 	}
 }
 
-// findFilePart walks a multipart request to the "file" field carrying an actual
-// file (a filename= attribute, which distinguishes it from a same-named plain
-// value), closing other parts unbuffered. It returns the reader's error (io.EOF
-// included) when none is found.
+// findFilePart finds the "file" field carrying a filename= (not a same-named plain value), closing other
+// parts unbuffered. It returns the reader's error (io.EOF included) when none is found.
 func findFilePart(mr *multipart.Reader) (*multipart.Part, error) {
 	for {
 		part, err := mr.NextPart()
@@ -352,8 +317,6 @@ func findFilePart(mr *multipart.Reader) (*multipart.Part, error) {
 	}
 }
 
-// drainMultipartTail reads every part after the file to its end, discarding
-// the bytes, and reports the first error the reader or the body cap raises.
 func drainMultipartTail(mr *multipart.Reader) error {
 	for {
 		p, err := mr.NextPart()
@@ -369,9 +332,8 @@ func drainMultipartTail(mr *multipart.Reader) error {
 	}
 }
 
-// writeUploadPartError keeps the handler's old responses: no "file" part is
-// "missing file field", and any structural failure (malformed boundary,
-// truncated headers) is "invalid multipart form".
+// writeUploadPartError: no "file" part is "missing file field"; any structural failure is "invalid
+// multipart form".
 func writeUploadPartError(w http.ResponseWriter, err error) {
 	if writeTransferTimedOut(w, err, "file upload") {
 		return
@@ -387,26 +349,22 @@ func writeUploadPartError(w http.ResponseWriter, err error) {
 	writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
 }
 
-// storedUpload is what the bytes stage of an upload produces: the id the file
-// is stored under, the type sniffed from its own bytes, what was written, and
-// the image dimensions when it is an image.
+// storedUpload is what the bytes stage produces: stored id, sniffed type, bytes written and image
+// dimensions.
 type storedUpload struct {
 	id, mime      string
 	size          int64
 	width, height *int
 }
 
-// uploadStoreFile is the bytes stage of handleUpload: sniff the type, write
-// through the store under its reservation, and measure images. It writes its own
-// error response and reports ok=false. file is an io.Reader because a
-// *multipart.Part is not seekable, so the sniffed header bytes are re-joined
-// with the stream rather than rewound.
+// uploadStoreFile sniffs the type, writes through the store under its reservation and measures images. It
+// writes its own error response and reports ok=false. file is an io.Reader because a *multipart.Part is
+// not seekable, so sniffed bytes are re-joined rather than rewound.
 func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader, res *service.StorageReservation, store FileStore) (storedUpload, bool) {
 	fileID := uuid.New().String()
 
-	// Detect the MIME type from the actual bytes, never the client header.
-	// Part.Read may return short without EOF, so io.ReadFull fills the sniff
-	// buffer.
+	// Sniff the actual bytes, never the client header. Part.Read may return short without EOF, so use
+	// io.ReadFull.
 	var sniffBuf [512]byte
 	n, readErr := io.ReadFull(file, sniffBuf[:])
 	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
@@ -425,14 +383,12 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 		return storedUpload{}, false
 	}
 
-	// A TIFF-structured camera RAW is a download; an image gets its upright size.
 	mime, width, height := inspectStoredImage(store, fileID, mime)
 	return storedUpload{id: fileID, mime: mime, size: writtenBytes, width: width, height: height}, true
 }
 
-// jpegSidewaysOnDisk reports whether f's EXIF orientation (5-8) turns the
-// stored image a quarter turn, so the upright size swaps width and height,
-// as the thumbnail route and browsers display it.
+// jpegSidewaysOnDisk reports whether EXIF orientation 5-8 swaps width and height, as thumbnails and
+// browsers display it.
 func jpegSidewaysOnDisk(f io.ReadSeeker) bool {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return false

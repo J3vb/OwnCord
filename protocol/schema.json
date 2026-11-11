@@ -199,6 +199,12 @@
       "ts": "GAME_ACTIVITY_POLICY",
       "note": "WP 8.3e-2: whether game activity is shown on this server, unsequenced, after an admin saves the switch; auth_ok carries it on every connect and resume"
     },
+    {
+      "wire": "video_bitrate_cap",
+      "go": "MsgTypeVideoBitrateCap",
+      "ts": "VIDEO_BITRATE_CAP",
+      "note": "the per-person video upload cap in bits/s (0 = none), unsequenced, after an admin saves it; auth_ok carries it on every connect and resume"
+    },
     { "wire": "server_restart", "go": "MsgTypeServerRestart", "ts": "SERVER_RESTART" },
     {
       "wire": "mod_queue",

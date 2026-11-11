@@ -53,8 +53,8 @@ vi.mock("../../lib/voice/livekitSession", () => ({
   retryWatching: vi.fn(),
 }));
 vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
-vi.mock("../../lib/voice/screenShare", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../lib/voice/screenShare")>();
+vi.mock("./screenShare", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./screenShare")>();
   return { ...actual, rollbackPendingVideo: vi.fn() };
 });
 import {
@@ -72,7 +72,7 @@ import {
   resendWatching,
   retryWatching,
 } from "../../lib/voice/livekitSession";
-import { rollbackPendingVideo } from "../../lib/voice/screenShare";
+import { rollbackPendingVideo } from "./screenShare";
 import { expectConsole } from "../../../tests/helpers/console";
 import { captureLogs } from "../../../tests/helpers/log-capture";
 import { showToast } from "../../lib/ui/toast";
@@ -355,7 +355,7 @@ describe("handleVoiceJoinRollback", () => {
     joinVoiceChannel(4);
     expect(voiceStore.getState().voiceStatus).toBe("joining");
 
-    handleVoiceJoinRollback(refusal("CHANNEL_FULL"), undefined);
+    handleVoiceJoinRollback(socketStub(), refusal("CHANNEL_FULL"), undefined);
 
     expect(voiceStore.getState().currentChannelId).toBeNull();
   });
@@ -365,14 +365,14 @@ describe("handleVoiceJoinRollback", () => {
     // token issued; without arming the backoff every click re-sent voice_join.
     noteJoinSucceeded();
     joinVoiceChannel(4);
-    handleVoiceJoinRollback(refusal("FORBIDDEN"), undefined);
+    handleVoiceJoinRollback(socketStub(), refusal("FORBIDDEN"), undefined);
     expect(joinRetryInMs()).toBeGreaterThan(0);
     noteJoinSucceeded();
   });
 
   it("does not back off an error that lands with no join outstanding", () => {
     noteJoinSucceeded();
-    handleVoiceJoinRollback(refusal("FORBIDDEN"), undefined);
+    handleVoiceJoinRollback(socketStub(), refusal("FORBIDDEN"), undefined);
     expect(joinRetryInMs()).toBe(0);
   });
 
@@ -380,7 +380,7 @@ describe("handleVoiceJoinRollback", () => {
     joinVoiceChannel(4);
     noteJoinSent("join-1");
 
-    handleVoiceJoinRollback(refusal("FORBIDDEN"), "chat-edit-7");
+    handleVoiceJoinRollback(socketStub(), refusal("FORBIDDEN"), "chat-edit-7");
 
     expect(voiceStore.getState().currentChannelId).toBe(4);
     expect(voiceStore.getState().voiceStatus).toBe("joining");
@@ -390,7 +390,7 @@ describe("handleVoiceJoinRollback", () => {
     joinVoiceChannel(4);
     noteJoinSent("join-1");
 
-    handleVoiceJoinRollback(refusal("FORBIDDEN"), "join-1");
+    handleVoiceJoinRollback(socketStub(), refusal("FORBIDDEN"), "join-1");
 
     expect(voiceStore.getState().currentChannelId).toBeNull();
   });
@@ -401,7 +401,7 @@ describe("handleVoiceJoinRollback", () => {
     joinVoiceChannel(5);
     noteJoinSent("join-new");
 
-    handleVoiceJoinRollback(refusal("CHANNEL_FULL"), "join-old");
+    handleVoiceJoinRollback(socketStub(), refusal("CHANNEL_FULL"), "join-old");
 
     expect(voiceStore.getState().currentChannelId).toBe(5);
     expect(voiceStore.getState().voiceStatus).toBe("joining");
@@ -411,7 +411,7 @@ describe("handleVoiceJoinRollback", () => {
     joinVoiceChannel(4);
     noteJoinSent("join-1");
 
-    handleVoiceJoinRollback(refusal("CHANNEL_FULL"), undefined);
+    handleVoiceJoinRollback(socketStub(), refusal("CHANNEL_FULL"), undefined);
 
     expect(voiceStore.getState().currentChannelId).toBeNull();
   });
@@ -420,7 +420,7 @@ describe("handleVoiceJoinRollback", () => {
     joinVoiceChannel(4);
     noteJoinSent("join-1");
 
-    handleVoiceJoinRollback(refusal("INVALID_JSON"), undefined);
+    handleVoiceJoinRollback(socketStub(), refusal("INVALID_JSON"), undefined);
 
     expect(voiceStore.getState().currentChannelId).toBe(4);
   });
@@ -582,7 +582,7 @@ describe("handleVoiceMoved toast", () => {
     await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
     noteJoinSent("join-1");
     setVoiceStatus("joining");
-    handleVoiceJoinRollback({ code: "FORBIDDEN", message: "no" }, "join-1");
+    handleVoiceJoinRollback(socketStub(), { code: "FORBIDDEN", message: "no" }, "join-1");
     joinVoiceChannel(4);
     ack(4);
     expect(showToast).not.toHaveBeenCalled();
@@ -1258,7 +1258,7 @@ describe("handleVoiceJoinRollback session teardown", () => {
   it("abandons a pending rejoin but keeps the server membership when no session is live", async () => {
     joinVoiceChannel(4);
 
-    handleVoiceJoinRollback(refusal("FORBIDDEN"), undefined);
+    handleVoiceJoinRollback(socketStub(), refusal("FORBIDDEN"), undefined);
 
     await vi.waitFor(() => expect(failPendingRejoin).toHaveBeenCalledTimes(1));
     expect(leaveVoice).not.toHaveBeenCalled();
@@ -1268,7 +1268,7 @@ describe("handleVoiceJoinRollback session teardown", () => {
     vi.mocked(isVoiceSessionActive).mockReturnValue(true);
     joinVoiceChannel(4);
 
-    handleVoiceJoinRollback(refusal("FORBIDDEN"), undefined);
+    handleVoiceJoinRollback(socketStub(), refusal("FORBIDDEN"), undefined);
 
     await vi.waitFor(() => expect(leaveVoice).toHaveBeenCalledWith(true));
   });
@@ -1281,7 +1281,7 @@ describe("handleVoiceJoinRollback session teardown", () => {
     resetJoinRequest();
     noteJoinSent("j1");
 
-    handleVoiceJoinRollback(refusal("FORBIDDEN"), "j1");
+    handleVoiceJoinRollback(socketStub(), refusal("FORBIDDEN"), "j1");
     joinVoiceChannel(4);
     ack(4);
 

@@ -9,53 +9,44 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"maps"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 )
 
-// The fixture turns a bare server into an install an owner would recognise
-// (an owner, an attachment, a backup), because the upgrade question is whether
-// what was already there is preserved, which a cold boot cannot answer.
+// The fixture turns a bare server into an install an owner would recognise (owner, attachment, backup): the
+// upgrade question is whether what was there is preserved, which a cold boot cannot answer.
 
 const (
-	// fixtureUser and fixturePassword go through POST /admin/api/setup, which
-	// enforces auth.ValidatePasswordStrength (8-72 bytes); a throwaway server
-	// in a temporary directory, not a secret.
+	// fixtureUser and fixturePassword go through POST /admin/api/setup (auth.ValidatePasswordStrength, 8-72
+	// bytes); a throwaway server in a temp directory, not a secret.
 	fixtureUser     = "rehearsal-owner"
 	fixturePassword = "rehearsal-passphrase" //nolint:gosec // throwaway account on a temp-dir server, deleted with it
 
-	// fixturePayloadSize exceeds one filesystem block, so a truncated or
-	// partial copy shows as a digest mismatch.
+	// fixturePayloadSize exceeds one filesystem block, so a truncated copy shows as a digest mismatch.
 	fixturePayloadSize = 64 * 1024
 	fixtureFilename    = "rehearsal-attachment.bin"
 
-	// fixturePayloadDigest is sha256(fixturePayload()), pinned as a literal:
-	// recomputing it would make every assertion agree with whatever
-	// fixturePayload returns.
+	// fixturePayloadDigest is sha256(fixturePayload()) pinned as a literal: recomputing it would make every
+	// assertion agree with whatever fixturePayload returns.
 	fixturePayloadDigest = "de3f3404598736bd6abece44ed40b347febf99becf1a476f0d18fdc9a32a6166"
 
-	// fixtureTimeout bounds every call, so a server that stopped answering
-	// fails the phase instead of hanging the rehearsal.
+	// fixtureTimeout bounds every call so a server that stopped answering fails the phase instead of hanging.
 	fixtureTimeout = 30 * time.Second
 )
 
-// credentialFiles are the on-disk secrets beside the database that are not in
-// a backup: losing one is silent at boot and surfaces later as "every TOTP
-// enrolment is invalid" or "push stopped". Slash form, as printed in failures.
+// credentialFiles are the on-disk secrets beside the database that are not in a backup: losing one is silent
+// at boot and surfaces later (TOTP enrolments invalid, push stopped). Slash form.
 var credentialFiles = []string{
 	"data/totp.key",
 	"data/erasure.key",
 	"data/push_vapid.key",
 }
 
-// The generated certificate carries no SANs (Server/auth/tls.go), so no
-// RootCAs pool can verify it; this client talks only to a server this harness
-// launched on loopback.
+// The generated certificate carries no SANs (Server/auth/tls.go), so no RootCAs pool can verify it; this
+// client only talks to a server this harness launched on loopback.
 var fixtureClient = &http.Client{
 	Timeout: fixtureTimeout,
 	Transport: &http.Transport{
@@ -63,28 +54,19 @@ var fixtureClient = &http.Client{
 	},
 }
 
-// fixture is what installFixture left behind: what a later phase needs to
-// speak to the same install as the same owner.
 type fixture struct {
-	// token is the pre-upgrade session token, reused after the upgrade so
-	// "authenticated downloads still work" is a real assertion.
-	//
-	// It is also how "the database survived" is asserted: data/chatserver.db is
-	// not hashed (WAL churn and forward migrations rewrite it by design), but
-	// this token authenticating after the swap proves the session row, user and
-	// schema came out of the pre-upgrade database. A recreated database would
-	// 401 every call captureState makes.
+	// token is the pre-upgrade session token, reused after the upgrade so "authenticated downloads still work"
+	// is real. It also asserts the database survived: data/chatserver.db is not hashed (WAL churn and forward
+	// migrations rewrite it), but this token authenticating after the swap proves the session row, user and
+	// schema came from the pre-upgrade database; a recreated one would 401 every captureState call.
 	token string
-	// attachmentID is the /api/v1/files/{id} path segment and the file name
-	// under data/uploads (Server/storage saves under the id verbatim).
+	// attachmentID is the /api/v1/files/{id} segment and the file name under data/uploads (Server/storage saves
+	// under the id verbatim).
 	attachmentID string
-	// backupName is the backup created before the upgrade, so the first capture
-	// can be checked for it.
+	// backupName is the backup created before the upgrade, so the first capture can be checked for it.
 	backupName string
 }
 
-// installFixture populates a freshly booted server running the old version, so
-// everything it creates is state the upgrade has to carry over.
 func installFixture(baseURL, serverLog string) (fixture, error) {
 	token, err := runSetup(baseURL, serverLog)
 	if err != nil {
@@ -98,9 +80,8 @@ func installFixture(baseURL, serverLog string) (fixture, error) {
 	if err != nil {
 		return fixture{}, err
 	}
-	// Prove the attachment round-trips now, on the version that stored it:
-	// compare() is only a delta, so a download already wrong before the upgrade
-	// would pass.
+	// Prove the attachment round-trips now, on the version that stored it: compare() is only a delta, so a
+	// download already wrong before the upgrade would pass.
 	got, err := fetchAttachment(baseURL, token, id)
 	if err != nil {
 		return fixture{}, err
@@ -114,10 +95,9 @@ func installFixture(baseURL, serverLog string) (fixture, error) {
 	return fixture{token: token, attachmentID: id, backupName: backup}, nil
 }
 
-// createBackup takes the backup the rollback recipe tells owners to take and
-// returns its name. The list is read back and must contain it: otherwise a 200
-// that produced no file would leave the first capture with no backups and
-// "every backup survived" would hold vacuously.
+// createBackup takes the backup the rollback recipe tells owners to take and returns its name; the list is
+// read back and must contain it, or a 200 that produced no file would make "every backup survived" hold
+// vacuously.
 func createBackup(baseURL, token string) (string, error) {
 	var created struct {
 		Path string `json:"path"`
@@ -138,12 +118,9 @@ func createBackup(baseURL, token string) (string, error) {
 	return created.Path, nil
 }
 
-// runSetup creates the owner account through the first-run wizard, with the
-// setup token found in the server's start-up output.
 func runSetup(baseURL, serverLog string) (string, error) {
-	// Wizard fields that live in config.yaml (port, tls_mode, tls_domain,
-	// upload_max_size_mb, voice_quality, voice_auto_download) are omitted:
-	// setting one restarts the server and rewrites the file whose hash the
+	// Wizard fields that live in config.yaml (port, tls_mode, tls_domain, upload_max_size_mb, voice_quality,
+	// voice_auto_download) are omitted: setting one restarts the server and rewrites the file whose hash the
 	// rehearsal compares.
 	body, err := json.Marshal(map[string]any{
 		"username":    fixtureUser,
@@ -175,10 +152,9 @@ func runSetup(baseURL, serverLog string) (string, error) {
 	return resp.Token, nil
 }
 
-// multipartUpload builds the fixture attachment request body and content type.
-// The drill phases need the same bytes as a request whose non-2xx status is
-// the assertion (phase D expects 507), which request() would report as a
-// failure; sharing it stops the two uploads drifting apart.
+// multipartUpload builds the fixture attachment body and content type. The drill phases need the same bytes
+// as a request whose non-2xx status is the assertion (phase D expects 507), which request() would report as a
+// failure; sharing it stops the uploads drifting apart.
 func multipartUpload() ([]byte, string, error) {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
@@ -195,7 +171,6 @@ func multipartUpload() ([]byte, string, error) {
 	return body.Bytes(), mw.FormDataContentType(), nil
 }
 
-// uploadAttachment stores the fixed payload and returns the attachment id.
 func uploadAttachment(baseURL, token string) (string, error) {
 	body, contentType, err := multipartUpload()
 	if err != nil {
@@ -224,9 +199,8 @@ func fixturePayload() []byte {
 	return b
 }
 
-// request issues one call and decodes a JSON response into out (nil to
-// discard it). A non-2xx is reported with the server's own error body instead
-// of surfacing later as a decode failure.
+// request issues one call and decodes JSON into out (nil to discard); a non-2xx is reported with the server's
+// error body instead of surfacing later as a decode failure.
 func request(method, url, token, contentType string, body io.Reader, wantStatus int, out any) error {
 	req, err := http.NewRequest(method, url, body) //nolint:noctx // the client's own Timeout bounds every call
 	if err != nil {
@@ -266,28 +240,24 @@ type download struct {
 	length int
 }
 
-// state is one capture of everything the upgrade promises to preserve: data,
-// attachments, configuration, credentials and backups, plus the download that
-// proves the pre-upgrade session still works. Digests rather than contents, so
-// a failure prints a name and two hashes.
+// state is one capture of everything the upgrade promises to preserve (data, attachments, configuration,
+// credentials, backups, the download proving the old session works). Digests, so a failure prints a name and
+// two hashes.
 type state struct {
 	config string // SHA-256 of config.yaml
-	// keys maps a credentialFiles entry to its SHA-256. A missing file has no
-	// entry: "was there and is gone" and "never there" mean opposite things
-	// about an upgrade (see compare).
+	// keys maps a credentialFiles entry to its SHA-256. A missing file has no entry: "was there and is gone" and
+	// "never there" mean opposite things about an upgrade (see compare).
 	keys map[string]string
-	// uploads maps a path relative to data/uploads (slash form) to its
-	// SHA-256, so a lost file is named rather than counted.
+	// uploads maps a path relative to data/uploads to its SHA-256, so a lost file is named, not counted.
 	uploads  map[string]string
 	backups  []string // names only: size and date do not survive a copy unchanged
 	download download
 	version  string // as reported by the running server
 }
 
-// captureState reads the install at dir (config.yaml at its root, data/
-// beneath) and interrogates the server serving it. attachmentID comes from the
-// fixture on the old version, so the question is whether the attachment
-// uploaded before is still downloadable, not whether some attachment is.
+// captureState reads the install at dir and interrogates the server serving it. attachmentID comes from the
+// fixture on the old version, so the question is whether the attachment uploaded before is still
+// downloadable, not whether some attachment is.
 func captureState(dir, baseURL, token, attachmentID string) (state, error) {
 	s := state{keys: map[string]string{}, uploads: map[string]string{}}
 
@@ -320,19 +290,14 @@ func captureState(dir, baseURL, token, attachmentID string) (state, error) {
 	return s, nil
 }
 
-// anchor checks the first capture against what installFixture created.
-// compare() is only a delta, so two equally wrong captures (an empty backup
-// list, uploads read from the wrong directory, an already-broken download)
-// would make "nothing was lost" true over nothing; anchoring gives the delta
-// something to be a delta of.
+// anchor checks the first capture against what installFixture created: compare() is only a delta, so two
+// equally wrong captures (empty backup list, uploads read from the wrong directory, a broken download) would
+// make "nothing was lost" true over nothing.
 func (f fixture) anchor(s state) error {
 	problems := make([]error, 0, 4)
-	// The credential branch of compare() can go vacuous without a trace: it
-	// iterates before.keys, so an empty map compares nothing. That is
-	// reachable: OWNCORD_TOTP_KEY set on a runner makes
-	// loadOrGenerateKeyFile (Server/auth/totp_encrypt.go) take the env branch
-	// and never write data/totp.key, and start() hands the server the
-	// harness's environment.
+	// The credential branch of compare() can go vacuous: it iterates before.keys, so an empty map compares
+	// nothing. Reachable: OWNCORD_TOTP_KEY on a runner makes loadOrGenerateKeyFile (Server/auth/totp_encrypt.go)
+	// take the env branch and never write data/totp.key, and start() hands the server the harness's environment.
 	if len(s.keys) == 0 {
 		problems = append(problems, fmt.Errorf(
 			"the pre-upgrade capture found none of %v: the credential assertion would hold over nothing",
@@ -344,8 +309,8 @@ func (f fixture) anchor(s state) error {
 	}
 	switch digest, ok := s.uploads[f.attachmentID]; {
 	case !ok:
-		// Server/storage saves under the attachment id verbatim, so a miss
-		// means captureState was pointed somewhere that is not the install.
+		// Server/storage saves under the attachment id verbatim, so a miss means captureState was pointed somewhere
+		// that is not the install.
 		problems = append(problems, fmt.Errorf(
 			"the pre-upgrade capture has no data/uploads/%s (it found %d file(s)): is it reading the install directory?",
 			f.attachmentID, len(s.uploads)))
@@ -361,9 +326,8 @@ func (f fixture) anchor(s state) error {
 	return errors.Join(problems...)
 }
 
-// hashUploads digests every file under root, keyed by its path relative to
-// root. A missing directory yields an empty map so compare names each missing
-// upload instead of failing with one opaque error.
+// hashUploads digests every file under root keyed by relative path; a missing directory yields an empty map
+// so compare names each missing upload instead of failing opaquely.
 func hashUploads(root string) (map[string]string, error) {
 	out := map[string]string{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -407,9 +371,8 @@ func listBackups(baseURL, token string) ([]string, error) {
 	return names, nil
 }
 
-// fetchAttachment re-downloads the attachment with the caller's token. The
-// body is hashed rather than kept: a digest plus a length names every way it
-// could come back wrong.
+// fetchAttachment re-downloads the attachment with the caller's token; hashed, not kept, since a digest plus
+// a length names every way it could come back wrong.
 func fetchAttachment(baseURL, token, id string) (download, error) {
 	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/v1/files/"+id, nil) //nolint:noctx // bounded by the client Timeout
 	if err != nil {
@@ -451,88 +414,6 @@ func reportedVersion(baseURL, token string) (string, error) {
 	return diag.Server.Version, nil
 }
 
-// compare asserts that everything recorded in before survived into after,
-// byte for byte, naming whatever did not. It does not assert the reverse: an
-// item present only in after is new and printed as informational.
-//
-// alpha.4 has no Server/auth/erasure_key.go or push_vapid_key.go, so HEAD
-// legitimately creates data/erasure.key, data/push_vapid.key and
-// data/erasure/markers.sqlite on first boot; byte-equality would fail a newer
-// server for doing what it should. A lost or mutated item still fails.
-//
-// The version is not compared: the upgrade phase expects it to differ and the
-// rollback phase to match, so the caller asserts it.
-func compare(before, after state) error {
-	problems := make([]error, 0, 4)
-	if before.config != after.config {
-		problems = append(problems, fmt.Errorf("config.yaml changed: %s -> %s", before.config, after.config))
-	}
-	problems = append(problems, lostOrChanged("credential file", before.keys, after.keys)...)
-	problems = append(problems, lostOrChanged("upload", before.uploads, after.uploads)...)
-	for _, name := range before.backups {
-		if !slices.Contains(after.backups, name) {
-			problems = append(problems, fmt.Errorf("backup %s is gone from the backup list", name))
-		}
-	}
-	// Digest and length only: the id is an input, and including it would
-	// print a mismatched id as though the bytes had changed.
-	if before.download.digest != after.download.digest || before.download.length != after.download.length {
-		problems = append(problems, fmt.Errorf(
-			"the download of attachment %s changed: %s (%d bytes) -> %s (%d bytes)",
-			before.download.id, before.download.digest, before.download.length,
-			after.download.digest, after.download.length))
-	}
-	if line := additions(before, after); line != "" {
-		fmt.Println(line)
-	}
-	return errors.Join(problems...)
-}
-
-// lostOrChanged reports every entry of before that after has lost or altered,
-// sorted so a divergence prints the same on every run.
-func lostOrChanged(kind string, before, after map[string]string) []error {
-	problems := make([]error, 0, len(before))
-	for _, name := range slices.Sorted(maps.Keys(before)) {
-		switch got, ok := after[name]; {
-		case !ok:
-			problems = append(problems, fmt.Errorf("%s %s is gone", kind, name))
-		case got != before[name]:
-			problems = append(problems, fmt.Errorf("%s %s changed: %s -> %s", kind, name, before[name], got))
-		}
-	}
-	return problems
-}
-
-// additions is the other half of compare's asymmetry: what the newer version
-// created that the older one never had. Informational, "" when none.
-func additions(before, after state) string {
-	added := slices.Concat(
-		onlyIn("credential file", before.keys, after.keys),
-		onlyIn("upload", before.uploads, after.uploads),
-	)
-	for _, name := range after.backups {
-		if !slices.Contains(before.backups, name) {
-			added = append(added, "backup "+name)
-		}
-	}
-	if len(added) == 0 {
-		return ""
-	}
-	slices.Sort(added)
-	return "added since the pre-upgrade capture: " + strings.Join(added, ", ")
-}
-
-func onlyIn(kind string, before, after map[string]string) []string {
-	var names []string
-	for name := range after {
-		if _, ok := before[name]; !ok {
-			names = append(names, kind+" "+name)
-		}
-	}
-	return names
-}
-
-// getClient fetches one path from the running server with the loopback client.
 func getClient(path string) (status int, contentType, body string, err error) {
 	req, err := http.NewRequest(http.MethodGet, defaultBaseURL+path, nil) //nolint:noctx // bounded by the client Timeout
 	if err != nil {

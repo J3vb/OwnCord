@@ -8,20 +8,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// fileLimit is the soft/hard open-file limit pair rlimit(RLIMIT_NOFILE)
-// carries, a plain struct so the platform functions and tests need no syscall
-// types.
+// fileLimit is the soft/hard open-file limit pair, a plain struct so tests need
+// no syscall types.
 type fileLimit struct {
 	soft uint64
 	hard uint64
 }
 
-// uncappedConnBudget is the connection count an uncapped server
-// (server.max_ws_connections = 0) is budgeted for: the 2,000-online target.
+// uncappedConnBudget is the connection count budgeted when
+// server.max_ws_connections = 0: the 2,000-online target.
 const uncappedConnBudget = 2000
 
-// getFileLimit and setFileLimit are the platform pair raiseFileLimit drives;
-// package vars so a test can swap in a fake.
+// getFileLimit and setFileLimit are package vars so a test can swap in a fake.
 var (
 	getFileLimit = realGetFileLimit
 	setFileLimit = realSetFileLimit
@@ -39,17 +37,9 @@ func realSetFileLimit(l fileLimit) error {
 	return unix.Setrlimit(unix.RLIMIT_NOFILE, &unix.Rlimit{Cur: l.soft, Max: l.hard})
 }
 
-// raiseFileLimit lifts the process's soft open-file limit to the hard one and
-// reports the result; a chat server holds one descriptor per WebSocket. The Go
-// runtime already lifts the soft limit to hard-1, so this is the last step; the
-// hard limit (systemd LimitNOFILE, a Docker ulimit, the operator's `ulimit -n`)
-// is the real ceiling.
-//
-// A raise the host refuses is only logged: the existing limit may suffice, and
-// refusing to serve would be worse than serving until it runs out. maxConns is
-// server.max_ws_connections (0 = budgeted as the 2,000-online target); a
-// resulting limit below what that many connections need is called out, since
-// raising cannot fix a hard limit that is too low.
+// raiseFileLimit lifts the soft open-file limit to the hard one; a chat server
+// holds one descriptor per WebSocket. A raise the host refuses is only logged:
+// the existing limit may suffice, and refusing to serve would be worse.
 func raiseFileLimit(log *slog.Logger, maxConns int) {
 	before, err := getFileLimit()
 	if err != nil {
@@ -72,9 +62,6 @@ func raiseFileLimit(log *slog.Logger, maxConns int) {
 	}
 	log.Info("open-file limit", "soft", after.soft, "hard", after.hard, "raised_to_hard", raised)
 
-	// Each connection holds one descriptor; the budget doubles that for
-	// headroom and adds a fixed allowance for the database, LiveKit, TLS and the
-	// rest of the process.
 	budgetConns := maxConns
 	if budgetConns <= 0 {
 		budgetConns = uncappedConnBudget

@@ -17,7 +17,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-const { createVoiceWidget } = await import("@components/VoiceWidget");
+const { createVoiceWidget } = await import("../../src/features/voice/VoiceWidget");
 const { attachGlobalKeybinds } = await import("../../src/pages/main-page/GlobalKeybinds");
 const { voiceStore } = await import("@stores/voice.store");
 const { parseKeybinds } = await import("../../src/lib/prefs/keybinds");

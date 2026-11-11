@@ -6,7 +6,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
 ## Layout
 
 - `src/stores/` observable stores · `src/lib/` protocol, WS, voice, E2EE ·
-  `src/pages/`, `src/components/` UI · `src/features/voice/` modules
+  `src/pages/` wiring only (screens live in `src/features/`, shared UI in `src/lib/ui/`; there is no `components/`) · `src/features/voice/` modules
   extracted from `lib/voice/livekitSession.ts` and `lib/voice/livekitE2EE.ts` (the
   facades; the `e2ee*.ts` files are `E2EEManager`'s), with colocated
   `*.test.ts`; `src/features/{connection,direct-messages,message-requests,channels,messaging,voice,safety,moderation}/wsHandlers.ts`
@@ -17,7 +17,10 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   or extracted code uses `src/features/`, relative imports, except the pieces
   of a store split by concern (`channelModel`/`channelGroups`,
   `voiceModel`/`voiceRoster`/`voicePeers`/`voiceSelfPrefs`), which stay in
-  `src/stores/` so the store adds no upward import to `scripts/layer-baseline.json`
+  `src/stores/` so the store adds no upward import to `scripts/layer-baseline.json`,
+  and the pieces of a `lib/` module that other `lib/` or `stores/` code still
+  imports (`lib/text/markdownScan.ts`, since `lib/notifications.ts` imports the
+  markdown facade), which stay in `src/lib/` for the same reason
 - `src/app/` is the composition layer above `pages/` (`main.ts`'s siblings, the
   only code besides `main.ts` that may import `pages/`; enforced from 7.4b:
   `local/layer-direction`): modules export functions or types, with no
@@ -89,21 +92,21 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   covering the module it guards (ARCH-06).
 - **Layers import downward or sideways only** (`local/layer-direction`, an
   error on `src/**/*.ts` except tests): `main.ts` and `app/`, then `pages/`,
-  then `components/` and `features/`, then `stores/`, then `lib/`, `platform/`
+  then `features/`, then `stores/`, then `lib/`, `platform/`
   and `i18n/`, then `styles/` and `assets/`. A static import, `export … from`
   or dynamic `import()` of a higher layer fails lint; `import type` does not
   count. The imports that predate the rule are listed in
   `scripts/layer-baseline.json`, which only shrinks
   (`tests/unit/layer-baseline.test.ts` fails on a stale entry): when you remove
   one, delete its entry and lower the cap in that test. The rank list and the
-  alias map are in the rule's header in `eslint-rules.js`.
-- **No new function over complexity 15 or nesting depth 4**
-  (`local/complexity-ratchet`, `local/max-depth-ratchet`, errors on
-  `src/**/*.ts` except tests). Functions over the limit before the cap are
-  listed in `scripts/complexity-baseline.json` and may not grow. When you
-  simplify one, run `node scripts/complexity-baseline.mjs --update` and lower
-  the caps in `tests/unit/complexity-baseline.test.ts`; after a rename or move,
-  re-key its entry by hand. Split a function rather than adding an entry.
+  alias map are in the rule's header in `eslint-rules.js`. `src/pages/` is held
+  to wiring by a shrink-only line cap (`PAGES_LINE_CAP` in
+  `tests/unit/pages-size-ratchet.test.ts`; lower it when pages shrink), and
+  `tests/unit/layer-folders.test.ts` keeps `src/components/` gone.
+- **No function over complexity 15 or nesting depth 4** (ESLint's built-in
+  `complexity` and `max-depth`, errors on `src/**/*.ts` except tests). There is
+  no baseline: split the function with named helpers, lookup tables and early
+  returns.
 - `src/` has **no import cycles**: `npm run lint:cycles` (oxlint `import/no-cycle`)
   runs at `--max-warnings=0`, so a new cycle fails `npm run lint`. When a
   lower-level module has to trigger a higher one, invert the edge rather than

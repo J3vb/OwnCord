@@ -1,6 +1,4 @@
-// Plugin admin REST surface, mounted under the AdminIPRestrict group so it
-// inherits the admin panel's network ACL; authentication is the admin handler's
-// middleware before this handler runs.
+// Plugin admin REST surface, mounted under AdminIPRestrict so it inherits the admin network ACL.
 
 package api
 
@@ -20,9 +18,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// maxPluginUploadBytes caps the multipart upload at 16 MiB to match the
-// plugin.maxZipBytes ceiling. The handler enforces both layers because the
-// outer MaxBytesReader gives a clean 413 instead of a partial extract.
+// maxPluginUploadBytes caps the upload at 16 MiB to match plugin.maxZipBytes; the outer MaxBytesReader
+// gives a clean 413 instead of a partial extract.
 const maxPluginUploadBytes = 16 * 1024 * 1024
 
 // PluginAdminHandler exposes plugin lifecycle operations to the admin panel.
@@ -32,9 +29,8 @@ type PluginAdminHandler struct {
 	audit    db.Auditor // nil disables audit writes (unit tests)
 }
 
-// NewPluginAdminHandler builds an http.Handler that the router can mount.
-// Pass a nil registry when plugin support is disabled — the handler then
-// reports an empty list and 503 on lifecycle calls.
+// NewPluginAdminHandler builds the handler; a nil registry means plugin support is off (empty list, 503 on
+// lifecycle calls).
 func NewPluginAdminHandler(registry *plugin.Registry, st plugin.PluginStore, audit db.Auditor) http.Handler {
 	h := &PluginAdminHandler{registry: registry, store: st, audit: audit}
 	r := chi.NewRouter()
@@ -46,16 +42,15 @@ func NewPluginAdminHandler(registry *plugin.Registry, st plugin.PluginStore, aud
 	return r
 }
 
-// install accepts a multipart upload with one "plugin" .zip part, validated
-// (zip-slip safe, no symlinks, capped uncompressed total, manifest at root) and
-// installed via Registry.InstallFromZip. Returns 201 with the plugin name.
+// install accepts a multipart upload with one "plugin" .zip part, installed via Registry.InstallFromZip,
+// which validates it (zip-slip safe, no symlinks, capped size, manifest at root). Returns 201 with the
+// name.
 func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 	if h.registry == nil {
 		writeErr(w, http.StatusServiceUnavailable, httperr.CodePluginsDisabled, "plugin runtime disabled")
 		return
 	}
-	// Hard cap on the request body before parsing multipart so a hostile
-	// client can't tie up parsing memory.
+	// Hard cap before parsing multipart so a hostile client cannot tie up parsing memory.
 	r.Body = http.MaxBytesReader(w, r.Body, maxPluginUploadBytes+1024)
 	if err := r.ParseMultipartForm(maxPluginUploadBytes); err != nil {
 		if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
@@ -72,11 +67,8 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close() //nolint:errcheck
 
-	// Reject obviously-wrong uploads early. The real defence is the zip
-	// reader inside InstallFromZip (content-type is client-supplied and must
-	// never be trusted for authorisation), but rejecting non-zip MIME types
-	// here returns a cleaner 400 than a "not a valid zip" error from deep
-	// inside the registry.
+	// Reject obviously-wrong uploads early for a cleaner 400. The real defence is the zip reader in
+	// InstallFromZip; content-type is client-supplied and must never be trusted for authorisation.
 	if header != nil {
 		if ct := header.Header.Get("Content-Type"); ct != "" && !isZipContentType(ct) {
 			writeErr(w, http.StatusUnsupportedMediaType, httperr.CodeUnsupportedMediaType, "plugin upload must be a .zip archive")
@@ -93,9 +85,7 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusRequestEntityTooLarge, httperr.CodePayloadTooLarge, "plugin upload too large")
 		return
 	}
-	// Magic-byte check: a real .zip starts with "PK\x03\x04" or "PK\x05\x06"
-	// (empty archive); anything else is not a zip whatever the client labelled
-	// it.
+	// A real .zip starts with "PK\x03\x04" or "PK\x05\x06" (empty archive), whatever the client labelled it.
 	if !hasZipMagic(body) {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "plugin upload is not a valid zip archive")
 		return
@@ -112,10 +102,8 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 
 func (h *PluginAdminHandler) list(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	// An empty list means "nothing installed" on a server with the runtime on,
-	// and "you can't install anything" on a server with it off. The caller
-	// can't tell those apart from the body, so say which it is — otherwise the
-	// admin panel's empty state has to guess.
+	// An empty list means "nothing installed" with the runtime on and "cannot install" with it off; say
+	// which, so the panel need not guess.
 	w.Header().Set("X-Plugin-Runtime", pluginRuntimeState(h.registry))
 	if h.store == nil {
 		writeJSON(w, http.StatusOK, []any{})
@@ -173,9 +161,8 @@ func (h *PluginAdminHandler) uninstall(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, httperr.CodePluginsDisabled, "plugin runtime disabled")
 		return
 	}
-	// Registry.UninstallPlugin is idempotent on an unknown id, so check the
-	// row here: a stale or repeated delete must answer 404 and must not
-	// record a plugin_uninstall that never happened.
+	// Registry.UninstallPlugin is idempotent on an unknown id, so check the row: a stale delete must answer
+	// 404 and not record a plugin_uninstall that never happened.
 	if h.store != nil {
 		if _, err := h.store.GetPlugin(r.Context(), id); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -196,9 +183,8 @@ func (h *PluginAdminHandler) uninstall(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// writeAudit records a plugin lifecycle mutation against the admin
-// principal RequireAdminAuth put on the request. A nil auditor (unit tests
-// that only exercise the HTTP surface) records nothing.
+// writeAudit records a plugin lifecycle mutation against the admin principal; a nil auditor (unit tests)
+// records nothing.
 func (h *PluginAdminHandler) writeAudit(r *http.Request, action string, pluginID int64, detail string) {
 	if h.audit == nil {
 		return
@@ -207,8 +193,8 @@ func (h *PluginAdminHandler) writeAudit(r *http.Request, action string, pluginID
 		action, "plugin", pluginID, detail)
 }
 
-// installedID resolves a freshly installed plugin's row id for its audit
-// entry; 0 when the store cannot answer (the name in detail still identifies it).
+// installedID resolves a freshly installed plugin's row id for its audit entry; 0 when the store cannot
+// answer.
 func (h *PluginAdminHandler) installedID(ctx context.Context, name string) int64 {
 	if h.store == nil {
 		return 0
@@ -220,9 +206,8 @@ func (h *PluginAdminHandler) installedID(ctx context.Context, name string) int64
 	return row.ID
 }
 
-// pluginRuntimeState reports whether lifecycle calls will work, for the
-// X-Plugin-Runtime response header. A nil registry means plugin support is
-// compiled/configured off and every lifecycle endpoint answers 503.
+// pluginRuntimeState reports whether lifecycle calls will work, for the X-Plugin-Runtime header; a nil
+// registry means off and every lifecycle endpoint answers 503.
 func pluginRuntimeState(registry *plugin.Registry) string {
 	if registry == nil {
 		return "disabled"
@@ -230,9 +215,8 @@ func pluginRuntimeState(registry *plugin.Registry) string {
 	return "enabled"
 }
 
-// isZipContentType reports whether ct looks like a zip MIME type
-// (application/zip or the legacy application/x-zip-compressed some Windows
-// clients send), case-insensitively and ignoring parameters.
+// isZipContentType reports whether ct is a zip MIME type (including legacy application/x-zip-compressed),
+// ignoring case and parameters.
 func isZipContentType(ct string) bool {
 	for i := 0; i < len(ct); i++ {
 		if ct[i] == ';' {
@@ -247,8 +231,7 @@ func isZipContentType(ct string) bool {
 	return false
 }
 
-// hasZipMagic reports whether b starts with the PK signature (local file header
-// 03 04, or the empty-archive marker 05 06).
+// hasZipMagic reports whether b starts with the PK signature (03 04, or the empty-archive 05 06).
 func hasZipMagic(b []byte) bool {
 	if len(b) < 4 {
 		return false

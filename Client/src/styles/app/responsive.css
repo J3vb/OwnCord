@@ -26,7 +26,7 @@
     --toast-center-fallback: 50%;
   }
   /* A sheet or dialog docks to the bottom on a phone: toasts move to the top. */
-  body:has(.bottom-sheet-overlay, .modal-overlay) .toast-container {
+  body .toast-container.toast-container--over-sheet {
     top: calc(env(safe-area-inset-top, 0px) + 8px);
     bottom: auto;
   }

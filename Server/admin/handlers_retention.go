@@ -25,8 +25,7 @@ func handleGetRetentionChannels(retention *service.RetentionService) http.Handle
 	}
 }
 
-// handleGetRetention returns the policy: the server window and every
-// channel override.
+// handleGetRetention returns the policy: the server window and every channel override.
 func handleGetRetention(retention *service.RetentionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if retention == nil {
@@ -59,8 +58,6 @@ func handleGetRetentionPreview(retention *service.RetentionService) http.Handler
 	}
 }
 
-// putChannelRetentionRequest is the JSON body for
-// PUT /admin/api/channels/{id}/retention.
 type putChannelRetentionRequest struct {
 	// Days is the channel's window; 0 keeps the channel forever even under
 	// a server-wide window.
@@ -75,7 +72,6 @@ func writeRetentionErr(w http.ResponseWriter, err error) {
 	writeSvcErr(w, err, "", "", "retention change failed")
 }
 
-// handlePutChannelRetention sets a channel's override.
 func handlePutChannelRetention(retention *service.RetentionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
@@ -105,7 +101,6 @@ func handlePutChannelRetention(retention *service.RetentionService) http.Handler
 	}
 }
 
-// handleDeleteChannelRetention removes a channel's override.
 func handleDeleteChannelRetention(retention *service.RetentionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")

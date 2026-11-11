@@ -101,7 +101,7 @@ Supporting pieces:
   primitives, safety-number fingerprints, long-term identity keys),
   `src/lib/net/identity.ts` (OS-keyring identity key + peer identity pins),
   `src/lib/voice/audioPipeline.ts` + `src/lib/voice/noiseSuppression.ts` (RNNoise WASM),
-  `src/lib/voice/screenShare.ts`, `src/features/voice/videoCodec.ts` (the camera and
+  `src/features/voice/screenShare.ts`, `src/features/voice/videoCodec.ts` (the camera and
   screen-share codec: VP8 by default, H.264, VP9, H.265 (hardware encoder, non-Intel GPU) or Auto by choice on Windows;
   Linux native publishes VP8 or, by choice when its encoder has it, H.264; Auto is VP8), `src/features/voice/codecSwitch.ts`
   (republishes a live VP9 or H.265 camera or share on a codec every viewer decodes when
@@ -629,12 +629,12 @@ the backend captures with libwebrtc's `DesktopCapturer`
   and titled top-level windows, each with a thumbnail captured on the spot (a
   PNG at most 120×68, which keeps even an incompressible one under 33 KB as a
   data URL, so 30 sources cost about 1 MB of IPC), and the webview's "Share
-  your screen" dialog (`components/ScreenSharePicker.ts`, adapted by
+  your screen" dialog (`features/voice/ScreenSharePicker.ts`, adapted by
   `features/voice/native/screenPicker.ts`) shows them in Screens and
   Applications tabs, so what will be shared is visible before sharing starts.
   Nothing is captured until the user presses Go Live.
 
-**The shared path runs unchanged.** `lib/voice/screenShare.ts`'s
+**The shared path runs unchanged.** `features/voice/screenShare.ts`'s
 `enableScreenshare` makes one Linux-only call: instead of
 `createLocalScreenTracks` it asks the room for
 `localParticipant.createScreenTracks`, which `NativeRoom` implements as pick,

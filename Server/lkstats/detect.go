@@ -10,20 +10,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/sysstats"
 )
 
-// derivedPort is LiveKit's conventional Prometheus port.
 const derivedPort = "6789"
 
 // Detect is what the server knows when it picks a source.
 type Detect struct {
 	// Voice is false when voice is off or has no LiveKit client.
 	Voice bool
-	// Managed is true when OwnCord runs LiveKit itself. It is set when the
-	// hub is built, before the process starts, so it is final here.
+	// Managed is true when OwnCord runs LiveKit itself; final here, as it is set before the process starts.
 	Managed bool
-	// MetricsURL is voice.livekit_metrics_url, already checked; empty if unset
-	// or invalid.
+	// MetricsURL is voice.livekit_metrics_url, already checked; empty if unset or invalid.
 	MetricsURL string
-	// LiveKitURL is voice.livekit_url.
 	LiveKitURL string
 	PID        func() (int, bool)
 	RoomUsage  func(ctx context.Context) (rooms, participants int, err error)
@@ -47,9 +43,8 @@ func (d Detect) Pick(log *slog.Logger) *Sampler {
 	return nil
 }
 
-// DeriveURL guesses LiveKit's stats page from its signalling address: the same
-// host on port 6789, always over plain http: LiveKit serves that page without
-// TLS even when its signalling address uses wss.
+// DeriveURL guesses the stats page: the signalling host on port 6789, always plain http (LiveKit
+// serves it without TLS even when signalling uses wss).
 func DeriveURL(liveKitURL string) (string, bool) {
 	u, err := url.Parse(liveKitURL)
 	if err != nil || u.Hostname() == "" {

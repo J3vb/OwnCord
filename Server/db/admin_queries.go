@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
@@ -21,8 +22,6 @@ func (d *DB) UserCount(ctx context.Context) (int64, error) {
 }
 
 // GetServerStats returns aggregate counts for the admin dashboard.
-// GetServerStats returns aggregate counts for the admin dashboard.
-// DBSizeBytes is 0 for in-memory databases.
 func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 	stats := &ServerStats{}
 	var err error
@@ -30,8 +29,6 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 	if stats.UserCount, err = d.q.CountUsers(ctx); err != nil {
 		return nil, fmt.Errorf("GetServerStats users: %w", err)
 	}
-	// CountActiveMessages is a full scan; the dashboard tolerates a minute of
-	// staleness.
 	if stats.MessageCount, err = d.activeMessagesCache.Get(statsCacheTTL, func() (int64, error) {
 		return d.q.CountActiveMessages(ctx)
 	}); err != nil {
@@ -44,8 +41,8 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 		return nil, fmt.Errorf("GetServerStats invites: %w", err)
 	}
 
-	// page_count * page_size gives the size in bytes. PRAGMAs are not expressible
-	// as sqlc queries, and both values are DB-wide, so the reader pool is fine.
+	// page_count * page_size gives the size in bytes. PRAGMAs are not sqlc queries and
+	// both values are DB-wide, so the reader is fine.
 	var pageCount, pageSize int64
 	if err := d.reader.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&pageCount); err != nil {
 		return nil, fmt.Errorf("GetServerStats page_count: %w", err)
@@ -58,21 +55,17 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 	return stats, nil
 }
 
-// UserListFilter narrows ListAllUsers for the admin Members page. The zero
-// value lists everyone.
+// UserListFilter narrows ListAllUsers for the admin Members page; the zero value lists everyone.
 type UserListFilter struct {
-	// Query is a case-insensitive substring of the username or nickname; empty
-	// matches all.
+	// Query is a case-insensitive substring of the username or nickname; empty matches all.
 	Query string
 	// RoleID keeps one role; 0 means any role.
 	RoleID int64
-	// BannedOnly keeps only effectively banned users (a lapsed temporary ban
-	// does not count, as in notBannedClause).
+	// BannedOnly keeps only effectively banned users (a lapsed temporary ban does not count).
 	BannedOnly bool
 }
 
-// ListAllUsers returns active users matching f, joined with their role name
-// and position, ordered by ID. limit=0 returns no rows.
+// ListAllUsers returns active users matching f with role, ordered by ID; limit=0 returns none.
 func (d *DB) ListAllUsers(ctx context.Context, f UserListFilter, limit, offset int) ([]UserWithRole, error) {
 	var bannedOnly int64
 	if f.BannedOnly {
@@ -125,9 +118,9 @@ func (d *DB) ListAllUsers(ctx context.Context, f UserListFilter, limit, offset i
 	return result, nil
 }
 
-// UpdateUserRole replaces every role userID holds with roleID: it clears the
-// member's user_roles rows, grants roleID and re-mirrors users.role_id, in one
-// writer transaction, so the two never disagree. Unknown users are a no-op.
+// UpdateUserRole replaces every role userID holds with roleID and re-mirrors
+// users.role_id in one writer transaction so the two never disagree. Unknown users are
+// a no-op.
 func (d *DB) UpdateUserRole(ctx context.Context, userID, roleID int64) error {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -172,9 +165,9 @@ func (d *DB) GetUserSessions(ctx context.Context, userID int64) ([]Session, erro
 	return sessions, nil
 }
 
-// AdminCreateChannel creates a channel with full field control including
-// position. A non-empty category is resolved by name ignoring case and created
-// when missing, in the same transaction as the insert (CreateChannelIn).
+// AdminCreateChannel creates a channel with full field control. A non-empty category
+// is resolved by name (case-insensitive) and created when missing, in the insert's
+// transaction.
 func (d *DB) AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error) {
 	return d.CreateChannelIn(ctx, NewChannel{
 		Name:         name,
@@ -185,68 +178,142 @@ func (d *DB) AdminCreateChannel(ctx context.Context, name, chanType, category, t
 	})
 }
 
-// ChannelUpdate is the full set of mutable channel fields an admin edit
-// writes. A struct rather than a positional list because ten fields, four of
-// them ints, invite a silent transposition (slow mode into user limit). Every
-// field is written unconditionally, so callers must start from the channel's
-// current values, as the handler does, which keeps a partial PATCH safe.
+// ChannelUpdate is the full set of mutable channel fields an admin edit writes,
+// unconditionally, so callers start from the channel's current values to keep a
+// partial PATCH safe.
 type ChannelUpdate struct {
 	Name  string
 	Topic string
 	// CategoryID is the category the channel ends up in, 0 for none; it must exist
-	// (ErrNotFound otherwise). A non-nil CategoryName overrides it: the name is
-	// resolved ignoring case and the category created when missing, in the
-	// update's transaction (the legacy free-text field).
+	// (ErrNotFound otherwise). A non-nil CategoryName overrides it: resolved ignoring
+	// case, created when missing, in the update's transaction.
 	CategoryID   int64
 	CategoryName *string
-	// CategoryIfExists makes a CategoryID that no longer exists mean "no
-	// category" instead of ErrNotFound, for writes that carry the channel's
-	// current category forward (a PATCH naming none, the archive step of a
-	// delete), where losing a race with a category delete must not fail the write.
+	// CategoryIfExists makes a vanished CategoryID mean "no category" instead of
+	// ErrNotFound, for writes carrying the current category forward, where losing a race
+	// with a category delete must not fail.
 	CategoryIfExists bool
-	// CreatedCategory, when non-nil, receives the id of a category this write
-	// created because CategoryName matched none. See NewChannel.
-	CreatedCategory *int64
-	SlowMode        int
-	Position        int
-	Archived        bool
-	// NSFW is stored and broadcast only; it drives no server-side behaviour.
-	NSFW bool
-	// VoiceMaxUsers / VoiceMaxVideo are the voice capacity limits the ws voice-join
-	// path enforces (0 = unlimited). They are written on text channels too,
-	// because refusing them would make the value depend on a type that never
-	// changes.
+	CreatedCategory  *int64
+	SlowMode         int
+	Position         int
+	Archived         bool
+	NSFW             bool
+	// VoiceMaxUsers / VoiceMaxVideo are the voice limits the ws voice-join path
+	// enforces (0 = unlimited); written on text channels too so the value does not depend on type.
 	VoiceMaxUsers int
 	VoiceMaxVideo int
-	// Password, when non-nil, sets or clears the channel's password in the same
-	// transaction as the rest of the update. Nil leaves it alone.
-	Password *ChannelPasswordChange
+	Password      *ChannelPasswordChange
 	// SyncGuard, when non-nil, replaces the channel's override rows with the
 	// template of the category it ends up in and marks it synced, in the update's
-	// transaction, so a refusal leaves the channel where it was. ErrUncategorized
-	// when the update leaves no category. Without it, a move to another category
-	// keeps the channel's rows and unsyncs it.
+	// transaction, so a refusal leaves the channel as it was; ErrUncategorized when
+	// no category remains. Without it, a move keeps the rows and unsyncs the channel.
 	SyncGuard ChannelSyncGuard
-	// SyncPlan, when non-nil and SyncGuard ran, receives the rows replaced.
-	SyncPlan *ChannelSyncPlan
+	SyncPlan  *ChannelSyncPlan
+	// Base is the row this update was built from. The write keeps the stored value of
+	// every field left equal to Base, so an edit that committed in between survives.
+	// It must be a real stored row: a zero-value Base would keep every zero-valued field.
+	Base *Channel
+	// Before receives the row as the write found it; left alone when the channel is gone.
+	Before *Channel
+	// settled is the stored row when the write keeps its name or its category over the
+	// request's: the pair it writes is then one the caller never checked.
+	settled *Channel
 }
 
-// AdminUpdateChannel updates all mutable channel fields, category included;
-// a by-name category resolve and the update share one transaction.
+// ErrChannelNameTaken means a write that kept a concurrent edit would leave two channels
+// of one type with the same name in one category.
+var ErrChannelNameTaken = errors.New("channel name is taken in the category")
+
+// keepStored returns stored when the request left the field as the snapshot had it.
+func keepStored[T comparable](requested, snapshot, stored T) T {
+	if requested == snapshot {
+		return stored
+	}
+	return requested
+}
+
+// settleAgainstStored applies Base and Before inside the write transaction. A category
+// carried forward from Base follows the stored category the same way.
+func (u ChannelUpdate) settleAgainstStored(ctx context.Context, q *dbgen.Queries, id int64) (ChannelUpdate, error) {
+	if u.Base == nil && u.Before == nil {
+		return u, nil
+	}
+	row, err := q.GetChannel(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return u, nil
+	}
+	if err != nil {
+		return u, err
+	}
+	cur := channelFromFields(channelFields(row))
+	if u.Before != nil {
+		*u.Before = cur
+	}
+	b := u.Base
+	if b == nil {
+		return u, nil
+	}
+	name, category := u.Name, u.CategoryID
+	u.Name = keepStored(u.Name, b.Name, cur.Name)
+	u.Topic = keepStored(u.Topic, b.Topic, cur.Topic)
+	u.SlowMode = keepStored(u.SlowMode, b.SlowMode, cur.SlowMode)
+	u.Position = keepStored(u.Position, b.Position, cur.Position)
+	u.Archived = keepStored(u.Archived, b.Archived, cur.Archived)
+	u.NSFW = keepStored(u.NSFW, b.NSFW, cur.NSFW)
+	u.VoiceMaxUsers = keepStored(u.VoiceMaxUsers, b.VoiceMaxUsers, cur.VoiceMaxUsers)
+	u.VoiceMaxVideo = keepStored(u.VoiceMaxVideo, b.VoiceMaxVideo, cur.VoiceMaxVideo)
+	if u.CategoryName == nil && u.CategoryID == b.CategoryID {
+		u.CategoryID, u.CategoryIfExists = cur.CategoryID, true
+	}
+	if u.Name != name || u.CategoryID != category {
+		u.settled = &cur
+	}
+	return u, nil
+}
+
+// requireSettledNameFree refuses (ErrChannelNameTaken) a settled write that would put the
+// channel beside another of its type with the same name, ignoring case, in the category
+// it ends up in. The caller checked the name and category it asked for, and one of them
+// was replaced by the stored row's. A write that leaves both as stored (a change of case
+// in the name aside) moves nothing and passes, as an existing duplicate does.
+func requireSettledNameFree(ctx context.Context, q *dbgen.Queries, id int64, stored *Channel, name string, catID *int64) error {
+	var category int64
+	if catID != nil {
+		category = *catID
+	}
+	if strings.EqualFold(name, stored.Name) && category == stored.CategoryID {
+		return nil
+	}
+	rows, err := q.ListChannels(ctx)
+	if err != nil {
+		return err
+	}
+	for i := range rows {
+		r := &rows[i]
+		if r.ID != id && r.Type == stored.Type && r.CategoryID == category && strings.EqualFold(r.Name, name) {
+			return fmt.Errorf("%w: %q", ErrChannelNameTaken, r.Name)
+		}
+	}
+	return nil
+}
+
+// AdminUpdateChannel updates all mutable channel fields, category included, in one transaction.
 func (d *DB) AdminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate) error {
-	if err := d.adminUpdateChannel(ctx, id, u, false); err != nil {
+	if err := d.adminUpdateChannel(ctx, id, u); err != nil {
 		return fmt.Errorf("AdminUpdateChannel: %w", err)
 	}
 	return nil
 }
 
-// adminUpdateChannel is the one write behind AdminUpdateChannel and
-// AdminUpdateChannelClearingNSFW; clearNSFW also deletes the channel's
-// standing NSFW acknowledgements in the same transaction.
-func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, clearNSFW bool) error {
+// adminUpdateChannel also deletes the channel's standing NSFW acknowledgements in the
+// same transaction whenever the row it writes is unlabelled, so none outlives its label.
+func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate) error {
 	return d.inWriteTx(ctx, "update", func(q *dbgen.Queries) error {
+		u, err := u.settleAgainstStored(ctx, q, id)
+		if err != nil {
+			return err
+		}
 		var catID *int64
-		var err error
 		var created int64
 		switch {
 		case u.CategoryName != nil:
@@ -257,6 +324,11 @@ func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, 
 		if err != nil {
 			return err
 		}
+		if u.settled != nil {
+			if err := requireSettledNameFree(ctx, q, id, u.settled, u.Name, catID); err != nil {
+				return err
+			}
+		}
 		if u.CreatedCategory != nil && created != 0 {
 			*u.CreatedCategory = created
 		}
@@ -264,7 +336,6 @@ func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, 
 		moved := false
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			// The channel is gone: the update below touches nothing.
 		case err != nil:
 			return err
 		default:
@@ -290,7 +361,9 @@ func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, 
 		if err := applyPermissionSyncTx(ctx, q, id, catID, moved, u); err != nil {
 			return err
 		}
-		if clearNSFW {
+		// The flag as settled against the stored row: a label kept from a concurrent
+		// edit keeps its acknowledgements, an unlabelled row keeps none.
+		if !u.NSFW {
 			return q.DeleteNSFWAcknowledgementsForChannel(ctx, id)
 		}
 		return nil
@@ -305,8 +378,7 @@ func (d *DB) AdminDeleteChannel(ctx context.Context, id int64) error {
 	return nil
 }
 
-// GetSetting returns the value for key, or an error wrapping sql.ErrNoRows
-// when the key does not exist.
+// GetSetting returns the value for key, or an error wrapping sql.ErrNoRows.
 func (d *DB) GetSetting(ctx context.Context, key string) (string, error) {
 	value, err := d.q.GetSetting(ctx, key)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -329,9 +401,7 @@ func (d *DB) SetSetting(ctx context.Context, key, value string) error {
 	return nil
 }
 
-// ApplySettings upserts every key/value pair in one transaction, so a
-// mid-loop failure leaves no partial update. Keys apply in sorted order for
-// determinism under test.
+// ApplySettings upserts every pair in one transaction, in sorted key order.
 func (d *DB) ApplySettings(ctx context.Context, updates map[string]string) error {
 	if len(updates) == 0 {
 		return nil
@@ -366,8 +436,7 @@ func (d *DB) GetAllSettings(ctx context.Context) (map[string]string, error) {
 	return result, nil
 }
 
-// CountUsersWithoutTOTP returns the users who are not effectively banned
-// (unbanned, or past a lapsed temporary ban) and have no confirmed TOTP secret.
+// CountUsersWithoutTOTP returns users not effectively banned with no confirmed TOTP secret.
 func (d *DB) CountUsersWithoutTOTP(ctx context.Context) (int, error) {
 	count, err := d.q.CountUsersWithoutTOTP(ctx)
 	if err != nil {

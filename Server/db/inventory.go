@@ -3,8 +3,8 @@ package db
 import "context"
 
 // InventoryClass is one row of the subject-inventory queries in
-// docs/architecture/data-lifecycle.md (appendix): a data class that can hold
-// a user, and the COUNT(*) that says whether it still does.
+// docs/architecture/data-lifecycle.md: a data class that can hold a user, and the
+// COUNT(*) saying whether it still does.
 type InventoryClass struct {
 	Key   string
 	Query string
@@ -15,12 +15,11 @@ func inventoryByUID(uid int64, _ string) []any     { return []any{uid} }
 func inventoryByUname(_ int64, uname string) []any { return []any{uname} }
 func inventoryBothIDs(uid int64, _ string) []any   { return []any{uid, uid} }
 
-// SubjectInventory is the data-class inventory of data-lifecycle.md as
-// queries, keyed by class number. It is the generated lineage checklist
-// account erasure walks after an erasure (every count must be zero; class 21 counts audit
-// rows that still carry the id, which the audit unlinking takes to zero while
-// the rows themselves stay) and the before/after table the erasure drills
-// paste. uname is the username before erasure, for the lockout keys.
+// SubjectInventory is the data-lifecycle.md class inventory as queries, keyed
+// by class number: the checklist account erasure walks afterwards (every count
+// must be zero; class 21 counts audit rows still carrying the id, which the
+// unlinking takes to zero) and the before/after table the drills paste. uname
+// is the username before erasure, for the lockout keys.
 var SubjectInventory = []InventoryClass{
 	{"1 identity row", `SELECT COUNT(*) FROM users WHERE id = ?`, inventoryByUID},
 	{"2 sessions", `SELECT COUNT(*) FROM sessions WHERE user_id = ?`, inventoryByUID},
@@ -33,8 +32,8 @@ var SubjectInventory = []InventoryClass{
 		+ (SELECT COUNT(*) FROM totp_recovery_codes WHERE user_id = ?1)`, inventoryByUID},
 	{"5 recovery secrets", `SELECT (SELECT COUNT(*) FROM recovery_kits WHERE user_id = ?1)
 		+ (SELECT COUNT(*) FROM recovery_assists WHERE user_id = ?1 OR issued_by = ?1)`, inventoryByUID},
-	// Exact-suffix match, not LIKE (as in erasureDeleteLockouts), so a username
-	// holding `_` or `%` cannot widen the match onto another account's key.
+	// Exact-suffix match, not LIKE (as in erasureDeleteLockouts), so a `_` or `%` in a
+	// username cannot widen onto another key.
 	{"6 rate-limit keys", `SELECT COUNT(*) FROM rate_lockouts
 		WHERE lower(substr(key, -(length(?1) + 1))) = ':' || lower(?1)
 		   OR substr(key, -(length(?2) + 1)) = ':' || ?2`,
@@ -58,8 +57,8 @@ var SubjectInventory = []InventoryClass{
 	{"14c message requests", `SELECT COUNT(*) FROM message_requests WHERE sender_id = ? OR recipient_id = ?`, inventoryBothIDs},
 	{"14d trusted senders", `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = ? OR sender_id = ?`, inventoryBothIDs},
 	{"15 invites", `SELECT COUNT(*) FROM invites WHERE created_by = ? OR redeemed_by = ?`, inventoryBothIDs},
-	// 15b: a redemption the subject spent. The row survives with its user_id
-	// NULLed; the class goes to zero on the link, not the row.
+	// 15b: the redemption survives with user_id NULLed; the class goes to zero on the
+	// link, not the row.
 	{"15b invite redemptions", `SELECT COUNT(*) FROM invite_redemptions WHERE user_id = ?`, inventoryByUID},
 	{"16 emoji", `SELECT COUNT(*) FROM emoji WHERE uploaded_by = ?`, inventoryByUID},
 	{"16c stickers", `SELECT COUNT(*) FROM stickers WHERE uploaded_by = ?`, inventoryByUID},
@@ -76,37 +75,28 @@ var SubjectInventory = []InventoryClass{
 	{"20 replay events", `SELECT COUNT(*) FROM events WHERE ` + EventNamesUserPredicate, inventoryByUID},
 	{"20a channel retention updated_by", `SELECT COUNT(*) FROM channel_retention WHERE updated_by = ?`, inventoryByUID},
 	{"21 audit rows", `SELECT COUNT(*) FROM audit_log WHERE actor_id = ? OR (target_type = 'user' AND target_id = ?)`, inventoryBothIDs},
-	// Report classes: 22a and 22b count the principal columns, not the rows, which
-	// survive erasure by design; they go to zero when subject_id/reporter_id are
-	// rewritten to 0.
 	{"22a reports about the subject", `SELECT COUNT(*) FROM reports WHERE subject_id = ?`, inventoryByUID},
 	{"22b reports by the subject", `SELECT COUNT(*) FROM reports WHERE reporter_id = ?`, inventoryByUID},
 	{"22c evidence authored", `SELECT COUNT(*) FROM report_evidence WHERE author_id = ?`, inventoryByUID},
 	{"22d report notes authored", `SELECT COUNT(*) FROM report_notes WHERE author_id = ?`, inventoryByUID},
 	{"22e report assignments", `SELECT COUNT(*) FROM reports WHERE assignee_id = ?`, inventoryByUID},
-	// 22f: report_events is metadata; unlinking the actor is the whole job.
 	{"22f report events by the subject", `SELECT COUNT(*) FROM report_events WHERE actor_id = ?`, inventoryByUID},
-	// Moderation-action classes: 23a counts rows (they cascade-delete with the
-	// users row), 23b the principal column.
+	// Moderation-action classes: 23a counts rows (cascade-deleted with the users row), 23b
+	// the principal column.
 	{"23a moderation actions on the subject", `SELECT COUNT(*) FROM moderation_actions WHERE target_id = ?`, inventoryByUID},
 	{"23b moderation actions by the subject", `SELECT COUNT(*) FROM moderation_actions WHERE actor_id = ? OR lifted_by = ?`, inventoryBothIDs},
-	// Appeal classes: 24a counts rows (appellant_id cascades with the users row),
-	// 24b the principal column.
 	{"24a appeals by the subject", `SELECT COUNT(*) FROM appeals WHERE appellant_id = ?`, inventoryByUID},
 	{"24b appeals decided by the subject", `SELECT COUNT(*) FROM appeals WHERE decided_by = ?`, inventoryByUID},
-	// 24c: assignee_id has no token column (like 22e and
-	// moderation_actions.lifted_by), so it is its own class; a row assigned to but
-	// not yet decided by the subject is still caught.
+	// 24c: assignee_id has no token column, so it is its own class; a row assigned but not
+	// yet decided by the subject is still caught.
 	{"24c appeals assigned to the subject", `SELECT COUNT(*) FROM appeals WHERE assignee_id = ?`, inventoryByUID},
 }
 
-// InventoryKeptByErasure names the classes an erasure leaves on purpose.
-// Empty now: the audit history stays, but unlinked, so no class
-// still counts the subject.
+// InventoryKeptByErasure names the classes an erasure keeps on purpose; empty, as
+// audit history stays unlinked.
 var InventoryKeptByErasure = map[string]bool{}
 
-// TakeInventory runs SubjectInventory for one subject and returns the count
-// per class key.
+// TakeInventory runs SubjectInventory for one subject and returns the count per class key.
 func (d *DB) TakeInventory(ctx context.Context, uid int64, uname string) (map[string]int, error) {
 	out := make(map[string]int, len(SubjectInventory))
 	for _, c := range SubjectInventory {

@@ -56,6 +56,7 @@ export const connectText = defineCatalog("connect", {
   "voice.movedGeneric": "You were moved to {channel}",
   "voice.movedChannelFallback": "another voice channel",
   "voice.channelFull": "That voice channel is full",
+  "voice.joinUnanswered": "Could not join voice: the server did not answer. Try again.",
   "voice.videoLimit": "That voice channel has reached its video limit",
 
   "brand.tagline": "Self-hosted chat — Your server, your rules",
@@ -249,6 +250,10 @@ export const connectText = defineCatalog("connect", {
     "The server accepted your sign-in but did not finish loading. Try again in a moment.",
   "session.unreadableReply":
     "The server sent a reply this version of OwnCord cannot read. Update OwnCord or ask the server owner to update the server.",
+  "session.codeLoadFailed":
+    "Part of OwnCord failed to load. Check your connection, or reload, and try again.",
+  "session.unreadableWriteReply":
+    "The server's reply could not be read, but your change may have been saved. Check before trying again.",
   "error.notJson":
     "The server answered with a web page instead of the API. A proxy or network gateway in front of it may be intercepting requests.",
   "session.loginFailedStatus": "Login failed ({status})",

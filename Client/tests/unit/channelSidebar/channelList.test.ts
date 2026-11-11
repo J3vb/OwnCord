@@ -871,6 +871,29 @@ describe("ChannelSidebar", () => {
     expect(fx.container.querySelector("[data-testid='create-channel-empty']")).toBeNull();
   });
 
+  it("replaces the rows with the empty state when the last channel goes, and the rows back when one returns", () => {
+    setChannels(testChannels);
+    fx.sidebar.mount(fx.container);
+    expect(fx.container.querySelectorAll(".channel-item").length).toBe(4);
+
+    setChannels([]);
+    channelsStore.flush();
+    expect(fx.container.querySelectorAll(".channel-item").length).toBe(0);
+    expect(fx.container.querySelectorAll(".category").length).toBe(0);
+    expect(fx.container.querySelectorAll(".channel-list-empty").length).toBe(1);
+
+    // A second empty render does not stack another empty state.
+    authStore.setState((prev) => ({ ...prev, serverName: "Still Empty" }));
+    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(["nothing"]) }));
+    channelsStore.flush();
+    expect(fx.container.querySelectorAll(".channel-list-empty").length).toBe(1);
+
+    setChannels(testChannels);
+    channelsStore.flush();
+    expect(fx.container.querySelectorAll(".channel-list-empty").length).toBe(0);
+    expect(fx.container.querySelectorAll(".channel-item").length).toBe(4);
+  });
+
   // ── Server name updates ──
 
   it("updates server name when auth store changes", () => {

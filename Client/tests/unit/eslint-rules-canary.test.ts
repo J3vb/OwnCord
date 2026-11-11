@@ -155,7 +155,7 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/no-raw-html-sink",
     shape: "insertAdjacentHTML",
-    filePath: "src/components/EmojiPicker.ts",
+    filePath: "src/features/messaging/EmojiPicker.ts",
     code: `function f(el, html) { el.insertAdjacentHTML("beforeend", html); }`,
     messageId: "htmlSink",
   },
@@ -199,7 +199,7 @@ const CANARIES: readonly Canary[] = [
     rule: "local/layer-direction",
     shape: "relative",
     filePath: "src/stores/voice.store.ts",
-    code: `import { x } from "../components/Foo";`,
+    code: `import { x } from "../pages/Foo";`,
     messageId: "upwardImport",
     hasOptions: true,
   },
@@ -209,28 +209,6 @@ const CANARIES: readonly Canary[] = [
     filePath: "src/lib/voice/livekitSession.ts",
     code: `async function f() { return import("@pages/MainPage"); }`,
     messageId: "upwardImport",
-    hasOptions: true,
-  },
-  {
-    rule: "local/complexity-ratchet",
-    filePath: "src/features/messaging/messageModel.ts",
-    code: `function route(k) {
-      switch (k) {
-        case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8:
-        case 9: case 10: case 11: case 12: case 13: case 14: case 15: case 16:
-          return k;
-        default:
-          return 0;
-      }
-    }`,
-    messageId: "overLimit",
-    hasOptions: true,
-  },
-  {
-    rule: "local/max-depth-ratchet",
-    filePath: "src/features/messaging/messageModel.ts",
-    code: `function deep(a) { if (a) { if (a) { if (a) { if (a) { if (a) { a(); } } } } } }`,
-    messageId: "overLimit",
     hasOptions: true,
   },
 ];

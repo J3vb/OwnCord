@@ -172,6 +172,7 @@ export function voiceStoreActionStubs() {
     setLocalSessionFingerprint: vi.fn(),
     setLocalSafetyNumber: vi.fn(),
     setEncryptionDegraded: vi.fn(),
+    setSwitchingTo: vi.fn(),
   };
 }
 

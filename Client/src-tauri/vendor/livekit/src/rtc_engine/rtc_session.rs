@@ -378,6 +378,33 @@ struct IceCandidateJson {
     pub candidate: String,
 }
 
+// OWNCORD-PATCH (signal input)
+fn parse_sdp_type(sdp_type: &str) -> EngineResult<SdpType> {
+    sdp_type.parse::<SdpType>().map_err(|err| {
+        EngineError::Internal(format!("{} in session description: {:?}", err, sdp_type).into())
+    })
+}
+
+// OWNCORD-PATCH (signal input)
+fn parse_remote_description(sdp: &str, sdp_type: &str) -> EngineResult<SessionDescription> {
+    let sdp_type = parse_sdp_type(sdp_type)?;
+    SessionDescription::parse(sdp, sdp_type)
+        .map_err(|err| EngineError::Internal(format!("invalid session description: {}", err).into()))
+}
+
+// OWNCORD-PATCH (signal input)
+fn parse_ice_candidate_json(candidate_init: &str) -> EngineResult<IceCandidateJson> {
+    serde_json::from_str::<IceCandidateJson>(candidate_init)
+        .map_err(|err| EngineError::Internal(format!("invalid ice candidate: {}", err).into()))
+}
+
+// OWNCORD-PATCH (signal input)
+fn parse_ice_candidate(candidate_init: &str) -> EngineResult<IceCandidate> {
+    let json = parse_ice_candidate_json(candidate_init)?;
+    IceCandidate::parse(&json.sdp_mid, json.sdp_m_line_index, &json.candidate)
+        .map_err(|err| EngineError::Internal(format!("invalid ice candidate: {}", err).into()))
+}
+
 /// Fields shared with rtc_task and signal_task
 struct SessionInner {
     signal_client: Arc<SignalClient>,
@@ -1435,6 +1462,15 @@ impl SessionInner {
             proto::signal_response::Message::Answer(answer) => {
                 log::debug!("received publisher answer: {:?}", answer);
 
+                // OWNCORD-PATCH (signal input): an unusable answer ends the session.
+                let answer_sd = match parse_remote_description(&answer.sdp, &answer.r#type) {
+                    Ok(answer_sd) => answer_sd,
+                    Err(err) => {
+                        self.close_after_invalid_input("invalid publisher answer");
+                        return Err(err);
+                    }
+                };
+
                 // Store mid_to_track_id mapping in single PC mode
                 if self.single_pc_mode && !answer.mid_to_track_id.is_empty() {
                     let mut mapping = self.mid_to_track_id.lock();
@@ -1451,9 +1487,7 @@ impl SessionInner {
                 self.max_message_size.store(max_message_size, Ordering::Release);
                 log::debug!("negotiated data channel max message size: {} bytes", max_message_size);
 
-                let answer =
-                    SessionDescription::parse(&answer.sdp, answer.r#type.parse().unwrap()).unwrap(); // Unwrap is ok, the server shouldn't give us an invalid sdp
-                self.publisher_pc.set_remote_description(answer).await?;
+                self.publisher_pc.set_remote_description(answer_sd).await?;
                 let _ = self.emitter.send(SessionEvent::RefreshPublishingLayers);
 
                 if self.single_pc_mode {
@@ -1477,13 +1511,21 @@ impl SessionInner {
 
                 // Dual PC mode: handle offer on subscriber PC
                 log::debug!("received subscriber offer: {:?}", offer);
-                let offer_sdp =
-                    SessionDescription::parse(&offer.sdp, offer.r#type.parse().unwrap()).unwrap();
+                // OWNCORD-PATCH (signal input): an unusable offer ends the session.
+                let offer_sdp = match parse_remote_description(&offer.sdp, &offer.r#type) {
+                    Ok(offer_sdp) => offer_sdp,
+                    Err(err) => {
+                        self.close_after_invalid_input("invalid subscriber offer");
+                        return Err(err);
+                    }
+                };
 
-                let answer = self
-                    .subscriber_pc
-                    .as_ref()
-                    .unwrap()
+                // OWNCORD-PATCH (signal input)
+                let Some(subscriber_pc) = self.subscriber_pc.as_ref() else {
+                    log::warn!("received subscriber offer without a subscriber pc, ignoring");
+                    return Ok(());
+                };
+                let answer = subscriber_pc
                     .create_anwser(offer_sdp, AnswerOptions::default())
                     .await?;
 
@@ -1498,11 +1540,13 @@ impl SessionInner {
             }
             proto::signal_response::Message::Trickle(trickle) => {
                 let target = trickle.target();
-                let ice_candidate = {
-                    let json =
-                        serde_json::from_str::<IceCandidateJson>(&trickle.candidate_init).unwrap();
-                    IceCandidate::parse(&json.sdp_mid, json.sdp_m_line_index, &json.candidate)
-                        .unwrap()
+                // OWNCORD-PATCH (signal input): a single unusable candidate is skipped.
+                let ice_candidate = match parse_ice_candidate(&trickle.candidate_init) {
+                    Ok(ice_candidate) => ice_candidate,
+                    Err(err) => {
+                        log::warn!("ignoring invalid remote ice candidate: {}", err);
+                        return Ok(());
+                    }
                 };
 
                 log::debug!("remote ice_candidate {:?} {:?}", ice_candidate, target);
@@ -1512,8 +1556,11 @@ impl SessionInner {
                 } else if self.single_pc_mode {
                     // In single PC mode, all ICE candidates go to publisher
                     self.publisher_pc.add_ice_candidate(ice_candidate).await?;
+                } else if let Some(subscriber_pc) = self.subscriber_pc.as_ref() {
+                    // OWNCORD-PATCH (signal input)
+                    subscriber_pc.add_ice_candidate(ice_candidate).await?;
                 } else {
-                    self.subscriber_pc.as_ref().unwrap().add_ice_candidate(ice_candidate).await?;
+                    log::warn!("ignoring subscriber ice candidate without a subscriber pc");
                 }
             }
             proto::signal_response::Message::Leave(leave) => {
@@ -1563,12 +1610,24 @@ impl SessionInner {
             proto::signal_response::Message::TrackPublished(publish_res) => {
                 let mut pending_tracks = self.pending_tracks.lock();
                 if let Some(tx) = pending_tracks.remove(&publish_res.cid) {
-                    let _ = tx.send(publish_res.track.unwrap());
+                    // OWNCORD-PATCH (signal input): without track info the sender is
+                    // dropped, which ends the waiting publish with an error.
+                    match publish_res.track {
+                        Some(track) => {
+                            let _ = tx.send(track);
+                        }
+                        None => log::warn!("track published response without track info"),
+                    }
                 }
             }
             proto::signal_response::Message::RoomUpdate(room_update) => {
-                let _ =
-                    self.emitter.send(SessionEvent::RoomUpdate { room: room_update.room.unwrap() });
+                // OWNCORD-PATCH (signal input)
+                match room_update.room {
+                    Some(room) => {
+                        let _ = self.emitter.send(SessionEvent::RoomUpdate { room });
+                    }
+                    None => log::warn!("ignoring room update without room info"),
+                }
             }
             proto::signal_response::Message::RoomMoved(room_moved) => {
                 let _ = self.emitter.send(SessionEvent::RoomMoved { moved: room_moved });
@@ -2009,14 +2068,12 @@ impl SessionInner {
 
         // Wait the result from the server (TrackInfo)
         tokio::select! {
-            Ok(info) = rx => Ok(info),
+            // OWNCORD-PATCH (signal input): a dropped sender ends the wait right away.
+            res = rx => res.map_err(|_| EngineError::Internal("track publication cancelled".into())),
             _ = sleep(TRACK_PUBLISH_TIMEOUT) => {
                 self.pending_tracks.lock().remove(&cid);
                 Err(EngineError::Internal("track publication timed out, no response received from the server".into()))
             },
-            else => {
-                Err(EngineError::Internal("track publication cancelled".into()))
-            }
         }
     }
 
@@ -2100,6 +2157,18 @@ impl SessionInner {
         }
 
         Ok(transceiver)
+    }
+
+    // OWNCORD-PATCH (signal input): ends the session with a terminal disconnect
+    // when the server sent a session description that cannot be used.
+    fn close_after_invalid_input(&self, source: &str) {
+        self.on_session_disconnected(
+            source,
+            DisconnectReason::UnknownReason,
+            proto::ReconnectReason::RrUnknown,
+            proto::leave_request::Action::Disconnect,
+            false,
+        );
     }
 
     /// Called when the SignalClient or one of the PeerConnection has lost the connection
@@ -2892,9 +2961,38 @@ fn uses_negotiated_data_channels(
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_sdp_max_message_size, recovery_decision, uses_negotiated_data_channels,
-        DEFAULT_MAX_MESSAGE_SIZE,
+        parse_ice_candidate_json, parse_remote_description, parse_sdp_max_message_size,
+        parse_sdp_type, recovery_decision, uses_negotiated_data_channels, DEFAULT_MAX_MESSAGE_SIZE,
     };
+    use libwebrtc::session_description::SdpType;
+
+    // OWNCORD-PATCH (signal input)
+    #[test]
+    fn sdp_type_accepts_known_values_and_rejects_others() {
+        assert_eq!(parse_sdp_type("offer").unwrap(), SdpType::Offer);
+        assert_eq!(parse_sdp_type("answer").unwrap(), SdpType::Answer);
+        assert!(parse_sdp_type("").is_err());
+        assert!(parse_sdp_type("Answer").is_err());
+        assert!(parse_sdp_type("bogus").is_err());
+    }
+
+    // OWNCORD-PATCH (signal input)
+    #[test]
+    fn remote_description_with_unknown_type_is_an_error() {
+        assert!(parse_remote_description("v=0\r\n", "bogus").is_err());
+    }
+
+    // OWNCORD-PATCH (signal input)
+    #[test]
+    fn ice_candidate_json_requires_all_fields() {
+        let ok = r#"{"sdpMid":"0","sdpMLineIndex":0,"candidate":"candidate:1 1 udp 1 1.2.3.4 5 typ host"}"#;
+        let parsed = parse_ice_candidate_json(ok).unwrap();
+        assert_eq!(parsed.sdp_mid, "0");
+        assert_eq!(parsed.sdp_m_line_index, 0);
+        assert!(parse_ice_candidate_json("").is_err());
+        assert!(parse_ice_candidate_json("not json").is_err());
+        assert!(parse_ice_candidate_json(r#"{"sdpMid":"0"}"#).is_err());
+    }
 
     /// The server picks negotiated data channels from the protocol the client advertised, so a
     /// client advertising 16 to a protocol 18 server must open them in-band, as the server does.

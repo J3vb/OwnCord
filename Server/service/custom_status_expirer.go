@@ -11,26 +11,21 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// MinCustomStatusExpirySeconds and MaxCustomStatusExpirySeconds bound
-// presence_update's custom_status_expires_in, in seconds.
+// Bounds (seconds) of presence_update's custom_status_expires_in.
 const (
 	MinCustomStatusExpirySeconds = 60
 	MaxCustomStatusExpirySeconds = 604800
 )
 
 const (
-	// expirerSlack is added to a deadline before the sweep, so the clock the
-	// sweep compares against is past it at second precision.
+	// expirerSlack is added to a deadline so the sweep's clock is past it at second precision.
 	expirerSlack = time.Second
-	// expirerMaxSleep caps one sleep: a self-heal for a wake that was lost.
-	expirerMaxSleep = 10 * time.Minute
-	// expirerRetryAfterError is the sleep after a failed read or sweep.
+	// expirerMaxSleep caps one sleep, self-healing a lost wake.
+	expirerMaxSleep        = 10 * time.Minute
 	expirerRetryAfterError = 30 * time.Second
-	// expirerBatch bounds one ListExpiredCustomStatuses read.
-	expirerBatch = 200
+	expirerBatch           = 200
 )
 
-// customStatusExpiryStore is the slice of Store the expirer reads and writes.
 type customStatusExpiryStore interface {
 	NextCustomStatusExpiry(ctx context.Context) (string, bool, error)
 	ListExpiredCustomStatuses(ctx context.Context, now string, limit int) ([]db.ExpiredCustomStatus, error)
@@ -38,15 +33,14 @@ type customStatusExpiryStore interface {
 }
 
 // CustomStatusNotifier is told when the expirer cleared a user's custom status.
-// expiresAt is the expiry the cleared row carried: the hub acts only on a
-// connection whose live status still carries that same tag.
+// expiresAt is the cleared row's expiry: the hub acts only on a connection whose live
+// status still carries that tag.
 type CustomStatusNotifier interface {
 	CustomStatusExpired(userID int64, expiresAt string)
 }
 
-// CustomStatusExpirer clears custom statuses at their expiry: one goroutine
-// (Run) sleeps until the soonest pending expiry, then compare-and-clears every
-// expired row and tells the notifier about each row it really cleared.
+// CustomStatusExpirer clears custom statuses at expiry: Run sleeps until the soonest
+// pending expiry, compare-and-clears every expired row and notifies for each really cleared.
 type CustomStatusExpirer struct {
 	st   customStatusExpiryStore
 	wake chan struct{} // size 1: a status with an expiry was just set
@@ -54,15 +48,13 @@ type CustomStatusExpirer struct {
 	mu       syncutil.Mutex
 	notifier CustomStatusNotifier
 
-	// Timing knobs; tests shorten them.
 	now        func() time.Time
 	slack      time.Duration
 	maxSleep   time.Duration
 	retryAfter time.Duration
 }
 
-// NewCustomStatusExpirer returns an expirer over st. Install the notifier with
-// SetNotifier before Run.
+// NewCustomStatusExpirer returns an expirer over st.
 func NewCustomStatusExpirer(st customStatusExpiryStore) *CustomStatusExpirer {
 	return &CustomStatusExpirer{
 		st:         st,
@@ -81,8 +73,7 @@ func (e *CustomStatusExpirer) SetNotifier(n CustomStatusNotifier) {
 	e.notifier = n
 }
 
-// Wake makes Run re-read the soonest expiry. It never blocks: a wake already
-// pending covers this one.
+// Wake makes Run re-read the soonest expiry; never blocks (a pending wake covers this one).
 func (e *CustomStatusExpirer) Wake() {
 	select {
 	case e.wake <- struct{}{}:
@@ -115,18 +106,16 @@ func (e *CustomStatusExpirer) Sweep(ctx context.Context) error {
 				notifier.CustomStatusExpired(r.UserID, r.ExpiresAt)
 			}
 		}
-		// A full batch with progress may have more behind it; anything else is done. Rows
-		// that did not clear were changed by a concurrent set and are re-evaluated by the
-		// next read. Returning when a full batch clears nothing is correct, not a stall:
-		// every row was re-set with a future expiry between list and clear, so it no longer
-		// matches ListExpiredCustomStatuses, and nextSleep re-reads the soonest expiry.
+		// A full batch with progress may have more behind it; anything else is done. Rows that
+		// did not clear were changed by a concurrent set. A full batch clearing nothing is not a
+		// stall: every row was re-set with a future expiry, and nextSleep re-reads the soonest.
 		if len(rows) < expirerBatch || cleared == 0 {
 			return nil
 		}
 	}
 }
 
-// Run is the expirer loop. It returns when ctx is done.
+// Run is the expirer loop.
 func (e *CustomStatusExpirer) Run(ctx context.Context) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
@@ -143,7 +132,6 @@ func (e *CustomStatusExpirer) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-e.wake:
-			// A status with an expiry was set: re-read the soonest deadline.
 			continue
 		case <-timer.C:
 		}
@@ -160,7 +148,6 @@ func (e *CustomStatusExpirer) Run(ctx context.Context) {
 	}
 }
 
-// sleepOrDone waits d or until ctx is done.
 func (e *CustomStatusExpirer) sleepOrDone(ctx context.Context, d time.Duration) {
 	t := time.NewTimer(d)
 	defer t.Stop()
@@ -170,9 +157,6 @@ func (e *CustomStatusExpirer) sleepOrDone(ctx context.Context, d time.Duration) 
 	}
 }
 
-// nextSleep reads the soonest expiry and returns how long to sleep. failed is
-// true after a read error, where the sleep is the retry delay and the sweep is
-// skipped.
 func (e *CustomStatusExpirer) nextSleep(ctx context.Context) (sleep time.Duration, failed bool) {
 	next, ok, err := e.st.NextCustomStatusExpiry(ctx)
 	if err != nil {

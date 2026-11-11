@@ -11,6 +11,7 @@ import type {
 import type { ReferencedMessage } from "../../lib/types";
 import { isPinRowKind } from "../../lib/text/messageKind";
 import type { Message, MessagesState } from "./messageModel";
+import { recordLoadJournal } from "./loadJournal";
 
 /** A parent that is deleted, purged or erased: no author, no text. */
 function redactSnippet(id: number): ReferencedMessage {
@@ -56,6 +57,10 @@ function refreshReplies(
 
 /** editMessage's reducer. */
 export function reduceEditMessage(prev: MessagesState, payload: ChatEditedPayload): MessagesState {
+  return recordLoadJournal(editRows(prev, payload), payload.channel_id, { kind: "edit", payload });
+}
+
+function editRows(prev: MessagesState, payload: ChatEditedPayload): MessagesState {
   const channelMessages = prev.messagesByChannel.get(payload.channel_id);
   if (!channelMessages) return prev;
 
@@ -90,6 +95,13 @@ export function reduceDeleteMessage(
   prev: MessagesState,
   payload: ChatDeletedPayload,
 ): MessagesState {
+  return recordLoadJournal(deleteRows(prev, payload), payload.channel_id, {
+    kind: "delete",
+    payload,
+  });
+}
+
+function deleteRows(prev: MessagesState, payload: ChatDeletedPayload): MessagesState {
   const channelMessages = prev.messagesByChannel.get(payload.channel_id);
   if (!channelMessages) return prev;
 
@@ -108,6 +120,13 @@ export function reduceBulkDeleteMessages(
   prev: MessagesState,
   payload: ChatBulkDeletedPayload,
 ): MessagesState {
+  return recordLoadJournal(bulkDeleteRows(prev, payload), payload.channel_id, {
+    kind: "bulkDelete",
+    payload,
+  });
+}
+
+function bulkDeleteRows(prev: MessagesState, payload: ChatBulkDeletedPayload): MessagesState {
   const channelMessages = prev.messagesByChannel.get(payload.channel_id);
   if (!channelMessages) return prev;
 
@@ -137,6 +156,19 @@ export function reduceSetMessagePinned(
   messageId: number,
   pinned: boolean,
 ): MessagesState {
+  return recordLoadJournal(pinRows(prev, channelId, messageId, pinned), channelId, {
+    kind: "pin",
+    messageId,
+    pinned,
+  });
+}
+
+function pinRows(
+  prev: MessagesState,
+  channelId: number,
+  messageId: number,
+  pinned: boolean,
+): MessagesState {
   const pinRevision = new Map(prev.pinRevision);
   pinRevision.set(channelId, (pinRevision.get(channelId) ?? 0) + 1);
   const messagePinRevision = new Map(prev.messagePinRevision);
@@ -152,4 +184,26 @@ export function reduceSetMessagePinned(
   const updatedMessages = new Map(prev.messagesByChannel);
   updatedMessages.set(channelId, updatedList);
   return { ...prev, messagesByChannel: updatedMessages, pinRevision, messagePinRevision };
+}
+
+/** markStickersDeleted's reducer: a sticker message whose sticker left `liveIds` becomes a deleted-sticker row. */
+export function reduceMarkStickersDeleted(
+  prev: MessagesState,
+  liveIds: ReadonlySet<number>,
+): MessagesState {
+  let changed: Map<number, readonly Message[]> | null = null;
+  for (const [channelId, list] of prev.messagesByChannel) {
+    const stale = (m: Message): boolean =>
+      m.sticker?.id !== null && m.sticker !== undefined && !liveIds.has(m.sticker.id);
+    if (!list.some(stale)) continue;
+    const next: Map<number, readonly Message[]> = changed ?? new Map(prev.messagesByChannel);
+    changed = next;
+    next.set(
+      channelId,
+      list.map((m) =>
+        stale(m) ? { ...m, sticker: { id: null, name: m.sticker!.name, url: null } } : m,
+      ),
+    );
+  }
+  return changed === null ? prev : { ...prev, messagesByChannel: changed };
 }

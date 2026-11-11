@@ -314,6 +314,114 @@ export function renderPollCard(
     return row;
   }
 
+  /** The question and, while voting is open, the hint on how to vote. */
+  function appendIntro(ended: boolean, results: boolean): void {
+    card.appendChild(createElement("div", { class: "msg-poll-question" }, poll.question));
+    const hint = ended
+      ? pollCardText("endedFinal")
+      : results
+        ? null
+        : pollCardText(poll.allow_multiselect ? "hint.multi" : "hint.single");
+    if (hint !== null) {
+      card.appendChild(
+        createElement("div", { class: "msg-poll-hint", "data-testid": "poll-hint" }, hint),
+      );
+    }
+  }
+
+  /** The answers, as results or as a voting form. */
+  function buildAnswerList(ended: boolean, results: boolean, lock: string | null): HTMLElement {
+    const list = createElement("div", {
+      class: "msg-poll-answers",
+      role: results ? "list" : poll.allow_multiselect ? "group" : "radiogroup",
+      "aria-label": poll.question,
+    });
+    const winners = ended ? winningAnswers(poll) : new Set<number>();
+    for (const answer of poll.answers) {
+      list.appendChild(results ? resultAnswer(answer, ended, winners) : votingAnswer(answer, lock));
+    }
+    return list;
+  }
+
+  function removeVoteButton(lock: string | null): HTMLButtonElement {
+    const remove = button(pollCardText("removeVote"), `poll-remove-${msg.id}`, "link");
+    if (lock !== null) {
+      remove.setAttribute("disabled", "true");
+      remove.title = lock;
+    }
+    remove.addEventListener("click", () => void submit([]), { signal });
+    return remove;
+  }
+
+  function hideResultsButton(): HTMLButtonElement {
+    const back = button(pollCardText("hideResults"), `poll-hide-results-${msg.id}`, "link");
+    back.addEventListener(
+      "click",
+      () => {
+        state.showResults = false;
+        draw();
+      },
+      { signal },
+    );
+    return back;
+  }
+
+  /** Show results and Vote; the Vote button follows the selection in `list`. */
+  function voteButtons(list: HTMLElement, lock: string | null): HTMLButtonElement[] {
+    const show = button(pollCardText("showResults"), `poll-show-results-${msg.id}`, "link");
+    show.addEventListener(
+      "click",
+      () => {
+        state.showResults = true;
+        draw();
+      },
+      { signal },
+    );
+    const vote = button(pollCardText("vote"), `poll-vote-${msg.id}`, "primary");
+    if (state.selected.length === 0 || lock !== null) vote.setAttribute("disabled", "true");
+    if (lock !== null) vote.title = lock;
+    vote.addEventListener("click", () => void submit(state.selected), { signal });
+    list.addEventListener(
+      "change",
+      () => {
+        state.selected = [...list.querySelectorAll<HTMLInputElement>("input")]
+          .filter((input) => input.checked)
+          .map((input) => Number(input.value));
+        vote.toggleAttribute(
+          "disabled",
+          state.selected.length === 0 || lock !== null || state.busy,
+        );
+      },
+      { signal },
+    );
+    return [show, vote];
+  }
+
+  function endButton(): HTMLButtonElement {
+    const end = button(pollCardText("end"), `poll-end-${msg.id}`, "danger");
+    end.addEventListener(
+      "click",
+      () => confirmEnd(msg.id, opts.listSignal ?? signal, () => void finish()),
+      { signal },
+    );
+    return end;
+  }
+
+  function buildActions(
+    ended: boolean,
+    voted: boolean,
+    lock: string | null,
+    list: HTMLElement,
+  ): HTMLElement {
+    const actions = createElement("div", { class: "msg-poll-actions" });
+    if (ended) return actions;
+    if (voted) actions.appendChild(removeVoteButton(lock));
+    else if (state.showResults) actions.appendChild(hideResultsButton());
+    else actions.append(...voteButtons(list, lock));
+    if (mayEnd && !state.endSent) actions.appendChild(endButton());
+    return actions;
+  }
+
   function draw(): void {
     const focusHere = card.contains(document.activeElement);
     clearChildren(card);
@@ -326,94 +434,15 @@ export function renderPollCard(
     if (state.busy) card.setAttribute("aria-busy", "true");
     else card.removeAttribute("aria-busy");
 
-    card.appendChild(createElement("div", { class: "msg-poll-question" }, poll.question));
-    const hint = ended
-      ? pollCardText("endedFinal")
-      : results
-        ? null
-        : pollCardText(poll.allow_multiselect ? "hint.multi" : "hint.single");
-    if (hint !== null) {
-      card.appendChild(
-        createElement("div", { class: "msg-poll-hint", "data-testid": "poll-hint" }, hint),
-      );
-    }
-
-    const list = createElement("div", {
-      class: "msg-poll-answers",
-      role: results ? "list" : poll.allow_multiselect ? "group" : "radiogroup",
-      "aria-label": poll.question,
-    });
-    const winners = ended ? winningAnswers(poll) : new Set<number>();
-    for (const answer of poll.answers) {
-      list.appendChild(results ? resultAnswer(answer, ended, winners) : votingAnswer(answer, lock));
-    }
+    appendIntro(ended, results);
+    const list = buildAnswerList(ended, results, lock);
     card.appendChild(list);
 
     const foot = createElement("div", { class: "msg-poll-foot" });
     statusEl = createElement("span", { class: "msg-poll-status", "data-testid": "poll-status" });
     renderStatus(now, ended);
     foot.appendChild(statusEl);
-    const actions = createElement("div", { class: "msg-poll-actions" });
-    if (!ended) {
-      if (voted) {
-        const remove = button(pollCardText("removeVote"), `poll-remove-${msg.id}`, "link");
-        if (lock !== null) {
-          remove.setAttribute("disabled", "true");
-          remove.title = lock;
-        }
-        remove.addEventListener("click", () => void submit([]), { signal });
-        actions.appendChild(remove);
-      } else if (state.showResults) {
-        const back = button(pollCardText("hideResults"), `poll-hide-results-${msg.id}`, "link");
-        back.addEventListener(
-          "click",
-          () => {
-            state.showResults = false;
-            draw();
-          },
-          { signal },
-        );
-        actions.appendChild(back);
-      } else {
-        const show = button(pollCardText("showResults"), `poll-show-results-${msg.id}`, "link");
-        show.addEventListener(
-          "click",
-          () => {
-            state.showResults = true;
-            draw();
-          },
-          { signal },
-        );
-        const vote = button(pollCardText("vote"), `poll-vote-${msg.id}`, "primary");
-        if (state.selected.length === 0 || lock !== null) vote.setAttribute("disabled", "true");
-        if (lock !== null) vote.title = lock;
-        vote.addEventListener("click", () => void submit(state.selected), { signal });
-        actions.append(show, vote);
-        list.addEventListener(
-          "change",
-          () => {
-            state.selected = [...list.querySelectorAll<HTMLInputElement>("input")]
-              .filter((input) => input.checked)
-              .map((input) => Number(input.value));
-            vote.toggleAttribute(
-              "disabled",
-              state.selected.length === 0 || lock !== null || state.busy,
-            );
-          },
-          { signal },
-        );
-      }
-      if (mayEnd && !state.endSent) {
-        const end = button(pollCardText("end"), `poll-end-${msg.id}`, "danger");
-        end.addEventListener(
-          "click",
-          () => confirmEnd(msg.id, opts.listSignal ?? signal, () => void finish()),
-          { signal },
-        );
-        actions.appendChild(end);
-      }
-    }
-    foot.appendChild(actions);
+    foot.appendChild(buildActions(ended, voted, lock, list));
     card.appendChild(foot);
     if (state.error !== null) {
       card.appendChild(

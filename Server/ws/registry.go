@@ -8,15 +8,13 @@ import (
 	"github.com/J3vb/OwnCord/Server/stackutil"
 )
 
-// handlerV2Entry pairs a V2 handler with its domain-specific dependency struct.
 type handlerV2Entry struct {
 	handler HandlerV2
 	deps    any // concrete deps struct for this handler's domain
 }
 
-// HandlerRegistry maps message type strings to their typed V2 handlers.
-// It is not safe for concurrent use after initialization; all RegisterV2
-// calls must happen before any DispatchV2 calls.
+// HandlerRegistry maps message type strings to typed V2 handlers. Not safe for concurrent
+// use after initialization: all RegisterV2 calls must precede any DispatchV2.
 type HandlerRegistry struct {
 	handlersV2 map[string]handlerV2Entry
 }
@@ -28,8 +26,7 @@ func NewHandlerRegistry() *HandlerRegistry {
 	}
 }
 
-// RegisterV2 registers a V2 handler for the given command type.
-// PANICS if cmdType is already registered (duplicate guard).
+// RegisterV2 registers a V2 handler for the given command type. PANICS if cmdType is already registered.
 func (r *HandlerRegistry) RegisterV2(cmdType string, handler HandlerV2, deps any) {
 	if _, exists := r.handlersV2[cmdType]; exists {
 		panic(fmt.Sprintf("RegisterV2: cmdType %q already registered", cmdType))
@@ -37,10 +34,8 @@ func (r *HandlerRegistry) RegisterV2(cmdType string, handler HandlerV2, deps any
 	r.handlersV2[cmdType] = handlerV2Entry{handler: handler, deps: deps}
 }
 
-// DispatchV2 looks up a V2 handler and calls it.
-// Returns (result, true) if found, (Result{}, false) if not.
-// Recovers from panics (e.g. bad type assertions on cmd or deps) to prevent
-// a single malformed message from crashing the entire server.
+// DispatchV2 looks up a V2 handler and calls it: (result, true) if found, (Result{}, false)
+// if not. Recovers from panics (e.g. bad type assertions) so one malformed message cannot crash the server.
 func (r *HandlerRegistry) DispatchV2(ctx context.Context, cmd Command, info ClientInfo) (result Result, ok bool) {
 	entry, found := r.handlersV2[cmd.Type()]
 	if !found {
@@ -48,17 +43,16 @@ func (r *HandlerRegistry) DispatchV2(ctx context.Context, cmd Command, info Clie
 	}
 	defer func() {
 		if rec := recover(); rec != nil {
-			// stackutil.Capture omits argument values, which for E2EE
-			// handlers can include encrypted key material.
+			// stackutil.Capture omits argument values, which for E2EE handlers can include encrypted key
+			// material.
 			slog.Error("DispatchV2 panic recovered",
 				"type", cmd.Type(),
 				"user_id", info.UserID,
 				"panic", rec,
 				"stack", stackutil.Capture(),
 			)
-			// on Windows a nil deref or invalid address may have left
-			// the heap corrupt (golang/go#81238), so it exits for a supervisor
-			// restart instead of resuming on damaged memory. Every other panic
+			// On Windows a nil deref or invalid address may have left the heap corrupt (golang/go#81238), so
+			// it exits for a supervisor restart instead of resuming on damaged memory; every other panic
 			// stays recovered.
 			if stackutil.Recovered(rec) {
 				slog.Error("DispatchV2: hardware fault, exiting for supervisor restart",
@@ -72,8 +66,7 @@ func (r *HandlerRegistry) DispatchV2(ctx context.Context, cmd Command, info Clie
 	return entry.handler(ctx, cmd, info, entry.deps), true
 }
 
-// RegisteredV2Types returns all V2-registered message types (unordered).
-// Intended for testing and diagnostics.
+// RegisteredV2Types returns all V2-registered message types (unordered); for testing and diagnostics.
 func (r *HandlerRegistry) RegisteredV2Types() []string {
 	types := make([]string, 0, len(r.handlersV2))
 	for t := range r.handlersV2 {

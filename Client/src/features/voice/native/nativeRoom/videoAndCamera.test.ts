@@ -83,6 +83,29 @@ beforeEach(() => {
 });
 
 describe("NativeRoom remote video", () => {
+  it("holds the published camera under a bitrate through the host, by its live sid", async () => {
+    const { room, cam } = await publishedCamera();
+    await room.setVideoBitrate("camera", cam, 800_000);
+    expect(host.calls).toEqual([["setVideoBitrate", [1, "camera", "TR_cam", 800_000]]]);
+  });
+
+  it("drops a bitrate change for a camera that is no longer the published one", async () => {
+    const { room, cam } = await publishedCamera();
+    await room.setVideoBitrate("camera", {}, 800_000);
+    await room.setVideoBitrate("screen", cam, 800_000);
+    await room.localParticipant.unpublishTrack(cam.mediaStreamTrack);
+    await room.setVideoBitrate("camera", cam, 800_000);
+    expect(names()).not.toContain("setVideoBitrate");
+  });
+
+  it("holds no bitrate once the room has disconnected", async () => {
+    const { room, cam } = await publishedCamera();
+    await room.disconnect();
+    host.calls.length = 0;
+    await room.setVideoBitrate("camera", cam, 800_000);
+    expect(names()).not.toContain("setVideoBitrate");
+  });
+
   it("raises a subscribed video track backed by a renderer on the frame socket", async () => {
     const room = createNativeRoom(audio);
     const subscribed = vi.fn();

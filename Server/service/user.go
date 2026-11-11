@@ -12,16 +12,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// userStore is what NewUserService wires: the core's store plus its parts'.
-// *db.DB satisfies it.
 type userStore interface {
 	userCoreStore
 	userSessionStore
 	registrationQueueStore
 }
 
-// userCoreStore is what UserService's profile, status, password and lookup paths
-// read and write.
 type userCoreStore interface {
 	connWritesStore
 	db.Auditor
@@ -34,8 +30,6 @@ type userCoreStore interface {
 	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)
 	RevokeUserAPITokens(ctx context.Context, userID int64) (int64, error)
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
-	// HasActiveTimeout is the indexed per-user lookup (FinalizeTimeoutLift;
-	// PermissionService.Subject reads its mirror).
 	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
 	GetServerStats(ctx context.Context) (*db.ServerStats, error)
 	ListAllUsers(ctx context.Context, f db.UserListFilter, limit, offset int) ([]db.UserWithRole, error)
@@ -47,9 +41,7 @@ type UserService struct {
 	*registrationQueue
 	st           userCoreStore
 	profileLocks keyedMutex
-	// batch, when set, queues the connection stamps instead of writing them; nil
-	// writes each at once (tests, the admin panel's instance).
-	batch *ConnWrites
+	batch        *ConnWrites
 }
 
 // NewUserService creates a UserService.
@@ -61,11 +53,9 @@ func NewUserService(st userStore) *UserService {
 	}
 }
 
-// keyedMutex hands out a per-key lock so unrelated keys never contend. Keyed by
-// user ID for UpdateProfile's read-merge-write: PATCH /users/me can race POST
-// /users/me/avatar, and the loser would commit columns merged against a pre-race
-// snapshot, reverting the winner. Entries are never removed; the key space is
-// bounded by distinct user IDs.
+// keyedMutex hands out a per-key lock so unrelated keys never contend. Keyed by user ID for UpdateProfile's
+// read-merge-write: PATCH /users/me can race POST /users/me/avatar, and the loser would revert the winner.
+// Entries are never removed; the key space is bounded by distinct user IDs.
 type keyedMutex struct {
 	mu    syncutil.Mutex
 	locks map[int64]*syncutil.Mutex
@@ -87,18 +77,16 @@ func (k *keyedMutex) lock(key int64) func() {
 	return l.Unlock
 }
 
-// AvatarFileURL is the server-relative path an uploaded avatar is served from:
-// the ordinary attachment route, where handleServeFile admits an unlinked
-// attachment that some user's avatar names. Defined once because the upload
-// response, the stored column and the file route's authorization probe (which
-// matches the column by string) must agree on the spelling.
+// AvatarFileURL is the server-relative path an uploaded avatar is served from. Defined once because the
+// upload response, the stored column and the file route's authorization probe (which matches the column by
+// string) must agree.
 func AvatarFileURL(fileID string) string {
 	return "/api/v1/files/" + fileID
 }
 
 const (
-	// MaxDisplayNameLen bounds users.display_name; 32 matches the username cap so a
-	// nickname fits wherever the fallback puts the username.
+	// MaxDisplayNameLen bounds users.display_name; 32 matches the username cap so a nickname fits wherever the
+	// fallback puts the username.
 	MaxDisplayNameLen = 32
 	// MaxAboutLen bounds users.about.
 	MaxAboutLen = 300
@@ -106,19 +94,17 @@ const (
 	MaxCustomStatusLen = 128
 )
 
-// ProfilePatch is a partial update. A nil field means "leave unchanged"; a
-// pointer to "" clears the nullable fields. Free text is sanitized and
-// length-checked here so every transport gets the same rules.
+// ProfilePatch is a partial update. A nil field means "leave unchanged"; a pointer to "" clears the nullable
+// fields. Free text is sanitized and length-checked here so every transport gets the same rules.
 type ProfilePatch struct {
 	Username    string
 	Avatar      *string
 	DisplayName *string
 	About       *string
-	// BannerID (upload handler only) and BannerColor (#rgb or #rrggbb): "" clears.
 	BannerID    *string
 	BannerColor *string
-	// IdentityKey, when set, publishes an already validated E2EE identity
-	// public key in the same transaction as the profile columns.
+	// IdentityKey, when set, publishes an already validated E2EE identity public key in the same transaction as
+	// the profile columns.
 	IdentityKey *string
 }
 
@@ -129,22 +115,17 @@ func nullable(v string) *string {
 	return &v
 }
 
-// cleanText strips HTML and trims a free-text profile field; callers run it
-// before any bound check so markup cannot buy length. It uses
-// sanitizeToFixpoint (message.go) because these fields render through the
-// client's textContent-only path, where a single sanitizer pass would show
-// literal &#39;/&gt;/&amp; entities for ordinary punctuation.
+// cleanText strips HTML and trims a free-text profile field; callers run it before any bound check so markup
+// cannot buy length. It uses sanitizeToFixpoint (message.go) because these fields render through the client's
+// textContent-only path, where a single pass would show literal &#39;/&gt;/&amp;.
 func cleanText(v string) string {
 	return strings.TrimSpace(sanitizeToFixpoint(v))
 }
 
-// cleanTextBounded is cleanText plus a raw-byte guard for every free-text field
-// that runs through cleanText. sanitizeToFixpoint is quadratic in input length,
-// so bounding only its output lets a nested-entity payload cost seconds of CPU
-// (and even sanitize under maxRunes and be accepted). The byte pre-check on the
-// untouched input makes rejection O(len(v)). *4 is deliberately looser than
-// maxRunes: it only keeps pathological payloads away from the sanitizer, and the
-// real rune-count bound still runs on the cleaned value.
+// cleanTextBounded is cleanText plus a raw-byte guard: sanitizeToFixpoint is quadratic in input length, so
+// bounding only its output lets a nested-entity payload cost seconds of CPU. The byte pre-check on the
+// untouched input makes rejection O(len(v)). *4 is deliberately looser than maxRunes; the real rune bound
+// still runs on the cleaned value.
 func cleanTextBounded(v string, maxRunes int, fieldName string) (string, error) {
 	if len(v) > maxRunes*4 {
 		return "", fmt.Errorf("%w: %s must be at most %d characters", ErrBadRequest, fieldName, maxRunes)
@@ -170,14 +151,12 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	)
 	defer done()
 
-	// Bound the raw bytes before cleanText: see cleanTextBounded for why. *4 still
-	// admits any legitimate UTF-8 value at the rune bound. The guard lives here, not
-	// only in the REST handler, because every transport reaches UpdateProfile.
+	// Raw bytes are bounded before cleanText (see cleanTextBounded); the guard lives here because every
+	// transport reaches UpdateProfile.
 	if err := checkProfileByteBounds(patch); err != nil {
 		return nil, err
 	}
 
-	// Display name is single-line visible text, capped like the custom status.
 	var cleanDisplayName *string
 	if patch.DisplayName != nil {
 		cleaned, err := cleanVisibleBounded(*patch.DisplayName, MaxDisplayNameLen, "display_name")
@@ -195,11 +174,9 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		return nil, err
 	}
 
-	// The update writes every column, so a partial patch is merged against the
-	// current row (else a display-name-only patch would clear about). That
-	// read-merge-write is serialized per user: PATCH /users/me and POST
-	// /users/me/avatar race for one account, and an interleaved read would make the
-	// second merge revert the first call's change.
+	// The update writes every column, so a partial patch is merged against the current row, serialized per user:
+	// PATCH /users/me and POST /users/me/avatar race for one account, and an interleaved read would make the
+	// second merge revert the first.
 	unlock := s.profileLocks.lock(userID)
 	defer unlock()
 
@@ -210,9 +187,8 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	if err := s.checkTimedOutProfileEdit(ctx, userID, current, cleanDisplayName, patch.Username); err != nil {
 		return nil, err
 	}
-	// An empty Username means "unspecified", like a nil pointer. That lets the avatar
-	// upload leave username alone without a snapshot that could be stale; PATCH
-	// /users/me rejects an empty username before calling in.
+	// An empty Username means "unspecified", like a nil pointer, so the avatar upload can leave username alone
+	// without a stale snapshot; PATCH /users/me rejects an empty username before calling in.
 	next := *current
 	if patch.Username != "" {
 		next.Username = patch.Username
@@ -235,16 +211,13 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		}
 		return nil, fmt.Errorf("%w: failed to update profile: %w", ErrInternal, err)
 	}
-	// This re-read, like the audit write, must survive a request ctx canceled after
-	// the commit: otherwise a hang-up turns a successful write into ErrInternal,
-	// handleUpdateProfile never broadcasts, and other clients show the stale profile.
+	// This re-read, like the audit write, must survive a request ctx canceled after the commit: otherwise a
+	// hang-up turns a successful write into ErrInternal and other clients show the stale profile.
 	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), userID)
 	if err != nil {
-		// The write committed, so a failing re-read (SQLITE_BUSY, I/O error, pool
-		// exhaustion) must not be ErrInternal: handleUploadAvatar treats any error as
-		// "the write never landed" and deletes the file the committed avatar now points
-		// at. The write touches only the columns merged into next (username, avatar,
-		// display_name, about, the banner and the identity key), so next is the row.
+		// The write committed, so a failing re-read must not be ErrInternal: handleUploadAvatar treats any error as
+		// "the write never landed" and deletes the file the committed avatar points at. The write touches only the
+		// columns merged into next, so next is the row.
 		slog.Error("UpdateProfile post-commit re-read failed; returning locally merged row",
 			"user_id", userID, "error", err)
 		user = &next
@@ -253,23 +226,19 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	return user, nil
 }
 
-// auditProfileUpdate records a committed profile write. Audit rows must survive
-// a request canceled after the write committed.
+// auditProfileUpdate records a committed profile write; audit rows must survive a request canceled after the
+// commit.
 func (s *UserService) auditProfileUpdate(ctx context.Context, current, next *db.User, keyWritten bool) {
 	ctx = context.WithoutCancel(ctx)
 	db.WriteAudit(ctx, s.st, next.ID, "profile_update", "user", next.ID,
 		fmt.Sprintf("username=%s", next.Username)+displayNameAuditSuffix(current.DisplayName, next.DisplayName))
 	if keyWritten {
-		// Every key write is audited so a rotation, which peers surface as a
-		// TOFU mismatch, leaves a trail.
 		db.WriteAudit(ctx, s.st, next.ID, "identity_key_update", "user", next.ID, "")
 		slog.Info("identity key published", "user_id", next.ID)
 	}
 	slog.Info("profile updated", "user_id", next.ID, "username", next.Username)
 }
 
-// writeProfile writes the merged profile columns, and the identity key with
-// them in one transaction when the patch carries one.
 func (s *UserService) writeProfile(ctx context.Context, u *db.User, identityKey *string) error {
 	if identityKey == nil {
 		if err := s.st.UpdateUserProfile(ctx, u.ID, u.Username, u.Avatar, u.DisplayName, u.About, u.BannerID, u.BannerColor); err != nil {
@@ -283,8 +252,7 @@ func (s *UserService) writeProfile(ctx context.Context, u *db.User, identityKey 
 	return nil
 }
 
-// SetCustomStatus stores (or clears, with "") the custom status. It persists across
-// reconnects and is cleared on logout, so it is stored, not held on the connection.
+// SetCustomStatus stores (or clears, with "") the custom status.
 func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text string) error {
 	cleaned, err := cleanVisibleBounded(text, MaxCustomStatusLen, "custom_status")
 	if err != nil {
@@ -296,8 +264,8 @@ func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text st
 	return nil
 }
 
-// ClearCustomStatus wipes the custom status on logout: a "right now" note left
-// standing after sign-out would state something no longer true.
+// ClearCustomStatus wipes the custom status on logout: a "right now" note would otherwise outlive the
+// sign-out.
 func (s *UserService) ClearCustomStatus(ctx context.Context, userID int64) error {
 	if err := s.st.UpdateUserCustomStatus(ctx, userID, nil); err != nil {
 		return fmt.Errorf("%w: failed to clear custom status: %w", ErrInternal, err)
@@ -305,26 +273,24 @@ func (s *UserService) ClearCustomStatus(ctx context.Context, userID int64) error
 	return nil
 }
 
-// ChangePasswordResult reports a completed password change. RevokeFailed means
-// the password committed but other sessions, or the API tokens the caller asked
-// to revoke, could not be revoked: surface it as a warning, never a 5xx, since
-// the old password is already dead and a "failed" answer would walk the user
-// into retrying with it and tripping the lockout.
+// ChangePasswordResult reports a completed password change. RevokeFailed means the password committed but
+// other sessions, or the API tokens the caller asked to revoke, could not be revoked: surface a warning,
+// never a 5xx, since the old password is dead and a "failed" answer would send the user retrying with it and
+// tripping the lockout.
 type ChangePasswordResult struct {
 	SessionsRevoked int64
 	TokensRevoked   int64
 	RevokeFailed    bool
 }
 
-// ChangePassword updates the user's password and revokes other sessions, and
-// every API token of the account too when revokeTokens is set.
+// ChangePassword updates the password and revokes other sessions (and every API token when revokeTokens is
+// set).
 func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPasswordHash string, keepSessionID int64, revokeTokens bool) (ChangePasswordResult, error) {
 	if err := s.st.UpdateUserPassword(ctx, userID, newPasswordHash); err != nil {
 		return ChangePasswordResult{}, fmt.Errorf("%w: failed to update password: %w", ErrInternal, err)
 	}
 
-	// The password is committed: every path below reports success and audits, even
-	// on a canceled ctx, as revocation and audit are the security tail of the change.
+	// The password is committed: below, report success and audit even on a canceled ctx (the security tail).
 	tailCtx := context.WithoutCancel(ctx)
 
 	var res ChangePasswordResult
@@ -332,8 +298,6 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 	res.SessionsRevoked = revoked
 	if err != nil {
 		slog.Error("UserService.ChangePassword DeleteOtherSessions", "err", err, "user_id", userID)
-		// One immediate retry covers transient write-lock contention; add backoff only if
-		// logs show it.
 		if revokedRetry, retryErr := s.st.DeleteOtherSessions(tailCtx, userID, keepSessionID); retryErr == nil {
 			res.SessionsRevoked += revokedRetry
 		} else {
@@ -344,7 +308,6 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 		tokens, tokErr := s.st.RevokeUserAPITokens(tailCtx, userID)
 		if tokErr != nil {
 			slog.Error("UserService.ChangePassword RevokeUserAPITokens", "err", tokErr, "user_id", userID)
-			// Same single retry as the sessions above.
 			tokens, tokErr = s.st.RevokeUserAPITokens(tailCtx, userID)
 		}
 		if tokErr != nil {
@@ -364,8 +327,7 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 	return res, nil
 }
 
-// ServerStats returns the admin dashboard counters. The live connection count is
-// hub state; the caller stamps it afterwards.
+// ServerStats returns the admin dashboard counters.
 func (s *UserService) ServerStats(ctx context.Context) (*db.ServerStats, error) {
 	stats, err := s.st.GetServerStats(ctx)
 	if err != nil {
@@ -374,8 +336,8 @@ func (s *UserService) ServerStats(ctx context.Context) (*db.ServerStats, error) 
 	return stats, nil
 }
 
-// ListAll returns one page of users matching f with role names, in id order. The
-// caller bounds limit and offset; this does not re-bound them.
+// ListAll returns one page of users matching f with role names, in id order. The caller bounds limit and
+// offset; this does not re-bound them.
 func (s *UserService) ListAll(ctx context.Context, f db.UserListFilter, limit, offset int) ([]db.UserWithRole, error) {
 	users, err := s.st.ListAllUsers(ctx, f, limit, offset)
 	if err != nil {
@@ -384,8 +346,7 @@ func (s *UserService) ListAll(ctx context.Context, f db.UserListFilter, limit, o
 	return users, nil
 }
 
-// Get resolves one user, reporting a missing row as ErrNotFound rather than
-// (nil, nil), so callers can tell 404 from 500.
+// Get resolves one user; a missing row is ErrNotFound, not (nil, nil), so callers can tell 404 from 500.
 func (s *UserService) Get(ctx context.Context, id int64) (*db.User, error) {
 	user, err := s.st.GetUserByID(ctx, id)
 	if err != nil {
@@ -397,9 +358,8 @@ func (s *UserService) Get(ctx context.Context, id int64) (*db.User, error) {
 	return user, nil
 }
 
-// GetWithRoleName is Get plus the user's role display name. The name is
-// best-effort: a missing or unreadable role row comes back as "" rather than
-// failing a user the panel must still be able to show.
+// GetWithRoleName is Get plus the user's role display name, best-effort: a missing or unreadable role row
+// comes back as "" rather than failing a user the panel must still show.
 func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, string, error) {
 	user, err := s.Get(ctx, id)
 	if err != nil {
@@ -412,22 +372,13 @@ func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, 
 	return user, roleName, nil
 }
 
-// StampConnect records the status this session comes online as and returns it. It
-// is db.ConnectStatus(saved), not a flat "online", which made a saved Do Not
-// Disturb flash back to online on every reconnect: idle/dnd/invisible survive,
-// anything else becomes online. It writes even when unchanged, to refresh
-// last_seen.
-//
-// With a batch the write is queued and lands within StampFlushInterval. The member
-// list does not wait on it (the hub overlays each connection's live status), but
-// a reader of the row itself may see the pre-connect value that long. The SQL
-// re-derives the status at write time, which keeps a chosen idle/dnd/invisible
-// committed meanwhile but would turn a legacy "offline" into online, so a
-// committed presence_update drops the pending stamp
-// (ChannelService.HandlePresenceUpdate); a flush already in flight can still land
-// once, affecting only that legacy value.
-//
-// The caller must not cache the returned status unless the error is nil.
+// StampConnect records the status this session comes online as and returns it: db.ConnectStatus(saved), so a
+// saved Do Not Disturb survives a reconnect (idle/dnd/invisible survive, anything else becomes online). It
+// writes even when unchanged, to refresh last_seen. With a batch the write is queued and lands within
+// StampFlushInterval; the member list does not wait on it (the hub overlays live status). The SQL re-derives
+// the status at write time, which would turn a legacy "offline" into online, so a committed presence_update
+// drops the pending stamp (ChannelService.HandlePresenceUpdate). The caller must not cache the returned
+// status unless the error is nil.
 func (s *UserService) StampConnect(ctx context.Context, userID int64, savedStatus string) (string, error) {
 	status := db.ConnectStatus(savedStatus)
 	if s.batch != nil {
@@ -440,11 +391,10 @@ func (s *UserService) StampConnect(ctx context.Context, userID int64, savedStatu
 	return status, nil
 }
 
-// StampDisconnect records that the user has no live connection left. It clears
-// only the non-choice "online" and refreshes last_seen; a chosen idle/dnd/invisible
-// stays for StampConnect to read back. The stale choice is handled at read time:
-// a member with no live connection renders offline. A batched stamp lost to a
-// crash leaves "online", which the boot-time ResetAllUserStatuses clears.
+// StampDisconnect records that the user has no live connection left. It clears only the non-choice "online"
+// and refreshes last_seen; a chosen idle/dnd/invisible stays for StampConnect (a member with no live
+// connection renders offline). A batched stamp lost to a crash leaves "online", which the boot-time
+// ResetAllUserStatuses clears.
 func (s *UserService) StampDisconnect(ctx context.Context, userID int64) error {
 	if s.batch != nil {
 		s.batch.queueStamp(userID, false)
@@ -456,6 +406,5 @@ func (s *UserService) StampDisconnect(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// SetConnWrites installs the batch the connection stamps queue into. Call once at
-// startup, before the service is shared.
+// SetConnWrites installs the connection-stamp batch; call once at startup before the service is shared.
 func (s *UserService) SetConnWrites(w *ConnWrites) { s.batch = w }

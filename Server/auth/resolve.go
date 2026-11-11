@@ -25,14 +25,11 @@ var (
 	ErrRoleNotFound  = errors.New("auth: role not found")
 )
 
-// ResolveTokenHash resolves a hashed bearer token to its principal (user + role).
-//
-// A login session is matched first; an API token is tried only when no session
-// row matches. The returned *db.Session is nil for an API-token principal. A DB
-// error is returned wrapped (never a sentinel) so callers can tell an outage
-// from a bad token, and an outage never falls through to API-token lookup. On
-// ErrTokenExpired the expired session is returned so the caller can schedule
-// its cleanup by hash.
+// ResolveTokenHash resolves a hashed bearer token to its user and role. A
+// session is matched first; an API token only when no session matches, and then
+// the returned *db.Session is nil. A DB error is returned wrapped, never as a
+// sentinel, and never falls through to API-token lookup. On ErrTokenExpired the
+// expired session is returned so the caller can clean it up.
 func ResolveTokenHash(ctx context.Context, store tokenStore, hash string) (*db.User, *db.Role, *db.Session, error) {
 	sess, err := store.GetSessionByTokenHash(ctx, hash)
 	if err != nil {
@@ -62,15 +59,12 @@ func ResolveTokenHash(ctx context.Context, store tokenStore, hash string) (*db.U
 		return nil, nil, nil, err
 	}
 	if user == nil || user.IsSystemAccount() {
-		// The hidden import account owns no session or token; a row that
-		// somehow names it resolves to no principal.
+		// The hidden import account owns no session or token.
 		return nil, nil, nil, ErrUserNotFound
 	}
 
-	// A member holding no role returns (nil, nil); the nil check keeps a nil
-	// role out of the context and every downstream permission check. The role
-	// carries the top role's identity (rank, ownership) with the OR of every
-	// held role's permissions, which the server-level checks read.
+	// No role returns (nil, nil); keep a nil role out of every downstream permission
+	// check. Effective() is the top role's identity with the OR of all held permissions.
 	held, err := store.GetMemberRoles(ctx, user.ID)
 	if err != nil {
 		return nil, nil, nil, err

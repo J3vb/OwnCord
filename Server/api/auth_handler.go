@@ -17,8 +17,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// maxLoginUsernameLen mirrors auth.ValidateUsername's 32-rune cap and is
-// enforced before the value builds a RateLimiter map key (see loginReadRequest).
+// maxLoginUsernameLen mirrors auth.ValidateUsername's 32-rune cap, enforced before the value builds a
+// RateLimiter map key.
 const maxLoginUsernameLen = 32
 
 type registerRequest struct {
@@ -37,16 +37,13 @@ type authSuccessResponse struct {
 	PartialToken string        `json:"partial_token,omitempty"`
 	Requires2FA  bool          `json:"requires_2fa"`
 	User         *userResponse `json:"user,omitempty"`
-	// RecoveryCodesRemaining is present only when an emergency recovery
-	// code completed the second step: how many the account has left.
+	// Present only when a recovery code completed the second step: how many the account has left.
 	RecoveryCodesRemaining *int `json:"recovery_codes_remaining,omitempty"`
 }
 
-// MountAuthRoutes registers the auth endpoints. svc owns every decision below
-// the transport; requireAuth is the AuthMiddleware for authenticated routes,
-// built by the caller because it needs the database handle. trustedProxies lists
-// the CIDRs whose X-Forwarded-For / X-Real-IP are honoured for rate-limit IP
-// resolution.
+// MountAuthRoutes registers the auth endpoints; svc owns every decision below the transport. requireAuth
+// is built by the caller (it needs the database). trustedProxies lists the CIDRs whose X-Forwarded-For /
+// X-Real-IP are honoured for rate-limit IP resolution.
 func MountAuthRoutes(r chi.Router, svc AuthService, requireAuth func(http.Handler) http.Handler, limiter *auth.RateLimiter, trustedProxies []string) {
 	r.Route("/api/v1/auth", func(r chi.Router) {
 		r.With(RateLimitMiddleware(limiter, "register:", scaledAuthLimit(registerRateLimitPerMinute), time.Minute, trustedProxies)).
@@ -85,8 +82,6 @@ func MountAuthRoutes(r chi.Router, svc AuthService, requireAuth func(http.Handle
 		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/totp/recovery-codes", handleRegenerateRecoveryCodes(svc))
 
-	// The recovery kit: enrolment and status beside the credential
-	// routes, redemption public and budgeted like login.
 	r.With(requireAuth, requireLoginSession,
 		RateLimitMiddleware(limiter, "kit:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/recovery-kit", handleEnrolRecoveryKit(svc))
@@ -99,8 +94,7 @@ func MountAuthRoutes(r chi.Router, svc AuthService, requireAuth func(http.Handle
 func handleRegister(svc AuthService, trustedProxies []string) http.HandlerFunc {
 	proxyNets := parseCIDRList(trustedProxies) // parse once at construction
 	return func(w http.ResponseWriter, r *http.Request) {
-		// The policy gate runs before any credential is read: a closed
-		// server refuses even a malformed body with the policy's 403.
+		// The policy gate runs before any credential is read: a closed server refuses even a malformed body.
 		if err := svc.RegistrationPolicy(r.Context()); err != nil {
 			writeAuthError(r.Context(), w, err)
 			return
@@ -123,8 +117,7 @@ func handleRegister(svc AuthService, trustedProxies []string) http.HandlerFunc {
 			return
 		}
 		if res.PendingApproval {
-			// Approval mode: the application is recorded and an admin
-			// decides; there is no session to hand out yet.
+			// Approval mode: the application is recorded and an admin decides; there is no session yet.
 			writeJSON(w, http.StatusAccepted, registrationPendingResponse{Status: "pending_approval"})
 			return
 		}
@@ -132,42 +125,31 @@ func handleRegister(svc AuthService, trustedProxies []string) http.HandlerFunc {
 	}
 }
 
-// registrationPendingResponse is the 202 body of an approval-mode
-// registration: the application exists, an admin decides, and the applicant
-// signs in normally once approved.
+// registrationPendingResponse is the 202 body of an approval-mode registration.
 type registrationPendingResponse struct {
 	Status string `json:"status"`
 }
 
-// registerReadRequest decodes and validates the registration body, writing the
-// rejection response itself when the input cannot be used.
+// registerReadRequest decodes and validates the registration body, writing the rejection itself.
 func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerRequest, bool) {
 	var req registerRequest
 	if !decodeJSON(w, r, &req) {
 		return req, false
 	}
 
-	// Bound the raw field before the fixpoint sanitizer: sanitizeToFixpoint is
-	// quadratic in input length (nested entities force about one extra pass per
-	// two nesting levels), so an unauthenticated caller could pin a core for
-	// minutes with one oversized username before auth.ValidateUsername's 32-rune
-	// cap runs. This is a cheap byte-length pre-check; *4 still admits any
-	// legitimate 32-rune UTF-8 username (same bound as sanitizeContent in
-	// service/message.go and loginReadRequest).
+	// Bound the raw field before the fixpoint sanitizer, which is quadratic in input length: an
+	// unauthenticated caller could pin a core for minutes with one oversized username before the 32-rune cap
+	// runs. *4 still admits any legitimate 32-rune UTF-8 username.
 	if len(req.Username) > maxLoginUsernameLen*4 {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is too long")
 		return req, false
 	}
 
-	// Use the fixpoint sanitizer (service.SanitizeText), not a bare bluemonday
-	// call: its output is always HTML-escaped (' -> &#39;, & -> &amp;), so the
-	// stored name would differ from what handleLogin looks up (which only
-	// trims), permanently locking out usernames containing those characters.
+	// Use service.SanitizeText, not a bare bluemonday call: its HTML-escaped output would differ from what
+	// handleLogin looks up (it only trims), permanently locking out usernames containing ' or &.
 	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 	req.InviteCode = strings.TrimSpace(req.InviteCode)
 
-	// Whether an invite is needed depends on the registration mode,
-	// which the service decides; only the credentials are required here.
 	if req.Username == "" || req.Password == "" {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username and password are required")
 		return req, false
@@ -207,8 +189,7 @@ func handleLogin(svc AuthService, trustedProxies []string) http.HandlerFunc {
 	}
 }
 
-// loginReadRequest decodes and validates the login body, writing the rejection
-// response itself when the input cannot be used.
+// loginReadRequest decodes and validates the login body, writing the rejection itself.
 func loginReadRequest(w http.ResponseWriter, r *http.Request) (loginRequest, bool) {
 	var req loginRequest
 	if !decodeJSON(w, r, &req) {
@@ -216,20 +197,15 @@ func loginReadRequest(w http.ResponseWriter, r *http.Request) (loginRequest, boo
 	}
 
 	req.Username = strings.TrimSpace(req.Username)
-	// Do NOT trim req.Password — passwords may intentionally contain
-	// leading/trailing whitespace. Bcrypt handles arbitrary bytes.
+	// Do NOT trim req.Password: passwords may intentionally have leading/trailing whitespace.
 
 	if req.Username == "" || req.Password == "" {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username and password are required")
 		return req, false
 	}
 
-	// Reject an over-long username before it builds a RateLimiter map key
-	// (unameKey, failKey, userFailKey, lockout keys in service.AuthService).
-	// Login has no account to validate against yet, so nothing else bounds it,
-	// and an unauthenticated caller could pin a body-sized string as a retained
-	// key (Cleanup evicts it only after hours). Same 32-rune cap as
-	// registration.
+	// Reject an over-long username before it builds a RateLimiter map key: login has no account to validate
+	// against yet, and a body-sized retained key would linger for hours. Same 32-rune cap as registration.
 	if utf8.RuneCountInString(req.Username) > maxLoginUsernameLen {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is too long")
 		return req, false
@@ -267,10 +243,9 @@ type deleteAccountRequest struct {
 	Password string `json:"password"`
 }
 
-// handleDeleteAccount processes DELETE /api/v1/auth/account. The caller must
-// supply their current password for confirmation; the lockout, the compare
-// and the member_ban broadcast are the service's. The logged IP is resolved
-// through trusted_proxies like every other auth route's.
+// handleDeleteAccount processes DELETE /api/v1/auth/account; the caller must supply their current password.
+// The lockout, compare and member_ban broadcast are the service's. The logged IP is resolved through
+// trusted_proxies like every other auth route's.
 func handleDeleteAccount(svc AuthService, trustedProxies []string) http.HandlerFunc {
 	proxyNets := parseCIDRList(trustedProxies)
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -293,8 +268,7 @@ func handleDeleteAccount(svc AuthService, trustedProxies []string) http.HandlerF
 	}
 }
 
-// authResponse encodes a service result: a session, or the two-factor
-// challenge Login started instead of one.
+// authResponse encodes a service result: a session, or the two-factor challenge Login started instead.
 func authResponse(res *service.AuthResult) authSuccessResponse {
 	if res.Requires2FA {
 		return authSuccessResponse{
@@ -310,17 +284,14 @@ func authResponse(res *service.AuthResult) authSuccessResponse {
 	}
 }
 
-// writeNotAuthenticated is the refusal for a route mounted behind
-// AuthMiddleware that still finds no usable principal on the request.
+// writeNotAuthenticated refuses a route behind AuthMiddleware that finds no usable principal.
 func writeNotAuthenticated(w http.ResponseWriter) {
 	writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 }
 
-// writeAuthError encodes a service.Err* refusal from the auth slice. Each
-// named value's Error() is the public message; its category picks the
-// status and code, and four values carry a code of their own. Anything that
-// is not an auth refusal is a contract bug in the service, logged and
-// answered as a generic 500 so no cause leaks to the client.
+// writeAuthError encodes a service.Err* refusal: each value's Error() is the public message, its category
+// picks status and code. Anything else is a service contract bug, logged and answered as a generic 500 so
+// no cause leaks.
 func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 	var status int
 	var code httperr.Code
@@ -363,10 +334,8 @@ func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 	writeErr(w, status, code, err.Error())
 }
 
-// writeAuthBusy answers an admission refusal as 429 AUTH_BUSY, a code apart from
-// the per-IP RATE_LIMITED so a client can tell the server's load from its own
-// pace. A refusal from the queue carries the budget's retry hint as Retry-After
-// in whole seconds.
+// writeAuthBusy answers an admission refusal as 429 AUTH_BUSY, apart from per-IP RATE_LIMITED so a client
+// can tell server load from its own pace; a queue refusal carries the retry hint as Retry-After in seconds.
 func writeAuthBusy(w http.ResponseWriter, err error) {
 	var hinted interface{ RetryAfter() time.Duration }
 	if errors.As(err, &hinted) {

@@ -21,9 +21,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/updater"
 )
 
-// guardContext is the state the host guards judge: the request (for its real
-// client address), the running options, the configuration the next boot would
-// run with, and the keys the PATCH names.
+// guardContext is the state the host guards judge: the request (real client address), running options, the
+// config the next boot would run with, and the keys the PATCH names.
 type guardContext struct {
 	r       *http.Request
 	opts    SetupOptions
@@ -40,12 +39,10 @@ func (g guardContext) anyOf(keys ...string) bool {
 	return slices.ContainsFunc(keys, g.has)
 }
 
-// runConfigGuards checks the keys a PATCH names against host state that the
-// config package cannot see, writing the refusal itself and returning false
-// when a change must not be saved. The lock-out guard runs first and answers
-// 409 LOCKOUT; every other refusal is 400 and names the offending key. All
-// guards judge next (the configuration the next boot would run with), so a
-// null reset that falls back to a narrower config.yaml value is caught too.
+// runConfigGuards checks the PATCH's keys against host state the config package cannot see, writing the
+// refusal and returning false when a change must not be saved. The lock-out guard runs first (409 LOCKOUT);
+// other refusals are 400 naming the key. Guards judge the next-boot configuration, so a null reset falling
+// back to a narrower config.yaml value is caught too.
 func runConfigGuards(ctx context.Context, w http.ResponseWriter, r *http.Request, opts SetupOptions, next *config.Config, changes map[string]any) bool {
 	g := guardContext{r: r, opts: opts, next: next, changes: changes}
 	return guardPerimeter(w, g) &&
@@ -55,9 +52,8 @@ func runConfigGuards(ctx context.Context, w http.ResponseWriter, r *http.Request
 		guardLiveKitBinary(w, g)
 }
 
-// guardPerimeter refuses a perimeter change that would exclude the caller's own
-// address from the admin panel. An empty allowlist is allowed: it switches the
-// perimeter off and cannot lock anyone out.
+// guardPerimeter refuses a change that would exclude the caller's own address from the panel. An empty
+// allowlist is allowed: it switches the perimeter off.
 func guardPerimeter(w http.ResponseWriter, g guardContext) bool {
 	if !g.anyOf("server.admin_allowed_cidrs", "server.trusted_proxies") {
 		return true
@@ -101,8 +97,8 @@ func guardPort(w http.ResponseWriter, g guardContext) bool {
 	return true
 }
 
-// guardTLS refuses a TLS change that would leave the server unable to serve
-// TLS. It checks the pair, the acme domain and port 80.
+// guardTLS refuses a TLS change leaving the server unable to serve TLS: the pair, the acme domain and port
+// 80.
 func guardTLS(w http.ResponseWriter, g guardContext) bool {
 	if !g.anyOf("tls.mode", "tls.domain", "tls.cert_file", "tls.key_file") {
 		return true
@@ -133,8 +129,7 @@ var (
 	errManualPairExpired = errors.New("tls.cert_file: the certificate is unreadable or expired")
 )
 
-// manualTLSPairError reports why a manual-mode pair could not serve TLS at
-// the next boot, or nil when it loads and its certificate is current.
+// manualTLSPairError reports why a manual-mode pair could not serve TLS at the next boot, or nil.
 func manualTLSPairError(certFile, keyFile string) error {
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
@@ -160,8 +155,7 @@ func guardAcmeTLS(w http.ResponseWriter, g guardContext) bool {
 			"server.port must not be 80 in acme mode; the HTTPS listener would occupy the port the ACME challenge needs")
 		return false
 	}
-	// The ACME challenge answers on port 80; only probe when the server is not
-	// already in acme mode (it would be holding nothing on 80 between runs).
+	// The ACME challenge answers on port 80; probe only when not already in acme mode.
 	if g.opts.RunningCfg.TLS.Mode == "acme" {
 		return true
 	}
@@ -175,8 +169,7 @@ func guardAcmeTLS(w http.ResponseWriter, g guardContext) bool {
 }
 
 func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
-	// The boot writes a missing half, so in a container both live under
-	// data_dir like every other path the server writes.
+	// The boot writes a missing half, so in a container both live under data_dir.
 	if containerOutsideDataDir(g, g.next.TLS.CertFile, "tls.cert_file", w) ||
 		containerOutsideDataDir(g, g.next.TLS.KeyFile, "tls.key_file", w) {
 		return false
@@ -235,9 +228,8 @@ func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
 	return true
 }
 
-// guardDataPaths checks the host paths a PATCH moves: the database must be an
-// intact OwnCord database, the directories must exist and be writable, and in
-// a container every path the server writes must live under data_dir.
+// guardDataPaths checks the host paths a PATCH moves: the database must be an intact OwnCord database,
+// directories must exist and be writable, and in a container every written path must live under data_dir.
 func guardDataPaths(ctx context.Context, w http.ResponseWriter, g guardContext) bool {
 	return guardDatabasePath(ctx, w, g) &&
 		guardBackupDir(w, g) &&
@@ -301,10 +293,9 @@ func guardPluginsDir(w http.ResponseWriter, g guardContext) bool {
 	return true
 }
 
-// guardPluginsOverlap keeps the plugins directory apart from server data
-// whichever of the three directories a PATCH moves. A plugin install replaces
-// <plugins.directory>/<name> wholesale, so the plugins directory must not live
-// inside uploads, nor be or hold data_dir, uploads or backups.
+// guardPluginsOverlap keeps the plugins directory apart from server data. A plugin install replaces
+// <plugins.directory>/<name> wholesale, so it must not live inside uploads nor be or hold data_dir, uploads
+// or backups.
 func guardPluginsOverlap(w http.ResponseWriter, g guardContext) bool {
 	if !g.anyOf("plugins.directory", "upload.storage_dir", "backup.dir") {
 		return true
@@ -348,9 +339,8 @@ func guardAcmeCacheDir(w http.ResponseWriter, g guardContext) bool {
 	return false
 }
 
-// guardLiveKitBinary refuses a binary the server process could have written
-// itself: an upload, a plugin or a backup. voice.livekit_binary is executed, so
-// a stolen owner session must not be able to plant one and then run it.
+// guardLiveKitBinary refuses a binary the server could have written itself (upload, plugin, backup):
+// voice.livekit_binary is executed, so a stolen owner session must not plant one and run it.
 func guardLiveKitBinary(w http.ResponseWriter, g guardContext) bool {
 	if !g.has("voice.livekit_binary") {
 		return true
@@ -380,9 +370,8 @@ func guardLiveKitBinary(w http.ResponseWriter, g guardContext) bool {
 	return true
 }
 
-// containerOutsideDataDir refuses a written path outside data_dir when the
-// server runs in a container: only data_dir is a volume, so the path would
-// vanish when the container is recreated.
+// containerOutsideDataDir refuses a written path outside data_dir in a container: only data_dir is a volume,
+// so the path would vanish when the container is recreated.
 func containerOutsideDataDir(g guardContext, path, key string, w http.ResponseWriter) bool {
 	if updater.RunningInContainer() && !pathWithin(path, g.next.Server.DataDir) {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest,
@@ -402,8 +391,8 @@ func dirEmpty(path string) bool {
 	return err == nil && len(entries) == 0
 }
 
-// fileWritable reports whether the server's own user can open path for writing,
-// which is what a truncate-in-place regeneration needs.
+// fileWritable reports whether the server's user can open path for writing (what a truncate-in-place
+// regeneration needs).
 func fileWritable(path string) bool {
 	f, err := os.OpenFile(path, os.O_WRONLY, 0) //nolint:gosec // G304: a config path the guard is judging
 	if err != nil {
@@ -413,8 +402,7 @@ func fileWritable(path string) bool {
 	return true
 }
 
-// dirWritable probes the directory by creating and removing a temp file, so it
-// reports what the server's own user can actually do.
+// dirWritable probes by creating and removing a temp file, reporting what the server's user can really do.
 func dirWritable(dir string) bool {
 	f, err := os.CreateTemp(dir, ".owncord-probe-*")
 	if err != nil {
@@ -426,10 +414,8 @@ func dirWritable(dir string) bool {
 	return true
 }
 
-// sameFile reports whether two paths name the same file. Existing paths compare
-// by identity, so a symlink or hardlink alias is caught; a pair that does not
-// exist yet compares case-insensitively on Windows, where the filesystem would
-// treat a case-variant spelling as the same file.
+// sameFile reports whether two paths name the same file: existing paths compare by identity (catching symlink
+// and hardlink aliases); non-existent ones compare case-insensitively on Windows.
 func sameFile(a, b string) bool {
 	ai, aerr := os.Stat(a)
 	bi, berr := os.Stat(b)
@@ -446,7 +432,6 @@ func samePath(a, b string) bool {
 	return filepath.Clean(a) == filepath.Clean(b)
 }
 
-// pathWithin reports whether child is parent or lives under it.
 func pathWithin(child, parent string) bool {
 	if child == "" || parent == "" {
 		return false

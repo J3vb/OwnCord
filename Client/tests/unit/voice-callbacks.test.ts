@@ -10,6 +10,7 @@ const {
   mockVoiceStoreGetState,
   mockJoinVoiceChannel,
   mockLeaveVoiceChannel,
+  mockSetSwitchingTo,
   mockSetMutedBeforeDeafen,
   mockSaveSelfVoiceState,
   mockVoiceSessionLeave,
@@ -25,6 +26,7 @@ const {
   mockVoiceStoreGetState: vi.fn(),
   mockJoinVoiceChannel: vi.fn(),
   mockLeaveVoiceChannel: vi.fn(),
+  mockSetSwitchingTo: vi.fn(),
   mockSetMutedBeforeDeafen: vi.fn(),
   mockSaveSelfVoiceState: vi.fn(),
   mockVoiceSessionLeave: vi.fn(),
@@ -44,6 +46,7 @@ vi.mock("@stores/voice.store", async (importOriginal) => ({
   voiceStore: { getState: mockVoiceStoreGetState },
   joinVoiceChannel: mockJoinVoiceChannel,
   leaveVoiceChannel: mockLeaveVoiceChannel,
+  setSwitchingTo: mockSetSwitchingTo,
   setMutedBeforeDeafen: mockSetMutedBeforeDeafen,
   saveSelfVoiceState: mockSaveSelfVoiceState,
   isSelfMuted: (await importOriginal<typeof import("@stores/voice.store")>()).isSelfMuted,
@@ -109,6 +112,7 @@ interface VoiceStateStub {
   localServerDeafened: boolean;
   pttGated?: boolean;
   voiceStatus?: string;
+  switchingTo?: number | null;
   mutedBeforeDeafen?: boolean;
 }
 
@@ -622,6 +626,36 @@ describe("createSidebarVoiceCallbacks", () => {
     );
     cbs.onVoiceJoin(10);
     expect(ws.send).toHaveBeenCalledTimes(2);
+  });
+
+  it("a switch out of a live call keeps the call in the store until the server acts", () => {
+    const { ws, cbs } = sidebarCallbacks();
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({ currentChannelId: 10, voiceStatus: "connected" }),
+    );
+
+    cbs.onVoiceJoin(42);
+
+    expect(mockJoinVoiceChannel).not.toHaveBeenCalled();
+    expect(mockSetSwitchingTo).toHaveBeenCalledExactlyOnceWith(42);
+    expect(ws.send).toHaveBeenCalledExactlyOnceWith({
+      type: "voice_join",
+      payload: { channel_id: 42, user_initiated: true },
+    });
+  });
+
+  it("a click while a switch waits for the server sends nothing", () => {
+    const { ws, cbs } = sidebarCallbacks();
+    mockVoiceStoreGetState.mockReturnValue(
+      makeVoiceState({ currentChannelId: 10, voiceStatus: "connected", switchingTo: 42 }),
+    );
+
+    cbs.onVoiceJoin(7);
+    cbs.onVoiceJoin(42);
+
+    expect(ws.send).not.toHaveBeenCalled();
+    expect(mockSetSwitchingTo).not.toHaveBeenCalled();
+    expect(mockJoinVoiceChannel).not.toHaveBeenCalled();
   });
 
   it("onVoiceJoin does not send over a down socket", () => {

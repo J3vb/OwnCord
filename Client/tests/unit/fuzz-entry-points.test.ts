@@ -36,7 +36,7 @@ const clientGaps: Record<string, string> = {
   "profiles.pingHost": "server health response",
   "profiles.importProfiles": "a profile file the user imports",
   "credentials.parseRelayedLogin": "login response relayed by the native side",
-  "attachmentCache.requestFileLink": "REST response",
+  "attachmentMedia.requestFileLink": "REST response",
   "externalContent.json": "external-content broker responses",
   "api.parseAttachments": "moderation report attachments from the server",
 };
@@ -53,7 +53,7 @@ const clientTrusted: Record<string, string> = {
   "themes.restoreAccent": "this client's settings",
   "supportBundle.allowlistedSettings": "this client's settings",
   "osMotion.manualPreference": "this client's settings",
-  "audioElements.parseStoredVolume": "this client's settings",
+  "audioVolumePrefs.parseStoredVolume": "this client's settings",
   "credentials.parseCredential": "this client's browser credential store",
   "settings.load": "this client's browser settings",
 };
@@ -82,6 +82,10 @@ const commandCovered: Record<string, Covered> = {
   get_identity_pin: {
     source: "host and user id",
     targets: [`${parseTests}/pins_properties.rs`, `${fuzzTargets}/pin_inputs.rs`],
+  },
+  resume_saved_session: {
+    source: "server host, compared as a pin key and then dialled through the tunnel",
+    targets: [`${parseTests}/pins_properties.rs`, `${parseTests}/proxy_properties.rs`],
   },
   start_http_proxy: {
     source: "server host, then every request head through the tunnel",
@@ -138,6 +142,7 @@ const commandPassThrough: Record<string, string> = {
   native_voice_unpublish_screen_audio: "track id used as a lookup key",
   native_voice_set_subscribed: "participant and track ids used as lookup keys",
   native_voice_set_video_view: "participant and track ids used as lookup keys",
+  native_voice_set_video_bitrate: "video kind and track id used as lookup keys",
   native_voice_set_volume: "participant id used as a lookup key",
   native_voice_set_screenshare_volume: "participant id used as a lookup key",
   set_gpu_adapter: "card id matched against the listed cards",

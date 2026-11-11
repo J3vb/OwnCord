@@ -41,12 +41,15 @@ vi.mock("@lib/logger", () => ({
 vi.mock("@lib/pendingMessages", () => ({
   deactivatePendingMessages: hoisted.deactivatePendingMessages,
 }));
-vi.mock("@lib/notifications", () => ({ openMessageTarget: hoisted.openMessageTarget }));
+vi.mock("@lib/notificationDelivery", () => ({ openMessageTarget: hoisted.openMessageTarget }));
 vi.mock("@lib/nav/inviteNavigation", () => ({
   setInviteJoinHandler: hoisted.setInviteJoinHandler,
 }));
 vi.mock("../../src/platform/desktop", () => ({ desktop: { deepLinks: { init: hoisted.init } } }));
 vi.mock("../../src/app/serverHealth", () => ({ serverInfoFor: vi.fn(() => undefined) }));
+vi.mock("../../src/app/networkStartup", () => ({
+  startNetworkMonitoring: () => Promise.resolve(),
+}));
 vi.mock("../../src/app/session", () => ({
   sessionInFlight: () => hoisted.inFlight,
   abandonInFlight: () => events.push("abandonInFlight"),
@@ -61,7 +64,7 @@ vi.mock("@stores/auth.store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@stores/auth.store")>()),
   clearAuth: (...args: unknown[]) => hoisted.clearAuth(...args),
 }));
-vi.mock("@components/InviteJoinConfirm", () => ({
+vi.mock("../../src/features/invites/InviteJoinConfirm", () => ({
   confirmInviteJoin: hoisted.confirmInviteJoin,
 }));
 
@@ -292,7 +295,7 @@ describe("an invite link from outside the app", () => {
 
   it("logs a confirmation chunk that fails to load, and changes nothing", async () => {
     setAuth("tok", USER, "Srv", "");
-    vi.doMock("@components/InviteJoinConfirm", () => {
+    vi.doMock("../../src/features/invites/InviteJoinConfirm", () => {
       throw new Error("chunk 404");
     });
     try {
@@ -307,7 +310,7 @@ describe("an invite link from outside the app", () => {
       expect(hoisted.applyInvite).not.toHaveBeenCalled();
       expect(endSession).not.toHaveBeenCalled();
     } finally {
-      vi.doMock("@components/InviteJoinConfirm", () => ({
+      vi.doMock("../../src/features/invites/InviteJoinConfirm", () => ({
         confirmInviteJoin: hoisted.confirmInviteJoin,
       }));
     }

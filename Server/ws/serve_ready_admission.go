@@ -1,8 +1,8 @@
 package ws
 
-// serve_ready_admission.go — P5-S04. A restart herd used to run every fresh
-// connect's ready build at once and thrash the reader pool; handleFreshConnect
-// now takes a permit from Hub.readyGate (2 x GOMAXPROCS slots) first.
+// serve_ready_admission.go: a restart herd used to run every fresh connect's ready build at
+// once and thrash the reader pool; handleFreshConnect now takes a permit from Hub.readyGate
+// (2 x GOMAXPROCS slots) first.
 
 import (
 	"context"
@@ -13,19 +13,16 @@ import (
 	"github.com/coder/websocket"
 )
 
-// readyAdmissionWait is how long a fresh connect waits for a ready-build
-// permit (Hub.readyGate) before it is refused with SERVER_BUSY. A var so
-// tests can shorten it.
+// readyAdmissionWait is how long a fresh connect waits for a ready-build permit before
+// SERVER_BUSY. A var so tests can shorten it.
 var readyAdmissionWait = 10 * time.Second
 
-// readyRetryAfter is the upper bound of the retry_after_ms a refused connect
-// is given; each refusal draws from [readyRetryAfter/2, readyRetryAfter] so
-// the refused herd does not come back as one.
+// readyRetryAfter is the upper bound of the retry_after_ms a refused connect is given; each
+// refusal draws from [readyRetryAfter/2, readyRetryAfter] so the herd does not return as one.
 const readyRetryAfter = 5 * time.Second
 
-// admitReady takes a ready-build permit, waiting up to readyAdmissionWait.
-// The returned release is idempotent, so a caller can free the permit as
-// soon as the build is done and still defer it for the early returns.
+// admitReady takes a ready-build permit, waiting up to readyAdmissionWait. The returned
+// release is idempotent, so a caller can free it early and still defer it.
 func (h *Hub) admitReady(ctx context.Context) (release func(), ok bool) {
 	if h.readyGate == nil { // a Hub literal in a test: unbounded
 		return func() {}, true
@@ -48,8 +45,8 @@ func (h *Hub) admitReady(ctx context.Context) (release func(), ok bool) {
 	}, true
 }
 
-// refuseBusy answers a fresh connect that found no ready-build permit in
-// time: SERVER_BUSY with a jittered retry_after_ms, then close 1013.
+// refuseBusy answers a fresh connect that found no permit in time: SERVER_BUSY with a jittered
+// retry_after_ms, then close 1013.
 func refuseBusy(ctx context.Context, conn *websocket.Conn, c *Client) {
 	retry := readyRetryAfter/2 + rand.N(readyRetryAfter/2+1) //nolint:gosec // G404: retry jitter, nothing here is cryptographic
 	slog.Warn("ws: fresh connect refused, ready builds saturated", "user_id", c.userID, "retry_after_ms", retry.Milliseconds())
@@ -64,10 +61,9 @@ func refuseBusy(ctx context.Context, conn *websocket.Conn, c *Client) {
 	_ = conn.Close(websocket.StatusTryAgainLater, "server busy")
 }
 
-// sendFreshReady writes the ready handleFreshConnect built (or reports its
-// build error), outside the admission permit: the write runs at the peer's
-// pace, not the database's. owedResync is restored when the ready never
-// reaches the client.
+// sendFreshReady writes the ready handleFreshConnect built (or reports its build error)
+// outside the admission permit: the write runs at the peer's pace, not the database's.
+// owedResync is restored when the ready never reaches the client.
 func (h *Hub) sendFreshReady(ctx context.Context, conn *websocket.Conn, c *Client, ready *readyPayload, readyErr error, owedResync bool) error {
 	if readyErr != nil {
 		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)

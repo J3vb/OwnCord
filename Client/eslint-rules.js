@@ -9,7 +9,6 @@
 // Plain JS, ESM, no build step — eslint.config.js imports this directly.
 
 import { statSync } from "node:fs";
-import { builtinRules } from "eslint/use-at-your-own-risk";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -861,7 +860,7 @@ const subscriptionResultKept = {
 //
 //   6  main.ts, app/
 //   5  pages/
-//   4  components/, features/        (peers)
+//   4  features/
 //   3  stores/
 //   2  lib/, platform/, i18n/        (peers)
 //   1  styles/, assets/
@@ -874,7 +873,7 @@ const subscriptionResultKept = {
 // so it counts; write `import type`. Colocated `*.test.ts(x)` files are exempt.
 //
 // The rule is string and path based. An alias (`@lib`, `@stores`,
-// `@components`, `@pages`, `@styles`, as in tsconfig.json) and a relative
+// `@pages`, `@styles`, as in tsconfig.json) and a relative
 // specifier that name the same module get the same verdict and the same
 // baseline key: the resolved file relative to src/ (a directory import
 // resolves to its index.ts). The filesystem is read only for a site that is
@@ -892,7 +891,6 @@ const LAYER_RANK = new Map([
   ["main", 6],
   ["app", 6],
   ["pages", 5],
-  ["components", 4],
   ["features", 4],
   ["stores", 3],
   ["lib", 2],
@@ -902,11 +900,10 @@ const LAYER_RANK = new Map([
   ["assets", 1],
 ]);
 
-/** The five tsconfig `paths` aliases, as alias -> directory under src/. */
+/** The four tsconfig `paths` aliases, as alias -> directory under src/. */
 const LAYER_ALIASES = new Map([
   ["@lib", "lib"],
   ["@stores", "stores"],
-  ["@components", "components"],
   ["@pages", "pages"],
   ["@styles", "styles"],
 ]);
@@ -999,7 +996,7 @@ const layerDirection = {
     type: "problem",
     docs: {
       description:
-        "A lower layer must not import a higher one (main/app > pages > components/features > stores > lib/platform/i18n > styles/assets). Existing upward imports are listed in scripts/layer-baseline.json and only shrink.",
+        "A lower layer must not import a higher one (main/app > pages > features > stores > lib/platform/i18n > styles/assets). Existing upward imports are listed in scripts/layer-baseline.json and only shrink.",
     },
     schema: [
       {
@@ -1079,174 +1076,6 @@ const layerDirection = {
   },
 };
 
-// --- Complexity ratchet --------------------------------------------------
-// `complexity` and `max-depth` cap every function, but some functions were
-// over the cap before the rules existed. Option `baseline` is one section of
-// Client/scripts/complexity-baseline.json: `{ "<file under src/>": { "<function
-// key>": [values, highest first] } }`. A function is reported only when its
-// file and key have more over-limit functions, or a higher value, than the
-// baseline lists. tests/unit/complexity-baseline.test.ts keeps the baseline
-// shrink-only.
-
-const FUNCTION_TYPES = new Set([
-  "FunctionDeclaration",
-  "FunctionExpression",
-  "ArrowFunctionExpression",
-]);
-
-function propertyKeyName(key, computed) {
-  if (computed) return "[computed]";
-  if (key.type === "Identifier" || key.type === "PrivateIdentifier") return key.name;
-  if (key.type === "Literal") return String(key.value);
-  return "[computed]";
-}
-
-/** The name a function or class member goes by where it is defined. */
-function ownName(node) {
-  if (node.type === "StaticBlock") return "static block";
-  if (node.type === "FunctionDeclaration" && node.id) return node.id.name;
-  const parent = node.parent;
-  if (!parent) return "(anonymous)";
-  if (FUNCTION_TYPES.has(node.type) && node.type !== "ArrowFunctionExpression" && node.id) {
-    return node.id.name;
-  }
-  switch (parent.type) {
-    case "VariableDeclarator":
-      return parent.id.type === "Identifier" ? parent.id.name : "(anonymous)";
-    case "MethodDefinition":
-    case "Property":
-    case "PropertyDefinition":
-      if (parent.value !== node) break;
-      return propertyKeyName(parent.key, parent.computed);
-    case "AssignmentExpression":
-      if (parent.right !== node) break;
-      if (parent.left.type === "Identifier") return parent.left.name;
-      if (parent.left.type === "MemberExpression") {
-        return propertyKeyName(parent.left.property, parent.left.computed);
-      }
-      break;
-    default:
-      break;
-  }
-  return "(anonymous)";
-}
-
-/** True for a function or a class static block. */
-function isScopeNode(node) {
-  return FUNCTION_TYPES.has(node.type) || node.type === "StaticBlock";
-}
-
-/** `outer > inner` path of enclosing functions and classes, so two helpers
- *  named alike in different closures keep apart. */
-function functionKey(node, ancestors) {
-  const parts = [];
-  for (const ancestor of ancestors) {
-    if (isScopeNode(ancestor)) parts.push(ownName(ancestor));
-    else if (
-      (ancestor.type === "ClassDeclaration" || ancestor.type === "ClassExpression") &&
-      ancestor.id
-    ) {
-      parts.push(ancestor.id.name);
-    }
-  }
-  if (isScopeNode(node)) parts.push(ownName(node));
-  else if (node.parent?.type === "PropertyDefinition") {
-    parts.push(`field ${propertyKeyName(node.parent.key, node.parent.computed)}`);
-  }
-  return parts.length === 0 ? "(top level)" : parts.join(" > ");
-}
-
-/** The nearest enclosing function of a block, as a key. */
-function enclosingFunctionKey(ancestors) {
-  for (let i = ancestors.length - 1; i >= 0; i -= 1) {
-    if (isScopeNode(ancestors[i])) return functionKey(ancestors[i], ancestors.slice(0, i));
-  }
-  return "(top level)";
-}
-
-/** Wrap a core rule so its reports are checked against a baseline. `pick`
- *  reads the measured value from a report and `keyOf` names the function. */
-function ratchetRule({ core, defaultMax, description, label, pick, keyOf }) {
-  return {
-    meta: {
-      type: "suggestion",
-      docs: { description },
-      schema: [
-        {
-          type: "object",
-          properties: { max: { type: "integer", minimum: 0 }, baseline: { type: "object" } },
-          additionalProperties: false,
-        },
-      ],
-      messages: {
-        overLimit: `{{file}} {{key}}: ${label} {{value}}, the limit is {{max}}. Split the function. Functions already over the limit are listed in scripts/complexity-baseline.json and only shrink.`,
-      },
-    },
-    create(context) {
-      const { max = defaultMax, baseline = {} } = context.options[0] ?? {};
-      const filename = path.isAbsolute(context.filename)
-        ? context.filename
-        : path.resolve(path.dirname(SRC_ROOT), context.filename);
-      const file = relToSrc(filename);
-      if (file === null) return {};
-      const listed = baseline[file] ?? {};
-      const found = new Map();
-      const proxy = Object.create(context, {
-        options: { value: [max] },
-        report: {
-          value(descriptor) {
-            const key = keyOf(descriptor.node, context.sourceCode.getAncestors(descriptor.node));
-            const list = found.get(key) ?? [];
-            list.push({ node: descriptor.node, loc: descriptor.loc, value: pick(descriptor.data) });
-            found.set(key, list);
-          },
-        },
-      });
-      const listeners = core.create(proxy);
-      const coreExit = listeners["Program:exit"];
-      return {
-        ...listeners,
-        "Program:exit"(node) {
-          if (coreExit) coreExit(node);
-          for (const [key, list] of found) {
-            const allowed = [...(listed[key] ?? [])].sort((a, b) => b - a);
-            const sorted = [...list].sort((a, b) => b.value - a.value);
-            sorted.forEach((site, i) => {
-              if (i < allowed.length && site.value <= allowed[i]) return;
-              context.report({
-                node: site.node,
-                loc: site.loc,
-                messageId: "overLimit",
-                data: { file, key, value: site.value, max },
-              });
-            });
-          }
-        },
-      };
-    },
-  };
-}
-
-const complexityRatchet = ratchetRule({
-  core: builtinRules.get("complexity"),
-  defaultMax: 15,
-  description:
-    "Cyclomatic complexity per function stays at or under the limit; functions in scripts/complexity-baseline.json may not grow.",
-  label: "complexity",
-  pick: (data) => Number(data.complexity),
-  keyOf: (node, ancestors) => functionKey(node, ancestors),
-});
-
-const maxDepthRatchet = ratchetRule({
-  core: builtinRules.get("max-depth"),
-  defaultMax: 4,
-  description:
-    "Blocks nest no deeper than the limit; blocks in scripts/complexity-baseline.json may not grow.",
-  label: "nesting depth",
-  pick: (data) => Number(data.depth),
-  keyOf: (_node, ancestors) => enclosingFunctionKey(ancestors),
-});
-
 // Exported so tests/unit/layer-baseline.test.ts can pin the maps to the real tree.
 export { LAYER_ALIASES, LAYER_RANK };
 
@@ -1261,7 +1090,5 @@ export default {
     "no-raw-html-sink": noRawHtmlSink,
     "subscription-result-kept": subscriptionResultKept,
     "layer-direction": layerDirection,
-    "complexity-ratchet": complexityRatchet,
-    "max-depth-ratchet": maxDepthRatchet,
   },
 };

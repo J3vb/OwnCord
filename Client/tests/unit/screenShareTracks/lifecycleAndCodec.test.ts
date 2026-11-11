@@ -1,4 +1,4 @@
-// Tests for the track-publishing half of src/lib/voice/screenShare.ts, continued from camera.test.ts.
+// Tests for the track-publishing half of src/features/voice/screenShare.ts, continued from camera.test.ts.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/screenShareTracksMocks";

@@ -7,11 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/admin"
 )
 
-// startLogHistory starts saving log lines to disk for the admin panel's log
-// history. It starts right after the data directory exists so start-up lines
-// are saved, and its close step runs near the end of teardown so shutdown
-// lines are too. The writer stops on its own close step, not on bgCtx, so
-// it can write what is still queued after the other stages are gone.
+// startLogHistory saves log lines to disk for the admin panel's log history.
 func (a *App) startLogHistory() error {
 	dir := a.cfg.LogHistoryDir()
 	if a.deps.LogBuf == nil || dir == "" {

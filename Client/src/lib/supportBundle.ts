@@ -166,6 +166,7 @@ const SETTINGS_ALLOWLIST = [
   "pttVk",
   "inputMode",
   "pttReleaseDelayMs",
+  "screenShareBackupLayer",
   "screenShareFps",
   "screenShareQuality",
   "streamQuality",

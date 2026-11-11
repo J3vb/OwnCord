@@ -29,6 +29,12 @@ func TestParseClientFeatures_Mobile(t *testing.T) {
 	if f := parseClientFeatures([]string{"mobile"}); f.forums {
 		t.Error("mobile turned on forums")
 	}
+	if f := parseClientFeatures([]string{"call_sync"}); !f.callSync || f.mobile || f.forums {
+		t.Errorf("call_sync parsed as %+v", f)
+	}
+	if parseClientFeatures([]string{"forums", "mobile"}).callSync {
+		t.Error("call_sync turned on without being declared")
+	}
 }
 
 // mobileConn is a stamped connection for the merge tests.

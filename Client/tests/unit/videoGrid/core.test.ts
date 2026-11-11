@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/videoGridMocks";
 import { cascadedDeclaration } from "../../helpers/app-css";
-import { computeGridLayout, type VideoGridComponent } from "../../../src/components/VideoGrid";
+import {
+  computeGridLayout,
+  type VideoGridComponent,
+} from "../../../src/features/voice/videoGrid/VideoGrid";
 import {
   addAudioTile,
   fakeStream,

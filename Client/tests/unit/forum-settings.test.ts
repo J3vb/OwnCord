@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { createEditChannelModal } from "@components/EditChannelModal";
+import { createEditChannelModal } from "../../src/features/channels/editChannelDialog";
 import { ApiClientError } from "@lib/api";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { Permission, type ForumSettings, type ForumSettingsBody } from "@lib/types";
@@ -71,6 +71,9 @@ describe("forum settings model", () => {
       emoji: "",
     }));
     expect(validateDraft({ ...d, tags: many })?.kind).toBe("count");
+    expect(validateDraft({ ...d, requireTag: true, tags: [] })?.kind).toBe("requireTag");
+    expect(validateDraft({ ...d, requireTag: true })).toBeNull();
+    expect(validateDraft({ ...d, requireTag: false, tags: [] })).toBeNull();
   });
 
   it("merges a tag another admin added and drops one they removed, keeping local edits", () => {

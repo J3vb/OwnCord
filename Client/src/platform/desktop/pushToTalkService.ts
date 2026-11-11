@@ -138,6 +138,96 @@ async function initPtt(): Promise<void> {
   await startBinding(vk, false);
 }
 
+/** A saved key the backend no longer accepts would leave PTT silently dead
+ *  with the key still shown in Settings; clear it instead. */
+function forgetRejectedKey(attempt: PttBinding, vk: number, err: unknown): void {
+  if (!isCurrent(attempt) || !isUnsupportedKeyError(err)) return;
+  savePref("pttVk", 0);
+  log.warn("Saved Push to Talk key is not supported; cleared", { vk });
+}
+
+/** Surface a backend polling-thread panic: no further ptt-state events can
+ *  ever arrive afterward, so a gate the last release closed would otherwise
+ *  be stranded with no way to open it. */
+function onPttError(attempt: PttBinding, reason: string): void {
+  if (!isCurrent(attempt)) return;
+  log.warn("PTT polling thread stopped unexpectedly", { error: reason });
+  dropBinding(attempt);
+}
+
+/** One press or release, captured when its event arrived. */
+type VoiceState = ReturnType<typeof voiceStore.getState>;
+
+interface PttEdge {
+  attempt: PttBinding;
+  version: number;
+  edge: number;
+  channelId: NonNullable<VoiceState["currentChannelId"]>;
+  joinedAt: VoiceState["joinedAt"];
+  pressed: boolean;
+}
+
+function applyEdge(edgeInfo: PttEdge, setPttGated: (gated: boolean) => void): void {
+  const { attempt, version, edge: currentEdge, channelId, joinedAt, pressed } = edgeInfo;
+  const state = voiceStore.getState();
+  if (
+    !isCurrent(attempt, version) ||
+    currentEdge !== edge ||
+    state.currentChannelId !== channelId ||
+    state.joinedAt !== joinedAt
+  )
+    return;
+  setPttGated(!pressed);
+  log.debug(pressed ? "PTT pressed — gate open" : "PTT released — gate closed");
+}
+
+function onPttState(attempt: PttBinding, supported: boolean, pressed: boolean): void {
+  if (!isCurrent(attempt) || !supported) return;
+  // Only toggle mute when in a voice channel
+  const { currentChannelId: channelId, joinedAt } = voiceStore.getState();
+  if (channelId === null) return;
+  const edgeInfo: PttEdge = {
+    attempt,
+    version: attempt.generation,
+    edge: ++edge,
+    channelId,
+    joinedAt,
+    pressed,
+  };
+  // A newer edge supersedes a release still waiting out its delay; the
+  // edge guard in applyEdge already drops it, this just frees the timer.
+  clearTimeout(releaseTimer);
+  // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is
+  // loaded lazily so it stays out of the startup path. In a voice channel
+  // the module is necessarily already loaded, so this import resolves
+  // from the module cache in a microtask.
+  void import("@lib/voice/livekitSession")
+    .then(({ setPttGated }) => {
+      // A release keeps transmitting for the saved delay, so the
+      // tail of a word is not cut; a press opens at once.
+      const delay = pressed ? 0 : pttReleaseDelayMs();
+      const apply = (): void => applyEdge(edgeInfo, setPttGated);
+      if (delay > 0) releaseTimer = setTimeout(apply, delay);
+      else apply();
+    })
+    .catch((e) => log.warn("Failed to apply PTT gate", e));
+}
+
+/** Startup may still be checking native readiness when auto-join opens a
+ *  call. Reconcile that call once idle-key polling becomes available. */
+async function reconcileStartedBinding(
+  attempt: PttBinding,
+  initialState: VoiceState,
+  gateMidCall: boolean,
+  supported: boolean,
+): Promise<void> {
+  const state = voiceStore.getState();
+  const joinedDuringStart =
+    state.currentChannelId !== initialState.currentChannelId ||
+    state.joinedAt !== initialState.joinedAt;
+  if ((gateMidCall || joinedDuringStart) && supported) await gateBoundMic(attempt);
+}
+
 async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
   watchGlobalKeys();
   releaseListeners(binding);
@@ -163,12 +253,7 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
     try {
       await invoke("ptt_set_key", { vkCode: vk });
     } catch (err) {
-      // A saved key the backend no longer accepts would leave PTT silently
-      // dead with the key still shown in Settings; clear it instead.
-      if (isCurrent(attempt) && isUnsupportedKeyError(err)) {
-        savePref("pttVk", 0);
-        log.warn("Saved Push to Talk key is not supported; cleared", { vk });
-      }
+      forgetRejectedKey(attempt, vk, err);
       throw err;
     }
     if (!isCurrent(attempt)) return;
@@ -184,55 +269,15 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
       log.warn("PTT key polling unsupported on this platform — mic will not be gated at join");
     }
 
-    // Surface a backend polling-thread panic: no further ptt-state events can
-    // ever arrive afterward, so a gate the last release closed would
-    // otherwise be stranded with no way to open it.
-    const errorUnlisten = await listen<string>("ptt-error", (event) => {
-      if (!isCurrent(attempt)) return;
-      log.warn("PTT polling thread stopped unexpectedly", { error: event.payload });
-      dropBinding(attempt);
-    });
+    const errorUnlisten = await listen<string>("ptt-error", (event) =>
+      onPttError(attempt, event.payload),
+    );
     if (!retainListener(attempt, errorUnlisten)) return;
 
     // Listen for press/release events
-    const unsub = await listen<boolean>("ptt-state", (event) => {
-      if (!isCurrent(attempt) || !supported) return;
-      // Only toggle mute when in a voice channel
-      const { currentChannelId: channelId, joinedAt } = voiceStore.getState();
-      if (channelId === null) return;
-      const version = attempt.generation;
-      const currentEdge = ++edge;
-
-      const pressed = event.payload;
-      // A newer edge supersedes a release still waiting out its delay; the
-      // edge guard below already drops it, this just frees the timer.
-      clearTimeout(releaseTimer);
-      // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is
-      // loaded lazily so it stays out of the startup path. In a voice channel
-      // the module is necessarily already loaded, so this import resolves
-      // from the module cache in a microtask.
-      void import("@lib/voice/livekitSession")
-        .then(({ setPttGated }) => {
-          const apply = (): void => {
-            const state = voiceStore.getState();
-            if (
-              !isCurrent(attempt, version) ||
-              currentEdge !== edge ||
-              state.currentChannelId !== channelId ||
-              state.joinedAt !== joinedAt
-            )
-              return;
-            setPttGated(!pressed);
-            log.debug(pressed ? "PTT pressed — gate open" : "PTT released — gate closed");
-          };
-          // A release keeps transmitting for the saved delay, so the
-          // tail of a word is not cut; a press opens at once.
-          const delay = pressed ? 0 : pttReleaseDelayMs();
-          if (delay > 0) releaseTimer = setTimeout(apply, delay);
-          else apply();
-        })
-        .catch((e) => log.warn("Failed to apply PTT gate", e));
-    });
+    const unsub = await listen<boolean>("ptt-state", (event) =>
+      onPttState(attempt, supported, event.payload),
+    );
     if (!retainListener(attempt, unsub)) return;
 
     // Subscribe before starting: the poller may report a press or fail as
@@ -242,13 +287,7 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
     if (!isCurrent(attempt)) return;
     attempt.ready = true;
     setPttPollingLive(supported);
-    const state = voiceStore.getState();
-    // Startup may still be checking native readiness when auto-join opens
-    // a call. Reconcile that call once idle-key polling becomes available.
-    const joinedDuringStart =
-      state.currentChannelId !== initialState.currentChannelId ||
-      state.joinedAt !== initialState.joinedAt;
-    if ((gateMidCall || joinedDuringStart) && supported) await gateBoundMic(attempt);
+    await reconcileStartedBinding(attempt, initialState, gateMidCall, supported);
     log.info("PTT started", { vk, name: vkName(vk) });
   } catch (err) {
     // Not in Tauri environment (dev mode), or the backend rejected a command.

@@ -43,7 +43,7 @@ vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
-vi.mock("@lib/voice/screenShare", () => ({
+vi.mock("../../src/features/voice/screenShare", () => ({
   rollbackPendingVideo: vi.fn(() => undefined),
 }));
 vi.mock("@lib/ui/toast", () => ({

@@ -1,5 +1,5 @@
 import { afterEach, vi } from "vitest";
-import { createDmSidebar, type DmConversation } from "@components/DmSidebar";
+import { createDmSidebar, type DmConversation } from "../../src/features/direct-messages/DmSidebar";
 import { useMountContainer } from "./mountContainer";
 
 type DmSidebarOpts = Partial<Parameters<typeof createDmSidebar>[0]>;

@@ -145,6 +145,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
       s("voiceAudio.screenQualityDesc"),
       s("voiceAudio.screenFps"),
       s("voiceAudio.screenFpsDesc"),
+      s("voiceAudio.screenBackupLayer"),
+      s("voiceAudio.screenBackupLayerDesc"),
       s("voiceAudio.videoCodec"),
       s("voiceAudio.videoCodecDesc"),
     ),
@@ -161,6 +163,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     ...(!isLinuxDesktop() ? [voiceText("audio.buffer.label"), voiceText("audio.buffer.desc")] : []),
   ],
   "Text & Images": () => [
+    ...(isAndroidApp() ? [s("images.dataSaver.label"), s("images.dataSaver.desc")] : []),
     s("images.linkPreview.label"),
     s("images.linkPreview.desc"),
     s("images.embeds.label"),

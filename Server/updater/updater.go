@@ -1,5 +1,5 @@
-// Package updater checks GitHub Releases for server updates and manages
-// binary downloads with checksum verification.
+// Package updater checks GitHub Releases for server updates and downloads
+// checksum- and signature-verified binaries.
 package updater
 
 import (
@@ -25,30 +25,23 @@ const (
 	defaultBaseURL = "https://api.github.com"
 	cacheTTL       = 1 * time.Hour
 
-	// maxFetchBytes caps the body read for checksum/signature files so a
-	// malicious or corrupted asset cannot exhaust memory.
+	// maxFetchBytes caps checksum/signature bodies so a bad asset cannot exhaust memory.
 	maxFetchBytes = config.MaxMessageBytes
 	errorCacheTTL = 5 * time.Minute
-	// fetchTimeout bounds an outbound metadata fetch once detached from the
-	// caller's context (see detachFetch); it matches NewUpdater's http.Client
-	// timeout.
+	// fetchTimeout bounds a metadata fetch once detached from the caller's context (see detachFetch).
 	fetchTimeout = 30 * time.Second
-	// metadataClientTimeout bounds a whole metadata exchange (release lookup,
-	// checksum and manifest files), not the asset download (downloadHTTPClient).
+	// metadataClientTimeout bounds a whole metadata exchange, not the asset download.
 	metadataClientTimeout = 30 * time.Second
-	// responseHeaderTimeout bounds the wait for response headers, so a server
-	// that accepts the connection and says nothing is abandoned.
+	// responseHeaderTimeout abandons a server that accepts the connection and stays silent.
 	responseHeaderTimeout = 30 * time.Second
-	// defaultDownloadStallTimeout abandons an asset download that has received
-	// no body bytes for this long.
+	// defaultDownloadStallTimeout abandons a download with no body bytes for this long.
 	defaultDownloadStallTimeout = 60 * time.Second
 	checksumAsset               = "checksums.sha256"
 	manifestAsset               = "server-update-manifest.json"
 	manifestSigAsset            = manifestAsset + ".sig"
 
-	// The four published server assets. The amd64 pair's names are frozen:
-	// servers deployed before arm64 existed match them exactly, so renaming
-	// either would strand every one of them on its current version.
+	// The amd64 asset names are frozen: servers deployed before arm64 existed match
+	// them exactly, so renaming would strand them on their current version.
 	windowsServerBinary      = "chatserver.exe"
 	linuxServerArchive       = "chatserver-linux-amd64.tar.gz"
 	windowsServerArm64Binary = "chatserver-windows-arm64.exe"
@@ -77,7 +70,6 @@ type Asset struct {
 	DownloadURL string `json:"download_url"`
 }
 
-// releaseResponse mirrors the subset of GitHub's release API we need.
 type releaseResponse struct {
 	TagName string          `json:"tag_name"`
 	Body    string          `json:"body"`
@@ -85,7 +77,6 @@ type releaseResponse struct {
 	Assets  []assetResponse `json:"assets"`
 }
 
-// assetResponse mirrors a single release asset from the GitHub API.
 type assetResponse struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
@@ -109,8 +100,7 @@ type Updater struct {
 	mu             syncutil.Mutex
 	httpClient     *http.Client
 	signingKeyText string
-	// downloadStallTimeout aborts an asset download when no body bytes arrive
-	// for this long. Zero means defaultDownloadStallTimeout.
+	// downloadStallTimeout aborts a download with no body bytes for this long; zero means the default.
 	downloadStallTimeout time.Duration
 }
 
@@ -119,8 +109,7 @@ var (
 	sharedTransport     atomic.Pointer[http.Transport]
 )
 
-// CloseIdleConnections closes the idle connections of the transport every
-// Updater shares. It is safe to call before any Updater exists.
+// CloseIdleConnections closes the idle connections of the shared transport; safe before any Updater exists.
 func CloseIdleConnections() {
 	if t := sharedTransport.Load(); t != nil {
 		t.CloseIdleConnections()
@@ -136,11 +125,9 @@ func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Update
 		repoName:       repoName,
 		signingKeyText: defaultServerSignaturePublicKey,
 	}
-	// Each redirect hop passes the same host check as the first request. One
-	// transport is shared by every Updater so its idle connections can be
-	// released together (CloseIdleConnections): clone the default transport, or
-	// build an equivalent one if the global default was replaced. Built here, in
-	// the inventoried egress site (invariants.EgressAllow), not in a helper.
+	// One transport is shared by every Updater so CloseIdleConnections can release
+	// them together; it is built here, in the inventoried egress site
+	// (invariants.EgressAllow), and every redirect hop passes the same host check.
 	sharedTransportOnce.Do(func() {
 		var transport *http.Transport
 		if base, ok := http.DefaultTransport.(*http.Transport); ok {
@@ -182,8 +169,7 @@ func (u *Updater) SetBaseURL(url string) {
 	u.baseURL = url
 }
 
-// ensureVPrefix returns the version string with a "v" prefix for semver
-// comparison. If it already has one, it is returned unchanged.
+// ensureVPrefix returns v with a "v" prefix for semver comparison.
 func ensureVPrefix(v string) string {
 	if strings.HasPrefix(v, "v") {
 		return v
@@ -191,7 +177,6 @@ func ensureVPrefix(v string) string {
 	return "v" + v
 }
 
-// apiBaseURL returns the effective base URL for GitHub API requests.
 func (u *Updater) apiBaseURL() string {
 	if u.baseURL != "" {
 		return u.baseURL
@@ -199,40 +184,27 @@ func (u *Updater) apiBaseURL() string {
 	return defaultBaseURL
 }
 
-// detachFetch returns a context carrying ctx's values but not its
-// cancellation, bounded by fetchTimeout.
-//
-// The release and text-asset caches are process-wide and shared by the
-// unauthenticated client-update endpoint and the owner-only admin update
-// handlers, so one caller's fetch outcome is replayed to every other caller.
-// Driving the fetch from the caller's own context would let an unauthenticated
-// client abort its request and have the resulting context.Canceled cached as a
-// failure for errorCacheTTL, blocking update checks for everyone. Detached,
-// only upstream-derived errors can reach the cache, and a fetch in flight
-// still fills the success cache if its caller walks away.
+// detachFetch returns a context carrying ctx's values but not its cancellation,
+// bounded by fetchTimeout. The release and text-asset caches are process-wide
+// and shared by unauthenticated and owner-only callers, so driving a fetch from
+// one caller's context would let an aborted request cache context.Canceled as a
+// failure for errorCacheTTL and block update checks for everyone.
 func detachFetch(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), fetchTimeout)
 }
 
-// CheckForUpdate queries GitHub for the latest release and compares it
-// against the current version. Results are cached for cacheTTL; errors
-// are cached for errorCacheTTL to avoid spamming the GitHub API. The outbound
-// fetch is detached from ctx (see detachFetch), so cancelling ctx does not
-// abort it or write a failure into the shared cache.
+// CheckForUpdate compares the latest GitHub release with the current version.
+// Results are cached for cacheTTL and errors for errorCacheTTL; the fetch is
+// detached from ctx, so cancelling it never writes a failure into the shared cache.
 func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
 	if info, err, ok := u.lookupRelease(time.Now()); ok {
 		return info, err
 	}
 
-	// Coalesce concurrent misses: when the cache TTL expires under load, every
-	// caller would otherwise issue its own GitHub fetch. One flight runs and
-	// the rest wait on its result, like FetchTextAssetCached's textAssetSF. The
-	// flight is detached from the leader's ctx (see detachFetch) so a leader
-	// that aborts its request cannot fail its followers or cache its own
-	// context.Canceled.
+	// Coalesce concurrent misses into one flight, detached from the leader's ctx so
+	// an aborted leader cannot fail followers or cache its own context.Canceled.
 	v, err, _ := u.releaseSF.Do("latest-release", func() (any, error) {
 		now := time.Now()
-		// Re-check: another flight may have filled the cache while we queued.
 		if info, err, ok := u.lookupRelease(now); ok {
 			return info, err
 		}
@@ -263,10 +235,8 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
 	return v.(UpdateInfo), nil
 }
 
-// lookupRelease returns a live cached release or cached error, if either
-// exists. The third return value reports whether the cache was live (a
-// caller should return the first two values directly); a false miss means
-// the caller must fetch.
+// lookupRelease returns a live cached release or error; the bool reports a live
+// cache hit (false means the caller must fetch).
 func (u *Updater) lookupRelease(now time.Time) (UpdateInfo, error, bool) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -279,8 +249,6 @@ func (u *Updater) lookupRelease(now time.Time) (UpdateInfo, error, bool) {
 	return UpdateInfo{}, nil, false
 }
 
-// fetchLatestRelease queries the GitHub API for the latest release and
-// builds the UpdateInfo struct.
 func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", u.apiBaseURL(), u.repoOwner, u.repoName)
 
@@ -311,14 +279,12 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 	currentV := ensureVPrefix(u.currentVersion)
 	latestV := ensureVPrefix(release.TagName)
 
-	// semver.Compare returns -1, 0, or +1. Update available when current < latest.
 	updateAvailable := semver.Compare(currentV, latestV) < 0
 
 	var downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL string
 	assets := make([]Asset, 0, len(release.Assets))
 	wantBinary := serverDownloadAssetName(runtime.GOOS, runtime.GOARCH)
-	// Paired with wantBinary, never fixed: a Windows arm64 host that matched
-	// the amd64 signature would fail verification on every update.
+	// Paired with wantBinary: a Windows arm64 host matching the amd64 signature would fail verification.
 	wantSignature := serverSignatureAssetName(runtime.GOOS, runtime.GOARCH)
 	for _, asset := range release.Assets {
 		assets = append(assets, Asset{
@@ -357,11 +323,9 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 	}, nil
 }
 
-// hasRequiredServerAssetsFor reports whether every asset the goos-specific
-// verify path consumes is present. The detached binary signature
-// (chatserver.exe.sig) is Windows-only: the Linux tarball path verifies via the
-// signed manifest + checksum, so requiring it there would block Linux updates
-// on a release missing a Windows-only asset.
+// hasRequiredServerAssetsFor reports whether every asset the goos verify path
+// consumes is present. The binary signature is Windows-only (Linux verifies via
+// the signed manifest + checksum), so requiring it there would block Linux updates.
 func hasRequiredServerAssetsFor(goos, downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL string) bool {
 	if goos == "windows" && signatureURL == "" {
 		return false

@@ -721,10 +721,10 @@ describe("eslint-rules", () => {
         // Same rank (lib and platform are peers), lower rank, and within a layer.
         { code: `import { a } from "../platform/desktop";`, filename: lib },
         { code: `import { a } from "./logger";`, filename: lib },
-        { code: `import "@styles/app.css";`, filename: src("components/Foo.ts") },
+        { code: `import "@styles/app.css";`, filename: src("features/Foo.ts") },
         { code: `import { a } from "@lib/dom";`, filename: src("stores/auth.store.ts") },
         {
-          code: `import { a } from "../components/Foo";`,
+          code: `import { a } from "../chat/Foo";`,
           filename: src("features/voice/x.ts"),
         },
         // main.ts and app/ sit above everything, including platform/.
@@ -856,13 +856,13 @@ describe("eslint-rules", () => {
         },
         {
           code: `import { x } from "../app/session";`,
-          filename: src("components/Foo.ts"),
-          errors: [error("components/Foo.ts", "app/session.ts", "components", "app")],
+          filename: src("pages/Foo.ts"),
+          errors: [error("pages/Foo.ts", "app/session.ts", "pages", "app")],
         },
         {
           code: `import { p } from "@pages/MainPage";`,
-          filename: src("components/Foo.ts"),
-          errors: [error("components/Foo.ts", "pages/MainPage.ts", "components", "pages")],
+          filename: src("features/Foo.ts"),
+          errors: [error("features/Foo.ts", "pages/MainPage.ts", "features", "pages")],
         },
         // Count-keyed: a second site beyond the listed count is reported, the
         // first is covered. The baseline never lists another importer's edge.

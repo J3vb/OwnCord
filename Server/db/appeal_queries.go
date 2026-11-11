@@ -9,11 +9,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Appeal is a row of the appeals table. DecidedByToken is filled by erasure
-// (bare id plus token): a zero id plus a non-empty token means the deciding
-// moderator erased their account. PublicID is the only identifier exposed
-// outside the server, because sequential ids would let a moderator infer a
-// hidden appeal from a gap.
+// Appeal is a row of the appeals table. DecidedByToken is filled by erasure (zero id
+// plus token). PublicID is the only identifier exposed outside the server, so
+// sequential ids cannot leak a hidden appeal.
 type Appeal struct {
 	ID             int64
 	PublicID       string
@@ -29,8 +27,7 @@ type Appeal struct {
 	DecidedAt      *string
 }
 
-// AppealSummary is one row of the appellant's own view, which never shows the
-// assignee or who decided.
+// AppealSummary is one row of the appellant's own view, without assignee or decider.
 type AppealSummary struct {
 	ID           int64
 	PublicID     string
@@ -66,9 +63,8 @@ func appealFromRow(r dbgen.Appeal) Appeal {
 	}
 }
 
-// FindAppealForAction returns the appeal id for an action, or 0, nil when none
-// exists. It is only a fast-path check; InsertAppeal's UNIQUE(action_id)
-// mapping is what enforces one appeal per action.
+// FindAppealForAction returns the appeal id for an action, or 0; a fast path, since
+// UNIQUE(action_id) enforces it.
 func (d *DB) FindAppealForAction(ctx context.Context, actionID int64) (int64, error) {
 	id, err := d.q.FindAppealForAction(ctx, actionID)
 	if err != nil {
@@ -80,14 +76,13 @@ func (d *DB) FindAppealForAction(ctx context.Context, actionID int64) (int64, er
 	return id, nil
 }
 
-// appealInsertPreHookForTest runs just before InsertAppeal's INSERT so a test
-// can hold two goroutines in flight at the same point. Test-only.
+// appealInsertPreHookForTest runs before InsertAppeal's INSERT so a test can hold two
+// goroutines at the same point. Test-only.
 var appealInsertPreHookForTest func()
 
 // InsertAppeal files a new appeal; the caller generates publicID. A
-// UNIQUE(action_id) violation returns ErrConflict. The INSERT's WHERE EXISTS
-// guard turns an action erased since the caller's lookup into sql.ErrNoRows,
-// mapped to ErrNotFound.
+// UNIQUE(action_id) violation returns ErrConflict; the WHERE EXISTS guard turns
+// an erased action into ErrNotFound.
 func (d *DB) InsertAppeal(ctx context.Context, publicID string, actionID, appellantID int64, body string) (int64, error) {
 	if appealInsertPreHookForTest != nil {
 		appealInsertPreHookForTest()
@@ -120,8 +115,7 @@ func (d *DB) GetAppeal(ctx context.Context, id int64) (*Appeal, error) {
 	return &a, nil
 }
 
-// GetAppealByPublicID resolves the opaque public id every route parameter
-// and API response carries to the appeal row, or ErrNotFound.
+// GetAppealByPublicID resolves the opaque public id to the appeal row, or ErrNotFound.
 func (d *DB) GetAppealByPublicID(ctx context.Context, publicID string) (*Appeal, error) {
 	r, err := d.q.GetAppealByPublicID(ctx, publicID)
 	if err != nil {
@@ -150,8 +144,8 @@ func (d *DB) ListAppealsMine(ctx context.Context, appellantID int64) ([]AppealSu
 	return out, nil
 }
 
-// ListAppealsQueue returns the moderation queue for one state filter: "open",
-// "assigned", "decided" (both terminal states), or "" for open plus assigned.
+// ListAppealsQueue returns one state's queue: "open", "assigned", "decided", or "" for
+// open plus assigned.
 func (d *DB) ListAppealsQueue(ctx context.Context, state string) ([]AppealQueueRow, error) {
 	build := func(rows []AppealQueueRow, err error) ([]AppealQueueRow, error) {
 		if err != nil {
@@ -199,10 +193,9 @@ func (d *DB) ListAppealsQueue(ctx context.Context, state string) ([]AppealQueueR
 	}
 }
 
-// AssignAppeal assigns assigneeID to appeal id, guarded on state,
-// observedAssigneeID (optimistic concurrency, like AssignReport) and
-// EXISTS(users). It returns false on a conflict and does no authority
-// re-check; AssignAppealTx is the service entry point.
+// AssignAppeal assigns assigneeID, guarded on state, observedAssigneeID (optimistic
+// concurrency, like AssignReport) and EXISTS(users); false on a conflict. No authority
+// re-check: AssignAppealTx is the service entry point.
 func (d *DB) AssignAppeal(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error) {
 	n, err := d.q.AssignAppeal(ctx, dbgen.AssignAppealParams{AssigneeID: assigneeID, ID: id, ObservedAssigneeID: observedAssigneeID})
 	if err != nil {
@@ -211,10 +204,9 @@ func (d *DB) AssignAppeal(ctx context.Context, id, assigneeID, observedAssigneeI
 	return n == 1, nil
 }
 
-// DecideAppeal is the guarded decide UPDATE alone, with no precheck and no
-// transaction; DecideAppealTx wraps it. It is exported so a test can prove the
-// UPDATE's own guard refuses a stale write, independent of
-// AppealObservedRowExists.
+// DecideAppeal is the guarded decide UPDATE alone, without precheck or
+// transaction (DecideAppealTx wraps it); exported so a test can prove its own guard
+// refuses a stale write.
 func (d *DB) DecideAppeal(ctx context.Context, id int64, observedState string, observedAssigneeID int64, newState string, decidedBy int64, note string) (bool, error) {
 	n, err := d.q.DecideAppeal(ctx, dbgen.DecideAppealParams{
 		NewState: newState, DecidedBy: decidedBy, DecisionNote: note, ID: id,
@@ -226,14 +218,10 @@ func (d *DB) DecideAppeal(ctx context.Context, id int64, observedState string, o
 	return n == 1, nil
 }
 
-// appealAssignInTxHook runs inside AssignAppealTx's transaction right after
-// BeginTx, before the fresh reads it guards, and receives that transaction's
-// Queries so a test can mutate state on the same tx. Test-only.
 var appealAssignInTxHook func(ctx context.Context, q *dbgen.Queries) error
 
-// appealSelfReviewCheck builds the closure AssignAppealTx and
-// forceReassignGuarded call inside their transaction to evaluate the
-// self-review eligibility test fresh. checkSelfReview false means always skip.
+// appealSelfReviewCheck builds the closure AssignAppealTx and forceReassignGuarded run
+// in their transaction to evaluate self-review eligibility fresh.
 func appealSelfReviewCheck(ctx context.Context, actorID, appellantID, permBit, adminBit int64) func(q *dbgen.Queries) (bool, error) {
 	return func(q *dbgen.Queries) (bool, error) {
 		eligible, err := q.EligibleModeratorExists(ctx, dbgen.EligibleModeratorExistsParams{
@@ -246,11 +234,9 @@ func appealSelfReviewCheck(ctx context.Context, actorID, appellantID, permBit, a
 	}
 }
 
-// AssignAppealTx is the plain (non-forced) assign path in its own transaction.
-// The acting moderator's authority (CanModerate bit, effective ban) is re-read
-// inside the same transaction as the write and refuses with ErrForbidden when
-// it no longer holds. With checkSelfReview the eligibility test also runs
-// fresh in that transaction.
+// AssignAppealTx is the plain assign path in its own transaction; it re-reads the
+// moderator's authority and refuses with ErrForbidden, and with checkSelfReview runs
+// the eligibility test fresh.
 func (d *DB) AssignAppealTx(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
 	checkSelfReview bool, appellantID, permBit, adminBit int64,
 	checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error) {
@@ -296,10 +282,8 @@ func (d *DB) AssignAppealTx(ctx context.Context, id, assigneeID, observedAssigne
 	return true, nil
 }
 
-// AssignAppealForced is the force-reassign path; see forceReassignGuarded in
-// report_queries.go. checkAuthority and the self-review test run in the same
-// transaction as the target's rank read; checkSelfReviewNeeded=false skips the
-// latter.
+// AssignAppealForced is the force-reassign path (forceReassignGuarded): checkAuthority
+// and the self-review test run in the same transaction as the target's rank read.
 func (d *DB) AssignAppealForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
 	checkSelfReviewNeeded bool, appellantID, permBit, adminBit int64,
 	checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error) {
@@ -312,8 +296,7 @@ func (d *DB) AssignAppealForced(ctx context.Context, id, assigneeID, observedAss
 	})
 }
 
-// WithdrawAppeal withdraws appeal id (appellant only, open or assigned). It
-// returns false on a conflict.
+// WithdrawAppeal withdraws appeal id (appellant only, open or assigned); false on a conflict.
 func (d *DB) WithdrawAppeal(ctx context.Context, id, appellantID int64) (bool, error) {
 	n, err := d.q.WithdrawAppeal(ctx, dbgen.WithdrawAppealParams{ID: id, AppellantID: appellantID})
 	if err != nil {
@@ -322,10 +305,9 @@ func (d *DB) WithdrawAppeal(ctx context.Context, id, appellantID int64) (bool, e
 	return n == 1, nil
 }
 
-// CountEligibleModerators counts every other user (excluding excludeActorID,
-// excludeAppellantID, id 0 and anyone effectively banned) whose role holds
-// permBit or adminBit. The acting moderator may decide their own appeal only
-// when it is zero. The bits are passed in so db does not import permissions.
+// CountEligibleModerators counts other users (not the actor, appellant, id 0 or the
+// effectively banned) whose role holds permBit or adminBit; the moderator may decide
+// their own appeal only when it is zero.
 func (d *DB) CountEligibleModerators(ctx context.Context, excludeActorID, excludeAppellantID, permBit, adminBit int64) (int64, error) {
 	n, err := d.q.CountUsersWithPermission(ctx, dbgen.CountUsersWithPermissionParams{
 		ExcludeActorID: excludeActorID, ExcludeAppellantID: excludeAppellantID, PermBit: permBit, AdminBit: adminBit,
@@ -336,8 +318,7 @@ func (d *DB) CountEligibleModerators(ctx context.Context, excludeActorID, exclud
 	return n, nil
 }
 
-// GetModerationAction returns one moderation_actions row by id, or
-// ErrNotFound.
+// GetModerationAction returns one moderation_actions row by id, or ErrNotFound.
 func (d *DB) GetModerationAction(ctx context.Context, id int64) (*ModerationAction, error) {
 	r, err := d.q.GetModerationActionByID(ctx, id)
 	if err != nil {

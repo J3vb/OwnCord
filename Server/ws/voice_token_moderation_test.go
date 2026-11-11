@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
@@ -77,28 +76,7 @@ func TestVoiceToken_ModerationRestrictsMicrophoneGrant(t *testing.T) {
 				if err != nil || state == nil {
 					t.Fatalf("voice state: %v", err)
 				}
-				lk := moderationTokenClient(t)
-				var reply []byte
-				if route == "refresh" {
-					deps.TokenGen = lk
-					result := handleVoiceTokenRefreshV2(ctx, VoiceTokenRefreshCmd{userID: 1}, ClientInfo{
-						UserID: 1, Username: "alice", VoiceChannelID: 100, VoiceJoinToken: state.JoinedAt,
-					}, deps)
-					if result.Error != nil {
-						t.Fatal(result.Error)
-					}
-					reply = result.Reply
-				} else {
-					h := newTestHubWith(t, HubOptions{DB: database, LiveKit: lk})
-					send := make(chan []byte, 8)
-					c := NewTestClient(h, 1, send)
-					c.user = &db.User{ID: 1, Username: "alice"}
-					c.voice.setState(100, state.JoinedAt)
-					if !h.voiceJoinGrantTokenTest(ctx, c, 100, state, "") {
-						t.Fatal("initial token mint refused")
-					}
-					reply = <-send
-				}
+				reply := mintVoiceGrantReply(t, route, moderationTokenClient(t), database, deps, state)
 				grant := moderationTokenGrant(t, reply)
 				for source, want := range map[livekit.TrackSource]bool{
 					livekit.TrackSource_MICROPHONE:         tc.microphone,

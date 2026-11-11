@@ -37,6 +37,7 @@ import {
   shareSettings,
 } from "./screenPicker";
 import { setScreenSourcePicker } from "./screenPickerSlot";
+import { savePref } from "../../../lib/prefs/preferences";
 
 const x11: NativeVoiceScreenSources = {
   portal: false,
@@ -79,7 +80,8 @@ describe("pickScreenSource", () => {
       capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
       maxBitrate: 6_000_000,
       maxFramerate: 30,
-      simulcast: true,
+      // One layer: the backup copy is off by default.
+      simulcast: false,
     });
   });
 
@@ -321,13 +323,24 @@ describe("shareSettings", () => {
       capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
       maxBitrate: 6_000_000,
       maxFramerate: 30,
-      simulcast: true,
+      simulcast: false,
     });
     expect(shareSettings("source", 120)).toMatchObject({
       capture: { fps: 120, maxWidth: 0, maxHeight: 0 },
       maxFramerate: 120,
       simulcast: false,
     });
+  });
+});
+
+describe("shareSettings with the backup copy on", () => {
+  afterEach(() => localStorage.clear());
+
+  it("publishes Medium and High with the lower layer, and High at 120 fps without", () => {
+    savePref("screenShareBackupLayer", true);
+    expect(shareSettings("high", 30).simulcast).toBe(true);
+    expect(shareSettings("medium", 30).simulcast).toBe(true);
+    expect(shareSettings("high", 120).simulcast).toBe(false);
   });
 });
 

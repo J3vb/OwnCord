@@ -7,13 +7,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// afterHubStart runs the wiring that needs the built runtime: the admin panel's
-// runtime log-level card, the boot-status record, then the batched connection
-// writes (installConnWrites). It lives beside the controller to keep
-// lifecycle.go inside its file-size budget.
-//
-// A nil LevelVar (an App built without main's wiring, as some tests do) leaves
-// api.Runtime.LogLevel nil, which the admin endpoints report as 503.
+// afterHubStart wires what needs the built runtime: the log-level card, the
+// boot-status record, then the batched connection writes.
 func (a *App) afterHubStart(services *service.Services) {
 	if a.deps.LogLevelVar != nil {
 		lvl := admin.NewLogLevelController(a.deps.LogLevelVar, a.deps.LogBaseLevel)

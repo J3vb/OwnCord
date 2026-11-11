@@ -24,6 +24,7 @@ import { retentionNotice } from "@lib/types";
 import { renderConnect } from "./connectRoute";
 import { serverInfoFor } from "./serverHealth";
 import type { PageId } from "./context";
+import { startNetworkMonitoring } from "./networkStartup";
 
 const log = createLogger("main");
 
@@ -31,6 +32,7 @@ let api: ApiClient;
 let ws: WsClient;
 let appEl: HTMLElement;
 let profileManager: ProfileManager;
+let networkReady: Promise<void> | null = null;
 
 // The active page. `currentPage` further down holds the mounted page
 // *component*, so the page id needs its own name.
@@ -67,6 +69,7 @@ export function configureRouter(
   ws = wsClient;
   appEl = appElement;
   profileManager = profiles;
+  networkReady = startNetworkMonitoring();
 }
 
 /** The id of the page that is showing (or about to). */
@@ -212,7 +215,7 @@ async function renderPage(pageId: PageId): Promise<void> {
     // soon as the WS connect succeeds, so this normally resolves from the
     // module cache.
     try {
-      const { createMainPage } = await import("@pages/MainPage");
+      const [{ createMainPage }] = await Promise.all([import("@pages/MainPage"), networkReady]);
       // A newer navigation may have superseded this one while the chunk loaded;
       // mounting now would fight the page that navigation rendered.
       if (!isCurrentNavigation()) return;

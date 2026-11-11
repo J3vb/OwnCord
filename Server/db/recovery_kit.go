@@ -11,8 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// RecoveryKit is the server's whole knowledge of an account's recovery kit:
-// an argon2id verifier, when it was issued, and whether it was spent.
+// RecoveryKit is an account's recovery kit: an argon2id verifier, issue time and spent flag.
 type RecoveryKit struct {
 	UserID    int64
 	Verifier  string `json:"-"`
@@ -20,12 +19,11 @@ type RecoveryKit struct {
 	UsedAt    *string
 }
 
-// ErrRecoveryKitSpent is RedeemRecoveryKit finding no unspent kit for the
-// account — already used, never issued, or replaced since the compare.
+// ErrRecoveryKitSpent is RedeemRecoveryKit finding no unspent kit (used, never issued,
+// or replaced).
 var ErrRecoveryKitSpent = errors.New("recovery kit already spent or absent")
 
-// UpsertRecoveryKit stores the verifier of a freshly issued kit, replacing
-// and un-spending any previous one: one active kit per account.
+// UpsertRecoveryKit stores a new kit's verifier, replacing and un-spending any previous one.
 func (d *DB) UpsertRecoveryKit(ctx context.Context, userID int64, verifier string) error {
 	if err := d.q.UpsertRecoveryKit(ctx, dbgen.UpsertRecoveryKitParams{
 		UserID:    userID,
@@ -57,13 +55,12 @@ func (d *DB) DeleteRecoveryKit(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// RedeemRecoveryKit is the whole state change of a successful recovery in
-// one transaction (data-lifecycle O8, axis A1): the kit is spent, the
-// password replaced, every session and API token of the account revoked and
-// the audit row written with both counts, or none of it. The consume is
-// conditional on the kit being unspent and still holding the verifier the
-// caller compared against, so two concurrent redemptions admit at most one
-// and a kit enrolled meanwhile stays; the loser gets ErrRecoveryKitSpent.
+// RedeemRecoveryKit is the whole state change of a successful recovery in one
+// transaction: spend the kit, replace the password, revoke every session and
+// API token and write the audit row with both counts, or none of it. The consume
+// is conditional on the kit being unspent and still holding the verifier the
+// caller compared, so concurrent redemptions admit at most one and a kit
+// enrolled meanwhile stays; the loser gets ErrRecoveryKitSpent.
 func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (sessionsRevoked int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -95,9 +92,8 @@ func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, verifier, newP
 		return 0, fmt.Errorf("RedeemRecoveryKit api tokens: %w", err)
 	}
 	tokensRevoked, _ := tokens.RowsAffected()
-	// A recovery by kit withdraws any owner-issued credential still
-	// outstanding for the account: the situation it was issued for
-	// is over.
+	// A recovery by kit withdraws any outstanding owner-issued credential; the situation
+	// it was issued for is over.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM recovery_assists WHERE user_id = ?`, userID); err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryKit withdraw credential: %w", err)
 	}

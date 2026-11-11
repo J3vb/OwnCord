@@ -11,16 +11,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// ModQueueBroadcaster is the hub capability the report routes need: notify
-// connected moderation-bit holders of a queue change (satisfied by *ws.Hub). It
-// takes the INTERNAL report id; the hub resolves the public id
-// (db.Report.PublicID).
-// BroadcastMemberBan/BroadcastChatBulkDeleted are the transport broadcasts the
-// queue's act route sends after a report-linked ban or removal commits, the same
-// calls the direct admin PATCH and purge routes make. Ban and removal have no
-// live-target notifier of their own (unlike Warn/Timeout's
-// ModerationService.notifyModAction), so without these acting through the queue
-// silently dropped both.
+// ModQueueBroadcaster is the hub capability the report routes need: notify moderation-bit holders of a queue
+// change (satisfied by *ws.Hub). It takes the INTERNAL report id; the hub resolves the public id.
+// BroadcastMemberBan/BroadcastChatBulkDeleted are the transport broadcasts the act route sends after a
+// report-linked ban or removal commits; those have no live-target notifier of their own, unlike Warn/Timeout.
 type ModQueueBroadcaster interface {
 	BroadcastModQueue(ctx context.Context, reportID int64, state string)
 	BroadcastMemberBan(userID int64)

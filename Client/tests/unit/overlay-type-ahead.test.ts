@@ -29,10 +29,10 @@ const h = vi.hoisted(() => {
   return { quick, search, fakeOverlay };
 });
 
-vi.mock("@components/QuickSwitcher", () =>
+vi.mock("../../src/features/navigation/QuickSwitcher", () =>
   h.quick.promise.then(() => ({ createQuickSwitcher: h.fakeOverlay("qs-input") })),
 );
-vi.mock("@components/SearchOverlay", () =>
+vi.mock("../../src/features/navigation/SearchOverlay", () =>
   h.search.promise.then(() => ({ createSearchOverlay: h.fakeOverlay("search-input") })),
 );
 

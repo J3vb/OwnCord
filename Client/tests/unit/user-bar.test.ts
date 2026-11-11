@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { authStore } from "@stores/auth.store";
 import { openSettings } from "@stores/ui.store";
-import { createUserBar } from "@components/UserBar";
+import { createUserBar } from "../../src/features/voice/UserBar";
 import {
   voiceStore,
   resetVoiceStore,

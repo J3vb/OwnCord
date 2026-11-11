@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCategoryNameModal, createDeleteCategoryModal } from "@components/CategoryModals";
+import {
+  createCategoryNameModal,
+  createDeleteCategoryModal,
+} from "../../src/features/channels/CategoryModals";
 import type { MountableComponent } from "@lib/text/safeRender";
 
 describe("category dialogs close on their backdrop", () => {

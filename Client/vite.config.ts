@@ -64,7 +64,6 @@ export default defineConfig({
     alias: {
       "@lib": resolve(import.meta.dirname, "src/lib"),
       "@stores": resolve(import.meta.dirname, "src/stores"),
-      "@components": resolve(import.meta.dirname, "src/components"),
       "@pages": resolve(import.meta.dirname, "src/pages"),
       "@styles": resolve(import.meta.dirname, "src/styles"),
     },

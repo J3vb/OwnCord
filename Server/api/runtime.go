@@ -15,56 +15,43 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// Runtime holds the process-level collaborators NewRouter mounts its routes
-// over. internal/app builds them (app.StartRuntime) and applies every pre-Run
-// setter in one place, so the hub has a single owner.
+// Runtime holds the process-level collaborators NewRouter mounts its routes over; internal/app builds them
+// (app.StartRuntime), so the hub has a single owner.
 type Runtime struct {
-	// Hub is already wired and running: StartRuntime starts its dispatch
-	// goroutine after the last pre-Run setter. Stopping it is the caller's job
-	// (App.Close's "hub" step).
+	// Already wired and running; stopping it is the caller's job (App.Close's "hub" step).
 	Hub *ws.Hub
-	// Limiter backs both the hub and every rate-limited route. One instance:
-	// it persists auth lockouts, so a second copy would split that state.
+	// Backs both the hub and every rate-limited route; one instance, since it persists auth lockouts.
 	Limiter *auth.RateLimiter
-	// Services is the shared service layer — the same instance the hub holds,
-	// so the permission cache the hub invalidates is the one the handlers read.
+	// The shared service layer, the same instance the hub holds, so the permission cache the hub invalidates
+	// is the one handlers read.
 	Services     *service.Services
 	VoiceEnabled bool
-	// SetupToken is required on the first-run setup request when non-empty
-	// (admin.SetupOptions.SetupToken). The app generates it per start.
+	// Required on the first-run setup request when non-empty (admin.SetupOptions.SetupToken); generated per
+	// start.
 	SetupToken string
 	LogLevel   *admin.LogLevelController
-	// MetricsWindows is the sampled ring behind the metrics endpoint's "windows"
-	// block. The app starts its sampler (App.startHub) and stops it before the
+	// The sampled ring behind the metrics "windows" block; the app starts its sampler and stops it before the
 	// hub. Nil leaves the block out.
 	MetricsWindows *metrics.Windows
-	// SystemStats is the CPU and memory sampler behind the admin Dashboard's
-	// health row. The app starts and stops it beside MetricsWindows. Nil
-	// leaves those figures null.
+	// The CPU and memory sampler behind the admin Dashboard's health row; nil leaves those figures null.
 	SystemStats *sysstats.Sampler
-	// LiveKitStats reads LiveKit's stats page for the Dashboard's LiveKit
-	// card; nil when voice.livekit_metrics_url is not set.
+	// Reads LiveKit's stats page for the Dashboard card; nil when voice.livekit_metrics_url is unset.
 	LiveKitStats *lkstats.Sampler
-	// Auth is the account service, built by StartRuntime over the hub (its
-	// AuthBroadcaster) and shared with the erasure runner. NewRouter only mounts
-	// it.
+	// The account service, built by StartRuntime over the hub and shared with the erasure runner; NewRouter
+	// only mounts it.
 	Auth *service.AuthService
-	// Storage is the one upload file store: the routes, the maintenance
-	// sweep and the erasure replay all use this instance. Nil when the store
-	// could not be opened (logged once by app.OpenStorage); the upload,
-	// avatar and emoji routes are then not mounted.
+	// The one upload file store, shared by routes, the maintenance sweep and erasure replay. Nil when it
+	// could not be opened; the upload, avatar and emoji routes are then not mounted.
 	Storage *storage.Storage
 	Updater *updater.Updater
-	// WebClient is the browser client bundle the portal serves when
-	// server.browser_client_enabled is on. Nil uses the one embedded
-	// in this binary (webclient.Assets); tests hand in an fstest.MapFS.
+	// The browser client bundle served when server.browser_client_enabled is on; nil uses the embedded one,
+	// tests pass an fstest.MapFS.
 	WebClient fs.FS
 	Lifecycle // the app's job group and shutdown signal (setup_options.go)
 }
 
-// requireBuiltRuntime refuses a Runtime that StartRuntime did not build: the
-// router only mounts, so a missing collaborator is a wiring bug to fail on at
-// start-up. Storage is not checked; nil is the degraded "no file storage" state.
+// requireBuiltRuntime refuses a Runtime StartRuntime did not build: a missing collaborator is a wiring bug
+// to fail on at start-up. Storage is not checked; nil is the degraded "no file storage" state.
 func requireBuiltRuntime(rt Runtime) {
 	var missing []string
 	if rt.Hub == nil {

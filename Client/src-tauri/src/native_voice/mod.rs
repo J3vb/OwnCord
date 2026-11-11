@@ -23,7 +23,9 @@
 pub mod app_sound;
 pub mod camera;
 pub mod capture;
+mod codecs;
 mod hotplug;
+mod keys;
 pub mod mic_test;
 pub mod playout;
 pub mod screen;
@@ -33,13 +35,18 @@ pub mod stats;
 pub mod stream_format;
 pub mod video;
 
+#[cfg(test)]
+use codecs::{decode_codec_name, decode_names, is_h264_mime, is_vp9_mime};
+pub use codecs::{probe_video_codecs, VideoCodecs};
+use keys::wipe;
 use mic_test::{
     level_event, MicTest, MicTestEnvelope, MicTestEvent, MicTestOptions, MicTestUpdate,
     MIC_TEST_EVENT, MIC_TEST_IN_CALL,
 };
 use serde::Serialize;
 use session::{
-    AudioOptions, CameraOptions, Event, NativeSession, QualityError, Resources, ScreenOptions,
+    release_blocking, AudioOptions, CameraOptions, Event, NativeSession, QualityError, Resources,
+    Retired, ScreenOptions, VideoKind,
 };
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::Mutex;
@@ -168,10 +175,11 @@ impl Inner {
     fn call_camera_preview(&self) -> Option<(String, (u32, u32))> {
         self.session.as_ref().and_then(|(_, s)| s.camera_preview())
     }
-    /// Supersede any in-flight start and release the current preview.
-    fn clear_standalone(&mut self) {
+    /// Supersede any in-flight start and take the current preview out, for
+    /// the caller to release off the runtime.
+    fn clear_standalone(&mut self) -> Option<Standalone> {
         self.standalone_generation += 1;
-        self.standalone = None;
+        self.standalone.take()
     }
 }
 
@@ -189,17 +197,20 @@ pub struct NativeVoiceState {
     /// held only to test or fill the slot, separate from `inner`, the tokio
     /// mutex held across awaits: the two are never taken together.
     devices_watch: std::sync::Mutex<Option<hotplug::DevicesWatch>>,
+    /// Serialise the camera commands (start, change, stop, the settings
+    /// preview) and the screen-share commands, each held through the release
+    /// of a stopped capture, so a start issued behind a stop waits until the
+    /// old device or portal session is free. Lock order: a gate, then
+    /// `inner`; `inner` is never held while taking a gate. A gate is dropped
+    /// before awaiting a first frame or a portal dialog, so a stop can end
+    /// that wait. Microphone, device and leave commands never take a gate.
+    camera_gate: Mutex<()>,
+    screen_gate: Mutex<()>,
 }
 
 impl NativeVoiceState {
     pub fn new() -> Self {
         Self::default()
-    }
-}
-
-fn wipe(key: &mut Option<Vec<u8>>) {
-    if let Some(mut k) = key.take() {
-        k.iter_mut().for_each(|b| *b = 0);
     }
 }
 
@@ -218,64 +229,6 @@ fn key_slot(slot: Option<i32>) -> Result<i32, String> {
         Ok(slot)
     } else {
         Err(format!("key slot {slot} out of range"))
-    }
-}
-
-impl Inner {
-    /// Record a room key: staged in `slot` (received with only) or sent
-    /// with at once. Staging into the slot being sent on replaces the sending
-    /// key, so that is a send-at-once.
-    fn install_key(&mut self, material: Vec<u8>, slot: i32, stage: bool) -> bool {
-        let stage = stage && self.key.is_some() && slot != self.key_slot;
-        if stage {
-            if let Some((_, mut old)) = self.staged.take() {
-                old.iter_mut().for_each(|b| *b = 0);
-            }
-            self.staged = Some((slot, material));
-        } else {
-            if matches!(&self.staged, Some((s, _)) if *s == slot) {
-                let mut old = self.staged.take();
-                if let Some((_, k)) = old.as_mut() {
-                    k.iter_mut().for_each(|b| *b = 0);
-                }
-            }
-            wipe(&mut self.key);
-            self.key = Some(material);
-            self.key_slot = slot;
-        }
-        stage
-    }
-
-    /// Send with the key staged in `slot`. The key sent with until now stays
-    /// in its own slot, staged, for frames still in flight. False when nothing
-    /// is staged there.
-    fn use_key_slot(&mut self, slot: i32) -> bool {
-        if slot == self.key_slot && self.key.is_some() {
-            return true;
-        }
-        match self.staged.take() {
-            Some((s, material)) if s == slot => {
-                let previous = self.key.replace(material);
-                if let Some(prev) = previous {
-                    self.staged = Some((self.key_slot, prev));
-                }
-                self.key_slot = slot;
-                true
-            }
-            other => {
-                self.staged = other;
-                false
-            }
-        }
-    }
-
-    /// Forget every key (leave).
-    fn clear_keys(&mut self) {
-        wipe(&mut self.key);
-        if let Some((_, mut k)) = self.staged.take() {
-            k.iter_mut().for_each(|b| *b = 0);
-        }
-        self.key_slot = session::KEY_INDEX;
     }
 }
 
@@ -389,7 +342,7 @@ pub async fn native_voice_connect<R: Runtime>(
     let mut connected_key = Some(key.clone());
     let mut session = NativeSession::connect(&url, &token, key, on_event).await?;
     // Playout is needed even for a listen-only join.
-    session.enable_audio(audio);
+    session.enable_audio(audio).await;
     let identity = session.local_identity();
     let mut inner = state.inner.lock().await;
     let rotated = inner.key_after_connect(id, connected_key.as_deref().unwrap_or_default());
@@ -578,12 +531,29 @@ pub async fn native_voice_set_device(
     kind: String,
     device_id: String,
 ) -> Result<(), String> {
-    state
+    let switch = state
         .inner
         .lock()
         .await
         .current(session)?
-        .set_device(&kind, &device_id)
+        .device_switch(&kind)?;
+    // The driver call runs without the session lock; a session that ended
+    // meanwhile releases the switch's handles on the blocking thread and the
+    // result is not reported.
+    let result = tokio::task::spawn_blocking(move || switch.apply(&device_id))
+        .await
+        .map_err(|e| e.to_string())?;
+    let live = state.inner.lock().await.current(session).is_ok();
+    switch_outcome(session, live, result)
+}
+
+/// A device switch's result stands only while its session is still live.
+fn switch_outcome(session: u64, live: bool, result: Result<(), String>) -> Result<(), String> {
+    if live {
+        result
+    } else {
+        Err(format!("native voice session {session} is not current"))
+    }
 }
 
 /// Close session `session` if it is still the live one.
@@ -617,13 +587,37 @@ pub async fn native_voice_set_microphone(
     enabled: bool,
     bitrate: Option<u64>,
 ) -> Result<(), String> {
-    state
+    // Decide under the lock, open or close the stream without it, then commit
+    // under the lock again if this call is still the latest on a live session.
+    let step = state
         .inner
         .lock()
         .await
         .current(session)?
-        .set_microphone(enabled, bitrate)
+        .begin_microphone(enabled, bitrate)
+        .await;
+    let ran = tokio::task::spawn_blocking(move || step.run())
         .await
+        .map_err(|e| e.to_string())??;
+    let Some(commit) = ran else {
+        return Ok(());
+    };
+    let (result, cleanup) = state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .finish_microphone(commit)
+        .await;
+    if let Some(stop) = cleanup {
+        let stopped = tokio::task::spawn_blocking(move || stop.run())
+            .await
+            .map_err(|e| e.to_string());
+        if let Ok(Err(e)) | Err(e) = stopped {
+            log::warn!("[native_voice] capture stop: {e}");
+        }
+    }
+    result
 }
 
 /// Close or open push-to-talk's gate on `session`'s microphone.
@@ -721,72 +715,6 @@ pub async fn native_voice_camera_support() -> Result<camera::CameraSupport, Stri
         .map_err(|e| e.to_string())
 }
 
-/// Which video codecs the native engine can encode beyond VP8.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VideoCodecs {
-    /// libwebrtc's sender capabilities list `video/H264`: its software
-    /// encoder (OpenH264) is built in.
-    pub h264: bool,
-    /// libwebrtc's sender capabilities list `video/VP9`.
-    pub vp9: bool,
-    /// The lowercased codec subtypes (`vp8`, `h264`, `vp9`, ...) libwebrtc's
-    /// receiver capabilities list, without the rtx, red and fec entries. The
-    /// webview intersects it with what it can decrypt before announcing it.
-    pub decode: Vec<String>,
-}
-
-/// Whether a sender-capability mime type is H.264, ignoring case.
-fn is_h264_mime(mime: &str) -> bool {
-    mime.eq_ignore_ascii_case("video/H264")
-}
-
-/// Whether a sender-capability mime type is VP9, ignoring case.
-fn is_vp9_mime(mime: &str) -> bool {
-    mime.eq_ignore_ascii_case("video/VP9")
-}
-
-/// The codec subtype of a receiver-capability mime type, lowercased, or
-/// `None` for the retransmission and redundancy entries that are not codecs.
-fn decode_codec_name(mime: &str) -> Option<String> {
-    let name = mime.split('/').nth(1)?.to_ascii_lowercase();
-    let is_support =
-        matches!(name.as_str(), "rtx" | "red" | "ulpfec") || name.starts_with("flexfec");
-    if name.is_empty() || is_support {
-        None
-    } else {
-        Some(name)
-    }
-}
-
-/// The distinct decodable codec names of a receiver-capability mime list, in
-/// the order libwebrtc lists them.
-fn decode_names<'a>(mimes: impl Iterator<Item = &'a str>) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    for name in mimes.filter_map(decode_codec_name) {
-        if !names.contains(&name) {
-            names.push(name);
-        }
-    }
-    names
-}
-
-/// Ask libwebrtc which video codecs it can send. Synchronous: callers off the
-/// async runtime (the interop example) use it directly.
-pub fn probe_video_codecs() -> VideoCodecs {
-    // Outside a call this makes `LkRuntime::instance()` build the libwebrtc
-    // factory just for the probe; acceptable, as the webview asks once (memoised).
-    let runtime = livekit::rtc_engine::lk_runtime::LkRuntime::instance();
-    let factory = runtime.pc_factory();
-    let send = factory.get_rtp_sender_capabilities(livekit::webrtc::MediaType::Video);
-    let receive = factory.get_rtp_receiver_capabilities(livekit::webrtc::MediaType::Video);
-    VideoCodecs {
-        h264: send.codecs.iter().any(|c| is_h264_mime(&c.mime_type)),
-        vp9: send.codecs.iter().any(|c| is_vp9_mime(&c.mime_type)),
-        decode: decode_names(receive.codecs.iter().map(|c| c.mime_type.as_str())),
-    }
-}
-
 /// The codecs this build's libwebrtc can send. The picker enables H.264 only
 /// when this says so; a probe that fails reads as no H.264 in the webview.
 #[tauri::command]
@@ -820,12 +748,20 @@ pub async fn native_voice_start_camera(
 ) -> Result<CameraStarted, String> {
     let target = camera::Target::parse(&source)?;
     let (id, started) = {
-        let mut inner = state.inner.lock().await;
-        inner.current(session)?;
-        // The settings preview may hold the device: free it for the call,
-        // whose camera the preview then shows.
-        inner.clear_standalone();
-        inner
+        let _gate = state.camera_gate.lock().await;
+        let (standalone, retired) = {
+            let mut inner = state.inner.lock().await;
+            let retired = inner.current(session)?.release_camera().await;
+            // The settings preview may hold the device: free it for the call,
+            // whose camera the preview then shows.
+            (inner.clear_standalone(), retired)
+        };
+        release_blocking(standalone).await;
+        retired.release().await;
+        state
+            .inner
+            .lock()
+            .await
             .current(session)?
             .start_camera(target, capture)
             .await?
@@ -839,9 +775,7 @@ pub async fn native_voice_start_camera(
         Err(e) => {
             // A capture that never started must not stay as the call's camera:
             // the settings preview would show its dead socket.
-            if let Ok(s) = state.inner.lock().await.current(session) {
-                s.stop_camera(id).await;
-            }
+            stop_camera_capture(&state, session, id).await;
             return Err(e);
         }
     };
@@ -866,26 +800,50 @@ pub async fn native_voice_change_camera(
     capture: camera::CaptureOptions,
 ) -> Result<CameraStarted, String> {
     let target = camera::Target::parse(&source)?;
-    let (id, started) = state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .start_camera_change(target, capture)?;
+    let (id, started) = {
+        let _gate = state.camera_gate.lock().await;
+        // A superseded pending capture frees its device before the new one opens.
+        let pending = state
+            .inner
+            .lock()
+            .await
+            .current(session)?
+            .retire_camera_change();
+        pending.release().await;
+        let (retired, started) = state
+            .inner
+            .lock()
+            .await
+            .current(session)?
+            .start_camera_change(target, capture);
+        retired.release().await;
+        started?
+    };
     let started = started
         .await
         .map_err(|_| "camera capture stopped before it started".to_string())
         .and_then(|r| r);
-    let mut inner = state.inner.lock().await;
-    let s = inner.current(session)?;
-    let finished = started.and_then(|size| s.finish_camera_change(id).map(|()| size));
-    let (width, height) = match finished {
-        Ok(size) => size,
-        Err(e) => {
-            s.stop_camera(id).await;
-            return Err(e);
-        }
+    let finished = {
+        let _gate = state.camera_gate.lock().await;
+        let (retired, finished) = {
+            let mut inner = state.inner.lock().await;
+            let s = inner.current(session)?;
+            let (mut retired, finished) = match started {
+                Ok(size) => {
+                    let (retired, swapped) = s.finish_camera_change(id);
+                    (retired, swapped.map(|()| size))
+                }
+                Err(e) => (Retired::default(), Err(e)),
+            };
+            if finished.is_err() {
+                retired.merge(s.stop_camera(id).await);
+            }
+            (retired, finished)
+        };
+        retired.release().await;
+        finished
     };
+    let (width, height) = finished?;
     Ok(CameraStarted {
         capture: id,
         width,
@@ -956,14 +914,33 @@ pub async fn native_voice_stop_camera(
     session: u64,
     capture: u64,
 ) -> Result<(), String> {
-    state
+    let _gate = state.camera_gate.lock().await;
+    let retired = state
         .inner
         .lock()
         .await
         .current(session)?
         .stop_camera(capture)
         .await;
+    retired.release().await;
     Ok(())
+}
+
+/// Stop camera capture `capture` of `session` if it is still current, under
+/// the camera gate, releasing it before returning.
+async fn stop_camera_capture(state: &NativeVoiceState, session: u64, capture: u64) {
+    let _gate = state.camera_gate.lock().await;
+    let retired = match state.inner.lock().await.current(session) {
+        Ok(s) => s.stop_camera(capture).await,
+        Err(_) => return,
+    };
+    retired.release().await;
+}
+
+/// Release `value` (a preview's capture) under the camera gate.
+async fn release_preview<T: Send + 'static>(state: &NativeVoiceState, value: T) {
+    let _gate = state.camera_gate.lock().await;
+    release_blocking(value).await;
 }
 
 #[derive(Serialize)]
@@ -989,36 +966,60 @@ pub async fn native_voice_start_camera_preview(
     capture: camera::CaptureOptions,
 ) -> Result<CameraPreviewStarted, String> {
     let target = camera::Target::parse(&source)?;
-    let generation = {
-        let mut inner = state.inner.lock().await;
-        let generation = inner.begin_standalone();
-        if let Some((frames, (width, height))) = inner.call_camera_preview() {
-            inner.standalone = None;
-            return Ok(CameraPreviewStarted {
-                width,
-                height,
-                frames,
-            });
-        }
-        generation
+    let (generation, capturer, started) = {
+        let _gate = state.camera_gate.lock().await;
+        let generation = {
+            let mut inner = state.inner.lock().await;
+            let generation = inner.begin_standalone();
+            if let Some((frames, (width, height))) = inner.call_camera_preview() {
+                let old = inner.standalone.take();
+                drop(inner);
+                release_blocking(old).await;
+                return Ok(CameraPreviewStarted {
+                    width,
+                    height,
+                    frames,
+                });
+            }
+            generation
+        };
+        let (capturer, started) = camera::CameraCapture::start(target, capture, || {})?;
+        (generation, capturer, started)
     };
-    let (capturer, started) = camera::CameraCapture::start(target, capture, || {})?;
-    let frames = video::FrameServer::bind().await?;
+    let frames = match video::FrameServer::bind().await {
+        Ok(frames) => frames,
+        Err(e) => {
+            release_preview(&state, capturer).await;
+            return Err(e);
+        }
+    };
     frames.set_camera(Some(capturer.preview()));
     let url = frames.url().to_string();
-    let (width, height) = started
+    let started = started
         .await
-        .map_err(|_| "camera preview stopped before it started".to_string())??;
+        .map_err(|_| "camera preview stopped before it started".to_string())
+        .and_then(|r| r);
+    let (width, height) = match started {
+        Ok(size) => size,
+        Err(e) => {
+            release_preview(&state, (capturer, frames)).await;
+            return Err(e);
+        }
+    };
     let mut inner = state.inner.lock().await;
-    // A newer start or a stop superseded this one while it started: drop the
-    // capture here rather than replacing the slot the newer request owns.
+    // A newer start or a stop superseded this one while it started: release
+    // the capture here rather than replacing the slot the newer request owns.
     if !inner.standalone_is_latest(generation) {
+        drop(inner);
+        release_preview(&state, (capturer, frames)).await;
         return Err("camera preview superseded by a newer request".to_string());
     }
-    inner.standalone = Some(Standalone {
+    let replaced = inner.standalone.replace(Standalone {
         frames,
         _capture: capturer,
     });
+    drop(inner);
+    release_preview(&state, replaced).await;
     Ok(CameraPreviewStarted {
         width,
         height,
@@ -1033,7 +1034,9 @@ pub async fn native_voice_start_camera_preview(
 pub async fn native_voice_stop_camera_preview(
     state: tauri::State<'_, NativeVoiceState>,
 ) -> Result<(), String> {
-    state.inner.lock().await.clear_standalone();
+    let _gate = state.camera_gate.lock().await;
+    let stopped = state.inner.lock().await.clear_standalone();
+    release_blocking(stopped).await;
     Ok(())
 }
 
@@ -1071,13 +1074,24 @@ pub async fn native_voice_start_screen(
     capture: screen::CaptureOptions,
 ) -> Result<ScreenStarted, String> {
     let target = screen::Target::parse(&source)?;
-    let (id, started) = state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .start_screen(target, capture)
-        .await?;
+    let (id, started) = {
+        let _gate = state.screen_gate.lock().await;
+        let retired = state
+            .inner
+            .lock()
+            .await
+            .current(session)?
+            .release_screen()
+            .await;
+        retired.release().await;
+        state
+            .inner
+            .lock()
+            .await
+            .current(session)?
+            .start_screen(target, capture)
+            .await?
+    };
     let (width, height) = started
         .await
         .map_err(|_| "screen capture stopped before it started".to_string())??;
@@ -1103,26 +1117,50 @@ pub async fn native_voice_change_screen(
     capture: screen::CaptureOptions,
 ) -> Result<ScreenStarted, String> {
     let target = screen::Target::parse(&source)?;
-    let (id, started) = state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .start_screen_change(target, capture)?;
+    let (id, started) = {
+        let _gate = state.screen_gate.lock().await;
+        // A superseded pending share closes before the new one opens.
+        let pending = state
+            .inner
+            .lock()
+            .await
+            .current(session)?
+            .retire_screen_change();
+        pending.release().await;
+        let (retired, started) = state
+            .inner
+            .lock()
+            .await
+            .current(session)?
+            .start_screen_change(target, capture);
+        retired.release().await;
+        started?
+    };
     let started = started
         .await
         .map_err(|_| "screen capture stopped before it started".to_string())
         .and_then(|r| r);
-    let mut inner = state.inner.lock().await;
-    let s = inner.current(session)?;
-    let finished = started.and_then(|size| s.finish_screen_change(id).map(|()| size));
-    let (width, height) = match finished {
-        Ok(size) => size,
-        Err(e) => {
-            s.stop_screen(id).await;
-            return Err(e);
-        }
+    let finished = {
+        let _gate = state.screen_gate.lock().await;
+        let (retired, finished) = {
+            let mut inner = state.inner.lock().await;
+            let s = inner.current(session)?;
+            let (mut retired, finished) = match started {
+                Ok(size) => {
+                    let (retired, swapped) = s.finish_screen_change(id);
+                    (retired, swapped.map(|()| size))
+                }
+                Err(e) => (Retired::default(), Err(e)),
+            };
+            if finished.is_err() {
+                retired.merge(s.stop_screen(id).await);
+            }
+            (retired, finished)
+        };
+        retired.release().await;
+        finished
     };
+    let (width, height) = finished?;
     Ok(ScreenStarted {
         capture: id,
         width,
@@ -1168,6 +1206,27 @@ pub async fn native_voice_set_screen_quality(
     Ok(ScreenQualitySet { sid, width, height })
 }
 
+/// Hold the published camera or share `sid` under `max_bitrate` bits per
+/// second without republishing it: the top layer runs at it and every lower
+/// layer at the lower of its own rate and it; 0 restores the rates the
+/// publish produced. A `sid` that is not the live publication is a no-op.
+#[tauri::command]
+pub async fn native_voice_set_video_bitrate(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    kind: String,
+    sid: String,
+    max_bitrate: u64,
+) -> Result<(), String> {
+    let kind = VideoKind::parse(&kind)?;
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_video_bitrate(kind, &sid, max_bitrate)
+}
+
 /// Publish running capture `capture` as the screen share; returns its sid.
 #[tauri::command]
 pub async fn native_voice_publish_screen(
@@ -1193,13 +1252,15 @@ pub async fn native_voice_publish_screen_audio(
     session: u64,
     capture: u64,
 ) -> Result<String, String> {
-    state
+    let (retired, published) = state
         .inner
         .lock()
         .await
         .current(session)?
         .publish_screen_audio(capture)
-        .await
+        .await;
+    retired.release().await;
+    published
 }
 
 /// Unpublish screen audio `sid` and end its capture; a stale sid is a no-op.
@@ -1209,13 +1270,14 @@ pub async fn native_voice_unpublish_screen_audio(
     session: u64,
     sid: String,
 ) -> Result<(), String> {
-    state
+    let retired = state
         .inner
         .lock()
         .await
         .current(session)?
         .unpublish_screen_audio(&sid)
         .await;
+    retired.release().await;
     Ok(())
 }
 
@@ -1227,13 +1289,15 @@ pub async fn native_voice_stop_screen(
     session: u64,
     capture: u64,
 ) -> Result<(), String> {
-    state
+    let _gate = state.screen_gate.lock().await;
+    let retired = state
         .inner
         .lock()
         .await
         .current(session)?
         .stop_screen(capture)
         .await;
+    retired.release().await;
     Ok(())
 }
 

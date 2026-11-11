@@ -11,8 +11,8 @@ import {
   applyReadyCapabilities,
   resetServerCapabilities,
 } from "../../../src/lib/net/serverCapabilities";
-import "@components/UserProfilePopup";
-import "@components/AdminActions";
+import "../../../src/features/profiles/userProfilePopup";
+import "../../../src/features/moderation/AdminActions";
 import { lastResizeCallback } from "../../helpers/memberListMocks";
 import {
   useDarkSurfaces,

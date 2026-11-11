@@ -18,7 +18,7 @@ category, sorted by position. The sidebar has two modes (`ui.store.sidebarMode`)
 | State              | Trigger                                                                                                                                                                                                                                  | Target reaction                                                                                                        |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `ready`            | Channels loaded from `ready`                                                                                                                                                                                                             | Grouped, collapsible category list                                                                                     |
-| `empty`            | Zero channels                                                                                                                                                                                                                            | "No channels yet" + hint (already the empty-state branch of `renderChannels()`, `features/channels/ChannelSidebar.ts`) |
+| `empty`            | Zero channels                                                                                                                                                                                                                            | "No channels yet" + hint (already the empty-state branch of the list render, `features/channels/channelListRender.ts`) |
 | category collapsed | User toggles                                                                                                                                                                                                                             | Persisted per-server in localStorage (`ui.toggleCategory`); chevron reflects state                                     |
 | active channel     | `setActiveChannel`                                                                                                                                                                                                                       | Highlighted; unread cleared only when actually mounted (UX-8)                                                          |
 | unread             | `chat_message` in a non-active channel, or in the active channel while the reader is away (`isChannelAway`: window unfocused, loaded window detached, or list scrolled away from the live tail) ([messaging.md §7](messaging.md), P4-03) | Unread pill; badge on the channel                                                                                      |
@@ -117,7 +117,7 @@ role grouping.
 `typing` events populate `members.typingUsers` with a 5 s auto-clear timer.
 **Target:** show "X is typing…" / "X and Y are typing…" / "Several people are
 typing…" below the message list, excluding the current user (already
-`formatTypingText()` in `components/TypingIndicator.ts`). The client emits `typing_start` while composing
+`formatTypingText()` in `features/messaging/TypingIndicator.ts`). The client emits `typing_start` while composing
 (debounced), never per-keystroke. A `chat_message` clears its sender's entry at
 once (`handleChatMessage`, `features/messaging/wsHandlers.ts`), and the bar keeps
 its 24 px row while empty so typing start/stop never shifts the message list.
@@ -151,7 +151,7 @@ recipient, last-message preview, unread).
 | open DM                       | `dm_channel_open`                                    | Prepend/move-to-top, dedup (already `addDmChannel()`, `stores/dm.store.ts`)                                                                                                                                                                                           |
 | close DM                      | `dm_channel_close`                                   | Remove from list                                                                                                                                                                                                                                                      |
 | new DM message                | `chat_message` in a DM                               | `updateDmLastMessage` (unread bump + reorder) unless the message is own or the reader is looking at that active DM (`!isChannelAway`: window focused, its loaded window attached, and the list at the live tail); `updateDmLastMessagePreview` (no bump) then (P4-03) |
-| last-message empty            | Never messaged                                       | "No messages yet" fallback, keyed on an empty `lastMessageAt` (`dmPreviewText()`, `pages/main-page/SidebarDmHelpers.ts`)                                                                                                                                              |
+| last-message empty            | Never messaged                                       | "No messages yet" fallback, keyed on an empty `lastMessageAt` (`dmPreviewText()`, `features/direct-messages/SidebarDmHelpers.ts`)                                                                                                                                     |
 | last message edited / deleted | `chat_edited` / `chat_deleted` / `chat_bulk_deleted` | `reviseDmLastMessage` swaps the preview text; a delete blanks it, then takes the last message from `GET /dms` unless a newer message has already replaced it                                                                                                          |
 
 ### 3.1 Opening a DM
@@ -172,13 +172,13 @@ sequenceDiagram
 
 ### 3.1b The DM side panels
 
-A 1:1 DM shows the partner's profile panel (`components/DmProfileSidebar.ts`:
+A 1:1 DM shows the partner's profile panel (`features/direct-messages/DmProfileSidebar.ts`:
 name, @username under a nickname, custom status, about, note, Report, Block)
 and a group shows its member panel, both in the slot beside the chat. On a
 computer they open with the conversation while the saved preference is on
-(`pages/main-page/dmProfilePanel.ts`, `GroupMemberPanelController.ts`). On the
+(`features/direct-messages/dmProfilePanel.ts`, `GroupMemberPanelController.ts`). On the
 phone layout neither opens by itself: the header's profile button opens the
-member profile sheet (`pages/main-page/dmProfileSheet.ts`), the members button
+member profile sheet (`features/direct-messages/dmProfileSheet.ts`), the members button
 opens the group panel as an overlay that Back closes, and the saved preference
 is left alone. Turning the device across the phone layout closes or restores
 the panels.
@@ -186,14 +186,14 @@ the panels.
 ### 3.1a Group DMs
 
 One picker covers 1:1 and group creation
-(`pages/main-page/MemberPickerModal.ts`): selecting a single member opens a
+(`features/direct-messages/MemberPickerModal.ts`): selecting a single member opens a
 1:1 DM, selecting two or more creates a group (cap
 the `MAX_GROUP_DM_PARTICIPANTS = 10` constant in `lib/constants.ts`) — "new conversation"
 is one intent, so the user is not asked to choose DM-vs-group up front. Group
 DMs are `channels` rows with `type='dm'` and `is_group=1` server-side
 (migration 028), so leaving a two-person group does not collapse it back into
 a 1:1. "Rename Group" / "Leave Group" affordances live in the DM row context
-menu (the contextmenu handler in `renderDmItem()`, `components/DmSidebar.ts`; leave doubles as "Close DM" for 1:1s);
+menu (the contextmenu handler in `renderDmItem()`, `features/direct-messages/DmSidebar.ts`; leave doubles as "Close DM" for 1:1s);
 ring/incoming calls work the same as 1:1 DMs (`call_ring` fans out to every
 other participant).
 
@@ -230,10 +230,10 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 
 ## Source of truth
 
-`src/features/channels/ChannelSidebar.ts` (+ `sidebar/`),
-`src/features/members/MemberList.ts`, `src/components/TypingIndicator.ts`,
-`src/components/DmSidebar.ts`, `src/components/DmProfileSidebar.ts`,
+`src/features/channels/ChannelSidebar.ts` (+ its siblings `channelListRender.ts`, `voiceSidebarRows.ts` and `sidebar/`),
+`src/features/members/MemberList.ts`, `src/features/messaging/TypingIndicator.ts`,
+`src/features/direct-messages/DmSidebar.ts`, `src/features/direct-messages/DmProfileSidebar.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
-`SidebarDmSection.ts`, `SidebarDmHelpers.ts`, `src/stores/channels.store.ts`,
+`src/features/direct-messages/SidebarDmSection.ts`, `SidebarDmHelpers.ts`, `src/stores/channels.store.ts`,
 `members.store.ts`, `dm.store.ts`, `src/lib/dispatcher.ts` (+ `src/features/{channels,direct-messages}/wsHandlers.ts`);
 server `Server/service/channel.go`, `dm.go`, `block.go`.

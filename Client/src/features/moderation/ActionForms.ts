@@ -145,24 +145,22 @@ const hint = (id: string, text: string): HTMLParagraphElement => {
 
 let actSeq = 0;
 
-export function buildActionForms(o: ActionOptions): ActionView {
-  const { detail, me, draft, signal } = o;
-  const open = detail.state === "open" || detail.state === "assigned";
-  const holding = open && detail.assigneeId === me;
-  const runningUntil = activeTimeoutEnd(detail, o.now ?? Date.now());
-  const lifts = runningUntil !== null && (holding || !open);
-  if (detail.subjectId <= 0 || detail.reporterId === me || (!holding && !lifts)) {
-    return { element: null, takesInput: false };
-  }
+/** What the form builders share: the options, this render's id suffix and the control factories. */
+interface FormCtx {
+  readonly o: ActionOptions;
+  readonly seq: number;
+  readonly send: (write: ActionWrite) => void;
+  readonly button: (label: string, key: string, type: "button" | "submit") => HTMLButtonElement;
+  readonly reasonField: (
+    id: string,
+    key: "warn" | "reason" | "enforce",
+    label: string,
+    hintText?: string,
+  ) => HTMLElement[];
+}
 
-  const seq = ++actSeq;
-  const element = createElement("section", {
-    class: "mod-work",
-    "aria-labelledby": `mod-act-${seq}`,
-    "data-testid": "mod-act",
-  });
-  element.appendChild(createElement("h4", { id: `mod-act-${seq}` }, t("act.title")));
-
+function makeFormCtx(o: ActionOptions, seq: number): FormCtx {
+  const { draft, signal } = o;
   const buttons: HTMLButtonElement[] = [];
   const send = (write: ActionWrite): void => {
     if (!o.onWrite(write)) return;
@@ -193,147 +191,185 @@ export function buildActionForms(o: ActionOptions): ActionView {
     input.addEventListener("input", () => (draft[key] = input.value), { signal });
     return [createElement("label", { for: id }, label), hint(`${id}-hint`, hintText), input];
   };
+  return { o, seq, send, button, reasonField };
+}
 
-  if (holding) {
-    element.appendChild(muted(t("act.hint")));
+function buildWarnForm(c: FormCtx): HTMLElement {
+  const { draft, signal } = c.o;
+  const warnForm = createElement("form", { class: "mod-work-form", novalidate: "" });
+  appendChildren(
+    warnForm,
+    ...c.reasonField(`mod-warn-${c.seq}`, "warn", t("act.warnLabel")),
+    c.button(t("act.warn"), "warn-submit", "submit"),
+  );
+  warnForm.addEventListener(
+    "submit",
+    (e) => {
+      e.preventDefault();
+      c.send({ kind: "warning", reason: cleanReason(draft.warn) });
+    },
+    { signal },
+  );
+  return warnForm;
+}
 
-    const warnForm = createElement("form", { class: "mod-work-form", novalidate: "" });
-    appendChildren(
-      warnForm,
-      ...reasonField(`mod-warn-${seq}`, "warn", t("act.warnLabel")),
-      button(t("act.warn"), "warn-submit", "submit"),
-    );
-    warnForm.addEventListener(
-      "submit",
-      (e) => {
-        e.preventDefault();
-        send({ kind: "warning", reason: cleanReason(draft.warn) });
-      },
-      { signal },
-    );
-
-    const timeoutForm = createElement("form", { class: "mod-work-form", novalidate: "" });
-    const lengthId = `mod-length-${seq}`;
-    const amount = createElement("input", {
-      id: lengthId,
-      type: "number",
-      class: "form-input",
-      min: "1",
-      step: "1",
-      inputmode: "numeric",
-      "aria-describedby": `${lengthId}-hint ${lengthId}-error`,
-      "data-focus": "amount",
-    });
-    amount.value = draft.amount;
-    const unit = createElement("select", {
-      id: `${lengthId}-unit`,
-      class: "form-input",
-      "data-focus": "unit",
-    });
-    for (const [value, u] of Object.entries(UNITS)) {
-      unit.appendChild(createElement("option", { value }, t(u.labelKey)));
-    }
-    unit.value = draft.unit;
-    const lengthError = createElement("p", {
-      id: `${lengthId}-error`,
-      class: "form-error",
-      role: "alert",
-    });
-    amount.addEventListener(
-      "input",
-      () => {
-        draft.amount = amount.value;
-        setText(lengthError, "");
-        amount.removeAttribute("aria-invalid");
-      },
-      { signal },
-    );
-    unit.addEventListener("change", () => (draft.unit = unit.value as LengthUnit), { signal });
-    timeoutForm.addEventListener(
-      "submit",
-      (e) => {
-        e.preventDefault();
-        if (lengthSeconds(amount.value, draft.unit) === null) {
-          setText(lengthError, t("act.lengthInvalid"));
-          amount.setAttribute("aria-invalid", "true");
-          amount.focus();
-          return;
-        }
-        send({
-          kind: "timeout",
-          reason: cleanReason(draft.reason),
-          amount: Number(amount.value.trim()),
-          unit: draft.unit,
-        });
-      },
-      { signal },
-    );
-    appendChildren(
-      timeoutForm,
-      ...reasonField(`mod-timeout-${seq}`, "reason", t("act.timeoutLabel")),
-      createElement("label", { for: lengthId }, t("act.lengthLabel")),
-      hint(`${lengthId}-hint`, t("act.timeoutHint")),
-      amount,
-      createElement("label", { for: unit.id }, t("act.unitLabel")),
-      unit,
-      lengthError,
-      button(t("act.timeout"), "timeout-submit", "submit"),
-    );
-    appendChildren(element, warnForm, timeoutForm);
+function buildTimeoutForm(c: FormCtx): HTMLElement {
+  const { draft, signal } = c.o;
+  const timeoutForm = createElement("form", { class: "mod-work-form", novalidate: "" });
+  const lengthId = `mod-length-${c.seq}`;
+  const amount = createElement("input", {
+    id: lengthId,
+    type: "number",
+    class: "form-input",
+    min: "1",
+    step: "1",
+    inputmode: "numeric",
+    "aria-describedby": `${lengthId}-hint ${lengthId}-error`,
+    "data-focus": "amount",
+  });
+  amount.value = draft.amount;
+  const unit = createElement("select", {
+    id: `${lengthId}-unit`,
+    class: "form-input",
+    "data-focus": "unit",
+  });
+  for (const [value, u] of Object.entries(UNITS)) {
+    unit.appendChild(createElement("option", { value }, t(u.labelKey)));
   }
+  unit.value = draft.unit;
+  const lengthError = createElement("p", {
+    id: `${lengthId}-error`,
+    class: "form-error",
+    role: "alert",
+  });
+  amount.addEventListener(
+    "input",
+    () => {
+      draft.amount = amount.value;
+      setText(lengthError, "");
+      amount.removeAttribute("aria-invalid");
+    },
+    { signal },
+  );
+  unit.addEventListener("change", () => (draft.unit = unit.value as LengthUnit), { signal });
+  timeoutForm.addEventListener(
+    "submit",
+    (e) => {
+      e.preventDefault();
+      if (lengthSeconds(amount.value, draft.unit) === null) {
+        setText(lengthError, t("act.lengthInvalid"));
+        amount.setAttribute("aria-invalid", "true");
+        amount.focus();
+        return;
+      }
+      c.send({
+        kind: "timeout",
+        reason: cleanReason(draft.reason),
+        amount: Number(amount.value.trim()),
+        unit: draft.unit,
+      });
+    },
+    { signal },
+  );
+  appendChildren(
+    timeoutForm,
+    ...c.reasonField(`mod-timeout-${c.seq}`, "reason", t("act.timeoutLabel")),
+    createElement("label", { for: lengthId }, t("act.lengthLabel")),
+    hint(`${lengthId}-hint`, t("act.timeoutHint")),
+    amount,
+    createElement("label", { for: unit.id }, t("act.unitLabel")),
+    unit,
+    lengthError,
+    c.button(t("act.timeout"), "timeout-submit", "submit"),
+  );
+  return timeoutForm;
+}
 
-  if (lifts) {
-    const liftForm = createElement("div", { class: "mod-work-form" });
-    const lift = button(t("act.lift"), "lift", "button");
-    lift.setAttribute("aria-describedby", `mod-lift-${seq}`);
-    lift.addEventListener("click", () => send({ kind: "lift", userId: detail.subjectId }), {
-      signal,
-    });
-    appendChildren(
-      liftForm,
-      hint(`mod-lift-${seq}`, t("act.running", { date: dateText(runningUntil) })),
-      lift,
-    );
-    element.appendChild(liftForm);
-  }
+function buildLiftForm(c: FormCtx, runningUntil: string): HTMLElement {
+  const liftForm = createElement("div", { class: "mod-work-form" });
+  const lift = c.button(t("act.lift"), "lift", "button");
+  lift.setAttribute("aria-describedby", `mod-lift-${c.seq}`);
+  lift.addEventListener("click", () => c.send({ kind: "lift", userId: c.o.detail.subjectId }), {
+    signal: c.o.signal,
+  });
+  appendChildren(
+    liftForm,
+    hint(`mod-lift-${c.seq}`, t("act.running", { date: dateText(runningUntil) })),
+    lift,
+  );
+  return liftForm;
+}
 
-  // Last, after the reversible actions.
+/** The irreversible actions this reader may offer on the report, or null when none. */
+function buildEnforceForm(c: FormCtx, holding: boolean): HTMLElement | null {
+  const { detail, draft, signal } = c.o;
   const kinds = (["removal", "kick", "ban"] as const).filter(
     (k) => holding && mayEnforce(k) && (k !== "removal" || detail.targetType === "message"),
   );
-  if (kinds.length > 0) {
-    const enforceForm = createElement("div", { class: "mod-work-form" });
-    const removed =
-      kinds[0] === "removal" &&
-      detail.history.some((e) => e.kind === "action" && e.action === "removal");
-    if (removed) enforceForm.appendChild(muted(t("enforce.removed")));
-    const offered = removed ? kinds.slice(1) : kinds;
-    if (offered.length > 0) {
-      enforceForm.append(
-        ...reasonField(`mod-enforce-${seq}`, "enforce", t("enforce.label"), t("enforce.hint")),
-      );
-    }
-    for (const kind of offered) {
-      const b = button(t(ENFORCE[kind].labelKey), kind, "button");
-      b.addEventListener(
-        "click",
-        () => {
-          if (b.getAttribute("aria-disabled") === "true") return;
-          confirmEnforce(
-            kind,
-            signal,
-            () => o.refocus(kind),
-            () => {
-              if (mayEnforce(kind)) send({ kind, reason: cleanReason(draft.enforce) });
-            },
-          );
-        },
-        { signal },
-      );
-      enforceForm.appendChild(b);
-    }
-    element.appendChild(enforceForm);
+  if (kinds.length === 0) return null;
+  const enforceForm = createElement("div", { class: "mod-work-form" });
+  const removed =
+    kinds[0] === "removal" &&
+    detail.history.some((e) => e.kind === "action" && e.action === "removal");
+  if (removed) enforceForm.appendChild(muted(t("enforce.removed")));
+  const offered = removed ? kinds.slice(1) : kinds;
+  if (offered.length > 0) {
+    enforceForm.append(
+      ...c.reasonField(`mod-enforce-${c.seq}`, "enforce", t("enforce.label"), t("enforce.hint")),
+    );
   }
+  for (const kind of offered) {
+    const b = c.button(t(ENFORCE[kind].labelKey), kind, "button");
+    b.addEventListener(
+      "click",
+      () => {
+        if (b.getAttribute("aria-disabled") === "true") return;
+        confirmEnforce(
+          kind,
+          signal,
+          () => c.o.refocus(kind),
+          () => {
+            if (mayEnforce(kind)) c.send({ kind, reason: cleanReason(draft.enforce) });
+          },
+        );
+      },
+      { signal },
+    );
+    enforceForm.appendChild(b);
+  }
+  return enforceForm;
+}
+
+export function buildActionForms(o: ActionOptions): ActionView {
+  const { detail, me } = o;
+  const open = detail.state === "open" || detail.state === "assigned";
+  const holding = open && detail.assigneeId === me;
+  const runningUntil = activeTimeoutEnd(detail, o.now ?? Date.now());
+  const lifts = runningUntil !== null && (holding || !open);
+  if (detail.subjectId <= 0 || detail.reporterId === me || (!holding && !lifts)) {
+    return { element: null, takesInput: false };
+  }
+
+  const seq = ++actSeq;
+  const element = createElement("section", {
+    class: "mod-work",
+    "aria-labelledby": `mod-act-${seq}`,
+    "data-testid": "mod-act",
+  });
+  element.appendChild(createElement("h4", { id: `mod-act-${seq}` }, t("act.title")));
+  const ctx = makeFormCtx(o, seq);
+
+  if (holding) {
+    element.appendChild(muted(t("act.hint")));
+    const warnForm = buildWarnForm(ctx);
+    const timeoutForm = buildTimeoutForm(ctx);
+    appendChildren(element, warnForm, timeoutForm);
+  }
+  if (lifts) element.appendChild(buildLiftForm(ctx, runningUntil));
+
+  // Last, after the reversible actions.
+  const enforceForm = buildEnforceForm(ctx, holding);
+  if (enforceForm !== null) element.appendChild(enforceForm);
 
   return { element, takesInput: holding };
 }

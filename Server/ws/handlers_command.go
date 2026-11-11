@@ -1,10 +1,6 @@
-// Phase C Step 9 — plugin slash-command dispatcher (V2).
-//
-// chat_command routes a slash command from a WS client to a registered plugin.
-// If no plugin owns the command, an error is returned to the sender. If the
-// plugin returns a Reply, it is sent only to the invoking client (ephemeral).
-// If the plugin returns a Broadcast string, it is broadcast to the channel
-// only after verifying the invoking client holds SEND_MESSAGES permission.
+// chat_command routes a slash command to a registered plugin: no owner is an
+// error to the sender; a Reply goes only to the invoker; a Broadcast goes to the
+// channel only after verifying the invoker holds SEND_MESSAGES.
 
 package ws
 
@@ -20,27 +16,22 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// maxCommandArgs is the maximum number of arguments accepted in a
-// chat_command payload. This prevents a malicious client from flooding
-// the plugin's allocate/dispatch ABI with thousands of strings.
+// maxCommandArgs stops a malicious client flooding the plugin's allocate/dispatch
+// ABI with strings.
 const maxCommandArgs = 64
 
 // pluginCommandRateLimit and pluginCommandWindow cap chat_command frames per
-// user. Every other V2 handler is throttled; this one drove a WASM
-// guest invocation once per frame with no cap at all. Tighter than chat send
-// (10/s) because DispatchCommand does real work per call.
+// user; tighter than chat send because DispatchCommand runs a WASM guest per
+// call.
 const (
 	pluginCommandRateLimit = 5
 	pluginCommandWindow    = time.Second
 )
 
-// handleChatCommandV2 dispatches a slash command to the owning plugin via the
-// live plugin registry (wired post-construction). It returns:
-//   - a ClientError when no plugin registry is wired, the command is unknown,
-//     or the invoking user may not post the plugin's broadcast;
-//   - Result.Reply for an ephemeral plugin reply (sender only);
-//   - Result.Events with a plugin_broadcast event for a channel broadcast, gated
-//     by MessageService.CanPost (same policy as a real message send).
+// handleChatCommandV2 dispatches to the owning plugin: a ClientError when no
+// registry is wired, the command is unknown or the invoker may not post;
+// Result.Reply for an ephemeral reply; a plugin_broadcast event for a channel
+// broadcast, gated by MessageService.CanPost.
 func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps any) Result {
 	d := deps.(PluginDeps)
 	cc := cmd.(ChatCommandCmd)
@@ -62,33 +53,27 @@ func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps an
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: fmt.Sprintf("unknown command: %s", cc.Command)}}
 	}
 	if result == nil {
-		// Plugin acknowledged with no output.
 		return Result{}
 	}
 
 	var out Result
 	if result.Reply != "" {
-		// Ephemeral reply — sent only to the invoking client.
 		out.Reply = buildCommandReply(cc.ReqID, result.Reply)
 	}
 
 	if result.Broadcast != "" && cc.ChannelID != 0 {
-		// Verify the invoking client can post to this channel before broadcasting
-		// (same gate a real send uses: channel role perms + DM membership/blocks).
-		// ponytail: if the plugin returned both a reply and a broadcast and the
-		// gate denies, the error wins and the ephemeral reply is dropped (Result
-		// carries either an error or a reply, not both) — an untested edge; V1
-		// sent both. Preserve the security signal (denial) over the ack.
+		// Verify the invoker can post here before broadcasting (the real send
+		// gate). If the plugin returned both a reply and a broadcast and the gate
+		// denies, the error wins and the reply is dropped: the denial signal
+		// beats the ack.
 		if gate := canPluginBroadcast(ctx, d.MessageSvc, cc.userID, cc.ChannelID); gate != nil {
 			return *gate
 		}
 		msg := buildCommandBroadcast(cc.ChannelID, cc.userID, cc.Command, result.Broadcast)
-		// A DM's plugin broadcast must reach the same
-		// sender-aware audience chat/typing/reactions do, not the plain
-		// per-channel-topic fan-out — channel_focus subscribes any DM
-		// participant to the topic regardless of message-request trust.
-		// A lookup failure fails closed to the DM shape (sender only),
-		// never to the wider, untrusted-reaching plain broadcast.
+		// A DM's plugin broadcast must reach the sender-aware audience chat and
+		// typing use, not the per-topic fan-out (channel_focus subscribes any DM
+		// participant regardless of message-request trust). A failed lookup fails
+		// closed to the DM shape.
 		isDM, dmErr := d.MessageSvc.ChannelIsDM(ctx, cc.ChannelID)
 		if dmErr != nil || isDM {
 			var participantIDs []int64
@@ -107,12 +92,9 @@ func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps an
 	return out
 }
 
-// canPluginBroadcast reports whether userID may post to channelID by delegating
-// to the SAME service-layer check a real message send runs (MessageService.CanPost:
-// cached channel permissions; DM membership AND DM blocks). Returns nil when
-// allowed, or a Result carrying the appropriate ClientError otherwise. A nil
-// MessageSvc (bare test hub) fails closed rather than allowing an ungated
-// broadcast.
+// canPluginBroadcast runs the same MessageService.CanPost check as a real send
+// (channel perms, DM membership and blocks); nil when allowed. A nil MessageSvc
+// (bare test hub) fails closed.
 func canPluginBroadcast(ctx context.Context, messageSvc *service.MessageService, userID, channelID int64) *Result {
 	if messageSvc == nil {
 		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "broadcast gate unavailable"}}
@@ -131,7 +113,6 @@ func canPluginBroadcast(ctx context.Context, messageSvc *service.MessageService,
 	return nil
 }
 
-// buildCommandReply builds an ephemeral command_reply envelope.
 func buildCommandReply(reqID, text string) []byte {
 	type payload struct {
 		Text string `json:"text"`
@@ -149,7 +130,6 @@ func buildCommandReply(reqID, text string) []byte {
 	return raw
 }
 
-// buildCommandBroadcast builds a plugin_broadcast envelope sent to a channel.
 func buildCommandBroadcast(channelID, userID int64, cmd, text string) []byte {
 	type payload struct {
 		ChannelID int64  `json:"channel_id"`

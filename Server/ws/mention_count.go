@@ -8,11 +8,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// mentionCountPayload is the mention_count frame's payload: targeted
-// at one reader, unsequenced, not replayed. channel_id names the channel whose
-// read_states.mention_count changed; count is the reader's total after the
-// bump. A client uses it to repaint that channel's badge live when the channel
-// is not focused, whose chat_message broadcasts it never receives.
+// mentionCountPayload is the mention_count payload: targeted, unsequenced, not replayed.
+// channel_id names the channel whose read_states.mention_count changed; count is the
+// reader's total after the bump, letting a client repaint an unfocused channel's badge live.
 type mentionCountPayload struct {
 	ChannelID int64 `json:"channel_id"`
 	Count     int64 `json:"count"`
@@ -26,28 +24,18 @@ func buildMentionCount(channelID, count int64) []byte {
 
 var _ service.MentionCountBatcher = (*Hub)(nil)
 
-// mentionAudienceTimeout bounds the channel and permission reads one badge
-// preparation makes, so a stalled reader pool cannot hold the caller (which may
-// hold a channel's mention emit lock) without end.
+// mentionAudienceTimeout bounds the reads one badge preparation makes, so a stalled reader
+// pool cannot hold the caller (which may hold a channel's mention emit lock) without end.
 const mentionAudienceTimeout = 5 * time.Second
 
-// NotifyMentionCount delivers a live mention_count frame to userID, satisfying
-// service.MentionCountNotifier. Targeted and unsequenced (SendToUserLow): a
-// disconnected reader recovers the authoritative count on their next ready,
-// so a missed frame costs nothing — exactly the posture of
-// NotifyAppealStatus/NotifyModAction. The count is the sender-side total, not
-// a delta, so a lost or duplicated frame still converges. The service holds
-// the channel's mention emit lock across every mention write and the frame, so
-// the frames a reader receives arrive in the order the server changed the
-// total (see service.reverseMentionCounts): the last frame always carries the
-// latest committed total, never an overtaken one.
-//
-// The frame is skipped when the reader cannot currently see the channel
-// (CanViewChannel: channel READ_MESSAGES with both override layers, or DM
-// membership). A reader whose access was revoked after being mentioned — a
-// removed channel override, a role change, leaving the DM — must not receive
-// a badge update for a channel their sidebar no longer lists. The stored count
-// is still corrected; only the live frame is withheld.
+// NotifyMentionCount delivers a live mention_count frame to userID
+// (service.MentionCountNotifier), targeted and unsequenced (SendToUserLow): a disconnected
+// reader recovers the count on their next ready. The count is the total, not a delta, so a
+// lost or duplicated frame converges. The service holds the channel's mention emit lock
+// across every mention write and the frame, so frames arrive in the order the total changed
+// (service.reverseMentionCounts). Skipped when the reader cannot currently see the channel
+// (CanViewChannel): a revoked reader must not get a badge update for a channel their
+// sidebar no longer lists. The stored count is still corrected.
 func (h *Hub) NotifyMentionCount(userID, channelID, count int64) {
 	if len(h.clientsOf(userID)) == 0 {
 		return
@@ -55,17 +43,14 @@ func (h *Hub) NotifyMentionCount(userID, channelID, count int64) {
 	h.PrepareMentionCounts(context.Background(), channelID, []int64{userID})(userID, count)
 }
 
-// PrepareMentionCounts satisfies service.MentionCountBatcher: it resolves, once
-// per flush, which of userIDs may see channelID (the NotifyMentionCount rules)
-// and returns the sender the service calls under the channel's emit lock. The
-// channel is read once, not once per reader and connection, and only connected
-// candidates get a permission check. The verdict is as of the preparation, not
-// the send: a reader whose access is revoked in between can still get this one
-// frame, which names only the channel and a count, and their next ready
-// reconciles it. The sender takes a reader's connections when it runs; a reader
-// the preparation did not cover (not connected then) is checked at send time
-// instead. Call the sender on the goroutine that prepared it (or after a
-// happens-before such as the emit lock): it fills its channel read lazily.
+// PrepareMentionCounts satisfies service.MentionCountBatcher: it resolves once per flush
+// which of userIDs may see channelID (the NotifyMentionCount rules) and returns the sender
+// the service calls under the channel's emit lock. The channel is read once, and only
+// connected candidates get a permission check. The verdict is as of preparation: a reader
+// revoked in between can still get this one frame (a channel and a count), and their next
+// ready reconciles it. A reader not connected at preparation is checked at send time. Call
+// the sender on the goroutine that prepared it (or after a happens-before such as the emit
+// lock): it fills its channel read lazily.
 func (h *Hub) PrepareMentionCounts(ctx context.Context, channelID int64, userIDs []int64) func(userID, count int64) {
 	a := &mentionAudience{h: h, channelID: channelID}
 	if h.db == nil {
@@ -86,7 +71,6 @@ func (h *Hub) PrepareMentionCounts(ctx context.Context, channelID int64, userIDs
 		a.visible[uid] = a.see(ctx, uid)
 	}
 	if ctx.Err() != nil {
-		// The budget ran out, so later readers' lookups failed and they are withheld.
 		withheld := 0
 		for _, ok := range a.visible {
 			if !ok {
@@ -99,22 +83,16 @@ func (h *Hub) PrepareMentionCounts(ctx context.Context, channelID int64, userIDs
 	return a.send
 }
 
-// mentionAudience is one prepared badge fan-out for a channel.
 type mentionAudience struct {
 	h         *Hub
 	channelID int64
-	// loaded is set once the channel read ran; see is nil when it failed, which
-	// sends nothing (fails closed).
-	loaded bool
-	// see reports whether a reader may currently see the loaded channel.
-	see func(ctx context.Context, userID int64) bool
-	// forumScoped withholds the frame from sockets without the forums feature.
+	// loaded is set once the channel read ran; see is nil when it failed, which sends nothing (fail closed).
+	loaded      bool
+	see         func(ctx context.Context, userID int64) bool
 	forumScoped bool
-	// visible holds the verdict for each reader prepared ahead of the send.
-	visible map[int64]bool
+	visible     map[int64]bool
 }
 
-// loadChannel reads the channel once; false when it is missing or unreadable.
 func (a *mentionAudience) loadChannel(ctx context.Context) bool {
 	if !a.loaded {
 		a.loaded = true
@@ -127,7 +105,6 @@ func (a *mentionAudience) loadChannel(ctx context.Context) bool {
 	return a.see != nil
 }
 
-// send delivers userID's frame to each of their live connections that may see it.
 func (a *mentionAudience) send(userID, count int64) {
 	conns := a.h.clientsOf(userID)
 	if len(conns) == 0 {
@@ -145,8 +122,6 @@ func (a *mentionAudience) send(userID, count int64) {
 	}
 }
 
-// mayReceive is the prepared verdict for userID, or a fresh check for a reader
-// who connected after the preparation.
 func (a *mentionAudience) mayReceive(userID int64) bool {
 	if ok, prepared := a.visible[userID]; prepared {
 		return ok

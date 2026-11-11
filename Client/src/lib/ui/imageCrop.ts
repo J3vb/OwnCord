@@ -83,6 +83,63 @@ function canvasBlob(canvas: HTMLCanvasElement, type: string): Promise<Blob | nul
   });
 }
 
+interface CropGeometry {
+  readonly cropW: number;
+  readonly cropH: number;
+  readonly outW: number;
+  readonly outH: number;
+}
+
+/** The largest rectangle of the wanted shape that fits inside the picture, and its scaled size. */
+function cropGeometry(image: DecodedImage, spec: CropSpec): CropGeometry {
+  const wide = image.width / image.height > spec.aspect;
+  const cropW = wide ? Math.max(1, Math.round(image.height * spec.aspect)) : image.width;
+  const cropH = wide ? image.height : Math.max(1, Math.round(image.width / spec.aspect));
+  const outW = Math.min(cropW, spec.maxWidth);
+  const outH = outW === cropW ? cropH : Math.max(1, Math.round(outW / spec.aspect));
+  return { cropW, cropH, outW, outH };
+}
+
+/** Size `canvas` and draw the centred crop onto it; false when it has no 2D context. */
+function drawCrop(canvas: HTMLCanvasElement, image: DecodedImage, g: CropGeometry): boolean {
+  canvas.width = g.outW;
+  canvas.height = g.outH;
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) return false;
+  ctx.drawImage(
+    image.source,
+    Math.floor((image.width - g.cropW) / 2),
+    Math.floor((image.height - g.cropH) / 2),
+    g.cropW,
+    g.cropH,
+    0,
+    0,
+    g.outW,
+    g.outH,
+  );
+  return true;
+}
+
+/** PNG first; when it is over the limit try WebP, then JPEG. */
+async function encodeUnderLimit(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  let blob = await canvasBlob(canvas, "image/png");
+  if (blob !== null && blob.size > MAX_BYTES) blob = await canvasBlob(canvas, "image/webp");
+  if (blob !== null && blob.size > MAX_BYTES) blob = await canvasBlob(canvas, "image/jpeg");
+  return blob;
+}
+
+/** The result for an encoded blob: its file, or the too-large message. */
+function cropResultOf(blob: Blob, spec: CropSpec): CropResult {
+  if (blob.size > MAX_BYTES) {
+    return {
+      ok: false,
+      error: accountText("avatar.tooLarge", { kb: String(MAX_BYTES / 1024) }),
+    };
+  }
+  const ext = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
+  return { ok: true, file: new File([blob], `${spec.fileBase}.${ext}`, { type: blob.type }) };
+}
+
 /**
  * Centre-crop `file` to `spec.aspect`, cap it at `spec.maxWidth` and encode it:
  * PNG, or WebP, then JPEG, when the PNG is over the server's 1 MiB limit.
@@ -97,43 +154,13 @@ export async function cropImage(file: File, spec: CropSpec): Promise<CropResult>
   let canvas: HTMLCanvasElement | null = null;
   try {
     if (image.width <= 0 || image.height <= 0) return unreadable;
-    // The largest rectangle of the wanted shape that fits inside the picture.
-    const wide = image.width / image.height > spec.aspect;
-    const cropW = wide ? Math.max(1, Math.round(image.height * spec.aspect)) : image.width;
-    const cropH = wide ? image.height : Math.max(1, Math.round(image.width / spec.aspect));
-    const outW = Math.min(cropW, spec.maxWidth);
-    const outH = outW === cropW ? cropH : Math.max(1, Math.round(outW / spec.aspect));
     canvas = document.createElement("canvas");
-    canvas.width = outW;
-    canvas.height = outH;
-    const ctx = canvas.getContext("2d");
-    if (ctx === null) return unreadable;
-    ctx.drawImage(
-      image.source,
-      Math.floor((image.width - cropW) / 2),
-      Math.floor((image.height - cropH) / 2),
-      cropW,
-      cropH,
-      0,
-      0,
-      outW,
-      outH,
-    );
-    // PNG first; when it is over the limit try WebP, then JPEG. A browser that
-    // cannot encode a type (WebKit has no WebP) answers with PNG, so the file
-    // is named and typed from what came back, not from what was asked for.
-    let blob = await canvasBlob(canvas, "image/png");
-    if (blob !== null && blob.size > MAX_BYTES) blob = await canvasBlob(canvas, "image/webp");
-    if (blob !== null && blob.size > MAX_BYTES) blob = await canvasBlob(canvas, "image/jpeg");
-    if (blob === null) return unreadable;
-    if (blob.size > MAX_BYTES) {
-      return {
-        ok: false,
-        error: accountText("avatar.tooLarge", { kb: String(MAX_BYTES / 1024) }),
-      };
-    }
-    const ext = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
-    return { ok: true, file: new File([blob], `${spec.fileBase}.${ext}`, { type: blob.type }) };
+    if (!drawCrop(canvas, image, cropGeometry(image, spec))) return unreadable;
+    // A browser that cannot encode a type (WebKit has no WebP) answers with
+    // PNG, so the file is named and typed from what came back, not from what
+    // was asked for.
+    const blob = await encodeUnderLimit(canvas);
+    return blob === null ? unreadable : cropResultOf(blob, spec);
   } catch {
     return unreadable;
   } finally {

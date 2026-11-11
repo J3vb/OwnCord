@@ -7,16 +7,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 )
 
-// limiterCleanupInterval is how often stale rate-limiter entries are reaped.
-// Cleanup is per-key-window-aware (see auth/ratelimit.go's entry.window), so
-// one sweep retires a short-window key (login attempts, minutes) and a long
-// one (service/appeal.go's 24h-per-user cap) alike.
+// limiterCleanupInterval is how often stale rate-limiter entries are reaped;
+// cleanup is per-key-window-aware, so one sweep retires short and long (24h)
+// windows alike.
 const limiterCleanupInterval = 5 * time.Minute
 
-// startLimiterCleanup reaps the shared limiter's stale entries on an App-owned
-// context. The sweep also deletes expired persisted lockouts, so the close step
-// cancels and joins the loop before the database closes: it registers after the
-// "database" step.
+// startLimiterCleanup reaps stale limiter entries on an App-owned context.
 func (a *App) startLimiterCleanup(rl *auth.RateLimiter) {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(a.bgCtx))
 	done := make(chan struct{})

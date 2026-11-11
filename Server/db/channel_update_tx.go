@@ -40,8 +40,6 @@ func applyPermissionSyncTx(ctx context.Context, q *dbgen.Queries, id int64, catI
 	return nil
 }
 
-// applyChannelPasswordTx writes a password change inside the update's
-// transaction. A nil change writes nothing.
 func applyChannelPasswordTx(ctx context.Context, q *dbgen.Queries, id int64, change *ChannelPasswordChange) error {
 	if change == nil {
 		return nil

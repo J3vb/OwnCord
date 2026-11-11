@@ -6,21 +6,17 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// gitDescribeSuffix matches what `git describe` appends to a tag for a commit
-// past it (-<count>-g<hash>) and the -dirty mark for uncommitted changes.
+// gitDescribeSuffix matches what `git describe` appends past a tag (-<count>-g<hash>, -dirty).
 var gitDescribeSuffix = regexp.MustCompile(`-\d+-g[0-9a-f]{7,}(-dirty)?$|-dirty$`)
 
-// IsDevelopmentBuild reports whether version names a build from source rather
-// than a release: "dev" (the default when no version is stamped), anything
-// that is not a semantic version, or a git describe string for a commit past
-// a tag. Such a build is never replaced with a release by the updater.
+// IsDevelopmentBuild reports whether version is a source build, not a release:
+// "dev", a non-semver string, or a git describe string past a tag. The updater never replaces one.
 func IsDevelopmentBuild(version string) bool {
 	v := ensureVPrefix(version)
 	return !semver.IsValid(v) || gitDescribeSuffix.MatchString(version)
 }
 
-// DevelopmentBuild reports whether the running server is a development build
-// (see IsDevelopmentBuild).
+// DevelopmentBuild reports whether the running server is a development build.
 func (u *Updater) DevelopmentBuild() bool {
 	return IsDevelopmentBuild(u.currentVersion)
 }

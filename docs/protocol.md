@@ -96,15 +96,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                                                                                   |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_update_batch`, `member_ban`, `roles_update`, `emoji_update`, `sticker_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                       |
-| Ephemeral          | No       | `typing`, `upload_policy` (see below), `game_activity_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `thread_follow_update`, `channel_create` (targeted per recipient; see below) |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                                                                |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                                                                            |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                                                                                      |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `poll_vote_ok`, `poll_end_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                                                           |
+| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                                                                                                                    |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_update_batch`, `member_ban`, `roles_update`, `emoji_update`, `sticker_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                                                        |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), `game_activity_policy` (see below), `video_bitrate_cap` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `thread_follow_update`, `channel_create` (targeted per recipient; see below) |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                                                                                                 |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                                                                                                             |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                                                                                                                       |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `poll_vote_ok`, `poll_end_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                                                                                            |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -257,10 +257,17 @@ connection or a call parked in the voice grace window.
       "thumbnails": true,
       "staged_lifetime_seconds": 86400
     },
-    "game_activity_policy": { "enabled": true }
+    "game_activity_policy": { "enabled": true },
+    "video_bitrate_cap": { "max_video_bitrate": 0 }
   }
 }
 ```
+
+`video_bitrate_cap.max_video_bitrate` is the server's video upload cap per
+person in bits per second (`0` = no cap), with the same shape and the same
+reason to ride every `auth_ok` as the
+[`video_bitrate_cap`](#video_bitrate_cap-server---client-broadcast) frame. A
+server that omits it has no cap.
 
 `game_activity_policy.enabled` (WP 8.3e-2) is whether game activity is shown on
 this server right now. It rides every `auth_ok`, connect and resume alike: a
@@ -386,10 +393,11 @@ first such declaration. Names the server does not know are ignored, the list is
 capped (32 names of at most 32 bytes each), and it grants nothing: it only
 narrows what the socket is sent.
 
-| Feature  | Declared by            | Effect on a socket that does **not** declare it                                                                                                                                                                                                                                                                                                                              |
-| -------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `forums` | clients from WP 6.9d-b | No `type: "forum"` row in `ready.channels`, and no forum `channel_create` (channel creation, visibility refresh, timeout refresh and role refresh alike). Those frames are per recipient and unsequenced, so skipping one allocates no sequence number. It also gets no frame for a forum's posts (see [Forum posts](#forum-posts)).                                         |
-| `mobile` | the Android app        | Nothing is withheld. It decides only whether this connection can make the user's presence show the phone: the merged `presence` carries `"mobile": true` when the connection the shown status comes from declared `mobile` and every other connection in the same idle class (all active, or all idle) did too. A phone browser does not declare it and counts as a desktop. |
+| Feature     | Declared by                                  | Effect on a socket that does **not** declare it                                                                                                                                                                                                                                                                                                                              |
+| ----------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `forums`    | clients from WP 6.9d-b                       | No `type: "forum"` row in `ready.channels`, and no forum `channel_create` (channel creation, visibility refresh, timeout refresh and role refresh alike). Those frames are per recipient and unsequenced, so skipping one allocates no sequence number. It also gets no frame for a forum's posts (see [Forum posts](#forum-posts)).                                         |
+| `mobile`    | the Android app                              | Nothing is withheld. It decides only whether this connection can make the user's presence show the phone: the merged `presence` carries `"mobile": true` when the connection the shown status comes from declared `mobile` and every other connection in the same idle class (all active, or all idle) did too. A phone browser does not declare it and counts as a desktop. |
+| `call_sync` | clients that end a ring on their own decline | No `call_declined` whose `from_user` is this account. The other participants' copy is not affected.                                                                                                                                                                                                                                                                          |
 
 `channel_update` for a forum is **not** filtered: it is one shared sequenced
 frame, and dropping it for some sockets would allocate a sequence number and
@@ -2688,6 +2696,39 @@ it again in the admin panel recovers. A client that connects at the moment of th
 asking once per poll; the server refuses each set with
 `GAME_ACTIVITY_DISABLED`, so nothing is shown.
 
+### video_bitrate_cap (Server -> Client, broadcast)
+
+Sent to every connected client after an admin with `MANAGE_SERVER` saves the
+`voice_max_video_kbps` setting in the admin panel (`PATCH
+/admin/api/settings`). No row means no cap.
+
+```json
+{
+  "type": "video_bitrate_cap",
+  "payload": { "max_video_bitrate": 6000000 }
+}
+```
+
+`max_video_bitrate` is the most video one person may send, in bits per second,
+for their camera and screen share together; `0` means no cap. LiveKit cannot
+cap one publisher, so this is advisory: a client follows a new value at once,
+with no rejoin and no republish (it changes the running encoders' rates). Each
+stream's top layer is held to its part of the cap and its lower layers sit
+under that, so each viewer receives at most the cap from one person (camera and
+share together); the person's own upload can be a little higher because it
+carries the lower layers too. With both streams live the share gets 75% and the
+camera 25%, and the camera gets at least 300 kbit/s unless the cap is under
+600 kbit/s, where each gets half. A stream alone may use the whole cap.
+A client treats a value that is not a positive whole number as no cap.
+
+Unfiltered, unsequenced and never replayed, like
+[`game_activity_policy`](#game_activity_policy-server---client-broadcast):
+`auth_ok` carries the same value on every connect and resume. The hub stores the
+new value before it lists the clients to send to, so a connection registering
+during a save either gets this frame or builds its `auth_ok` with the new value.
+If the setting cannot be read at server start there is no cap (the server logs
+`video_bitrate_cap_unreadable`); saving it again recovers.
+
 ### user_update (Server -> Client, broadcast)
 
 Broadcast when a user changes their own profile via `PATCH /api/v1/users/me`,
@@ -3773,7 +3814,10 @@ never lands after, and cancels, the new ring.
 Answered with `call_declined` (same payload shape as `call_incoming`) to the
 DM's other participants. It is addressed to all of them rather than to "the
 ringer" because the server does not know who that was — no call state, by
-design — and in a group more than one person may be ringing.
+design — and in a group more than one person may be ringing. The decliner's own
+connections that declared the `call_sync` [client feature](#client-features)
+receive it too (`from_user` is their own id), so another signed-in device of
+theirs that is still ringing stops.
 
 A declining client stops its own ring; a ringing client stops on
 `call_declined`, on a `voice_leave` that empties the room, or after a 30 second timeout.
@@ -4114,6 +4158,7 @@ tables below add per-type behavioral notes.
 | `sticker_update`       | Yes      | All clients (full custom-sticker set)                                                                  |
 | `upload_policy`        | No       | All clients (both upload file-type lists)                                                              |
 | `game_activity_policy` | No       | All clients (the game activity switch)                                                                 |
+| `video_bitrate_cap`    | No       | All clients (the video upload cap per person)                                                          |
 | `dm_channel_open`      | No       | Direct to participant                                                                                  |
 | `dm_channel_close`     | No       | Direct to participant                                                                                  |
 | `dm_request`           | No       | Direct to recipient (B5-6)                                                                             |

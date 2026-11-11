@@ -7,8 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// logRing is a fixed backing array plus write position: overwriting the
-// oldest entry is a single slot store.
+// logRing is a fixed array plus write position: overwriting the oldest entry is one slot store.
 type logRing struct {
 	entries []LogEntry // len == capacity
 	pos     int        // next write position
@@ -26,11 +25,9 @@ func (r *logRing) push(entry LogEntry) {
 func (r *logRing) snapshot() []LogEntry {
 	out := make([]LogEntry, r.count)
 	if r.count < len(r.entries) {
-		// Not yet wrapped: entries [0, count) are already in order.
 		copy(out, r.entries[:r.count])
 		return out
 	}
-	// Wrapped: oldest entry sits at pos.
 	n := copy(out, r.entries[r.pos:])
 	copy(out[n:], r.entries[:r.pos])
 	return out
@@ -45,15 +42,12 @@ type LogEntry struct {
 	Attrs     string `json:"attrs,omitempty"`
 }
 
-// RingBuffer is a bounded, thread-safe circular buffer of log entries with
-// fan-out to SSE subscriber channels. It is a true ring (fixed backing array +
-// write position, like ws.EventRingBuffer), so overwriting the oldest entry is
-// a single slot store rather than an allocation + copy per write.
+// RingBuffer is a bounded, thread-safe circular buffer of log entries with fan-out to SSE subscribers; a true
+// ring (like ws.EventRingBuffer) so overwriting is one slot store, not an allocation + copy.
 type RingBuffer struct {
 	mu  syncutil.Mutex
 	all logRing
-	// warn holds the last supportEventsMax WARN-and-above entries, so an
-	// INFO/DEBUG burst longer than all cannot evict a failure from the
+	// warn holds the last supportEventsMax WARN+ entries so an INFO/DEBUG burst cannot evict a failure from the
 	// support bundle.
 	warn        logRing
 	subscribers map[*logSubscriber]struct{}
@@ -73,11 +67,9 @@ func NewRingBuffer(capacity int) *RingBuffer {
 	}
 }
 
-// EndStreams ends every open log stream, and any opened after it, for good.
-// The server registers it with http.Server.RegisterOnShutdown: a stream never
-// returns on its own and Shutdown waits for every active handler, so an open
-// Logs tab would hold the drain for its whole budget. Safe to call more than
-// once.
+// EndStreams ends every open log stream, and any opened later, for good. Registered with
+// http.Server.RegisterOnShutdown: a stream never returns on its own and Shutdown waits for active handlers,
+// so an open Logs tab would hold the drain for its whole budget. Safe to call repeatedly.
 func (rb *RingBuffer) EndStreams() {
 	rb.endOnce.Do(func() { close(rb.streamsEnd) })
 }
@@ -87,8 +79,8 @@ func (rb *RingBuffer) SetHistory(lf *LogFile) {
 	rb.history.Store(lf)
 }
 
-// Write appends an entry, overwriting the oldest if full, and fans out
-// to all subscribers (non-blocking to avoid slow clients blocking logging).
+// Write appends an entry, overwriting the oldest if full, and fans out to subscribers without blocking so
+// slow clients cannot block logging.
 func (rb *RingBuffer) Write(entry LogEntry) {
 	if h := rb.history.Load(); h != nil {
 		h.Enqueue(entry)
@@ -113,17 +105,15 @@ func (rb *RingBuffer) Snapshot() []LogEntry {
 	return rb.snapshotLocked()
 }
 
-// snapshotLocked is Snapshot's body, callable by callers that already hold
-// rb.mu (SnapshotAndSubscribe needs the copy and the subscription to happen
-// under the same critical section).
+// snapshotLocked is Snapshot's body for callers holding rb.mu (SnapshotAndSubscribe needs copy and
+// subscription in one critical section).
 func (rb *RingBuffer) snapshotLocked() []LogEntry {
 	return rb.all.snapshot()
 }
 
-// supportSnapshot returns every entry, oldest first, preceded by any of the
-// last supportEventsMax WARN-and-above entries the general ring has already
-// evicted. The warn ring's newest entries are the WARN+ entries still in the
-// general ring, so only its older surplus is prepended.
+// supportSnapshot returns every entry oldest first, preceded by any of the last supportEventsMax WARN+
+// entries the general ring already evicted (the warn ring's newest are still in the general ring, so only its
+// older surplus is prepended).
 func (rb *RingBuffer) supportSnapshot() []LogEntry {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
@@ -140,13 +130,11 @@ func (rb *RingBuffer) supportSnapshot() []LogEntry {
 	return all
 }
 
-// isWarnLevel reports whether a LogEntry level is WARN or above.
 func isWarnLevel(level string) bool {
 	return level == "WARN" || level == "ERROR"
 }
 
-// Subscribe creates a buffered channel for a new SSE client.
-// Returns the channel and an unsubscribe function.
+// Subscribe returns a buffered channel for a new SSE client and its unsubscribe function.
 func (rb *RingBuffer) Subscribe() (<-chan LogEntry, func()) {
 	rb.mu.Lock()
 	ch, unsub := rb.subscribeLocked()
@@ -154,8 +142,7 @@ func (rb *RingBuffer) Subscribe() (<-chan LogEntry, func()) {
 	return ch, unsub
 }
 
-// subscribeLocked is Subscribe's body, callable by callers that already hold
-// rb.mu.
+// subscribeLocked is Subscribe's body for callers holding rb.mu.
 func (rb *RingBuffer) subscribeLocked() (<-chan LogEntry, func()) {
 	sub := &logSubscriber{ch: make(chan LogEntry, 64)}
 	rb.subscribers[sub] = struct{}{}
@@ -167,14 +154,10 @@ func (rb *RingBuffer) subscribeLocked() (<-chan LogEntry, func()) {
 	}
 }
 
-// SnapshotAndSubscribe atomically copies the current backfill entries and
-// registers a new subscriber channel under a single lock acquisition.
-//
-// Two separate calls (Snapshot() then Subscribe()) leave a window where an
-// entry written in between reaches neither the backfill nor the live feed,
-// because Write's fan-out only reaches registered subscribers. The window is
-// not instantaneous: handleLogStream runs a token-resolution DB round-trip per
-// backfill chunk.
+// SnapshotAndSubscribe atomically copies the backfill and registers a subscriber under one lock. Separate
+// Snapshot() then Subscribe() calls leave a window where an entry written between reaches neither the
+// backfill nor the live feed, since Write only reaches registered subscribers; the window is real because
+// handleLogStream does a token-resolution DB round-trip per backfill chunk.
 func (rb *RingBuffer) SnapshotAndSubscribe() ([]LogEntry, <-chan LogEntry, func()) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()

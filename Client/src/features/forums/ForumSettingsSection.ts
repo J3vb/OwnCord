@@ -65,6 +65,8 @@ const problemText = (p: DraftProblem): string => {
       return forumsText("settings.error.duplicate");
     case "emoji":
       return forumsText("settings.error.emoji");
+    case "requireTag":
+      return forumsText("settings.error.requireTag");
     default:
       return forumsText("settings.error.count", { max: MAX_FORUM_TAGS });
   }
@@ -347,7 +349,7 @@ export function createForumSettingsSection(
       if (problem !== null) {
         showNote(null);
         showError(problemText(problem));
-        if (problem.kind !== "count") {
+        if ("key" in problem) {
           list
             .querySelector<HTMLElement>(`[data-key="${problem.key}"] .forum-tag-row-name`)
             ?.focus();

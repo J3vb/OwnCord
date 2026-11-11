@@ -9,45 +9,34 @@ import (
 )
 
 //
-// These endpoints manage per-role and per-user allow/deny permission
-// overrides on a channel. Denying ReadMessages hides the channel from a role
-// entirely ("private channel"); the read side is already enforced by
-// ListVisibleChannels, the WS ready payload, and the per-message permission
-// checks.
+// Per-role and per-user allow/deny permission overrides on a channel. Denying ReadMessages hides the channel
+// from a role entirely ("private channel"); the read side is enforced by ListVisibleChannels, the WS ready
+// payload and per-message checks.
 //
-// Thin adapters over service.ChannelService:
-// the escalation guard (clearing a deny is a grant), the hierarchy rules,
-// mask clamping, the writes and their audit rows all live in the service.
-// The handlers decode, delegate and respond; the service also invalidates
-// cached permissions and refreshes channel visibility.
+// Thin adapters over service.ChannelService, which owns the escalation guard (clearing a deny is a grant),
+// hierarchy rules, mask clamping, writes, audit rows, cache invalidation and visibility refresh.
 
-// getPermChannel resolves the channel for an override request through the
-// one guild-channel policy (service.ChannelService.ResolveGuildChannel): a DM id
-// answers exactly like a missing id, so this surface no longer confirms
-// which ids are private conversations (A-2026-08-02). Returns nil when a
-// response has already been written.
+// getPermChannel resolves the channel through the one guild-channel policy
+// (ChannelService.ResolveGuildChannel): a DM id answers exactly like a missing id, so this surface never
+// confirms which ids are private conversations. Returns nil when a response is already written.
 func getPermChannel(channels *service.ChannelService, w http.ResponseWriter, r *http.Request) *db.Channel {
 	return resolveGuildChannel(channels, w, r)
 }
 
-// writeOverrideErr maps override-mutation errors onto admin API responses.
-// Unlike writeChannelErr it passes the service's NotFound text through —
-// the override paths distinguish "role not found" from "user not found".
+// writeOverrideErr maps override-mutation errors; unlike writeChannelErr it passes the service's NotFound
+// text through, since "role not found" and "user not found" differ.
 func writeOverrideErr(w http.ResponseWriter, err error) {
 	writeSvcErr(w, err, "", "", "channel permission action failed")
 }
 
-// channelPermissionsResponse is the JSON shape for GET .../permissions.
-// Roles lists EVERY role (zero allow/deny when it carries no override), while
-// Users lists only the members who actually have a per-user override row —
-// every member of a server is not a sensible list to ship, and the matrix
-// editor adds a member by writing one.
+// channelPermissionsResponse is GET .../permissions. Roles lists EVERY role (zero allow/deny when no
+// override); Users lists only members with a per-user override row, since every member is not a sensible list
+// and the matrix editor adds one by writing a row.
 type channelPermissionsResponse struct {
 	ChannelID int64                    `json:"channel_id"`
 	Roles     []db.ChannelRoleOverride `json:"roles"`
 	Users     []db.ChannelUserOverride `json:"users"`
-	// PermissionsSynced: the channel's overrides follow its category's
-	// template. Admin-only; not on the websocket channel payload.
+	// PermissionsSynced: the overrides follow the category's template. Admin-only; not on the websocket payload.
 	PermissionsSynced bool `json:"permissions_synced"`
 }
 
@@ -76,17 +65,14 @@ func handleGetChannelPermissions(channels *service.ChannelService) http.HandlerF
 	}
 }
 
-// putChannelPermissionRequest is the JSON body for PUT .../permissions/{roleId}
-// and .../user-permissions/{userId}.
 type putChannelPermissionRequest struct {
 	Allow int64 `json:"allow"`
 	Deny  int64 `json:"deny"`
 }
 
-// overrideMutationSetup decodes the shared preamble of every override
-// mutation: the resolved channel, the {id path param}, and the
-// authenticated actor's role. body reports whether a JSON body must be
-// decoded into req. Returns ok=false when a response has been written.
+// overrideMutationSetup decodes the preamble shared by every override mutation: resolved channel, the id path
+// param and the actor's role. body says whether a JSON body is decoded into req; ok=false means a response
+// was written.
 func overrideMutationSetup(channels *service.ChannelService, w http.ResponseWriter, r *http.Request, param, invalidMsg string, req *putChannelPermissionRequest) (ch *db.Channel, targetID int64, actorRole *db.Role, ok bool) {
 	ch = getPermChannel(channels, w, r)
 	if ch == nil {
@@ -151,12 +137,10 @@ func handleDeleteChannelPermission(channels *service.ChannelService) http.Handle
 }
 
 //
-// channel_user_overrides is the last layer of the resolution order (base role
-// perms -> role override -> user override), so these two endpoints can grant a
-// single member access to a channel their role is denied, or take it away
-// without minting a role for them. The service invalidates only the target
-// user's cached permissions: a per-user override cannot change anyone else's
-// verdict.
+// channel_user_overrides is the last resolution layer (base role perms -> role override -> user override), so
+// these endpoints can grant one member a channel their role is denied, or take it away, without minting a
+// role. The service invalidates only the target user's cached permissions: a per-user override cannot change
+// anyone else's verdict.
 
 func handlePutChannelUserPermission(channels *service.ChannelService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

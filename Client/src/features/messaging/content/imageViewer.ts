@@ -9,17 +9,13 @@ import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createZoomPan, PAN_MIN_SCALE, bindTouchZoom } from "@lib/ui/zoomPan";
 import { showToast } from "@lib/ui/toast";
-import { announceSaved } from "@lib/ui/savedNotice";
 import { desktop } from "../../../platform/desktop";
 import type { ExternalImageSource } from "../../../platform/contracts/externalContent";
 import { mediaControlsText } from "../../../i18n/mediaControls";
-import { messageStatusText } from "../../../i18n/messageStatus";
-import { fileTransferText } from "../../../i18n/fileTransfer";
 import type { ImageMenuTarget } from "../message-list/imageMenu";
 import {
   fetchExternalImage,
   fetchImageAsObjectUrl,
-  fetchServerFile,
   isExternalUrl,
   isServerUrl,
   recoverEvictedImage,
@@ -27,113 +23,17 @@ import {
   thumbnailUrl,
 } from "./attachmentCache";
 import { log } from "./attachmentUrls";
+import { downloadFile, failedText, type FileAction } from "./fileDownload";
+import type { LightboxCurrent, LightboxGallery, LightboxHandle } from "./lightboxTypes";
 
-/** One image of a message's lightbox sequence. `url` is the resolved server URL. */
-export interface LightboxGalleryItem {
-  readonly url: string;
-  readonly filename: string;
-  readonly mime: string;
-}
-
-/** The images of the clicked message, for the viewer's previous/next arrows. */
-export interface LightboxGallery {
-  readonly items: readonly LightboxGalleryItem[];
-  readonly index: number;
-  /** True once the message was deleted; checked when the viewer opens. */
-  readonly isGone?: () => boolean;
-  /** Calls `onGone` when the message is deleted; returns the unsubscribe. */
-  readonly watch?: (onGone: () => void) => () => void;
-  /** The message's row, for focus when the viewer closes over a deletion. */
-  readonly row?: () => Element | null;
-}
-
-/** What the viewer shows now: Download, Open original, the image menu and
- *  eviction recovery all read this at use time, never at bind time. */
-export interface LightboxCurrent {
-  readonly external: ExternalImageSource | undefined;
-  readonly alt: string;
-  /** The server URL shown in full when it is not `external`'s file: a HEIC or
-   *  TIFF is shown through its JPEG preview, while Save keeps the original. */
-  readonly shown?: string | undefined;
-}
-
-/** What the lazy gallery module drives (3A-10c). */
-export interface LightboxHandle {
-  readonly overlay: HTMLElement;
-  readonly img: HTMLImageElement;
-  /** Tab cycle, in order; the gallery puts its arrows first. */
-  readonly controls: HTMLButtonElement[];
-  readonly signal: AbortSignal;
-  setCurrent(current: LightboxCurrent): void;
-  /** Resets zoom and pan and ends a drag in progress. */
-  resetView(): void;
-  /** What a sideways swipe at 1x does: 1 is the next image, -1 the previous. */
-  onSwipeStep(step: (direction: 1 | -1) => void): void;
-  closeMenu(): void;
-  /** True while the image menu is open; it owns the arrow keys. */
-  isImageMenuOpen(): boolean;
-  /** Passed in so the lazy gallery module imports only types from here. */
-  fetchImageAsObjectUrl(url: string): Promise<string | null>;
-  thumbnailUrl(fileUrl: string, mime: string): string;
-  shownImageUrl(fileUrl: string, mime: string): string;
-  close(): void;
-}
-
-/** What a file button does with the bytes: save them, or (where the host
- *  has a share sheet) hand them to another app. */
-export type FileAction = "save" | "share";
-
-function failedText(action: FileAction, filename: string): string {
-  return action === "share"
-    ? fileTransferText("shareFailed", { filename })
-    : messageStatusText("file.downloadFailed", { filename });
-}
-
-/** Saves and shares in flight, by action and URL: a second tap while the first
- *  still runs does nothing, so a slow download is not saved twice. */
-const inFlight = new Set<string>();
-
-/** Download a file via Tauri HTTP plugin and save to disk with native dialog,
- *  or open the share sheet on it. `fs:allow-write-file` is statically scoped
- *  to `$APPLOG` (nothing covers app data); the save dialog grants the one path
- *  the user chose at runtime, so the dialog itself is the boundary for the
- *  download. The Android app has no dialog: the host saves into shared
- *  storage and a toast says where. */
-export async function downloadFile(
-  url: string,
-  filename: string,
-  action: FileAction = "save",
-): Promise<void> {
-  const key = `${action} ${url}`;
-  if (inFlight.has(key)) return;
-  inFlight.add(key);
-  try {
-    // The dialog opens before the fetch, so it answers the click at once.
-    const filePath = action === "save" ? await desktop.fileSaver.pickSaveLocation(filename) : null;
-    if (action === "save" && filePath === null) return; // User cancelled
-
-    // Fetch file data — server downloads go through the cert-pinned HTTP proxy
-    // with the session bearer token (the files endpoint requires auth).
-    const res = await fetchServerFile(url);
-    if (!res.ok) {
-      log.error("Download failed", { filename, status: res.status });
-      showToast(messageStatusText("file.downloadHttpFailed", { status: res.status }), "error");
-      return;
-    }
-
-    const data = new Uint8Array(await res.arrayBuffer());
-    if (filePath === null) await desktop.shareSheet.shareFile(filename, data);
-    else announceSaved(await desktop.fileSaver.writeFile(filePath, data), filename);
-  } catch (err) {
-    log.error(action === "share" ? "Share failed" : "Download failed", {
-      filename,
-      error: String(err),
-    });
-    showToast(failedText(action, filename), "error");
-  } finally {
-    inFlight.delete(key);
-  }
-}
+export { downloadFile };
+export type { FileAction };
+export type {
+  LightboxGalleryItem,
+  LightboxGallery,
+  LightboxCurrent,
+  LightboxHandle,
+} from "./lightboxTypes";
 
 // -- Image menu ---------------------------------------------------------------
 
@@ -213,6 +113,120 @@ export function closeActiveLightbox(): void {
   imageMenuModule?.closeImageMenu();
 }
 
+/** The source URL of the image on show, when it has one. */
+const sourceOf = (c: LightboxCurrent): string | null =>
+  c.external !== undefined && "url" in c.external ? c.external.url : null;
+
+/** Only a public address opens in the system browser (a server one needs the token). */
+const originalOf = (c: LightboxCurrent): string | null => {
+  const url = sourceOf(c);
+  return url !== null && isExternalUrl(url) ? url : null;
+};
+
+/** A modal surface, named for screen readers and tabbable itself. */
+function createLightboxOverlay(alt: string): HTMLDivElement {
+  const overlay = createElement("div", { class: "image-lightbox" });
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", alt);
+  overlay.tabIndex = -1;
+  return overlay;
+}
+
+/** `src` can be the server's thumbnail: show it at once, then the
+ *  full file. A server image shown in full is a memory-cache hit here. */
+function showFullWhenReady(
+  img: HTMLImageElement,
+  external: ExternalImageSource | undefined,
+  shownUrl: string | undefined,
+  stillOpened: () => boolean,
+): void {
+  if (external === undefined || !("url" in external) || !isServerUrl(external.url)) return;
+  void fetchImageAsObjectUrl(shownUrl ?? external.url).then((full) => {
+    // A gallery step since the open owns the picture now.
+    if (!stillOpened()) return;
+    if (full !== null && img.isConnected && img.src !== full) img.src = full;
+  });
+}
+
+/** The toolbar (Close, Download, Open original for an external image) and, in
+ *  the Android app, the labelled Save and Share buttons under the image. */
+function buildLightboxControls(hasOriginal: boolean) {
+  const toolbar = createElement("div", { class: "image-lightbox-toolbar" });
+  const lightboxButton = (
+    cls: string,
+    label: string,
+    icon: "x" | "download" | "external-link",
+  ): HTMLButtonElement => {
+    const btn = createElement("button", {
+      class: cls,
+      type: "button",
+      "aria-label": label,
+      title: label,
+    });
+    btn.appendChild(createIcon(icon, 20));
+    toolbar.appendChild(btn);
+    return btn;
+  };
+  const phoneBar = desktop.shareSheet.available
+    ? createElement("div", { class: "image-lightbox-actions" })
+    : null;
+  const downloadBtn =
+    phoneBar === null
+      ? lightboxButton("image-lightbox-action", mediaControlsText("lightbox.download"), "download")
+      : barButton(phoneBar, mediaControlsText("lightbox.save"), "download");
+  const shareBtn =
+    phoneBar === null ? null : barButton(phoneBar, mediaControlsText("lightbox.share"), "share-2");
+  const openBtn = hasOriginal
+    ? lightboxButton(
+        "image-lightbox-action",
+        mediaControlsText("lightbox.openOriginal"),
+        "external-link",
+      )
+    : null;
+  const closeBtn = lightboxButton("image-lightbox-close", mediaControlsText("lightbox.close"), "x");
+  // DOM order is the visual order left to right (the phone bar under the
+  // toolbar), and so the Tab order.
+  const controls: HTMLButtonElement[] = [
+    ...(phoneBar === null ? [downloadBtn] : []),
+    ...(openBtn === null ? [] : [openBtn]),
+    closeBtn,
+    ...(shareBtn === null ? [] : [downloadBtn, shareBtn]),
+  ];
+  return { toolbar, phoneBar, downloadBtn, shareBtn, openBtn, closeBtn, controls };
+}
+
+/** Tab cycles through the toolbar buttons, so focus stays in the dialog. */
+function cycleToolbarFocus(e: KeyboardEvent, controls: readonly HTMLButtonElement[]): void {
+  e.preventDefault();
+  const at = controls.findIndex((c) => c === document.activeElement);
+  const step = e.shiftKey ? -1 : 1;
+  const next = at === -1 ? (e.shiftKey ? controls.length - 1 : 0) : at + step;
+  controls[(next + controls.length) % controls.length]?.focus();
+}
+
+/** The Menu key and Shift+F10 open the image's menu. */
+function isContextMenuKey(e: KeyboardEvent): boolean {
+  return e.key === "ContextMenu" || (e.shiftKey && e.key === "F10");
+}
+
+/** + / - / 0 zoom the image (the caller has ruled out Ctrl/Cmd). */
+function zoomWithKey(key: string, view: ReturnType<typeof createZoomPan>): void {
+  if (key === "+" || key === "=") view.setScale(view.scale * 1.3);
+  if (key === "-") view.setScale(view.scale / 1.3);
+  if (key === "0") view.reset();
+}
+
+/** Load the gallery module on demand and hand it the viewer's handle. */
+function loadLightboxGallery(gallery: LightboxGallery, handle: LightboxHandle): void {
+  import("../message-list/lightboxGallery").then(
+    (m) => {
+      if (!handle.signal.aborted) m.attachLightboxGallery(gallery, handle);
+    },
+    (err: unknown) => log.warn("Lightbox gallery failed to load", { error: String(err) }),
+  );
+}
+
 /** Open a full-screen lightbox overlay with zoom and pan. */
 export function openImageLightbox(
   src: string,
@@ -232,26 +246,12 @@ export function openImageLightbox(
   // Focus moves into the lightbox on open and back to the opener on close;
   // captured before the overlay takes focus.
   const opener = document.activeElement;
-  const overlay = createElement("div", { class: "image-lightbox" });
-  // A modal surface: named so a screen reader announces it, and tabbable
-  // itself so the Tab cycle never escapes to the page behind it.
-  overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-modal", "true");
-  overlay.setAttribute("aria-label", alt);
-  overlay.tabIndex = -1;
+  const overlay = createLightboxOverlay(alt);
 
   const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
   const img = createElement("img", { src, alt });
   // The image on show; a gallery step replaces it (3A-10c).
   let current: LightboxCurrent = { external, alt, shown: shownUrl };
-  const sourceOf = (c: LightboxCurrent): string | null =>
-    c.external !== undefined && "url" in c.external ? c.external.url : null;
-  // Only a public address opens in the system browser; a server attachment's
-  // address needs the session token, which the browser would not have.
-  const originalOf = (c: LightboxCurrent): string | null => {
-    const url = sourceOf(c);
-    return url !== null && isExternalUrl(url) ? url : null;
-  };
   if (external !== undefined) {
     recoverEvictedImage(
       img,
@@ -261,65 +261,13 @@ export function openImageLightbox(
       () => current,
     );
   }
-  // `src` can be the server's thumbnail: show it at once, then the
-  // full file. A server image shown in full is a memory-cache hit here.
-  if (external !== undefined && "url" in external && isServerUrl(external.url)) {
-    const opened = current;
-    void fetchImageAsObjectUrl(shownUrl ?? external.url).then((full) => {
-      // A gallery step since the open owns the picture now.
-      if (current !== opened) return;
-      if (full !== null && img.isConnected && img.src !== full) img.src = full;
-    });
-  }
+  const opened = current;
+  showFullWhenReady(img, external, shownUrl, () => current === opened);
   imgWrap.appendChild(img);
   overlay.appendChild(imgWrap);
 
-  // Top-right toolbar: Close, Download and (external images only) Open
-  // original, left to right with Close in the corner.
-  const toolbar = createElement("div", { class: "image-lightbox-toolbar" });
-  const lightboxButton = (
-    cls: string,
-    label: string,
-    icon: "x" | "download" | "external-link",
-  ): HTMLButtonElement => {
-    const btn = createElement("button", {
-      class: cls,
-      type: "button",
-      "aria-label": label,
-      title: label,
-    });
-    btn.appendChild(createIcon(icon, 20));
-    toolbar.appendChild(btn);
-    return btn;
-  };
-  // In the Android app Save and Share sit under the image as labelled
-  // buttons a thumb can hit; the toolbar keeps Close and Open original.
-  const phoneBar = desktop.shareSheet.available
-    ? createElement("div", { class: "image-lightbox-actions" })
-    : null;
-  const downloadBtn =
-    phoneBar === null
-      ? lightboxButton("image-lightbox-action", mediaControlsText("lightbox.download"), "download")
-      : barButton(phoneBar, mediaControlsText("lightbox.save"), "download");
-  const shareBtn =
-    phoneBar === null ? null : barButton(phoneBar, mediaControlsText("lightbox.share"), "share-2");
-  const openBtn =
-    originalOf(current) === null
-      ? null
-      : lightboxButton(
-          "image-lightbox-action",
-          mediaControlsText("lightbox.openOriginal"),
-          "external-link",
-        );
-  const closeBtn = lightboxButton("image-lightbox-close", mediaControlsText("lightbox.close"), "x");
-  // DOM order is the visual order left to right (the phone bar under the
-  // toolbar), and so the Tab order.
-  const controls: HTMLButtonElement[] = [
-    ...(phoneBar === null ? [downloadBtn] : []),
-    ...(openBtn === null ? [] : [openBtn]),
-    closeBtn,
-    ...(shareBtn === null ? [] : [downloadBtn, shareBtn]),
-  ];
+  const { toolbar, phoneBar, downloadBtn, shareBtn, openBtn, closeBtn, controls } =
+    buildLightboxControls(originalOf(current) !== null);
 
   overlay.appendChild(toolbar);
   if (phoneBar !== null) overlay.appendChild(phoneBar);
@@ -456,23 +404,15 @@ export function openImageLightbox(
     if (e.key === "Escape" && !isImeCommit(e)) close();
     // The Menu key / Shift+F10 open the image's menu from whichever toolbar
     // button has focus, centred on the image.
-    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+    if (isContextMenuKey(e)) {
       e.preventDefault();
       img.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     }
-    if (e.key === "Tab") {
-      // Contain focus in the dialog: Tab cycles through its toolbar buttons.
-      e.preventDefault();
-      const at = controls.findIndex((c) => c === document.activeElement);
-      const step = e.shiftKey ? -1 : 1;
-      const next = at === -1 ? (e.shiftKey ? controls.length - 1 : 0) : at + step;
-      controls[(next + controls.length) % controls.length]?.focus();
-    }
+    // Contain focus in the dialog.
+    if (e.key === "Tab") cycleToolbarFocus(e, controls);
     // Ctrl/Cmd with these keys zooms the whole app, not the image.
     if (e.ctrlKey || e.metaKey) return;
-    if (e.key === "+" || e.key === "=") view.setScale(view.scale * 1.3);
-    if (e.key === "-") view.setScale(view.scale / 1.3);
-    if (e.key === "0") view.reset();
+    zoomWithKey(e.key, view);
   }
   document.addEventListener("keydown", onKey, { signal: disposable.signal });
 
@@ -504,11 +444,6 @@ export function openImageLightbox(
       shownImageUrl,
       close,
     };
-    import("../message-list/lightboxGallery").then(
-      (m) => {
-        if (!disposable.signal.aborted) m.attachLightboxGallery(gallery, handle);
-      },
-      (err: unknown) => log.warn("Lightbox gallery failed to load", { error: String(err) }),
-    );
+    loadLightboxGallery(gallery, handle);
   }
 }

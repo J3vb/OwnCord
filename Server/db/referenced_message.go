@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// referencedSnippetRunes caps a reply snippet's content.
 const referencedSnippetRunes = 100
 
 // attachReferencedMessages fills ReferencedMessage for every reply in msgs.
@@ -36,9 +35,9 @@ func (d *DB) attachReferencedMessages(ctx context.Context, msgs []MessageAPIResp
 	return msgs, nil
 }
 
-// GetReferencedMessages returns the reply snippets for parent ids that live
-// in channelID, keyed by id. A parent in another channel or already purged is
-// absent; a soft-deleted one is redacted to {id, deleted: true}.
+// GetReferencedMessages returns the reply snippets for parent ids in channelID, keyed
+// by id. A parent in another channel or purged is absent; a soft-deleted one is
+// redacted to {id, deleted: true}.
 func (d *DB) GetReferencedMessages(ctx context.Context, channelID int64, ids []int64) (map[int64]*ReferencedMessage, error) {
 	out := make(map[int64]*ReferencedMessage, len(ids))
 	if len(ids) == 0 {

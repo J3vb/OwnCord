@@ -9,7 +9,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// readBackup fills the backup schedule and newest-backup readings.
 func (s *AttentionService) readBackup(ctx context.Context, r *attentionReadings) {
 	r.scheduleErr = errors.New("backup schedule is not available")
 	if s.src.BackupSchedule != nil {
@@ -24,12 +23,9 @@ func (s *AttentionService) readBackup(ctx context.Context, r *attentionReadings)
 	}
 }
 
-// RefreshBackup re-reads the backup schedule and the newest backup and
-// re-evaluates only the backup signal at now, so a backup just taken shows on the
-// panel at once instead of after the next minute's sample. The rate and disk
-// signals keep their per-minute cadence: an extra sample would skew their
-// rates and sustain counts. Before the first full sample there is no signal
-// to replace and it does nothing. Nil-safe for partial wirings.
+// RefreshBackup re-evaluates only the backup signal at now so a fresh backup shows at
+// once; rate and disk keep their per-minute cadence (an extra sample would skew them).
+// No-op before the first full sample. Nil-safe.
 func (s *AttentionService) RefreshBackup(ctx context.Context, now time.Time) {
 	if s == nil {
 		return

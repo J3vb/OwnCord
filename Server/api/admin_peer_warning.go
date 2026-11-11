@@ -13,21 +13,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/updater"
 )
 
-// warnOnAdminPeerAddress reports an admin perimeter that will most likely see
-// a relay's address instead of the client's. With trusted_proxies empty,
-// AdminIPRestrict checks the connecting address; behind a reverse proxy that
-// is the proxy (often 127.0.0.1), and in a container it can be the bridge
-// gateway (the default route) for connections the engine's port relay carries,
-// such as published ports reached over IPv6. The default allowlist admits
-// both, so the perimeter then admits every client the relay carries.
-//
-// tls.mode "off" and a container are the two start-up signals for that
-// shape, but the warning fires only when the configured allowlist still
-// admits the relay's address: an owner who narrowed admin_allowed_cidrs so
-// the loopback/bridge ranges are excluded has already closed the hole, and
-// the warning's own suggested fix must silence it. It warns and never
-// refuses: a LAN-only install matches it too, and first-run setup is
-// additionally gated by the start-up setup token.
+// warnOnAdminPeerAddress reports an admin perimeter that will most likely see a relay's address instead of
+// the client's. With trusted_proxies empty, AdminIPRestrict checks the connecting address: behind a reverse
+// proxy that is the proxy, and in a container it can be the bridge gateway, so the default allowlist admits
+// every client the relay carries. It fires only when the allowlist still admits the relay's address (the
+// suggested fix must silence it). It warns and never refuses: a LAN-only install matches too, and first-run
+// setup is gated by the start-up setup token.
 func warnOnAdminPeerAddress(cfg *config.Config) {
 	if len(cfg.Server.TrustedProxies) > 0 || len(cfg.Server.AdminAllowedCIDRs) == 0 {
 		return
@@ -49,15 +40,9 @@ func warnOnAdminPeerAddress(cfg *config.Config) {
 			"addresses only the owner uses. Ignore this if clients reach the server directly on a LAN")
 }
 
-// adminAllowlistAdmitsRelay reports whether any admin_allowed_cidrs entry
-// admits a relay's likely connecting address: loopback (a same-host reverse
-// proxy), or — inside a container — the bridge gateway the engine relays
-// published ports through. That gateway is the container's default route,
-// whatever pool the engine (Docker, Podman) allocated the network from; when
-// the route table cannot be read it falls back to Docker's default
-// 172.16.0.0/12 pool. An entry is tested for overlap, so both a broad prefix
-// (0.0.0.0/0) and the relay's exact /32 count; invalid entries are skipped
-// here because config.Load already warned about them.
+// adminAllowlistAdmitsRelay reports whether any admin_allowed_cidrs entry admits a relay's likely address:
+// loopback, or in a container the default-route gateway (falling back to Docker's 172.16.0.0/12 when the
+// route table is unreadable). Entries are tested for overlap; invalid ones are skipped (config.Load warned).
 func adminAllowlistAdmitsRelay(cidrs []string, container bool) bool {
 	ranges := []netip.Prefix{
 		netip.MustParsePrefix("127.0.0.0/8"),
@@ -82,12 +67,10 @@ func adminAllowlistAdmitsRelay(cidrs []string, container bool) bool {
 	return false
 }
 
-// routeTablePath is the kernel's IPv4 route table; a variable so tests can
-// point it at a fixture.
+// routeTablePath is the kernel's IPv4 route table; a var so tests can point it at a fixture.
 var routeTablePath = "/proc/net/route"
 
-// defaultGateway returns the IPv4 gateway of the default route in
-// routeTablePath, whose addresses are hex in host byte order.
+// defaultGateway returns the IPv4 default-route gateway from routeTablePath (hex, host byte order).
 func defaultGateway() (netip.Addr, bool) {
 	data, err := os.ReadFile(routeTablePath)
 	if err != nil {

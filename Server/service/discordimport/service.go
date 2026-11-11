@@ -17,7 +17,6 @@ var ErrNotFound = db.ErrNotFound
 // ErrNotRunning is returned by Cancel for a job that has already ended.
 var ErrNotRunning = errors.New("that import is not running")
 
-// Job states, as JobView.Status reports them.
 const (
 	StatusRunning   = db.ImportRunning
 	StatusDone      = db.ImportDone
@@ -49,8 +48,7 @@ func viewOf(j *db.ImportJob) JobView {
 	}
 }
 
-// ServiceStore is the database surface the Service needs: the runner's plus the
-// audit log. *db.DB satisfies it.
+// ServiceStore is the database surface the Service needs: the runner's plus the audit log.
 type ServiceStore interface {
 	Store
 	db.Auditor
@@ -61,14 +59,13 @@ type ChannelBroadcaster interface {
 	BroadcastChannelCreate(ch *db.Channel)
 }
 
-// PermissionCache drops cached permissions; *service.PermissionService satisfies
-// it.
+// PermissionCache drops cached permissions; *service.PermissionService satisfies it.
 type PermissionCache interface {
 	InvalidateAll()
 }
 
-// ServiceConfig wires a Service. Store, Files and Uploads are the runner's
-// (Config); Hub and Perms announce the finished channel.
+// ServiceConfig wires a Service. Store, Files and Uploads are the runner's (Config); Hub and Perms announce
+// the finished channel.
 type ServiceConfig struct {
 	Store   ServiceStore
 	Files   Files
@@ -78,15 +75,15 @@ type ServiceConfig struct {
 	Perms   PermissionCache
 }
 
-// Service is what the admin routes drive: the runner plus the audit rows and
-// the announcement that go with an import.
+// Service is what the admin routes drive: the runner plus the audit rows and the announcement that go with an
+// import.
 type Service struct {
 	runner *Runner
 	audit  db.Auditor
 	group  *syncutil.Group
 
-	// cancelledBy remembers who asked to cancel a job, for the audit row
-	// written once the job really ended cancelled.
+	// cancelledBy remembers who asked to cancel a job, for the audit row written once the job really ended
+	// cancelled.
 	cancelMu    syncutil.Mutex
 	cancelledBy map[int64]int64
 }
@@ -104,15 +101,13 @@ func NewService(cfg ServiceConfig) *Service {
 	}
 }
 
-// channelAnnouncer tells everyone about a finished import's channel the way a
-// normal channel create does.
 type channelAnnouncer struct {
 	perms PermissionCache
 	hub   ChannelBroadcaster
 }
 
-// ChannelCreated drops cached permissions, since the channel started as a copy
-// of its category's template, and then sends channel_create.
+// ChannelCreated drops cached permissions, since the channel started as a copy of its category's template,
+// and then sends channel_create.
 func (a channelAnnouncer) ChannelCreated(_ context.Context, ch *db.Channel) {
 	if a.perms != nil {
 		a.perms.InvalidateAll()
@@ -122,8 +117,7 @@ func (a channelAnnouncer) ChannelCreated(_ context.Context, ch *db.Channel) {
 	}
 }
 
-// Start begins an import and audits it. When the job ends it audits a published
-// or cancelled one.
+// Start begins an import and audits it; when the job ends it audits a published or cancelled one.
 func (s *Service) Start(ctx context.Context, req Request) (*Job, error) {
 	job, err := s.runner.Start(ctx, req)
 	if err != nil {
@@ -140,8 +134,8 @@ func (s *Service) Start(ctx context.Context, req Request) (*Job, error) {
 	return job, nil
 }
 
-// auditEnd waits for the job and writes the audit row for how it ended. At
-// shutdown it leaves without waiting.
+// auditEnd waits for the job and writes the audit row for how it ended; at shutdown it leaves without
+// waiting.
 func (s *Service) auditEnd(ctx context.Context, job *Job, actor int64, source string) {
 	select {
 	case <-job.Done():
@@ -165,9 +159,9 @@ func (s *Service) auditEnd(ctx context.Context, job *Job, actor int64, source st
 	}
 }
 
-// Cancel asks a running job to stop. The cancel audit row is written when the
-// job actually ends cancelled, so a cancel that loses a race with the publish
-// leaves none. ErrNotFound for an unknown id, ErrNotRunning for a finished one.
+// Cancel asks a running job to stop. The cancel audit row is written when the job actually ends cancelled, so
+// a cancel that loses a race with the publish leaves none. ErrNotFound for an unknown id, ErrNotRunning for a
+// finished one.
 func (s *Service) Cancel(ctx context.Context, id, actor int64) error {
 	job := s.runner.Running(id)
 	if job != nil {
@@ -216,7 +210,6 @@ func (s *Service) CategoryExists(ctx context.Context, id int64) (bool, error) {
 	return s.runner.CategoryExists(ctx, id)
 }
 
-// auditSource is the upload's file name made safe and short for an audit row.
 func auditSource(name string) string {
 	s := strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {

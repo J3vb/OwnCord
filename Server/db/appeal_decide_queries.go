@@ -8,35 +8,34 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// AppealWriteOutcome is the guarded-write result of DecideAppealTx, so the
-// service can map each reason to its own HTTP status.
+// AppealWriteOutcome is DecideAppealTx's result, so the service can map each reason to
+// an HTTP status.
 type AppealWriteOutcome int
 
 const (
 	// AppealWriteOK: the write (and, for an overturn, its reversal) landed.
 	AppealWriteOK AppealWriteOutcome = iota
-	// AppealWriteConflict: the observed state/assignee was stale, or the
-	// deciding/assigning moderator no longer resolves to a user at all.
+	// AppealWriteConflict: the observed state/assignee was stale, or the moderator no
+	// longer resolves to a user.
 	AppealWriteConflict
 	// AppealWriteSelfReview: another eligible reviewer exists.
 	AppealWriteSelfReview
-	// AppealWriteReversalFailed: the UPDATE would have succeeded but the overturn
-	// hit a real reversal error, so the whole transaction rolled back; the
-	// appellant is never told "overturned" while the sanction stands.
+	// AppealWriteReversalFailed: the overturn hit a real reversal error and the
+	// whole transaction rolled back; the appellant is never told "overturned" while the
+	// sanction stands.
 	AppealWriteReversalFailed
-	// AppealWriteForbidden: the decider's authority (CanModerate bit or an
-	// effective ban) no longer held when re-checked inside the transaction.
+	// AppealWriteForbidden: the decider's authority (CanModerate bit, effective ban) no
+	// longer held when re-checked in the transaction.
 	AppealWriteForbidden
 )
 
-// appealReversalHookForTest forces applyAppealReversalTx to fail so a test can
-// prove nothing commits. Test-only; set via SetAppealReversalHookForTest.
+// appealReversalHookForTest forces applyAppealReversalTx to fail so a test can prove
+// nothing commits. Test-only.
 var appealReversalHookForTest func() error
 
-// ReversalAuditActionFor names the audit action a kind's reversal writes,
-// using the same words as the moderation service. ok=false for "removal"
-// (nothing to audit). The service writes this row best-effort after
-// DecideAppealTx commits.
+// ReversalAuditActionFor names the audit action a kind's reversal writes, with
+// the moderation service's words; ok=false for "removal". The service writes it
+// best-effort after commit.
 func ReversalAuditActionFor(kind string) (action string, ok bool) {
 	switch kind {
 	case "timeout":
@@ -52,11 +51,10 @@ func ReversalAuditActionFor(kind string) (action string, ok bool) {
 
 // applyAppealReversalTx runs the overturn's kind-specific reversal on the same
 // transaction as the decision's UPDATE, so a failure rolls the decision back.
-// It is a store-level consequence, not a second moderation action. The
-// actor's authority is checked by AppealService.Decide beforehand, and the
-// outrank half is re-checked live in DecideAppealTx. Zero rows affected is not
-// an error (the action may already be superseded or lifted); affected reports
-// whether anything changed, so the caller audits only a real reversal.
+// The actor's authority is checked by AppealService.Decide and the outrank half
+// re-checked live in DecideAppealTx. Zero rows affected is not an error (the
+// action may be superseded or lifted); affected says whether anything changed so
+// only a real reversal is audited.
 func applyAppealReversalTx(ctx context.Context, tx *sql.Tx, q *dbgen.Queries, kind string, actionID, targetID int64) (affected bool, err error) {
 	if appealReversalHookForTest != nil {
 		if err := appealReversalHookForTest(); err != nil {
@@ -72,11 +70,10 @@ func applyAppealReversalTx(ctx context.Context, tx *sql.Tx, q *dbgen.Queries, ki
 		return n > 0, nil
 	case "ban":
 		// Hand-rolled: sqlc's SQLite analyzer silently drops the second bind when a
-		// distinct parameter is reused inside a NOT EXISTS subquery (confirmed on
-		// v1.30). Unban only when no strictly newer 'ban' action exists for the
-		// target, so ban, unban, re-ban, overturn-first-ban leaves the user banned.
-		// The tie-break is the autoincrement id, not created_at, whose one-second
-		// resolution can tie two ban rows and make a ">" comparison always false.
+		// distinct parameter is reused inside a NOT EXISTS subquery. Unban only when no
+		// strictly newer 'ban' action exists, so ban, unban, re-ban, overturn-first-ban
+		// leaves the user banned. The tie-break is the autoincrement id, not
+		// created_at, whose one-second resolution can tie two rows.
 		res, err := tx.ExecContext(ctx, `
 			UPDATE users
 			   SET banned = 0, ban_reason = NULL, ban_expires = NULL
@@ -98,33 +95,25 @@ func applyAppealReversalTx(ctx context.Context, tx *sql.Tx, q *dbgen.Queries, ki
 		}
 		return n > 0, nil
 	case "removal":
-		// Nothing to restore — the content is gone.
 		return false, nil
 	}
 	return false, nil
 }
 
-// AppealedAction is the part of the appealed moderation_actions row that
-// DecideAppealTx's reversal needs, resolved once by the caller.
+// AppealedAction is the part of the appealed action the reversal needs.
 type AppealedAction struct {
 	ID       int64
 	Kind     string
 	TargetID int64
 }
 
-// appealDecideInTxHook is the DecideAppealTx counterpart of
-// appealAssignInTxHook. Test-only.
 var appealDecideInTxHook func(ctx context.Context, q *dbgen.Queries) error
 
-// DecideAppealTx decides appealID in one transaction: a fresh authority
-// re-check (checkAuthority), the self-review eligibility test (when
-// checkSelfReview) run only after confirming the row is still the one the
-// caller observed, the guarded UPDATE on the observed state and assignee, and,
-// for an overturn, the reversal. soleModerator reports whether the self-review
-// escape applied; reversalApplied reports whether the reversal changed
-// anything. The reversal's audit row is written by the caller after commit,
-// because audit writes are best-effort and a rolled-back transaction must not
-// leave one behind.
+// DecideAppealTx decides appealID in one transaction: fresh authority re-check, the
+// self-review test (when checkSelfReview) on the still-observed row, the guarded
+// UPDATE, and for an overturn the reversal. soleModerator reports the self-review
+// escape; reversalApplied whether the reversal changed anything. The caller writes the
+// reversal's audit row after commit, so a rollback leaves none.
 func (d *DB) DecideAppealTx(
 	ctx context.Context,
 	appealID int64,
@@ -162,17 +151,15 @@ func (d *DB) DecideAppealTx(
 		}
 	}
 
-	// An overturn re-checks live that the decider strictly outranks the target,
-	// so a decider demoted since the service's cached check cannot still commit
-	// the reversal. "removal" is excluded (overturning it is record-only).
+	// An overturn re-checks live that the decider strictly outranks the target, so
+	// a decider demoted since the cached check cannot commit the reversal;
+	// "removal" is excluded (record-only).
 	if outcome == "overturned" && action.Kind != "removal" {
 		if !strictlyOutranks(ctx, tx, decidedBy, action.TargetID) {
 			return AppealWriteForbidden, false, false, nil
 		}
 	}
 
-	// Reject a stale or terminal appeal before the eligibility test, so a decide
-	// that will fail its guarded write anyway skips the EXISTS cost.
 	rowStillObserved, err := q.AppealObservedRowExists(ctx, dbgen.AppealObservedRowExistsParams{
 		ID: appealID, ObservedState: observedState, ObservedAssigneeID: observedAssigneeID,
 	})
@@ -207,8 +194,7 @@ func (d *DB) DecideAppealTx(
 		return AppealWriteConflict, false, false, nil
 	}
 
-	// The reversal runs inside this transaction before the commit, so a failure
-	// rolls the decision UPDATE back too.
+	// The reversal runs in this transaction, so its failure rolls back the decision UPDATE too.
 	if outcome == "overturned" {
 		reversalApplied, err = applyAppealReversalTx(ctx, tx, q, action.Kind, action.ID, action.TargetID)
 		if err != nil {

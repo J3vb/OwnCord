@@ -2,7 +2,7 @@
 // A leaf module: it imports nothing at runtime, so the extracted voice modules
 // (audioElements, livekitDiagnostics, roomEventHandlers) can depend on it
 // without closing an import cycle through the livekitSession facade.
-import type { Room } from "livekit-client";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 /** Parse userId from LiveKit participant identity "user-{id}" or "user-{id}:{token}". Returns 0 if unparseable. */
 export function parseUserId(identity: string): number {
@@ -42,7 +42,7 @@ export type SessionState =
     }
   | {
       readonly type: "connected";
-      readonly room: Room;
+      readonly room: VoiceRoom;
       readonly channelId: number;
       readonly latestToken: string;
       readonly lastUrl: string;

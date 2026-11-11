@@ -3,15 +3,32 @@
  * factor and auto-connect overlays, and the server-wait and busy-retry lines.
  */
 import { createElement, appendChildren, qs } from "@lib/dom";
-import { isImeCommit } from "@lib/text/ime";
 import { createIcon } from "@lib/icons";
 import { setAddressInputHints } from "@lib/net/hostNormalize";
 import { isAndroidHost } from "@lib/hostPlatform";
 import { connectText } from "../../../i18n/connect";
 import { portalText } from "../../../i18n/portal";
 import { attachLimitHint, usernameHintText, MAX_USERNAME_LEN } from "@lib/text/nameLimits";
+import {
+  buildTotpOverlay as buildTotpOverlayDom,
+  buildAutoConnectOverlay as buildAutoConnectOverlayDom,
+  buildServerWait as buildServerWaitDom,
+  buildAuthBusyRetry as buildAuthBusyRetryDom,
+} from "../../../features/connection/loginOverlays";
+import { createOcLogo } from "../../../features/connection/ocLogo";
 import { SAVED_PASSWORD_PLACEHOLDER } from "./loginShared";
 import type { LoginFormState, LoginFormInternals } from "./loginState";
+
+/** The logo block: the OC neon glow monogram, product name and subtitle. */
+function buildFormLogo(): HTMLDivElement {
+  const formLogo = createElement("div", { class: "form-logo" });
+  const logoSvg = createOcLogo({ idSuffix: "-form", width: 70, height: 42 });
+  // i18n-exempt: product name, never translated
+  const logoTitle = createElement("h1", {}, "OwnCord");
+  const logoSubtitle = createElement("p", {}, connectText("login.subtitle"));
+  appendChildren(formLogo, logoSvg, logoTitle, logoSubtitle);
+  return formLogo;
+}
 
 export function createLoginFormDom(st: LoginFormState, lf: LoginFormInternals) {
   /** Drop the placeholder the moment the user edits the field. */
@@ -50,70 +67,7 @@ export function createLoginFormDom(st: LoginFormState, lf: LoginFormInternals) {
     // Form container
     const formContainer = createElement("div", { class: "form-container" });
 
-    // Logo section — OC neon glow SVG
-    const formLogo = createElement("div", { class: "form-logo" });
-    const logoSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    logoSvg.setAttribute("width", "70");
-    logoSvg.setAttribute("height", "42");
-    logoSvg.setAttribute("viewBox", "0 0 120 70");
-    logoSvg.setAttribute("class", "oc-logo");
-    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-    const grad = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
-    grad.setAttribute("id", "oc-grad-form");
-    grad.setAttribute("x1", "0%");
-    grad.setAttribute("y1", "0%");
-    grad.setAttribute("x2", "100%");
-    grad.setAttribute("y2", "0%");
-    for (const [offset, color] of [
-      ["0%", "#f97316"],
-      ["30%", "#ec4899"],
-      ["65%", "#8b5cf6"],
-      ["100%", "#06b6d4"],
-    ] as const) {
-      const stop = document.createElementNS("http://www.w3.org/2000/svg", "stop");
-      stop.setAttribute("offset", offset);
-      stop.setAttribute("style", `stop-color:${color}`);
-      grad.appendChild(stop);
-    }
-    const filter = document.createElementNS("http://www.w3.org/2000/svg", "filter");
-    filter.setAttribute("id", "oc-glow-form");
-    const blur = document.createElementNS("http://www.w3.org/2000/svg", "feGaussianBlur");
-    blur.setAttribute("stdDeviation", "4");
-    blur.setAttribute("result", "blur");
-    filter.appendChild(blur);
-    const comp = document.createElementNS("http://www.w3.org/2000/svg", "feComposite");
-    comp.setAttribute("in", "SourceGraphic");
-    comp.setAttribute("in2", "blur");
-    comp.setAttribute("operator", "over");
-    filter.appendChild(comp);
-    defs.appendChild(grad);
-    defs.appendChild(filter);
-    logoSvg.appendChild(defs);
-    for (const [opacity, filterAttr] of [
-      ["0.4", "url(#oc-glow-form)"],
-      [null, null],
-    ] as const) {
-      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      t.setAttribute("x", "60");
-      t.setAttribute("y", "56");
-      t.setAttribute("text-anchor", "middle");
-      t.setAttribute("font-family", "'Segoe UI',system-ui,sans-serif");
-      t.setAttribute("font-size", "68");
-      t.setAttribute("font-weight", "900");
-      t.setAttribute("fill", "url(#oc-grad-form)");
-      t.setAttribute("letter-spacing", "-4");
-      if (opacity) {
-        t.setAttribute("opacity", opacity);
-        t.setAttribute("class", "oc-glow-layer");
-      }
-      if (filterAttr) t.setAttribute("filter", filterAttr);
-      t.textContent = "OC"; // i18n-exempt: logo monogram, not copy
-      logoSvg.appendChild(t);
-    }
-    // i18n-exempt: product name, never translated
-    const logoTitle = createElement("h1", {}, "OwnCord");
-    const logoSubtitle = createElement("p", {}, connectText("login.subtitle"));
-    appendChildren(formLogo, logoSvg, logoTitle, logoSubtitle);
+    const formLogo = buildFormLogo();
 
     // Form title
     st.formTitle = createElement("h1", {}, connectText("login.title"));
@@ -422,161 +376,10 @@ export function createLoginFormDom(st: LoginFormState, lf: LoginFormInternals) {
     return group;
   }
 
-  function buildTotpOverlay(): HTMLDivElement {
-    const overlay = createElement("div", { class: "totp-overlay totp-overlay--hidden" });
-    const card = createElement("div", { class: "totp-card" });
-    const title = createElement("h2", { class: "totp-title" }, connectText("totp.title"));
-    const description = createElement(
-      "p",
-      {
-        class: "totp-subtitle",
-      },
-      connectText("totp.description"),
-    );
-
-    // Not numeric-only: an emergency recovery code is letters and digits,
-    // 11 characters with its separator, and goes in this same box.
-    st.totpInput = createElement("input", {
-      class: "form-input",
-      type: "text",
-      maxlength: "11",
-      placeholder: connectText("totp.placeholder"),
-      inputmode: "text",
-      pattern: "[0-9]{6}|[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}",
-      autocomplete: "one-time-code",
-      "aria-label": connectText("totp.inputLabel"),
-      "aria-describedby": "totp-error",
-    });
-    // A malformed code used to be a 500 ms red border with no text and no
-    // announcement, so a screen reader got nothing. The message is the
-    // input's description and focus returns to the input, so it is read once
-    // with the field; it is a live alert only when the input already has
-    // focus and so is not re-read.
-    st.totpError = createElement("div", {
-      class: "form-error",
-      id: "totp-error",
-      "data-testid": "totp-invalid",
-    });
-
-    st.totpSubmitBtn = createElement(
-      "button",
-      {
-        class: "btn-primary",
-        type: "button",
-      },
-      connectText("totp.verify"),
-    );
-
-    const cancelBtn = createElement(
-      "button",
-      {
-        class: "totp-back",
-        type: "button",
-      },
-      connectText("common.cancel"),
-    );
-
-    st.totpSubmitBtn.addEventListener("click", lf.handleTotpSubmit, { signal: st.signal });
-    cancelBtn.addEventListener("click", lf.handleTotpCancel, { signal: st.signal });
-
-    // Allow Enter key in TOTP input
-    st.totpInput.addEventListener(
-      "keydown",
-      (e) => {
-        if (e.key === "Enter" && !isImeCommit(e)) {
-          e.preventDefault();
-          void lf.handleTotpSubmit();
-        }
-      },
-      { signal: st.signal },
-    );
-
-    appendChildren(
-      card,
-      title,
-      description,
-      st.totpInput,
-      st.totpError,
-      st.totpSubmitBtn,
-      cancelBtn,
-    );
-    overlay.appendChild(card);
-    return overlay;
-  }
-
-  function buildAutoConnectOverlay(): HTMLDivElement {
-    const overlay = createElement("div", {
-      class: "auto-connect-overlay auto-connect-overlay--hidden",
-    });
-    const card = createElement("div", { class: "auto-connect-card" });
-
-    const spinner = createElement("div", { class: "auto-connect-spinner" });
-    const spinnerEl = createElement("div", { class: "spinner" });
-    spinner.appendChild(spinnerEl);
-
-    const title = createElement(
-      "h2",
-      { class: "auto-connect-title" },
-      connectText("login.autoConnecting"),
-    );
-    st.autoConnectServerName = createElement("span", { class: "auto-connect-server" });
-
-    const cancelBtn = createElement(
-      "button",
-      {
-        class: "btn-ghost auto-connect-cancel",
-        type: "button",
-      },
-      connectText("common.cancel"),
-    );
-
-    cancelBtn.addEventListener(
-      "click",
-      () => {
-        lf.transitionTo("idle");
-        st.onAutoLoginCancel?.();
-      },
-      { signal: st.signal },
-    );
-
-    appendChildren(card, spinner, title, st.autoConnectServerName, cancelBtn);
-    overlay.appendChild(card);
-    return overlay;
-  }
-
-  function buildServerWait(): HTMLDivElement {
-    // A live status line, not a modal: the form beneath stays usable.
-    const wait = createElement("div", { class: "server-wait", role: "status" });
-    wait.hidden = true;
-    st.serverWaitText = createElement("span", { class: "server-wait-text" });
-    const cancelBtn = createElement(
-      "button",
-      { class: "btn-ghost server-wait-cancel", type: "button" },
-      connectText("common.cancel"),
-    );
-    cancelBtn.addEventListener("click", lf.cancelServerWait, { signal: st.signal });
-    appendChildren(wait, st.serverWaitText, cancelBtn);
-    return wait;
-  }
-
-  function buildAuthBusyRetry(): HTMLDivElement {
-    // The server-wait line's look: a live status while a busy login retries.
-    const line = createElement("div", { class: "server-wait auth-busy-retry", role: "status" });
-    line.hidden = true;
-    const text = createElement(
-      "span",
-      { class: "server-wait-text" },
-      connectText("login.serverBusyRetrying"),
-    );
-    const cancelBtn = createElement(
-      "button",
-      { class: "btn-ghost server-wait-cancel", type: "button" },
-      connectText("common.cancel"),
-    );
-    cancelBtn.addEventListener("click", () => st.cancelAuthBusyRetry?.(), { signal: st.signal });
-    appendChildren(line, text, cancelBtn);
-    return line;
-  }
+  const buildTotpOverlay = (): HTMLDivElement => buildTotpOverlayDom(st, lf);
+  const buildAutoConnectOverlay = (): HTMLDivElement => buildAutoConnectOverlayDom(st, lf);
+  const buildServerWait = (): HTMLDivElement => buildServerWaitDom(st, lf);
+  const buildAuthBusyRetry = (): HTMLDivElement => buildAuthBusyRetryDom(st);
 
   return {
     clearSavedPasswordPlaceholder,

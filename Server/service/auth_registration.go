@@ -13,9 +13,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// RegistrationPolicy reports whether registration is permitted. It runs before
-// the transport reads any credential: a closed server refuses even a malformed
-// body with the policy's 403.
+// RegistrationPolicy reports whether registration is permitted. It runs before the
+// transport reads any credential: a closed server refuses even a malformed body with 403.
 func (s *AuthService) RegistrationPolicy(ctx context.Context) error {
 	mode, err := registrationModeSetting(ctx, s.st)
 	if err != nil {
@@ -37,18 +36,15 @@ func (s *AuthService) RegistrationPolicy(ctx context.Context) error {
 	return nil
 }
 
-// Per-mode abuse limits for the invite-free modes: accounts or applications per
-// address per day, and the approval-queue cap.
+// Per-mode abuse limits for invite-free modes: registrations per address per day, and the approval-queue cap.
 const (
 	inviteFreeRegistrationsPerIPPerDay = 5
 	maxPendingRegistrations            = 100
 )
 
-// admitRegistration runs the mode's gates before any bcrypt work. In the
-// invite-free modes it reserves one of the address's daily registrations;
-// refund hands it back, and Register calls it unless the account or application
-// committed, so a busy server, a taken username or a full queue costs the
-// address nothing. refund is never nil.
+// admitRegistration runs the mode's gates before any bcrypt work. In invite-free modes it
+// reserves one of the address's daily registrations; Register calls refund unless the
+// account or application committed. refund is never nil.
 func (s *AuthService) admitRegistration(ctx context.Context, in RegisterInput) (mode RegistrationMode, refund func(), err error) {
 	noRefund := func() {}
 	mode, err = registrationModeSetting(ctx, s.st)
@@ -61,7 +57,6 @@ func (s *AuthService) admitRegistration(ctx context.Context, in RegisterInput) (
 		return "", noRefund, ErrRegistrationClosed
 	case RegistrationInvite:
 		if strings.TrimSpace(in.InviteCode) == "" {
-			// Same answer as a bad code, so the response reveals nothing new.
 			slog.WarnContext(ctx, "registration refused", "cause", "invite required",
 				"ip", in.IP, "username", in.Username)
 			return "", noRefund, ErrRegistrationRejected
@@ -86,15 +81,11 @@ func (s *AuthService) admitRegistration(ctx context.Context, in RegisterInput) (
 	return mode, refund, nil
 }
 
-// createRegisteredAccount persists an application (no session) or an account with
-// its first session, minted through newSessionToken so the token exists only once
-// the row committed.
 func (s *AuthService) createRegisteredAccount(ctx context.Context, mode RegistrationMode, in RegisterInput, hash string) (uid int64, token string, err error) {
 	role := int(permissions.MemberRoleID)
 	switch mode {
 	case RegistrationApproval:
-		// The insert re-checks the cap: admitRegistration's count is only the cheap
-		// pre-bcrypt refusal.
+		// The insert re-checks the cap: admitRegistration's count is only the cheap pre-bcrypt refusal.
 		uid, err = s.st.CreatePendingUser(ctx, in.Username, hash, role, maxPendingRegistrations)
 		if errors.Is(err, db.ErrPendingQueueFull) {
 			return 0, "", ErrRegistrationQueueFull
@@ -105,7 +96,6 @@ func (s *AuthService) createRegisteredAccount(ctx context.Context, mode Registra
 			return err
 		})
 	case RegistrationInvite, RegistrationClosed:
-		// Closed never reaches here; invite mode spends the code and commits with the session.
 		token, err = newSessionToken(func(tokenHash string) (err error) {
 			uid, err = s.st.CreateUserWithInvite(ctx, in.Username, hash, role, in.InviteCode, tokenHash, in.Device, in.IP)
 			return err
@@ -114,10 +104,9 @@ func (s *AuthService) createRegisteredAccount(ctx context.Context, mode Registra
 	return uid, token, err
 }
 
-// Register creates the account the current mode allows: invite consumes the
-// invite and issues a session, open issues one without, approval records a locked
-// application and issues nothing. Closed is refused again in case a caller skips
-// RegistrationPolicy.
+// Register creates the account the current mode allows: invite consumes the invite and
+// issues a session, open issues one, approval records a locked application. Closed is
+// refused again in case a caller skips RegistrationPolicy.
 func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResult, error) {
 	mode, refund, err := s.admitRegistration(ctx, in)
 	if err != nil {
@@ -130,9 +119,8 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 		}
 	}()
 
-	// Hash before consuming the invite so a hashing failure does not burn it. The
-	// hash is full-cost bcrypt, so it takes an admission slot like a compare does and
-	// a refusal burns nothing.
+	// Hash before consuming the invite so a hashing failure does not burn it. Full-cost
+	// bcrypt takes an admission slot like a compare; a refusal burns nothing.
 	release, err := s.acquireAdmission(ctx)
 	if err != nil {
 		return nil, err
@@ -144,9 +132,6 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 		return nil, ErrPasswordHash
 	}
 
-	// The session is persisted by CreateUserWithInvite's transaction, so the
-	// account, invite use and first session commit together; a fault at any step
-	// rolls the whole registration back and burns nothing.
 	uid, token, err := s.createRegisteredAccount(ctx, mode, in, hash)
 	committed = err == nil
 	if err != nil {
@@ -158,8 +143,7 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 				"ip", in.IP, "username", in.Username)
 			return nil, ErrRegistrationRejected
 		case errors.Is(err, db.ErrNotFound):
-			// The invite UPDATE matched no row; read it back to name why. The public answer
-			// stays generic.
+			// The invite UPDATE matched no row; read it back to name why (log only; the public answer stays generic).
 			slog.WarnContext(ctx, "registration refused", "cause", s.inviteRefusalCause(ctx, in.InviteCode),
 				"ip", in.IP, "username", in.Username)
 			return nil, ErrRegistrationRejected
@@ -179,8 +163,7 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	slog.Info("user registered", "username", in.Username, "user_id", uid, "ip", in.IP, "mode", string(mode))
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, uid, "user_register", "user", uid,
 		"new account created ("+string(mode)+" registration)")
-	// Greet is best effort on a detached context: a dropped client still gets its
-	// welcome and a failure never fails the registration.
+	// Greet is best effort on a detached context: a failure never fails the registration.
 	s.welcome.Greet(ctx, uid)
 
 	user, err := s.st.GetUserByID(ctx, uid)
@@ -191,9 +174,8 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	return &AuthResult{Token: token, User: user}, nil
 }
 
-// inviteRefusalCause names why the invite UPDATE matched no row, for the operator
-// log only: the code is never logged, a store fault is its own cause, and a wrong
-// guess here must never widen what the client is told.
+// inviteRefusalCause names why the invite UPDATE matched no row, for the operator log
+// only: the code is never logged and a wrong guess must never widen what the client is told.
 func (s *AuthService) inviteRefusalCause(ctx context.Context, code string) string {
 	invite, err := s.st.GetInvite(ctx, code)
 	if err != nil {
@@ -211,8 +193,6 @@ func (s *AuthService) inviteRefusalCause(ctx context.Context, code string) strin
 	case invite.Expired(time.Now()):
 		return "invite expired"
 	default:
-		// The row looked redeemable but the atomic UPDATE matched nothing: a concurrent
-		// redemption won.
 		return "invite exhausted"
 	}
 }

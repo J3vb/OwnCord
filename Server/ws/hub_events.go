@@ -23,9 +23,8 @@ func (h *Hub) ReplayBuffer() *EventRingBuffer {
 
 func (h *Hub) CurrentSeq() uint64 { return atomic.LoadUint64(&h.seq) }
 
-// SeedSeq sets the hub's monotonic sequence counter to seed (atomic), at startup, to
-// align in-memory seqs with the persisted MAX(events.seq) so wrapped-payload seqs
-// stay monotonic across restarts. A seed below the current seq is a no-op.
+// SeedSeq sets the monotonic sequence counter at startup to the persisted MAX(events.seq) so seqs
+// stay monotonic across restarts; a lower seed is a no-op.
 func (h *Hub) SeedSeq(seed uint64) {
 	for {
 		cur := atomic.LoadUint64(&h.seq)
@@ -38,14 +37,14 @@ func (h *Hub) SeedSeq(seed uint64) {
 	}
 }
 
-// SetEventPersister attaches a persister so broadcasts are also written to the
-// EventStore; nil disables. Safe at any time, including after Run has started.
+// SetEventPersister attaches a persister so broadcasts are also written to the EventStore; nil
+// disables. Safe at any time.
 func (h *Hub) SetEventPersister(p *EventPersister) {
 	h.events.eventPersister.Store(p)
 }
 
-// SetEventStore attaches the read-side EventStore for cold-tier reconnect replay,
-// typically the one behind SetEventPersister; nil disables. Safe at any time.
+// SetEventStore attaches the EventStore for cold-tier reconnect replay; nil disables. Safe at any
+// time.
 func (h *Hub) SetEventStore(s EventStore) {
 	if s == nil {
 		h.events.eventStore.Store(nil)
@@ -55,10 +54,9 @@ func (h *Hub) SetEventStore(s EventStore) {
 	h.events.eventStore.Store(&guarded)
 }
 
-// SetPluginEventSink wires the plugin.EventSink so the hub fans out each sequenced
-// broadcast to plugins; nil disables. Safe at any time. Deliberately still a setter:
-// the sink consumes the built hub's broadcaster (sink.SetBroadcaster), so it cannot
-// exist before the hub, unlike the registry (a HubOptions field).
+// SetPluginEventSink wires the sink that fans each sequenced broadcast out to plugins; nil
+// disables. A setter because the sink consumes the built hub's broadcaster, so it cannot exist
+// before the hub.
 func (h *Hub) SetPluginEventSink(s *plugin.EventSink) {
 	h.events.pluginSink.Store(s)
 }
@@ -80,46 +78,42 @@ func (h *Hub) dispatchToPlugins(msg []byte) {
 
 var pluginDispatchHook atomic.Pointer[func(h *Hub, msg []byte)]
 
-// ReconnectTierStats returns the per-tier resume hit counters (buffer, db, full);
-// the OpenTelemetry meters read the same atomics.
+// ReconnectTierStats returns the per-tier resume hit counters (buffer, db, full); the OTel meters
+// read the same atomics.
 func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 	return h.stats.ReconnectTierBuf.Load(), h.stats.ReconnectTierDB.Load(), h.stats.ReconnectTierFull.Load()
 }
 
-// noteRingMiss counts a resume the ring just failed to serve, only when the client is
-// behind the ring's oldest entry: the ring also returns nil for an empty ring and
-// for a client ahead of it, and the events table serves neither. One atomic, no
-// hub lock, no I/O, so it is safe outside seqMu on the handshake path. Re-reading
-// the ring can race a push, which is harmless.
+// noteRingMiss counts a resume the ring failed to serve, only when the client is behind the ring's
+// oldest entry (the ring also returns nil for an empty ring or a client ahead of it, which the
+// events table does not serve). One atomic, no lock or I/O, so it is safe outside seqMu; re-reading
+// the ring can race a push, harmlessly.
 func (h *Hub) noteRingMiss(lastSeq uint64) {
 	if oldest := h.ReplayBuffer().OldestSeq(); oldest != 0 && lastSeq <= oldest {
 		h.stats.ReconnectRingMiss.Add(1)
 	}
 }
 
-// ReconnectRingMissCount returns the lifetime resumes that passed the resync checks
-// but fell behind the in-memory ring; the events table hit rate is
-// ReconnectTierStats' db divided by this. A separate method so ReconnectTierStats
-// keeps its admin-interface signature.
+// ReconnectRingMissCount returns lifetime resumes that fell behind the ring; the events-table hit
+// rate is ReconnectTierStats' db over this. Separate so ReconnectTierStats keeps its admin-
+// interface signature.
 func (h *Hub) ReconnectRingMissCount() uint64 {
 	return h.stats.ReconnectRingMiss.Load()
 }
 
-// mustFullResync reports whether a client resuming from lastSeq predates the latest
-// channel-visibility change or content shed and cannot converge via replay.
+// mustFullResync reports whether a client resuming from lastSeq predates the latest visibility
+// change or content shed and cannot converge via replay.
 func (h *Hub) mustFullResync(lastSeq uint64) bool {
 	if w := h.visibilityChangeSeq.Load(); w > 0 && lastSeq <= w {
 		return true
 	}
-	// An erasure's replay purge cleared slots up to this watermark (the seq of the last
-	// frame sequenced before it, the member_ban included), so a client that has not
-	// acked that far may have missed the ban and cannot be served the range around it.
+	// An erasure's replay purge cleared slots up to this watermark (the last frame sequenced before
+	// it, the member_ban included), so a client that has not acked that far may have missed the
+	// ban.
 	w := h.replayPurgeSeq.Load()
 	return w > 0 && lastSeq < w
 }
 
-// bumpReplayPurgeWatermark ratchets replayPurgeSeq up to the current seq, never
-// down (bumpVisibilityWatermark's CAS-max pattern).
 func (h *Hub) bumpReplayPurgeWatermark() {
 	for {
 		cur := h.replayPurgeSeq.Load()
@@ -133,17 +127,14 @@ func (h *Hub) bumpReplayPurgeWatermark() {
 	}
 }
 
-// replayPurgeBeforeDelete, when set by a test, runs after a purge's in-memory step
-// released seqMu and before the persisted rows are deleted.
+// replayPurgeBeforeDelete is a test hook run after a purge's in-memory step released seqMu and
+// before rows are deleted.
 var replayPurgeBeforeDelete func()
 
-// PurgeMessagesFromReplay takes every frame about the given messages out of the
-// replay pipeline after a retention sweep removed them: the dispatch loop is
-// drained so a frame queued before the sweep is sequenced, then purgeReplay
-// installs the ids as tombstones and drops the ring's copies under seqMu, and
-// deletes the persisted rows after releasing it. A client resuming across the holes
-// falls through the ring's gap rule and the cold tier's row count to the full
-// ready, which no longer holds the messages. Idempotent; the sweep journals the ids
+// PurgeMessagesFromReplay takes every frame about the given messages out of the replay pipeline
+// after a retention sweep: drain the dispatch loop, then purgeReplay installs the ids as tombstones
+// and drops the ring's copies under seqMu and deletes persisted rows after releasing it. A client
+// resuming across the holes falls through to the full ready. Idempotent; the sweep journals the ids
 // until this succeeds.
 func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 	if len(ids) == 0 {
@@ -165,12 +156,11 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 	return nil
 }
 
-// PurgeUserFromReplay takes every frame naming userID out of the replay pipeline
-// after an account erasure: the dispatch loop is drained so the erasure's
-// member_ban is sequenced, then purgeReplay, under seqMu, adds the user to the
-// tombstones, moves the replay-purge watermark to the current seq (a client resuming
-// from before it takes the full ready) and drops the ring's copies, then deletes the
-// persisted rows after releasing it. Idempotent; retried from the erasure journal.
+// PurgeUserFromReplay takes every frame naming userID out of the replay pipeline after an erasure:
+// drain the loop so the member_ban is sequenced, then purgeReplay tombstones the user, moves the
+// purge watermark to the current seq (a client resuming from before it takes the full ready) and
+// drops the ring's copies under seqMu, then deletes rows after releasing it. Idempotent; retried
+// from the erasure journal.
 func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
 	h.activity.forget([]int64{userID}, nil)
 	dropped, rows, err := h.purgeReplay(ctx, &h.tombstones.unfinishedUsers, []int64{userID},
@@ -187,12 +177,10 @@ func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// purgeReplay runs a replay purge in the order that keeps seqMu short: drain the
-// dispatch loop; take the purge lock, which keeps cold-tier reads out until the
-// rows are gone; under seqMu install the tombstones and drop the ring's copies, so
-// no frame naming them is sequenced from here on; release seqMu; flush the
-// persister so every frame sequenced before the tombstones is on disk; delete the
-// persisted rows.
+// purgeReplay keeps seqMu short: drain the dispatch loop; take the purge lock (keeps cold-tier
+// reads out until the rows are gone); under seqMu install tombstones and drop ring copies, so no
+// frame naming them is sequenced from here on; release seqMu; flush the persister so every frame
+// sequenced before the tombstones is on disk; delete the persisted rows.
 func (h *Hub) purgeReplay(
 	ctx context.Context, unfinished *map[int64]struct{}, ids []int64,
 	install func(seq uint64), names func([]byte) bool, deleteRows func(context.Context) (int64, error),
@@ -223,8 +211,8 @@ func (h *Hub) purgeReplay(
 	return dropped, rows, nil
 }
 
-// purgePersisted flushes the persister so every frame sequenced before the
-// tombstones is on disk, then deletes the persisted rows.
+// purgePersisted flushes the persister so every frame sequenced before the tombstones is on disk,
+// then deletes the persisted rows.
 func (h *Hub) purgePersisted(ctx context.Context, deleteRows func(context.Context) (int64, error)) (rows int64, err error) {
 	if p := h.events.eventPersister.Load(); p != nil {
 		if err := p.Flush(ctx); err != nil {
@@ -243,12 +231,10 @@ func (h *Hub) purgePersisted(ctx context.Context, deleteRows func(context.Contex
 	return rows, nil
 }
 
-// awaitDispatch returns once every broadcast enqueued on h.broadcast before the call
-// has been sequenced, buffered and handed to the persister, including content parked
-// on its gate (hub_content_gate.go). BroadcastToAll is asynchronous, so a caller that
-// broadcast a member_ban and now purges replay behind it needs this barrier first. A
-// hub whose dispatch loop is not running (a test hub, a hub after GracefulStop) has
-// nothing queued to wait for.
+// awaitDispatch returns once every broadcast enqueued before the call is sequenced, buffered and
+// handed to the persister, including gate-parked content. BroadcastToAll is asynchronous, so a
+// caller purging replay behind a member_ban needs this first. A hub whose loop is not running has
+// nothing to wait for.
 func (h *Hub) awaitDispatch(ctx context.Context) error {
 	if !h.lifecycle.running.Load() || !h.DispatchAlive() {
 		return nil
@@ -267,8 +253,6 @@ func (h *Hub) awaitDispatch(ctx context.Context) error {
 	}
 }
 
-// eventNamesUser reports whether a wrapped broadcast frame names userID (frameRefs
-// lists where); an unparseable frame names nobody.
 func eventNamesUser(data []byte, userID int64) bool {
 	refs, ok := parseFrameRefs(data)
 	if !ok {
@@ -278,8 +262,8 @@ func eventNamesUser(data []byte, userID int64) bool {
 	return hit
 }
 
-// messageFamily lists the frame types that carry a message's content or name one:
-// what a retention purge removes and a tombstone drops.
+// messageFamily lists the frame types that carry or name a message's content: what a retention
+// purge removes and a tombstone drops.
 var messageFamily = map[string]struct{}{
 	MsgTypeChatMessage:     {},
 	MsgTypeChatEdited:      {},
@@ -289,16 +273,13 @@ var messageFamily = map[string]struct{}{
 	MsgTypePollUpdate:      {},
 }
 
-// eventNamesMessage reports whether a wrapped frame is a message-family frame about
-// one of ids; an unparseable frame is about nothing.
 func eventNamesMessage(data []byte, ids map[int64]struct{}) bool {
 	refs, ok := parseFrameRefs(data)
 	return ok && messageIn(&refs, ids)
 }
 
-// persistEvent enqueues a broadcast event for cold-storage persistence; safe with a
-// nil persister and never blocks the hot path. seq is the hub-assigned counter
-// embedded in payload, so the stored row-seq matches the payload-seq the client tracks.
+// persistEvent enqueues a broadcast for cold storage; safe with a nil persister, never blocks. seq
+// is the hub counter embedded in payload so the row-seq matches the client's payload-seq.
 func (h *Hub) persistEvent(seq uint64, channelID int64, payload []byte) {
 	p := h.events.eventPersister.Load()
 	if p == nil {
@@ -314,53 +295,56 @@ func (h *Hub) persistEvent(seq uint64, channelID int64, payload []byte) {
 	p.Enqueue(int64(seq), eventType, channelID, payload) //nolint:gosec // seq is a monotonically increasing counter, never reaches MaxInt64
 }
 
-// extractEventType scans a wrapped JSON envelope for the "type" field value, or ""
-// on any parse failure so the caller can substitute a generic label. Intentionally
-// not a full JSON decode: it looks for the literal `"type":"<value>"` token, which
-// matches every envelope this server produces, avoiding encoding/json allocation on
-// the broadcast hot path.
+// extractEventType scans a wrapped envelope for the literal `"type":"<value>"` token, "" on
+// failure. Deliberately not a JSON decode: it matches every envelope this server produces and
+// keeps a decode's allocations off the broadcast hot path.
 func extractEventType(payload []byte) string {
+	return string(eventTypeBytes(payload))
+}
+
+// frameIsContentBearing is contentBearingKinds[extractEventType(payload)] without the string: a
+// map index on string(bytes) does not allocate.
+func frameIsContentBearing(payload []byte) bool {
+	return contentBearingKinds[string(eventTypeBytes(payload))]
+}
+
+// eventTypeBytes is extractEventType's scan; the result aliases payload, nil on failure.
+func eventTypeBytes(payload []byte) []byte {
 	const needle = `"type":"`
 	idx := bytes.Index(payload, []byte(needle))
 	if idx < 0 {
-		return ""
+		return nil
 	}
 	start := idx + len(needle)
 	end := bytes.IndexByte(payload[start:], '"')
 	if end < 0 {
-		return ""
+		return nil
 	}
 	t := payload[start : start+end]
-	// Reject values with control chars or escapes (a clean label, not arbitrary
-	// user-controlled metadata); length-capped defensively.
+	// Reject control chars or escapes (a clean label, not arbitrary user metadata); length-capped.
 	if len(t) == 0 || len(t) > 64 {
-		return ""
+		return nil
 	}
 	for _, b := range t {
 		if b < 0x20 || b == '\\' {
-			return ""
+			return nil
 		}
 	}
-	return string(t)
+	return t
 }
 
-// sequenceable reports whether wrapWithSeq stamps msg: a non-empty JSON object no
-// larger than config.MaxMessageBytes; anything else passes through.
 func sequenceable(msg []byte) bool {
 	return len(msg) >= 2 && len(msg) <= config.MaxMessageBytes && msg[0] == '{'
 }
 
-// wrapWithSeq injects a "seq" field into a JSON message without re-serializing.
 func wrapWithSeq(msg []byte, seq uint64) []byte {
-	// Fast path: inject seq after the opening brace, e.g. {"type":...} becomes
-	// {"seq":123,"type":...}. Frames above config.MaxMessageBytes pass through
-	// unsequenced like a non-object frame; every server-built envelope is far smaller,
-	// and the bound keeps the capacity arithmetic below overflow-free.
+	// Fast path: inject seq after the opening brace. Frames above config.MaxMessageBytes pass
+	// through unsequenced; the bound keeps the capacity arithmetic below overflow-free.
 	if !sequenceable(msg) {
 		return msg
 	}
-	// `{"seq":` + up to 20 digits + `,` is at most 28 extra bytes; the single make is the
-	// only allocation on this hot path.
+	// `{"seq":` + up to 20 digits + `,` is at most 28 extra bytes; the single make is the only
+	// allocation on this hot path.
 	result := make([]byte, 0, len(msg)+28)
 	result = append(result, `{"seq":`...)
 	result = strconv.AppendUint(result, seq, 10)

@@ -10,9 +10,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/clientip"
 )
 
-// secretKeys is the exact set of panel-editable keys whose value is write-only:
-// the panel may set or clear them, but no response, log line or audit row ever
-// carries the value. The exact-set test pins this list.
+// secretKeys is the set of panel-editable keys whose value is write-only: settable or clearable, but never
+// in any response, log line or audit row. The exact-set test pins it.
 var secretKeys = map[string]bool{
 	"gif.api_key":              true,
 	"github.token":             true,
@@ -20,10 +19,9 @@ var secretKeys = map[string]bool{
 	"voice.livekit_api_secret": true,
 }
 
-// confirmKeys is the exact set of keys whose wrong value can lock the owner out
-// of the panel, move the data the server runs on, or make it execute a host
-// file. A PATCH naming one must carry it in X-OwnCord-Confirm, and the admin
-// handler runs host-state guards before saving. The exact-set test pins this.
+// confirmKeys is the set of keys whose wrong value can lock the owner out of the panel, move the server's
+// data or make it execute a host file. A PATCH naming one must carry it in X-OwnCord-Confirm. The exact-set
+// test pins it.
 var confirmKeys = map[string]bool{
 	"backup.dir":                 true,
 	"database.path":              true,
@@ -44,10 +42,8 @@ var confirmKeys = map[string]bool{
 // IsSecret reports whether a panel-editable key is write-only.
 func IsSecret(key string) bool { return secretKeys[key] }
 
-// SecretAllowsEmpty reports whether a write-only secret key's rule accepts an
-// empty string, so the panel offers an explicit "Clear value" action only where
-// blanking the value is valid. It asks the key's own rule rather than keeping a
-// parallel list, so the classification cannot drift from validation.
+// SecretAllowsEmpty reports whether a secret key's rule accepts an empty string, so the panel offers "Clear
+// value" only where valid. It asks the rule itself so the classification cannot drift from validation.
 func SecretAllowsEmpty(key string) bool {
 	if !secretKeys[key] {
 		return false
@@ -60,13 +56,11 @@ func SecretAllowsEmpty(key string) bool {
 	return err == nil
 }
 
-// RequiresConfirmation reports whether a PATCH naming key must carry the
-// typed-confirmation header.
+// RequiresConfirmation reports whether a PATCH naming key must carry the typed-confirmation header.
 func RequiresConfirmation(key string) bool { return confirmKeys[key] }
 
-// secretRule validates a write-only secret: a JSON string with no control
-// characters or whitespace, within [min, max] bytes. Messages never name or
-// echo the value.
+// secretRule validates a write-only secret: a string with no control characters or whitespace, within [min,
+// max] bytes; messages never echo the value.
 func secretRule(min, max int) func(any) (any, error) {
 	return func(v any) (any, error) {
 		s, err := cleanString(v)
@@ -83,8 +77,8 @@ func secretRule(min, max int) func(any) (any, error) {
 	}
 }
 
-// liveKitKeyRule refuses an empty LiveKit API key (Load regenerates a random
-// one every boot) and the public dev/placeholder credentials.
+// liveKitKeyRule refuses an empty key (Load regenerates one every boot) and the public placeholder
+// credentials.
 func liveKitKeyRule(v any) (any, error) {
 	raw, err := secretRule(3, 255)(v)
 	if err != nil {
@@ -97,8 +91,7 @@ func liveKitKeyRule(v any) (any, error) {
 	return key, nil
 }
 
-// liveKitSecretRule refuses an empty LiveKit API secret and the public
-// dev/placeholder credentials.
+// liveKitSecretRule refuses an empty secret and the public placeholder credentials.
 func liveKitSecretRule(v any) (any, error) {
 	raw, err := secretRule(32, 512)(v)
 	if err != nil {
@@ -137,8 +130,7 @@ func githubRepoRule(v any) (any, error) {
 	return s, nil
 }
 
-// portRule accepts a listen port, minus LiveKit's API (7880) and TCP media
-// (7881) ports and pprof's loopback port (6060), which must not collide.
+// portRule accepts a listen port minus LiveKit's API (7880), TCP media (7881) and pprof (6060) ports.
 func portRule(v any) (any, error) {
 	n, ok := wholeInt(v)
 	if !ok || n < 1 || n > 65535 {
@@ -150,8 +142,7 @@ func portRule(v any) (any, error) {
 	return n, nil
 }
 
-// tlsDomainRule accepts an empty domain (self_signed/off) or a bare hostname:
-// at most 253 bytes, no scheme, port or path.
+// tlsDomainRule accepts an empty domain or a bare hostname: at most 253 bytes, no scheme, port or path.
 func tlsDomainRule(v any) (any, error) {
 	s, err := cleanString(v)
 	if err != nil {
@@ -191,8 +182,7 @@ func isHostLabel(label string) bool {
 	return true
 }
 
-// pathRule accepts a clean, non-empty path. Relative paths stay allowed, since
-// the compiled defaults are relative (data/...).
+// pathRule accepts a clean, non-empty path; relative paths stay allowed since the defaults are relative.
 func pathRule(v any) (any, error) {
 	s, err := cleanString(v)
 	if err != nil {
@@ -221,8 +211,6 @@ func checkPath(s string) error {
 	return nil
 }
 
-// liveKitBinaryRule accepts an empty value (no companion process) or an
-// absolute path whose base name names a livekit binary.
 func liveKitBinaryRule(v any) (any, error) {
 	s, err := cleanString(v)
 	if err != nil {
@@ -243,8 +231,8 @@ func liveKitBinaryRule(v any) (any, error) {
 	return s, nil
 }
 
-// checkTrustedProxy rejects an entry that covers every address: trusting it
-// lets any client forge X-Forwarded-For past the perimeter and rate limits.
+// checkTrustedProxy rejects an entry covering every address: it would let any client forge X-Forwarded-For
+// past the perimeter and rate limits.
 func checkTrustedProxy(s string) error {
 	if err := checkCIDR(s); err != nil {
 		return err

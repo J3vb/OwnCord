@@ -9,8 +9,7 @@ import "log/slog"
 // slog.Info("x", "user", user)) never emits the credential. Secret fields are
 // omitted entirely; the useful identifying fields stay visible.
 
-// LogValue omits PasswordHash and TOTPSecret. It exposes whether TOTP is
-// enabled (not the secret) since that is often what a log line needs.
+// LogValue omits PasswordHash and TOTPSecret, exposing only whether TOTP is enabled.
 func (u User) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.Int64("id", u.ID),

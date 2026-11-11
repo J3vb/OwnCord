@@ -19,8 +19,8 @@ type RetentionChange = db.RetentionChange
 
 const retentionPreviewLifetime = 15 * time.Minute
 
-// ProposedRetentionPreview is an observation, not a promise about the next
-// sweep: new messages, pins and elapsed time can change the eventual count.
+// ProposedRetentionPreview is an observation, not a promise about the next sweep: new messages, pins and
+// elapsed time can change the count.
 type ProposedRetentionPreview struct {
 	*db.RetentionChangeEffect
 	Proposed         RetentionChange `json:"proposed"`
@@ -51,8 +51,7 @@ func validateRetentionChange(c RetentionChange) error {
 	return nil
 }
 
-// PreviewChange binds the server-computed observation to the exact proposal,
-// actor and base revision. A stale editor must reload before previewing again.
+// PreviewChange binds the server-computed observation to the exact proposal, actor and base revision.
 func (s *RetentionService) PreviewChange(ctx context.Context, actorID int64, c RetentionChange, revision string) (*ProposedRetentionPreview, error) {
 	if err := validateRetentionChange(c); err != nil {
 		return nil, err
@@ -115,9 +114,8 @@ func (s *RetentionService) retentionClaim(actorID int64, c RetentionChange, toke
 	return &claim, nil
 }
 
-// ApplyChange is reached only after the admin middleware resolves the live
-// bearer/session and MANAGE_SERVER permission again. A preview is not an
-// authorization grant. The store compares the revision and writes atomically.
+// ApplyChange is reached only after the admin middleware resolves the live bearer/session and MANAGE_SERVER
+// again; a preview is not an authorization grant. The store compares the revision and writes atomically.
 func (s *RetentionService) ApplyChange(ctx context.Context, actorID int64, c RetentionChange, token string) error {
 	if err := validateRetentionChange(c); err != nil {
 		return err

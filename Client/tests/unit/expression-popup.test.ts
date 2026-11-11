@@ -8,9 +8,9 @@ let stickerOpts: {
   canManage: boolean;
 } | null = null;
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
-vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
-vi.mock("@components/StickerPicker", () => ({
+vi.mock("../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../src/features/messaging/GifPicker", () => mocks.gifPickerMock());
+vi.mock("../../src/features/messaging/StickerPicker", () => ({
   createStickerPicker: (opts: NonNullable<typeof stickerOpts>) => {
     stickerOpts = opts;
     const element = document.createElement("div");

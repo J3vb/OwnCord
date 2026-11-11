@@ -12,8 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// OwnUploadStore is the slice of the database a user's own upload list reads and
-// writes beyond Store.
+// OwnUploadStore is the slice of the database a user's own upload list reads and writes beyond Store.
 type OwnUploadStore interface {
 	ListOwnUploads(ctx context.Context, q db.OwnUploadQuery) ([]db.OwnUpload, error)
 	DeleteOwnAttachment(ctx context.Context, id string, userID int64) (removed db.RemovedAttachment, found bool, err error)
@@ -23,7 +22,6 @@ type OwnUploadStore interface {
 
 var _ OwnUploadStore = (*db.DB)(nil)
 
-// Page bounds and the longest file name search of the own upload list.
 const (
 	OwnUploadsDefaultLimit = 50
 	OwnUploadsMaxLimit     = 100
@@ -31,8 +29,6 @@ const (
 	maxOwnUploadCursorLen  = 200
 )
 
-// uploadInUseError is ErrUploadInUse: a conflict the API answers with its own
-// message.
 type uploadInUseError struct{}
 
 func (uploadInUseError) Error() string {
@@ -40,19 +36,18 @@ func (uploadInUseError) Error() string {
 }
 func (uploadInUseError) Unwrap() error { return ErrConflict }
 
-// ErrUploadInUse means the file is a live avatar, profile banner or group DM
-// icon, so removing it would break that surface. It wraps ErrConflict.
+// ErrUploadInUse means the file is a live avatar, profile banner or group DM icon, so removing it would break
+// that surface. It wraps ErrConflict.
 var ErrUploadInUse error = uploadInUseError{}
 
-// StorageSummary is what a user has uploaded against what they may. QuotaBytes 0
-// means no limit.
+// StorageSummary is what a user has uploaded against what they may; QuotaBytes 0 means no limit.
 type StorageSummary struct {
 	UsedBytes  int64 `json:"used_bytes"`
 	QuotaBytes int64 `json:"quota_bytes"`
 }
 
-// OwnUploadsRequest is one list call. Sort is db.UploadSortNewest (also for "")
-// or db.UploadSortLargest. Cursor is a previous page's NextCursor.
+// OwnUploadsRequest is one list call. Sort is db.UploadSortNewest (also for "") or db.UploadSortLargest;
+// Cursor is a previous page's NextCursor.
 type OwnUploadsRequest struct {
 	Sort   string
 	Name   string
@@ -60,8 +55,7 @@ type OwnUploadsRequest struct {
 	Limit  int
 }
 
-// OwnUploadsPage is one page of a user's uploads. NextCursor is "" on the last
-// page.
+// OwnUploadsPage is one page of a user's uploads; NextCursor is "" on the last page.
 type OwnUploadsPage struct {
 	Items      []db.OwnUpload `json:"items"`
 	NextCursor string         `json:"next_cursor,omitempty"`
@@ -74,9 +68,8 @@ func (s *UploadService) QuotaBytes() int64 {
 	return s.quota.limits.UserQuotaBytes
 }
 
-// StorageSummary reports userID's counted bytes and their limit: their own when
-// an admin set one, else the server-wide one. A user who has never uploaded has
-// no counter row and reads as 0.
+// StorageSummary reports userID's counted bytes and their limit: their own when an admin set one, else the
+// server-wide one. A user who never uploaded has no counter row and reads as 0.
 func (s *UploadService) StorageSummary(ctx context.Context, userID int64) (StorageSummary, error) {
 	used, err := s.StorageUsed(ctx, userID)
 	if err != nil {
@@ -144,14 +137,13 @@ func (s *UploadService) ListOwnUploads(ctx context.Context, userID int64, in Own
 	return page, nil
 }
 
-// formatOwnUploadCursor renders the last item's sort key and id as an opaque
-// token: "n|<uploaded_at>|<id>" or "l|<size>|<id>", base64url encoded.
+// formatOwnUploadCursor renders the last item's sort key and id as an opaque base64url token:
+// "n|<uploaded_at>|<id>" or "l|<size>|<id>".
 func formatOwnUploadCursor(sort string, last db.OwnUpload) string {
 	return formatUploadCursor(sort, last.UploadedAt, last.Attachment.Size, last.Attachment.ID)
 }
 
-// formatUploadCursor is formatOwnUploadCursor over the sort key values, shared
-// with the admin list.
+// formatUploadCursor is formatOwnUploadCursor over the sort key values, shared with the admin list.
 func formatUploadCursor(sort, uploadedAt string, size int64, id string) string {
 	raw := "n|" + uploadedAt + "|" + id
 	if sort == db.UploadSortLargest {
@@ -160,8 +152,7 @@ func formatUploadCursor(sort, uploadedAt string, size int64, id string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
 }
 
-// parseOwnUploadCursor reads a next_cursor value back. A cursor made for the
-// other sort order is refused: its key means something else here.
+// parseOwnUploadCursor reads a next_cursor value back; a cursor made for the other sort order is refused.
 func parseOwnUploadCursor(sort, raw string) (db.OwnUploadCursor, error) {
 	bad := fmt.Errorf("%w: cursor must be a next_cursor value from a previous page", ErrBadRequest)
 	if len(raw) > maxOwnUploadCursorLen {
@@ -194,8 +185,8 @@ func parseOwnUploadCursor(sort, raw string) (db.OwnUploadCursor, error) {
 	return cur, nil
 }
 
-// validCursorID reports whether id is non-empty and only letters, digits and
-// dashes, the characters of an attachment id.
+// validCursorID reports whether id is non-empty and only letters, digits and dashes (an attachment id's
+// characters).
 func validCursorID(id string) bool {
 	if id == "" {
 		return false
@@ -208,18 +199,12 @@ func validCursorID(id string) bool {
 	return true
 }
 
-// RemoveOwnUpload deletes a file userID uploaded, wherever it sits: unsent, in a
-// message, or in a message since deleted. A live avatar, profile banner or group
-// icon is refused with ErrUploadInUse; an unknown id, someone else's file or one
-// already gone is ErrNotFound. It returns the removed row for the caller to act
-// on: delete the bytes, and tell the message's readers.
-//
-// Like Discard, the delete and the recount share the quota lock. Only one of two
-// callers racing on a row gets it back from the DELETE; the loser reads
-// ErrNotFound and never recounts, and the counter is recomputed from the rows, so
-// the bytes can never be released twice. A recount that fails leaves the counter
-// high, the safe side, for the next sweep to lower; the row is gone, so the
-// removal still reports success.
+// RemoveOwnUpload deletes a file userID uploaded, wherever it sits: unsent, in a message, or in a message
+// since deleted. A live avatar, profile banner or group icon is refused with ErrUploadInUse; an unknown id,
+// someone else's file or one already gone is ErrNotFound. Returns the removed row for the caller to delete
+// the bytes and tell the message's readers. Like Discard, the delete and the recount share the quota lock:
+// only one of two racing callers gets the row back, so the bytes are never released twice. A failed recount
+// leaves the counter high, the safe side; the row is gone, so removal still reports success.
 func (s *UploadService) RemoveOwnUpload(ctx context.Context, fileID string, userID int64) (db.RemovedAttachment, error) {
 	st, err := s.ownStore()
 	if err != nil {
@@ -241,17 +226,15 @@ func (s *UploadService) RemoveOwnUpload(ctx context.Context, fileID string, user
 		}
 		return db.RemovedAttachment{}, fmt.Errorf("upload not found%.0w", ErrNotFound)
 	}
-	// Detached: the row is gone, so a caller that hung up must still see its
-	// space back.
+	// Detached: the row is gone, so a caller that hung up must still see its space back.
 	if rcErr := s.recountLocked(context.WithoutCancel(ctx), userID); rcErr != nil {
 		slog.Warn("own upload removed; storage recount failed, the next recount will fix the counter", "user_id", userID, "error", rcErr)
 	}
 	return removed, nil
 }
 
-// StoredFileShared reports whether another attachment row still names storedAs,
-// in which case the bytes must stay. Forwards normally clone to a new name, so
-// this is a guard against deleting a file something else still serves.
+// StoredFileShared reports whether another attachment row still names storedAs, in which case the bytes must
+// stay (a guard against deleting a file something else still serves).
 func (s *UploadService) StoredFileShared(ctx context.Context, storedAs string) (bool, error) {
 	st, err := s.ownStore()
 	if err != nil {
@@ -264,9 +247,8 @@ func (s *UploadService) StoredFileShared(ctx context.Context, storedAs string) (
 	return shared, nil
 }
 
-// validUploadTimestamp reports whether s looks like a stored upload time: digits
-// and the separators SQLite and RFC 3339 use. The cursor only hands it back to
-// SQL as a bound argument, so this guards the size and shape, not the date.
+// validUploadTimestamp reports whether s looks like a stored upload time. The cursor only hands it back to
+// SQL as a bound argument, so this guards size and shape, not the date.
 func validUploadTimestamp(s string) bool {
 	if s == "" || len(s) > 40 {
 		return false

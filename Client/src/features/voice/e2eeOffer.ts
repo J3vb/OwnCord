@@ -219,7 +219,7 @@ export class E2EEOffer {
       // unwrap) OR the keypair no longer matches (clearState() ran and a new
       // session generated a fresh one — possible when the epoch is 0 in both
       // the old and new session, since a non-key-holder never bumps it).
-      if (!isCurrent() || this._e2eeEpoch !== epochBefore || this._ecdhKeyPair !== keypair) {
+      if (this.offerIsStale(isCurrent, epochBefore, keypair)) {
         log.info("E2EE: discarding stale offer (epoch or session keypair changed during unwrap)", {
           fromUserId,
           epochBefore,
@@ -228,38 +228,9 @@ export class E2EEOffer {
         return;
       }
 
-      // Freshness: the epoch is GCM-authenticated, so it is the
-      // holder's own value. Equal is fine — the holder re-sends the current
-      // key at the current epoch when a peer re-announces.
-      if (epoch === null) {
-        // ponytail: compat with holders on the pre-epoch build — remove with
-        // the legacy branch in unwrapRoomKey.
-        log.warn(
-          "E2EE: offer carries no epoch (legacy holder) — applying without freshness check",
-          {
-            fromUserId,
-          },
-        );
-      } else {
-        const highWater = this._peerOfferEpochs.get(fromUserId);
-        if (highWater !== undefined && epoch < highWater) {
-          log.warn("E2EE: discarding superseded offer (epoch below high-water mark)", {
-            fromUserId,
-            epoch,
-            highWater,
-          });
-          return;
-        }
-        this._peerOfferEpochs.set(fromUserId, epoch);
-      }
+      if (!this.acceptOfferEpoch(fromUserId, epoch)) return;
 
-      // A first key has nothing to switch from: use it at once.
-      const placement: KeyPlacement =
-        offered === undefined
-          ? LEGACY_PLACEMENT
-          : this._roomKey === null
-            ? { slot: offered.slot, stage: false }
-            : offered;
+      const placement = this.placementForOffer(offered);
       this._roomKey = unwrapped;
       this.host.setRoomKeyPlacement?.(placement);
       if (!(await this.applyRoomKey(unwrapped, isCurrent, placement))) return;
@@ -276,42 +247,93 @@ export class E2EEOffer {
       // landing here would otherwise have this stale continuation read the
       // NEW session's live _isKeyHolder/_roomKeyResolver below and stand it
       // down / resolve it — corrupting a session this attempt no longer owns.
-      if (!isCurrent() || this._e2eeEpoch !== epochBefore || this._ecdhKeyPair !== keypair) {
+      if (this.offerIsStale(isCurrent, epochBefore, keypair)) {
         log.info("E2EE: discarding stale offer after setKey (epoch or session keypair changed)", {
           fromUserId,
         });
         return;
       }
 
-      // Accepting an offer proves the sender is the server-authoritative key
-      // holder (the server gates outgoing offers on IsVoiceKeyHolder), so if we
-      // still think we hold the key, we have been re-elected away — a lower
-      // userID joined. Stand down: our rotations would be rejected with
-      // NOT_KEY_HOLDER, but only after we applied the new key locally, leaving
-      // us deaf and mute until the real holder rotates again.
-      // handleParticipantLeft can still re-promote us later.
-      if (this._isKeyHolder) {
-        this._isKeyHolder = false;
-        this.clearKeyRotationTimer();
-        log.info("E2EE: stood down as key holder — accepted an offer from the elected holder", {
-          fromUserId,
-        });
-      }
-
-      // Resolve the pending connect promise if we were waiting for the key.
-      if (this._roomKeyResolver) {
-        this._roomKeyResolver();
-        this._roomKeyResolver = null;
-        this._roomKeyRejector = null;
-      }
+      this.standDownAsHolder(fromUserId);
+      this.wakeRoomKeyWaiter();
     } catch (err) {
       log.error("E2EE: failed to handle offer", err);
-      // Propagate decryption failure so the waiting setupKeyExchange unblocks.
-      if (isCurrent() && this._roomKeyRejector) {
-        this._roomKeyRejector(err instanceof Error ? err : new Error(String(err)));
-        this._roomKeyResolver = null;
-        this._roomKeyRejector = null;
-      }
+      this.failRoomKeyWaiter(err, isCurrent);
+    }
+  }
+
+  /** The attempt was superseded, an epoch advanced, or the session keypair
+   *  was replaced since the offer was picked up. Read at the point of use. */
+  private offerIsStale(
+    isCurrent: () => boolean,
+    epochBefore: number,
+    keypair: CryptoKeyPair,
+  ): boolean {
+    return !isCurrent() || this._e2eeEpoch !== epochBefore || this._ecdhKeyPair !== keypair;
+  }
+
+  /** Freshness: the epoch is GCM-authenticated, so it is the holder's own
+   *  value. Equal is fine — the holder re-sends the current key at the current
+   *  epoch when a peer re-announces. Records the high-water mark; false when
+   *  the offer is below it. */
+  private acceptOfferEpoch(fromUserId: number, epoch: number | null): boolean {
+    if (epoch === null) {
+      // ponytail: compat with holders on the pre-epoch build — remove with
+      // the legacy branch in unwrapRoomKey.
+      log.warn("E2EE: offer carries no epoch (legacy holder) — applying without freshness check", {
+        fromUserId,
+      });
+      return true;
+    }
+    const highWater = this._peerOfferEpochs.get(fromUserId);
+    if (highWater !== undefined && epoch < highWater) {
+      log.warn("E2EE: discarding superseded offer (epoch below high-water mark)", {
+        fromUserId,
+        epoch,
+        highWater,
+      });
+      return false;
+    }
+    this._peerOfferEpochs.set(fromUserId, epoch);
+    return true;
+  }
+
+  /** A first key has nothing to switch from: use it at once. */
+  private placementForOffer(offered: KeyPlacement | undefined): KeyPlacement {
+    if (offered === undefined) return LEGACY_PLACEMENT;
+    return this._roomKey === null ? { slot: offered.slot, stage: false } : offered;
+  }
+
+  /** Accepting an offer proves the sender is the server-authoritative key
+   *  holder (the server gates outgoing offers on IsVoiceKeyHolder), so if we
+   *  still think we hold the key, we have been re-elected away — a lower
+   *  userID joined. Stand down: our rotations would be rejected with
+   *  NOT_KEY_HOLDER, but only after we applied the new key locally, leaving
+   *  us deaf and mute until the real holder rotates again.
+   *  handleParticipantLeft can still re-promote us later. */
+  private standDownAsHolder(fromUserId: number): void {
+    if (!this._isKeyHolder) return;
+    this._isKeyHolder = false;
+    this.clearKeyRotationTimer();
+    log.info("E2EE: stood down as key holder — accepted an offer from the elected holder", {
+      fromUserId,
+    });
+  }
+
+  /** Resolve the pending connect promise if we were waiting for the key. */
+  private wakeRoomKeyWaiter(): void {
+    if (!this._roomKeyResolver) return;
+    this._roomKeyResolver();
+    this._roomKeyResolver = null;
+    this._roomKeyRejector = null;
+  }
+
+  /** Propagate decryption failure so the waiting setupKeyExchange unblocks. */
+  private failRoomKeyWaiter(err: unknown, isCurrent: () => boolean): void {
+    if (isCurrent() && this._roomKeyRejector) {
+      this._roomKeyRejector(err instanceof Error ? err : new Error(String(err)));
+      this._roomKeyResolver = null;
+      this._roomKeyRejector = null;
     }
   }
 

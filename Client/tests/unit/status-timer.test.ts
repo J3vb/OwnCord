@@ -231,6 +231,24 @@ describe("status timer watcher", () => {
       w.destroy();
     });
 
+    it("adopts a status chosen on another device although no timer is running", () => {
+      const w = startStatusTimerWatcher({ onRevert });
+      setOwnPresence("dnd");
+      expect(loadUserStatus()).toBe("dnd");
+      expect(loadUserStatusOrigin()).toBe("manual");
+      expect(onRevert).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(HOUR);
+      expect(loadUserStatus()).toBe("dnd");
+      w.destroy();
+    });
+
+    it("does not adopt an Idle from another device when no timer is running", () => {
+      const w = startStatusTimerWatcher({ onRevert });
+      setOwnPresence("idle");
+      expect(loadUserStatus()).toBe("online");
+      w.destroy();
+    });
+
     it("reconciles an ignored echo at the end of the window when it was a real change", () => {
       setOwnPresence("online");
       const w = startStatusTimerWatcher({ onRevert });

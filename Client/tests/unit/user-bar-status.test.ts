@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { authStore } from "@stores/auth.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
-import { createUserBar } from "@components/UserBar";
+import { createUserBar } from "../../src/features/voice/UserBar";
 import { loadUserStatus, saveUserStatus } from "@lib/presence/userStatus";
 import { createPresenceSender } from "@lib/presence/presence";
 import { createPresenceLimiter } from "@lib/net/rateLimiter";

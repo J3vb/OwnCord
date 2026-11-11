@@ -29,7 +29,7 @@ import {
 import type { ContextMenuItem, ContextMenuSeparator } from "@lib/ui/contextMenu";
 import { appendPurgeSection } from "./purgePrompt";
 import { copyWithToast, isDeveloperMode } from "../../developer-mode/developerTools";
-import type { ChannelReorderData } from "../ChannelSidebar";
+import type { ChannelReorderData } from "../channelSidebarTypes";
 import { openMenuSheet } from "../../menus/menuSheet";
 import { muteChoices, mutedUntilLabel } from "../muteMenu";
 import { shellText } from "../../../i18n/shell";
@@ -67,10 +67,93 @@ export interface ChannelSheetRequest {
   readonly fallbackFocus: () => HTMLElement | null;
 }
 
-/** The sheet's rows, read from the stores as they are now. */
-function channelSheetItems(req: ChannelSheetRequest): (ContextMenuItem | ContextMenuSeparator)[] {
+type SheetTop = ContextMenuItem[];
+
+/** Mute (or Unmute) and the notification level, for a channel that holds messages. */
+function muteSheetItems(channel: Channel): SheetTop {
+  const items: SheetTop = [];
+  const mute = getChannelMute(channel.id);
+  if (mute !== null) {
+    const until = mutedUntilLabel(mute.until);
+    items.push({
+      label: shellText("channel.unmute"),
+      testId: "ctx-mute-channel",
+      ...(until !== null ? { detail: until } : {}),
+      onClick: () => unmuteChannel(channel.id),
+    });
+  } else {
+    // A tap opens the choices; "Until I turn it back on" is the last of them.
+    items.push({
+      label: shellText("channel.mute"),
+      testId: "ctx-mute-channel",
+      onClick: () => muteChannel(channel.id),
+      submenu: muteChoices().map((choice) => ({
+        label: choice.label,
+        testId: choice.testId,
+        onClick: () => muteChannel(channel.id, choice.durationMs),
+      })),
+    });
+  }
+
+  const own = getChannelNotificationLevel(channel.id);
+  const levelRow = (
+    label: string,
+    level: NotificationLevel | null,
+    testId: string,
+  ): ContextMenuItem => ({
+    label,
+    testId,
+    checked: own === level,
+    radio: true,
+    onClick: () => setChannelNotificationLevel(channel.id, level),
+  });
+  items.push({
+    label: shellText("channel.notifySettings"),
+    testId: "ctx-notify-settings",
+    onClick: () => undefined,
+    submenu: [
+      levelRow(
+        shellText("channel.notify.default", {
+          level: shellText(LEVEL_KEYS[effectiveNotificationLevel()]),
+        }),
+        null,
+        "ctx-notify-default",
+      ),
+      ...NOTIFICATION_LEVELS.map((level) =>
+        levelRow(shellText(LEVEL_KEYS[level]), level, `ctx-notify-${level}`),
+      ),
+    ],
+  });
+  return items;
+}
+
+/** Move Up and Move Down, disabled at the ends of the channel's group. */
+function moveSheetItems(
+  channel: Channel,
+  channels: readonly Channel[],
+  onReorder: (reorders: readonly ChannelReorderData[]) => void,
+): SheetTop {
+  const { up, down } = channelMoves(channel, channels, onReorder);
+  return [
+    {
+      label: shellText("channel.moveUp"),
+      testId: "ctx-move-up",
+      disabled: up === null,
+      onClick: () => up?.(),
+    },
+    {
+      label: shellText("channel.moveDown"),
+      testId: "ctx-move-down",
+      disabled: down === null,
+      onClick: () => down?.(),
+    },
+  ];
+}
+
+/** Everything above the separator: open, read state, mute, link, invite, move, developer id. */
+function topSheetItems(req: ChannelSheetRequest): SheetTop {
   const { channel, show } = req;
-  const top: ContextMenuItem[] = [];
+  const top: SheetTop = [];
 
   if (show.openChat) {
     top.push({
@@ -91,60 +174,7 @@ function channelSheetItems(req: ChannelSheetRequest): (ContextMenuItem | Context
     });
   }
 
-  if (show.mute) {
-    const mute = getChannelMute(channel.id);
-    if (mute !== null) {
-      const until = mutedUntilLabel(mute.until);
-      top.push({
-        label: shellText("channel.unmute"),
-        testId: "ctx-mute-channel",
-        ...(until !== null ? { detail: until } : {}),
-        onClick: () => unmuteChannel(channel.id),
-      });
-    } else {
-      // A tap opens the choices; "Until I turn it back on" is the last of them.
-      top.push({
-        label: shellText("channel.mute"),
-        testId: "ctx-mute-channel",
-        onClick: () => muteChannel(channel.id),
-        submenu: muteChoices().map((choice) => ({
-          label: choice.label,
-          testId: choice.testId,
-          onClick: () => muteChannel(channel.id, choice.durationMs),
-        })),
-      });
-    }
-
-    const own = getChannelNotificationLevel(channel.id);
-    const levelRow = (
-      label: string,
-      level: NotificationLevel | null,
-      testId: string,
-    ): ContextMenuItem => ({
-      label,
-      testId,
-      checked: own === level,
-      radio: true,
-      onClick: () => setChannelNotificationLevel(channel.id, level),
-    });
-    top.push({
-      label: shellText("channel.notifySettings"),
-      testId: "ctx-notify-settings",
-      onClick: () => undefined,
-      submenu: [
-        levelRow(
-          shellText("channel.notify.default", {
-            level: shellText(LEVEL_KEYS[effectiveNotificationLevel()]),
-          }),
-          null,
-          "ctx-notify-default",
-        ),
-        ...NOTIFICATION_LEVELS.map((level) =>
-          levelRow(shellText(LEVEL_KEYS[level]), level, `ctx-notify-${level}`),
-        ),
-      ],
-    });
-  }
+  if (show.mute) top.push(...muteSheetItems(channel));
 
   if (show.copyLink) {
     top.push({
@@ -169,22 +199,7 @@ function channelSheetItems(req: ChannelSheetRequest): (ContextMenuItem | Context
   }
 
   if (show.move && req.channels !== undefined && req.onReorder !== undefined) {
-    const moves = channelMoves(channel, req.channels, req.onReorder);
-    const { up, down } = moves;
-    top.push(
-      {
-        label: shellText("channel.moveUp"),
-        testId: "ctx-move-up",
-        disabled: up === null,
-        onClick: () => up?.(),
-      },
-      {
-        label: shellText("channel.moveDown"),
-        testId: "ctx-move-down",
-        disabled: down === null,
-        onClick: () => down?.(),
-      },
-    );
+    top.push(...moveSheetItems(channel, req.channels, req.onReorder));
   }
 
   if (isDeveloperMode()) {
@@ -195,8 +210,13 @@ function channelSheetItems(req: ChannelSheetRequest): (ContextMenuItem | Context
         copyWithToast(String(channel.id), "toast.channelIdCopied", "toast.channelIdCopyFailed"),
     });
   }
+  return top;
+}
 
-  const manage: ContextMenuItem[] = [];
+/** Edit and Delete, below the separator. */
+function manageSheetItems(req: ChannelSheetRequest): SheetTop {
+  const { channel, show } = req;
+  const manage: SheetTop = [];
   const onEdit = req.onEdit;
   if (show.edit && onEdit !== undefined) {
     manage.push({
@@ -214,7 +234,13 @@ function channelSheetItems(req: ChannelSheetRequest): (ContextMenuItem | Context
       onClick: () => onDelete(channel),
     });
   }
+  return manage;
+}
 
+/** The sheet's rows, read from the stores as they are now. */
+function channelSheetItems(req: ChannelSheetRequest): (ContextMenuItem | ContextMenuSeparator)[] {
+  const top = topSheetItems(req);
+  const manage = manageSheetItems(req);
   return top.length > 0 && manage.length > 0
     ? [...top, { separator: true }, ...manage]
     : [...top, ...manage];

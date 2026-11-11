@@ -6,7 +6,7 @@ import type { QueuedSend } from "../../../features/messaging/sendQueue";
 import type { MessageController } from "../MessageController";
 import type { ReactionController } from "../ReactionController";
 import type { ThreadPanelHost } from "../ThreadPanelHost";
-import type { ThreadListPopover } from "@components/ThreadListPopover";
+import type { ThreadListPopover } from "../../../features/threads/ThreadListPopover";
 import type { ChatHeaderRefs } from "../ChatHeader";
 import type { SavedDraft } from "@lib/prefs/savedDrafts";
 import type { TrackedEdit } from "./channelShared";
@@ -210,7 +210,7 @@ export interface MountScope {
    * MainPage budget); the gated path mounts no content while it loads.
    */
   mountConsentUi: (
-    build: (ui: typeof import("@components/NsfwGate")) => MountableComponent,
+    build: (ui: typeof import("../../../features/content-consent/NsfwGate")) => MountableComponent,
   ) => void;
   mountConsentBar: () => void;
   /** Mirrors onJumpToPresent — reattach clears "loaded" so the tail is refetched. */

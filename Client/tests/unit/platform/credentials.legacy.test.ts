@@ -26,6 +26,7 @@ const mod = await import("../../../src/lib/net/credentials");
 const legacy: CredentialStore = {
   save: mod.saveCredential,
   load: mod.loadCredential,
+  resume: mod.resumeSavedSession,
   delete: mod.deleteCredential,
   loginWithSavedPassword: mod.loginWithSavedPassword,
 };

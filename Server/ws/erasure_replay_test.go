@@ -118,7 +118,10 @@ func countEventsNaming(t *testing.T, database *db.DB, uid int64) int {
 func sawType(ch <-chan []byte, want string) bool {
 	for {
 		select {
-		case msg := <-ch:
+		case msg, ok := <-ch:
+			if !ok {
+				return false
+			}
 			var env struct {
 				Type string `json:"type"`
 			}

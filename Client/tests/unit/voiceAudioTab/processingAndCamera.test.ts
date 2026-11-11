@@ -42,7 +42,7 @@ describe("VoiceAudioTab UI structure", () => {
     const { ac, el } = mountTab();
 
     const settingRows = el.querySelectorAll(
-      ".setting-row:not([data-testid='voice-buffer']):not([data-testid='auto-sensitivity']):not([data-testid='mic-test']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera'])",
+      ".setting-row:not([data-testid='voice-buffer']):not([data-testid='auto-sensitivity']):not([data-testid='mic-test']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera']):not([data-testid='screen-backup-layer'])",
     );
     // 4 toggles: echo cancellation, noise suppression, auto gain control, enhanced NS
     expect(settingRows.length).toBe(4);
@@ -110,7 +110,7 @@ describe("VoiceAudioTab UI structure", () => {
 
     // Toggles are divs with class "toggle" (not buttons)
     const toggleDiv = el.querySelector(
-      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera']) .toggle",
+      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera']):not([data-testid='screen-backup-layer']) .toggle",
     ) as HTMLElement;
     expect(toggleDiv).not.toBeNull();
     toggleDiv.click();

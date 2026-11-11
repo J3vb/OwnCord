@@ -59,7 +59,7 @@ var publicSurface = map[string]string{
 	"GET /api/v1/metrics/prometheus": "the same counters in Prometheus text format, in every build, behind the same AdminIPRestrict (metrics_allowed_cidrs); no per-user data (TestPrometheusMetrics_*)",
 	"GET /api/v1/livekit/health":     "LiveKit reachability, behind the webhook perimeter (livekit_webhook_allowed_cidrs)",
 	"POST /api/v1/livekit/webhook":   "LiveKit's webhook; authenticated in-band by the LiveKit JWT signature, plus the same perimeter",
-	"* /livekit/*":                   "the LiveKit signalling proxy; authenticated in-band by the LiveKit access token the SFU validates, rate-limited (see router.go)",
+	"* /livekit/*":                   "the LiveKit signalling proxy; authenticated in-band by the LiveKit access token, which the hub verifies and admits against current voice membership before LiveKit sees the request (ws.Hub.AdmitVoiceSession), rate-limited (see router.go)",
 }
 
 // optionalPublicSurface holds public routes that exist only under a build
