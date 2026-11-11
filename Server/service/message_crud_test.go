@@ -474,6 +474,7 @@ type dmSendSpyStore struct {
 	*db.DB
 	armed                                    atomic.Bool
 	participantIDs, isGroup, trusted, openDM atomic.Int32
+	trustWrites                              atomic.Int32
 }
 
 func (s *dmSendSpyStore) count(n *atomic.Int32) {
@@ -501,6 +502,11 @@ func (s *dmSendSpyStore) IsGroupDM(ctx context.Context, channelID int64) (bool, 
 func (s *dmSendSpyStore) IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
 	s.count(&s.trusted)
 	return s.DB.IsTrustedSender(ctx, recipientID, senderID)
+}
+
+func (s *dmSendSpyStore) TrustSender(ctx context.Context, recipientID, senderID int64, source string) error {
+	s.count(&s.trustWrites)
+	return s.DB.TrustSender(ctx, recipientID, senderID, source)
 }
 
 func (s *dmSendSpyStore) OpenDM(ctx context.Context, userID, channelID int64) (bool, error) {

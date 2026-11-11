@@ -13,6 +13,29 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
+// persistOrRefund is persistMessage that gives the slow-mode token back when nothing new was
+// posted: the write failed, or an identical attempt committed it and holds its own token.
+func (s *MessageService) persistOrRefund(ctx context.Context, p SendMessageParams, content string, mentions mentionSet, delivery *db.MessageDeliveryParams, refundSlow func()) (*db.Message, []db.AttachmentInfo, []string, bool, error) {
+	msg, attachments, skipped, duplicate, err := s.persistMessage(ctx, p, content, mentions, delivery)
+	if err != nil || duplicate {
+		refundSlow()
+	}
+	return msg, attachments, skipped, duplicate, err
+}
+
+// replySnippet reads the replied-to message for the broadcast, nil when p is not a reply.
+// The send is committed already: a failed read costs only the snippet.
+func (s *MessageService) replySnippet(ctx context.Context, p SendMessageParams, msgID int64) *ReferencedMessage {
+	if p.ReplyTo == nil {
+		return nil
+	}
+	refs, err := s.st.GetReferencedMessages(context.WithoutCancel(ctx), p.ChannelID, []int64{*p.ReplyTo})
+	if err != nil {
+		slog.Error("MessageService.SendMessage GetAttachments", "err", err, "msg_id", msgID, "read", "referenced_message")
+	}
+	return refs[*p.ReplyTo]
+}
+
 // SendMessage validates, persists and prepares broadcast data for a new message; callers emit the events.
 func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (*SendMessageResult, error) {
 	ctx, done := traceCall(ctx, "service/message", "MessageService.SendMessage",
@@ -43,7 +66,8 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkMessageSlowMode(ctx, p, ch); err != nil {
+	refundSlow, err := s.checkMessageSlowMode(ctx, p, ch)
+	if err != nil {
 		return nil, err
 	}
 
@@ -53,7 +77,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	mentions := s.loadRoleHolders(ctx, s.resolveMentions(ctx, content, p.UserID, p.ChannelID, isDM).
 		withReplyPing(replyPingTarget(p, replyRef)), p.ChannelID)
 
-	msg, attachments, skipped, duplicate, err := s.persistMessage(ctx, p, content, mentions, delivery)
+	msg, attachments, skipped, duplicate, err := s.persistOrRefund(ctx, p, content, mentions, delivery, refundSlow)
 	if err != nil {
 		return nil, err
 	}
@@ -80,13 +104,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		id := stickerRef.ID
 		result.Sticker = db.NewMessageStickerInfo(&id, stickerRef.Name)
 	}
-	if p.ReplyTo != nil {
-		refs, refErr := s.st.GetReferencedMessages(context.WithoutCancel(ctx), p.ChannelID, []int64{*p.ReplyTo})
-		if refErr != nil {
-			slog.Error("MessageService.SendMessage GetAttachments", "err", refErr, "msg_id", msgID, "read", "referenced_message")
-		}
-		result.ReferencedMessage = refs[*p.ReplyTo]
-	}
+	result.ReferencedMessage = s.replySnippet(ctx, p, msgID)
 
 	if isDM && !s.sendMessageDMSideEffects(ctx, p, result) {
 		return result, nil // Message saved, skip DM side effects.

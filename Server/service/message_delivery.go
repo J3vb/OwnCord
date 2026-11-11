@@ -203,12 +203,20 @@ func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams
 	return saved.Message, attachments[saved.Message.ID], skippedAttachmentIDs(p.AttachmentIDs, saved.LinkedAttachmentIDs), false, nil
 }
 
-func (s *MessageService) checkMessageSlowMode(ctx context.Context, p SendMessageParams, ch *db.Channel) error {
+// checkMessageSlowMode charges a new send and holds the token from here, so
+// concurrent sends cannot both pass. The caller runs refund when the write that
+// follows fails or finds the send already committed, so nobody is locked out for
+// a message that was not posted. refund is never nil.
+func (s *MessageService) checkMessageSlowMode(ctx context.Context, p SendMessageParams, ch *db.Channel) (refund func(), err error) {
 	if ch.Type != "dm" && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
 		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)
-		if s.limiter != nil && !s.limiter.Allow(slowKey, 1, time.Duration(ch.SlowMode)*time.Second) {
-			return fmt.Errorf("%w: channel has %ds slow mode", ErrSlowMode, ch.SlowMode)
+		if s.limiter != nil {
+			refund, ok := s.limiter.Reserve(slowKey, 1, time.Duration(ch.SlowMode)*time.Second)
+			if !ok {
+				return func() {}, fmt.Errorf("%w: channel has %ds slow mode", ErrSlowMode, ch.SlowMode)
+			}
+			return refund, nil
 		}
 	}
-	return nil
+	return func() {}, nil
 }

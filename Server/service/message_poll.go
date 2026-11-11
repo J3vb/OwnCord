@@ -140,16 +140,19 @@ func (s *MessageService) CreatePoll(ctx context.Context, p PollCreateParams) (*S
 	if err := s.checkSendPermission(ctx, p.UserID, ch); err != nil {
 		return nil, err
 	}
-	if err := s.checkMessageSlowMode(ctx, sp, ch); err != nil {
+	refundSlow, err := s.checkMessageSlowMode(ctx, sp, ch)
+	if err != nil {
 		return nil, err
 	}
 	delivery.Content, delivery.Poll = content, input
 	// No mention set: a poll never pings, whatever @names its text holds.
 	msg, _, _, duplicate, err := s.persistMessage(ctx, sp, content, mentionSet{}, delivery)
 	if err != nil {
+		refundSlow()
 		return nil, err
 	}
 	if duplicate {
+		refundSlow()
 		return &SendMessageResult{MessageID: msg.ID, Timestamp: msg.Timestamp, Duplicate: true}, nil
 	}
 	if s.poll.wake != nil {

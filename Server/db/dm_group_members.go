@@ -138,8 +138,9 @@ func requireGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64
 	return nil
 }
 
-// removeGroupMember deletes userID's participant, open-state and read-state rows. No participant row
-// is ErrNotFound, and the caller writes no system row for it.
+// removeGroupMember deletes userID's participant, open-state and read-state rows, and clears the
+// group's icon when userID uploaded it. No participant row is ErrNotFound, and the caller writes no
+// system row for it.
 func removeGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64) error {
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM dm_participants WHERE channel_id = ? AND user_id = ?`, channelID, userID)
@@ -156,6 +157,15 @@ func removeGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64)
 	if _, err = tx.ExecContext(ctx,
 		`DELETE FROM dm_open_state WHERE channel_id = ? AND user_id = ?`, channelID, userID); err != nil {
 		return fmt.Errorf("close dm: %w", err)
+	}
+	// An icon the leaver uploaded would stay in use for a group they can no
+	// longer reach, so they could neither delete the file nor free its quota.
+	// Clearing it makes the file an ordinary upload again.
+	if _, err = tx.ExecContext(ctx,
+		`UPDATE channels SET dm_icon = NULL
+		  WHERE id = ? AND dm_icon IN (SELECT id FROM attachments WHERE uploader_id = ?)`,
+		channelID, userID); err != nil {
+		return fmt.Errorf("clear leaver's icon: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx,
 		`DELETE FROM read_states WHERE channel_id = ? AND user_id = ?`, channelID, userID); err != nil {

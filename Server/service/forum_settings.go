@@ -55,7 +55,8 @@ func (s *ChannelService) forumStore() (ForumStore, error) {
 
 // cleanForumSettings applies the settings contract: auto-archive is one of the four, at
 // most MaxForumTags tags, each name cleaned, 1..MaxForumTagNameLen runes and unique
-// ignoring case, each emoji valid, each id once. Violations are ErrBadRequest.
+// ignoring case, each emoji valid, each id once, and requiring a tag needs at least
+// one tag to pick. Violations are ErrBadRequest.
 func cleanForumSettings(in ForumSettingsInput) (db.ForumSettingsWrite, error) {
 	ok := false
 	for _, m := range forumAutoArchiveMinutes {
@@ -66,6 +67,9 @@ func cleanForumSettings(in ForumSettingsInput) (db.ForumSettingsWrite, error) {
 	}
 	if len(in.Tags) > MaxForumTags {
 		return db.ForumSettingsWrite{}, fmt.Errorf("a forum holds at most %d tags%.0w", MaxForumTags, ErrBadRequest)
+	}
+	if in.RequireTag && len(in.Tags) == 0 {
+		return db.ForumSettingsWrite{}, fmt.Errorf("add a tag before requiring one%.0w", ErrBadRequest)
 	}
 	out := db.ForumSettingsWrite{
 		RequireTag:                in.RequireTag,

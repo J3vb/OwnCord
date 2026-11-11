@@ -98,10 +98,17 @@ func (s *MessageService) ForwardMessage(ctx context.Context, p ForwardParams) (*
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkMessageSlowMode(ctx, sp, target); err != nil {
+	refundSlow, err := s.checkMessageSlowMode(ctx, sp, target)
+	if err != nil {
 		return nil, err
 	}
-	return s.commitForward(ctx, p, sp, delivery, snap, target)
+	res, err := s.commitForward(ctx, p, sp, delivery, snap, target)
+	if err != nil || res.Duplicate {
+		// Nothing was posted by this attempt: an error, or an identical attempt that
+		// holds its own token won the write.
+		refundSlow()
+	}
+	return res, err
 }
 
 // forwardSource is gate 1: the source must be a live ordinary message in a channel the

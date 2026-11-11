@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // MentionCountNotifier delivers a live mention_count frame to one reader whose
@@ -63,6 +65,41 @@ func (s *mentionState) reverseMentionCounts(ctx context.Context, channelID int64
 	mu := s.mentionEmitLocks.forChannel(channelID)
 	mu.Lock()
 	defer mu.Unlock()
+	return s.reverseMentionCountsLocked(ctx, channelID, msgIDs)
+}
+
+// removeAndReverseMentions runs write, which soft-deletes messages in channelID
+// and returns their ids, and reverses those messages' mention badges, all under one
+// hold of the channel's emit lock. A reader's read-pointer move takes the same lock
+// and recomputes the badge without deleted messages, so it must see the removal
+// and its reversal as one step: between them it would count the removal already,
+// and the reversal would then take the same mention a second time. The lock order
+// is the emit lock, then the writer, as in the mention worker's flush.
+//
+// Callers flush queued increments before calling, since that flush takes this lock
+// itself, and call it for one channel at a time: channels share lock stripes, so
+// holding two could deadlock. Waiting for the lock honours ctx and writes nothing
+// when it ends. write's error comes back as err with nothing reversed; a failed
+// reversal comes back as reverseErr, the removal having committed. The reversal
+// runs detached from ctx.
+func (s *mentionState) removeAndReverseMentions(ctx context.Context, channelID int64, write func() ([]int64, error)) (ids []int64, reverseErr, err error) {
+	mu := s.mentionEmitLocks.forChannel(channelID)
+	if lockErr := syncutil.LockContext(ctx, mu); lockErr != nil {
+		// Not a refusal: answered like a store failure, with the context error kept
+		// so a caller can still tell a deadline from a hang-up.
+		return nil, nil, fmt.Errorf("%w: remove messages: %w", ErrInternal, lockErr)
+	}
+	defer mu.Unlock()
+	ids, err = write()
+	if err != nil {
+		return nil, nil, err
+	}
+	return ids, s.reverseMentionCountsLocked(context.WithoutCancel(ctx), channelID, ids), nil
+}
+
+// reverseMentionCountsLocked is reverseMentionCounts for a caller that holds the
+// channel's emit lock.
+func (s *mentionState) reverseMentionCountsLocked(ctx context.Context, channelID int64, msgIDs []int64) error {
 	lowered, err := s.st.DecrementMentionCounts(ctx, channelID, msgIDs)
 	if err != nil {
 		return err

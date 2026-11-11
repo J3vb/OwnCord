@@ -1,5 +1,5 @@
 {
-  "nextId": 574,
+  "nextId": 581,
   "findings": [
     {
       "id": "OC-0001",
@@ -13252,6 +13252,163 @@
       "hunt": "fable-review-2026-11-11",
       "finder": "claude",
       "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0574",
+      "title": "A send that was refused or failed after the slow-mode gate still used up the slow-mode wait",
+      "file": "Server/service/message_crud.go",
+      "line": 48,
+      "severity": "low",
+      "why": "Slow mode charged the wait as soon as a send passed its gate. When the message was then not posted because the write failed or timed out, or because it turned out to be a repeat of one already posted, the member was still locked out for the whole window with nothing new on the channel. Messages, polls, forwards and forum posts all did this.",
+      "repro": "Give a channel a long slow mode, make the message write fail once for a member without the manage-messages permission, then send again: the second send is refused as slow mode although nothing was posted.",
+      "evidence": "Server/service/slow_mode_refund_test.go (TestSendMessage_SlowModeRefundedOnWriteFailureOnly, TestSendMessage_SlowModeNotChargedTwiceForDuplicate, and the poll, forward and forum post cases)",
+      "suggestedFix": "Give the slow-mode token back when the send is not posted because of a write failure or a duplicate; keep it for a refusal the member caused.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/slow_mode_refund_test.go",
+        "revertProof": "without the refund TestSendMessage_SlowModeRefundedOnWriteFailureOnly fails"
+      },
+      "lens": "flow-message",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0575",
+      "title": "A read-pointer move between a delete and its mention reversal left the mention badge one too low",
+      "file": "Server/service/message_removal.go",
+      "line": 149,
+      "severity": "low",
+      "why": "Deleting a message commits the delete first and takes the mention badges back in a second step. A reader who moved their read pointer between the two (mark unread, or a partial mark read) had the badge recomputed without the deleted message and then reduced again by the reversal, so a real mention was lost from the count for good. Purges and the purge after a ban had the same gap.",
+      "repro": "Two messages mention a reader who has read both. Delete the newer one and, between its commit and the mention reversal, let the reader mark the older one unread: the badge ends at 0 instead of 1.",
+      "evidence": "Server/service/mention_removal_lock_test.go (TestDeleteMessage_MarkUnreadInGapKeepsMentionBadge, TestDeleteMessage_PartialReadInGapKeepsMentionBadge, TestPurgeMessages_MarkUnreadInGapKeepsMentionBadge, TestPurgeAfterBan_MarkUnreadInGapKeepsMentionBadge)",
+      "suggestedFix": "Hold the channel's mention lock across the delete commit and its reversal, as a read-pointer move already does for its own recompute.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/mention_removal_lock_test.go",
+        "revertProof": "without the lock across both steps TestDeleteMessage_MarkUnreadInGapKeepsMentionBadge fails"
+      },
+      "lens": "ordering-boundary",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0576",
+      "title": "A forum that required a tag but had none could not be posted in",
+      "file": "Server/service/forum.go",
+      "line": 85,
+      "severity": "low",
+      "why": "A forum could be saved with \"require a tag\" on and no tags, or lose its last tag while the switch stayed on. After that nobody could post in it: the dialog offered no tag to pick and the server refused a post without one.",
+      "repro": "Turn on \"Require a tag\" for a forum that has no tags and save, then try to create a post: it is refused as tag required and there is no tag to choose.",
+      "evidence": "Server/service/forum_post_test.go (TestCreateForumPost_RequireTagWithNoTagsAcceptsUntaggedPost), Server/service/forum_test.go (TestAdminUpdateForumSettings_RequireTagNeedsATag), Client/tests/unit/forum-settings.test.ts",
+      "suggestedFix": "Refuse the setting while the forum has no tags, accept an untagged post in a forum that requires one and has none, and have the settings form and the new-post dialog follow the same rule.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/forum_post_test.go",
+        "revertProof": "without the rule TestCreateForumPost_RequireTagWithNoTagsAcceptsUntaggedPost fails"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0577",
+      "title": "After a block and unblock, a reply to the person who wrote first was held back as a new request",
+      "file": "Server/service/message_dm_gate.go",
+      "line": 37,
+      "severity": "low",
+      "why": "Blocking someone removes the trust between the two and unblocking does not put it back. When the unblocker then wrote first, their message was delivered, but the reply was held back as a new message request, or refused outright when the unblocker had direct messages from members turned off.",
+      "repro": "Two users have an ordinary DM. One blocks the other, unblocks them, and sends a message. The other replies: the reply is staged as a message request instead of arriving in the conversation.",
+      "evidence": "Server/service/block_test.go (TestUnblock_UnblockerWritingFirstLetsTheReplyThrough)",
+      "suggestedFix": "When a DM is delivered because the recipient trusts the sender, record that the sender now trusts the recipient too: writing to someone is accepting their replies.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/block_test.go",
+        "revertProof": "without the trust on send TestUnblock_UnblockerWritingFirstLetsTheReplyThrough fails"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0578",
+      "title": "A group DM icon set by a member who then left could never be deleted and stayed on their storage",
+      "file": "Server/db/dm_group_members.go",
+      "line": 183,
+      "severity": "low",
+      "why": "A group DM icon stays listed under the member who uploaded it and cannot be removed while the group uses it. After that member left or was removed, they could no longer change the group's icon either, so the file stayed in their uploads, not removable and counted against their storage, until someone still in the group replaced it.",
+      "repro": "Upload a group DM icon, leave the group, then open your uploads: the icon is listed as not removable and its size still counts.",
+      "evidence": "Server/db/dm_group_icon_test.go (TestGroupDMExit_ClearsTheIconTheLeaverUploaded, TestGroupDMExit_KeepsAnIconUploadedBySomeoneElse)",
+      "suggestedFix": "When a member leaves or is removed, clear the group icon if that member uploaded it, in the same transaction, so the file becomes an ordinary removable upload.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/dm_group_icon_test.go",
+        "revertProof": "without the clear TestGroupDMExit_ClearsTheIconTheLeaverUploaded fails"
+      },
+      "lens": "api-authz",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0579",
+      "title": "The config page accepted an allowed web origin with a trailing slash that no origin check matched",
+      "file": "Server/config/overrides_validate.go",
+      "line": 323,
+      "severity": "low",
+      "why": "The Configuration page accepted an allowed web origin with a trailing slash, the way a browser address bar copies it. An origin header never ends in a slash, so no check matched it and the browser client at that site was refused after the restart, with nothing pointing at the setting.",
+      "repro": "Save https://chat.example/ under Allowed web origins, restart, and connect a browser client served from https://chat.example: the handshake is refused.",
+      "evidence": "Server/config/allowed_origins_test.go (TestAllowedOrigins_TrailingSlashIsDropped)",
+      "suggestedFix": "Drop a trailing slash when an allowed origin is saved and when the list is loaded.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/config/allowed_origins_test.go",
+        "revertProof": "without the trim TestAllowedOrigins_TrailingSlashIsDropped fails"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0580",
+      "title": "A group DM whose owner was banned was left with nobody able to manage it",
+      "file": "Server/db/dm_group_mutations.go",
+      "line": 146,
+      "severity": "low",
+      "why": "When the owner of a group DM was banned from the server, the group kept an owner who could not sign in. Removing a member and handing the group on are owner-only, so nobody left in the group could manage it until the owner was unbanned.",
+      "repro": "Create a group DM, ban its owner, then have another member try to remove someone: refused as owner-only, and the banned account is still shown as the owner.",
+      "evidence": "Server/db/dm_group_mutations.go (owner-only member removal and transfer); a ban does not touch channels.dm_owner_id",
+      "suggestedFix": "In the ban's own transaction, move the owner seat of every group DM the banned user owns to the longest-standing member who is not banned.",
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "declined",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "note": "owner chose to leave it as it is, 2026-11-11",
+      "rationale": "owner chose to leave it as it is, 2026-11-11: a banned owner keeps the group, and it is theirs again when the ban ends."
     }
   ]
 }

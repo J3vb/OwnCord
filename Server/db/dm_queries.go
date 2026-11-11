@@ -300,6 +300,8 @@ type DMDeliveryTarget struct {
 	// TrustsSender is whether the participant has a trusted_senders row for the sender
 	// (never populated for a group DM).
 	TrustsSender bool
+	// TrustedBySender is the reverse: the sender has a trusted_senders row for the participant.
+	TrustedBySender bool
 }
 
 // GetDMDeliveryTargets returns in one read a DM channel's group flag and every
@@ -313,7 +315,7 @@ func (d *DB) GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64
 	targets = make([]DMDeliveryTarget, 0, len(rows))
 	for _, r := range rows {
 		isGroup = r.IsGroup != 0
-		targets = append(targets, DMDeliveryTarget{UserID: r.UserID, Open: r.IsOpen != 0, TrustsSender: r.TrustsSender != 0})
+		targets = append(targets, DMDeliveryTarget{UserID: r.UserID, Open: r.IsOpen != 0, TrustsSender: r.TrustsSender != 0, TrustedBySender: r.TrustedBySender != 0})
 	}
 	return isGroup, targets, nil
 }

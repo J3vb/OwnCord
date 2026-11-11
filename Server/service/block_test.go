@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -224,5 +225,37 @@ func TestUnblockUser_NotBlockedKeepsIgnoredRequest(t *testing.T) {
 	})
 	if len(again.RequestCreatedFor) != 0 {
 		t.Errorf("RequestCreatedFor = %v, want none (request stays ignored)", again.RequestCreatedFor)
+	}
+}
+
+// After a block and unblock, writing first to the formerly blocked person is
+// trusting them: their reply is delivered into the DM, not held as a request,
+// and not refused when the writer takes no direct messages from strangers.
+func TestUnblock_UnblockerWritingFirstLetsTheReplyThrough(t *testing.T) {
+	for _, dmsOff := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dms_off=%v", dmsOff), func(t *testing.T) {
+			database, svc := newMessageRequestFixture(t)
+			ctx := context.Background()
+			mustDo(t, "TrustSender(2,1)", database.TrustSender(ctx, 2, 1, "accepted"))
+			mustDo(t, "TrustSender(1,2)", database.TrustSender(ctx, 1, 2, "accepted"))
+			if dmsOff {
+				setPrivacy(t, database, 2, false, true)
+			}
+			mustDo(t, "BlockUser", svc.Blocks.BlockUser(ctx, 2, 1))
+			mustDo(t, "UnblockUser", svc.Blocks.UnblockUser(ctx, 2, 1))
+
+			mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
+				ChannelID: 50, UserID: 2, Username: "bob", Content: "sorry, can we talk?",
+			})
+			reply, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+				ChannelID: 50, UserID: 1, Username: "alice", Content: "sure",
+			})
+			if err != nil {
+				t.Fatalf("reply refused: %v", err)
+			}
+			if len(reply.RequestCreatedFor) != 0 {
+				t.Errorf("reply held as a request: %v", reply.RequestCreatedFor)
+			}
+		})
 	}
 }

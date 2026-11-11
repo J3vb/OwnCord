@@ -94,6 +94,12 @@ and only when it changes something a contributor or fork holder must do
 - A thread that was renamed, locked, unlocked, archived or deleted while you were in another channel now shows its current name and state when you return, instead of keeping the old chip and a wrongly locked or unlocked composer.
 - If the app cannot read a live update from the server, it now reconnects for a fresh copy of everything instead of reconnecting and still missing that update.
 - Blocking or unblocking someone on one device now reaches your other signed-in devices after they reconnect, without restarting the app.
+- Deleting a message that mentioned you, or a moderator clearing messages, no longer makes the mention badge come out one too low when you mark a channel unread at the same moment.
+- In a channel with slow mode, a message, poll, forward or forum post that failed to send (for example when every attached file had expired) no longer starts your wait. You can send again right away.
+- An allowed web origin saved with a trailing slash (for example https://chat.example/, as copied from a browser address bar) never matched, so the browser client at that site was refused after the restart. The slash is now dropped when the setting is saved and when the config is loaded.
+- A group DM icon you uploaded could never be deleted after you left or were removed from the group: it stayed listed under your uploads, counted against your storage and could not be removed. The group now drops that icon when its uploader leaves, and the file is yours to delete.
+- A forum set to "Require a tag" with no tags could not be posted in by anyone. Forum settings now refuse to require a tag until the forum has one, and a forum already in that state accepts posts without a tag.
+- After you blocked and unblocked someone and then wrote to them first, their reply was held as a new message request, or refused when your settings turn off direct messages from members. Writing to someone now counts as trusting them, so their reply arrives in the conversation. A message from them before you write is still a request.
 - Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
 - Linux: switching audio devices or muting and unmuting no longer makes other voice controls wait.
 - Linux: stopping a camera or screen share no longer makes other voice controls wait, and starting the camera again right after waits for the old one to close.

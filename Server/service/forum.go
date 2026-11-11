@@ -71,7 +71,7 @@ func cleanPostTags(forum *db.Channel, ids []int64) ([]int64, error) {
 		}
 		seen[id] = true
 	}
-	if forum != nil && forum.Forum != nil && forum.Forum.RequireTag && len(ids) == 0 {
+	if forum != nil && forum.Forum != nil && forum.Forum.RequireTag && len(forum.Forum.Tags) > 0 && len(ids) == 0 {
 		return nil, fmt.Errorf("%w: this forum requires a tag on every post", ErrBadRequest)
 	}
 	if ids == nil {
@@ -140,7 +140,8 @@ func (s *MessageService) CreateForumPost(ctx context.Context, p ForumPostParams)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkMessageSlowMode(ctx, sp, forum); err != nil {
+	refundSlow, err := s.checkMessageSlowMode(ctx, sp, forum)
+	if err != nil {
 		return nil, err
 	}
 	mentions := s.resolveMentions(ctx, content, p.UserID, p.ChannelID, false).withReplyPing(0)
@@ -150,9 +151,11 @@ func (s *MessageService) CreateForumPost(ctx context.Context, p ForumPostParams)
 	delivery.MentionedRoleIDs = mentions.RoleIDs
 	saved, err := s.st.CreateMessageDelivery(ctx, *delivery)
 	if err != nil {
+		refundSlow()
 		return nil, forumPostError(err)
 	}
 	if saved.Duplicate {
+		refundSlow()
 		return s.forumPostReplay(ctx, p.UserID, saved.Message.ID)
 	}
 	return s.forumPostResult(ctx, sp, saved, content, mentions), nil

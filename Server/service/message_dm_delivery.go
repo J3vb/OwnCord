@@ -14,6 +14,7 @@ type dmDeliveryStore interface {
 	GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (isGroup bool, targets []db.DMDeliveryTarget, err error)
 	GetGroupDMMeta(ctx context.Context, channelID int64) (ownerID int64, iconID string, err error)
 	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
+	TrustSender(ctx context.Context, recipientID, senderID int64, source string) error
 }
 
 type dmDelivery struct {

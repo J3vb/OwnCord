@@ -71,6 +71,9 @@ describe("forum settings model", () => {
       emoji: "",
     }));
     expect(validateDraft({ ...d, tags: many })?.kind).toBe("count");
+    expect(validateDraft({ ...d, requireTag: true, tags: [] })?.kind).toBe("requireTag");
+    expect(validateDraft({ ...d, requireTag: true })).toBeNull();
+    expect(validateDraft({ ...d, requireTag: false, tags: [] })).toBeNull();
   });
 
   it("merges a tag another admin added and drops one they removed, keeping local edits", () => {

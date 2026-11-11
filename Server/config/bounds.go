@@ -3,6 +3,7 @@ package config
 import (
 	"log/slog"
 	"math"
+	"strings"
 )
 
 // boundedKey is one integer key with a legal range. Out-of-range values are clamped and warned about, never
@@ -66,5 +67,21 @@ func applyBounds(cfg *Config) {
 		}
 		slog.Warn("config: value out of range", "key", b.key, "value", v, "using", fixed, "note", b.meaning)
 		*b.ptr = fixed
+	}
+}
+
+// trimOriginSlashes drops trailing slashes from an allowed web origin: a
+// browser's Origin header never carries one, and every origin check compares the
+// configured text literally, so "https://chat.example/" would match nothing.
+func trimOriginSlashes(s string) string {
+	return strings.TrimRight(s, "/")
+}
+
+// normalizeAllowedOrigins rewrites server.allowed_origins entries to the
+// scheme://host[:port] form the origin checks compare, wherever the entry came
+// from (config file, panel override or environment).
+func normalizeAllowedOrigins(sc *ServerConfig) {
+	for i, o := range sc.AllowedOrigins {
+		sc.AllowedOrigins[i] = trimOriginSlashes(o)
 	}
 }

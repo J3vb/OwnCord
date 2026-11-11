@@ -167,7 +167,11 @@ func (s *messageRemoval) purgeUserMessagesSince(ctx context.Context, actorID, us
 				return batches, false, nil
 			}
 			n := min(maxPurgeLimit, remaining)
-			ids, purgeErr := s.st.PurgeUserChannelMessagesSince(ctx, chID, userID, since, n)
+			// One batch's purge and mention reversal run under the channel's emit lock,
+			// released before the next batch, so one channel's lock is held at a time.
+			ids, mcErr, purgeErr := s.mentions.removeAndReverseMentions(ctx, chID, func() ([]int64, error) {
+				return s.st.PurgeUserChannelMessagesSince(ctx, chID, userID, since, n)
+			})
 			if purgeErr != nil {
 				if errors.Is(purgeErr, context.Canceled) || errors.Is(purgeErr, context.DeadlineExceeded) {
 					return batches, false, fmt.Errorf("ban purge: %w", purgeErr)
@@ -176,7 +180,7 @@ func (s *messageRemoval) purgeUserMessagesSince(ctx context.Context, actorID, us
 				return batches, false, fmt.Errorf("%w: failed to purge messages", ErrInternal)
 			}
 			if len(ids) > 0 {
-				if mcErr := s.mentions.reverseMentionCounts(context.WithoutCancel(ctx), chID, ids); mcErr != nil {
+				if mcErr != nil {
 					slog.Error("ModerationService.PurgeAfterBan DecrementMentionCounts", "err", mcErr, "channel_id", chID)
 				}
 				batches = append(batches, BanPurgeBatch{ChannelID: chID, MessageIDs: ids})
