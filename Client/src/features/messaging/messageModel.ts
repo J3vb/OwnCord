@@ -2,6 +2,7 @@
 // wire-to-store converters, the per-channel cap and the initial state —
 // extracted from stores/messages.store.ts, which re-exports the types and
 // stays the only import path consumers use.
+import type { JournalEntry } from "./loadJournal";
 import type {
   CallInfo,
   GroupEventInfo,
@@ -153,6 +154,14 @@ export interface MessagesState {
    * test fixtures need not restate it.
    */
   readonly loadWatermark?: ReadonlyMap<number, number>;
+  /**
+   * channelId -> the edits, deletes, pins and reactions that arrived while that
+   * channel's history fetch was in flight (loadJournal.ts). Present from
+   * setChannelLoading until the page is installed or fails; the install applies
+   * them again on top of the page, which was read before they happened. Optional
+   * like loadWatermark.
+   */
+  readonly loadJournal?: ReadonlyMap<number, readonly JournalEntry[]>;
 }
 
 // -----------------------------------------------------------------------------
@@ -249,4 +258,5 @@ export const INITIAL_STATE: MessagesState = {
   messagePinRevision: new Map(),
   detachedChannels: new Set(),
   loadWatermark: new Map(),
+  loadJournal: new Map(),
 };

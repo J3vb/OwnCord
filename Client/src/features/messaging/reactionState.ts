@@ -5,6 +5,7 @@
 // changed is behavior: selector subscriptions compare with ===.
 import type { ReactionUpdatePayload } from "../../lib/types";
 import type { Message, MessagesState, PendingReaction } from "./messageModel";
+import { recordLoadJournal } from "./loadJournal";
 
 /**
  * Apply a single reaction count/me delta to a channel's message list, or null
@@ -62,6 +63,21 @@ export function reduceAddOptimisticReaction(
 
 /** updateReaction's reducer. */
 export function reduceUpdateReaction(
+  prev: MessagesState,
+  payload: ReactionUpdatePayload,
+  currentUserId: number,
+): MessagesState {
+  const next = reactionRows(prev, payload, currentUserId);
+  // The echo of this user's own toggle is not journaled: the optimistic apply
+  // already put it on the row.
+  if (payload.user_id === currentUserId) return next;
+  return recordLoadJournal(next, payload.channel_id, {
+    kind: "reaction",
+    messageId: payload.message_id,
+  });
+}
+
+function reactionRows(
   prev: MessagesState,
   payload: ReactionUpdatePayload,
   currentUserId: number,

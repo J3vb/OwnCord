@@ -179,6 +179,7 @@ describe("INITIAL_STATE", () => {
       "detachedChannels",
       "hasMore",
       "historyLoadState",
+      "loadJournal",
       "loadWatermark",
       "loadedChannels",
       "messagePinRevision",
