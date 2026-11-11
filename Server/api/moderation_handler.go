@@ -50,14 +50,10 @@ type moderationActionResponse struct {
 	CreatedAt      string  `json:"created_at"`
 }
 
-// moderationActionResponses maps a ledger slice to the wire shape, resolving
-// every row's internal report_id to its public one in a single read — the sequential
-// id never reaches a response. viewerID authorizes each row's report link
-// individually through the report's own confidentiality guard:
-// a moderator who is the SUBJECT of a report linked from their own
-// action ledger must not have that report's id surface here just because
-// they still hold MODERATE_MEMBERS — the id is simply omitted (the rest of
-// the row still renders) rather than the whole read failing.
+// moderationActionResponses maps a ledger slice to the wire shape, resolving internal report_ids to public
+// ones in one read. viewerID authorizes each row's report link through the report's confidentiality guard: a
+// moderator who is the SUBJECT of a report must not see its id just because they hold MODERATE_MEMBERS; the
+// id is omitted and the rest of the row still renders.
 func moderationActionResponses(ctx context.Context, svc *service.Services, viewerID int64, rows []db.ModerationAction) []moderationActionResponse {
 	reportIDs := make([]int64, 0, len(rows))
 	for i := range rows {
@@ -84,12 +80,9 @@ func moderationActionResponses(ctx context.Context, svc *service.Services, viewe
 	return out
 }
 
-// MountModerationRoutes registers the user-directed moderator actions
-// (warning, timeout, untimeout, the ledger read, the nickname change) and the
-// notice acknowledgement route. broadcaster receives the nickname change's
-// user_update; nil skips the broadcast. Authorization is enforced inside ModerationService
-// (requirePerm/requireOutranks) so these handlers carry no permission check
-// of their own.
+// MountModerationRoutes registers the user-directed moderator actions and the notice acknowledgement route.
+// broadcaster receives the nickname change's user_update; nil skips it. Authorization is enforced inside
+// ModerationService, so these handlers carry no permission check.
 func MountModerationRoutes(r chi.Router, svc *service.Services, broadcaster ProfileBroadcaster) {
 	r.Route("/api/v1/moderation/users/{id}", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))

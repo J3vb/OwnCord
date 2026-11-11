@@ -13,8 +13,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws/hubstats"
 )
 
-// EventPersisterMetrics is the nested event-persistence block of ServerMetrics.
-// Present only when event persistence is enabled.
+// EventPersisterMetrics is the nested event-persistence block of ServerMetrics, present only when
+// persistence is enabled.
 type EventPersisterMetrics struct {
 	Persisted uint64 `json:"persisted"`
 	Dropped   uint64 `json:"dropped"`
@@ -33,38 +33,32 @@ type ServerMetrics struct {
 	NumGC          uint32  `json:"num_gc"`
 	ConnectedUsers int     `json:"connected_users"`
 	VoiceSessions  int     `json:"voice_sessions"`
-	// BroadcastDrops counts messages dropped because the hub-wide broadcast
-	// queue was full, a hub-level overload signal distinct from the per-client
-	// counters below; any growth means sequenced events were lost before
-	// delivery and is worth alerting on.
+	// Messages dropped because the hub-wide broadcast queue was full; any growth means sequenced events were
+	// lost and is worth alerting on.
 	BroadcastDrops uint64 `json:"broadcast_drops"`
-	// TopicSheds counts channel frames dropped by the topic limiter before a
-	// seq was assigned — replay cannot recover them, so like
-	// broadcast_drops any growth is worth alerting on.
+	// Channel frames dropped by the topic limiter before a seq was assigned; replay cannot recover them, so
+	// any growth is worth alerting on.
 	TopicSheds     uint64 `json:"topic_sheds_total"`
 	LiveKitHealthy *bool  `json:"livekit_healthy,omitempty"`
 
-	// In-process latency distributions, present in every build (unlike the
-	// OpenTelemetry instruments, which need -tags otel).
-	BroadcastMs   *metrics.Summary `json:"ws_broadcast_ms,omitempty"`
-	DispatchLagMs *metrics.Summary `json:"ws_dispatch_lag_ms,omitempty"`
-	ChatAckMs     *metrics.Summary `json:"chat_send_ack_ms,omitempty"`
-	// VoiceJoinMs is each phase of a completed voice join (voice_join_ms).
-	VoiceJoinMs *hubstats.VoiceJoinPhases `json:"voice_join_ms,omitempty"`
+	// In-process latency distributions, present in every build (unlike OTel instruments, which need -tags
+	// otel).
+	BroadcastMs   *metrics.Summary          `json:"ws_broadcast_ms,omitempty"`
+	DispatchLagMs *metrics.Summary          `json:"ws_dispatch_lag_ms,omitempty"`
+	ChatAckMs     *metrics.Summary          `json:"chat_send_ack_ms,omitempty"`
+	VoiceJoinMs   *hubstats.VoiceJoinPhases `json:"voice_join_ms,omitempty"`
 
-	// BroadcastQueueDepth is the hub dispatch channel's current depth; the
-	// max-seqMu-hold gauge is the worst single critical-section hold.
+	// Current hub dispatch channel depth; the max-seqMu-hold gauge is the worst single critical-section hold.
 	BroadcastQueueDepth int     `json:"hub_broadcast_queue_depth"`
 	SeqMuMaxHoldMs      float64 `json:"hub_seqmu_max_hold_ms"`
 
-	// Reconnect replay tier hits. A rising full-resync share means the replay
-	// budget (ring size / cold cap) is too small for observed disconnect gaps.
+	// Reconnect replay tier hits; a rising full-resync share means the replay budget is too small for
+	// observed disconnect gaps.
 	ReconnectTierBuffer uint64 `json:"reconnect_tier_buffer"`
 	ReconnectTierDB     uint64 `json:"reconnect_tier_db"`
 	ReconnectTierFull   uint64 `json:"reconnect_tier_full"`
-	// ReconnectRingMisses counts resumes that passed the resync checks but fell
-	// behind the in-memory replay ring: the only ones the events table can
-	// serve. Usually ends in db or full; not a tier. Hit rate = db / this.
+	// Resumes that passed the resync checks but fell behind the in-memory replay ring, the only ones the
+	// events table can serve. Hit rate = db / this.
 	ReconnectRingMisses uint64 `json:"reconnect_ring_misses"`
 
 	BackpressureQueueDisconnects uint64 `json:"backpressure_queue_disconnects"`
@@ -72,57 +66,45 @@ type ServerMetrics struct {
 	BackpressureLowDrops         uint64 `json:"backpressure_low_drops"`
 	BackpressurePresenceDrops    uint64 `json:"backpressure_presence_drops"`
 
-	// DeliveryLossMarks counts connected clients told to resync because a
-	// sequenced frame meant for them was dropped or withheld.
+	// Connected clients told to resync because a sequenced frame meant for them was dropped or withheld.
 	DeliveryLossMarks uint64 `json:"delivery_loss_marks"`
 
-	// WSConnRejects counts upgrades refused by the max_ws_connections cap.
 	WSConnRejects uint64 `json:"ws_conn_rejects"`
 
-	// DiskFreeMB is free space on the data volume; omitted when unknown.
 	DiskFreeMB *float64 `json:"disk_free_mb,omitempty"`
-	// DiskMinFreeMB is the reserved-headroom floor (server.min_free_disk_mb)
-	// the banner, /health and the upload path share; DiskLow is free < floor,
-	// present when free is known and a floor is set (a disk pressure signal).
+	// The reserved-headroom floor (server.min_free_disk_mb) shared by the banner, /health and the upload
+	// path; DiskLow is free < floor, present when free is known and a floor is set.
 	DiskMinFreeMB float64 `json:"disk_min_free_mb"`
 	DiskLow       *bool   `json:"disk_low,omitempty"`
-	// UploadStorageUsedMB is every attachment row's size summed — a storage
-	// total, not the per-user quota counters (which skip legacy rows with no
-	// uploader). Emoji, a bounded exclusion, are not in it. Omitted when the
-	// query fails.
+	// Every attachment row's size summed: a storage total, not the per-user quota counters. Emoji are not in
+	// it. Omitted when the query fails.
 	UploadStorageUsedMB *float64 `json:"upload_storage_used_mb,omitempty"`
-	// DBWALMB is the SQLite write-ahead log file's size, stat'd once per
-	// scrape. A WAL that keeps growing means checkpoints are not keeping up.
-	// Omitted when no source is wired or the stat fails.
+	// The SQLite WAL file's size, stat'd once per scrape; steady growth means checkpoints are not keeping up.
 	DBWALMB *float64 `json:"db_wal_mb,omitempty"`
 
-	// SQLite writer-pool saturation: time spent queueing for the single write
-	// connection, the most direct signal of the single-writer bottleneck.
+	// Writer-pool saturation: time queueing for the single write connection, the direct single-writer
+	// bottleneck signal.
 	DBWriterWaitCount   int64   `json:"db_writer_wait_count"`
 	DBWriterWaitSeconds float64 `json:"db_writer_wait_seconds"`
 
-	// SQLite reader-pool saturation: time spent queueing for a reader
-	// connection (max_readers per pool). On in-memory databases reader ==
-	// writer, so this duplicates the writer pair there.
+	// Reader-pool saturation (max_readers per pool); on in-memory databases reader == writer, so it
+	// duplicates the writer pair.
 	DBReaderWaitCount   int64   `json:"db_reader_wait_count"`
 	DBReaderWaitSeconds float64 `json:"db_reader_wait_seconds"`
 
 	PermCacheHits   uint64 `json:"perm_cache_hits"`
 	PermCacheMisses uint64 `json:"perm_cache_misses"`
 
-	// Web Push dispatch — aggregate counters only,
-	// never per user. Zero on a server with dispatch off, which is the
-	// compiled default.
+	// Web Push dispatch: aggregate counters only, never per user; zero when dispatch is off (the compiled
+	// default).
 	PushDispatched uint64 `json:"push_dispatched"`
 	PushFailed     uint64 `json:"push_failed"`
 	PushPruned     uint64 `json:"push_pruned"`
 
 	EventPersister *EventPersisterMetrics `json:"event_persister,omitempty"`
 
-	// Windows holds the same latency, worst-hold and counter figures over the
-	// last minute ("1m") and fifteen minutes ("15m"), where every figure above
-	// is cumulative since boot. Omitted until the sampler has two
-	// samples, and when no windowed source is wired.
+	// The same figures over the last 1m and 15m, where every figure above is cumulative since boot. Omitted
+	// until the sampler has two samples or when no windowed source is wired.
 	Windows map[string]*WindowMetrics `json:"windows,omitempty"`
 }
 
@@ -131,10 +113,8 @@ var metricsWindows = []struct {
 	d   time.Duration
 }{{"1m", time.Minute}, {"15m", 15 * time.Minute}}
 
-// WindowMetrics is one window of ServerMetrics.Windows. The field names repeat
-// the top-level keys; the counters are the growth over the window. Seconds is
-// what the window really covers (shorter than its name for a young process) and
-// AsOf the newest sample it ends at, at most one sampler tick old.
+// WindowMetrics is one window of ServerMetrics.Windows: counters are the growth over the window, Seconds is
+// what it really covers (shorter for a young process) and AsOf the newest sample it ends at.
 type WindowMetrics struct {
 	Seconds float64 `json:"seconds"`
 	AsOf    string  `json:"as_of"`
@@ -163,16 +143,15 @@ type WindowMetrics struct {
 	DBReaderWaitSeconds          float64 `json:"db_reader_wait_seconds"`
 }
 
-// Window source names that are not JSON keys: the database wait time is
-// sampled in nanoseconds and reported in seconds.
+// Window source names that are not JSON keys; database wait time is sampled in nanoseconds and reported in
+// seconds.
 const (
 	windowDBWriterWaitNanos = "db_writer_wait_nanos"
 	windowDBReaderWaitNanos = "db_reader_wait_nanos"
 )
 
-// NewWindowMetrics maps one snapshot, whose names are the sources' JSON keys,
-// onto the response shape. A name the sources did not register stays zero (or
-// nil for a summary).
+// NewWindowMetrics maps one snapshot onto the response shape; a name the sources did not register stays
+// zero (or nil for a summary).
 func NewWindowMetrics(s metrics.WindowSnapshot) *WindowMetrics {
 	summary := func(name string) *metrics.Summary {
 		v, ok := s.Histograms[name]
@@ -206,8 +185,7 @@ func NewWindowMetrics(s metrics.WindowSnapshot) *WindowMetrics {
 		DBReaderWaitCount:            s.Counters["db_reader_wait_count"],
 		DBReaderWaitSeconds:          float64(s.Counters[windowDBReaderWaitNanos]) / float64(time.Second),
 	}
-	// All six phases are registered together; a missing one means no voice
-	// source, and the key is left out rather than half filled.
+	// All six phases are registered together; a missing one means no voice source, so the key is left out.
 	phases := [6]*metrics.Summary{
 		summary("voice_join_ms.precheck"), summary("voice_join_ms.leave"),
 		summary("voice_join_ms.persist"), summary("voice_join_ms.token"),
@@ -222,8 +200,8 @@ func NewWindowMetrics(s metrics.WindowSnapshot) *WindowMetrics {
 	return w
 }
 
-// fillWindows adds the windowed block. A window the sampler cannot yet answer
-// is left out, so nothing reports a reassuring zero.
+// fillWindows adds the windowed block; a window the sampler cannot yet answer is left out, not reported as
+// zero.
 func fillWindows(m *ServerMetrics, src MetricsSources) {
 	if src.Windows == nil {
 		return
@@ -240,16 +218,12 @@ func fillWindows(m *ServerMetrics, src MetricsSources) {
 	}
 }
 
-// MetricsSources provides the live data feeds for handleMetrics. Any nil
-// field is skipped, leaving that metric at its zero value (or absent for
-// pointer-typed output), so tests and partial wirings stay cheap.
+// MetricsSources provides the live data feeds for handleMetrics; a nil field is skipped, leaving that
+// metric zero or absent.
 type MetricsSources struct {
-	ConnectedUsers func() int
-	VoiceSessions  func() int
-	BroadcastDrops func() uint64
-	// TopicSheds, BroadcastMs, DispatchLagMs, ChatAckMs, VoiceJoinMs,
-	// BroadcastQueueDepth and SeqMuMaxHoldMs are the in-process metrics. Nil
-	// fields are skipped, so tests and partial wirings stay cheap.
+	ConnectedUsers      func() int
+	VoiceSessions       func() int
+	BroadcastDrops      func() uint64
 	TopicSheds          func() uint64
 	BroadcastMs         func() metrics.Summary
 	DispatchLagMs       func() metrics.Summary
@@ -272,15 +246,12 @@ type MetricsSources struct {
 	DiskMinFree         uint64
 	UploadBytes         func(context.Context) (int64, error)
 	WALBytes            func() (int64, error) // db.(*DB).WALBytes: one stat per scrape
-	// PushCounters is nil when dispatch is off (the compiled default); the
-	// three fields stay at their zero value then.
+	// Nil when dispatch is off (the compiled default).
 	PushCounters func() (dispatched, failed, pruned uint64)
-	// Windows answers a window of the given length ending at the newest
-	// sample (metrics.Windows.Snapshot); nil leaves the "windows" key out.
+	// Answers a window of the given length (metrics.Windows.Snapshot); nil leaves the "windows" key out.
 	Windows func(time.Duration) (metrics.WindowSnapshot, bool)
-	// LatencyCounts reads the raw counts of every latency histogram for the
-	// Prometheus exposition (ws.Hub.LatencyCounts); nil leaves the histogram
-	// families out. The JSON endpoint does not use it.
+	// Raw counts of every latency histogram for the Prometheus exposition; nil leaves the histogram families
+	// out.
 	LatencyCounts func() hubstats.LatencyCounts
 }
 
@@ -290,9 +261,8 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 	}
 }
 
-// collectMetrics reads every source once into a ServerMetrics. It is the one
-// collector behind both encoders, the JSON handler above and the Prometheus
-// handler (metrics_prometheus.go), so the two formats cannot disagree.
+// collectMetrics reads every source once; it backs both the JSON and Prometheus encoders so the two cannot
+// disagree.
 func collectMetrics(ctx context.Context, src MetricsSources) ServerMetrics {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -382,8 +352,6 @@ func collectMetrics(ctx context.Context, src MetricsSources) ServerMetrics {
 	return metrics
 }
 
-// fillHubLatency copies the hub's latency distributions, queue depth, seqMu
-// hold and topic sheds into metrics.
 // fillDelivery copies the reconnect-tier, send-queue and delivery-loss totals.
 func fillDelivery(metrics *ServerMetrics, src MetricsSources) {
 	if src.ReconnectTiers != nil {

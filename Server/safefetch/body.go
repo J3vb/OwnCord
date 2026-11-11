@@ -14,8 +14,7 @@ import (
 )
 
 // readResponse turns a live http.Response into a bounded, type-checked
-// Response. The body is read under both ceilings before anything else looks
-// at it, and the media type is judged on the bytes that actually arrived.
+// Response, judging the media type on the bytes that actually arrived.
 func (f *Fetcher) readResponse(ctx context.Context, resp *http.Response, dest *destination) (*Response, error) {
 	gzipped, err := encoding(resp.Header)
 	if err != nil {
@@ -29,9 +28,8 @@ func (f *Fetcher) readResponse(ctx context.Context, resp *http.Response, dest *d
 	if err != nil {
 		return nil, fmt.Errorf("%w (from %s)", err, dest.url.Redacted())
 	}
-	// The header has to describe the body being returned, not the one that
-	// arrived: Body is inflated and inside both ceilings, so an upstream
-	// Content-Encoding and Content-Length would both be lies about it.
+	// The header must describe the returned (inflated) body, so the upstream
+	// Content-Encoding and Content-Length are replaced.
 	header := resp.Header.Clone()
 	if header == nil {
 		// Clone returns nil for a nil map, and Set on a nil Header panics.
@@ -49,12 +47,8 @@ func (f *Fetcher) readResponse(ctx context.Context, resp *http.Response, dest *d
 	}, nil
 }
 
-// readBody reads the response under two independent ceilings: one on the
-// bytes read from the response body before any decompression, one on the
-// bytes after inflation. Both are enforced while reading, so an oversized
-// body is refused once MaxBytes have been consumed rather than after all of
-// it has been buffered — a Content-Length header is a claim about the body,
-// not a limit on it.
+// readBody reads the response under two ceilings, on wire bytes and on inflated
+// bytes, both enforced while reading so an oversized body is refused early.
 func (f *Fetcher) readBody(ctx context.Context, resp *http.Response, gzipped bool) ([]byte, error) {
 	wire := &limitedReader{r: resp.Body, remaining: f.policy.MaxBytes + 1, over: ErrBodyTooLarge}
 	var src io.Reader = wire
@@ -69,8 +63,8 @@ func (f *Fetcher) readBody(ctx context.Context, resp *http.Response, gzipped boo
 		limit, over = f.policy.MaxDecompressedBytes, ErrDecompressedTooLarge
 	}
 	if f.policy.Truncate {
-		// Never past the inflated ceiling, and never one byte past it either:
-		// limitedReader would report the breach on the read after it.
+		// Never past the inflated ceiling, nor one byte past it, which
+		// limitedReader would report on the read after.
 		keep := min(f.policy.MaxDecompressedBytes, limit)
 		body, err := io.ReadAll(io.LimitReader(src, keep))
 		if err != nil {
@@ -82,25 +76,19 @@ func (f *Fetcher) readBody(ctx context.Context, resp *http.Response, gzipped boo
 	if err != nil {
 		return nil, f.readError(ctx, err)
 	}
-	// limitedReader reports its breach on the read *after* the allowance runs
-	// out, and a source that returns its last bytes together with io.EOF —
-	// which net/http bodies do — never gives it that read. Without this check
-	// a body of exactly ceiling+1 came back accepted while ceiling+2 was
-	// refused, so whether the ceiling held depended on wire framing.
+	// limitedReader reports a breach only on the read after its allowance, which
+	// a source returning its last bytes with io.EOF never gives it; without this
+	// check a body of ceiling+1 would pass depending on wire framing.
 	if int64(len(body)) > limit {
 		return nil, fmt.Errorf("%w: %d bytes past a %d-byte ceiling", over, len(body), limit)
 	}
 	return body, nil
 }
 
-// encoding reports whether the body is gzip, and refuses anything else.
-//
-// The request asks for gzip and nothing more, so identity, gzip and an absent
-// header are the only honest answers. Anything else — br, deflate, a stacked
-// "gzip, gzip", or a second header line Header.Get would not show — is
-// refused rather than returned as opaque bytes: we would be handing back
-// content in an encoding the caller never agreed to, and a stacked encoding
-// is a decompression bomb with an extra layer.
+// encoding reports whether the body is gzip and refuses any other encoding.
+// Only gzip, identity and an absent header are honest answers to our request;
+// anything else, including a stacked "gzip, gzip" (a decompression bomb with an
+// extra layer) or a second header line Header.Get would not show, is refused.
 func encoding(h http.Header) (gzipped bool, err error) {
 	values := h.Values("Content-Encoding")
 	if len(values) == 0 {
@@ -119,8 +107,7 @@ func encoding(h http.Header) (gzipped bool, err error) {
 	}
 }
 
-// readError keeps the two ceiling breaches and the context's own failure
-// distinguishable from an upstream transport error.
+// readError keeps ceiling breaches and context failure distinct from a transport error.
 func (f *Fetcher) readError(ctx context.Context, err error) error {
 	if errors.Is(err, ErrBodyTooLarge) || errors.Is(err, ErrDecompressedTooLarge) {
 		return err
@@ -128,14 +115,10 @@ func (f *Fetcher) readError(ctx context.Context, err error) error {
 	return wrapContext(ctx, fmt.Errorf("safefetch: read body: %w", err))
 }
 
-// checkContentType judges the media type twice: as the response declares it,
-// and as the bytes actually read sniff. A body that declares one type and
-// sniffs as an incompatible one is refused — that mismatch is how a caller
-// expecting JSON is handed an HTML page or an image decoder is handed a script.
-// An empty body has nothing to sniff, so only the declared type is checked. An
-// empty body with no declared Content-Type passes (a normal shape for a
-// 201/204 acknowledgement, e.g. a push-service response); this does not relax
-// anything for a body that arrived with bytes.
+// checkContentType judges the media type as declared and as sniffed; an
+// incompatible mismatch is refused (how a JSON caller is handed an HTML page).
+// An empty body has nothing to sniff, and with no declared type passes (a normal
+// 201/204 acknowledgement).
 func (f *Fetcher) checkContentType(declared string, body []byte) (string, string, error) {
 	media := normaliseType(declared)
 	if len(f.policy.ContentTypes) == 0 {
@@ -163,8 +146,7 @@ func (f *Fetcher) checkContentType(declared string, body []byte) (string, string
 	return media, sniffed, nil
 }
 
-// textual lists the declared types whose bytes http.DetectContentType reports
-// as text/plain.
+// textual lists declared types whose bytes http.DetectContentType reports as text/plain.
 var textual = map[string]bool{
 	"application/json":                  true,
 	"application/xml":                   true,
@@ -175,7 +157,6 @@ var textual = map[string]bool{
 }
 
 // compatible reports whether a sniffed type can be what the response declared.
-// Each type passing the allowlist alone is not enough: the pair must agree.
 func compatible(declared, sniffed string, body []byte) bool {
 	switch {
 	case declared == sniffed, declared == "application/octet-stream":
@@ -185,12 +166,10 @@ func compatible(declared, sniffed string, body []byte) bool {
 	case sniffed == "text/xml":
 		return strings.HasPrefix(declared, "text/") || declared == "application/xml" || declared == "application/xhtml+xml" || declared == "image/svg+xml"
 	case sniffed == "text/html" && declared == "application/xhtml+xml":
-		// XHTML is HTML: the declared type already admits the markup.
 		return true
 	case sniffed == "text/html":
-		// A leading "<!--" sniffs as HTML but is equally a valid XML/SVG/CSS
-		// comment, so the markup and stylesheet types stay compatible — but
-		// only for that comment: what follows it is judged on its own.
+		// A leading "<!--" sniffs as HTML but is also a valid XML/SVG/CSS comment;
+		// only the comment is excused, what follows is judged on its own.
 		if !strings.HasPrefix(declared, "text/") && declared != "application/xml" && declared != "image/svg+xml" {
 			return false
 		}
@@ -235,22 +214,15 @@ func normaliseType(v string) string {
 	}
 	media, _, err := mime.ParseMediaType(v)
 	if err != nil {
-		// A malformed Content-Type is still a claim; keep whatever precedes
-		// the first ';' so it can be judged rather than silently accepted.
+		// Keep what precedes the first ';' so a malformed type is judged, not accepted.
 		media, _, _ = strings.Cut(v, ";")
 	}
 	return strings.ToLower(strings.TrimSpace(media))
 }
 
-// limitedReader is the one place bytes are counted. It hands out at most
-// remaining bytes and then fails with over, so the ceiling applies while the
-// body streams rather than after it has been buffered.
-//
-// It is the streaming half of the ceiling: it stops an endless body after
-// ceiling+1 bytes. It is not the whole ceiling, since a source that returns
-// its last bytes together with io.EOF is never asked for the read that would
-// report the breach, so readBody checks the final length as well. This one
-// bounds memory, that one makes the limit exact.
+// limitedReader is the one place bytes are counted: it hands out at most
+// remaining bytes, then fails with over. It bounds memory; readBody's final
+// length check makes the limit exact.
 type limitedReader struct {
 	r         io.Reader
 	remaining int64

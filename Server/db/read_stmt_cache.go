@@ -10,13 +10,11 @@ import (
 	"sync"
 )
 
-// readStmtCache holds prepared statements for hot read queries on the reader
-// pool. The SQLite driver keeps no statement cache, so a plain QueryContext
-// parses and plans its SQL on every call; for a history page that parse was
-// about 40 % of the CPU. The cache is keyed by SQL text, so only SQL with a
-// small number of spellings belongs here: a hand-written IN list binds its ids
-// as one JSON array (idsJSON), and a sqlc slice is padded to a size bucket
-// (padIDs). Past maxReadStmts entries a query runs unprepared instead.
+// readStmtCache holds prepared statements for hot read queries on the reader pool;
+// the driver has no cache, so a plain QueryContext re-parses each call (~40 % of CPU
+// for a history page). Keyed by SQL text, so only few-spelling SQL belongs: IN lists
+// bind ids as one JSON array (idsJSON), sqlc slices pad to a bucket (padIDs). Past
+// maxReadStmts entries a query runs unprepared.
 type readStmtCache struct {
 	mu     sync.Mutex
 	stmts  map[string]*sql.Stmt
@@ -25,18 +23,15 @@ type readStmtCache struct {
 
 const maxReadStmts = 256
 
-// maxPaddedIDs is the largest bucket padIDs pads to. It covers a full pinned
-// list (MaxPinnedMessages + 1 rows); SQL with more placeholders than this is
-// one-off and is never cached.
+// maxPaddedIDs is the largest bucket padIDs pads to, covering a full pinned list; SQL
+// with more placeholders is one-off and never cached.
 const maxPaddedIDs = 1024
 
 var errStmtCacheClosed = errors.New("read statement cache closed")
 
-// stmt returns the prepared statement for query, preparing it once, or nil
-// when the cache is full or the SQL has more placeholders than padIDs pads.
-// database/sql re-prepares it on each reader connection that runs it. The
-// prepare waits for a pool connection, so it runs outside mu: a cache hit must
-// not queue behind it.
+// stmt returns the prepared statement for query, preparing it once, or nil when full
+// or the SQL has too many placeholders; the prepare waits for a pool connection, so it
+// runs outside mu.
 func (c *readStmtCache) stmt(ctx context.Context, pool *sql.DB, query string) (*sql.Stmt, error) {
 	if strings.Count(query, "?") > maxPaddedIDs {
 		return nil, nil
@@ -63,7 +58,6 @@ func (c *readStmtCache) stmt(ctx context.Context, pool *sql.DB, query string) (*
 		return nil, errors.Join(errStmtCacheClosed, prepared.Close())
 	}
 	if s, ok := c.stmts[query]; ok {
-		// Another caller prepared the same SQL while this one waited.
 		if err := prepared.Close(); err != nil {
 			return nil, fmt.Errorf("close duplicate statement: %w", err)
 		}
@@ -82,7 +76,6 @@ func (c *readStmtCache) stmt(ctx context.Context, pool *sql.DB, query string) (*
 	return prepared, nil
 }
 
-// close closes every cached statement; later lookups fail.
 func (c *readStmtCache) close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -95,8 +88,8 @@ func (c *readStmtCache) close() error {
 	return errors.Join(errs...)
 }
 
-// query runs a read-only query on pool through a cached prepared statement,
-// or unprepared once the cache is full.
+// query runs a read-only query on pool through a cached statement, or unprepared once
+// the cache is full.
 func (c *readStmtCache) query(ctx context.Context, pool *sql.DB, query string, args ...any) (*sql.Rows, error) {
 	s, err := c.stmt(ctx, pool, query)
 	if err != nil {
@@ -114,17 +107,14 @@ func (c *readStmtCache) query(ctx context.Context, pool *sql.DB, query string, a
 	return rows, nil
 }
 
-// queryCached runs a read-only query with few SQL spellings on the reader
-// through a cached prepared statement.
 func (d *DB) queryCached(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	return d.readStmts.query(ctx, d.reader, query, args...)
 }
 
 type cachedReadsKey struct{}
 
-// withCachedReads marks ctx so the sqlc read queries run under it use the
-// statement cache. Only code whose sqlc reads are constant or padded with
-// padIDs may set it.
+// withCachedReads marks ctx so sqlc reads under it use the statement cache; only code
+// whose reads are constant or padded with padIDs may set it.
 func withCachedReads(ctx context.Context) context.Context {
 	return context.WithValue(ctx, cachedReadsKey{}, true)
 }
@@ -134,9 +124,8 @@ func cachedReads(ctx context.Context) bool {
 	return on
 }
 
-// padIDs pads ids to the next size bucket by repeating the last id, so a sqlc
-// slice query has a handful of SQL spellings instead of one per length. A
-// repeated value does not change what IN matches.
+// padIDs pads ids to the next size bucket by repeating the last id, so a sqlc slice
+// query has a handful of SQL spellings; a repeat does not change what IN matches.
 func padIDs[T any](ids []T) []T {
 	n := len(ids)
 	if n == 0 {
@@ -157,8 +146,6 @@ func padIDs[T any](ids []T) []T {
 	return out
 }
 
-// idsJSON encodes ids as a JSON array for `IN (SELECT value FROM json_each(?))`,
-// which keeps the SQL text the same for any number of ids.
 func idsJSON(ids []int64) string {
 	var sb strings.Builder
 	sb.Grow(len(ids)*8 + 2)

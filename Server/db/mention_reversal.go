@@ -6,42 +6,28 @@ import (
 )
 
 // countedReceipt is the SQL predicate, over mention_receipts r joined to its
-// message m, for a receipt that records a badge the message really raised.
-// Receipts written with an increment are exact. The migration 063 backfill
-// could not tell @here from @everyone and included mentions an edit added, so
-// a receipt on a message older than that migration counts only when a direct
-// mention of the reader backs it.
+// message m, for a receipt recording a badge the message really raised. The
+// migration 063 backfill could not tell @here from @everyone and included
+// edit-added mentions, so a receipt on an older message counts only when a
+// direct mention of the reader backs it.
 const countedReceipt = `(m.timestamp >= COALESCE(
 	(SELECT applied_at FROM schema_versions WHERE version = '063_mention_receipts.sql'), '')
 	OR EXISTS (SELECT 1 FROM message_mentions mm
 	            WHERE mm.message_id = m.id AND mm.mentioned_user_id = r.user_id))`
 
-// DecrementMentionCounts reverses the read_states.mention_count increments
-// IncrementMentionCounts made for msgIDs, when those messages are deleted or
-// purged. Otherwise a deleted mentioning message would leave a badge pointing
-// at nothing, since the delete path soft-deletes the row and leaves read_states
-// untouched while the unread count is computed live.
-//
-// The readers come from mention_receipts, the ledger of whose badge each
-// message raised, not from message_mentions: an edit rewrites message_mentions
-// but never moves a badge, so reversing the current set would wipe an
-// unrelated badge for an edit-added mention and leave one for an edit-removed
-// mention. Receipts also cover @everyone and @here. Receipts from the
-// migration 063 backfill can overcount (see countedReceipt), so they count only
-// where a direct mention backs them.
-//
-// Each message is decremented separately, guarded like the increment
-// (last_message_id < msgID), since a reader who has read past it had the badge
-// settled by that read; mention_count > 0 keeps each step monotonic. A receipt
-// from an author the reader has since blocked is skipped, matching the
-// read-pointer recompute (receiptsAfter): once a read recomputed the badge
-// without it, reversing again would take a second badge (until that read the
-// badge stays one too high). The message's receipts are deleted in the same
-// transaction, so a repeated call lowers nothing.
-//
-// The returned map is userID to mention_count after the reversal, holding
-// exactly the readers the guards admitted (the RETURNING rows), the same
-// live-badge signal IncrementMentionCountsBatch returns.
+// DecrementMentionCounts reverses the read_states.mention_count increments made for
+// msgIDs when those messages are deleted or purged; a soft delete leaves read_states
+// untouched, so the badge would point at nothing.
+// Readers come from mention_receipts, the ledger of whose badge each message raised,
+// not message_mentions: an edit rewrites message_mentions but never moves a badge, so
+// reversing the current set would wipe an unrelated badge.
+// Each message is decremented separately, guarded like the increment (last_message_id
+// < msgID) since a read past it settled the badge; mention_count > 0 keeps each step
+// monotonic. A receipt from an author the reader has since blocked is skipped,
+// matching receiptsAfter, or a second reversal would take a second badge. The receipts
+// are deleted in the same transaction, so a repeated call lowers nothing.
+// The returned map is userID to mention_count after the reversal for the readers the
+// guards admitted, the live-badge signal as in IncrementMentionCountsBatch.
 func (d *DB) DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) (map[int64]int64, error) {
 	if len(msgIDs) == 0 {
 		return nil, nil

@@ -9,27 +9,23 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// ChannelPassword is the part of a channel row that says whether it has a
-// password, embedded in Channel so it appears on every channel payload. It
-// holds that one fact only: the hash is read through ChannelPasswordState and
-// never lives on a channel value.
+// ChannelPassword says whether a channel has a password, embedded in Channel. The hash
+// is read through ChannelPasswordState and never lives on a channel value.
 type ChannelPassword struct {
 	JoinLocked bool `json:"password_protected"`
 }
 
-// ChannelPasswordChange is a password write carried by ChannelUpdate. Clear
-// removes the password; otherwise Hash is the bcrypt hash to store. Either
-// way the channel's password_version goes up by one, so every earlier grant
-// stops counting.
+// ChannelPasswordChange is a password write carried by ChannelUpdate: Clear removes
+// the password, otherwise Hash is the bcrypt hash. Either way password_version goes up
+// by one, invalidating every earlier grant.
 type ChannelPasswordChange struct {
 	Hash  string
 	Clear bool
 }
 
-// ChannelPasswordState reads a channel's password hash and version for the
-// join check. found is false when the channel does not exist; hash is empty
-// when the channel has no password. This and the grant methods below are the
-// only readers of channels.password_hash.
+// ChannelPasswordState reads a channel's password hash and version for the join check;
+// found is false for no such channel, hash empty for no password. With the grant
+// methods it is the only reader of channels.password_hash.
 func (d *DB) ChannelPasswordState(ctx context.Context, channelID int64) (hash string, version int64, found bool, err error) {
 	row, err := d.q.GetChannelPasswordState(ctx, channelID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -44,8 +40,7 @@ func (d *DB) ChannelPasswordState(ctx context.Context, channelID int64) (hash st
 	return hash, row.PasswordVersion, true, nil
 }
 
-// HasChannelPasswordGrant reports whether userID already entered the
-// channel's current password.
+// HasChannelPasswordGrant reports whether userID entered the channel's current password.
 func (d *DB) HasChannelPasswordGrant(ctx context.Context, channelID, userID int64) (bool, error) {
 	n, err := d.q.HasChannelPasswordGrant(ctx, dbgen.HasChannelPasswordGrantParams{ChannelID: channelID, UserID: userID})
 	if err != nil {
@@ -54,9 +49,8 @@ func (d *DB) HasChannelPasswordGrant(ctx context.Context, channelID, userID int6
 	return n > 0, nil
 }
 
-// GrantChannelPassword records that userID entered the password whose version
-// the caller checked it against. It writes only while the channel still has
-// that version, so a password changed in between leaves no grant: false means
+// GrantChannelPassword records that userID entered the password whose version the
+// caller checked. It writes only while the channel still has that version; false means
 // nothing was written.
 func (d *DB) GrantChannelPassword(ctx context.Context, channelID, userID, version int64) (bool, error) {
 	n, err := d.q.GrantChannelPassword(ctx, dbgen.GrantChannelPasswordParams{

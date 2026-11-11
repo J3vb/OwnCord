@@ -5,25 +5,20 @@ import (
 	"strings"
 )
 
-// containerMarkerFiles are runtime-created markers that identify the two
-// container engines OwnCord is deployed under in practice. They back up the
-// env var for images built before it existed.
+// containerMarkerFiles are runtime-created markers of the two container engines
+// OwnCord ships under, backing up the env var for older images.
 var containerMarkerFiles = []string{
 	"/.dockerenv",        // Docker
 	"/run/.containerenv", // Podman
 }
 
-// RunningInContainer reports whether the server appears to be running inside
-// a container image. OWNCORD_CONTAINER is the authoritative override in both
-// directions — the shipped Dockerfile sets it to 1, and an operator who
-// bind-mounts the binary into a container and genuinely wants in-place
-// self-update can set 0/false to opt back in. Without the variable, the
-// engine marker files decide.
-//
-// In-place self-update is refused in containers because the running binary
-// is image content: the replacement written next to it dies with the
-// container, and the restart comes back as the old image. Container upgrades
-// are image pulls (see docs/deployment.md).
+// RunningInContainer reports whether the server appears to run in a container
+// image. OWNCORD_CONTAINER (set to 1 by the shipped Dockerfile) overrides in
+// both directions: an operator who bind-mounts the binary and wants in-place
+// update can set 0/false. Otherwise the engine marker files decide. In-place
+// update is refused in containers because the new binary dies with the
+// container and the restart comes back as the old image; upgrades are image
+// pulls (docs/deployment.md).
 func RunningInContainer() bool {
 	if v, ok := os.LookupEnv("OWNCORD_CONTAINER"); ok {
 		v = strings.TrimSpace(v)

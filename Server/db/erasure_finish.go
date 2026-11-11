@@ -11,20 +11,13 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// EraseAccountFinish is the finish stage: one transaction over tables the
-// drain left nearly empty. Every statement is idempotent, so it also sweeps
-// whatever a send that passed auth before the lock wrote since. It ends by
-// turning the subject's queued job into db_done with the union of the files
-// every stage collected; after the commit it unlinks the audit history and
-// truncates the WAL once.
-//
-// subjectToken is the deletion marker's token: see EraseAccount. A subject
-// whose users row is already gone (a restore or an operator can cause that)
-// only has its job closed.
-//
-// A subject whose users row is already gone (a stage interrupted after the
-// delete would leave none, but a restore or an operator can) only has its job
-// closed.
+// EraseAccountFinish is the finish stage: one transaction over tables the drain left
+// nearly empty. Every statement is idempotent, so it also sweeps whatever a send that
+// passed auth before the lock wrote since. It turns the queued job into db_done with
+// the union of the files every stage collected; after the commit it unlinks the audit
+// history and truncates the WAL once. subjectToken is the deletion marker's token (see
+// EraseAccount). A subject whose users row is already gone (a restore or operator can
+// cause that) only has its job closed.
 func (d *DB) EraseAccountFinish(ctx context.Context, userID int64, subjectToken string) (*ErasureJob, error) {
 	var job *ErasureJob
 	err := d.withErasureConn(ctx, userID, func(conn *sql.Conn) error {
@@ -36,17 +29,12 @@ func (d *DB) EraseAccountFinish(ctx context.Context, userID int64, subjectToken 
 		if err := d.erasureHook("finish", 0); err != nil {
 			return err
 		}
-		// Crash seam: the transaction has committed and the
-		// checkpoint below has not run, which is the window a test needs to
-		// read the bytes as a crash leaves them. Nil in production.
 		if d.testEraseCommitHook != nil {
 			d.testEraseCommitHook()
 		}
-		// The audit writer's rule for the subject, now that the transaction
-		// has committed and while this connection is still held: an audit
-		// entry about the subject that a flush inserts after the UPDATE in
-		// the transaction is written unlinked (AuditWriter.Unlink), and a
-		// refused transaction has installed nothing.
+		// The audit writer's rule for the subject, installed after commit while this
+		// connection is held: an entry a flush inserts after the transaction's UPDATE
+		// is written unlinked (AuditWriter.Unlink); a refused transaction installs nothing.
 		d.unlinkAuditsFor(userID, subjectToken)
 		d.checkpointAfterErasure(ctx, conn, userID)
 		return d.erasureHook("checkpoint", 0)
@@ -57,7 +45,6 @@ func (d *DB) EraseAccountFinish(ctx context.Context, userID int64, subjectToken 
 	return job, nil
 }
 
-// eraseFinishTx is the finish stage's transaction.
 func eraseFinishTx(ctx context.Context, conn *sql.Conn, userID int64, subjectToken string) (*ErasureJob, error) {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -88,7 +75,6 @@ func eraseFinishTx(ctx context.Context, conn *sql.Conn, userID int64, subjectTok
 		}
 		files = append(files, more...)
 	case errors.Is(err, sql.ErrNoRows):
-		// Nothing left to delete: only the job is outstanding.
 	default:
 		return nil, fmt.Errorf("EraseAccount fetch user: %w", err)
 	}
@@ -111,8 +97,6 @@ func eraseFinishTx(ctx context.Context, conn *sql.Conn, userID int64, subjectTok
 	return &ErasureJob{ID: queued.ID, UserID: userID, State: ErasureStateDBDone, Files: files}, nil
 }
 
-// eraseSubjectRows is the whole-account deletion the single transaction used
-// to be, and returns the stored names of the files it unlinked.
 func eraseSubjectRows(ctx context.Context, tx *sql.Tx, userID int64, username, subjectToken string, jobID int64) ([]string, error) {
 	dmChannelIDs, err := deleteAccountDMChannels(ctx, tx, userID)
 	if err != nil {
@@ -122,8 +106,6 @@ func eraseSubjectRows(ctx context.Context, tx *sql.Tx, userID int64, username, s
 	if err != nil {
 		return nil, err
 	}
-	// Mention badges are reversed only while the subject still has messages
-	// to reverse them for; the drain has taken the rest (chunk by chunk).
 	var has int
 	switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM messages WHERE user_id = ? LIMIT 1`, userID).Scan(&has); {
 	case err == nil:
@@ -142,11 +124,10 @@ func eraseSubjectRows(ctx context.Context, tx *sql.Tx, userID int64, username, s
 			return nil, fmt.Errorf("EraseAccount %s: %w", s.label, err)
 		}
 	}
-	// Replay events naming the subject. The drain has taken
-	// every one that existed before the lock, so the sweep here is the rows
-	// written since: the job's created_at is the lock's time, and the
-	// created_at index turns the JSON predicate's table scan into a range.
-	// PurgeUserFromReplay deletes them all again after the member_ban.
+	// Replay events naming the subject: the drain took every one from before the
+	// lock, so this sweeps rows written since (the job's created_at is the lock's
+	// time, and its index turns the JSON predicate's scan into a range).
+	// PurgeUserFromReplay deletes them again after the member_ban.
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM events WHERE created_at >= (SELECT created_at FROM erasure_jobs WHERE id = ?2) AND `+EventNamesUserPredicate,
 		userID, jobID); err != nil {
@@ -169,8 +150,6 @@ func eraseSubjectRows(ctx context.Context, tx *sql.Tx, userID int64, username, s
 	return files, nil
 }
 
-// uniqueNames sorts names and drops repeats: the union of the files the drain
-// chunks journaled and the finish stage collected.
 func uniqueNames(names []string) []string {
 	out := slices.Clone(names)
 	slices.Sort(out)

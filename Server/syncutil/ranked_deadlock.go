@@ -14,16 +14,10 @@ import (
 	"github.com/petermattis/goid"
 )
 
-// The rank checker of the deadlock build. It mirrors the Go runtime's
-// lockrank: every Ranked/RankedRW acquire records a hold against the acquiring
-// goroutine, and a blocking acquire whose rank is not strictly greater than
-// every rank the goroutine holds panics before blocking, with the acquire's
-// stack and the held lock's.
-//
-// go-deadlock (mutex_deadlock.go) still runs underneath, but reports an
-// inversion only once one process has taken the same two lock instances in
-// both orders; the rank check fails the first time a path takes a forbidden
-// edge.
+// The rank checker of the deadlock build, mirroring the Go runtime's lockrank:
+// a blocking acquire whose rank is not strictly greater than every rank the
+// goroutine holds panics before blocking. go-deadlock only reports an inversion
+// after both orders are seen; this fails on the first forbidden edge.
 
 // rankHold is one lock a goroutine holds.
 type rankHold struct {
@@ -35,19 +29,15 @@ type rankHold struct {
 	pcs  []uintptr // where it was acquired
 }
 
-// rankHolds is the process-wide hold table, keyed by goroutine id. It is a
-// raw sync.Mutex on purpose: a syncutil lock here would recurse into the
-// checker. The table is touched only by this file and never held across
-// anything but slice and map work.
+// rankHolds is the process-wide hold table, keyed by goroutine id. It is a raw
+// sync.Mutex because a syncutil lock would recurse into the checker.
 var rankHolds = struct {
 	mu sync.Mutex
 	by map[int64][]rankHold
 }{by: make(map[int64][]rankHold)}
 
-// rankViolations counts violations since the last TakeRankViolations. The
-// hub's dispatch loop and handlers recover panics, so a violation there would
-// otherwise only reach the log; a package's TestMain fails the run on a
-// non-zero count instead.
+// rankViolations counts violations since the last TakeRankViolations. Hub
+// handlers recover panics, so a package's TestMain fails the run on a non-zero count.
 var rankViolations atomic.Int64
 
 // rankViolation reports a violation: it counts it, writes the report to
@@ -58,9 +48,8 @@ var rankViolation = func(report string) {
 	panic(report)
 }
 
-// TakeRankViolations returns the number of rank violations since the last
-// call and resets the count. A test that provokes a violation on purpose
-// takes it, so TestMain sees only the unexpected ones.
+// TakeRankViolations returns and resets the violation count; a test that
+// provokes one on purpose takes it so TestMain sees only unexpected ones.
 func TakeRankViolations() int64 {
 	return rankViolations.Swap(0)
 }
@@ -69,8 +58,7 @@ const rankStackDepth = 32
 
 func rankCallers() []uintptr {
 	pcs := make([]uintptr, rankStackDepth)
-	// Skip runtime.Callers, rankCallers and the Ranked method that calls it,
-	// so the first frame is the caller of Lock.
+	// Skip runtime.Callers, rankCallers and the Ranked method: first frame is the caller of Lock.
 	n := runtime.Callers(3, pcs)
 	return pcs[:n]
 }
@@ -139,12 +127,9 @@ func rankAcquired(gid int64, lock any, r LockRank, read, try bool, pcs []uintptr
 	rankHolds.mu.Unlock()
 }
 
-// rankReleased drops one hold of lock. It looks on the releasing goroutine
-// first and then on every other, because a lock may be released by a different
-// goroutine than took it: the hold leaves whichever goroutine recorded it. For
-// a read hold that fallback cannot tell readers apart: an RUnlock on a
-// goroutine holding no read of lock drops some reader's hold. No ranked RLock
-// is released across goroutines today.
+// rankReleased drops one hold of lock, on the releasing goroutine first and
+// then any other, since a lock may be released by another goroutine. For reads
+// that fallback cannot tell readers apart; no ranked RLock is released across goroutines.
 func rankReleased(lock any) {
 	gid := goid.Get()
 	rankHolds.mu.Lock()
@@ -159,8 +144,7 @@ func rankReleased(lock any) {
 	}
 }
 
-// dropHold removes the latest hold of lock by gid. The caller holds
-// rankHolds.mu.
+// dropHold removes the latest hold of lock by gid; the caller holds rankHolds.mu.
 func dropHold(gid int64, lock any) bool {
 	hs := rankHolds.by[gid]
 	for i, h := range slices.Backward(hs) {
@@ -178,8 +162,7 @@ func dropHold(gid int64, lock any) bool {
 	return false
 }
 
-// HoldsForTest reports how many holds of lock (a *Ranked or *RankedRW) the
-// table records, on any goroutine. It exists only in the deadlock build.
+// HoldsForTest reports how many holds of lock the table records, on any goroutine.
 func HoldsForTest(lock any) int {
 	rankHolds.mu.Lock()
 	defer rankHolds.mu.Unlock()
@@ -213,8 +196,7 @@ func (m *Ranked[R]) Unlock() {
 	m.mu.Unlock()
 }
 
-// TryLock tries to lock m. A try cannot block, so it is never flagged; a
-// successful one is recorded as a hold like any other.
+// TryLock tries to lock m; a try cannot block so is never flagged, but success is recorded.
 func (m *Ranked[R]) TryLock() bool {
 	if !m.mu.TryLock() {
 		return false

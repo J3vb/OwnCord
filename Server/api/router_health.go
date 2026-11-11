@@ -15,10 +15,9 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// routerHealthDeps builds the liveness probes behind the shared /health
-// handler. getOnlineUsers and hubAlive are taken as pointers because NewRouter
-// only assigns them once the hub exists, after this handler is already mounted;
-// the closures read whatever the variables hold at request time.
+// routerHealthDeps builds the liveness probes behind the shared /health handler. getOnlineUsers and
+// hubAlive are pointers because NewRouter assigns them once the hub exists; closures read them at request
+// time.
 func routerHealthDeps(cfg *config.Config, database *db.DB, getOnlineUsers *func() int, hubAlive *func() bool) healthDeps {
 	return healthDeps{
 		onlineUsers: func() int {
@@ -31,9 +30,8 @@ func routerHealthDeps(cfg *config.Config, database *db.DB, getOnlineUsers *func(
 			if database == nil {
 				return nil
 			}
-			// Reader pool, not the writer: the writer is the single connection
-			// every mutation queues on, so a SELECT 1 there would report a
-			// writer queue as a liveness failure (see db.PingRead).
+			// Reader pool, not the writer: a SELECT 1 on the single writer would report a writer queue as a
+			// liveness failure (see db.PingRead).
 			return database.PingRead(ctx)
 		},
 		dispatchAlive: func() bool {
@@ -55,8 +53,8 @@ type healthResponse struct {
 	Status      string `json:"status"` // "ok" | "degraded"
 	Uptime      int64  `json:"uptime"`
 	OnlineUsers int    `json:"online_users"`
-	// Reason names the degraded subsystem ("hub", "database", "disk") and
-	// nothing more — this endpoint is unauthenticated, so no error details.
+	// Names the degraded subsystem ("hub", "database", "disk") and nothing more: unauthenticated, so no error
+	// details.
 	Reason string `json:"reason,omitempty"`
 }
 
@@ -65,26 +63,22 @@ type healthDeps struct {
 	dbPing        func(context.Context) error
 	dispatchAlive func() bool
 	freeDiskBytes func() (uint64, error)
-	// minFreeDiskBytes is the free-space floor under which health reports
-	// degraded: server.min_free_disk_mb, the same number the start-up banner and
-	// upload path use. WAL growth, uploads and backups share the data volume, so
-	// running dry corrupts more than one thing. 0 disables the check.
+	// The free-space floor under which health reports degraded (server.min_free_disk_mb, shared with the
+	// start-up banner and upload path); WAL growth, uploads and backups share the volume. 0 disables the
+	// check.
 	minFreeDiskBytes uint64
 }
 
 const (
-	// healthCacheTTL bounds how often the real checks run: the endpoint is
-	// unauthenticated AND rate-limit-exempt, so an uncached DB ping per
-	// request would be a free amplification lever.
+	// Bounds how often the real checks run: unauthenticated AND rate-limit-exempt, so an uncached ping would
+	// be an amplification lever.
 	healthCacheTTL = 5 * time.Second
-	// healthDBPingTimeout bounds the SELECT 1 so a wedged writer degrades the
-	// health report instead of hanging it.
+	// Bounds the SELECT 1 so a wedged writer degrades the report instead of hanging it.
 	healthDBPingTimeout = 1 * time.Second
 )
 
-// mountPublicV1 registers the unauthenticated /api/v1 routes. Each must be
-// declared in publicSurface (auth_posture_test.go) and must keep build identity
-// (version, build, commit) off it.
+// mountPublicV1 registers the unauthenticated /api/v1 routes; each must be in publicSurface
+// (auth_posture_test.go) and keep build identity off.
 func mountPublicV1(r chi.Router, cfg *config.Config, healthHandler http.HandlerFunc, svc *service.Services) {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler)
@@ -98,19 +92,16 @@ type infoResponse struct {
 }
 
 func handleHealth(deps healthDeps) http.HandlerFunc {
-	// Version is omitted to prevent server fingerprinting; it is on the
-	// authenticated diagnostics endpoint.
+	// Version is omitted to prevent fingerprinting; it is on the authenticated diagnostics endpoint.
 	var mu syncutil.Mutex
 	var cachedAt time.Time
 	var cachedStatus, cachedReason string
 	return func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		if time.Since(cachedAt) >= healthCacheTTL {
-			// WithoutCancel: the result is cached for the next healthCacheTTL,
-			// so it must not inherit THIS request's cancellation, or a probe
-			// that disconnects mid-check would poison the shared cache with a
-			// false "degraded/database" verdict. The DB ping has its own 1s
-			// timeout, so checks stay bounded.
+			// WithoutCancel: the result is cached, so a probe that disconnects mid-check must not poison the
+			// shared cache with a false "degraded/database"; the DB ping has its own timeout, so checks stay
+			// bounded.
 			cachedStatus, cachedReason = runHealthChecks(context.WithoutCancel(r.Context()), deps)
 			cachedAt = time.Now()
 		}
@@ -134,10 +125,9 @@ func handleHealth(deps healthDeps) http.HandlerFunc {
 	}
 }
 
-// runHealthChecks probes the hub dispatch loop, the database, and free disk,
-// returning ("ok", "") or ("degraded", <subsystem>). First failure wins, in
-// blast-radius order. Probe errors that mean "unknown" (unsupported platform,
-// missing dir in tests) count as healthy — only a positive negative degrades.
+// runHealthChecks probes the hub dispatch loop, the database and free disk, returning ("ok", "") or
+// ("degraded", <subsystem>); first failure wins. Errors meaning "unknown" count as healthy, only a positive
+// negative degrades.
 func runHealthChecks(ctx context.Context, deps healthDeps) (status, reason string) {
 	if deps.dispatchAlive != nil && !deps.dispatchAlive() {
 		return "degraded", "hub"

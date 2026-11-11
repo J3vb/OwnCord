@@ -11,52 +11,43 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// AuditStore is the minimal batch-write surface AuditWriter needs. *DB
-// satisfies it directly; tests substitute a fake.
+// AuditStore is the batch-write surface AuditWriter needs; *DB satisfies it.
 type AuditStore interface {
 	PersistAudits(ctx context.Context, entries []AuditEntry) (int, error)
 }
 
 // AuditWriter drains audit entries from an in-memory channel into audit_log in
-// batches through an AuditStore, modeled on ws.EventPersister. It must never
-// block the request path: when the queue is full or the writer is stopping,
-// TryEnqueue refuses and the DB path writes the entry synchronously instead.
-// Enqueue, which has no such fallback, drops and counts. A drop is never
-// silent: it is logged with the actor/action/target (never the detail string,
-// which can carry sensitive text), and flush losses are logged the same way.
+// batches, modeled on ws.EventPersister. It must never block the request path:
+// TryEnqueue refuses when the queue is full or stopping and the DB path writes
+// synchronously; Enqueue, with no fallback, drops and counts. A drop is logged
+// with actor/action/target, never the detail string, which can carry sensitive text.
 type AuditWriter struct {
 	store      AuditStore
 	queue      chan AuditEntry
 	batchSize  int
 	flushEvery time.Duration
 
-	// flushReq carries Flush's barrier requests to run(); each is answered once
-	// everything queued before it has reached the store.
 	flushReq chan chan struct{}
 
-	// unlinked is the erasure's rule set: erased subjects, by user id, whose
-	// entries are written unlinked (id 0, detail cleared, the deletion marker's
-	// token in place) because the erasure transaction can rewrite only rows
-	// already persisted. Written by Unlink after an erasure commits; read by the
-	// store at insert time under the writer connection.
+	// unlinked is the erasure's rule set: erased subjects whose entries are
+	// written unlinked (id 0, detail cleared, the marker's token) because the
+	// erasure transaction can rewrite only persisted rows. Written by Unlink after
+	// an erasure commits; read by the store at insert time under the writer connection.
 	unlinkMu syncutil.Mutex
 	unlinked map[int64]string
 
 	startOnce sync.Once
 	started   atomic.Bool
 	stopOnce  sync.Once
-	// sendMu makes "not stopped, so send" one step against Stop: TryEnqueue
-	// checks stopped and sends under the read lock, and Stop sets stopped under
-	// the write lock before it closes w.stop, so every accepted send is in the
-	// queue before run() starts its final drain.
+	// sendMu makes "not stopped, so send" one step against Stop: TryEnqueue sends
+	// under the read lock and Stop sets stopped under the write lock before
+	// closing w.stop, so every accepted send is queued before run()'s final drain.
 	sendMu  syncutil.RWMutex
 	stopped bool
 	stop    chan struct{}
 	done    chan struct{}
-	// stopCtxDone is the Done channel of the context passed to Stop. run's
-	// drain-on-stop loop reads it only after observing stop closed, which gives
-	// the happens-before without a lock. Nil (an uncancellable ctx) means drain
-	// fully.
+	// stopCtxDone is the Done channel of Stop's context, read by run only after
+	// observing stop closed (happens-before without a lock). Nil drains fully.
 	stopCtxDone <-chan struct{}
 
 	persisted atomic.Uint64
@@ -65,11 +56,8 @@ type AuditWriter struct {
 	errors    atomic.Uint64
 }
 
-// NewAuditWriter returns a writer wired to s, which must be non-nil: run()
-// dereferences it on every flush, so failing fast here beats a panic in the
-// background goroutine. queueSize sets the channel buffer; once full, Enqueue
-// drops (loudly) without blocking. batchSize and flushEvery control the flush
-// triggers.
+// NewAuditWriter returns a writer wired to s, which must be non-nil; once queueSize is
+// full, Enqueue drops loudly.
 func NewAuditWriter(s AuditStore, queueSize, batchSize int, flushEvery time.Duration) *AuditWriter {
 	if s == nil {
 		panic("db: NewAuditWriter requires a non-nil AuditStore")
@@ -94,8 +82,7 @@ func NewAuditWriter(s AuditStore, queueSize, batchSize int, flushEvery time.Dura
 	}
 }
 
-// Start launches the background flusher goroutine; calling it more than once
-// is a no-op.
+// Start launches the flusher goroutine; calling it again is a no-op.
 func (w *AuditWriter) Start(ctx context.Context) {
 	w.startOnce.Do(func() {
 		w.started.Store(true)
@@ -103,11 +90,9 @@ func (w *AuditWriter) Start(ctx context.Context) {
 	})
 }
 
-// Enqueue queues an audit entry without blocking. On a full queue, or once the
-// writer is stopping, the entry is dropped, counted and logged with the same
-// identifying fields WriteAudit uses for a synchronous failure, never the
-// detail string. The DB path uses TryEnqueue instead and writes a refused
-// entry directly.
+// Enqueue queues an entry without blocking; on a full queue or a stopping
+// writer it is dropped, counted and logged with WriteAudit's identifying
+// fields, never the detail. The DB path uses TryEnqueue instead.
 func (w *AuditWriter) Enqueue(actorID int64, action, targetType string, targetID int64, detail string) {
 	w.EnqueueEntry(AuditEntry{ActorID: actorID, Action: action, TargetType: targetType, TargetID: targetID, Detail: detail})
 }
@@ -135,10 +120,8 @@ func (w *AuditWriter) EnqueueEntry(e AuditEntry) {
 	)
 }
 
-// TryEnqueue queues e without blocking and reports whether the writer took it.
-// It refuses, with nothing counted or logged, when the queue is full or the
-// writer is stopping or stopped, so the caller can write the entry itself
-// while the database is still open.
+// TryEnqueue queues e without blocking and reports whether it was taken; refusal is
+// uncounted so the caller writes it.
 func (w *AuditWriter) TryEnqueue(e AuditEntry) bool {
 	if w == nil {
 		return false
@@ -156,9 +139,8 @@ func (w *AuditWriter) TryEnqueue(e AuditEntry) bool {
 	}
 }
 
-// stopping reports whether Stop was called or run() has exited. run() stops
-// reading w.queue the instant it exits, but the channel keeps accepting sends,
-// so an entry sent after either point could be stranded.
+// stopping reports whether Stop was called or run() has exited; the channel
+// still accepts sends after that, which could strand an entry.
 func (w *AuditWriter) stopping() bool {
 	select {
 	case <-w.stop:
@@ -170,13 +152,10 @@ func (w *AuditWriter) stopping() bool {
 	}
 }
 
-// Stop signals the writer to drain and exit, and returns only after the run
-// goroutine has exited. That is load-bearing: main.go closes the database right
-// after Stop, so no flush may still be in flight or audits are lost. ctx does
-// not abandon that wait; it bounds how long run() keeps draining before it
-// stops accepting entries, flushes once and exits, so a stuck flush delays
-// shutdown by at most that flush. Without a prior Start there is nothing to
-// wait for and it returns after closing the stop channel.
+// Stop signals the writer to drain and returns only after run has exited, because
+// main.go closes the database right after. ctx bounds how long run() keeps draining
+// before one final flush, not the wait. Without a prior Start it returns after closing
+// the stop channel.
 func (w *AuditWriter) Stop(ctx context.Context) {
 	if w == nil {
 		return
@@ -185,23 +164,18 @@ func (w *AuditWriter) Stop(ctx context.Context) {
 		w.sendMu.Lock()
 		defer w.sendMu.Unlock()
 		w.stopped = true
-		// Published before close(w.stop): run() reads stopCtxDone only after its
-		// receive observes the close, which makes this write visible race-free.
+		// Published before close(w.stop) so run()'s read after observing the close is race-free.
 		w.stopCtxDone = ctx.Done()
 		close(w.stop)
 	})
 	if !w.started.Load() {
-		// run() was never launched, so done will never be closed.
 		return
 	}
-	// Always wait for the goroutine to exit; never race it against ctx.
 	<-w.done
 
-	// Entries can still be queued here: run() exits early when the Stop context
-	// expires mid-drain, or when its own context was cancelled before Stop and a
-	// send raced that exit. The store is still open (the caller closes it only
-	// after Stop returns), so write them directly, bounded so a stuck store
-	// cannot hold shutdown.
+	// Entries can remain if run() exited early (Stop context expired mid-drain, or
+	// a send raced its exit). The store is still open, so write them directly,
+	// bounded so a stuck store cannot hold shutdown.
 	stranded := w.drainQueued(nil)
 	if len(stranded) == 0 {
 		return
@@ -219,7 +193,6 @@ func (w *AuditWriter) Stop(ctx context.Context) {
 	}
 }
 
-// strandedWriteTimeout bounds Stop's direct write of entries that raced it.
 const strandedWriteTimeout = 2 * time.Second
 
 // Stats returns lifetime counters.
@@ -227,15 +200,12 @@ func (w *AuditWriter) Stats() (persisted, dropped, flushes, errs uint64) {
 	return w.persisted.Load(), w.dropped.Load(), w.flushes.Load(), w.errors.Load()
 }
 
-// Unlink installs the erasure's unlinking rule for userID: every entry the
-// store inserts from now on that names userID (as actor or user target) is
-// written as the erasure rewrote persisted rows (erasureUnlinkAudit): id 0,
-// detail cleared, the deletion marker's token in place. The erasure installs it
-// after its transaction commits, while it holds the writer connection, and the
-// store reads it under that connection, so an entry queued earlier lands raw
-// ahead of the rewriting UPDATE and a later one lands unlinked. A refused
-// erasure installs nothing. The rule is permanent because an erased id is never
-// reissued (DB.RaiseSequences).
+// Unlink installs the erasure's unlinking rule for userID: every entry inserted from
+// now on that names userID is written as erasureUnlinkAudit rewrote persisted rows.
+// The erasure installs it after commit while holding the writer connection and the
+// store reads it under that connection, so an earlier-queued entry lands raw ahead of
+// the rewriting UPDATE and a later one lands unlinked. Permanent: an erased id is
+// never reissued (DB.RaiseSequences).
 func (w *AuditWriter) Unlink(userID int64, token string) {
 	if w == nil {
 		return
@@ -248,8 +218,6 @@ func (w *AuditWriter) Unlink(userID int64, token string) {
 	w.unlinked[userID] = token
 }
 
-// unlinkRules snapshots the rule set for one insert batch; nil when empty, so
-// the common case costs one lock and no allocation.
 func (w *AuditWriter) unlinkRules() map[int64]string {
 	w.unlinkMu.Lock()
 	defer w.unlinkMu.Unlock()
@@ -261,9 +229,8 @@ func (w *AuditWriter) unlinkRules() map[int64]string {
 	return rules
 }
 
-// unlinkEntry applies the rule set to one entry as erasureUnlinkAudit does to a
-// persisted row: the actor's token on the actor side, the subject's on the
-// target side, so an entry naming two erased subjects keeps both.
+// unlinkEntry applies the rules as erasureUnlinkAudit does: the actor's token
+// on the actor side, the subject's on the target side.
 func unlinkEntry(e AuditEntry, rules map[int64]string) AuditEntry {
 	if len(rules) == 0 {
 		return e
@@ -277,17 +244,15 @@ func unlinkEntry(e AuditEntry, rules map[int64]string) AuditEntry {
 	return e
 }
 
-// Flush is a barrier: it returns once every entry enqueued before the call has
-// reached the store. The erasure takes it before its transaction so an entry
-// about the subject is on disk with its ids for the UPDATE to rewrite; a
-// refused transaction leaves it as it was. A writer never started, or
-// stopped, has nothing in flight (Start drains, Stop sweeps).
+// Flush is a barrier: it returns once every entry enqueued before the call has reached
+// the store. The erasure takes it first so entries about the subject are on disk for
+// the UPDATE to rewrite. A writer never started, or stopped, has nothing in flight.
 func (w *AuditWriter) Flush(ctx context.Context) error {
 	if w == nil || !w.started.Load() {
 		return nil
 	}
-	// select picks randomly among ready cases, so an already-cancelled barrier
-	// must fail here rather than race a ready flushReq send.
+	// select picks randomly among ready cases, so a cancelled barrier must fail here, not race the
+	// flushReq send.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -309,7 +274,6 @@ func (w *AuditWriter) Flush(ctx context.Context) error {
 	}
 }
 
-// drainQueued moves everything currently in the queue into batch.
 func (w *AuditWriter) drainQueued(batch []AuditEntry) []AuditEntry {
 	for {
 		select {
@@ -332,16 +296,12 @@ func (w *AuditWriter) run(ctx context.Context) {
 			return
 		}
 		w.flushes.Add(1)
-		// One transaction per flush instead of one autocommit per entry; PersistAudits
-		// retries per row on failure so one bad entry does not drop the batch.
 		persisted, err := w.store.PersistAudits(ctx, batch)
 		if persisted > 0 {
 			w.persisted.Add(uint64(persisted))
 		}
 		if failed := len(batch) - persisted; failed > 0 {
 			w.errors.Add(uint64(failed)) //nolint:gosec // failed is non-negative
-			// A lost audit write is never silent; PersistAudits wraps the first row error
-			// with its action context.
 			slog.Error("audit writer: flush lost audit entries",
 				"failed", failed, "batch", len(batch), "error", err)
 		}
@@ -351,10 +311,9 @@ func (w *AuditWriter) run(ctx context.Context) {
 	for {
 		select {
 		case <-w.stop:
-			// Drain anything left in the channel, bounded by the Stop context
-			// (w.stopCtxDone): once it fires, flush once and exit so a slow store delays
-			// shutdown by at most one flush. The goroutine finishes any in-flight flush
-			// before closing w.done, so Stop's caller never closes the store under it.
+			// Drain what is left, bounded by w.stopCtxDone: once it fires, flush once
+			// and exit. Any in-flight flush finishes before w.done closes, so Stop's
+			// caller never closes the store under it.
 			for {
 				select {
 				case a := <-w.queue:
@@ -379,7 +338,6 @@ func (w *AuditWriter) run(ctx context.Context) {
 				flush()
 			}
 		case reply := <-w.flushReq:
-			// Everything sent before the request is already queued; write it, then answer.
 			batch = w.drainQueued(batch)
 			flush()
 			close(reply)
@@ -389,28 +347,20 @@ func (w *AuditWriter) run(ctx context.Context) {
 	}
 }
 
-// SetAuditWriter installs w as this DB's asynchronous audit path: WriteAudit
-// calls whose Auditor is backed by this *DB enqueue on it instead of inserting
-// synchronously. Without a writer (token CLI, tests) writes stay synchronous.
-// Safe for concurrent use; nil uninstalls.
+// SetAuditWriter installs w as the asynchronous audit path for WriteAudit calls backed
+// by this *DB; nil uninstalls. Safe for concurrent use.
 func (d *DB) SetAuditWriter(w *AuditWriter) {
 	d.auditWriter.Store(w)
 }
 
-// EnqueueAuditEntry implements AsyncEntryAuditor: WriteAudit's asynchronous
-// fast path, carrying the subject token. It reports false without a writer,
-// with the writer's queue full, or once the writer is stopping, so the caller
-// writes the entry synchronously instead of losing it. The writer stays
-// installed after Stop on purpose: the synchronous path reads the erasure's
-// unlinking rules from it.
+// EnqueueAuditEntry implements AsyncEntryAuditor and reports false without a writer, a
+// full queue or a stopping writer, so the caller writes synchronously. The writer
+// stays installed after Stop: the synchronous path reads the unlinking rules from it.
 func (d *DB) EnqueueAuditEntry(e AuditEntry) bool {
 	return d.auditWriter.Load().TryEnqueue(e)
 }
 
-// FlushAudits is the erasure's audit-writer barrier: everything the installed
-// writer holds is on disk, with its ids, on return, so the erasure
-// transaction's UPDATE rewrites it. Without a writer every audit write was
-// synchronous and nothing is queued.
+// FlushAudits is the erasure's barrier: on return the installed writer's entries are on disk.
 func (d *DB) FlushAudits(ctx context.Context) error {
 	w := d.auditWriter.Load()
 	if w == nil {
@@ -419,16 +369,14 @@ func (d *DB) FlushAudits(ctx context.Context) error {
 	return w.Flush(ctx)
 }
 
-// unlinkAuditsFor installs the writer's unlinking rule for an erased subject
-// (AuditWriter.Unlink); eraseAccount calls it after its transaction committed,
-// while it holds the writer connection.
+// unlinkAuditsFor installs the unlinking rule for an erased subject;
+// eraseAccount calls it after commit while holding the writer connection.
 func (d *DB) unlinkAuditsFor(userID int64, token string) {
 	if w := d.auditWriter.Load(); w != nil {
 		w.Unlink(userID, token)
 	}
 }
 
-// auditUnlinkRules is the installed writer's rule set, nil without one.
 func (d *DB) auditUnlinkRules() map[int64]string {
 	w := d.auditWriter.Load()
 	if w == nil {

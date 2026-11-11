@@ -14,8 +14,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// ListInvites returns invites ordered by creation time descending.
-// Limited to 200 rows to prevent unbounded result sets.
+// ListInvites returns invites newest first, limited to 200 rows.
 func (d *DB) ListInvites(ctx context.Context) ([]*Invite, error) {
 	rows, err := d.q.ListInvites(ctx)
 	if err != nil {
@@ -38,9 +37,8 @@ func (d *DB) ListInvites(ctx context.Context) ([]*Invite, error) {
 	return invites, nil
 }
 
-// InviteRedemption is one recorded use of an invite. UserID is nil for a
-// redeemer whose account has since been erased (migration 055): the history is
-// kept, the link is cut.
+// InviteRedemption is one recorded use of an invite. UserID is nil when the redeemer's
+// account was since erased (migration 055): the history is kept, the link is cut.
 type InviteRedemption struct {
 	ID         int64
 	UserID     *int64
@@ -69,8 +67,8 @@ func (d *DB) ListInviteRedemptions(ctx context.Context, inviteID int64, limit in
 	return out, nil
 }
 
-// CreateInvite generates a random invite code, persists it, and returns the
-// code. maxUses=0 means unlimited. expiresAt=nil means never expires.
+// CreateInvite generates and persists a random code and returns it; maxUses=0 is
+// unlimited, nil expiresAt never expires.
 func (d *DB) CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error) {
 	code, err := generateInviteCode()
 	if err != nil {
@@ -147,7 +145,6 @@ func (d *DB) RevokeInvite(ctx context.Context, code string) error {
 	return nil
 }
 
-// generateInviteCode produces a random 8-byte (16-char hex) code.
 func generateInviteCode() (string, error) {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {

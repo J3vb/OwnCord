@@ -12,8 +12,8 @@ import (
 )
 
 // RecoveryAssist is the server's whole knowledge of an owner-issued recovery
-// credential: an argon2id verifier, who issued it, the fixed wording
-// of how the person was verified, and when it expires.
+// credential: an argon2id verifier, its issuer, how the person was verified, and its
+// expiry.
 type RecoveryAssist struct {
 	UserID       int64
 	Verifier     string `json:"-"`
@@ -29,12 +29,10 @@ func (a *RecoveryAssist) Live(now time.Time) bool {
 	return err == nil && now.UTC().Before(exp)
 }
 
-// ErrRecoveryAssistSpent is RedeemRecoveryAssist finding no live credential
-// for the account: consumed, expired, replaced or never issued.
+// ErrRecoveryAssistSpent is RedeemRecoveryAssist finding no live credential.
 var ErrRecoveryAssistSpent = errors.New("recovery credential spent, expired or absent")
 
-// UpsertRecoveryAssist stores the verifier of a freshly issued credential,
-// replacing any outstanding one: one live credential per account.
+// UpsertRecoveryAssist stores a new credential's verifier, replacing any outstanding one.
 func (d *DB) UpsertRecoveryAssist(ctx context.Context, userID int64, verifier string, issuedBy int64, verification string, expiresAt time.Time) error {
 	if err := d.q.UpsertRecoveryAssist(ctx, dbgen.UpsertRecoveryAssistParams{
 		UserID:       userID,
@@ -49,8 +47,8 @@ func (d *DB) UpsertRecoveryAssist(ctx context.Context, userID int64, verifier st
 	return nil
 }
 
-// GetRecoveryAssist returns the account's credential row, live or expired,
-// or nil when none is outstanding.
+// GetRecoveryAssist returns the account's credential row, live or expired, or nil when none is
+// outstanding.
 func (d *DB) GetRecoveryAssist(ctx context.Context, userID int64) (*RecoveryAssist, error) {
 	row, err := d.q.GetRecoveryAssist(ctx, userID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -74,14 +72,12 @@ func (d *DB) DeleteRecoveryAssist(ctx context.Context, userID int64) error {
 }
 
 // RedeemRecoveryAssist is RedeemRecoveryKit for an owner-issued credential:
-// the live credential is deleted, the password replaced, every session and
-// API token of the account revoked and the audit row written in one
-// transaction, or none of it. The consume is conditional on the credential
-// being live and on it being the very row the caller verified (its
-// verifier), so two concurrent redemptions admit at most one, an expired
-// credential admits none, and a credential replaced between the compare and
-// the redeem cannot spend its replacement; the loser gets
-// ErrRecoveryAssistSpent.
+// delete the credential, replace the password, revoke every session and API
+// token and write the audit row in one transaction, or none of it. The consume
+// is conditional on the credential being live and being the very row the caller
+// verified (its verifier), so concurrent redemptions admit at most one, an
+// expired one admits none, and a replaced one cannot spend its replacement; the
+// loser gets ErrRecoveryAssistSpent.
 func (d *DB) RedeemRecoveryAssist(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (sessionsRevoked int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {

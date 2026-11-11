@@ -8,10 +8,8 @@ import (
 	"path/filepath"
 )
 
-// walFilePath is the write-ahead log SQLite keeps beside a database file,
-// parsed the same way as the retry-floor sidecar. SQLite follows a symlinked
-// database to its target and keeps the WAL there, so this does too. A path
-// that names no file gives "", which WALBytes reports as 0.
+// walFilePath is the write-ahead log beside a database file. SQLite keeps the WAL
+// beside a symlink's target, so this does too; no path gives "" (WALBytes reports 0).
 func walFilePath(path string) string {
 	p, err := dbFilePath(path)
 	if err != nil {
@@ -23,10 +21,9 @@ func walFilePath(path string) string {
 	return p + "-wal"
 }
 
-// WALBytes reports the size of the write-ahead log file. It is 0 with a nil
-// error for an in-memory database (no WAL file) and when the file does not
-// exist (a fresh or just-checkpointed database); any other stat failure is
-// returned wrapped. One stat per call, safe for a per-scrape read.
+// WALBytes reports the size of the write-ahead log file: 0 with a nil error for an
+// in-memory database or a missing file; any other stat failure is returned wrapped.
+// One stat per call, safe for a per-scrape read.
 func (d *DB) WALBytes() (int64, error) {
 	if d.walPath == "" {
 		return 0, nil
