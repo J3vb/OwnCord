@@ -152,6 +152,9 @@ export const shards = {
   "audio-media-2": [
     "src/features/channels/voiceRow.view.ts",
     "src/features/members/memberRow.view.ts",
+    "src/features/members/memberListModel.ts",
+    "src/features/members/memberListOptions.ts",
+    "src/features/members/memberRowMenu.ts",
     "src/features/voice-messages/linuxMic.ts",
     "src/features/voice/cameraFlip.ts",
     "src/lib/ui/virtualRange.ts",
@@ -334,6 +337,7 @@ export const shards = {
   "lib-rest-5": [
     "src/features/direct-messages/callAlerts.ts",
     "src/features/forums/NewPostDialog.ts",
+    "src/features/forums/newPostParts.ts",
     "src/features/forums/postTagPicker.ts",
     "src/features/messaging/spoilerAttachment.ts",
     "src/features/unread-badge/unreadBadge.ts",
@@ -461,6 +465,8 @@ export const shards = {
   ],
   "lib-rest-16": [
     "src/features/forums/ForumView.ts",
+    "src/features/forums/forumViewModel.ts",
+    "src/features/forums/forumViewParts.ts",
     "src/features/forums/postRowParts.ts",
     "src/features/forums/view.ts",
     "src/features/messaging/reactionUsers.ts",
@@ -495,6 +501,7 @@ export const shards = {
     "src/features/panes/paneResize.ts",
     "src/lib/voice/appAudioShare.ts",
     "src/stores/members.store.ts",
+    "src/stores/memberStoreModel.ts",
     "src/stores/threadsLoader.ts",
   ],
   "stores-3": [
@@ -533,12 +540,18 @@ export const shards = {
     "src/stores/voiceRoster.ts",
     "src/stores/voiceSelfPrefs.ts",
   ],
-  "safety-moderation-1": ["src/features/moderation/Queue.ts"],
+  "safety-moderation-1": [
+    "src/features/moderation/Queue.ts",
+    "src/features/moderation/ReportsView.ts",
+    "src/features/moderation/queueModel.ts",
+    "src/features/moderation/queueParts.ts",
+  ],
   "safety-moderation-2": [
     "src/features/content-consent/external.ts",
     "src/features/forums/forumSettingsModel.ts",
     "src/features/message-requests/wsHandlers.ts",
     "src/features/moderation/AppealQueue.ts",
+    "src/features/moderation/appealModel.ts",
     "src/features/moderation/BanDialog.ts",
     "src/features/people-home/view.ts",
     "src/features/safety/store.ts",

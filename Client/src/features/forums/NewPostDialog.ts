@@ -32,7 +32,9 @@ import { claimForwardRequest, releaseForwardRequest } from "../messaging/forward
 import { forumsText } from "../../i18n/forums";
 import { POST_TITLE_MAX, cleanPostTitle } from "./forumModel";
 import { buildTagSection, fieldGroup } from "./postTagPicker";
-import { WsErrorCode } from "@lib/protocolTypes";
+import { postErrorText, type Attachment, type ErrorField } from "./newPostParts";
+
+export { postErrorText } from "./newPostParts";
 
 const log = createLogger("forum-new-post");
 
@@ -54,38 +56,6 @@ export interface NewPostDialogOptions {
   /** The dialog went away (posted or cancelled); the opener may open another. */
   readonly onClosed?: () => void;
 }
-
-/** The dialog's refusal line for a server error code. */
-export function postErrorText(code: string): string {
-  switch (code) {
-    case WsErrorCode.FORBIDDEN:
-      return forumsText("error.FORBIDDEN");
-    case WsErrorCode.NOT_FOUND:
-      return forumsText("error.NOT_FOUND");
-    case WsErrorCode.RATE_LIMITED:
-      return forumsText("error.RATE_LIMITED");
-    case WsErrorCode.SLOW_MODE:
-      return forumsText("error.SLOW_MODE");
-    case WsErrorCode.CONFLICT:
-      return forumsText("error.CONFLICT");
-    case "UNCONFIRMED":
-      return forumsText("error.UNCONFIRMED");
-    case "OFFLINE":
-      return forumsText("error.OFFLINE");
-    default:
-      return forumsText("error.other");
-  }
-}
-
-interface Attachment {
-  readonly file: File;
-  id: string | null;
-  status: "uploading" | "done" | "failed";
-  readonly owner: Disposable;
-  readonly chip: HTMLElement;
-}
-
-type ErrorField = "title" | "tags" | "message";
 
 export function openNewPostDialog(options: NewPostDialogOptions): void {
   const { ws, api, channelId, signal } = options;

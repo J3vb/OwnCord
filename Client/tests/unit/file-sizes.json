@@ -1,9 +1,4 @@
 {
-  "src/features/forums/ForumView.ts": 750,
-  "src/features/forums/NewPostDialog.ts": 550,
-  "src/features/members/MemberList.ts": 1000,
-  "src/features/moderation/AppealQueue.ts": 550,
-  "src/features/moderation/Queue.ts": 900,
   "src/lib/apiAccount.ts": 550,
   "src/lib/apiShared.ts": 650,
   "src/lib/diagnostics/eventCodes.ts": 600,
@@ -11,6 +6,5 @@
   "src/lib/wireServer.ts": 1000,
   "src/pages/ConnectPage.ts": 550,
   "src/pages/connect-page/ServerPanel.ts": 650,
-  "src/pages/connect-page/login-form/loginFormDom.ts": 600,
-  "src/stores/members.store.ts": 550
+  "src/pages/connect-page/login-form/loginFormDom.ts": 600
 }
