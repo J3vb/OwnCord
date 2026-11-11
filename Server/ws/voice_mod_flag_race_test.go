@@ -13,12 +13,14 @@ import (
 
 // startRacingMute runs a moderator mute (or unmute) on another goroutine and
 // returns once it has finished or is queued behind the moderation lock the
-// caller's path holds. The channel yields what the moderator was told.
-func startRacingMute(t *testing.T, h *Hub, userID, channelID int64, muted bool) <-chan bool {
+// caller's path holds. The channel yields what the moderator was told. The
+// mute outlives the caller's own request, so it keeps ctx's values only.
+func startRacingMute(ctx context.Context, t *testing.T, h *Hub, userID, channelID int64, muted bool) <-chan bool {
 	told := make(chan bool, 1)
 	finished := make(chan struct{})
+	muteCtx := context.WithoutCancel(ctx)
 	go func() {
-		matched, _, _ := h.SetServerMuteLocked(context.Background(), userID, channelID, muted)
+		matched, _, _ := h.SetServerMuteLocked(muteCtx, userID, channelID, muted)
 		told <- matched
 		close(finished)
 	}()
@@ -51,7 +53,7 @@ type muteDuringLeaveVoice struct {
 
 func (s *muteDuringLeaveVoice) LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error) {
 	if userID == s.userID && s.started.CompareAndSwap(false, true) {
-		told := startRacingMute(s.t, s.h, userID, channelID, true)
+		told := startRacingMute(ctx, s.t, s.h, userID, channelID, true)
 		go func() { s.matched <- <-told }()
 	}
 	return s.VoiceStore.LeaveIfMatch(ctx, userID, channelID, joinedAt)
@@ -187,7 +189,7 @@ func TestVoiceJoin_UnmuteRacingTheFlagRestoreIsNotOverwritten(t *testing.T) {
 			return
 		}
 		// The new row exists and does not carry the mute yet.
-		once.Do(func() { told <- startRacingMute(t, f.hub, f.uid, f.voiceB, false) })
+		once.Do(func() { told <- startRacingMute(ctx, t, f.hub, f.uid, f.voiceB, false) })
 	}
 	t.Cleanup(func() { voiceJoinPostCommitRaceHook = nil })
 
