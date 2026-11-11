@@ -36,6 +36,12 @@ describe("VideoGrid participant strip", () => {
   });
   const people = (n: number, from = 10): GridPerson[] =>
     Array.from({ length: n }, (_, i) => person(from + i));
+  const flip = (key: string): void => {
+    root().querySelector<HTMLButtonElement>(`[data-view-toggle='${key}']`)!.click();
+    vi.advanceTimersByTime(50);
+  };
+  const focusTile = (id: number): void =>
+    cell(id).querySelector<HTMLButtonElement>("[data-tile-control='select']")!.click();
   const addCamera = (id: number): void =>
     grid.addStream(id, `User ${id}`, fakeStream(), makeTileConfig({ audioUserId: id }));
 
@@ -159,25 +165,68 @@ describe("VideoGrid participant strip", () => {
     addCamera(2);
     vi.advanceTimersByTime(50);
     expect(strip()!.hidden).toBe(false);
-    const toggle = root().querySelector<HTMLButtonElement>("[data-view-toggle='nonVideo']")!;
-    toggle.click();
-    vi.advanceTimersByTime(50);
+    flip("nonVideo");
     expect(strip()!.hidden).toBe(true);
-    toggle.click();
-    vi.advanceTimersByTime(50);
+    flip("nonVideo");
     expect(strip()!.hidden).toBe(false);
   });
 
-  it("leaves focus mode as it was: avatars in the thumb strip, no participant strip", () => {
+  it("keeps the participant strip in focus, with the focused tile packed clear of it", () => {
     grid.setPeople(people(2));
     addCamera(2);
     addCamera(3);
     vi.advanceTimersByTime(50);
-    cell(2).querySelector<HTMLButtonElement>("[data-tile-control='select']")!.click();
+    focusTile(2);
     vi.advanceTimersByTime(50);
-    expect(strip()).toBeNull();
-    expect(avatar(10).parentElement!.classList.contains("video-focus-strip")).toBe(true);
-    expect(avatar(10).classList.contains("thumb")).toBe(true);
+    const bar = strip()!;
+    expect(bar.hidden).toBe(false);
+    expect(avatar(10).parentElement).toBe(bar);
+    expect(root().querySelector(".video-focus-strip")).toBeNull();
+    // The focused tile is the largest, the other video tile Small, both above the strip.
+    expect(px(cell(2), "width")).toBeGreaterThan(px(cell(3), "width"));
+    expect(px(cell(2), "top") + px(cell(2), "height")).toBeLessThanOrEqual(px(bar, "top"));
+  });
+
+  it("hides the strip with Show participant strip, in the grid and in focus", () => {
+    grid.setExitVisible(true);
+    grid.setPeople(people(2));
+    addCamera(2);
+    addCamera(3);
+    vi.advanceTimersByTime(50);
+    expect(root().querySelector<HTMLElement>("[data-view-toggle='strip']")!.hidden).toBe(false);
+    expect(strip()!.hidden).toBe(false);
+
+    flip("strip");
+    expect(strip()!.hidden).toBe(true);
+    // Hidden, not detached, and the video tiles take the room it had.
+    expect(strip()!.contains(avatar(10))).toBe(true);
+    expect(localStorage.getItem("owncord:settings:callShowStrip")).toBe("false");
+
+    focusTile(2);
+    vi.advanceTimersByTime(50);
+    expect(strip()!.hidden).toBe(true);
+
+    flip("strip");
+    expect(strip()!.hidden).toBe(false);
+  });
+
+  it("leaves the people as tiles when no video is up, whatever the strip toggle says", () => {
+    grid.setExitVisible(true);
+    grid.setPeople(people(2));
+    flip("strip");
+    expect(avatar(10).hidden).toBe(false);
+    expect(avatar(10).parentElement).toBe(root());
+    expect(px(avatar(10), "width")).toBeGreaterThan(0);
+  });
+
+  it("hides the people for good with Show non-video participants, strip on or off", () => {
+    grid.setExitVisible(true);
+    grid.setPeople(people(2));
+    addCamera(2);
+    focusTile(2);
+    flip("nonVideo");
+    expect(avatar(10).hidden).toBe(true);
+    expect(strip()!.hidden).toBe(true);
   });
 
   it("keeps the strip clear of the call bar and the tiles clear of the strip", () => {
@@ -216,16 +265,16 @@ describe("VideoGrid participant strip", () => {
     expect(kids.indexOf(cell(2))).toBeLessThan(kids.indexOf(strip()!));
   });
 
-  it("returns the people to the strip on leaving focus mode", () => {
+  it("keeps the people in the strip on leaving focus", () => {
     grid.setPeople(people(2));
     addCamera(2);
     addCamera(3);
     vi.advanceTimersByTime(50);
-    cell(2).querySelector<HTMLButtonElement>("[data-tile-control='select']")!.click();
+    focusTile(2);
     cell(2).querySelector<HTMLButtonElement>("[data-tile-control='grid']")!.click();
     vi.advanceTimersByTime(50);
     expect(avatar(10).parentElement).toBe(strip());
-    expect(avatar(10).classList.contains("thumb")).toBe(false);
+    expect(grid.getFocusedTileId()).toBeNull();
   });
 
   it("marks a speaking person in the strip", () => {

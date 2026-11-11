@@ -1,6 +1,6 @@
 /**
- * Video grid layout: tile sizes, the focused tile and its strip, keyboard focus
- * across rebuilds, full screen and the theatre fallback.
+ * Video grid layout: seating the tiles, the focused (pinned) tile, keyboard
+ * focus as tiles move, full screen and the theatre fallback.
  */
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren } from "@lib/dom";
@@ -10,9 +10,9 @@ import { voiceText } from "../../../i18n/voice";
 import { beginPhoneFullscreen } from "../phoneFullscreen";
 import { log, isShown, isFullscreenKey, isSelfCamera } from "./gridShared";
 import { STRIP_CLASS } from "./gridPeopleStrip";
-import { createGridSizing, clearTileLayout } from "./gridSizing";
+import { createGridSizing } from "./gridSizing";
 import type { GridState, GridApi } from "./gridState";
-import { seatFocusedTile, fillThumbStrip } from "./gridFocus";
+import { enterFocus, leaveFocus } from "./tileFocus";
 import type { TileConfig } from "./VideoGrid";
 
 export function createGridLayout(st: GridState, api: GridApi) {
@@ -62,11 +62,11 @@ export function createGridLayout(st: GridState, api: GridApi) {
   }
 
   /** Mark each tile hidden or shown by the view toggles. A focused tile that
-   *  is now hidden gives the focus up. */
+   *  is now hidden gives the focus up: the others get their sizes back. */
   function applyViewFilters(): void {
     for (const [id, entry] of st.cells) {
       entry.el.hidden = hiddenByView(entry.el, entry.config);
-      if (entry.el.hidden && id === st.focusedTileId) st.focusedTileId = null;
+      if (entry.el.hidden && id === st.focusedTileId) leaveFocus(st);
     }
     for (const cell of st.personCells.values()) cell.hidden = hiddenByView(cell, undefined);
   }
@@ -90,15 +90,14 @@ export function createGridLayout(st: GridState, api: GridApi) {
   function relayout(): void {
     syncPeople();
     // A focused tile the view toggles hide drops focus: back to the grid.
-    const wasFocused = st.focusedTileId !== null;
+    const focusBefore = st.focusedTileId;
+    const savedFocus = focusBefore === null ? null : captureFocusedControl();
     applyViewFilters();
+    const gaveUp = focusBefore !== null && st.focusedTileId === null;
+    if (gaveUp) syncTileNav();
     api.applySpeaking();
     api.applyUserAudioState();
     if (st.root === null) return;
-    if (wasFocused) {
-      rebuildFocusLayout();
-      return;
-    }
     // A control the user is on keeps focus while its cell moves.
     keepFocus(allTiles(), () => {
       for (const el of allTiles()) {
@@ -110,6 +109,7 @@ export function createGridLayout(st: GridState, api: GridApi) {
       }
       applyGridSizes();
     });
+    if (gaveUp) restoreFocusedControl(savedFocus);
   }
 
   /** Schedule a layout recalculation on the next animation frame. */
@@ -124,11 +124,10 @@ export function createGridLayout(st: GridState, api: GridApi) {
     });
   }
 
-  /** The tile control the user is currently focused on, if any. `rebuildFocusLayout`
-   *  detaches and re-appends every cell (and `removeStream` drops one), which
-   *  blurs a focused overlay control to `<body>` — so both capture this first
-   *  and restore it after, keeping focus predictable as tiles move or leave
-   *  (Q1 focus stability). Keyed on the tile's `data-user-id` and the control's
+  /** The tile control the user is currently focused on, if any. A change of
+   *  focus or a tile leaving (`removeStream`) can blur a focused overlay
+   *  control to `<body>` — so both capture this first and restore it after,
+   *  keeping focus predictable as tiles move or leave (Q1 focus stability). Keyed on the tile's `data-user-id` and the control's
    *  `data-tile-control` role, not node identity. */
   function captureFocusedControl(): { userId: number; control: string } | null {
     if (st.root === null) return null;
@@ -162,70 +161,12 @@ export function createGridLayout(st: GridState, api: GridApi) {
   function syncTileNav(): void {
     for (const [id, entry] of st.cells) {
       const isMain = id === st.focusedTileId;
+      entry.el.classList.toggle("focused", isMain);
       const select = entry.el.querySelector<HTMLElement>(".video-cell-select");
       if (select !== null) select.hidden = isMain;
       const back = entry.el.querySelector<HTMLElement>("[data-tile-control='grid']");
       if (back !== null) back.hidden = !isMain;
     }
-  }
-
-  /** No focused tile: the regular flex-wrap layout. The grid's own controls
-   *  stay put, so a control the user is on keeps focus. */
-  function rebuildPlainLayout(root: HTMLDivElement): void {
-    for (const child of Array.from(root.childNodes)) if (!isChrome(child)) child.remove();
-    root.classList.remove("focus-mode");
-    for (const el of allTiles()) {
-      el.classList.remove("focused", "thumb");
-      beforeChrome(el);
-    }
-    appendChrome();
-    applyGridSizes();
-  }
-
-  function rebuildFocusLayout(): void {
-    if (st.root === null) return;
-    const savedFocus = captureFocusedControl();
-    syncTileNav();
-
-    const focusedId = st.focusedTileId;
-    if (focusedId === null || st.cells.size === 0) {
-      rebuildPlainLayout(st.root);
-      restoreFocusedControl(savedFocus);
-      return;
-    }
-
-    st.root.classList.add("focus-mode");
-
-    // Clear inline places and sizes (focus mode uses CSS flex sizing)
-    st.root.classList.remove("video-grid--packed");
-    clearTileLayout(allTiles());
-
-    // Main area
-    const mainArea =
-      st.root.querySelector<HTMLDivElement>(":scope > .video-focus-main") ??
-      createElement("div", { class: "video-focus-main" });
-    for (const child of Array.from(st.root.childNodes)) {
-      if (child !== mainArea && !isChrome(child)) child.remove();
-    }
-    // Strip area
-    const stripArea = createElement("div", { class: "video-focus-strip" });
-
-    seatFocusedTile(st, mainArea, focusedId);
-    fillThumbStrip(st, stripArea, focusedId, allTiles());
-
-    if (mainArea.parentNode !== st.root) beforeChrome(mainArea);
-    // Only show strip if there are thumbnails. The call view's toggle hides
-    // it rather than detaching it: a detached video pauses.
-    const shownThumbs = [...stripArea.children].some((el) => !(el as HTMLElement).hidden);
-    if (shownThumbs) {
-      stripArea.hidden = st.callView && !st.viewOn.strip;
-      beforeChrome(stripArea);
-    }
-    // Keep the exit control in the DOM (it was stripped with the other
-    // children above) and on top, so focus mode is never a dead end.
-    appendChrome();
-
-    restoreFocusedControl(savedFocus);
   }
 
   /** The grid's own controls, after the tiles: the exit control, the view
@@ -260,11 +201,22 @@ export function createGridLayout(st: GridState, api: GridApi) {
     st.root.insertBefore(el, anchor);
   }
 
+  /** Focus a tile: pin it and draw the others Small. Null, or a tile that is
+   *  not up, is Back to grid: the others take their earlier sizes again. */
   function setFocusedTile(tileId: number | null): void {
     const watching = st.fullscreenTile ?? st.theatreTile;
     if (watching !== null && watching !== tileId) leaveFullscreen();
-    st.focusedTileId = tileId;
-    rebuildFocusLayout();
+    const savedFocus = captureFocusedControl();
+    if (tileId !== null && st.cells.has(tileId)) enterFocus(st, tileId);
+    else {
+      leaveFocus(st);
+      // A tile still on its way (a stream just watched) takes the focus when
+      // it arrives.
+      st.focusedTileId = tileId;
+    }
+    syncTileNav();
+    applyGridSizes();
+    restoreFocusedControl(savedFocus);
     api.syncStatsPolling();
     api.syncViews();
   }
@@ -437,7 +389,6 @@ export function createGridLayout(st: GridState, api: GridApi) {
     captureFocusedControl,
     restoreFocusedControl,
     syncTileNav,
-    rebuildFocusLayout,
     appendChrome,
     isChrome,
     beforeChrome,

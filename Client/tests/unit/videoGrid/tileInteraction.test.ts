@@ -60,7 +60,7 @@ describe("VideoGrid", () => {
     };
     const select = (id: number) => cell(id).querySelector<HTMLButtonElement>(".video-cell-select")!;
 
-    it("makes each tile a named button that opens it in focus view", () => {
+    it("makes each tile a named button that focuses it", () => {
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
       grid.addStream(3, "Sam", fakeStream(), camera());
 
@@ -71,14 +71,14 @@ describe("VideoGrid", () => {
 
       expect(grid.getFocusedTileId()).toBe(SCREEN);
       expect(cell(SCREEN).classList.contains("focused")).toBe(true);
-      // The focused tile needs no "watch" button; the filmstrip thumbs keep theirs.
+      // The focused tile needs no "watch" button; the other tiles keep theirs.
       expect(select(SCREEN).hidden).toBe(true);
       expect(select(3).hidden).toBe(false);
       select(3).click();
       expect(grid.getFocusedTileId()).toBe(3);
     });
 
-    it("offers Back to grid in focus view, which leaves it", () => {
+    it("offers Back to grid on the focused tile, which leaves focus", () => {
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
       grid.addStream(3, "Sam", fakeStream(), camera());
       expect(cell(SCREEN).querySelector<HTMLElement>("[data-tile-control='grid']")!.hidden).toBe(
@@ -91,7 +91,7 @@ describe("VideoGrid", () => {
       back.click();
 
       expect(grid.getFocusedTileId()).toBeNull();
-      expect(container.querySelector(".video-grid.focus-mode")).toBeNull();
+      expect(cell(SCREEN).classList.contains("focused")).toBe(false);
     });
 
     it("exposes a header control that leaves focus/grid mode and is keyboard reachable", () => {
@@ -107,11 +107,11 @@ describe("VideoGrid", () => {
       expect(exit!.getAttribute("aria-label")).toBe("Show chat");
 
       select(SCREEN).click();
-      expect(container.querySelector(".video-grid.focus-mode")).not.toBeNull();
+      expect(grid.getFocusedTileId()).toBe(SCREEN);
 
       exit!.click();
       expect(grid.getFocusedTileId()).toBeNull();
-      expect(container.querySelector(".video-grid.focus-mode")).toBeNull();
+      expect(cell(SCREEN).classList.contains("focused")).toBe(false);
     });
 
     it("marks screen shares LIVE, and cameras not", () => {
@@ -375,20 +375,29 @@ describe("VideoGrid", () => {
       container.remove();
     });
 
-    it("Watch stream on a filmstrip thumb hands focus to the thumb, not its hidden controls", () => {
+    /** Sam's tile stopped, SCREEN focused, then Watch stream on Sam's tile. */
+    function watchSamInFocus(): void {
       document.body.appendChild(container);
-      // The filmstrip's CSS hides a thumb's tile controls.
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+      grid.addStream(3, "Sam", fakeStream(), camera());
+      cell(3).querySelector<HTMLButtonElement>("[data-tile-control='stop']")!.click();
+      grid.setFocusedTile(SCREEN);
+      cell(3).querySelector<HTMLButtonElement>("[data-tile-control='watch']")!.click();
+    }
+
+    it("Watch stream on a Small tile in focus hands focus to its Stop watching button", () => {
+      watchSamInFocus();
+      expect(document.activeElement).toBe(cell(3).querySelector("[data-tile-control='stop']"));
+      container.remove();
+    });
+
+    it("Watch stream hands focus to the tile's select button when CSS hides its controls", () => {
       const proto = HTMLElement.prototype as { checkVisibility?: () => boolean };
       proto.checkVisibility = function (this: HTMLElement) {
-        return this.closest(".video-focus-strip .video-tile-nav") === null;
+        return this.closest("[data-user-id='3'] .video-tile-nav") === null;
       };
       try {
-        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
-        grid.addStream(3, "Sam", fakeStream(), camera());
-        cell(3).querySelector<HTMLButtonElement>("[data-tile-control='stop']")!.click();
-        grid.setFocusedTile(SCREEN);
-
-        cell(3).querySelector<HTMLButtonElement>("[data-tile-control='watch']")!.click();
+        watchSamInFocus();
         expect(document.activeElement).toBe(select(3));
       } finally {
         delete proto.checkVisibility;

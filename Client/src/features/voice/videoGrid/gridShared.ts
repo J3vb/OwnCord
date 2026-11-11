@@ -127,7 +127,7 @@ export function computeGridLayout(
 }
 
 /** Rendered, so it can take focus: not hidden by the grid (`hidden`) or by
- *  the layout's CSS (the filmstrip hides a thumb's controls). */
+ *  the layout's CSS). */
 export function isShown(el: HTMLElement): boolean {
   return (
     el.closest("[hidden]") === null &&

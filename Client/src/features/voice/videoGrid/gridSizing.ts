@@ -40,17 +40,6 @@ export function aspectMoved(last: number | undefined, next: number): boolean {
   return last === undefined || Math.abs(next - last) / last > ASPECT_TOLERANCE;
 }
 
-/** Leave the grid layout's places and sizes behind: the focus layout. */
-export function clearTileLayout(tiles: readonly HTMLElement[]): void {
-  for (const el of tiles) {
-    el.style.left = "";
-    el.style.top = "";
-    el.style.width = "";
-    el.style.height = "";
-    el.classList.remove("video-cell--no-room");
-  }
-}
-
 export function createGridSizing(st: GridState, api: GridApi) {
   /** The aspect each tile was last packed with. */
   const packedAspect = new WeakMap<HTMLElement, number>();
@@ -78,13 +67,16 @@ export function createGridSizing(st: GridState, api: GridApi) {
     return ordered.map((el, id) => {
       const [tileId, entry] = byEl.get(el) ?? [undefined, undefined];
       const aspect = entry === undefined ? DEFAULT_ASPECT : aspectOf(entry.video);
-      const size = tileSizeOf(entry, tileId === undefined ? undefined : st.tileSizes.get(tileId));
+      const chosen = tileId === undefined ? undefined : st.tileSizes.get(tileId);
+      // An avatar tile left in the packed area keeps to the others' size in focus.
+      const size =
+        entry === undefined && st.focusedTileId !== null ? "small" : tileSizeOf(entry, chosen);
       const pinned = tileId !== undefined && st.pinned.has(tileId);
       return { el, tile: { id, aspect, size, ...(pinned ? { pinned } : {}) } };
     });
   }
 
-  /** Place the tiles of the grid layout; the focus layout sizes by CSS. */
+  /** Place the tiles: the packer sets each one's left, top, width and height. */
   function applyGridSizes(): void {
     if (st.root === null) return;
     const { width: cw, height: ch } = st.root.getBoundingClientRect();
@@ -98,7 +90,7 @@ export function createGridSizing(st: GridState, api: GridApi) {
     const space = peopleStrip.seat(cw, ch, shown, barSpace);
     const input = packInput(space.active ? shown.filter((el) => !isAvatarCell(el)) : shown);
     // Tiles go absolute only once there is a size to place them in.
-    const packed = st.focusedTileId === null && input.length > 0 && sized;
+    const packed = input.length > 0 && sized;
     st.root.classList.toggle("video-grid--packed", packed);
     if (!packed) return;
     peopleStrip.place(space, cw, ch, barSpace);
