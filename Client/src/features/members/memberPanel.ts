@@ -142,7 +142,9 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
       return;
     }
     try {
-      bannedUsers = (await api.adminListUsers()).filter(isBanInForce);
+      bannedUsers = (await api.adminListUsers(undefined, { bannedOnly: true })).filter(
+        isBanInForce,
+      );
     } catch {
       return;
     }
@@ -176,8 +178,6 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
   // roleRevision moves on exactly those (and on role and profile changes, never
   // on presence or typing), and it is monotonic, so a ban and a join batched
   // into one notification still register.
-  // ponytail: every roster change re-walks the user list for a moderator; a
-  // banned-only server query is the upgrade if that ever costs something.
   unsubs.push(
     membersStore.subscribeSelector(
       (state) => state.roleRevision,

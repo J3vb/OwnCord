@@ -179,6 +179,15 @@ describe("REST client requests", () => {
       expect(callInit().method).toBe("GET");
     });
 
+    it("adds banned=1 on every page when asked for banned users only", async () => {
+      mockFetch
+        .mockResolvedValueOnce(okResponse(page(0, 500)))
+        .mockResolvedValueOnce(okResponse(page(500, 2)));
+      await expect(api.adminListUsers(undefined, { bannedOnly: true })).resolves.toHaveLength(502);
+      expect(callUrl(0)).toBe(`${BASE}/moderation/members?limit=500&offset=0&banned=1`);
+      expect(callUrl(1)).toBe(`${BASE}/moderation/members?limit=500&offset=500&banned=1`);
+    });
+
     it("walks every page of 500 until a short one arrives", async () => {
       mockFetch
         .mockResolvedValueOnce(okResponse(page(0, 500)))
