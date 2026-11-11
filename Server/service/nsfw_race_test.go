@@ -162,7 +162,7 @@ func TestAdminUpdateChannel_StaleUnlabelledSnapshotKeepsAConcurrentLabelAndItsAc
 // runs interleave (a concurrent change landing after the snapshot), then runs
 // the edit req through that snapshot and expects the row unlabelled with no
 // acknowledgement left.
-func assertEditLeavesNoAcks(t *testing.T, req AdminChannelUpdate, interleave func(ctx context.Context, database *db.DB, nsfwSvc *NSFWService)) {
+func assertEditLeavesNoAcks(t *testing.T, req AdminChannelUpdate, interleave func(database *db.DB, nsfwSvc *NSFWService)) {
 	t.Helper()
 	ctx, database, nsfwSvc, channels := newNSFWRaceFixture(t)
 	labelChannel(t, database, 10, true)
@@ -171,7 +171,7 @@ func assertEditLeavesNoAcks(t *testing.T, req AdminChannelUpdate, interleave fun
 		t.Fatalf("GetChannel: %+v, %v", existing, err)
 	}
 	mustDo(t, "Acknowledge", nsfwSvc.Acknowledge(ctx, 1, 10))
-	interleave(ctx, database, nsfwSvc)
+	interleave(database, nsfwSvc)
 
 	if _, _, err := channels.AdminUpdateChannel(ctx, 1, existing, req, nil); err != nil {
 		t.Fatalf("AdminUpdateChannel: %v", err)
@@ -187,17 +187,17 @@ func assertEditLeavesNoAcks(t *testing.T, req AdminChannelUpdate, interleave fun
 
 func TestAdminUpdateChannel_ClearsAcksWhenTheEditTurnsTheLabelOff(t *testing.T) {
 	assertEditLeavesNoAcks(t, AdminChannelUpdate{Name: "general", NSFW: false},
-		func(context.Context, *db.DB, *NSFWService) {})
+		func(*db.DB, *NSFWService) {})
 }
 
 // The snapshot was read while labelled, then another admin unlabelled and
 // relabelled the channel and a member acknowledged the new labelling.
 func TestAdminUpdateChannel_StaleLabelledSnapshotClearsAcksFromALaterLabelling(t *testing.T) {
 	assertEditLeavesNoAcks(t, AdminChannelUpdate{Name: "general", NSFW: false},
-		func(ctx context.Context, database *db.DB, nsfwSvc *NSFWService) {
+		func(database *db.DB, nsfwSvc *NSFWService) {
 			labelChannel(t, database, 10, false)
 			labelChannel(t, database, 10, true)
-			mustDo(t, "Acknowledge again", nsfwSvc.Acknowledge(ctx, 1, 10))
+			mustDo(t, "Acknowledge again", nsfwSvc.Acknowledge(context.Background(), 1, 10))
 		})
 }
 
@@ -207,7 +207,7 @@ func TestAdminUpdateChannel_StaleLabelledSnapshotClearsAcksFromALaterLabelling(t
 // leaves the acknowledgement behind for it to find.
 func TestAdminUpdateChannel_PositionOnlyEditClearsAcksLeftOnAnUnlabelledRow(t *testing.T) {
 	assertEditLeavesNoAcks(t, AdminChannelUpdate{Name: "general", NSFW: true, Position: 3},
-		func(_ context.Context, database *db.DB, _ *NSFWService) {
+		func(database *db.DB, _ *NSFWService) {
 			labelChannel(t, database, 10, false)
 		})
 }
