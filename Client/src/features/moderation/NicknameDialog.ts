@@ -192,7 +192,7 @@ export function openNicknameDialog(options: NicknameDialogOptions): ModalInstanc
 
 /** The server names the field `display_name`; this dialog calls it a nickname. */
 function failureText(err: unknown): string {
-  return errorText(err, t("nicknameDialog.failed")).replace(
+  return errorText(err, shellText("member.nicknameFailed")).replace(
     /^display_name\b/i,
     t("nicknameDialog.label"),
   );
