@@ -438,6 +438,11 @@ export function buildProfileFields(
         })
         .then(() => {
           bannerEditor?.commit();
+          // Show what the server stored: it may have cleaned the text, and the
+          // unsaved-changes check compares the fields with the stored profile.
+          const stored = authStore.getState().user;
+          nameInput.value = stored?.display_name ?? "";
+          aboutInput.value = stored?.about ?? "";
           showOutcome(statusEl, "success", t("profile.saved"));
           onSaved(
             displayName.length > 0 ? displayName : (authStore.getState().user?.username ?? ""),

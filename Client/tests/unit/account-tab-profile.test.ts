@@ -12,7 +12,7 @@ import {
   prepareBannerFile,
   validateAvatarFile,
 } from "../../src/features/settings/AccountTab";
-import { authStore } from "@stores/auth.store";
+import { authStore, updateUser } from "@stores/auth.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { ApiClientError } from "@lib/api";
 import * as imageCrop from "@lib/ui/imageCrop";
@@ -184,6 +184,31 @@ describe("Account tab profile fields", () => {
       );
     });
     expect(name.value).toBe("Ada");
+  });
+
+  it("shows the stored text after a save and no longer counts it as unsaved", async () => {
+    setUser({ display_name: "Alice", about: "" });
+    // The server cleans the text; the store gets what the server returned.
+    const options = makeOptions({
+      onUpdateProfile: vi.fn(async () => {
+        updateUser({ about: "mail me at" });
+      }),
+    });
+    let isDirty: () => boolean = () => false;
+    container.appendChild(
+      buildAccountTab(options, ac.signal, (check) => {
+        isDirty = check;
+      }),
+    );
+    const about = container.querySelector<HTMLTextAreaElement>('[data-testid="about-input"]')!;
+    about.value = "mail me at <me@example.org>";
+    expect(isDirty()).toBe(true);
+    container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!.click();
+
+    await vi.waitFor(() => {
+      expect(about.value).toBe("mail me at");
+    });
+    expect(isDirty()).toBe(false);
   });
 
   it("leaves focus where the user moved it while the save was in flight", async () => {
