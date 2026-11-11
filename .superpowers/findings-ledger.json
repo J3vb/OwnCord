@@ -1,5 +1,5 @@
 {
-  "nextId": 566,
+  "nextId": 567,
   "findings": [
     {
       "id": "OC-0001",
@@ -13060,6 +13060,29 @@
         "commit": "pending",
         "test": "Server/ws/voice_join_stash_test.go",
         "revertProof": "without the re-stash TestVoiceJoin_RosterReadFailureKeepsModeratorMuteForRetry fails"
+      },
+      "lens": "flow-voice",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0566",
+      "title": "A moderator mute given while the member was changing voice channel could be reported as applied and then not hold",
+      "file": "Server/ws/voice_join.go",
+      "line": 306,
+      "severity": "low",
+      "why": "A channel switch, a call moved to another device and a moderator move all read the member's mute and deafen off the row and then delete it, to put the flags back on the new row. A mute or unmute by another moderator that landed between that read and the delete was answered as applied, but it went with the old row and the new one came up with the earlier state. A join putting the flags back could also overwrite an unmute that landed just after the new row was inserted.",
+      "repro": "Start a channel switch for a member and, between the switch's read of the row and its delete, have a moderator mute them: the moderator is told the mute applied and the member arrives in the new channel unmuted.",
+      "evidence": "Server/ws/voice_mod_flag_race_test.go (TestVoiceJoin_MuteRacingAChannelSwitchIsNotLost, TestMultiDevice_MuteRacingACallMoveIsNotLost, TestModeratorMove_MuteRacingTheEvictionIsNotLost, TestVoiceJoin_UnmuteRacingTheFlagRestoreIsNotOverwritten)",
+      "suggestedFix": "Read the flags and delete the row under the per-member moderation lock every mute and unmute already takes, and put them back on the new row under the same lock, so a moderator's change lands before the read or after the row is gone and is answered truthfully either way.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/voice_mod_flag_race_test.go",
+        "revertProof": "without the lock around the read and the delete TestVoiceJoin_MuteRacingAChannelSwitchIsNotLost fails; without it around the insert and the restore TestVoiceJoin_UnmuteRacingTheFlagRestoreIsNotOverwritten fails"
       },
       "lens": "flow-voice",
       "confidence": "high",
