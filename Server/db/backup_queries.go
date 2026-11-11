@@ -45,11 +45,10 @@ var backupPublishMu syncutil.Mutex
 // BackupTo creates an online backup using SQLite's VACUUM INTO; the
 // destination must not already exist.
 //
-// VACUUM INTO takes no bind parameters, so the path is interpolated into SQL
-// and guarded two ways: it must resolve under safeRoot (after filepath.Clean
-// and filepath.Abs), and a single-quote, semicolon, double-dash or null byte
-// in the cleaned path is rejected as defence-in-depth. The caller in
-// handleBackup builds the path from a hardcoded directory and a timestamp.
+// The path must resolve under safeRoot (after filepath.Clean and filepath.Abs)
+// and reaches SQLite as a bound value, never as SQL text, so any name the
+// filesystem accepts is a valid destination. The caller in handleBackup builds
+// the path from a hardcoded directory and a timestamp.
 func (d *DB) BackupTo(ctx context.Context, path string) error {
 	return d.BackupToSafe(ctx, path, filepath.Join("data", "backups"))
 }
@@ -81,8 +80,10 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		return fmt.Errorf("BackupToSafe: path %q is not under safe root %q", absClean, absRoot)
 	}
 
-	if err := validateBackupPathChars(absClean); err != nil {
-		return err
+	// A null byte would end the name early inside SQLite, so the file written
+	// would not be the one named here.
+	if strings.ContainsRune(absClean, 0) {
+		return fmt.Errorf("BackupToSafe: path contains a null byte")
 	}
 
 	// Refuse an existing destination before the VACUUM, so an operator-chosen name
@@ -113,10 +114,6 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		_ = os.Remove(absTemp)
 		return fmt.Errorf("BackupToSafe: creating temp: %w", err)
 	}
-	if err := validateBackupPathChars(absTemp); err != nil {
-		_ = os.Remove(absTemp)
-		return err
-	}
 
 	// Read on the reader pool: under WAL it runs concurrently with writers instead
 	// of queueing behind the single writer. Pin one reader connection for the whole
@@ -132,7 +129,9 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		BackupVACUUMPreExecHook()
 	}
 
-	if _, err := conn.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absTemp)); err != nil {
+	// The destination is bound, not written into the statement: it is an absolute
+	// path, so SQLite reads it as a plain file name whatever characters it holds.
+	if _, err := conn.ExecContext(ctx, "VACUUM INTO ?", absTemp); err != nil {
 		// Nothing to clean up beyond the temp VACUUM may have partly written; the
 		// final path was never touched.
 		_ = os.Remove(absTemp)
@@ -164,33 +163,6 @@ func publishBackup(absTemp, absClean string) error {
 	}
 	if err := os.Rename(absTemp, absClean); err != nil {
 		return fmt.Errorf("BackupToSafe: publishing backup: %w", err)
-	}
-	return nil
-}
-
-// validateBackupPathChars is the strict character gate BackupToSafe applies to
-// the destination before it is interpolated into VACUUM INTO, split out only
-// to keep the allowlist loop's branch count down.
-func validateBackupPathChars(absClean string) error {
-	// Defence-in-depth strict allowlist: alphanumerics, path separators, hyphen,
-	// underscore, dot, space, colon and tilde; anything else could inject SQL via
-	// the interpolated path.
-	for _, ch := range absClean {
-		switch {
-		case ch >= 'a' && ch <= 'z',
-			ch >= 'A' && ch <= 'Z',
-			ch >= '0' && ch <= '9',
-			ch == '/' || ch == '\\' || ch == '-' || ch == '_' || ch == '.' || ch == ' ' || ch == ':' || ch == '~':
-			// allowed (colon for Windows drive letters, tilde for temp paths)
-		default:
-			return fmt.Errorf("BackupToSafe: path contains forbidden character %q", string(ch))
-		}
-	}
-
-	// Reject SQL comment sequences that could break VACUUM INTO, though single
-	// hyphens are allowed in filenames.
-	if strings.Contains(absClean, "--") {
-		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
 	}
 	return nil
 }
