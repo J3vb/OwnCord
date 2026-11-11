@@ -59,7 +59,7 @@ var allowedSettingKeys = map[string]struct{}{
 	ServerUploadMbpsKey:        {},
 }
 
-// VoiceOwnerMovableKey: whether MOVE_MEMBERS holders may move the owner ("true"/"false"); missing means true.
+// VoiceOwnerMovableKey says whether MOVE_MEMBERS holders may move the owner ("true"/"false"); missing means true.
 const VoiceOwnerMovableKey = "voice_owner_movable"
 
 // VoiceOwnerMovable reads a stored value: true when blank, false when unparseable so a damaged row never lets
@@ -72,7 +72,7 @@ func VoiceOwnerMovable(stored string) bool {
 	return err == nil && v
 }
 
-// GameActivityEnabledKey: whether game activity is shown ("true"/"false"); a missing row means true.
+// GameActivityEnabledKey says whether game activity is shown ("true"/"false"); a missing row means true.
 const GameActivityEnabledKey = "game_activity_enabled"
 
 // GameActivityEnabled reads a stored value: true when blank, false when unparseable so a damaged row never

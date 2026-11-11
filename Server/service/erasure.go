@@ -246,7 +246,7 @@ func (s *ErasureService) closeSetupGateForMarkers(ctx context.Context) error {
 	return nil
 }
 
-// ErrSequenceFloorUnresolved: a marker names an id the probe cannot reach, so no floor
+// ErrSequenceFloorUnresolved means a marker names an id the probe cannot reach, so no floor
 // below it is safe (the id could be handed out again and its innocent holder erased by
 // the old marker). Start-up fails; the operator raises the floor and acknowledges it
 // (MarkerStore.MarkFloorProbed, docs/security.md, "Erasure marker sequence floors").
