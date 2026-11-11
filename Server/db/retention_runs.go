@@ -17,8 +17,8 @@ type RetentionRun struct {
 	MessagesDeleted int
 	Files           []string
 	FilesRemoved    int
-	// PurgePending lists swept message ids whose replay purge is still
-	// outstanding: journaled before the purge, cleared after it.
+	// PurgePending lists swept message ids whose replay purge is outstanding: journaled
+	// before the purge, cleared after.
 	PurgePending []int64
 	LastError    string
 }
@@ -32,9 +32,9 @@ func (d *DB) StartRetentionRun(ctx context.Context) (int64, error) {
 	return res.LastInsertId()
 }
 
-// RecordRetentionRunFiles journals the files a run's sweeps unlinked (the only
-// handle left on the blobs) and its counts, before any file is removed.
-// Idempotent per run: each call replaces the list.
+// RecordRetentionRunFiles journals the files a run's sweeps unlinked (the only handle
+// left on the blobs) and its counts, before any file is removed; each call replaces
+// the list.
 func (d *DB) RecordRetentionRunFiles(ctx context.Context, runID int64, channels, deleted int, files []string) error {
 	if files == nil {
 		files = []string{}
@@ -51,10 +51,9 @@ func (d *DB) RecordRetentionRunFiles(ctx context.Context, runID int64, channels,
 	return nil
 }
 
-// RecordRetentionRunPurge journals the swept message ids whose replay purge
-// (ring buffer and events rows) is outstanding: written before the purge and
-// replaced by the empty list after it, so a failed or interrupted purge is
-// retried on the next tick. nil clears it.
+// RecordRetentionRunPurge journals the swept message ids whose replay purge is
+// outstanding: written before the purge, replaced by the empty list after, so an
+// interrupted purge is retried next tick. nil clears it.
 func (d *DB) RecordRetentionRunPurge(ctx context.Context, runID int64, ids []int64) error {
 	if ids == nil {
 		ids = []int64{}
@@ -70,8 +69,7 @@ func (d *DB) RecordRetentionRunPurge(ctx context.Context, runID int64, ids []int
 	return nil
 }
 
-// FinishRetentionRun closes a run: files_removed, the last error (empty for
-// none) and finished_at.
+// FinishRetentionRun closes a run: files_removed, the last error (empty for none) and finished_at.
 func (d *DB) FinishRetentionRun(ctx context.Context, runID int64, filesRemoved int, lastError string) error {
 	var errText *string
 	if lastError != "" {
@@ -85,9 +83,7 @@ func (d *DB) FinishRetentionRun(ctx context.Context, runID int64, filesRemoved i
 	return nil
 }
 
-// ListUnfinishedRetentionRuns returns runs with work outstanding (not
-// finished, files_removed short of the journal, or a replay purge pending),
-// oldest first, for the resume at start-up and on each tick.
+// ListUnfinishedRetentionRuns returns runs with work outstanding, oldest first, for resume.
 func (d *DB) ListUnfinishedRetentionRuns(ctx context.Context) ([]RetentionRun, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT id, started_at, finished_at, channels, messages_deleted, files, files_removed, purge_pending, COALESCE(last_error, '')
@@ -132,7 +128,6 @@ func (d *DB) GetRetentionRun(ctx context.Context, id int64) (*RetentionRun, erro
 	return &r, nil
 }
 
-// decodeRetentionRunLists fills a run's journaled lists from their JSON.
 func decodeRetentionRunLists(r *RetentionRun, files, purge string) error {
 	if err := json.Unmarshal([]byte(files), &r.Files); err != nil {
 		return fmt.Errorf("retention run %d: decode files: %w", r.ID, err)

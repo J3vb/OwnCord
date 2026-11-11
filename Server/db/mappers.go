@@ -2,15 +2,9 @@ package db
 
 import "github.com/J3vb/OwnCord/Server/db/dbgen"
 
-// This file holds the conversions from sqlc-generated row/model types
-// (db/dbgen) to the domain model types this package exposes. sqlc emits int64
-// for integer columns and *string for nullable text; the domain models use
-// narrower Go types (int, bool, non-pointer string) for ergonomics, so each
-// delegating read maps through one of these helpers. See docs/archive/plans/sqlc-adoption.md.
+// Conversions from sqlc-generated row types (db/dbgen) to the domain models: sqlc
+// emits int64 and *string where the models use int, bool and plain string.
 
-// derefString returns the pointed-to string, or "" when the pointer is nil.
-// Used for columns the schema allows to be NULL but the domain model exposes
-// as a plain string (device, ip_address).
 func derefString(s *string) string {
 	if s == nil {
 		return ""
@@ -18,8 +12,6 @@ func derefString(s *string) string {
 	return *s
 }
 
-// ptrI64toI narrows a *int64 (sqlc's nullable-integer type) to a *int, which
-// the domain models use for optional counts (e.g. invite max_uses).
 func ptrI64toI(p *int64) *int {
 	if p == nil {
 		return nil
@@ -28,8 +20,6 @@ func ptrI64toI(p *int64) *int {
 	return &v
 }
 
-// ptrItoI64 widens a *int to a *int64 for passing into a generated params
-// struct (the inverse of ptrI64toI).
 func ptrItoI64(p *int) *int64 {
 	if p == nil {
 		return nil
@@ -38,7 +28,6 @@ func ptrItoI64(p *int) *int64 {
 	return &v
 }
 
-// b2i64 converts a bool to sqlc's int64 representation of a SQLite boolean.
 func b2i64(b bool) int64 {
 	if b {
 		return 1
@@ -46,9 +35,6 @@ func b2i64(b bool) int64 {
 	return 0
 }
 
-// strToNullPtr returns nil for an empty string, else a pointer to it — so
-// empty strings are written as NULL in optional TEXT columns (matches the
-// former nullableString helper).
 func strToNullPtr(s string) *string {
 	if s == "" {
 		return nil
@@ -56,7 +42,6 @@ func strToNullPtr(s string) *string {
 	return &s
 }
 
-// userFromGen maps a generated user row to the domain User model.
 func userFromGen(u dbgen.User) *User {
 	return &User{
 		ID:                 u.ID,
@@ -83,7 +68,6 @@ func userFromGen(u dbgen.User) *User {
 	}
 }
 
-// apiTokenFromGen maps a generated api_tokens row to the domain APIToken model.
 func apiTokenFromGen(t dbgen.ApiToken) *APIToken {
 	return &APIToken{
 		ID:        t.ID,
@@ -97,9 +81,6 @@ func apiTokenFromGen(t dbgen.ApiToken) *APIToken {
 	}
 }
 
-// sessionFromColumns builds a Session from the columns the session queries
-// select. The per-query row types (which omit sessions.identity_public_key)
-// map through it.
 func sessionFromColumns(id, userID int64, token string, device, ip *string, createdAt, lastUsed, expiresAt string, unseen int64) Session {
 	return Session{
 		ID:        id,

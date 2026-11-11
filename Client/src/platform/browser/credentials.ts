@@ -19,7 +19,7 @@
 // The contract's outcomes hold as on desktop: a failed write or delete answers
 // `false`, an unreadable store rejects a load, and a page with no Web Storage
 // answers as a host with no store (`false` / `null`).
-import type { CredentialStore, SavedCredential } from "../contracts/credentials";
+import type { CredentialStore } from "../contracts/credentials";
 
 /** The prefix the Advanced tab keeps when it clears localStorage
  *  (`clearLocalStoragePreservingUserData`, `AdvancedTab.ts`). */
@@ -41,8 +41,14 @@ function area(name: AreaName): Storage | null {
   }
 }
 
+/** A stored record: the account and its sign-in token. */
+interface StoredCredential {
+  readonly username: string;
+  readonly token: string;
+}
+
 /** The stored record as a credential, or null when it is not one. */
-function parseCredential(raw: string): SavedCredential | null {
+function parseCredential(raw: string): StoredCredential | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -53,7 +59,22 @@ function parseCredential(raw: string): SavedCredential | null {
   if (!("username" in parsed) || !("token" in parsed)) return null;
   const { username, token } = parsed;
   if (typeof username !== "string" || typeof token !== "string") return null;
-  return { username, token, hasPassword: false };
+  return { username, token };
+}
+
+/** The first area's record for `host` that is a credential: the tab's own
+ *  session-only copy before the kept one. */
+function readStored(host: string): StoredCredential | null {
+  const areas = [area("sessionStorage"), area("localStorage")];
+  for (const found of areas) {
+    if (found === null) continue;
+    // A read that throws rejects: an unreadable store is not "nothing stored".
+    const raw = found.getItem(keyFor(host));
+    const parsed = raw === null ? null : parseCredential(raw);
+    // A record that is not a credential does not hide a good one.
+    if (parsed !== null) return parsed;
+  }
+  return null;
 }
 
 /** True when this tab already holds the host's token session-only. */
@@ -93,16 +114,15 @@ export const credentials: CredentialStore = {
   },
 
   async load(host) {
-    const areas = [area("sessionStorage"), area("localStorage")];
-    for (const found of areas) {
-      if (found === null) continue;
-      // A read that throws rejects: an unreadable store is not "nothing stored".
-      const raw = found.getItem(keyFor(host));
-      const parsed = raw === null ? null : parseCredential(raw);
-      // A record that is not a credential does not hide a good one.
-      if (parsed !== null) return parsed;
-    }
-    return null;
+    const stored = readStored(host);
+    return stored === null ? null : { username: stored.username, hasPassword: false };
+  },
+
+  // The portal serves one server and keeps its token in the page's own
+  // storage, so there is nothing to ask first: the stored token is the answer.
+  async resume(host) {
+    const stored = readStored(host);
+    return stored === null ? null : { outcome: "resumed", ...stored };
   },
 
   async delete(host, token) {

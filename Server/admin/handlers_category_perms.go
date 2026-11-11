@@ -10,17 +10,13 @@ import (
 )
 
 //
-// A category's overrides are a template its synced channels follow. These
-// adapters mirror the channel override handlers: decode, delegate to
-// service.ChannelService (which holds every guard, writes the category row and
-// the same row on each synced channel in one transaction, then drops the
-// affected users' cached permissions and refreshes channel visibility for each
-// channel the write touched), and respond. Mounted on /admin/api only, behind MANAGE_CHANNELS
-// like the channel override routes.
+// A category's overrides are a template its synced channels follow. These adapters mirror the channel
+// override handlers: decode, delegate to service.ChannelService (which holds every guard, writes the category
+// row and the same row on each synced channel in one transaction, then drops affected users' cached
+// permissions and refreshes channel visibility), and respond. /admin/api only, behind MANAGE_CHANNELS.
 
-// categoryPermissionsResponse is the JSON shape for GET .../permissions on a
-// category: every role (zero masks when it carries no template row) and the
-// members that have one.
+// categoryPermissionsResponse is GET .../permissions on a category: every role (zero masks without a template
+// row) and the members that have one.
 type categoryPermissionsResponse struct {
 	CategoryID int64                    `json:"category_id"`
 	Roles      []db.ChannelRoleOverride `json:"roles"`
@@ -37,9 +33,8 @@ func writeCategoryPermErr(w http.ResponseWriter, err error) {
 	writeOverrideErr(w, err)
 }
 
-// categoryPermSetup decodes the preamble every category template mutation
-// shares: the category id, the target id from param, the optional body and the
-// authenticated actor's role. ok is false when a response has been written.
+// categoryPermSetup decodes the preamble every category template mutation shares: category id, target id,
+// optional body and the actor's role; ok is false when a response is written.
 func categoryPermSetup(channels *service.ChannelService, w http.ResponseWriter, r *http.Request, param, invalidMsg string, req *putChannelPermissionRequest) (categoryID, targetID int64, actorRole *db.Role, ok bool) {
 	if channels == nil {
 		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")

@@ -7,9 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// ForumTag is one tag of a forum (migration 075), in the shape the wire
-// carries it: ready, channel_create, channel_update and the admin channel
-// list. Emoji is omitted when the tag has none.
+// ForumTag is one forum tag (migration 075) in its wire shape; Emoji is omitted when none.
 type ForumTag struct {
 	ID       int64  `json:"id"`
 	Name     string `json:"name"`
@@ -17,11 +15,8 @@ type ForumTag struct {
 	Position int    `json:"position"`
 }
 
-// ChannelForum is the forum half of a Channel (migration 075), set on a
-// type 'forum' row only. It is also the wire shape of a forum's settings, so
-// a field here is a field clients read. It lives here rather than in
-// models.go because the models.go json-tag count is ratcheted
-// (service/datastore_ratchet_test.go).
+// ChannelForum is the forum half of a Channel (migration 075), set on a type 'forum'
+// row only. It lives here because the models.go json-tag count is ratcheted.
 type ChannelForum struct {
 	Tags                      []ForumTag `json:"tags"`
 	RequireTag                bool       `json:"require_tag"`
@@ -42,8 +37,8 @@ func forumTagFromGen(r dbgen.ForumTag) ForumTag {
 	return t
 }
 
-// forumFromFields builds the forum half of a channel row; nil for any other
-// type. Tags start empty and non-nil so the wire carries [] rather than null.
+// forumFromFields builds the forum half of a channel row, nil for other types; Tags
+// start non-nil so the wire carries [].
 func forumFromFields(f channelFields) *ChannelForum {
 	if f.Type != ForumTypeName {
 		return nil
@@ -55,8 +50,6 @@ func forumFromFields(f channelFields) *ChannelForum {
 	}
 }
 
-// attachForumTags fills the tags of every forum in channels with one query,
-// and none when there is no forum, so a server without forums pays nothing.
 func (d *DB) attachForumTags(ctx context.Context, channels []Channel) error {
 	hasForum := false
 	for i := range channels {
@@ -84,18 +77,16 @@ func (d *DB) attachForumTags(ctx context.Context, channels []Channel) error {
 	return nil
 }
 
-// ForumTagWrite is one tag of a ForumSettingsWrite. ID 0 creates a tag; a
-// non-zero ID must name a tag of this forum and renames, re-emojis and
-// repositions it. Position is the tag's index in the list, set by the writer.
+// ForumTagWrite is one tag of a ForumSettingsWrite: ID 0 creates, else it must name a
+// tag of this forum.
 type ForumTagWrite struct {
 	ID    int64
 	Name  string
 	Emoji string
 }
 
-// ForumSettingsWrite is the whole settings of a forum: a full replace. A tag
-// of the forum that the list does not name is deleted, and its links to posts
-// go with it.
+// ForumSettingsWrite is a forum's whole settings, a full replace; unlisted tags are
+// deleted with their post links.
 type ForumSettingsWrite struct {
 	RequireTag                bool
 	DefaultAutoArchiveMinutes int
@@ -103,13 +94,11 @@ type ForumSettingsWrite struct {
 }
 
 // ReplaceForumSettings writes a forum's settings and tag list in one
-// transaction and returns the forum's tags as stored. ErrNotFound when the
-// forum is gone or is not a forum, or when a listed tag id is not one of its
-// tags; ErrConflict when two tags would share a name, ignoring case, or the
-// list would hold more than MaxForumTags. A tag that is renamed to another's
-// old name in the same write is fine: renames go through placeholders first.
-// The count check runs inside the writer transaction, so two racing writes
-// cannot both pass it.
+// transaction and returns the stored tags. ErrNotFound when the forum is gone,
+// not a forum, or a listed tag id is not its own; ErrConflict on duplicate
+// names (ignoring case) or more than MaxForumTags. A rename into another's old
+// name in the same write is fine (placeholders first). The count check runs in
+// the writer transaction, so racing writes cannot both pass.
 func (d *DB) ReplaceForumSettings(ctx context.Context, forumID int64, in ForumSettingsWrite) ([]ForumTag, error) {
 	var out []ForumTag
 	err := d.inWriteTx(ctx, "ReplaceForumSettings", func(q *dbgen.Queries) error {
@@ -149,10 +138,8 @@ func (d *DB) ReplaceForumSettings(ctx context.Context, forumID int64, in ForumSe
 	return out, nil
 }
 
-// replaceForumTags makes the forum's tags exactly tags, in list order: a tag
-// of the forum the list leaves out is deleted, a listed id is updated, an id of
-// 0 is inserted. A listed id that is not one of the forum's tags, or is listed
-// twice, is ErrNotFound.
+// replaceForumTags makes the forum's tags exactly tags, in order: omitted tags
+// are deleted, listed ids updated, id 0 inserted. A foreign or duplicated id is ErrNotFound.
 func replaceForumTags(ctx context.Context, q *dbgen.Queries, forumID int64, tags []ForumTagWrite) error {
 	cur, err := q.ListForumTagsByForum(ctx, forumID)
 	if err != nil {
@@ -178,9 +165,8 @@ func replaceForumTags(ctx context.Context, q *dbgen.Queries, forumID int64, tags
 			}
 		}
 	}
-	// Park every kept tag under a unique placeholder so renames that swap
-	// names cannot collide mid-write. A real name never holds a control
-	// character.
+	// Park kept tags under unique placeholders so swapped names cannot collide mid-write; a real name
+	// holds no control character.
 	for id := range keep {
 		if _, err := q.UpdateForumTag(ctx, dbgen.UpdateForumTagParams{
 			Name: fmt.Sprintf("\x01%d", id), ID: id, ForumID: forumID,
@@ -196,7 +182,6 @@ func replaceForumTags(ctx context.Context, q *dbgen.Queries, forumID int64, tags
 	return nil
 }
 
-// writeForumTag inserts (ID 0) or updates one tag at list index pos.
 func writeForumTag(ctx context.Context, q *dbgen.Queries, forumID int64, t ForumTagWrite, pos int) error {
 	var emoji *string
 	if t.Emoji != "" {

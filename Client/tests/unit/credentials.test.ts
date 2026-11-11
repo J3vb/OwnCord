@@ -34,6 +34,7 @@ vi.mock("@lib/logger", () => ({ createLogger: createLoggerMock }));
 const {
   saveCredential,
   loadCredential,
+  resumeSavedSession,
   deleteCredential,
   createUserUpdateCredentialSaver,
   parseRelayedLogin,
@@ -195,14 +196,17 @@ describe("createUserUpdateCredentialSaver", () => {
 // ── loadCredential ─────────────────────────────────────────────────────────
 
 describe("loadCredential", () => {
-  it("returns the stored username and token", async () => {
+  it("returns the stored username, and never a token", async () => {
+    // The backend does not serialize the token on this read. Even if one
+    // somehow arrived, it must not survive reconstruction into the JS heap:
+    // the token reaches the page through resumeSavedSession only.
     invoke.mockResolvedValue({ username: "alice", token: "tok" });
 
-    await expect(loadCredential("h.example")).resolves.toEqual({
-      username: "alice",
-      token: "tok",
-      hasPassword: false,
-    });
+    const got = await loadCredential("h.example");
+
+    expect(got).toEqual({ username: "alice", hasPassword: false });
+    expect(got).not.toHaveProperty("token");
+    expect(JSON.stringify(got)).not.toContain("tok");
     expect(invoke).toHaveBeenCalledWith("load_credential", { host: "h.example" });
   });
 
@@ -210,18 +214,17 @@ describe("loadCredential", () => {
     // The Rust side marks the field #[serde(skip)], so a plaintext password
     // cannot reach here at all. Even if one somehow did, it must not survive
     // reconstruction into the JS heap.
-    invoke.mockResolvedValue({ username: "alice", token: "tok", has_password: true });
+    invoke.mockResolvedValue({ username: "alice", has_password: true });
 
     const got = await loadCredential("h.example");
 
-    expect(got).toEqual({ username: "alice", token: "tok", hasPassword: true });
+    expect(got).toEqual({ username: "alice", hasPassword: true });
     expect(got).not.toHaveProperty("password");
   });
 
   it("does not carry a password through even if the backend sends one", async () => {
     invoke.mockResolvedValue({
       username: "alice",
-      token: "tok",
       has_password: true,
       password: "pass123",
     });
@@ -235,13 +238,11 @@ describe("loadCredential", () => {
   it("drops any extra fields the backend returns", async () => {
     // Only the known fields should survive reconstruction — an unrecognised
     // field must not make it into the JS heap.
-    invoke.mockResolvedValue({ username: "alice", token: "tok", bogus: "x" });
+    invoke.mockResolvedValue({ username: "alice", bogus: "x" });
 
     const got = await loadCredential("h.example");
 
-    // toEqual ignores the explicit `password: undefined`, so this still pins
-    // the exact shape and catches any unknown field, not just `bogus`.
-    expect(got).toEqual({ username: "alice", token: "tok", hasPassword: false });
+    expect(got).toEqual({ username: "alice", hasPassword: false });
     expect(got).not.toHaveProperty("bogus");
   });
 
@@ -259,10 +260,8 @@ describe("loadCredential", () => {
   it.each([
     ["a string", "not-an-object"],
     ["a number", 42],
-    ["an object with no username", { token: "tok" }],
-    ["an object with no token", { username: "alice" }],
-    ["a non-string username", { username: 1, token: "tok" }],
-    ["a non-string token", { username: "alice", token: 1 }],
+    ["an object with no username", { has_password: true }],
+    ["a non-string username", { username: 1, has_password: true }],
   ])("returns null for a malformed result (%s)", async (_label, result) => {
     invoke.mockResolvedValue(result);
 
@@ -287,6 +286,93 @@ describe("loadCredential", () => {
     invoke.mockRejectedValue("plain string reason");
 
     await expect(loadCredential("h.example")).rejects.toThrow("plain string reason");
+  });
+});
+
+// ── resumeSavedSession ─────────────────────────────────────────────────────
+
+describe("resumeSavedSession", () => {
+  it("returns the token the backend hands over", async () => {
+    invoke.mockResolvedValue({ outcome: "resumed", username: "alice", token: "tok" });
+
+    await expect(resumeSavedSession("h.example")).resolves.toEqual({
+      outcome: "resumed",
+      username: "alice",
+      token: "tok",
+    });
+    expect(invoke).toHaveBeenCalledWith("resume_saved_session", { host: "h.example" });
+  });
+
+  it.each(["sign_in_needed", "certificate_unverified", "refused"] as const)(
+    "returns a %s answer with nothing else on it",
+    async (outcome) => {
+      invoke.mockResolvedValue({ outcome, username: "alice", token: "must-not-pass" });
+
+      const got = await resumeSavedSession("h.example");
+
+      expect(got).toEqual({ outcome });
+      expect(JSON.stringify(got)).not.toContain("must-not-pass");
+    },
+  );
+
+  it("drops any extra fields the backend returns", async () => {
+    invoke.mockResolvedValue({
+      outcome: "resumed",
+      username: "alice",
+      token: "tok",
+      password: "pass123",
+    });
+
+    const got = await resumeSavedSession("h.example");
+
+    expect(got).toEqual({ outcome: "resumed", username: "alice", token: "tok" });
+    expect(JSON.stringify(got)).not.toContain("pass123");
+  });
+
+  it("returns null when nothing is stored, without logging it as an error", async () => {
+    invoke.mockResolvedValue(null);
+
+    await expect(resumeSavedSession("h.example")).resolves.toBeNull();
+    expect(logMock.error).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a string", "resumed"],
+    ["an unknown outcome", { outcome: "later" }],
+    ["no outcome", { username: "alice", token: "tok" }],
+    ["a resume with no token", { outcome: "resumed", username: "alice" }],
+    ["a resume with no username", { outcome: "resumed", token: "tok" }],
+    ["a non-string token", { outcome: "resumed", username: "alice", token: 1 }],
+  ])("returns null for a malformed result (%s)", async (_label, result) => {
+    invoke.mockResolvedValue(result);
+
+    await expect(resumeSavedSession("h.example")).resolves.toBeNull();
+  });
+
+  it.each([
+    "saved sign-in check: connect failed: connection refused",
+    "saved sign-in check timed out",
+    "saved sign-in check: the server answered 503",
+  ])("rejects with a TransportError when the server could not be asked (%s)", async (reason) => {
+    invoke.mockRejectedValue(reason);
+
+    const failure = await resumeSavedSession("h.example").catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(TransportError);
+    expect((failure as Error).message).toBe(reason);
+    expect(logMock.error).toHaveBeenCalledWith("Failed to resume the saved session", {
+      host: "h.example",
+      error: reason,
+    });
+  });
+
+  it("rejects with the backend's own reason when the store cannot be read", async () => {
+    invoke.mockRejectedValue(new Error("keychain locked"));
+
+    const failure = await resumeSavedSession("h.example").catch((err: unknown) => err);
+
+    expect(failure).not.toBeInstanceOf(TransportError);
+    expect((failure as Error).message).toBe("keychain locked");
   });
 });
 
@@ -411,6 +497,13 @@ describe("outside Tauri", () => {
     const { loadCredential: load } = await importWithoutInvoke();
 
     await expect(load("h.example")).resolves.toBeNull();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("resumeSavedSession returns null instead of throwing", async () => {
+    const { resumeSavedSession: resume } = await importWithoutInvoke();
+
+    await expect(resume("h.example")).resolves.toBeNull();
     expect(invoke).not.toHaveBeenCalled();
   });
 

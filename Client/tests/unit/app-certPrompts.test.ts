@@ -348,6 +348,15 @@ describe("mismatch prompt", () => {
     expect(hoisted.reconnectAfterCertAccept).not.toHaveBeenCalled();
   });
 
+  it("accepting re-checks the server and carries on with a sign-in the certificate held up", async () => {
+    const m = await openMismatch();
+    expect(rerunHealth).not.toHaveBeenCalled();
+    m.opts.onAccept();
+    await settle();
+    expect(rerunHealth).toHaveBeenCalledTimes(1);
+    expect(rerunHealth).toHaveBeenCalledWith("a.example:8443");
+  });
+
   it("a declined confirmation drops the session and shows the notice", async () => {
     hoisted.target = { host: "a.example:8443", token: "tok" };
     ws.acceptCertFingerprint.mockImplementationOnce(() =>
@@ -362,6 +371,7 @@ describe("mismatch prompt", () => {
     expect(hoisted.setTransientError).toHaveBeenCalledTimes(1);
     expect(hoisted.reconnectAfterCertAccept).not.toHaveBeenCalled();
     expect(ws.connect).not.toHaveBeenCalled();
+    expect(rerunHealth).not.toHaveBeenCalled();
   });
 
   it("another failure is logged and neither drops the session nor shows a notice", async () => {

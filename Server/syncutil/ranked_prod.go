@@ -2,11 +2,7 @@
 
 package syncutil
 
-// The production methods are the plain lock calls, so the rank costs nothing
-// outside the deadlock build.
-
-// TakeRankViolations reports the rank violations since its last call. Ranks
-// are checked only in the deadlock build, so here it is always zero.
+// TakeRankViolations is always zero: ranks are checked only in the deadlock build.
 func TakeRankViolations() int64 { return 0 }
 
 // Lock locks m.

@@ -100,6 +100,7 @@ and only when it changes something a contributor or fork holder must do
 - Voice: a join whose answer was lost, for example because the connection dropped at that moment, stayed on "Connecting…" until you pressed Disconnect. It now ends after 15 seconds with a message, so you can try again.
 - Voice: an unrelated error from the server could cancel a voice join that was still in progress. Only the join's own refusal cancels it now.
 - Desktop and Android: saved logins, media and game activity, notifications, saving or sharing files and installing an update no longer hold up the rest of the app while the system is slow to answer.
+- Desktop and Android: switching to another saved server for the first time since the app started showed "Auto-login failed" and asked for the password. It now signs in with the saved login, and says so when that server no longer accepts it or cannot be reached.
 
 ### Under the hood
 

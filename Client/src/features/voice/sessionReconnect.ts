@@ -1,7 +1,6 @@
 // The session's reconnect handling: the room-event handlers that turn a
 // dropped room into a reconnecting state, the auto-reconnect loop's host, and
 // restoring what the drop stopped once the reconnect (or its rejoin) lands.
-import type { Room } from "livekit-client";
 import {
   voiceStore,
   leaveVoiceChannel,
@@ -28,6 +27,7 @@ import { restoreMediaAfterReconnect } from "./localVoiceRestore";
 import { isLinuxDesktop } from "./native/platform";
 import { voiceText } from "../../i18n/voice";
 import { SessionTokens } from "./sessionTokens";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 /** How long a session handed to a join waits for that join's answer. The
  *  server answers a voice_join in one round trip; past this it was lost. */
@@ -37,9 +37,9 @@ export abstract class SessionReconnect extends SessionTokens {
   protected abstract readonly _join: JoinOrchestration;
   protected abstract readonly _audioElements: AudioElements;
   protected abstract readonly _cameraState: CameraTrackState;
-  protected abstract createRoom(channelId?: number): Promise<Room>;
-  protected abstract syncModuleRooms(room?: Room | null): void;
-  protected abstract sweepPublications(room: Room): void;
+  protected abstract createRoom(channelId?: number): Promise<VoiceRoom>;
+  protected abstract syncModuleRooms(room?: VoiceRoom | null): void;
+  protected abstract sweepPublications(room: VoiceRoom): void;
   protected abstract restoreLocalVoiceState(mode: "join" | "reconnect"): Promise<void>;
   abstract leaveVoice(sendWs?: boolean, keepWatched?: boolean): Promise<void>;
 

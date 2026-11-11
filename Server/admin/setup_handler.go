@@ -21,55 +21,41 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// setupStatusResponse is the JSON shape returned by GET /api/setup/status.
 type setupStatusResponse struct {
 	NeedsSetup bool `json:"needs_setup"`
-	// Defaults prefills the setup wizard. Present only while setup is needed
-	// and the server was wired with its running config (see SetupOptions).
+	// Defaults prefills the wizard; present only while setup is needed and the server has its running config.
 	Defaults *setupDefaults `json:"defaults,omitempty"`
 }
 
-// setupRequest is the JSON body for POST /api/setup.
 type setupRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	// SetupToken is the one-time token the server printed at start-up; see
-	// SetupOptions.SetupToken.
+	Username   string `json:"username"`
+	Password   string `json:"password"`
 	SetupToken string `json:"setup_token"`
-	// Wizard carries the optional first-run configuration. Absent = legacy
-	// behaviour: create the owner account only.
+	// Wizard is optional; absent means create the owner account only.
 	Wizard *setupWizardRequest `json:"wizard,omitempty"`
 }
 
-// setupResponse is the JSON shape returned on successful setup.
 type setupResponse struct {
 	Token      string `json:"token"`
 	UserID     int64  `json:"user_id"`
 	Username   string `json:"username"`
 	InviteCode string `json:"invite_code"`
-	// RestartRequired is true when wizard values that are only read at
-	// startup differ from the running config; the server restarts itself
-	// right after this response is sent.
+	// RestartRequired: startup-only wizard values differ from the running config; the server restarts itself
+	// right after this response.
 	RestartRequired bool `json:"restart_required"`
-	// RestartURL is where the admin panel will be reachable after the
-	// restart (scheme/port may have changed). Empty when no restart happens.
+	// RestartURL is where the panel will be reachable after the restart; empty when none happens.
 	RestartURL string `json:"restart_url,omitempty"`
-	// Warnings lists non-fatal problems (e.g. config.yaml not writable).
-	// The account exists whenever this response is returned.
+	// Warnings lists non-fatal problems; the account exists whenever this response is returned.
 	Warnings []string `json:"warnings,omitempty"`
-	// CertificateFingerprint is the served TLS leaf certificate's SHA-256 in
-	// the client's pin format, so the operator can publish it for users to
-	// compare out of band. Omitted when no served certificate is known (TLS
-	// off, or ACME before its first handshake) and when the wizard changed
-	// tls.mode: the restart will serve a different certificate.
+	// CertificateFingerprint is the served leaf certificate's SHA-256 in the client's pin format, for
+	// out-of-band comparison. Omitted when none is known (TLS off, ACME before its first handshake) or the
+	// wizard changed tls.mode, since the restart serves a different certificate.
 	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
-	// RecoveryKitSecret is the owner's recovery kit, present unless the
-	// wizard turned it off or it could not be issued. Shown once, on the finish step;
-	// the server stores only its verifier.
+	// RecoveryKitSecret is the owner's recovery kit, shown once on the finish step; the server stores only its
+	// verifier. Absent if the wizard turned it off or it could not be issued.
 	RecoveryKitSecret string `json:"recovery_kit_secret,omitempty"`
 }
 
-// handleSetupStatus returns whether initial setup is needed (no users exist).
 func handleSetupStatus(setup *service.SetupService, settings *service.SettingsService, opts SetupOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		needsSetup, err := setup.NeedsSetup(r.Context())
@@ -78,8 +64,7 @@ func handleSetupStatus(setup *service.SetupService, settings *service.SettingsSe
 			return
 		}
 		resp := setupStatusResponse{NeedsSetup: needsSetup}
-		// Prefill defaults are only exposed pre-setup: after the first user
-		// exists this endpoint reveals nothing about the configuration.
+		// Defaults are exposed only pre-setup: afterwards this endpoint reveals nothing about the configuration.
 		if resp.NeedsSetup && opts.RunningCfg != nil {
 			cfg := opts.RunningCfg
 			d := &setupDefaults{
@@ -94,12 +79,8 @@ func handleSetupStatus(setup *service.SetupService, settings *service.SettingsSe
 				VoiceAutoDownload: cfg.Voice.AutoDownloadLiveKit,
 				PortLocked:        updater.RunningInContainer(),
 			}
-			// The settings table is authoritative for the values the app reads
-			// live; fall back to the config/seed values on error. A nil
-			// settings service is one of those fallbacks, not a panic:
-			// SettingsService is the fail-closed-at-the-handler kind
-			// (adminRequiredServices deliberately does not build it), and every
-			// read below is best-effort with the config value standing in.
+			// The settings table is authoritative for live values; fall back to config/seed values on error. A nil
+			// SettingsService is such a fallback, not a panic: adminRequiredServices deliberately does not build it.
 			if settings != nil {
 				setupStatusSettingDefaults(r, settings, d)
 			}
@@ -109,10 +90,8 @@ func handleSetupStatus(setup *service.SetupService, settings *service.SettingsSe
 	}
 }
 
-// setupStatusSettingDefaults overlays the live settings rows onto the
-// config-derived defaults. Each read is best-effort: the config value it would
-// replace is a valid answer, so a failure leaves it standing rather than
-// failing the status call the setup page cannot render without.
+// setupStatusSettingDefaults overlays live settings rows onto the config defaults. Each read is best-effort:
+// the config value stays on failure, since the status call must not fail.
 func setupStatusSettingDefaults(r *http.Request, settings *service.SettingsService, d *setupDefaults) {
 	if v, err := settings.Setting(r.Context(), "server_name"); err == nil && v != "" {
 		d.ServerName = v
@@ -127,14 +106,11 @@ func setupStatusSettingDefaults(r *http.Request, settings *service.SettingsServi
 	}
 }
 
-// handleSetup creates the first owner account and, when the request carries
-// a wizard payload, applies the chosen settings (DB + config.yaml) and
-// restarts the server if startup-only values changed. It only works when no
-// users exist in the database, preventing abuse after initial setup.
+// handleSetup creates the first owner account and, with a wizard payload, applies the settings and restarts
+// if startup-only values changed. It only works when no users exist.
 func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowedOrigins []string, hub HubBroadcaster, opts SetupOptions) http.HandlerFunc {
-	// Resolve the trusted-proxy CIDRs once at construction, never per request.
-	// opts.RunningCfg is nil in the legacy/test path, which yields an empty
-	// list, so clientip.Resolve falls back to the raw RemoteAddr.
+	// Resolve trusted-proxy CIDRs once; a nil RunningCfg (legacy/test) yields none, so clientip.Resolve uses the
+	// raw RemoteAddr.
 	var trustedProxies []string
 	if opts.RunningCfg != nil {
 		trustedProxies = opts.RunningCfg.Server.TrustedProxies
@@ -206,21 +182,16 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 	}
 }
 
-// setupPrecheck runs every gate in front of the first-run setup endpoint
-// (origin check, rate limit, body decode, credential and wizard validation)
-// before any state is created. It writes the error response itself; ok=false
-// means the caller must return immediately. The returned host is the resolved
-// client address, reused as the session IP and (through clientip.RateKey) as
-// the rate-limit bucket; proxyNets (parsed once from
-// config.Server.TrustedProxies) makes both honour trusted_proxies like every
-// other session-creating path instead of trusting the raw, possibly-a-proxy
+// setupPrecheck runs every gate (origin, rate limit, body decode, credential and wizard validation) before
+// any state is created. It writes the error response itself; ok=false means return immediately. host is the
+// resolved client address, used as session IP and rate-limit bucket; proxyNets makes both honour
+// trusted_proxies like every other session-creating path instead of trusting the raw, possibly-proxy
 // RemoteAddr.
 func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLimiter, allowedOrigins []string, proxyNets []*net.IPNet, setupToken string, running *config.Config) (setupRequest, string, bool) {
 	var req setupRequest
 
-	// CSRF protection: reject cross-origin requests.
-	// A request is accepted when it is same-origin, or when its Origin is
-	// explicitly allowlisted. Absent Origin = non-browser client (allow).
+	// CSRF: reject cross-origin requests unless same-origin or Origin is allowlisted; absent Origin is a
+	// non-browser client.
 	if origin := r.Header.Get("Origin"); origin != "" {
 		if !isSameOrigin(origin, r.Host) && !isSetupOriginAllowed(origin, allowedOrigins) {
 			writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "cross-origin setup request blocked")
@@ -228,9 +199,8 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 		}
 	}
 
-	// Rate limit: 5 attempts per minute per IP. Resolved through proxyNets so
-	// source ports/hops of one real client share a bucket and distinct clients
-	// behind the same trusted proxy are NOT collapsed into one.
+	// Rate limit: 5 attempts per minute per IP, resolved through proxyNets so one client's ports and hops share
+	// a bucket and distinct clients behind a trusted proxy are not collapsed.
 	host := clientip.Resolve(r, proxyNets)
 	setupKey := "setup:" + clientip.RateKey(host)
 	if !limiter.Allow(setupKey, 5, time.Minute) {
@@ -242,27 +212,23 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 		return req, "", false
 	}
 
-	// Checked after the rate limit, so guesses are bounded like any other
-	// setup attempt, and before any other field is looked at.
+	// After the rate limit so guesses are bounded like any other setup attempt, and before any other field is
+	// looked at.
 	if setupToken != "" && subtle.ConstantTimeCompare([]byte(req.SetupToken), []byte(setupToken)) != 1 {
 		writeErr(w, http.StatusForbidden, httperr.CodeForbidden,
 			"setup token missing or incorrect — copy it from the server's start-up output")
 		return req, "", false
 	}
 
-	// Use the fixpoint sanitizer (service.SanitizeText), not a bare
-	// bluemonday.StrictPolicy().Sanitize: that HTML-escapes survivors
-	// (' -> &#39;), so "O'Brien" would be stored as "O&#39;Brien", differ from
-	// what handleLogin looks up (which only trims), and permanently lock the
-	// Owner out. Registration and profile rename canonicalize usernames the
-	// same way.
+	// Use service.SanitizeText, not a bare bluemonday StrictPolicy: that HTML-escapes survivors (' -> &#39;), so
+	// "O'Brien" would differ from what handleLogin looks up (which only trims) and permanently lock the Owner
+	// out. Registration and profile rename canonicalize the same way.
 	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 	if req.Username == "" || req.Password == "" {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "username and password are required")
 		return req, "", false
 	}
 
-	// Validate username format (strict rules for a name being chosen).
 	if err := auth.ValidateNewUsername(req.Username); err != nil {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 		return req, "", false
@@ -273,16 +239,15 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 		return req, "", false
 	}
 
-	// Validate the whole wizard payload BEFORE creating the account so a bad
-	// value cannot leave a half-configured server behind a created owner.
+	// Validate the whole wizard payload BEFORE creating the account so a bad value cannot leave a
+	// half-configured server.
 	if req.Wizard != nil {
 		if err := validateWizard(req.Wizard); err != nil {
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return req, "", false
 		}
-		// A container's published port mapping fixes the port, so a different
-		// one would leave the server unreachable. Refused here, with the
-		// other wizard validation, so no account is created for it.
+		// A container's published port mapping fixes the port, so a different one would leave the server
+		// unreachable; refused here so no account is created.
 		if err := wizardPortRefusal(req.Wizard, running); err != nil {
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return req, "", false
@@ -297,11 +262,8 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	return req, host, true
 }
 
-// setupApplyWizard applies the wizard payload. wr == nil is the legacy request
-// shape (create the owner account only) and applies nothing. reqHost is the
-// request's Host header, from which the post-restart admin-panel URL is
-// derived. The account exists from here on, so any failure downgrades to a
-// warning, never a 5xx that would orphan the owner behind an opaque error.
+// setupApplyWizard applies the wizard payload; wr == nil (legacy) applies nothing. The account exists from
+// here on, so any failure downgrades to a warning, never a 5xx that would orphan the owner.
 func setupApplyWizard(ctx context.Context, setup *service.SetupService, wr *setupWizardRequest, uid int64, reqHost string, opts SetupOptions) ([]string, bool, string) {
 	var warnings []string
 	restartRequired := false
@@ -316,8 +278,8 @@ func setupApplyWizard(ctx context.Context, setup *service.SetupService, wr *setu
 			"could not save server settings: "+err.Error()+" — adjust them later in the admin panel's Settings page")
 	}
 	if opts.ConfigPath != "" && opts.RunningCfg != nil && updater.RunningInContainer() {
-		// config.yaml is a read-only mount (or lives in the container layer),
-		// so the settings go to the overrides file in the data volume.
+		// config.yaml is read-only (or in the container layer), so settings go to the overrides file in the data
+		// volume.
 		restartRequired, restartURL = setupSaveContainerOverrides(ctx, setup, wr, uid, reqHost, opts, &warnings)
 		return warnings, restartRequired, restartURL
 	}
@@ -339,12 +301,9 @@ func setupApplyWizard(ctx context.Context, setup *service.SetupService, wr *setu
 	return warnings, restartRequired, restartURL
 }
 
-// setupSaveContainerOverrides persists the wizard's startup settings through
-// config-overrides.json, the durable file in the data volume. The merged
-// result is checked with config.Preview first (the twin of verifyLoadable), so
-// a change that would stop the next boot is refused rather than saved. Any
-// failure appends a warning and requests no restart; the account already
-// exists. Neither values nor secrets are logged.
+// setupSaveContainerOverrides persists startup settings via config-overrides.json in the data volume. The
+// merge is checked with config.Preview first so a change that would stop the next boot is refused. Failure
+// appends a warning and requests no restart. Neither values nor secrets are logged.
 func setupSaveContainerOverrides(ctx context.Context, setup *service.SetupService, wr *setupWizardRequest, uid int64, reqHost string, opts SetupOptions, warnings *[]string) (bool, string) {
 	path := config.OverridesPath(opts.RunningCfg.Server.DataDir)
 	fail := func(err error) (bool, string) {
@@ -379,14 +338,9 @@ func setupSaveContainerOverrides(ctx context.Context, setup *service.SetupServic
 	return false, ""
 }
 
-// setupRestartAfterResponse hands the setup-wizard restart off to main.go.
-//
-// Called by handleSetup only after it has written its response, so the browser
-// receives the token and reconnect URL before the process goes away. Like
-// handleRestoreBackup / handleApplyUpdate: broadcast, then request the restart
-// in a goroutine; main.go drains the server and performs the handoff.
-// tryDirectRestartPending loses only to an in-flight update or restore, which
-// will itself restart the process, so skipping is correct then.
+// setupRestartAfterResponse hands the restart off to main.go. Called only after the response is written so
+// the browser gets the token and reconnect URL first. tryDirectRestartPending loses only to an in-flight
+// update or restore, which restarts the process itself, so skipping is correct then.
 func setupRestartAfterResponse(hub HubBroadcaster, opts SetupOptions) {
 	if !tryDirectRestartPending() {
 		slog.Warn("setup restart skipped: another restart-sensitive operation is already in progress")
@@ -402,25 +356,17 @@ func setupRestartAfterResponse(hub HubBroadcaster, opts SetupOptions) {
 	go restartFn("setup_wizard")
 }
 
-// restartBroadcastDelaySeconds is the countdown clients are told before the
-// setup-wizard restart. There are normally no chat clients connected during
-// first-run setup, so this is informational.
+// restartBroadcastDelaySeconds is the countdown clients are told; informational, as no chat clients are
+// normally connected at first run.
 const restartBroadcastDelaySeconds = 3
 
-// isSameOrigin reports whether a browser-supplied Origin names this same
-// server, by comparing its host:port against the request's Host header.
+// isSameOrigin reports whether Origin names this server by comparing host:port with the request's Host.
+// Browsers send Origin on same-origin POSTs too (Chrome and Edge always, Firefox since 70), so measuring
+// against the empty allowed_origins would fail every new install.
 //
-// Browsers send Origin on same-origin POSTs too (Chrome and Edge always,
-// Firefox since 70), so the panel's own first-run setup call carries one.
-// Measured against allowed_origins, which is empty in a fresh config, setup
-// would fail with "cross-origin setup request blocked" on every new install.
-//
-// Scheme is deliberately not compared: nothing in this server derives the
-// external scheme (no r.TLS or X-Forwarded-Proto handling), so a
-// TLS-terminating proxy would make a scheme check reject legitimate requests.
-// Matching host:port is enough: forging it requires already serving content
-// on this exact host and port, and cross-site attackers cannot set Origin at
-// all, since the browser does.
+// Scheme is deliberately not compared: nothing here derives the external scheme, so a TLS-terminating proxy
+// would make a scheme check reject legitimate requests. Host:port suffices: forging it needs a page already
+// served from that host and port, and cross-site attackers cannot set Origin.
 func isSameOrigin(origin, host string) bool {
 	if host == "" {
 		return false
@@ -433,9 +379,8 @@ func isSameOrigin(origin, host string) bool {
 	return strings.EqualFold(u.Host, host)
 }
 
-// isSetupOriginAllowed checks if the given origin is permitted by the
-// configured allowed_origins list. Wildcard "*" allows any origin.
-// An empty list denies all cross-origin requests (safe default).
+// isSetupOriginAllowed checks origin against allowed_origins; "*" allows any, an empty list denies all
+// cross-origin (safe default).
 func isSetupOriginAllowed(origin string, allowed []string) bool {
 	for _, a := range allowed {
 		if a == "*" || strings.EqualFold(a, origin) {

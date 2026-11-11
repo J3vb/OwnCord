@@ -1,10 +1,7 @@
 package config
 
-// SettingCopy is the owner-facing text for one panel-editable key: label, what
-// it does, the value most owners should run and why, and what changing it
-// affects. Every override applies at the next restart, so the page says so once
-// rather than per key. The completeness test pins that every editable key has an
-// entry.
+// SettingCopy is the owner-facing text for one panel-editable key: label, what it does, the recommended
+// value and why, and what changing it affects. The completeness test pins an entry per editable key.
 type SettingCopy struct {
 	Label       string `json:"label"`
 	Description string `json:"description"`

@@ -5,20 +5,15 @@ import (
 	"net/netip"
 )
 
-// blockedPrefix is one non-global address range and the reason it is refused.
-// The reason reaches the caller's error, so a refusal reads as a policy
-// decision rather than an anonymous failure.
+// blockedPrefix is one non-global address range and the reason reported in the error.
 type blockedPrefix struct {
 	prefix netip.Prefix
 	why    string
 }
 
-// blockedPrefixes is the whole non-global set (docs/trust-model.md, the
-// desktop preview destination policy, clause 3). It is a denylist of the IANA
-// special-purpose address registries rather than an allowlist of global
-// unicast, because a new global allocation must not need a code change here to
-// become reachable. TestClassifyAddr_RejectsEveryNonGlobalClass names every
-// range so a deletion fails loudly.
+// blockedPrefixes is the non-global set (docs/trust-model.md clause 3): a
+// denylist of the IANA special-purpose registries, so a new global allocation
+// needs no code change to become reachable.
 var blockedPrefixes = []blockedPrefix{
 	// IPv4 — RFC 6890 and the registries it points at.
 	{netip.MustParsePrefix("0.0.0.0/8"), "this-network (RFC1122)"},
@@ -37,8 +32,7 @@ var blockedPrefixes = []blockedPrefix{
 	{netip.MustParsePrefix("224.0.0.0/4"), "multicast (RFC5771)"},
 	{netip.MustParsePrefix("240.0.0.0/4"), "reserved (RFC1112), including the limited broadcast address"},
 
-	// IPv6. IPv4-mapped addresses never reach this table: classify unmaps
-	// first, so ::ffff:10.0.0.1 is judged as 10.0.0.1 by the IPv4 rows above.
+	// IPv6. IPv4-mapped addresses never reach this table; they are unmapped first.
 	{netip.MustParsePrefix("::/128"), "unspecified"},
 	{netip.MustParsePrefix("::1/128"), "loopback"},
 	{netip.MustParsePrefix("64:ff9b:1::/48"), "local-use IPv4/IPv6 translation (RFC8215)"},
@@ -46,10 +40,8 @@ var blockedPrefixes = []blockedPrefix{
 	{netip.MustParsePrefix("2001::/23"), "IETF protocol assignments, including Teredo and IPv6 benchmarking (RFC2928)"},
 	{netip.MustParsePrefix("2001:20::/28"), "ORCHIDv2 (RFC7343)"},
 	{netip.MustParsePrefix("fec0::/10"), "deprecated site-local (RFC3879)"},
-	// ::/96 is the deprecated IPv4-compatible form — another IPv4 address in
-	// disguise, and unlike the IPv4-mapped form Unmap does not normalise it.
-	// It is listed before the loopback and unspecified rows below only
-	// because it contains them; the reason it reports is the accurate one.
+	// ::/96 is the deprecated IPv4-compatible form, an IPv4 address in disguise
+	// that Unmap does not normalise. Listed before the rows it contains so its reason is the one reported.
 	{netip.MustParsePrefix("::/96"), "deprecated IPv4-compatible (RFC4291)"},
 	{netip.MustParsePrefix("2001:db8::/32"), "documentation (RFC3849)"},
 	{netip.MustParsePrefix("2002::/16"), "6to4 (RFC3056)"},
@@ -60,35 +52,24 @@ var blockedPrefixes = []blockedPrefix{
 	{netip.MustParsePrefix("ff00::/8"), "multicast (RFC4291)"},
 }
 
-// nat64WellKnown is RFC 6052's well-known prefix. A NAT64 translator strips it
-// and delivers the packet to the IPv4 address in the low 32 bits, so that
-// embedded address is the one the policy has to judge.
+// nat64WellKnown is RFC 6052's well-known prefix. A NAT64 translator delivers
+// to the IPv4 address in the low 32 bits, so that is the address to judge:
+// blocking the prefix cuts IPv6-only servers off from IPv4 upstreams, while
+// allowing it would reach 169.254.169.254 as 64:ff9b::a9fe:a9fe.
 //
-// Blocking the prefix cuts an IPv6-only server (DNS64 synthesises these for
-// every IPv4-only host) off from every IPv4 upstream. Allowing it hands an
-// attacker every range this table refuses: 64:ff9b::a9fe:a9fe is
-// 169.254.169.254, the cloud metadata service. So it is unwrapped and the
-// embedded address classified.
-//
-// Known limit, shared with the trust-model contract: an operator-chosen
-// network-specific prefix (RFC 6052 §2.2) is indistinguishable from any other
-// global address, so a NAT64 deployment using one is invisible here.
+// Known limit: an operator-chosen network-specific prefix (RFC 6052 §2.2) looks
+// like any global address and is invisible here.
 var nat64WellKnown = netip.MustParsePrefix("64:ff9b::/96")
 
-// ClassifyAddr reports nil when addr is a globally routable unicast address
-// this server may dial, and a wrapped ErrBlockedAddress otherwise.
-//
-// It is exported so a call site can wrap it in a Policy.Classify to widen or
-// narrow the set (the seam this package's own tests use). Production policies
-// leave Policy.Classify nil, which selects exactly this function;
-// TestNoProductionOverrideOfClassify keeps it that way.
+// ClassifyAddr reports nil when addr is a globally routable unicast address,
+// and a wrapped ErrBlockedAddress otherwise. Production policies leave
+// Policy.Classify nil, which selects this function.
 func ClassifyAddr(addr netip.Addr) error {
 	if !addr.IsValid() {
 		return fmt.Errorf("%w: not an IP address", ErrBlockedAddress)
 	}
-	// Unmap before anything else. ::ffff:127.0.0.1 is 127.0.0.1 on the wire,
-	// so classifying it as an IPv6 address would let every IPv4 rule below be
-	// bypassed by respelling the address.
+	// Unmap first: ::ffff:127.0.0.1 is 127.0.0.1 on the wire, and judging it as
+	// IPv6 would bypass every IPv4 rule.
 	a := addr.Unmap()
 	if a.Zone() != "" {
 		return fmt.Errorf("%w: %s carries a zone, which only scoped (non-global) addresses do", ErrBlockedAddress, addr)
@@ -106,9 +87,7 @@ func ClassifyAddr(addr netip.Addr) error {
 			return fmt.Errorf("%w: %s is %s", ErrBlockedAddress, a, b.why)
 		}
 	}
-	// Belt and braces for anything the table above has not caught yet: the
-	// stdlib predicates cover the same classes from a different angle, so a
-	// range added to IANA's registry before it is added here still fails.
+	// Belt and braces: stdlib predicates catch ranges IANA adds before this table does.
 	switch {
 	case a.IsLoopback():
 		return fmt.Errorf("%w: %s is loopback", ErrBlockedAddress, a)

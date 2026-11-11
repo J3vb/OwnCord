@@ -1,7 +1,6 @@
 // Synchronous failure and claim steps of the voice join orchestration, split
 // from joinOrchestration.ts. Each is a whole synchronous step run right after
 // the ownership check in JoinOrchestration; none awaits.
-import type { Room } from "livekit-client";
 import { leaveVoiceChannel } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
 import { logIceConnectionInfo } from "../../lib/voice/livekitDiagnostics";
@@ -18,6 +17,7 @@ import {
   ownsConnectAttempt,
   type JoinRequest,
 } from "./joinSupport";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 // Same logger tag as before the extraction, so the join log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -32,7 +32,7 @@ const log = createLogger("livekitSession");
  *  currentChannelId that the newer join just set. */
 export function onKeyExchangeFailed(
   host: JoinHost,
-  localRoom: Room,
+  localRoom: VoiceRoom,
   channelId: number,
   myGeneration: number,
   traceId: number,
@@ -85,7 +85,7 @@ export function onKeyExchangeFailed(
  *  (a queued join, a leave, a room event) can land in between. */
 export function claimSession(
   host: JoinHost,
-  localRoom: Room,
+  localRoom: VoiceRoom,
   join: JoinRequest,
   resolvedUrl: string,
   traceId: number,
@@ -124,7 +124,7 @@ export function onConnectFailed(
   host: JoinHost,
   err: unknown,
   resolvedUrl: string,
-  localRoom: Room | null,
+  localRoom: VoiceRoom | null,
   channelId: number,
   myGeneration: number,
   traceId: number,

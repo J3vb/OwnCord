@@ -1,8 +1,5 @@
-// `storage` host capability.
-//
-// Plugins get a per-plugin namespaced KV store backed by the PluginStore rows.
-// Capacity and value-size caps are enforced here so a misbehaving plugin cannot
-// fill the database.
+// `storage` host capability: a per-plugin KV store with capacity and value-size
+// caps so a plugin cannot fill the database.
 
 package plugin
 
@@ -12,10 +9,8 @@ import (
 )
 
 // Key isolation is structural: every call passes inst.ID as the namespace and
-// no parameter lets a caller (let alone a guest module) name another plugin's
-// namespace. The plugin_kv PRIMARY KEY (plugin_id, key)
-// (migrations/015_plugins.sql) makes the same split the storage layout, so two
-// plugins using the same key never collide.
+// no parameter lets a caller name another plugin's, matching the plugin_kv
+// PRIMARY KEY (plugin_id, key).
 const (
 	maxPluginKeyBytes   = 256       // 256 B per key
 	maxPluginValueBytes = 64 * 1024 // 64 KB per value

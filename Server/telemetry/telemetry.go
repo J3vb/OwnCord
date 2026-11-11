@@ -1,21 +1,7 @@
-// Package telemetry wires the OpenTelemetry SDK for OwnCord.
-//
-// This file provides the public API surface and a no-op default implementation
-// that compiles without any external dependencies. The real OpenTelemetry
-// providers live in telemetry_otel.go behind the `otel` build tag, so the
-// default build ships a stub that satisfies every call site at zero binary
-// cost. To enable real OTel:
-//
-//	go get go.opentelemetry.io/otel \
-//	       go.opentelemetry.io/otel/sdk \
-//	       go.opentelemetry.io/otel/exporters/prometheus \
-//	       go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc \
-//	       go.opentelemetry.io/contrib/instrumentation/github.com/go-chi/chi/otelchi
-//	go build -tags otel ./...
-//
-// The fallback API is intentionally tiny: the rest of the codebase can use
-// Tracer / Meter / Counter / Histogram without caring whether the real SDK is
-// compiled in.
+// Package telemetry wires the OpenTelemetry SDK for OwnCord. This file is the
+// public API and a dependency-free no-op default; the real providers live in
+// telemetry_otel.go behind the `otel` build tag, so call sites never care
+// whether the SDK is compiled in.
 package telemetry
 
 import (
@@ -25,8 +11,7 @@ import (
 	"time"
 )
 
-// ShutdownFunc is returned by Init and must be called on server shutdown to
-// flush exporters. The no-op implementation returns nil.
+// ShutdownFunc is returned by Init and flushes exporters on shutdown; the no-op returns nil.
 type ShutdownFunc func(context.Context) error
 
 // Counter is a monotonically increasing integer metric.
@@ -152,8 +137,7 @@ type noopGauge struct{}
 
 func (noopGauge) Set(context.Context, float64, ...Attr) {}
 
-// TimeSince records the elapsed time since start as seconds on h. Convenience
-// shim used by Hub / service-layer instrumentation.
+// TimeSince records the seconds elapsed since start on h.
 func TimeSince(ctx context.Context, h Histogram, start time.Time, attrs ...Attr) {
 	if h == nil {
 		return

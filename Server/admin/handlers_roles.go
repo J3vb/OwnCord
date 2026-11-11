@@ -9,25 +9,20 @@ import (
 )
 
 //
-// The whole group sits behind requirePerm(MANAGE_ROLES); RoleService re-checks
-// the bit and owns the hierarchy rules (manage only below your own position,
-// never grant a bit you lack, Owner/default undeletable), so these handlers
-// stay adapters: decode, call, respond.
-//
-// Permission-cache invalidation and the live fan-out (the hub's role refresh
-// worker) belong to RoleService: a second caller of the
-// service gets the same effects, and nothing after the commit reads
-// r.Context(), so a request deadline or an aborted client cannot cut them.
+// The whole group sits behind requirePerm(MANAGE_ROLES); RoleService re-checks the bit and owns the hierarchy
+// rules (manage only below your own position, never grant a bit you lack, Owner/default undeletable), so
+// handlers stay adapters. Permission-cache invalidation and the live fan-out belong to RoleService, so a
+// second caller gets the same effects and nothing after the commit reads r.Context(): a request deadline or
+// aborted client cannot cut them.
 
-// roleServiceUnavailable writes the fail-closed response used when the server
-// was constructed without a RoleService. Refusing beats falling back to an
-// unchecked UPDATE, mirroring the nil-ModerationService branches.
+// roleServiceUnavailable is the fail-closed response when the server was built without a RoleService:
+// refusing beats an unchecked UPDATE (as the nil-ModerationService branches).
 func roleServiceUnavailable(w http.ResponseWriter) {
 	writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "role service unavailable")
 }
 
-// writeRoleErr maps RoleService errors onto admin API responses. Separate from
-// writeModerationErr only because NOT_FOUND means "role", not "user".
+// writeRoleErr maps RoleService errors; separate from writeModerationErr only because NOT_FOUND means "role",
+// not "user".
 func writeRoleErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrConflict) {
 		writeErr(w, http.StatusConflict, httperr.CodeRoleConflict, err.Error())
@@ -36,9 +31,8 @@ func writeRoleErr(w http.ResponseWriter, err error) {
 	writeSvcErr(w, err, "role not found", "", "role action failed")
 }
 
-// roleRequest is the JSON body for POST /roles and PATCH /roles/{id}. Every
-// field is a pointer so PATCH can tell "absent" from "set to zero" — a mask of
-// 0 (a role that may do nothing) and an empty color are both legitimate values.
+// roleRequest is the body for POST /roles and PATCH /roles/{id}. Fields are pointers so PATCH can tell absent
+// from zero: a mask of 0 and an empty color are both legitimate.
 type roleRequest struct {
 	Name        *string `json:"name"`
 	Color       *string `json:"color"`
@@ -66,8 +60,7 @@ func (r roleRequest) toInput() service.RoleInput {
 	}
 }
 
-// reorderRolesRequest is the JSON body for PATCH /roles/reorder: the ids of
-// every role below the caller's own rank, highest first.
+// reorderRolesRequest lists the ids of every role below the caller's rank, highest first.
 type reorderRolesRequest struct {
 	RoleIDs []int64 `json:"role_ids"`
 }

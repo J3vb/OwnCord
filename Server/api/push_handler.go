@@ -1,11 +1,7 @@
-// push_handler.go holds the Web Push subscription STORAGE endpoints: a signed-in
-// user registers, lists and revokes their own subscriptions, and gets the
-// server's VAPID public key to create one. Nothing here dispatches a push.
-// Default-off, like gif_handler.go: routes are always mounted, but with
-// push.enabled false every one answers 503 PUSH_DISABLED from a middleware that
-// runs AFTER session auth and BEFORE any handler reads the body, so a disabled
-// server authenticates the caller (a probe cannot test credentials for free) and
-// then refuses.
+// push_handler.go holds the Web Push subscription STORAGE endpoints: a user registers, lists and revokes
+// their own subscriptions and gets the VAPID public key. Nothing here dispatches a push. With push.enabled
+// false every route answers 503 PUSH_DISABLED from a middleware that runs AFTER session auth and BEFORE any
+// body is read, so a probe cannot test credentials for free.
 
 package api
 
@@ -26,10 +22,8 @@ import (
 // and a device label.
 const pushSubscribeMaxBodySize = 8 << 10 // 8 KiB
 
-// MountPushRoutes registers the /api/v1/push endpoints. sessions gates
-// authentication like every other authenticated REST surface; enabled is
-// cfg.Push.Enabled at mount time (routes never move; flip the key and restart,
-// as for GIF and browser hosting).
+// MountPushRoutes registers the /api/v1/push endpoints; enabled is cfg.Push.Enabled at mount time (flip the
+// key and restart).
 func MountPushRoutes(r chi.Router, sessions *service.SessionService, push *service.PushService, enabled bool) {
 	r.Route("/api/v1/push", func(r chi.Router) {
 		r.Use(AuthMiddleware(sessions))

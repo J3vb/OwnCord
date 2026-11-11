@@ -10,11 +10,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// requireChannelRead resolves a channel and asserts the user may read its
-// CONTENT: DM membership for a DM, otherwise READ_MESSAGES plus, for a labelled
-// channel, the caller's own acknowledgement (permissions.CanReadContent). A DM
-// the user is not in is ErrNotFound, not ErrForbidden: its existence is not for an
-// outsider to learn. Every REST read of channel content shares this gate.
+// requireChannelRead asserts the user may read the channel's CONTENT: DM membership, else READ_MESSAGES plus,
+// for a labelled channel, the caller's own acknowledgement. A DM the user is not in is ErrNotFound, not
+// ErrForbidden, so its existence is not disclosed. Every REST read of channel content shares this gate.
 func (s *messageReads) requireChannelRead(ctx context.Context, userID, channelID int64) error {
 	if channelID <= 0 {
 		return fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
@@ -40,7 +38,6 @@ func (s *messageReads) GetMessages(ctx context.Context, userID, channelID, befor
 		limit = 100
 	}
 
-	// Fetch one extra to detect has_more.
 	msgs, err := s.st.GetMessagesForAPI(ctx, channelID, before, limit+1, userID)
 	if err != nil {
 		slog.Error("MessageService.GetMessages", "err", err, "channel_id", channelID)
@@ -55,9 +52,8 @@ func (s *messageReads) GetMessages(ctx context.Context, userID, channelID, befor
 	return msgs, hasMore, nil
 }
 
-// GetMessagesAfter retrieves the page of messages newer than `after`, oldest
-// first, with GetMessages' read gate. hasMore is false once the page reaches the
-// newest message, the client's cue to re-attach to the live tail.
+// GetMessagesAfter returns the page of messages newer than after, oldest first, with GetMessages' read gate.
+// hasMore is false once the page reaches the newest message.
 func (s *messageReads) GetMessagesAfter(ctx context.Context, userID, channelID, after int64, limit int) ([]db.MessageAPIResponse, bool, error) {
 	if after <= 0 {
 		return nil, false, fmt.Errorf("%w: after must be positive", ErrBadRequest)
@@ -73,7 +69,6 @@ func (s *messageReads) GetMessagesAfter(ctx context.Context, userID, channelID, 
 		limit = 100
 	}
 
-	// Fetch one extra to detect has_more.
 	msgs, err := s.st.GetMessagesAfterForAPI(ctx, channelID, after, limit+1, userID)
 	if err != nil {
 		slog.Error("MessageService.GetMessagesAfter", "err", err, "channel_id", channelID)
@@ -87,10 +82,8 @@ func (s *messageReads) GetMessagesAfter(ctx context.Context, userID, channelID, 
 	return msgs, hasMore, nil
 }
 
-// requireSearchChannelAccess is SearchMessages' single-channel gate. Search keeps
-// its own access checks and error codes (a DM non-participant is ErrForbidden
-// here, ErrNotFound elsewhere), so the NSFW check is repeated here or search
-// becomes a leak path.
+// requireSearchChannelAccess is SearchMessages' single-channel gate. Search keeps its own error codes (a DM
+// non-participant is ErrForbidden here), so the NSFW check is repeated or search becomes a leak path.
 func (s *messageReads) requireSearchChannelAccess(ctx context.Context, userID, channelID int64) error {
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
@@ -120,10 +113,8 @@ type MessageWindow struct {
 	HasMoreAfter  bool                    `json:"has_more_after"`
 }
 
-// GetMessagesAround retrieves the window of `limit` messages centred on
-// messageID, oldest first, with GetMessages' read gate. The centre must be a live
-// message in this channel; one from another channel, nonexistent, or soft-deleted
-// (history omits it, so there is no row to centre on) is ErrNotFound.
+// GetMessagesAround returns the window of limit messages centred on messageID, oldest first, with
+// GetMessages' read gate. The centre must be a live message in this channel, else ErrNotFound.
 func (s *messageReads) GetMessagesAround(ctx context.Context, userID, channelID, messageID int64, limit int) (*MessageWindow, error) {
 	if messageID <= 0 {
 		return nil, fmt.Errorf("%w: message_id must be positive", ErrBadRequest)
@@ -148,8 +139,7 @@ func (s *messageReads) GetMessagesAround(ctx context.Context, userID, channelID,
 		return nil, fmt.Errorf("%w: message not found in this channel", ErrNotFound)
 	}
 
-	// The centre takes one slot, half the rest sits before it. One extra on each side
-	// yields the has-more flags from the same query.
+	// The centre takes one slot; one extra on each side yields the has-more flags.
 	beforeCount := limit / 2
 	afterCount := limit - beforeCount - 1
 
@@ -161,7 +151,6 @@ func (s *messageReads) GetMessagesAround(ctx context.Context, userID, channelID,
 
 	centreIdx := slices.IndexFunc(msgs, func(m db.MessageAPIResponse) bool { return m.ID == messageID })
 	if centreIdx < 0 {
-		// The centre vanished between the lookup and the window query.
 		return nil, fmt.Errorf("%w: message not found in this channel", ErrNotFound)
 	}
 

@@ -3,7 +3,7 @@
  * stop path ends in, and the disable that announces it.
  */
 
-import type { LocalTrack, Room } from "livekit-client";
+import type { LocalTrack } from "livekit-client";
 import { setLocalScreenshare } from "./shareHostLinks";
 import { createLogger } from "@lib/logger";
 import { recordEvent } from "@lib/diagnostics/eventSink";
@@ -13,6 +13,7 @@ import {
   type ScreenTrackState,
   type VideoTrackDeps,
 } from "./videoTrackState";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("screenShare");
 
@@ -54,7 +55,7 @@ export function watchScreenEnded(
   return cleanup;
 }
 
-export function stopManualScreenTracks(state: ScreenTrackState, room: Room | null): void {
+export function stopManualScreenTracks(state: ScreenTrackState, room: VoiceRoom | null): void {
   state.screenTrackEndedCleanup?.();
   state.stopResolutionRecovery?.();
   state.stopResolutionRecovery = undefined;

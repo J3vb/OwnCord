@@ -14,8 +14,8 @@ type Role struct {
 	Mentionable bool `json:"mentionable"`
 }
 
-// RoleMentions is the wire field for the roles a message pinged. Embedded in
-// MessageAPIResponse; never nil once a row has been enriched.
+// RoleMentions is the wire field for the roles a message pinged; embedded in
+// MessageAPIResponse, never nil once enriched.
 type RoleMentions struct {
 	MentionRoles []int64 `json:"mention_roles"`
 }

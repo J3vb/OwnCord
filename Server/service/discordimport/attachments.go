@@ -20,9 +20,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
-// copyAttachment stores one local file as an unlinked attachment of the import
-// account. It returns "" for a skipped file and an error only for a failure that
-// should stop the import.
+// copyAttachment stores one local file as an unlinked attachment of the import account. Returns "" for a
+// skipped file and an error only for a failure that should stop the import.
 func (r *Runner) copyAttachment(ctx context.Context, ex Export, st *runState, a *Attachment) (string, error) {
 	media, err := ex.OpenMedia(a.URL)
 	if errors.Is(err, ErrRemoteMedia) || errors.Is(err, ErrMediaMissing) {
@@ -46,8 +45,7 @@ func (r *Runner) copyAttachment(ctx context.Context, ex Export, st *runState, a 
 	}
 	res, err := r.cfg.Uploads.ReserveHeadroom(ctx, max(size, 0))
 	if err != nil {
-		// Low disk would only get worse, so it ends the import rather than
-		// dropping files one by one.
+		// Low disk would only get worse, so it ends the import rather than dropping files one by one.
 		return "", fmt.Errorf("reserving space: %w", err)
 	}
 	defer res.Settle(ctx)
@@ -81,10 +79,8 @@ func (r *Runner) copyAttachment(ctx context.Context, ex Export, st *runState, a 
 	return fileID, nil
 }
 
-// imageSize reads the size of a PNG or GIF from its first bytes, where the
-// header lives. A JPEG is left unmeasured: its size sits after the metadata
-// and its EXIF orientation can swap the sides, which this cheap pass cannot
-// settle, so clients size it once it loads.
+// imageSize reads the size of a PNG or GIF from its first bytes. A JPEG is left unmeasured: its size sits
+// after the metadata and EXIF orientation can swap the sides, so clients size it once it loads.
 func imageSize(head []byte, mime string) (width, height *int) {
 	if mime != "image/png" && mime != "image/gif" {
 		return nil, nil
@@ -96,9 +92,8 @@ func imageSize(head []byte, mime string) (width, height *int) {
 	return &cfg.Width, &cfg.Height
 }
 
-// cleanFilename is the display name an attachment keeps: the export's file name
-// (else the last part of its path) with directory parts, control and invisible
-// characters removed, cut to fit.
+// cleanFilename is the display name an attachment keeps: the export's file name (else the last path part)
+// with directory parts, control and invisible characters removed, cut to fit.
 func cleanFilename(name, ref string) string {
 	if strings.TrimSpace(name) == "" {
 		name = ref

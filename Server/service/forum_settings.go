@@ -10,12 +10,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// Forum settings and tags: a forum's settings are the require-tag flag, the default
-// auto-archive period its posts start with, and its tag list. They are written as
-// one whole value (a full replace, like Discord's available_tags): a tag without an
-// id is created, a listed id is renamed, re-emojied and repositioned, and a tag the
-// list leaves out is deleted along with its post links. One transaction, one audit
-// row, one channel_update.
+// Forum settings and tags: require-tag flag, default auto-archive period and tag list,
+// written as one whole value (full replace, like Discord's available_tags): a tag without
+// an id is created, a listed id renamed/re-emojied/repositioned, an omitted tag deleted
+// with its post links. One transaction, one audit row, one channel_update.
 
 const (
 	// MaxForumTagNameLen bounds a forum tag's name in runes.
@@ -24,26 +22,24 @@ const (
 	MaxForumTags = db.MaxForumTags
 )
 
-// forumAutoArchiveMinutes are the periods a forum may offer its posts: the
-// same four a thread takes (migration 074).
+// forumAutoArchiveMinutes are the periods a forum may offer its posts: the same four a thread takes.
 var forumAutoArchiveMinutes = []int{60, 1440, 4320, 10080}
 
-// ForumStore is the persistence behind forum settings. *db.DB satisfies it; a Store
-// that does not makes the operations answer ErrInternal. Kept beside Store because
-// Store's surface is ratcheted (datastore_ratchet_test.go).
+// ForumStore is the persistence behind forum settings; a Store that is not a *db.DB makes
+// the operations answer ErrInternal. Kept beside Store because Store's surface is
+// ratcheted (datastore_ratchet_test.go).
 type ForumStore interface {
 	ReplaceForumSettings(ctx context.Context, forumID int64, in db.ForumSettingsWrite) ([]db.ForumTag, error)
 }
 
-// ForumTagInput is one tag of a forum settings write. ID 0 creates the tag.
+// ForumTagInput is one tag of a forum settings write.
 type ForumTagInput struct {
 	ID    int64
 	Name  string
 	Emoji string
 }
 
-// ForumSettingsInput is the whole of a forum's settings. The tag order is the
-// display order.
+// ForumSettingsInput is the whole of a forum's settings; tag order is display order.
 type ForumSettingsInput struct {
 	RequireTag                bool
 	DefaultAutoArchiveMinutes int
@@ -57,11 +53,9 @@ func (s *ChannelService) forumStore() (ForumStore, error) {
 	return s.forum, nil
 }
 
-// cleanForumSettings applies the settings contract: the auto-archive period is
-// one of the four, there are at most MaxForumTags tags, each name is cleaned,
-// 1 to MaxForumTagNameLen runes and unique ignoring case, each emoji passes
-// the reaction emoji rules, and each id appears once. Every violation is
-// ErrBadRequest with the field's own message.
+// cleanForumSettings applies the settings contract: auto-archive is one of the four, at
+// most MaxForumTags tags, each name cleaned, 1..MaxForumTagNameLen runes and unique
+// ignoring case, each emoji valid, each id once. Violations are ErrBadRequest.
 func cleanForumSettings(in ForumSettingsInput) (db.ForumSettingsWrite, error) {
 	ok := false
 	for _, m := range forumAutoArchiveMinutes {
@@ -108,10 +102,9 @@ func cleanForumSettings(in ForumSettingsInput) (db.ForumSettingsWrite, error) {
 	return out, nil
 }
 
-// AdminUpdateForumSettings validates and writes a forum's settings, audits it
-// and returns the committed channel row read on the uncancellable tail, for
-// the caller to fan out as a channel_update. existing must be the resolved
-// guild channel: anything that is not a forum is ErrBadRequest.
+// AdminUpdateForumSettings validates and writes a forum's settings, audits it and returns
+// the channel row read on the uncancellable tail, for the caller's channel_update.
+// existing must be the resolved guild channel; a non-forum is ErrBadRequest.
 func (s *ChannelService) AdminUpdateForumSettings(ctx context.Context, actorID int64, existing *db.Channel, in ForumSettingsInput) (*db.Channel, error) {
 	if existing == nil || existing.Type != db.ForumTypeName {
 		return nil, fmt.Errorf("forum settings apply to forum channels only%.0w", ErrBadRequest)

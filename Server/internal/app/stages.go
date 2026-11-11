@@ -1,29 +1,24 @@
 package app
 
-// stage is one start step, in start order. The name is what a failure is
-// reported as (`starting audit-writer: ...`) and the key the failure-injection
-// test selects on.
+// stage is one start step; name is how a failure is reported and what the
+// failure-injection test selects on.
 type stage struct {
 	name  string
 	start func() error
 }
 
-// stages is the start sequence. Close walks the steps these register in
-// reverse, so this list is the shutdown order read backwards. Three orderings
-// are load-bearing:
+// stages is the start sequence; Close walks it in reverse. Three orderings are
+// load-bearing:
 //
-//   - the database opens before the audit writer and event persistence start,
-//     so both stop before the handle closes;
-//   - ACME and the HTTP server start after the maintenance loop, so the reverse
-//     walk drains in-flight HTTP handlers (whose broadcasts must still reach a
-//     live hub) before anything else is stopped;
-//   - signals are armed before the http stage, whose bind retries for about ten
-//     seconds while the port is in use: a SIGINT/SIGTERM in that window must
-//     drain through Close, not kill the process with the LiveKit child and the
-//     audit and event queues already running.
+//   - the database opens before the audit writer and event persistence, so
+//     both stop before the handle closes;
+//   - ACME and HTTP start after the maintenance loop, so the reverse walk
+//     drains in-flight handlers (whose broadcasts need a live hub) first;
+//   - signals are armed before the http stage, whose bind retries about ten
+//     seconds: a SIGINT in that window must drain through Close, not kill the
+//     process with LiveKit and the queues running.
 //
-// It lives in its own file so the list can grow without pushing lifecycle.go
-// past the repository's 500-line file cap.
+// It lives in its own file to keep lifecycle.go under the 500-line file cap.
 func (a *App) stages() []stage {
 	return []stage{
 		{"file-limit", a.startFileLimit},
@@ -55,8 +50,8 @@ func (a *App) stages() []stage {
 	}
 }
 
-// startFileLimit raises the process's soft open-file limit toward its hard
-// limit and reports the result (see raiseFileLimit; a no-op on Windows).
+// startFileLimit raises the soft open-file limit toward the hard limit (see
+// raiseFileLimit).
 func (a *App) startFileLimit() error {
 	raiseFileLimit(a.log, a.cfg.Server.MaxWSConnections)
 	return nil

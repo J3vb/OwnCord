@@ -10,8 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// ReadPointer and ReadPointerOp re-export the db shapes so ws callers stay off
-// the db package.
+// ReadPointer and ReadPointerOp re-export the db shapes so ws callers stay off the db package.
 type (
 	ReadPointer   = db.ReadPointer
 	ReadPointerOp = db.ReadPointerOp
@@ -24,8 +23,7 @@ const (
 	MarkUnread   = db.MarkUnread
 )
 
-// ReadStateNotifier delivers a read_state frame to the one reader whose read
-// pointer just moved. The hub installs it next to the mention-count notifier.
+// ReadStateNotifier delivers a read_state frame to the one reader whose read pointer just moved.
 type ReadStateNotifier interface {
 	NotifyReadState(userID, channelID int64, rs db.ReadPointer)
 }
@@ -35,19 +33,14 @@ func (s *MessageService) SetReadStateNotifier(n ReadStateNotifier) {
 	s.readStateNotifier = n
 }
 
-// MoveReadPointer moves userID's read pointer in channelID and tells them the
-// result. It lives on mentionState because that part owns mentionEmitLocks.
-// Admission is channel_focus's (admitReadState) except that a thread is admitted
-// too (admitReadPointer): a missing channel is ErrNotFound, lost access or an
-// archived channel ErrForbidden. messageID must be positive for db.ReadUpTo and
-// db.MarkUnread (ErrBadRequest otherwise); db.ReadAtLatest ignores it. For
-// db.MarkUnread a message that is not a live message of the channel is ErrNotFound
-// (still wrapping db.ErrNotFound).
-// Lock order: the channel's mention emit lock, then the database writer, then the
-// hub's per-client send, as reverseMentionCounts already does. It is held across the write and the
-// frame so a mention_count frame from the worker or a removal cannot overtake this
-// read_state frame and the last frame matches the committed row. Never taken under
-// a hub lock; the caller runs on the read goroutine. On failure no frame is sent.
+// MoveReadPointer moves userID's read pointer in channelID and tells them the result. Admission is
+// channel_focus's (admitReadState) except that a thread is admitted too (admitReadPointer): a missing channel
+// is ErrNotFound, lost access or an archived channel ErrForbidden. messageID must be positive for db.ReadUpTo
+// and db.MarkUnread (ErrBadRequest otherwise); for MarkUnread a message that is not a live message of the
+// channel is ErrNotFound. Lock order: the channel's mention emit lock, then the database writer, then the
+// hub's per-client send (as reverseMentionCounts). It is held across the write and the frame so a
+// mention_count frame from the worker or a removal cannot overtake this read_state frame. Never taken under a
+// hub lock. On failure no frame is sent.
 func (s *mentionState) MoveReadPointer(ctx context.Context, userID, channelID int64, op db.ReadPointerOp, messageID int64) (db.ReadPointer, error) {
 	if channelID <= 0 {
 		return db.ReadPointer{}, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
@@ -59,29 +52,24 @@ func (s *mentionState) MoveReadPointer(ctx context.Context, userID, channelID in
 	if err != nil {
 		return db.ReadPointer{}, err
 	}
-	// A forum holds no messages, so it has no read state: mark_read and mark_unread on
-	// one write no read_states row, as channel_focus does. NOT_FOUND (mark_read drops
-	// it silently, mark_unread reports it).
+	// A forum holds no messages, so no read state: mark_read and mark_unread on one write no row, as
+	// channel_focus does; NOT_FOUND (mark_read drops it silently, mark_unread reports it).
 	if ch.Type == db.ForumTypeName {
 		return db.ReadPointer{}, fmt.Errorf("%w: a forum holds no messages, so it has no read state", ErrNotFound)
 	}
 
-	// The lock wait honours ctx: the mention worker holds it across a write on its own
-	// lifecycle context, so a stalled write there must end this call at the caller's
-	// deadline instead of parking the read goroutine.
+	// The lock wait honours ctx: the mention worker holds it across a write on its own lifecycle context, so a
+	// stalled write must end this call at the caller's deadline.
 	mu := s.mentionEmitLocks.forChannel(channelID)
 	if err := syncutil.LockContext(ctx, mu); err != nil {
 		return db.ReadPointer{}, fmt.Errorf("move read pointer: %w", err)
 	}
 	defer mu.Unlock()
 
-	// Read-at-latest fires on every refocus and "Mark as Read" click, and a
-	// transaction occupies the single writer even when it changes nothing. As in
-	// HandleChannelFocus: when the reader pool shows the pointer at the newest live
-	// message and no mentions, answer from those reads without a transaction. A failed
-	// read falls through to the write, the load-bearing half. The check runs under
-	// the channel's emit lock like the write, so no increment can commit between the reads and
-	// the frame.
+	// Read-at-latest fires on every refocus and "Mark as Read" click, and a transaction occupies the single
+	// writer even when it changes nothing. As in HandleChannelFocus: when the reader pool shows the pointer at
+	// the newest live message and no mentions, answer without a transaction (under the emit lock, so no
+	// increment can commit in between). A failed read falls through to the write.
 	if op == db.ReadAtLatest {
 		if rs, ok := s.readAtLatestIsCurrent(ctx, userID, channelID); ok {
 			if s.readStateNotifier != nil {
@@ -104,9 +92,8 @@ func (s *mentionState) MoveReadPointer(ctx context.Context, userID, channelID in
 	return rs, nil
 }
 
-// readAtLatestIsCurrent reports whether the stored row already says "read at the
-// newest live message, no mentions" and, if so, the ReadPointer the write would
-// return.
+// readAtLatestIsCurrent reports whether the stored row already says "read at the newest live message, no
+// mentions" and, if so, the ReadPointer the write would return.
 func (s *mentionState) readAtLatestIsCurrent(ctx context.Context, userID, channelID int64) (db.ReadPointer, bool) {
 	latestID, err := s.st.GetLatestMessageID(ctx, channelID)
 	if err != nil {
@@ -116,17 +103,16 @@ func (s *mentionState) readAtLatestIsCurrent(ctx context.Context, userID, channe
 	if err != nil || !found || lastRead != latestID || mentions != 0 {
 		return db.ReadPointer{}, false
 	}
-	// A message that committed between the two reads would make the stale
-	// latestID look current; re-read it and fall through to the write if it moved.
+	// A message committed between the two reads would make the stale latestID look current; re-read it and fall
+	// through to the write if it moved.
 	if again, err := s.st.GetLatestMessageID(ctx, channelID); err != nil || again != latestID {
 		return db.ReadPointer{}, false
 	}
 	return db.ReadPointer{LastReadMessageID: lastRead}, true
 }
 
-// admitReadPointer is admitReadState for commands that move a pointer without
-// focusing (mark_read, mark_unread): a thread is admitted through its parent, as
-// thread_focus does, since the thread panel and sidebar row mark it read.
+// admitReadPointer is admitReadState for commands that move a pointer without focusing: a thread is admitted
+// through its parent, as thread_focus does.
 func admitReadPointer(ctx context.Context, st readAdmitStore, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
 	ch, err := st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {

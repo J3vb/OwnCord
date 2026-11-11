@@ -18,20 +18,17 @@ import (
 //go:embed static
 var staticFiles embed.FS
 
-// servedCert reports the TLS certificate being served now, and tlsMode the
-// configured tls.mode, both set once at startup via SetServedCertificate. The
-// fingerprint is not a secret (it is printed in the start-up banner for users
-// to compare out of band); the dashboard and setup finish step surface it so
-// the operator need not watch stderr. In acme mode it is learned on the first
-// handshake and follows every renewal.
+// servedCert and tlsMode (set once by SetServedCertificate) are the served certificate and tls.mode. The
+// fingerprint is not a secret (the start-up banner prints it for out-of-band comparison); the dashboard and
+// setup finish step surface it so the operator need not watch stderr. In acme mode it is learned on the first
+// handshake and follows renewals.
 var (
 	servedCert = func() auth.ServedCert { return auth.ServedCert{} }
 	tlsMode    string
 )
 
-// SetServedCertificate installs the TLS mode and the served-certificate
-// source for the admin panel to surface. Call once at startup, before the
-// router serves. A nil served reports none.
+// SetServedCertificate installs the TLS mode and served-certificate source. Call once at startup before the
+// router serves; a nil served reports none.
 func SetServedCertificate(mode string, served func() auth.ServedCert) {
 	if served == nil {
 		served = func() auth.ServedCert { return auth.ServedCert{} }
@@ -39,14 +36,12 @@ func SetServedCertificate(mode string, served func() auth.ServedCert) {
 	tlsMode, servedCert = mode, served
 }
 
-// ServedCertificate is the attention panel's certificate source: the TLS
-// mode and the served leaf, zero when none is known.
+// ServedCertificate is the attention panel's certificate source: TLS mode and served leaf, zero when unknown.
 func ServedCertificate() (string, auth.ServedCert) {
 	return tlsMode, servedCert()
 }
 
-// NewHandler returns an http.Handler that serves both the admin REST API and
-// the embedded admin panel static files.
+// NewHandler returns an http.Handler serving the admin REST API and the embedded panel static files.
 //
 // Routes:
 //
@@ -59,13 +54,10 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 	// NotFound/MethodNotAllowed handler set on r would not reach it.
 	r.Mount("/api", NewAdminAPI(database, version, hub, u, logBuf, allowedOrigins, permInvalidator, svc, opts...))
 
-	// Static files — serve from the "static" sub-tree of the embedded FS.
-	// The //go:embed static directive in this package embeds as "static/…",
-	// not "admin/static/…", so we strip just "static".
+	// Serve the "static" sub-tree of the embedded FS (//go:embed static embeds as "static/…").
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
-		// This is a programming error (wrong embed path) and should never
-		// happen in production. Panic so it surfaces immediately in tests.
+		// A programming error (wrong embed path); panic so tests surface it.
 		panic("admin: failed to create static sub-FS: " + err.Error())
 	}
 
@@ -78,25 +70,19 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 	}
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		// img-src adds blob: for the Emoji section: /api/v1/emoji/{id}/image
-		// requires an Authorization header, which <img src> cannot send, so
-		// each thumbnail is fetched with the session token and swapped in as a
-		// blob: URL. blob: is same-origin, opaque and unreadable across
-		// documents — it widens nothing an attacker could aim at.
+		// img-src adds blob: for the Emoji section: /api/v1/emoji/{id}/image needs an Authorization header, which
+		// <img src> cannot send, so thumbnails are fetched with the session token and shown as blob: URLs
+		// (same-origin, opaque, unreadable across documents; widens nothing an attacker could aim at).
 		//
-		// script-src is 'self' only: the panel's scripts are the files under
-		// static/js, and its markup carries no inline <script> or on*= handler
-		// (controls name a registered handler in data-action instead), so
-		// injected markup cannot run script. style-src keeps 'unsafe-inline'
-		// because the markup still carries inline style= attributes.
+		// script-src is 'self' only: panel scripts are files under static/js and the markup has no inline <script>
+		// or on*= handler (controls name a registered handler in data-action), so injected markup cannot run
+		// script. style-src keeps 'unsafe-inline' because the markup still carries inline style= attributes.
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; img-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'")
 		_, _ = w.Write(indexHTML)
 	})
-	// The stylesheet and scripts index.html loads. chi's Mount leaves the
-	// /admin prefix on URL.Path, which http.FileServer resolves against, so
-	// serve the route's wildcard remainder instead. A directory answers 404
-	// rather than a listing.
+	// chi's Mount leaves the /admin prefix on URL.Path, which http.FileServer resolves against, so serve the
+	// route's wildcard remainder; a directory answers 404, not a listing.
 	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
 		name := chi.URLParam(req, "*")
 		if info, err := fs.Stat(staticFS, name); err != nil || info.IsDir() {

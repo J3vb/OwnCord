@@ -7,7 +7,6 @@
 // synchronous checkpoint, failure and queue helpers live in joinSupport.ts
 // and joinFailures.ts; every await and the ownership check that guards it
 // stay in this file.
-import type { Room } from "livekit-client";
 import { voiceStore, setVoiceStatus } from "../../stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "../../lib/logger";
@@ -44,6 +43,7 @@ import {
   wireModules,
 } from "./joinSupport";
 import { claimSession, onConnectFailed, onKeyExchangeFailed } from "./joinFailures";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 export type { JoinHost } from "./joinHost";
 
@@ -76,7 +76,7 @@ export class JoinOrchestration {
   private setState(next: SessionState): void {
     this.host.setState(next);
   }
-  private createRoom(channelId: number): Promise<Room> {
+  private createRoom(channelId: number): Promise<VoiceRoom> {
     return this.host.createRoom(channelId);
   }
   private resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string> {
@@ -96,12 +96,12 @@ export class JoinOrchestration {
   }
 
   /** Whether state is "connected" for this exact room and channel (see joinSupport). */
-  isStateConnected(channelId: number, room: Room): boolean {
+  isStateConnected(channelId: number, room: VoiceRoom): boolean {
     return isStateConnected(this.host, channelId, room);
   }
 
   /** Checkpoint cleanup for a superseded attempt (see joinSupport). */
-  disconnectSupersededLocalRoom(localRoom: Room): void {
+  disconnectSupersededLocalRoom(localRoom: VoiceRoom): void {
     disconnectSupersededLocalRoom(this.host, localRoom);
   }
 
@@ -109,7 +109,7 @@ export class JoinOrchestration {
     return ownsConnectAttempt(this.host, generation);
   }
 
-  private dropSuperseded(localRoom: Room): "superseded" {
+  private dropSuperseded(localRoom: VoiceRoom): "superseded" {
     return dropSuperseded(this.host, localRoom);
   }
 
@@ -119,7 +119,7 @@ export class JoinOrchestration {
    *  when the connected room was discarded for a queued request. Resolves
    *  "superseded" when a checkpoint found a newer join. */
   private async connectWithRetry(
-    attempt: { room: Room | null },
+    attempt: { room: VoiceRoom | null },
     join: { token: string; url: string; channelId: number; directUrl?: string },
     resolvedUrl: string,
     myGeneration: number,
@@ -185,7 +185,7 @@ export class JoinOrchestration {
   /** Bring the call up on the claimed session (the rest of the "activate"
    *  phase: device switches, local voice state, pipeline). */
   private async activateRoom(
-    localRoom: Room,
+    localRoom: VoiceRoom,
     channelId: number,
     traceId: number,
   ): Promise<true | "superseded"> {
@@ -280,7 +280,7 @@ export class JoinOrchestration {
     // Track the room being built in this attempt so we can disconnect it on
     // supersession without touching the shared state (which may already have
     // been claimed by a newer attempt).
-    const attempt: { room: Room | null } = { room: null };
+    const attempt: { room: VoiceRoom | null } = { room: null };
     try {
       const firstRoom = await this.createRoom(channelId);
       attempt.room = firstRoom;

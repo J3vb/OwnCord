@@ -9,15 +9,13 @@ import (
 )
 
 //
-// Thin adapters over service.ChannelService's category operations, mounted by
-// mountChannelActionRoutes behind MANAGE_CHANNELS on both channel mounts. A
-// mutation answers from the committed row, then tells connected clients:
-// channel_update for every channel whose category fields changed (through the
-// ordinary visibility-filtered path, so a non-manager only hears about
-// channels they can read), then channel_categories to managers.
+// Thin adapters over ChannelService's category operations, mounted behind MANAGE_CHANNELS on both channel
+// mounts. A mutation answers from the committed row, then notifies clients: channel_update for each channel
+// whose category fields changed (visibility-filtered, so a non-manager only hears about channels they can
+// read), then channel_categories to managers.
 
-// writeCategoryErr maps ChannelService category errors onto API responses.
-// A duplicate name and a stale reorder are both 409 with distinct codes.
+// writeCategoryErr maps ChannelService category errors; a duplicate name and a stale reorder are both 409
+// with distinct codes.
 func writeCategoryErr(w http.ResponseWriter, err error, staleCode httperr.Code) {
 	if errors.Is(err, service.ErrConflict) {
 		code := httperr.CodeCategoryNameTaken
@@ -30,9 +28,8 @@ func writeCategoryErr(w http.ResponseWriter, err error, staleCode httperr.Code) 
 	writeSvcErr(w, err, "category not found", httperr.CodeInvalidInput, "category action failed")
 }
 
-// announceCategoryChange fans a committed category change out: first the
-// re-broadcast channel_update for each channel whose category fields moved,
-// then the manager-only category list.
+// announceCategoryChange fans a committed category change out: channel_update per moved channel, then the
+// manager-only category list.
 func announceCategoryChange(hub HubBroadcaster, change service.CategoryChange) {
 	if hub == nil {
 		return

@@ -9,44 +9,37 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// Channel media kinds: images and videos for the gallery grid, everything
-// else (documents, audio, voice messages, archives) for the files list.
+// Channel media kinds: images and videos for the gallery grid, everything else for the files list.
 const (
 	MediaKindMedia = "media"
 	MediaKindFiles = "files"
 )
 
-// MediaCursor is where a media page stops: the last item's message id and
-// attachment id. The zero value is the first page.
+// MediaCursor is where a media page stops (message id, attachment id); zero is the first page.
 type MediaCursor struct {
 	MessageID    int64
 	AttachmentID string
 }
 
-// ChannelMediaQuery is one gallery request over a single channel. Every value
-// reaches SQL as a bound argument; only fixed fragments are concatenated.
+// ChannelMediaQuery is one gallery request over a single channel; every value is a bound argument.
 type ChannelMediaQuery struct {
 	ChannelID int64
-	// ViewerID is the caller. Media from users the caller blocked is left out.
+	// ViewerID is the caller; media from users they blocked is left out.
 	ViewerID int64
-	// Kind is MediaKindMedia or MediaKindFiles.
-	Kind string
+	Kind     string
 	// Name keeps attachments whose file name contains it, ASCII case-insensitive.
 	Name string
 	// UploaderID keeps media posted by this user; 0 means anyone.
 	UploaderID int64
-	// Oldest walks oldest first; the default is newest first.
-	Oldest bool
-	// From, when set, is where the walk starts: newest-first keeps messages
-	// sent before it, oldest-first keeps messages sent at or after it. Used by
-	// "jump to month". Ignored once Cursor is set.
+	Oldest     bool
+	// From, when set, is where the walk starts (newest-first keeps messages before
+	// it, oldest-first at or after), for "jump to month"; ignored once Cursor is set.
 	From   time.Time
 	Cursor MediaCursor
 	Limit  int
 }
 
-// ChannelMediaItem is one attachment in the gallery with the message it
-// belongs to, so a click can jump there.
+// ChannelMediaItem is one attachment with its message, so a click can jump there.
 type ChannelMediaItem struct {
 	Attachment AttachmentInfo `json:"attachment"`
 	MessageID  int64          `json:"message_id"`
@@ -54,17 +47,15 @@ type ChannelMediaItem struct {
 	Timestamp  string         `json:"timestamp"`
 }
 
-// MediaBucket is the attachment count in one quarter hour (UTC). The service
-// folds buckets into local months; a quarter hour never straddles a month
-// boundary in any zone whose offset is a multiple of 15 minutes.
+// MediaBucket is the attachment count in one UTC quarter hour, which never straddles a
+// month in any 15-minute-offset zone.
 type MediaBucket struct {
 	Start time.Time
 	Count int
 }
 
-// ListChannelMedia returns up to q.Limit attachments of one channel in message
-// order (newest or oldest first), several attachments of one message in
-// attachment id order. Deleted messages and unlinked uploads never appear.
+// ListChannelMedia returns up to q.Limit attachments in message order; deleted
+// messages and unlinked uploads never appear.
 func (d *DB) ListChannelMedia(ctx context.Context, q ChannelMediaQuery) ([]ChannelMediaItem, error) {
 	if q.Limit < 1 {
 		return []ChannelMediaItem{}, nil
@@ -73,11 +64,10 @@ func (d *DB) ListChannelMedia(ctx context.Context, q ChannelMediaQuery) ([]Chann
 	if err != nil {
 		return nil, fmt.Errorf("ListChannelMedia: %w", err)
 	}
-	// Ordering on a.message_id rather than m.id, with attachments pinned as
-	// the outer loop (CROSS JOIN), walks idx_attachments_message in order and
-	// sorts only the ties within one message. Left to itself, without ANALYZE
-	// statistics, the planner starts from the channel's messages and sorts
-	// every attachment of the channel for each page.
+	// Ordering on a.message_id with attachments as the outer loop (CROSS JOIN)
+	// walks idx_attachments_message in order and sorts only ties; without ANALYZE
+	// statistics the planner would start from the channel's messages and sort every
+	// attachment per page.
 	order := " ORDER BY a.message_id DESC, a.id ASC"
 	if q.Oldest {
 		order = " ORDER BY a.message_id ASC, a.id ASC"
@@ -115,9 +105,7 @@ func (d *DB) ListChannelMedia(ctx context.Context, q ChannelMediaQuery) ([]Chann
 	return items, nil
 }
 
-// ChannelMediaBuckets counts the attachments matching q's kind, name, uploader
-// and block filters per UTC quarter hour, oldest first. Cursor, From, Oldest
-// and Limit are ignored: the counts cover the whole channel.
+// ChannelMediaBuckets counts matching attachments per UTC quarter hour; paging fields are ignored.
 func (d *DB) ChannelMediaBuckets(ctx context.Context, q ChannelMediaQuery) ([]MediaBucket, error) {
 	filter, args, err := d.channelMediaFilter(ctx, q, false)
 	if err != nil {
@@ -156,9 +144,8 @@ func (d *DB) ChannelMediaBuckets(ctx context.Context, q ChannelMediaQuery) ([]Me
 	return buckets, nil
 }
 
-// channelMediaFilter renders the kind, name, uploader and block predicates,
-// and with paging the start point and cursor, as " AND ..." fragments over
-// aliases m and a.
+// channelMediaFilter renders the kind, name, uploader and block predicates (and with
+// paging the start point and cursor) as " AND ..." fragments over aliases m and a.
 func (d *DB) channelMediaFilter(ctx context.Context, q ChannelMediaQuery, paging bool) (string, []any, error) {
 	var (
 		sb   strings.Builder
@@ -211,8 +198,6 @@ func (d *DB) channelMediaFilter(ctx context.Context, q ChannelMediaQuery, paging
 			if err != nil {
 				return "", nil, err
 			}
-			// The id bound narrows the index range; the exact timestamp test
-			// below decides.
 			frag, fragArgs := idBound("a.message_id "+cmp, bound, native, importedInScope)
 			sb.WriteString(frag)
 			args = append(args, fragArgs...)
@@ -223,8 +208,6 @@ func (d *DB) channelMediaFilter(ctx context.Context, q ChannelMediaQuery, paging
 	return sb.String(), args, nil
 }
 
-// escapeLike escapes the LIKE wildcards and the escape character itself so a
-// file name search matches literally.
 func escapeLike(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return r.Replace(s)

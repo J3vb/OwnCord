@@ -12,22 +12,22 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// ThreadAutoArchiveMinutes are the auto-archive periods a thread may have,
-// matching the CHECK on channels.thread_auto_archive_minutes (migration 074).
+// ThreadAutoArchiveMinutes are the allowed auto-archive periods, matching the CHECK on
+// channels.thread_auto_archive_minutes (migration 074).
 var ThreadAutoArchiveMinutes = []int{60, 1440, 4320, 10080}
 
 var (
-	// ErrThreadExists means the starter message already has a thread. It is
-	// always wrapped in a *ThreadExistsError that names the winner.
+	// ErrThreadExists means the starter message already has a thread; always wrapped in a
+	// *ThreadExistsError naming the winner.
 	ErrThreadExists = errors.New("a thread already exists for this message")
-	// ErrThreadStarterInvalid means the starter message is gone, deleted, not
-	// an ordinary message, or not in the parent channel. CreateThread returns
-	// it from inside its transaction, so a delete that commits first wins.
+	// ErrThreadStarterInvalid means the starter is gone, deleted, not an ordinary message
+	// or not in the parent channel; CreateThread returns it inside its transaction, so a
+	// delete that commits first wins.
 	ErrThreadStarterInvalid = errors.New("thread starter message is not available")
 	// ErrThreadGone means the thread no longer exists.
 	ErrThreadGone = errors.New("thread is gone")
-	// ErrThreadLockedForActor means a non-moderator tried to change a locked
-	// thread. UpdateThread re-reads the lock inside its transaction.
+	// ErrThreadLockedForActor means a non-moderator tried to change a locked thread;
+	// UpdateThread re-reads the lock in its transaction.
 	ErrThreadLockedForActor = errors.New("thread is locked")
 )
 
@@ -41,29 +41,25 @@ func (e *ThreadExistsError) Error() string {
 // Unwrap lets errors.Is(err, ErrThreadExists) match.
 func (e *ThreadExistsError) Unwrap() error { return ErrThreadExists }
 
-// ThreadInfo is the wire shape of a thread: the thread_changed and
-// thread_create_ok payloads, the thread on a starter message, and a row of the
-// thread list. OwnerID and StarterMessageID are null when that user or
-// message is gone. LastMessageAt is null while the thread has no message.
+// ThreadInfo is the wire shape of a thread. OwnerID and StarterMessageID are null when
+// gone; LastMessageAt is null while the thread has no message.
 type ThreadInfo struct {
-	ID                 int64   `json:"id"`
-	ParentID           int64   `json:"parent_id"`
-	Name               string  `json:"name"`
-	OwnerID            *int64  `json:"owner_id"`
-	StarterMessageID   *int64  `json:"starter_message_id"`
-	Archived           bool    `json:"archived"`
-	Locked             bool    `json:"locked"`
-	AutoArchiveMinutes int     `json:"auto_archive_minutes"`
-	MessageCount       int64   `json:"message_count"`
-	LastMessageAt      *string `json:"last_message_at"`
-	CreatedAt          string  `json:"created_at"`
-	// Post is the forum post block, present only when the parent is
-	// a forum.
-	Post *ForumPostMeta `json:"post,omitempty"`
+	ID                 int64          `json:"id"`
+	ParentID           int64          `json:"parent_id"`
+	Name               string         `json:"name"`
+	OwnerID            *int64         `json:"owner_id"`
+	StarterMessageID   *int64         `json:"starter_message_id"`
+	Archived           bool           `json:"archived"`
+	Locked             bool           `json:"locked"`
+	AutoArchiveMinutes int            `json:"auto_archive_minutes"`
+	MessageCount       int64          `json:"message_count"`
+	LastMessageAt      *string        `json:"last_message_at"`
+	CreatedAt          string         `json:"created_at"`
+	Post               *ForumPostMeta `json:"post,omitempty"`
 }
 
-// threadFields carries the columns shared by every thread info row; the
-// generated row types are structurally identical, so one mapper narrows any.
+// threadFields carries the columns shared by every thread info row; the generated row
+// types are structurally identical.
 type threadFields struct {
 	ID                       int64
 	ParentID                 int64
@@ -99,12 +95,10 @@ type NewThread struct {
 }
 
 // CreateThread inserts the thread row in one writer transaction. The starter
-// is re-read inside it (ErrThreadStarterInvalid), and a starter that already
-// has a thread is *ThreadExistsError naming it: the writer serialises racing
-// creates and the unique starter index is the backstop. That same answer is
-// what makes a retry idempotent; the service turns it into the existing
-// thread when the caller owns it. created reports whether this call inserted
-// the row.
+// is re-read inside it (ErrThreadStarterInvalid), and one that already has a
+// thread is *ThreadExistsError naming it: the writer serialises racing creates
+// and the unique starter index is the backstop. That answer makes a retry
+// idempotent. created reports whether this call inserted the row.
 func (d *DB) CreateThread(ctx context.Context, n NewThread) (info *ThreadInfo, created bool, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -144,7 +138,6 @@ func (d *DB) CreateThread(ctx context.Context, n NewThread) (info *ThreadInfo, c
 	if err != nil {
 		return nil, false, fmt.Errorf("CreateThread id: %w", err)
 	}
-	// The owner follows the thread they start.
 	if _, err := q.JoinThread(ctx, dbgen.JoinThreadParams{ThreadID: id, UserID: n.OwnerID}); err != nil {
 		return nil, false, fmt.Errorf("CreateThread follow: %w", err)
 	}
@@ -171,8 +164,6 @@ func (d *DB) GetThreadByStarter(ctx context.Context, starterID int64) (*ThreadIn
 	return &t, nil
 }
 
-// threadWonBy reads the thread that took a starter, for the unique-index
-// backstop; the failed insert aborted nothing else in the transaction.
 func threadWonBy(ctx context.Context, q *dbgen.Queries, starterID int64) error {
 	won, err := q.GetThreadInfoByStarter(ctx, &starterID)
 	if err != nil {
@@ -196,22 +187,19 @@ func (d *DB) getThread(ctx context.Context, q *dbgen.Queries, id int64) (*Thread
 	return &t, nil
 }
 
-// GetThread returns the thread with the given id, or nil when there is none
-// (including when id is an ordinary channel).
+// GetThread returns the thread with the given id, or nil (an ordinary channel id included).
 func (d *DB) GetThread(ctx context.Context, id int64) (*ThreadInfo, error) {
 	return d.getThread(ctx, d.q, id)
 }
 
-// ThreadCursor is where a thread list page stops: the activity time and id of
-// its last row, carried by the caller to the next request. The zero value is
-// the first page.
+// ThreadCursor is where a thread list page stops: the activity time and id of its last
+// row; the zero value is the first page.
 type ThreadCursor struct {
 	Activity string
 	ID       int64
 }
 
-// ThreadListRow is a ThreadInfo with the activity time the list is ordered by,
-// so the caller can build the next cursor.
+// ThreadListRow is a ThreadInfo with the activity time the list is ordered by.
 type ThreadListRow struct {
 	ThreadInfo
 	Activity string
@@ -220,23 +208,18 @@ type ThreadListRow struct {
 // Cursor is the position just after this row.
 func (r ThreadListRow) Cursor() ThreadCursor { return ThreadCursor{Activity: r.Activity, ID: r.ID} }
 
-// ThreadPatch is the set of thread fields one update changes; nil leaves a
-// field as it is.
+// ThreadPatch is the set of thread fields one update changes; nil leaves a field as it is.
 type ThreadPatch struct {
 	Name               *string
 	Archived           *bool
 	Locked             *bool
 	AutoArchiveMinutes *int
-	// TagIDs, when set, replaces the tags of a forum post. The
-	// service only sets it for a post; ErrNotFound otherwise.
-	TagIDs *[]int64
+	TagIDs             *[]int64
 }
 
-// UpdateThread applies patch in one writer transaction and returns the thread
-// after it. The lock is re-read inside the transaction: a caller that is not a
-// moderator (byModerator false) gets ErrThreadLockedForActor when the thread is
-// locked by then, so a lock that lands between the service's check and this
-// write is honoured. ErrNotFound when the thread is gone.
+// UpdateThread applies patch in one writer transaction and returns the thread. The
+// lock is re-read inside it: a non-moderator (byModerator false) gets
+// ErrThreadLockedForActor when the thread is locked by then. ErrNotFound when gone.
 func (d *DB) UpdateThread(ctx context.Context, id int64, patch ThreadPatch, byModerator bool) (*ThreadInfo, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -280,7 +263,6 @@ func (d *DB) UpdateThread(ctx context.Context, id int64, patch ThreadPatch, byMo
 	}); err != nil {
 		return nil, fmt.Errorf("UpdateThread: %w", err)
 	}
-	// Unarchiving restarts the idle clock, or the next sweep would archive it again.
 	if patch.Archived != nil && !*patch.Archived {
 		now := time.Now().UTC().Format(dbtime.ISOLayout)
 		if err := q.TouchThreadOnPost(ctx, dbgen.TouchThreadOnPostParams{ID: id, At: &now}); err != nil {
@@ -297,8 +279,8 @@ func (d *DB) UpdateThread(ctx context.Context, id int64, patch ThreadPatch, byMo
 	return out, nil
 }
 
-// DeleteThread removes the thread row; the foreign keys cascade its messages.
-// It reports whether a thread was deleted.
+// DeleteThread removes the thread row (foreign keys cascade its messages); it reports
+// whether one was deleted.
 func (d *DB) DeleteThread(ctx context.Context, id int64) (bool, error) {
 	n, err := d.q.DeleteThreadRow(ctx, id)
 	if err != nil {
@@ -307,17 +289,14 @@ func (d *DB) DeleteThread(ctx context.Context, id int64) (bool, error) {
 	return n > 0, nil
 }
 
-// touchThreadOnPost records a committed message in channelID when it is a
-// thread: it sets the activity time and reopens an archived thread. It runs in
-// the message's own transaction, so activity and message commit together. For
-// any other channel it matches nothing.
+// touchThreadOnPost records a committed message in a thread channel (activity time,
+// reopens an archived thread) in the message's transaction; other channels match
+// nothing.
 func touchThreadOnPost(ctx context.Context, q *dbgen.Queries, channelID int64) error {
 	_, err := touchIfThread(ctx, q, channelID)
 	return err
 }
 
-// touchIfThread is touchThreadOnPost that also reports whether channelID is a
-// thread, so the send transaction can join its followers with the one lookup.
 func touchIfThread(ctx context.Context, q *dbgen.Queries, channelID int64) (isThread bool, err error) {
 	if is, err := q.IsThreadChannel(ctx, channelID); err != nil {
 		return false, fmt.Errorf("touch thread: %w", err)
@@ -334,8 +313,8 @@ func touchIfThread(ctx context.Context, q *dbgen.Queries, channelID int64) (isTh
 // DueThread is a thread the archiver just archived.
 type DueThread struct{ ID, ParentID int64 }
 
-// NextThreadArchiveDue returns when the earliest open thread falls due, with
-// ok false when no thread is open.
+// NextThreadArchiveDue returns when the earliest open thread falls due; ok false when
+// none is open.
 func (d *DB) NextThreadArchiveDue(ctx context.Context) (due time.Time, ok bool, err error) {
 	v, err := d.q.NextThreadArchiveDue(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -351,9 +330,9 @@ func (d *DB) NextThreadArchiveDue(ctx context.Context) (due time.Time, ok bool, 
 	return time.Unix(secs, 0).UTC(), true, nil
 }
 
-// ArchiveDueThreads archives up to limit open threads whose idle period has
-// passed at now, and returns the ones it archived. Each archive re-checks the
-// due test, so a post that landed after the list keeps its thread open.
+// ArchiveDueThreads archives up to limit open threads idle at now and returns them;
+// each archive re-checks the due test, so a post landing after the list keeps its
+// thread open.
 func (d *DB) ArchiveDueThreads(ctx context.Context, now time.Time, limit int) (archived []DueThread, listed int, err error) {
 	rows, err := d.q.ListThreadsDueForArchive(ctx, dbgen.ListThreadsDueForArchiveParams{NowUnix: now.Unix(), RowLimit: int64(limit)})
 	if err != nil {
@@ -371,8 +350,6 @@ func (d *DB) ArchiveDueThreads(ctx context.Context, now time.Time, limit int) (a
 	return archived, len(rows), nil
 }
 
-// attachThreads fills Thread on every ordinary, live row in msgs that started a
-// thread, with one batched read. A page with no candidate rows costs no query.
 func (d *DB) attachThreads(ctx context.Context, msgs []MessageAPIResponse) error {
 	var ids []*int64
 	for i := range msgs {

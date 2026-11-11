@@ -4,7 +4,7 @@
 // facades. The track implementations stay in screenShare.ts, deviceManager.ts,
 // audioElements.ts and audioPipeline.ts; the session state and every
 // collaborator stay owned by LiveKitSession, reached through MediaControlHost.
-import { type Room, Track } from "livekit-client";
+import { Track } from "livekit-client";
 import type { WsClient } from "../../lib/ws";
 import {
   voiceStore,
@@ -36,6 +36,7 @@ import {
   getLocalScreenshareStats,
   getLocalCameraStats,
 } from "./screenShare";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 // Same logger tag as before the extraction, so the media log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -44,7 +45,7 @@ const log = createLogger("livekitSession");
  *  through getters on every use, never captured, so the session stays the
  *  single owner of each one. */
 export interface MediaControlHost {
-  getRoom(): Room | null;
+  getRoom(): VoiceRoom | null;
   getCurrentChannelId(): number | null;
   getWs(): WsClient | null;
   getOnError(): ((message: string) => void) | null;
@@ -53,8 +54,8 @@ export interface MediaControlHost {
   getDeviceManager(): DeviceManager;
   getCameraState(): CameraTrackState;
   getScreenState(): ScreenTrackState;
-  getPendingMicrophoneRoom(): Room | null;
-  setPendingMicrophoneRoom(room: Room | null): void;
+  getPendingMicrophoneRoom(): VoiceRoom | null;
+  setPendingMicrophoneRoom(room: VoiceRoom | null): void;
   configuredAudioOptions(
     channelId: number | null,
   ): { audioPreset: { maxBitrate: number } } | undefined;
@@ -84,7 +85,7 @@ export class MediaControl {
 
   // --- Host views, named as the pre-extraction fields so the bodies read the same ---
 
-  private get _room(): Room | null {
+  private get _room(): VoiceRoom | null {
     return this.host.getRoom();
   }
   private get _currentChannelId(): number | null {
@@ -111,10 +112,10 @@ export class MediaControl {
   private get _screenState(): ScreenTrackState {
     return this.host.getScreenState();
   }
-  private get pendingMicrophoneRoom(): Room | null {
+  private get pendingMicrophoneRoom(): VoiceRoom | null {
     return this.host.getPendingMicrophoneRoom();
   }
-  private set pendingMicrophoneRoom(room: Room | null) {
+  private set pendingMicrophoneRoom(room: VoiceRoom | null) {
     this.host.setPendingMicrophoneRoom(room);
   }
   private configuredAudioOptions(
@@ -211,7 +212,7 @@ export class MediaControl {
    *  the call shaped exactly as it was before. On the web path the room's
    *  track creation attaches the mic processor before the publish
    *  (RoomLifecycle.createRoom), so the sender never carries a raw track. */
-  async enableMicrophone(room: Room, enabled: boolean): Promise<void> {
+  async enableMicrophone(room: VoiceRoom, enabled: boolean): Promise<void> {
     const publishOptions = enabled
       ? this.configuredAudioOptions(this._currentChannelId)
       : undefined;
@@ -222,7 +223,7 @@ export class MediaControl {
     await room.localParticipant.setMicrophoneEnabled(enabled, undefined, publishOptions);
   }
 
-  microphonePublishingAllowed(room: Room): boolean {
+  microphonePublishingAllowed(room: VoiceRoom): boolean {
     return publishAllowed(room, Track.Source.Microphone);
   }
 
@@ -335,7 +336,7 @@ export class MediaControl {
   /** Stop the camera or share the grant no longer allows (a permission
    *  removed mid-call): the SFU stops carrying it, so the buttons and the
    *  server must not keep saying it is on. */
-  dropDeniedVideo(room: Room): void {
+  dropDeniedVideo(room: VoiceRoom): void {
     if (room !== this._room) return;
     const { localCamera, localScreenshare } = voiceStore.getState();
     if (localCamera && !publishAllowed(room, Track.Source.Camera)) void this.disableCamera();

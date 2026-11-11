@@ -9,18 +9,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// UpdateUserProfile updates the username, avatar, display name, about text and
-// banner (image id and colour) for the given user. All are written unconditionally, so the caller is
-// responsible for merging a partial PATCH against the current row.
-// Returns ErrNotFound if the user does not exist. Returns an error wrapping
-// a UNIQUE constraint violation if the username is already taken.
+// UpdateUserProfile writes username, avatar, display name, about text and banner
+// unconditionally, so the caller merges a partial PATCH against the current row.
+// ErrNotFound if the user does not exist; a UNIQUE violation error if the username is
+// taken.
 func (d *DB) UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string) error {
 	return updateUserProfile(ctx, d.q, userID, username, avatar, displayName, about, bannerID, bannerColor)
 }
 
-// UpdateUserProfileAndIdentityKey is UpdateUserProfile plus the E2EE identity
-// key, in one transaction: both commit or neither does, so a failed key write
-// never leaves a half-applied profile behind a failed request.
+// UpdateUserProfileAndIdentityKey is UpdateUserProfile plus the E2EE identity key in
+// one transaction.
 func (d *DB) UpdateUserProfileAndIdentityKey(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string, identityKey string) error {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -64,10 +62,9 @@ func updateUserProfile(ctx context.Context, q *dbgen.Queries, userID int64, user
 	return nil
 }
 
-// UpdateUserCustomStatus sets (or clears, with nil) the user's custom status
-// line with no expiry, clearing any expiry the old text carried. Kept separate
-// from UpdateUserProfile because it arrives on the presence path and must not
-// overwrite a concurrent profile edit.
+// UpdateUserCustomStatus sets (nil clears) the status line with no expiry. Separate
+// from UpdateUserProfile: it arrives on the presence path and must not overwrite a
+// concurrent profile edit.
 func (d *DB) UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error {
 	if err := d.q.UpdateUserCustomStatus(ctx, dbgen.UpdateUserCustomStatusParams{
 		CustomStatus: customStatus,
@@ -78,9 +75,7 @@ func (d *DB) UpdateUserCustomStatus(ctx context.Context, userID int64, customSta
 	return nil
 }
 
-// UpdateUserPresence writes a presence_update's status, custom status line and
-// the line's expiry (nil = none) in one transaction, so they commit together
-// or not at all (P5-O08).
+// UpdateUserPresence writes status, status line and expiry (nil = none) in one transaction.
 func (d *DB) UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus, expiresAt *string) error {
 	return d.inWriteTx(ctx, "UpdateUserPresence", func(q *dbgen.Queries) error {
 		if err := q.UpdateUserStatus(ctx, dbgen.UpdateUserStatusParams{Status: status, ID: userID}); err != nil {
@@ -100,8 +95,7 @@ type ExpiredCustomStatus struct {
 	ExpiresAt string
 }
 
-// NextCustomStatusExpiry returns the soonest pending custom-status expiry, or
-// ok=false when none is pending.
+// NextCustomStatusExpiry returns the soonest pending expiry, or ok=false.
 func (d *DB) NextCustomStatusExpiry(ctx context.Context) (next string, ok bool, err error) {
 	v, err := d.q.NextCustomStatusExpiry(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -116,8 +110,7 @@ func (d *DB) NextCustomStatusExpiry(ctx context.Context) (next string, ok bool, 
 	return *v, true, nil
 }
 
-// ListExpiredCustomStatuses returns up to limit statuses whose expiry is at or
-// before now (dbtime.ISOLayout text), oldest first.
+// ListExpiredCustomStatuses returns up to limit statuses expiring at or before now, oldest first.
 func (d *DB) ListExpiredCustomStatuses(ctx context.Context, now string, limit int) ([]ExpiredCustomStatus, error) {
 	rows, err := d.q.ListExpiredCustomStatuses(ctx, dbgen.ListExpiredCustomStatusesParams{
 		CustomStatusExpiresAt: &now,
@@ -136,10 +129,8 @@ func (d *DB) ListExpiredCustomStatuses(ctx context.Context, now string, limit in
 	return out, nil
 }
 
-// ClearCustomStatusIfExpiry clears the user's custom status and expiry only
-// while the stored expiry still equals expiresAt, and reports whether it did.
-// A status set after the caller read the row carries a different expiry (or
-// none), so it is left alone.
+// ClearCustomStatusIfExpiry clears the status only while its stored expiry equals
+// expiresAt, so a newer status is left alone.
 func (d *DB) ClearCustomStatusIfExpiry(ctx context.Context, userID int64, expiresAt string) (bool, error) {
 	n, err := d.q.ClearCustomStatusIfExpiry(ctx, dbgen.ClearCustomStatusIfExpiryParams{
 		ID:                    userID,
@@ -151,9 +142,9 @@ func (d *DB) ClearCustomStatusIfExpiry(ctx context.Context, userID int64, expire
 	return n == 1, nil
 }
 
-// IsBannerFile reports whether the attachment is currently some user's profile
-// banner image. Like IsAvatarFileURL it lets an unlinked attachment be served to
-// every authenticated user for exactly as long as a banner_id names it.
+// IsBannerFile reports whether the attachment is currently a user's banner; like
+// IsAvatarFileURL it lets an unlinked attachment be served to every authenticated user
+// while a banner_id names it.
 func (d *DB) IsBannerFile(ctx context.Context, fileID string) (bool, error) {
 	n, err := d.q.IsBannerFile(ctx, &fileID)
 	if err != nil {
@@ -162,10 +153,9 @@ func (d *DB) IsBannerFile(ctx context.Context, fileID string) (bool, error) {
 	return n != 0, nil
 }
 
-// IsAvatarFileURL reports whether url is currently some user's avatar. It is
-// the authorization check that lets an uploaded avatar — an attachment with no
-// channel, and therefore private to its uploader by default — be served to
-// every authenticated user for exactly as long as it is in use.
+// IsAvatarFileURL reports whether url is currently some user's avatar, which lets an
+// uploaded avatar (an attachment with no channel, private to its uploader) be served
+// to every authenticated user while in use.
 func (d *DB) IsAvatarFileURL(ctx context.Context, url string) (bool, error) {
 	n, err := d.q.CountUsersWithAvatar(ctx, &url)
 	if err != nil {
@@ -185,8 +175,7 @@ func (d *DB) UpdateUserPassword(ctx context.Context, userID int64, newPasswordHa
 	return nil
 }
 
-// ListUserSessions returns all sessions for the given user in a single query.
-// Results are ordered by created_at descending (newest first).
+// ListUserSessions returns all sessions for the user, newest first.
 func (d *DB) ListUserSessions(ctx context.Context, userID int64) ([]Session, error) {
 	rows, err := d.q.ListUserSessions(ctx, userID)
 	if err != nil {
@@ -199,9 +188,8 @@ func (d *DB) ListUserSessions(ctx context.Context, userID int64) ([]Session, err
 	return sessions, nil
 }
 
-// MarkSessionsSeen acknowledges the account's new logins: every
-// session's unseen flag clears except the caller's own, since a listing from
-// another device is what "seen" means. Returns how many rows changed.
+// MarkSessionsSeen clears every unseen flag except the caller's own (a listing from
+// another device is what "seen" means); returns rows changed.
 func (d *DB) MarkSessionsSeen(ctx context.Context, userID, exceptSessionID int64) (int64, error) {
 	res, err := d.q.MarkSessionsSeen(ctx, dbgen.MarkSessionsSeenParams{
 		UserID: userID,
@@ -213,9 +201,7 @@ func (d *DB) MarkSessionsSeen(ctx context.Context, userID, exceptSessionID int64
 	return res.RowsAffected()
 }
 
-// DeleteSessionByID removes a session by its ID, but only if it belongs to
-// the specified user. Returns ErrNotFound if the session does not exist or
-// does not belong to the user.
+// DeleteSessionByID removes a session only if it belongs to userID; ErrNotFound otherwise.
 func (d *DB) DeleteSessionByID(ctx context.Context, sessionID, userID int64) error {
 	result, err := d.q.DeleteSessionByID(ctx, dbgen.DeleteSessionByIDParams{
 		ID:     sessionID,
@@ -234,9 +220,8 @@ func (d *DB) DeleteSessionByID(ctx context.Context, sessionID, userID int64) err
 	return nil
 }
 
-// SignOutEverywhere revokes every session of the user — the caller's own
-// included — and every live API token in one transaction, so either both go
-// or neither does, and reports how many of each went.
+// SignOutEverywhere revokes every session (the caller's included) and live API token
+// in one transaction, reporting both counts.
 func (d *DB) SignOutEverywhere(ctx context.Context, userID int64) (sessions, tokens int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -265,10 +250,9 @@ func (d *DB) SignOutEverywhere(ctx context.Context, userID int64) (sessions, tok
 	return sessions, tokens, nil
 }
 
-// SetSessionIdentityKey stores the device identity public key a WebSocket
-// auth frame carried on the session that authenticated it. A token hash that
-// matches no row changes nothing and is not an error: the session may have
-// been revoked between the handshake read and this write.
+// SetSessionIdentityKey stores the device identity public key a WebSocket auth frame
+// carried. A token hash matching no row is not an error: the session may have been
+// revoked since.
 func (d *DB) SetSessionIdentityKey(ctx context.Context, tokenHash, key string) error {
 	if _, err := d.q.SetSessionIdentityKey(ctx, dbgen.SetSessionIdentityKeyParams{
 		IdentityPublicKey: &key,

@@ -13,7 +13,6 @@ import (
 // channels.dm_icon names. It is served to the group's members while it is the
 // live icon, and is reclaimed by the orphan sweep once replaced or cleared.
 
-// fileURLPrefix is where an attachment is served from.
 const fileURLPrefix = "/api/v1/files/"
 
 // GroupIconURL is the URL a group icon is served from, or "" for no icon.
@@ -24,8 +23,7 @@ func GroupIconURL(iconID string) string {
 	return fileURLPrefix + iconID
 }
 
-// BannerURL is the URL a profile banner image is served from, nil for none.
-// It is the same /api/v1/files/<id> shape as an avatar upload.
+// BannerURL is the /api/v1/files/<id> URL a profile banner is served from, nil for none.
 func BannerURL(bannerID *string) *string {
 	if bannerID == nil || *bannerID == "" {
 		return nil
@@ -34,9 +32,8 @@ func BannerURL(bannerID *string) *string {
 	return &u
 }
 
-// GetGroupDMMeta returns the owner (0 for none) and the icon attachment id
-// ("" for none) of a group DM. Both are zero values when the channel is not a
-// group.
+// GetGroupDMMeta returns the owner (0 for none) and the icon attachment id ("" for
+// none) of a group DM; both are zero when the channel is not a group.
 func (d *DB) GetGroupDMMeta(ctx context.Context, channelID int64) (ownerID int64, iconID string, err error) {
 	row, err := d.q.GetGroupDMMeta(ctx, channelID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -48,9 +45,8 @@ func (d *DB) GetGroupDMMeta(ctx context.Context, channelID int64) (ownerID int64
 	return row.OwnerID, row.IconID, nil
 }
 
-// IsGroupDMIconForUser reports whether fileID is the live icon of a group DM
-// userID is a member of. A non-member, a former member and an icon that has
-// been replaced or cleared all answer false.
+// IsGroupDMIconForUser reports whether fileID is the live icon of a group DM userID is
+// a member of; non-members, former members and replaced or cleared icons answer false.
 func (d *DB) IsGroupDMIconForUser(ctx context.Context, fileID string, userID int64) (bool, error) {
 	ok, err := d.q.IsGroupDMIconForUser(ctx, dbgen.IsGroupDMIconForUserParams{DmIcon: &fileID, UserID: userID})
 	if err != nil {
@@ -59,14 +55,13 @@ func (d *DB) IsGroupDMIconForUser(ctx context.Context, fileID string, userID int
 	return ok != 0, nil
 }
 
-// SetGroupDMIcon sets (iconID non-nil) or clears (nil) a group DM's icon on
-// behalf of actorID, who must be a member (ErrNotFound otherwise), and writes
-// one group_icon row (author = actor, icon_removed = whether it cleared).
-// Clearing a group that has no icon changes nothing and writes no row; the
-// returned change then has no Rows. Setting always writes a row, even to the
-// same attachment, because an upload is a new file. The actor's membership is
-// checked inside the transaction, so a member removed between an upload and
-// this write fails with ErrNotFound and nothing is written.
+// SetGroupDMIcon sets (iconID non-nil) or clears (nil) a group DM's icon on behalf of
+// actorID, who must be a member (ErrNotFound otherwise), and writes one group_icon row
+// (author = actor, icon_removed = whether it cleared). Clearing a group with no icon
+// writes no row and the returned change has no Rows. Setting always writes a row, even
+// for the same attachment, because an upload is a new file. Membership is checked
+// inside the transaction, so a member removed since the upload fails with ErrNotFound
+// and nothing is written.
 func (d *DB) SetGroupDMIcon(ctx context.Context, channelID, actorID int64, iconID *string, content string) (*GroupChange, error) {
 	var out GroupChange
 	err := d.inGroupTx(ctx, "SetGroupDMIcon", func(tx *sql.Tx, q *dbgen.Queries) error {

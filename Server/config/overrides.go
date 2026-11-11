@@ -16,21 +16,18 @@ import (
 	goyaml "go.yaml.in/yaml/v3"
 )
 
-// OverridesFileName is the flat JSON file in server.data_dir holding the
-// settings an owner changed from the admin panel. It sits beside the database,
-// not in config.yaml, because Docker mounts config.yaml read-only; data_dir is
-// the writable volume. See applyOverrideLayer for where it is layered.
+// OverridesFileName is the flat JSON file in server.data_dir holding settings changed from the admin panel.
+// It sits beside the database, not in config.yaml, because Docker mounts config.yaml read-only. See
+// applyOverrideLayer.
 const OverridesFileName = "config-overrides.json"
 
-// ErrNotEditable is the sentinel for a key the panel may not set: not a config
-// leaf, or one of three excluded keys: server.data_dir (the overrides file and
-// the server's key files live inside it) and the two upload-type lists, which
-// the Settings page owns live.
+// ErrNotEditable is the sentinel for a key the panel may not set: not a config leaf, server.data_dir (the
+// overrides file and key files live inside it) or the two upload-type lists, which the Settings page owns
+// live.
 var ErrNotEditable = errors.New("config key is not editable from the admin panel")
 
-// ErrInvalidValue is the sentinel for a value that fails its key's rule (wrong
-// JSON type, out of range, bad enum, bad CIDR, control characters). The panel
-// rejects a bad value; Load merely clamps and warns.
+// ErrInvalidValue is the sentinel for a value failing its key's rule; the panel rejects it where Load
+// merely clamps and warns.
 var ErrInvalidValue = errors.New("config value is invalid")
 
 // OverridesPath is the overrides file path inside a data directory.
@@ -38,8 +35,7 @@ func OverridesPath(dataDir string) string {
 	return filepath.Join(dataDir, OverridesFileName)
 }
 
-// IsEditable reports whether key is a panel-editable config key (exact,
-// case-sensitive dotted key).
+// IsEditable reports whether key is a panel-editable config key (exact, case-sensitive dotted key).
 func IsEditable(key string) bool {
 	_, ok := editableRules[key]
 	return ok
@@ -55,19 +51,16 @@ func EditableKeys() []string {
 	return keys
 }
 
-// EnvOverridden reports whether an OWNCORD_* environment variable names key.
-// The environment applies last, so a saved override for such a key would lose
-// silently at the next boot; the panel refuses it instead.
+// EnvOverridden reports whether an OWNCORD_* variable names key. The environment applies last, so a saved
+// override for it would lose silently at the next boot; the panel refuses it instead.
 func EnvOverridden(key string) bool {
 	_, ok := os.LookupEnv("OWNCORD_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_")))
 	return ok
 }
 
-// ReadOverrides reads the overrides file as a flat map of dotted key to value; a
-// missing file is an empty map. Values are normalised (whole JSON numbers to
-// int, arrays to []string) so a hand-edited file and the admin API carry the
-// same Go types. An editable key whose stored value fails its rule is dropped
-// with a warning, so a hand-edited wrong type cannot stop startup.
+// ReadOverrides reads the overrides file as a flat map of dotted key to value; a missing file is an empty
+// map. Values are normalised so a hand-edited file and the admin API carry the same Go types. An editable
+// key whose stored value fails its rule is dropped with a warning, so a hand-edit cannot stop startup.
 func ReadOverrides(path string) (map[string]any, error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: path comes from trusted wiring, not request input
 	if errors.Is(err, os.ErrNotExist) {
@@ -101,11 +94,8 @@ func ReadOverrides(path string) (map[string]any, error) {
 	return out, nil
 }
 
-// SaveOverrides merges changes into the overrides file; a nil value removes its
-// key. Every key and value is validated first and nothing is written unless the
-// whole batch passes, so a bad key never drops the valid ones. The write is
-// atomic, mode 0600, under the mutex config.Save uses so the read-modify-write
-// cannot interleave.
+// SaveOverrides merges changes into the overrides file; a nil value removes its key. Nothing is written
+// unless the whole batch validates. The write is atomic, mode 0600, under the mutex config.Save uses.
 func SaveOverrides(path string, changes map[string]any) error {
 	if len(changes) == 0 {
 		return nil
@@ -134,15 +124,12 @@ func SaveOverrides(path string, changes map[string]any) error {
 	return atomicWrite(path, encoded)
 }
 
-// ValidateOverrides runs SaveOverrides' syntax pass without writing, so the
-// admin handler can reject a bad value before previewing or saving.
+// ValidateOverrides runs SaveOverrides' syntax pass without writing.
 func ValidateOverrides(changes map[string]any) error {
 	_, _, err := validateOverrides(changes)
 	return err
 }
 
-// validateOverrides returns the normalised values to set and the keys to remove
-// (a nil value).
 func validateOverrides(changes map[string]any) (map[string]any, []string, error) {
 	set := make(map[string]any, len(changes))
 	remove := make([]string, 0, len(changes))
@@ -163,10 +150,8 @@ func validateOverrides(changes map[string]any) (map[string]any, []string, error)
 	return set, remove, nil
 }
 
-// Preview builds the configuration the NEXT boot would run with if changes were
-// saved: config.yaml, the overrides file with changes merged in (nil removes a
-// key), then environment, bounds and normalisation. It writes nothing, so a
-// missing config.yaml previews as defaults and is not created.
+// Preview builds the configuration the NEXT boot would run with if changes were saved (nil removes a key).
+// It writes nothing, so a missing config.yaml previews as defaults and is not created.
 func Preview(cfgPath, overridesPath string, changes map[string]any) (*Config, error) {
 	raw, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path comes from trusted wiring, not request input
 	if errors.Is(err, os.ErrNotExist) {
@@ -191,11 +176,9 @@ func Preview(cfgPath, overridesPath string, changes map[string]any) (*Config, er
 	return loadBytesWith(raw, cfgPath, current)
 }
 
-// BaseConfig builds the configuration with the overrides layer left out:
-// defaults, config.yaml, then the OWNCORD_* environment. Nothing is written and
-// no LiveKit credential is generated. The offline recovery command uses it to
-// find data_dir (which overrides cannot move) without reading the file it is
-// about to change.
+// BaseConfig builds the configuration with the overrides layer left out (defaults, config.yaml,
+// environment), writing nothing and generating no LiveKit credential. The offline recovery command uses it
+// to find data_dir without reading the file it is about to change.
 func BaseConfig(cfgPath string) (*Config, error) {
 	raw, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path comes from trusted wiring, not request input
 	if errors.Is(err, os.ErrNotExist) {
@@ -203,14 +186,11 @@ func BaseConfig(cfgPath string) (*Config, error) {
 	} else if err != nil {
 		return nil, fmt.Errorf("reading config file %s: %w", cfgPath, err)
 	}
-	// An empty, non-nil map selects "no overrides layer" in loadBytesWith; a
-	// nil map would read the overrides file.
+	// An empty, non-nil map selects "no overrides layer"; a nil map would read the overrides file.
 	return loadBytesWith(raw, cfgPath, map[string]any{})
 }
 
-// Lookup returns the running value of a dotted key from cfg and whether it names
-// a config leaf; the value has the field's Go type (int, bool, string, float64
-// or []string).
+// Lookup returns the running value of a dotted key and whether it names a config leaf.
 func Lookup(cfg *Config, key string) (any, bool) {
 	v := leafValue(cfg, key)
 	if !v.IsValid() {
@@ -219,8 +199,7 @@ func Lookup(cfg *Config, key string) (any, bool) {
 	return v.Interface(), true
 }
 
-// leafValue walks cfg by yaml tags to the field a dotted key names, or the zero
-// reflect.Value; the lookup twin of env.go's walkLeafKeys.
+// leafValue walks cfg by yaml tags to the field a dotted key names, or the zero reflect.Value.
 func leafValue(cfg *Config, key string) reflect.Value {
 	section, leaf, ok := strings.Cut(key, ".")
 	if !ok {
@@ -245,10 +224,8 @@ func leafValue(cfg *Config, key string) reflect.Value {
 	return reflect.Value{}
 }
 
-// applyOverrideLayer reads the overrides file and applies it between
-// config.yaml and the OWNCORD_* environment. data_dir is resolved first (the
-// environment's value wins, since the env layer itself would apply it) so the
-// file is found even when the environment moves the data directory.
+// applyOverrideLayer applies the overrides file between config.yaml and the environment. data_dir is
+// resolved first (the environment's value wins) so the file is found even when the environment moves it.
 func applyOverrideLayer(cfg *Config) error {
 	dataDir := cfg.Server.DataDir
 	if v := os.Getenv("OWNCORD_SERVER_DATA_DIR"); v != "" {
@@ -261,9 +238,8 @@ func applyOverrideLayer(cfg *Config) error {
 	return applyOverrides(cfg, overrides)
 }
 
-// applyOverrides applies a flat overrides map over cfg. Non-editable keys are
-// warned about and skipped: a hand-edited file must not reach a protected key,
-// and one bad key must not drop the valid ones.
+// applyOverrides applies a flat map over cfg. Non-editable keys are warned about and skipped: a
+// hand-edited file must not reach a protected key or drop the valid ones.
 func applyOverrides(cfg *Config, overrides map[string]any) error {
 	nested := make(map[string]map[string]any)
 	for key, value := range overrides {
@@ -294,8 +270,6 @@ func applyOverrides(cfg *Config, overrides map[string]any) error {
 	return nil
 }
 
-// normalizeStored converts decoded JSON shapes to config shapes: a whole float64
-// to int, a []any to []string.
 func normalizeStored(value any) any {
 	switch t := value.(type) {
 	case float64:

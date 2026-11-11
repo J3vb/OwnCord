@@ -11,54 +11,40 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Group DM membership mutations. Each one is a single write
-// transaction on the one-connection writer pool, so every check made inside it
-// (caller still a member, caller is the owner, target still a member, member
-// count) is race-free: two callers on the same group run one after the other
-// and the second sees the first's commit.
+// Group DM membership mutations. Each is a single write transaction on the
+// one-connection writer pool, so every check inside it (membership, ownership,
+// member count) is race-free: two callers on the same group run in turn and the
+// second sees the first's commit.
 
 var (
-	// ErrGroupDMFull means adding the users would take the group past
-	// MaxGroupDMParticipants.
+	// ErrGroupDMFull means adding the users would take the group past MaxGroupDMParticipants.
 	ErrGroupDMFull = errors.New("group DM is full")
 	// ErrNoNewGroupMembers means every user named by an add is already a member.
 	ErrNoNewGroupMembers = errors.New("no new group members")
-	// ErrGroupDMBlockedPair means a new member and another new member or a
-	// current member have blocked each other (either direction), or a new
-	// member refuses the actor (DMs off without trusting them, or an
-	// unaccepted message request from the actor).
+	// ErrGroupDMBlockedPair means a new member and another new or current member
+	// blocked each other (either direction), or a new member refuses the actor (DMs
+	// off without trusting them, or an unaccepted request from the actor).
 	ErrGroupDMBlockedPair = errors.New("blocked pair in group DM")
 )
 
-// GroupEventRow is a group DM system row as written: the messages row plus the
-// detail the group_event block carries.
+// GroupEventRow is a group DM system row as written: the messages row plus the group_event detail.
 type GroupEventRow struct {
-	MessageID int64
-	// Kind is the stored messages.kind (MessageKindGroupAdd to MessageKindGroupIcon).
-	Kind     int64
-	AuthorID int64
-	Content  string
-	// Timestamp is messages.timestamp of the new row.
-	Timestamp string
-	// TargetUserID is the user an add or remove row names, else 0.
+	MessageID    int64
+	Kind         int64
+	AuthorID     int64
+	Content      string
+	Timestamp    string
 	TargetUserID int64
-	// Name is the new group name of a rename row ("" = removed), else nil.
-	Name *string
-	// IconRemoved is true for an icon row that cleared the icon, false when it
-	// set one (and for every other kind).
-	IconRemoved bool
+	Name         *string
+	IconRemoved  bool
 }
 
 // GroupChange is the outcome of a membership or rename mutation.
 type GroupChange struct {
-	// Rows are the system rows the mutation wrote, in order. Empty when it
-	// changed nothing observable (an unchanged rename).
-	Rows []GroupEventRow
-	// MemberIDs is who is in the group after the change, lowest id first.
+	Rows      []GroupEventRow
 	MemberIDs []int64
 }
 
-// groupEventSpec is the input of insertGroupEventRow.
 type groupEventSpec struct {
 	channelID, authorID int64
 	kind                int64
@@ -68,8 +54,6 @@ type groupEventSpec struct {
 	iconRemoved         bool
 }
 
-// inGroupTx runs fn in one serializable write transaction and rolls back on
-// any error. Errors keep their sentinel for errors.Is.
 func (d *DB) inGroupTx(ctx context.Context, op string, fn func(tx *sql.Tx, q *dbgen.Queries) error) error {
 	tx, err := d.writer.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -86,8 +70,8 @@ func (d *DB) inGroupTx(ctx context.Context, op string, fn func(tx *sql.Tx, q *db
 	return nil
 }
 
-// insertGroupEventRow writes one group row (messages plus message_group_events)
-// inside the caller's transaction. It is the only writer of kinds 2 to 6.
+// insertGroupEventRow writes one group row (messages plus message_group_events) inside
+// the caller's transaction; the only writer of kinds 2 to 6.
 func insertGroupEventRow(ctx context.Context, q *dbgen.Queries, spec groupEventSpec) (*GroupEventRow, error) {
 	m, err := q.InsertGroupEventMessage(ctx, dbgen.InsertGroupEventMessageParams{
 		ChannelID: spec.channelID, UserID: spec.authorID, Content: spec.content, Kind: spec.kind,
@@ -115,7 +99,6 @@ func insertGroupEventRow(ctx context.Context, q *dbgen.Queries, spec groupEventS
 	}, nil
 }
 
-// groupMemberIDs lists a channel's members, lowest id first.
 func groupMemberIDs(ctx context.Context, tx *sql.Tx, channelID int64) ([]int64, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT user_id FROM dm_participants WHERE channel_id = ? ORDER BY user_id`, channelID)
@@ -138,9 +121,8 @@ func groupMemberIDs(ctx context.Context, tx *sql.Tx, channelID int64) ([]int64, 
 	return ids, nil
 }
 
-// requireGroupMember returns ErrNotFound unless userID is a member of the group
-// DM channelID. A 1:1 channel counts as "not found" too: these mutations
-// concern groups only, and the service has already answered 400 for a 1:1.
+// requireGroupMember returns ErrNotFound unless userID is a member of the group DM channelID; a 1:1
+// channel counts as not found.
 func requireGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64) error {
 	var one int
 	err := tx.QueryRowContext(ctx,
@@ -156,9 +138,8 @@ func requireGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64
 	return nil
 }
 
-// removeGroupMember deletes userID's participant, open-state and read-state
-// rows. No participant row to delete is ErrNotFound: the member already left
-// or was removed, and the caller must write no system row for it.
+// removeGroupMember deletes userID's participant, open-state and read-state rows. No participant row
+// is ErrNotFound, and the caller writes no system row for it.
 func removeGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64) error {
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM dm_participants WHERE channel_id = ? AND user_id = ?`, channelID, userID)
@@ -176,8 +157,6 @@ func removeGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64)
 		`DELETE FROM dm_open_state WHERE channel_id = ? AND user_id = ?`, channelID, userID); err != nil {
 		return fmt.Errorf("close dm: %w", err)
 	}
-	// The unread state of a room the user is no longer in is dead weight, and
-	// a later re-add must start from a clean pointer.
 	if _, err = tx.ExecContext(ctx,
 		`DELETE FROM read_states WHERE channel_id = ? AND user_id = ?`, channelID, userID); err != nil {
 		return fmt.Errorf("delete read state: %w", err)
@@ -185,8 +164,6 @@ func removeGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64)
 	return nil
 }
 
-// requireNoBlockedPair returns ErrGroupDMBlockedPair when any of fresh has
-// blocked, or is blocked by, anyone in all (one query on the transaction).
 func requireNoBlockedPair(ctx context.Context, tx *sql.Tx, fresh, all []int64) error {
 	marks := func(n int) string { return strings.TrimSuffix(strings.Repeat("?,", n), ",") }
 	args := make([]any, 0, 2*(len(fresh)+len(all)))
@@ -209,13 +186,12 @@ func requireNoBlockedPair(ctx context.Context, tx *sql.Tx, fresh, all []int64) e
 	return nil
 }
 
-// AddGroupDMMembers adds ids to a group DM on behalf of actorID, who must be a
-// member, and writes one group_add row per added user (author = actor,
-// target = the added user). Users who are already members are skipped; if that
-// leaves nobody the call fails with ErrNoNewGroupMembers. A group that would
-// exceed MaxGroupDMParticipants fails with ErrGroupDMFull and writes nothing:
-// the count is taken inside the transaction, so two adds that together pass
-// the cap cannot both succeed. contentFor gives each row's fallback text.
+// AddGroupDMMembers adds ids on behalf of actorID, who must be a member,
+// writing one group_add row per added user. Existing members are skipped; if
+// that leaves nobody it fails with ErrNoNewGroupMembers. Exceeding
+// MaxGroupDMParticipants fails with ErrGroupDMFull and writes nothing; the
+// count is taken in the transaction, so two adds that together pass the cap
+// cannot both succeed. contentFor gives each row's fallback text.
 func (d *DB) AddGroupDMMembers(ctx context.Context, channelID, actorID int64, ids []int64, contentFor func(targetID int64) string) (*GroupChange, error) {
 	var out GroupChange
 	err := d.inGroupTx(ctx, "AddGroupDMMembers", func(tx *sql.Tx, q *dbgen.Queries) error {
@@ -238,13 +214,13 @@ func (d *DB) AddGroupDMMembers(ctx context.Context, channelID, actorID int64, id
 		if len(members)+len(fresh) > MaxGroupDMParticipants {
 			return ErrGroupDMFull
 		}
-		// Re-check blocks inside the transaction: the service's check ran
-		// earlier, and a block or another add may have landed since.
+		// Re-check blocks inside the transaction: a block or another add may have landed since
+		// the service's check.
 		if err := requireNoBlockedPair(ctx, tx, fresh, slices.Concat(members, fresh)); err != nil {
 			return err
 		}
-		// Likewise a target that has turned DMs off since, or that the actor
-		// holds an unaccepted request to. Only the actor's trust counts.
+		// Likewise a target that turned DMs off or holds an unaccepted request from the actor;
+		// only the actor's trust counts.
 		if err := requireReachableTargets(ctx, tx, actorID, fresh); err != nil {
 			return err
 		}
@@ -271,7 +247,6 @@ func (d *DB) AddGroupDMMembers(ctx context.Context, channelID, actorID int64, id
 		if err := ensureGroupDMOwner(ctx, tx, channelID); err != nil {
 			return err
 		}
-		// The actor's own rows are not unread to them.
 		advanceAuthorReadState(ctx, q, actorID, channelID, last.MessageID)
 
 		out.MemberIDs = slices.Concat(members, fresh)
@@ -284,11 +259,9 @@ func (d *DB) AddGroupDMMembers(ctx context.Context, channelID, actorID int64, id
 	return &out, nil
 }
 
-// RemoveGroupDMMember removes targetID from a group DM on behalf of ownerID,
-// who must be a member and the group's owner (ErrForbidden otherwise), and
-// writes one group_remove row (author = owner, target = the removed user). A
-// target who is not a member, including one who just left, is ErrNotFound and
-// writes no row. The owner cannot remove themselves here: that is a leave.
+// RemoveGroupDMMember removes targetID on behalf of ownerID, who must be a member and
+// the owner (ErrForbidden otherwise), writing one group_remove row. A non-member
+// target is ErrNotFound with no row; the owner leaving is LeaveGroupDM.
 func (d *DB) RemoveGroupDMMember(ctx context.Context, channelID, ownerID, targetID int64, content string) (*GroupChange, error) {
 	var out GroupChange
 	err := d.inGroupTx(ctx, "RemoveGroupDMMember", func(tx *sql.Tx, q *dbgen.Queries) error {
@@ -323,9 +296,8 @@ func (d *DB) RemoveGroupDMMember(ctx context.Context, channelID, ownerID, target
 	return &out, nil
 }
 
-// requireGroupOwner checks, inside the caller's transaction, that userID is a
-// member of the group and its owner: ErrNotFound for a non-member, ErrForbidden
-// for a member who is not the owner.
+// requireGroupOwner checks, in the caller's transaction, that userID is the group's owner:
+// ErrNotFound for a non-member, ErrForbidden for a member who is not the owner.
 func requireGroupOwner(ctx context.Context, tx *sql.Tx, channelID, userID int64) error {
 	if err := requireGroupMember(ctx, tx, channelID, userID); err != nil {
 		return err
@@ -341,11 +313,10 @@ func requireGroupOwner(ctx context.Context, tx *sql.Tx, channelID, userID int64)
 	return nil
 }
 
-// TransferGroupDMOwner makes targetID the owner of a group DM on behalf of the
-// current owner ownerID. A caller who is not a member is ErrNotFound and a
-// member who is not the owner is ErrForbidden. A target who is not a member is
-// ErrNotFound and the owner is unchanged, so dm_owner_id always names a
-// current member. It writes no row. It returns the members after the change.
+// TransferGroupDMOwner makes targetID the owner on behalf of ownerID. A non-member
+// caller is ErrNotFound, a non-owner ErrForbidden; a non-member target is ErrNotFound,
+// so dm_owner_id always names a member. It writes no row and returns the members after
+// the change.
 func (d *DB) TransferGroupDMOwner(ctx context.Context, channelID, ownerID, targetID int64) ([]int64, error) {
 	var members []int64
 	err := d.inGroupTx(ctx, "TransferGroupDMOwner", func(tx *sql.Tx, _ *dbgen.Queries) error {
@@ -369,11 +340,9 @@ func (d *DB) TransferGroupDMOwner(ctx context.Context, channelID, ownerID, targe
 	return members, nil
 }
 
-// SetGroupDMName sets (or, with an empty name, clears) a group DM's name on
-// behalf of actorID, who must be a member (ErrNotFound otherwise). The name is
-// compared inside the transaction: a changed name writes a group_rename row
-// (author = actor, name = the new name, content = the fallback text) and an
-// unchanged one writes nothing and returns no rows.
+// SetGroupDMName sets (or, empty, clears) a group DM's name on behalf of actorID, who
+// must be a member (ErrNotFound otherwise). A changed name writes a group_rename row;
+// an unchanged one writes nothing.
 func (d *DB) SetGroupDMName(ctx context.Context, channelID, actorID int64, name, content string) (*GroupChange, error) {
 	var out GroupChange
 	err := d.inGroupTx(ctx, "SetGroupDMName", func(tx *sql.Tx, q *dbgen.Queries) error {

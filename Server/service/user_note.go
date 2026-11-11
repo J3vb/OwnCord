@@ -9,11 +9,10 @@ import (
 
 var _ UserNoteStore = (*db.DB)(nil)
 
-// MaxUserNoteRunes caps a private profile note (migration 069).
+// MaxUserNoteRunes caps a private profile note.
 const MaxUserNoteRunes = 256
 
-// UserNoteStore is the data access the note service needs. *db.DB satisfies
-// it; it is deliberately not part of Store.
+// UserNoteStore is the data access the note service needs; deliberately not part of Store.
 type UserNoteStore interface {
 	GetUserNote(ctx context.Context, ownerID, targetID int64) (string, error)
 	UpsertUserNote(ctx context.Context, ownerID, targetID int64, note string) (bool, error)
@@ -21,8 +20,8 @@ type UserNoteStore interface {
 	UserExists(ctx context.Context, id int64) (bool, error)
 }
 
-// UserNoteService keeps one private note per (owner, target). Every call is
-// keyed by the owner, and nothing here reads another user's notes.
+// UserNoteService keeps one private note per (owner, target). Every call is keyed by the owner; nothing here
+// reads another user's notes.
 type UserNoteService struct {
 	st UserNoteStore
 }
@@ -32,8 +31,8 @@ func NewUserNoteService(st UserNoteStore) *UserNoteService {
 	return &UserNoteService{st: st}
 }
 
-// Get returns the owner's note about target, "" when there is none. It does
-// not reveal whether the target exists.
+// Get returns the owner's note about target, "" when there is none, without revealing whether the target
+// exists.
 func (s *UserNoteService) Get(ctx context.Context, ownerID, targetID int64) (string, error) {
 	note, err := s.st.GetUserNote(ctx, ownerID, targetID)
 	if err != nil {
@@ -42,10 +41,9 @@ func (s *UserNoteService) Get(ctx context.Context, ownerID, targetID int64) (str
 	return note, nil
 }
 
-// Put bounds, cleans and caps note, then stores it, or deletes the row when it
-// is empty after trimming. It returns the stored value. An unknown target is
-// ErrNotFound and an oversized note is ErrBadRequest. The write is one
-// statement, so concurrent writers need no lock and the last write wins.
+// Put bounds, cleans and caps note, then stores it, or deletes the row when it is empty after trimming.
+// Returns the stored value. An unknown target is ErrNotFound and an oversized note ErrBadRequest. One
+// statement, so the last write wins.
 func (s *UserNoteService) Put(ctx context.Context, ownerID, targetID int64, note string) (string, error) {
 	cleaned, err := cleanTextBounded(note, MaxUserNoteRunes, "note")
 	if err != nil {

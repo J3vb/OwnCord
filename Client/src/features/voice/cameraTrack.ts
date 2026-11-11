@@ -3,7 +3,7 @@
  * both share.
  */
 
-import type { Room, LocalVideoTrack } from "livekit-client";
+import type { LocalVideoTrack } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { loadPref } from "@lib/prefs/preferences";
 import { setH264GpuProfiles } from "@lib/voice/h264Profile";
@@ -34,10 +34,11 @@ import {
 } from "./videoTrackState";
 import { clampPublishedVideo, presetRate } from "./videoCapFollow";
 import { liveVideoBudget } from "./videoBudgetNow";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("screenShare");
 
-export function stopManualCameraTrack(state: CameraTrackState, room: Room | null): void {
+export function stopManualCameraTrack(state: CameraTrackState, room: VoiceRoom | null): void {
   state.onCameraEnded = undefined;
   if (state.manualCameraTrack === null || room === null) return;
   const track = state.manualCameraTrack;
@@ -79,7 +80,7 @@ function watchCameraEnded(
   deps: VideoTrackDeps,
   videoTrack: LocalVideoTrack,
   generation: number,
-  room: Room,
+  room: VoiceRoom,
   ws: WsClient,
 ): () => void {
   const onEnded = (): void => {

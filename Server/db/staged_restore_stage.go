@@ -15,10 +15,9 @@ import (
 	"time"
 )
 
-// StageRestore copies the verified backup at src beside the database, checks
-// the copy, and writes the marker last. The live database is not touched. On
-// any failure nothing is left staged. The caller restarts the server so the
-// next boot applies it.
+// StageRestore copies the verified backup at src beside the database, checks the copy,
+// and writes the marker last. The live database is not touched and a failure leaves
+// nothing staged. The caller restarts the server so the next boot applies it.
 func StageRestore(ctx context.Context, dbPath, src string, m StagedRestoreMarker) error {
 	p, err := newRestorePaths(dbPath)
 	if err != nil {
@@ -27,7 +26,6 @@ func StageRestore(ctx context.Context, dbPath, src string, m StagedRestoreMarker
 	if fileExists(p.marker) {
 		return fmt.Errorf("staging restore: %w", ErrRestoreAlreadyStaged)
 	}
-	// Anything already here has no marker, so it is an orphan of a failed stage.
 	if err := removeIfPresent(p.staged, p.stagedTmp); err != nil {
 		return fmt.Errorf("staging restore: %w", err)
 	}
@@ -92,6 +90,5 @@ func stageCopy(ctx context.Context, p restorePaths, src string, m *StagedRestore
 	if len(ahead) > 0 {
 		return errors.New("staged copy was written by a newer server version")
 	}
-	// A read-only open of a WAL-mode file can leave sidecars behind.
 	return removeIfPresent(p.staged+"-wal", p.staged+"-shm")
 }

@@ -18,10 +18,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
-// NewLiveKitProxy creates a reverse proxy forwarding HTTP and WebSocket requests
-// to the LiveKit server, so the client reaches LiveKit through OwnCord's HTTPS
-// server and avoids WebView2 mixed-content blocks: wss://server:8443/livekit/ is
-// proxied to ws://localhost:7880/.
+// NewLiveKitProxy creates a reverse proxy forwarding HTTP and WebSocket requests to LiveKit through
+// OwnCord's HTTPS server, avoiding WebView2 mixed-content blocks.
 func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 	target, err := url.Parse(livekitURL)
 	if err != nil {
@@ -54,14 +52,13 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 		},
 	}
 
-	// Paths that must never be forwarded to LiveKit (internal/admin endpoints).
-	// Matched as exact path segments to avoid false positives (e.g. "/user-metrics").
+	// Never forwarded (internal/admin endpoints); matched as exact path segments to avoid false positives
+	// like "/user-metrics".
 	blockedSegments := map[string]bool{"admin": true, "metrics": true, "debug": true, "twirp": true}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Enforce the path allowlist and Origin check for EVERY request,
-		// including WebSocket upgrades — otherwise a client could reach a
-		// blocked/admin endpoint simply by sending an Upgrade header.
+		// Enforced for EVERY request including WebSocket upgrades, or an Upgrade header would bypass the
+		// blocklist.
 
 		for seg := range strings.SplitSeq(strings.ToLower(r.URL.Path), "/") {
 			if blockedSegments[seg] {
@@ -70,8 +67,7 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 			}
 		}
 
-		// Validate Origin header. This is the proxy's only origin decision:
-		// proxyWebSocket's Accept skips its own check.
+		// The proxy's only origin decision: proxyWebSocket's Accept skips its own check.
 		if !isOriginAllowed(r, allowedOrigins) {
 			slog.Warn("livekit proxy: origin rejected",
 				"origin", r.Header.Get("Origin"), "path", r.URL.Path, "remote", r.RemoteAddr)
@@ -97,33 +93,20 @@ func isWebSocketUpgrade(r *http.Request) bool {
 	return false
 }
 
-// firstPartyClientOrigins are the fixed webview origins of the desktop client
-// (Tauri): http(s)://tauri.localhost on WebView2, the tauri:// scheme on
-// WKWebView/WebKitGTK. The chat connection goes through the Rust proxy (no
-// Origin), but the LiveKit JS SDK's signal requests and validate probes come
-// from the webview and DO carry these origins; without them voice fails with 403
-// on every default install (empty allowed_origins) for any client off the server
-// machine.
-// This matches the trust already given to absent-Origin requests and does not
-// widen the CSRF surface: a remote website cannot present these origins
-// (browsers resolve *.localhost to loopback, tauri:// is unreachable from web
-// content), so only code on the user's own machine could send them.
+// The fixed webview origins of the desktop client (tauri.localhost on WebView2, tauri:// on
+// WKWebView/WebKitGTK). The LiveKit JS SDK's signal requests come from the webview and DO carry them;
+// without them voice fails with 403 on every default install for a client off the server machine. This does
+// not widen the CSRF surface: a remote website cannot present these origins, so only code on the user's own
+// machine could.
 var firstPartyClientOrigins = []string{
 	"http://tauri.localhost",
 	"https://tauri.localhost",
 	"tauri://localhost",
 }
 
-// isOriginAllowed checks whether the request's Origin header matches one of
-// the allowed origins. Requests with no Origin header (e.g. same-origin or
-// non-browser) and the first-party desktop client's webview origins are
-// always permitted. Beyond those, an empty allowedOrigins list denies all
-// cross-origin requests (require explicit "*" wildcard to allow all).
-// stripDefaultPort removes a trailing ":443" (https) or ":80" (http) from
-// host, so an explicit default port and its implicit RFC 6454 equivalent
-// compare equal. A reverse proxy in front of the server may normalize one
-// side (nginx's $host strips the port) but not the other (a client-set
-// Origin keeps it), so both sides of an origin/host comparison need this.
+// stripDefaultPort removes a trailing ":443" (https) or ":80" (http) so an explicit default port and its
+// RFC 6454 equivalent compare equal; a reverse proxy may normalize one side of an origin/host comparison
+// but not the other.
 func stripDefaultPort(scheme, host string) string {
 	switch scheme {
 	case "https":
@@ -135,16 +118,17 @@ func stripDefaultPort(scheme, host string) string {
 	}
 }
 
+// isOriginAllowed reports whether r's Origin is allowed. No Origin, a same-origin Host match and the
+// first-party webview origins always pass; an empty allowedOrigins denies every other origin, and only
+// "*" allows all.
 func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true // non-browser or same-origin requests
 	}
-	// Browsers attach the page's own origin to every WebSocket handshake. An
-	// Origin whose host matches the request's Host is a page this server served:
-	// same-origin. This mirrors websocket.Accept's default policy, which the
-	// chat WS endpoint already applies; other origins cannot present it (the
-	// browser pins Origin), so the CSRF surface is unchanged.
+	// Browsers attach the page's own origin to every WebSocket handshake; an Origin matching the request's
+	// Host is same-origin, mirroring websocket.Accept's default policy. The browser pins Origin, so the CSRF
+	// surface is unchanged.
 	if u, err := url.Parse(origin); err == nil && u.Host != "" && strings.EqualFold(stripDefaultPort(u.Scheme, u.Host), stripDefaultPort(u.Scheme, r.Host)) {
 		return true
 	}
@@ -167,25 +151,20 @@ func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 	return false
 }
 
-// proxyWebSocket opens a backend WS connection and shovels data in both
-// directions until either side closes.
 func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 	backendURL := *target
 	backendURL.Path = r.URL.Path
 	backendURL.RawQuery = r.URL.RawQuery
 
-	// Forward the Authorization header: the LiveKit Rust SDK (the Linux
-	// client's native voice) sends its room-join token as a Bearer header
-	// rather than the access_token query parameter. Nothing else is forwarded.
+	// Forward Authorization: the LiveKit Rust SDK (Linux native voice) sends its room-join token as a Bearer
+	// header, not access_token. Nothing else is forwarded.
 	var backendHeader http.Header
 	authz := r.Header.Get("Authorization")
 	if authz != "" {
 		backendHeader = http.Header{"Authorization": {authz}}
 	}
 
-	// The dial has its own bound: a hung SFU must not hold the handler for as
-	// long as the client keeps the front socket open. It bounds the handshake
-	// only; the open connection outlives it.
+	// The dial has its own bound so a hung SFU cannot hold the handler; it bounds the handshake only.
 	dialCtx, cancelDial := context.WithTimeout(r.Context(), time.Duration(wsProxyDialTimeout.Load()))
 	defer cancelDial()
 	backConn, dialResp, err := websocket.Dial(dialCtx, backendURL.String(), &websocket.DialOptions{
@@ -196,15 +175,10 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		defer dialResp.Body.Close() //nolint:errcheck // best-effort close
 	}
 	if err != nil {
-		// websocket.Dial wraps a *url.Error that embeds the full request URL,
-		// including the access_token query parameter, a live LiveKit room-join
-		// JWT. Anyone with log access (the admin panel's ring buffer captures
-		// DEBUG+ regardless of the stdout level) could replay it within its
-		// 5-minute TTL as the victim's participant. Strip the credential before
-		// the error reaches slog: the raw query blob first (so an encoded form
-		// is caught), then the decoded token. The Authorization header carries
-		// the same JWT for the native client; dial errors do not echo headers
-		// today, so scrubbing it is future-proofing.
+		// websocket.Dial wraps a *url.Error embedding the full request URL, including access_token, a live
+		// LiveKit room-join JWT that anyone with log access (the admin ring buffer captures DEBUG+) could
+		// replay within its 5-minute TTL. Strip the raw query first (so an encoded form is caught), then the
+		// decoded token. The Authorization header carries the same JWT, so scrubbing it is future-proofing.
 		safeErr := redactKey(err.Error(), backendURL.RawQuery)
 		safeErr = redactKey(safeErr, backendURL.Query().Get("access_token"))
 		safeErr = redactKey(safeErr, authz)
@@ -215,14 +189,12 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		return
 	}
 	defer backConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer
-	// The library default (32 KiB) would tear down both legs on a large
-	// signaling frame before copyWS's own limit is reached.
+	// The library default (32 KiB) would tear down both legs on a large signaling frame before copyWS's own
+	// limit.
 	backConn.SetReadLimit(wsProxyMaxMessageSize)
 
-	// Accept the frontend WebSocket. isOriginAllowed already decided the Origin;
-	// letting Accept run its own check would apply a second, different policy
-	// (literal Host comparison, no default-port equivalence, no first-party
-	// client origins) and refuse requests the proxy admitted.
+	// isOriginAllowed already decided the Origin; Accept's own check would apply a second, different policy
+	// and refuse requests the proxy admitted.
 	frontConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		Subprotocols:       []string{backConn.Subprotocol()},
 		InsecureSkipVerify: true,
@@ -234,8 +206,7 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 	defer frontConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer
 	frontConn.SetReadLimit(wsProxyMaxMessageSize)
 
-	// Use a cancellable context so when one direction finishes, the other
-	// goroutine's copyWS read/write is unblocked and can drain cleanly.
+	// Cancellable so when one direction finishes, the other's copyWS is unblocked.
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -254,25 +225,18 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 	<-errc
 }
 
-// wsProxyMaxMessageSize is the largest WebSocket message the proxy forwards;
-// both legs use it as their read limit, so a larger message closes the
-// connection with StatusMessageTooBig. 256 KB is generous for LiveKit signalling
-// (typically < 10 KB).
+// wsProxyMaxMessageSize is the read limit of both legs; a larger message closes with
+// StatusMessageTooBig. 256 KB is generous for LiveKit signalling (typically < 10 KB).
 const wsProxyMaxMessageSize = 256 * 1024
 
-// wsProxyDialTimeout bounds the backend WebSocket handshake (10 s). Atomic so a
-// test can shorten it.
+// wsProxyDialTimeout bounds the backend WebSocket handshake (10 s); atomic so a test can shorten it.
 var wsProxyDialTimeout atomic.Int64
 
 func init() { wsProxyDialTimeout.Store(int64(10 * time.Second)) }
 
-// wsCloseReasonMax is the longest close reason that fits a close frame (125-byte
-// control payload minus the 2-byte code).
 const wsCloseReasonMax = 123
 
-// copyWS copies messages from src to dst until an error or context cancellation.
-// The read limit on src (wsProxyMaxMessageSize) prevents memory exhaustion via
-// oversized frames.
+// copyWS copies messages until an error or cancellation; the read limit on src prevents memory exhaustion.
 func copyWS(ctx context.Context, dst, src *websocket.Conn) error {
 	for {
 		msgType, reader, err := src.Reader(ctx)
@@ -293,10 +257,8 @@ func copyWS(ctx context.Context, dst, src *websocket.Conn) error {
 	}
 }
 
-// forwardClose relays the close frame one leg received to the other leg, so the
-// LiveKit SDK sees the SFU's own code (for example the one that tells it not to
-// reconnect) and the SFU sees the client's. An error that is not a close frame,
-// or a code that may not be sent on the wire, leaves the deferred normal close.
+// forwardClose relays the close frame one leg received to the other, so the LiveKit SDK sees the SFU's own
+// code (for example the one that says not to reconnect). Non-close errors leave the deferred normal close.
 func forwardClose(dst *websocket.Conn, err error) {
 	ce, ok := errors.AsType[websocket.CloseError](err)
 	if !ok || !sendableCloseCode(ce.Code) {
@@ -305,9 +267,7 @@ func forwardClose(dst *websocket.Conn, err error) {
 	_ = dst.Close(ce.Code, truncateCloseReason(ce.Reason)) //nolint:errcheck // best-effort; the other leg may already be gone
 }
 
-// sendableCloseCode reports whether code may appear in a close frame (RFC 6455
-// section 7.4): the defined range minus the reserved and local-only codes, and
-// the registered and private ranges.
+// sendableCloseCode reports whether code may appear in a close frame (RFC 6455 section 7.4).
 func sendableCloseCode(code websocket.StatusCode) bool {
 	if code == 1004 || code == websocket.StatusNoStatusRcvd || code == websocket.StatusAbnormalClosure || code == websocket.StatusTLSHandshake {
 		return false

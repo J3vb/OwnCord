@@ -9,9 +9,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// GetReadState returns the stored read-state row for (userID, channelID);
-// found is false when the user never focused the channel. It runs on the
-// reader so HandleChannelFocus can skip a redundant write.
+// GetReadState returns the stored read-state row for (userID, channelID); found is
+// false when the user never focused the channel. It runs on the reader so
+// HandleChannelFocus can skip a redundant write.
 func (d *DB) GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error) {
 	row, err := d.q.GetReadState(ctx, dbgen.GetReadStateParams{UserID: userID, ChannelID: channelID})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -59,9 +59,9 @@ func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMes
 	return nil
 }
 
-// channelUnreadCountsSQL reads, per visible channel, the newest live message,
-// up to 100 live messages after the read marker, and the mention count. Both
-// message subqueries are answered from idx_messages_channel_live alone.
+// channelUnreadCountsSQL reads, per visible channel, the newest live message, up to
+// 100 live messages after the read marker, and the mention count, both subqueries from
+// idx_messages_channel_live alone.
 const channelUnreadCountsSQL = `SELECT c.id,
         (SELECT COALESCE(MAX(m.id), 0) FROM messages m
           WHERE m.channel_id = c.id AND m.deleted = 0) AS last_msg_id,

@@ -45,6 +45,7 @@ vi.mock("@lib/logPersistence", () => mocks.logPersistenceMock());
 vi.mock("@lib/net/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
+  resumeSavedSession: vi.fn().mockResolvedValue(null),
   deleteCredential: vi.fn(async (_host: string) => {
     events.push("credential-delete");
     return true;

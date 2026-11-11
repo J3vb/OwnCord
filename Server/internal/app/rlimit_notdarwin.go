@@ -2,6 +2,5 @@
 
 package app
 
-// maxSoftFileLimit is the highest soft limit setrlimit accepts under hard,
-// which outside macOS is the hard limit itself.
+// maxSoftFileLimit is the hard limit itself outside macOS.
 func maxSoftFileLimit(hard uint64) uint64 { return hard }
