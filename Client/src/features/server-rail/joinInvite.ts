@@ -42,7 +42,7 @@ export function confirmAndJoinInvite(
     invite.host === undefined
       ? messagingText("invite.confirmBodyNoHost", { current: currentName })
       : messagingText("invite.confirmBody", { current: currentName, target: invite.host });
-  void import("@components/InviteJoinConfirm")
+  void import("../invites/InviteJoinConfirm")
     .then((m) => m.confirmInviteJoin(body, () => run(invite.code, invite.host)))
     .catch((err: unknown) => log.warn("Invite confirmation failed to open", err));
 }

@@ -7,7 +7,11 @@ vi.mock("../../../lib/logger", () => ({
 
 import { NativeVideoRenderer, parseI420 } from "./videoRenderer";
 import { nativeCounters } from "./counters";
-import { syncVideoSurface, videoSurfaceOf } from "../../../lib/voice/videoSurface";
+import {
+  SURFACE_RESIZE_EVENT,
+  syncVideoSurface,
+  videoSurfaceOf,
+} from "../../../lib/voice/videoSurface";
 
 /** One frame-socket message, as `video.rs`'s `pack_i420` writes it. */
 function message(width: number, height: number, fill = 0): ArrayBuffer {
@@ -351,6 +355,21 @@ describe("NativeVideoRenderer", () => {
     socket.deliver!({ data: message(6, 4) });
     expect(widthSet).not.toHaveBeenCalled();
     expect(heightSet).not.toHaveBeenCalled();
+    renderer.dispose();
+  });
+
+  it("tells its tile when the picture changes size, and only then", () => {
+    const renderer = new NativeVideoRenderer("ws://x");
+    const resized = vi.fn();
+    const tile = document.createElement("div");
+    tile.appendChild(renderer.canvas);
+    tile.addEventListener(SURFACE_RESIZE_EVENT, resized);
+    const socket = FakeSocket.last;
+    socket.deliver!({ data: message(4, 2) });
+    socket.deliver!({ data: message(4, 2) });
+    expect(resized).toHaveBeenCalledTimes(1);
+    socket.deliver!({ data: message(2, 4) });
+    expect(resized).toHaveBeenCalledTimes(2);
     renderer.dispose();
   });
 

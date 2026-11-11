@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
-	"strings"
 )
 
 // fileSizesID is the rule's stable id.
@@ -50,12 +49,8 @@ type FileSizeOverride struct {
 }
 
 // FileSizeOverrides is the table of tighter ceilings, keyed by path relative
-// to the Server tree.
-//
-// cmd/ is deliberately absent as a class and skipped in the rule instead: it
-// holds entry points and one-shot tooling, where a long main is a shape rather
-// than a smell. The skip lives here rather than in the shared skipDirs because
-// the other rules cover cmd/ legitimately.
+// to the Server tree. cmd/ is held to the default like every other directory:
+// it used to be skipped, and its largest file grew to six times the limit.
 var FileSizeOverrides = map[string]FileSizeOverride{
 	"ws/hub.go": {
 		Ceiling: 400,
@@ -72,10 +67,6 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 var fileSizes = Rule{
 	ID: fileSizesID,
 	Check: func(f *ast.File, fset *token.FileSet, rel string) []Violation {
-		// Rule-local, not skipDirs: the other rules cover cmd/ legitimately.
-		if strings.HasPrefix(rel, "cmd/") {
-			return nil
-		}
 		limit := DefaultFileLimit
 		why := fmt.Sprintf("the %d-line default (invariants.DefaultFileLimit)", DefaultFileLimit)
 		split := "Split the new code into a sibling file."

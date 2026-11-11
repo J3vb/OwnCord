@@ -14,15 +14,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// Thin adapters over service.ChannelService: the name/topic/category contract,
-// type whitelist, numeric bounds, audit rows and delete ordering all live in
-// the service. The handlers decode, resolve through the one guild-channel
-// policy, delegate, and fan out to the hub from the rows the service returns.
+// Thin adapters over service.ChannelService, which owns the contract, audit rows and delete ordering.
+// Handlers decode, resolve through the one guild-channel policy, delegate, and fan out to the hub.
 
-// resolveGuildChannel adapts service.ChannelService.ResolveGuildChannel (the
-// one non-DM resolution policy) to this surface: a missing channel and a DM id
-// answer an identical 404. Returns nil when a response has already been
-// written.
+// resolveGuildChannel adapts ChannelService.ResolveGuildChannel: a missing channel and a DM id answer an
+// identical 404. Returns nil when a response is already written.
 func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter, r *http.Request) *db.Channel {
 	if channels == nil {
 		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
@@ -41,8 +37,8 @@ func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter
 	return ch
 }
 
-// writeChannelErr maps ChannelService errors onto admin API responses.
-// Validation failures answer INVALID_INPUT with the service's own message.
+// writeChannelErr maps ChannelService errors; validation failures answer INVALID_INPUT with the service's
+// message.
 func writeChannelErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrPermsChanged) {
 		writeErr(w, http.StatusConflict, httperr.CodePermissionsChanged, err.Error())
@@ -70,23 +66,19 @@ func handleListChannels(channels *service.ChannelService) http.HandlerFunc {
 	}
 }
 
-// createChannelRequest is the JSON body for POST /admin/api/channels.
 type createChannelRequest struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
-	// CategoryID places the channel in that category (0 = none); an unknown id
-	// answers 400. Category is the legacy free-text name (matched ignoring
-	// case, created when missing, empty = none). category_id wins when both
-	// are sent.
+	// CategoryID places the channel in that category (0 = none; unknown id answers 400). Category is the legacy
+	// free-text name (case-insensitive, created when missing); category_id wins when both are sent.
 	CategoryID int64  `json:"category_id"`
 	Category   string `json:"category"`
 	Topic      string `json:"topic"`
 	Position   int    `json:"position"`
 }
 
-// createChannelPostCommitHook, when non-nil, runs synchronously right after the
-// create commit, before the post-commit re-read and hub fan-out, so tests can
-// land a caller cancellation in that window.
+// createChannelPostCommitHook runs synchronously after the create commit, before the re-read and hub fan-out,
+// so tests can land a cancellation in that window.
 var createChannelPostCommitHook func()
 
 func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
@@ -114,9 +106,8 @@ func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) h
 		}
 		if hub != nil {
 			hub.BroadcastChannelCreate(ch)
-			// A category made by the legacy category string: managers get
-			// the list after the channel frame (see BroadcastChannelCategories
-			// on ordering).
+			// A category made by the legacy string: managers get the list after the channel frame (see
+			// BroadcastChannelCategories).
 			if newCats != nil {
 				hub.BroadcastChannelCategories(newCats)
 			}
@@ -125,39 +116,31 @@ func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) h
 	}
 }
 
-// updateChannelRequest is the JSON body for PATCH /admin/api/channels/{id}.
 type updateChannelRequest struct {
 	Name  string `json:"name"`
 	Topic string `json:"topic"`
-	// CategoryID moves the channel into that category (0 = uncategorized);
-	// an unknown id answers 400. Category is the legacy free-text name
-	// (matched ignoring case, created when missing, empty = none). Neither
-	// sent leaves the category alone, and category_id wins when both are.
+	// CategoryID moves the channel (0 = uncategorized; unknown id answers 400); Category is the legacy name.
+	// Neither sent leaves the category alone; category_id wins when both are.
 	CategoryID *int64  `json:"category_id"`
 	Category   *string `json:"category"`
 	SlowMode   int     `json:"slow_mode"`
 	Position   int     `json:"position"`
 	Archived   bool    `json:"archived"`
-	// NSFW is stored, broadcast and audited; it changes no server-side content
-	// behaviour (see migration 025). Clients decide how to present it.
+	// NSFW is stored, broadcast and audited; it changes no server-side content behaviour, clients decide
+	// presentation.
 	NSFW bool `json:"nsfw"`
-	// Voice capacity limits, enforced on voice join by the ws layer.
-	// 0 = unlimited.
+	// Voice capacity limits enforced on voice join by the ws layer; 0 = unlimited.
 	VoiceMaxUsers int `json:"voice_max_users"`
 	VoiceMaxVideo int `json:"voice_max_video"`
-	// SyncPermissions replaces the channel's overrides with the template of the
-	// category it ends up in and marks it synced. Without it, moving
-	// a channel to another category keeps its overrides and unsyncs it.
+	// SyncPermissions replaces the channel's overrides with its category's template and marks it synced; without
+	// it, moving to another category keeps its overrides and unsyncs it.
 	SyncPermissions bool `json:"sync_permissions"`
-	// Password sets, changes or removes a voice channel's password: absent
-	// leaves it alone, "" removes it, anything else becomes the password. Any
-	// value on a channel that is not a voice channel answers 400. It is never
-	// returned by any response.
+	// Password: absent leaves it alone, "" removes it, anything else sets it; any value on a non-voice channel
+	// answers 400. Never returned by any response.
 	Password *string `json:"password"`
 }
 
-// patchChannelPostCommitHook mirrors createChannelPostCommitHook for the
-// update path's post-commit window.
+// patchChannelPostCommitHook is createChannelPostCommitHook's counterpart for the update path.
 var patchChannelPostCommitHook func()
 
 func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
@@ -182,8 +165,7 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 			return
 		}
 
-		// Keep the category unless the body names one: category_id wins, then
-		// the legacy name; neither sent leaves the channel where it is.
+		// Keep the category unless the body names one: category_id wins, then the legacy name.
 		categoryID, legacyName, keepCategory := existing.CategoryID, (*string)(nil), true
 		switch {
 		case req.CategoryID != nil:
@@ -192,6 +174,8 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 			categoryID, legacyName, keepCategory = 0, req.Category, false
 		}
 
+		// The write fills this in with the row it replaced; it starts as the snapshot.
+		before := *existing
 		updated, newCats, err := channels.AdminUpdateChannel(r.Context(), actorFromContext(r), existing, service.AdminChannelUpdate{
 			Name:          req.Name,
 			Topic:         req.Topic,
@@ -208,6 +192,7 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 			SyncPermissions: req.SyncPermissions,
 			ActorRole:       actorRoleFromContext(r),
 			Password:        req.Password,
+			Before:          &before,
 		}, patchChannelPostCommitHook)
 		if err != nil {
 			writeChannelErr(w, err)
@@ -218,13 +203,12 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 			if newCats != nil {
 				hub.BroadcastChannelCategories(newCats)
 			}
-			// Archiving/unarchiving changes who sees the channel, not just its
-			// metadata: send targeted channel_create/channel_delete so clients
-			// re-sync without a reconnect. Archiving hides a voice channel the way
-			// deleting does, so live participants are evicted first, matching the
-			// delete ordering.
-			if existing.Archived != updated.Archived {
-				if !existing.Archived && updated.Archived {
+			// Archiving changes who sees the channel, not just metadata: send targeted channel_create/channel_delete
+			// so clients re-sync without a reconnect. Archiving hides a voice channel like deleting does, so live
+			// participants are evicted first, matching the delete ordering. Compared with the row the write
+			// replaced: another edit may have changed the archive state after this request read its snapshot.
+			if before.Archived != updated.Archived {
+				if !before.Archived && updated.Archived {
 					hub.CleanupVoiceForChannel(existing.ID)
 				}
 				hub.RefreshChannelVisibility(updated)
@@ -247,9 +231,8 @@ func handleDeleteChannel(channels *service.ChannelService, hub HubBroadcaster) h
 		}
 		archivedRow, err := channels.AdminDeleteChannel(r.Context(), actorFromContext(r), existing, evict)
 		if err != nil {
-			// The service archived the channel before the delete failed — tell
-			// connected clients about the state that did change instead of
-			// leaving them stuck on a live channel that now 403s everywhere.
+			// The service archived the channel before the delete failed: tell clients the state that did change, not
+			// leave them on a live channel that now 403s.
 			if hub != nil && archivedRow != nil {
 				hub.BroadcastChannelUpdate(archivedRow)
 				hub.RefreshChannelVisibility(archivedRow)
@@ -264,9 +247,8 @@ func handleDeleteChannel(channels *service.ChannelService, hub HubBroadcaster) h
 	}
 }
 
-// Longest audit search text and action filter the log view accepts. Real
-// action names are short snake_case identifiers; the search is a phrase an
-// operator types.
+// Longest audit search text and action filter accepted: real action names are short snake_case, the search is
+// a typed phrase.
 const (
 	maxAuditQueryRunes = 100
 	maxAuditActionLen  = 64
@@ -281,11 +263,8 @@ func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 		}
 		limit := queryInt(r, "limit", 50, 1, 500)
 		offset := queryInt(r, "offset", 0, 0, math.MaxInt32)
-		// q searches the whole log (actor, action, target type, detail) and
-		// action narrows it to one action, so the panel's search is not
-		// limited to the page it happened to fetch. hide_signins=1 drops the
-		// sign-in and connection rows (the panel's Sign-ins chip, off by
-		// default).
+		// q searches the whole log (actor, action, target type, detail) and action narrows to one action, so search
+		// is not limited to the fetched page. hide_signins=1 drops sign-in and connection rows (the Sign-ins chip).
 		query := strings.TrimSpace(r.URL.Query().Get("q"))
 		action := r.URL.Query().Get("action")
 		hideSignins := r.URL.Query().Get("hide_signins") == "1"
@@ -303,9 +282,8 @@ func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to get audit log")
 			return
 		}
-		// The first page also names every action in the whole log, so the
-		// panel's action filter is not limited to the rows it has fetched.
-		// A header, because the body is a bare array.
+		// The first page also names every action in the whole log so the action filter is not limited to fetched
+		// rows; sent as a header because the body is a bare array.
 		if offset == 0 {
 			actions, err := settings.AuditActions(r.Context(), maxAuditActions)
 			if err != nil {

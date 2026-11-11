@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
+import {
+  createServerBanner,
+  applyConnectionStatus,
+} from "../../src/features/server-rail/ServerBanner";
 
 describe("ServerBanner", () => {
   beforeEach(() => {

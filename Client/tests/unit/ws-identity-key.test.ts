@@ -90,6 +90,23 @@ describe("auth frame: identity_public_key", () => {
     expect(authFrames()).toHaveLength(0);
   });
 
+  it("sends only the newer attempt's frame when a reconnect overtakes a pending key lookup", async () => {
+    const releases: Array<(key: string) => void> = [];
+    setIdentityKeyProvider(() => new Promise<string | null>((resolve) => releases.push(resolve)));
+    await open();
+    client.disconnect();
+    await openSocket(client, { host: "localhost:8443", token: "t2" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(releases).toHaveLength(2);
+    releases[0]?.("first-key");
+    releases[1]?.("second-key");
+    await vi.advanceTimersByTimeAsync(10);
+    const frames = authFrames();
+    expect(frames).toHaveLength(1);
+    expect(frames[0]?.token).toBe("t2");
+    expect(frames[0]?.identity_public_key).toBe("second-key");
+  });
+
   it("sends a frame without the key when no provider is registered", async () => {
     await open();
     expectKeylessAuth();

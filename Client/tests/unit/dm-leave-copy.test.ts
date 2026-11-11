@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openLeaveConfirm, type DmMenuConvo } from "../../src/components/dmContextMenu";
+import {
+  openLeaveConfirm,
+  type DmMenuConvo,
+} from "../../src/features/direct-messages/dmContextMenu";
 import { requestsText } from "../../src/i18n/requests";
 
 describe("leave-group confirmation copy", () => {

@@ -1477,3 +1477,24 @@ fn a_hidden_library_game_does_not_fall_through_to_a_list_match_for_the_same_proc
     let other = proc_at("/opt/other.exe", 9);
     assert_eq!(name(&[hades, other], &["hades"]).as_deref(), Some("Other"));
 }
+
+#[test]
+fn overlapping_scans_answer_at_once_while_one_is_running() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let busy = AtomicBool::new(true);
+    assert!(super::detect_game_guarded(&busy, None).is_none());
+    assert!(super::list_running_programs_guarded(&busy).is_empty());
+    assert!(
+        busy.load(Ordering::SeqCst),
+        "a refused scan leaves the flag held"
+    );
+
+    let idle = AtomicBool::new(false);
+    let _ = super::list_running_programs_guarded(&idle);
+    let _ = super::detect_game_guarded(&idle, None);
+    assert!(
+        !idle.load(Ordering::SeqCst),
+        "the flag is released after a scan"
+    );
+}

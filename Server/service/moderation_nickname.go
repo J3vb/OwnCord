@@ -12,22 +12,18 @@ import (
 )
 
 const (
-	// nicknameRateLimit and nicknameRateWindow cap how many nicknames one
-	// actor may change. The budget is spent only after authorization, so a
-	// caller without authority cannot burn it.
+	// nicknameRateLimit and nicknameRateWindow cap one actor's nickname changes; the budget is spent only after
+	// authorization, so a caller without authority cannot burn it.
 	nicknameRateLimit  = 10
 	nicknameRateWindow = time.Minute
 )
 
-// SetNickname sets (or, with a nil or empty name, clears) another member's
-// nickname, users.display_name. Order: a human actor, a positive target that is not
-// the actor, the name through the member's own edit pipeline (cleanVisibleBounded),
-// MANAGE_NICKNAMES (Administrator bypasses the bit, never the hierarchy), the
-// target exists and is not pending, the actor strictly outranks it, the name is not
-// another account's username, the per-actor limiter, then the write, which
-// re-checks bit and rank in its transaction. Authorization precedes existence so a
-// caller without the bit sees Forbidden for an unknown id, never NotFound. The
-// returned user is the committed row, for the transport to broadcast.
+// SetNickname sets (or, with a nil or empty name, clears) another member's nickname (users.display_name).
+// Order: human actor, positive non-self target, the name through cleanVisibleBounded, MANAGE_NICKNAMES
+// (Administrator bypasses the bit, never the hierarchy), target exists and is not pending, actor strictly
+// outranks it, name is not another account's username, per-actor limiter, then the write, which re-checks bit
+// and rank in its transaction. Authorization precedes existence, so no bit means Forbidden for an unknown id.
+// Returns the committed row for the transport to broadcast.
 func (s *ModerationService) SetNickname(ctx context.Context, actorID, targetID int64, name *string) (*db.User, error) {
 	if err := requireHumanActor(actorID); err != nil {
 		return nil, err
@@ -72,8 +68,7 @@ func (s *ModerationService) SetNickname(ctx context.Context, actorID, targetID i
 	if err != nil {
 		switch {
 		case errors.Is(err, db.ErrOutranked):
-			// The concurrent-change case: the actor lost the bit or the target
-			// was promoted since the check above. Refused, not applied.
+			// The actor lost the bit or the target was promoted since the check above: refused, not applied.
 			return nil, fmt.Errorf("%w: cannot change the nickname of this member", ErrForbidden)
 		case errors.Is(err, db.ErrNotFound):
 			return nil, fmt.Errorf("%w: user not found", ErrNotFound)
@@ -84,8 +79,8 @@ func (s *ModerationService) SetNickname(ctx context.Context, actorID, targetID i
 	return user, nil
 }
 
-// checkNicknameCollision applies the self edit's username collision rule to a
-// moderator's change; an unchanged name is not re-checked.
+// checkNicknameCollision applies the self edit's username collision rule to a moderator's change; an
+// unchanged name is not re-checked.
 func (s *ModerationService) checkNicknameCollision(ctx context.Context, target *db.User, cleaned string) error {
 	if s.users == nil || !displayNameChanged(target.DisplayName, cleaned) {
 		return nil

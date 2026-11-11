@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { createGifPicker } from "@components/GifPicker";
+import { createGifPicker } from "../../src/features/messaging/GifPicker";
 import { messagingText } from "../../src/i18n/messaging";
 import { gifFavoritesText } from "../../src/i18n/gifFavorites";
 import { ApiClientError } from "@lib/api";
-import type { GifPickerOptions } from "@components/GifPicker";
+import type { GifPickerOptions } from "../../src/features/messaging/GifPicker";
 import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/media/gifProvider";
 import {
   bindGifFavoritesApi,

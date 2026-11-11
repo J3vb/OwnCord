@@ -96,6 +96,16 @@ function setBusy(row: Row, decision: DmRequestDecision | null): void {
   }
 }
 
+type RequestsState = ReturnType<typeof messageRequestsStore.getState>["status"];
+
+/** The status line's text for the current store and connection state. */
+function statusMessage(connected: boolean, state: RequestsState, pendingCount: number): string {
+  if (!connected) return t("reconnecting");
+  if (state === "loading") return t("loading");
+  if (state === "unavailable") return t("unavailable");
+  return pendingCount === 0 ? t("empty") : "";
+}
+
 /** Fill the inbox view's root (view.ts loads this module on first open). */
 export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
   const intro = createElement("p", { class: "requests-intro" }, t("intro"));
@@ -280,28 +290,19 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
     target?.focus();
   };
 
-  let shown: readonly MessageRequest[] | null = null;
-  function render(): void {
-    const { status: state, pending } = messageRequestsStore.getState();
+  const paintStatus = (state: RequestsState, pendingCount: number): void => {
     const connected = uiStore.getState().connectionStatus === "connected";
-    const message = !connected
-      ? t("reconnecting")
-      : state === "loading"
-        ? t("loading")
-        : state === "unavailable"
-          ? t("unavailable")
-          : pending.length === 0
-            ? t("empty")
-            : "";
+    const message = statusMessage(connected, state, pendingCount);
     // A live region re-reads what it is given; only speak on a change.
     if (status.textContent !== message) setText(status, message);
     retry.hidden = !connected || state !== "unavailable";
     retry.setAttribute("aria-disabled", String(retrying));
     const retryLabel = t(retrying ? "retrying" : "retry");
     if (retry.textContent !== retryLabel) setText(retry, retryLabel);
-    if (pending === shown) return;
-    shown = pending;
+  };
 
+  /** Drop the rows whose request left; the index where focus was lost, else null. */
+  const removeGoneRows = (pending: readonly MessageRequest[]): number | null => {
     const keep = new Set(pending.map((r) => r.id));
     let focusLeftAt: number | null = null;
     let index = 0;
@@ -316,6 +317,11 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
       row.li.remove();
       rows.delete(id);
     }
+    return focusLeftAt;
+  };
+
+  /** Refresh kept rows and slot new ones in. */
+  const upsertRows = (pending: readonly MessageRequest[]): void => {
     // Newest first, and ids only grow: an existing row never moves, new ones slot in.
     let before: Element | null = null;
     for (let i = pending.length - 1; i >= 0; i--) {
@@ -335,6 +341,17 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
     const ordered = pending.map((r) => [r.id, rows.get(r.id)!] as const);
     rows.clear();
     for (const [id, row] of ordered) rows.set(id, row);
+  };
+
+  let shown: readonly MessageRequest[] | null = null;
+  function render(): void {
+    const { status: state, pending } = messageRequestsStore.getState();
+    paintStatus(state, pending.length);
+    if (pending === shown) return;
+    shown = pending;
+
+    let focusLeftAt = removeGoneRows(pending);
+    upsertRows(pending);
     // The list itself is a tab stop; hiding it would drop focus to the body.
     if (pending.length === 0 && list.contains(document.activeElement)) focusLeftAt ??= 0;
     list.hidden = pending.length === 0;

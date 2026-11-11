@@ -9,21 +9,17 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// routeGate is one named admin route gate: a predicate over the role
-// adminAuthMiddleware resolved (the top role's identity with the OR of every
-// held role's permissions) and the 403 text a refusal carries. Every gate asks
-// a permissions predicate, so no route re-derives the rule.
+// routeGate is one named admin route gate: a predicate over the role adminAuthMiddleware resolved (top role's
+// identity with the OR of every held role's permissions) and the 403 text of a refusal. Every gate asks a
+// permissions predicate, so no route re-derives the rule.
 type routeGate struct {
-	// name is the gate's label in the route inventory (GatedRoute.Gate).
 	name  string
 	allow func(perms, roleID int64, position int) bool
 	msg   string
 }
 
-// The gates. The owner-tier ones pass the owner or an explicit holder of the
-// bit and refuse an Administrator without it; the administrator-tier ones
-// (diagnostics, erase) keep passing an Administrator. See
-// permissions.OwnerTierBits.
+// The owner-tier gates pass the owner or an explicit bit holder and refuse an Administrator without it; the
+// administrator-tier ones (diagnostics, erase) keep passing an Administrator. See permissions.OwnerTierBits.
 var (
 	gateManageBackups = routeGate{
 		name:  "manage_backups",
@@ -72,34 +68,30 @@ var (
 	}
 )
 
-// GatedRoute is one route registered through gateRegistry.route: the (method,
-// pattern) pair relative to NewAdminAPI's own router, and the name of the gate
-// it sits behind.
+// GatedRoute is one route registered through gateRegistry.route: the (method, pattern) pair and its gate's
+// name.
 type GatedRoute struct {
 	Method  string
 	Pattern string
 	Gate    string
 }
 
-// gateRegistry records every route registered behind a routeGate while one
-// NewAdminAPI call builds its router, so a test walks the exact set instead of
-// a second hand-kept list the next added route could leave stale. Like
-// ownerOnlyRegistry it belongs to that call's AdminAPI and is only written
-// during construction.
+// gateRegistry records every route registered behind a routeGate during one NewAdminAPI call, so a test walks
+// the exact set instead of a hand-kept list; like ownerOnlyRegistry it is per API and written only during
+// construction.
 type gateRegistry struct {
 	routes []GatedRoute
 }
 
-// route registers h on r behind gate and records the route. It is the ONE call
-// site for every owner-or-bit and administrator-or-bit route,
-// generalising the earlier owner-or-MANAGE_BACKUPS gate.
+// route registers h on r behind gate and records it: the ONE call site for every owner-or-bit and
+// administrator-or-bit route.
 func (g *gateRegistry) route(r chi.Router, gate routeGate, method, pattern string, h http.Handler) {
 	g.routes = append(g.routes, GatedRoute{Method: method, Pattern: pattern, Gate: gate.name})
 	r.Method(method, pattern, gateMiddleware(gate, h))
 }
 
-// gatedRoutes is a copy of the routes this API registered through the gate
-// registry. Read through GatedRoutesForTest; production code never reads it.
+// gatedRoutes copies the routes registered through the gate registry; production code never reads it
+// (GatedRoutesForTest).
 func (a *AdminAPI) gatedRoutes() []GatedRoute {
 	return slices.Clone(a.gates.routes)
 }

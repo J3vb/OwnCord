@@ -27,15 +27,22 @@ use super::camera::{
     self, CameraCapture, CameraDevice, CaptureOptions as CameraCaptureOptions,
     Target as CameraTarget,
 };
-use super::capture::{self, Apm, Capture, GateSink, LevelSink, Sink};
+use super::capture::{self, Apm, Capture, GateSink, LevelSink};
 use super::playout::{self, Playout};
 use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
 use super::share_audio::ShareAudio;
 use super::video::FrameServer;
 use crate::sync::lock;
 
+mod audio_line;
 mod events;
 mod publish_options;
+mod screen_share;
+mod video_bitrate;
+
+use audio_line::off_runtime;
+pub use audio_line::{Audio, Class, DeviceSwitch, MicCommit, MicStep};
+pub use video_bitrate::VideoKind;
 
 use events::{forward_events, is_encrypted, permission_event, withdraw_unencrypted};
 pub use events::{Event, EventSink, ParticipantInfo, TrackInfo};
@@ -298,6 +305,10 @@ struct VideoPublication {
     issued: String,
     live: TrackSid,
     capture: Option<u64>,
+    /// The sender's layers (rate, scale-down) right after the publish: what a
+    /// lifted bitrate cap restores (`video_bitrate.rs`). Empty until recorded,
+    /// and again after a republish, whose layers are new.
+    original_layers: Vec<video_bitrate::Layer>,
 }
 
 impl VideoPublication {
@@ -306,6 +317,7 @@ impl VideoPublication {
             issued: sid.to_string(),
             live: sid,
             capture: None,
+            original_layers: Vec::new(),
         }
     }
 
@@ -319,6 +331,7 @@ impl VideoPublication {
     fn republished(&mut self, previous: &TrackSid, sid: TrackSid) {
         if self.live == *previous {
             self.live = sid;
+            self.original_layers.clear();
         }
     }
 }
@@ -396,6 +409,10 @@ pub struct NativeSession {
     /// Set when the server withdrew the microphone publication (a moderator
     /// mute); the next enable republishes instead of unmuting a dead track.
     mic_withdrawn: MicWithdrawn,
+    /// Bumped by every microphone call, under the session lock: a call that
+    /// finds it moved when its driver step ends was superseded and commits
+    /// nothing.
+    mic_epoch: u64,
     camera: VideoSlot,
     /// The running native camera capture, independent of publication: the
     /// self-view preview reads it back over the frame socket's `camera` route.
@@ -424,8 +441,13 @@ pub struct NativeSession {
     next_camera: u64,
     on_event: EventSink,
     frames: FrameServer,
-    playout: Playout,
-    capture: Capture,
+    /// The playout and capture are shared with the blocking threads that
+    /// open and close their devices; `playout_controls` and `capture_controls`
+    /// reach the settings that never wait on a device.
+    playout: Arc<Audio<Playout>>,
+    playout_controls: playout::Controls,
+    capture: Arc<Audio<Capture>>,
+    capture_controls: capture::Controls,
     forwarder: tokio::task::JoinHandle<()>,
     /// Emits the capture's reports (`enable_audio`), off the audio thread.
     capture_reports: Option<tokio::task::JoinHandle<()>>,
@@ -501,6 +523,9 @@ impl NativeSession {
         let screen_publication = VideoSlot::default();
         let screen_audio = VideoSlot::default();
         let playout = Playout::default();
+        let playout_controls = playout.controls();
+        let capture = Capture::default();
+        let capture_controls = capture.controls();
         let mic_withdrawn = MicWithdrawn::default();
         let forwarder = tokio::spawn(forward_events(
             events,
@@ -523,6 +548,7 @@ impl NativeSession {
             mic: None,
             mic_source: None,
             mic_withdrawn,
+            mic_epoch: 0,
             camera,
             camera_capture: None,
             screen: None,
@@ -535,8 +561,10 @@ impl NativeSession {
             next_camera: 0,
             on_event,
             frames,
-            playout,
-            capture: Capture::default(),
+            playout: Arc::new(Audio::new(playout)),
+            playout_controls,
+            capture: Arc::new(Audio::new(capture)),
+            capture_controls,
             forwarder,
             capture_reports: None,
         })
@@ -582,7 +610,7 @@ impl NativeSession {
     /// The playout mixer, for the interop example: CI has no output device,
     /// so it pulls the mix itself to measure per-user volume end to end.
     pub fn playout_mixer(&self) -> Arc<playout::Mixer> {
-        self.playout.mixer().clone()
+        self.playout_controls.mixer().clone()
     }
 
     /// The frame socket's base URL, token included: only the webview (via
@@ -603,7 +631,7 @@ impl NativeSession {
     /// only through the gained mix in `playout.rs`, which is also what the
     /// echo canceller hears. A box with no sound server logs and carries on
     /// listen-only.
-    pub fn enable_audio(&mut self, opts: AudioOptions) {
+    pub async fn enable_audio(&mut self, opts: AudioOptions) {
         if self.apm.is_some() {
             return;
         }
@@ -611,18 +639,20 @@ impl NativeSession {
         let opts = self.audio.unwrap_or(opts);
         self.audio = Some(opts);
         let apm = Apm::new(&opts);
-        self.playout.set_reference(apm.clone());
+        self.playout_controls.set_reference(apm.clone());
         let (on_gate, on_level, emitter) = capture_report_sinks(self.on_event.clone());
         self.capture_reports = Some(emitter);
-        self.capture.configure(
+        self.capture_controls.configure(
             apm.clone(),
             opts.enhanced_noise_suppression,
             on_gate,
             on_level,
         );
         self.apm = Some(apm);
-        if let Err(e) = self.playout.set_device("") {
-            log::warn!("[native_voice] playout unavailable: {e}");
+        let switch = DeviceSwitch::output(&self.playout);
+        match off_runtime(move || switch.apply("")).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) | Err(e) => log::warn!("[native_voice] playout unavailable: {e}"),
         }
     }
 
@@ -638,15 +668,15 @@ impl NativeSession {
             ProcessingChange::Remember => self.audio = Some(audio),
             ProcessingChange::Reroute => {
                 if let Some(apm) = &self.apm {
-                    self.capture
+                    self.capture_controls
                         .set_processing(apm.clone(), audio.enhanced_noise_suppression);
                 }
                 self.audio = Some(audio);
             }
             ProcessingChange::Rebuild => {
                 let apm = Apm::new(&audio);
-                self.playout.set_reference(apm.clone());
-                self.capture
+                self.playout_controls.set_reference(apm.clone());
+                self.capture_controls
                     .set_processing(apm.clone(), audio.enhanced_noise_suppression);
                 retire(&mut self.retired, self.apm.replace(apm));
                 self.audio = Some(audio);
@@ -664,6 +694,26 @@ impl NativeSession {
         enabled: bool,
         bitrate: Option<u64>,
     ) -> Result<(), String> {
+        let step = self.begin_microphone(enabled, bitrate).await;
+        let Some(commit) = off_runtime(move || step.run()).await?? else {
+            return Ok(());
+        };
+        let (result, cleanup) = self.finish_microphone(commit).await;
+        if let Some(stop) = cleanup {
+            if let Ok(Err(e)) | Err(e) = off_runtime(move || stop.run()).await {
+                log::warn!("[native_voice] capture stop: {e}");
+            }
+        }
+        result
+    }
+
+    /// The session-locked first step of [`Self::set_microphone`]: decide what
+    /// the call needs from the capture and take its place in line. Run the
+    /// returned step on a blocking thread without the session, then pass what
+    /// it returns to [`Self::finish_microphone`] under the session again.
+    pub async fn begin_microphone(&mut self, enabled: bool, bitrate: Option<u64>) -> MicStep {
+        self.mic_epoch += 1;
+        let epoch = self.mic_epoch;
         let was_withdrawn = enabled && self.mic_withdrawn.take();
         if was_withdrawn {
             // The SFU dropped the publication; the track is dead. Best effort
@@ -675,60 +725,100 @@ impl NativeSession {
                     .unpublish_track(&track.sid())
                     .await;
             }
-            self.capture.stop();
             self.mic_source = None;
         }
-        let Some(track) = &self.mic else {
+        if self.mic.is_none() {
             if !enabled {
-                return Ok(());
+                return self.stop_step();
             }
             // Unbuffered (queue 0): the capture callback hands over whole
             // 10 ms frames and never waits.
             let source =
                 NativeAudioSource::new(AudioSourceOptions::default(), capture::SAMPLE_RATE, 1, 0);
-            self.capture.start(Sink::Track(source.clone()))?;
-            self.mic_source = Some(source.clone());
-            let published = self
-                .publish_audio(RtcAudioSource::Native(source), bitrate)
-                .await;
-            if published.is_err() {
-                self.capture.stop();
-                self.mic_source = None;
-                // The server may not have re-granted yet: stay withdrawn so
-                // the next enable tries a fresh publish again.
-                self.mic_withdrawn.keep_if_failed(was_withdrawn, &published);
-            }
-            return published;
-        };
+            return MicStep::first_publish(&self.capture, epoch, source, bitrate, was_withdrawn);
+        }
         if enabled {
             // The interop example publishes its own source and captures nothing.
-            if let Some(source) = &self.mic_source {
-                self.capture.start(Sink::Track(source.clone()))?;
-            }
-            track.unmute();
-        } else {
-            track.mute();
-            self.capture.stop();
+            let Some(source) = self.mic_source.clone() else {
+                if let Some(track) = &self.mic {
+                    track.unmute();
+                }
+                return MicStep::Idle;
+            };
+            return MicStep::Start {
+                capture: self.capture.clone(),
+                ticket: self.capture.ticket(Class::Running),
+                stop_first: false,
+                commit: MicCommit {
+                    epoch,
+                    source,
+                    publish: None,
+                },
+            };
         }
-        Ok(())
+        if let Some(track) = &self.mic {
+            track.mute();
+        }
+        self.stop_step()
+    }
+
+    fn stop_step(&self) -> MicStep {
+        MicStep::Stop {
+            capture: self.capture.clone(),
+            ticket: self.capture.ticket(Class::Running),
+        }
+    }
+
+    /// The session-locked last step of a microphone call whose capture start
+    /// succeeded: unmute the track, or publish it. A call a later one
+    /// superseded while its step ran changes nothing: the later call decides
+    /// the track and holds the later place in the capture's line. A failed
+    /// publish returns the stop that closes the capture it started.
+    pub async fn finish_microphone(
+        &mut self,
+        commit: MicCommit,
+    ) -> (Result<(), String>, Option<MicStep>) {
+        if self.mic_epoch != commit.epoch {
+            return (Ok(()), None);
+        }
+        let Some((bitrate, was_withdrawn)) = commit.publish else {
+            if let Some(track) = &self.mic {
+                track.unmute();
+            }
+            return (Ok(()), None);
+        };
+        self.mic_source = Some(commit.source.clone());
+        let published = self
+            .publish_audio(RtcAudioSource::Native(commit.source), bitrate)
+            .await;
+        if published.is_err() {
+            self.mic_source = None;
+            // The server may not have re-granted yet: stay withdrawn so
+            // the next enable tries a fresh publish again.
+            self.mic_withdrawn.keep_if_failed(was_withdrawn, &published);
+            let stop = self.stop_step();
+            return (published, Some(stop));
+        }
+        (published, None)
     }
 
     /// Close or open push-to-talk's gate: the capture and the publication
     /// stay as they are, and a closed gate sends silence.
     pub fn set_ptt_gated(&self, gated: bool) {
-        self.capture.set_ptt_gated(gated);
+        self.capture_controls.set_ptt_gated(gated);
     }
 
     /// Set the input-sensitivity gate's threshold (0: no gate); `retune`
     /// moves it without restarting the detector, `speech` adds RNNoise's
     /// verdict to the rule.
     pub fn set_voice_gate(&self, threshold: f32, retune: bool, speech: bool) {
-        self.capture.set_voice_gate(threshold, retune, speech);
+        self.capture_controls
+            .set_voice_gate(threshold, retune, speech);
     }
 
     /// Set the input volume as a linear gain (0 to 2).
     pub fn set_input_gain(&self, gain: f32) {
-        self.capture.set_input_gain(gain);
+        self.capture_controls.set_input_gain(gain);
     }
 
     /// Publish any audio source as the microphone track. The app passes its
@@ -764,7 +854,9 @@ impl NativeSession {
         target: CameraTarget,
         options: CameraCaptureOptions,
     ) -> Result<(u64, Started), String> {
-        self.release_camera().await;
+        // The command released any running capture before this; direct
+        // callers get the old device freed before the new one opens it.
+        self.release_camera().await.release().await;
         self.next_camera += 1;
         let id = self.next_camera;
         let on_event = self.on_event.clone();
@@ -829,6 +921,12 @@ impl NativeSession {
         }
         let capture = self.camera_capture.as_ref().map(|c| c.id);
         *lock(&self.camera) = Some(VideoPublication::of_capture(sid.clone(), capture));
+        self.hold_published_layers(
+            VideoKind::Camera,
+            &sid,
+            publication.track(),
+            opts.max_bitrate,
+        );
         Ok(sid.to_string())
     }
 
@@ -837,35 +935,56 @@ impl NativeSession {
     /// capture's id and its first-frame receiver, as `start_camera`; the
     /// caller awaits it without holding the session, then calls
     /// `finish_camera_change` (or `stop_camera` to give up).
+    /// Take out the pending camera change, if any, for the caller to release
+    /// before it starts another.
+    pub fn retire_camera_change(&mut self) -> Retired {
+        let mut retired = Retired::default();
+        retired.cameras.extend(self.camera_change.take());
+        retired
+    }
+
     pub fn start_camera_change(
         &mut self,
         target: CameraTarget,
         options: CameraCaptureOptions,
-    ) -> Result<(u64, Started), String> {
+    ) -> (Retired, Result<(u64, Started), String>) {
+        let mut retired = Retired::default();
         if !self.camera_published() {
-            return Err("no published camera to change".into());
+            return (retired, Err("no published camera to change".into()));
         }
-        self.camera_change.take();
+        retired.cameras.extend(self.camera_change.take());
         self.next_camera += 1;
         let id = self.next_camera;
         let on_event = self.on_event.clone();
-        let (capture, started) = CameraCapture::start(target, options, move || {
+        let started = CameraCapture::start(target, options, move || {
             on_event(Event::CameraCaptureEnded { capture: id })
-        })?;
-        self.camera_change = Some(CameraShare { id, capture });
-        Ok((id, started))
+        });
+        match started {
+            Ok((capture, started)) => {
+                self.camera_change = Some(CameraShare { id, capture });
+                (retired, Ok((id, started)))
+            }
+            Err(e) => (retired, Err(e)),
+        }
     }
 
     /// Move the published camera onto capture `capture` (started by
     /// `start_camera_change`): same publication and sid, same preview socket,
     /// and the old capture is released. Fails, changing nothing, when a stop,
     /// a new camera or another change came first.
-    pub fn finish_camera_change(&mut self, capture: u64) -> Result<(), String> {
+    pub fn finish_camera_change(&mut self, capture: u64) -> (Retired, Result<(), String>) {
+        let mut retired = Retired::default();
+        let result = self.swap_camera(capture, &mut retired);
+        (retired, result)
+    }
+
+    fn swap_camera(&mut self, capture: u64, retired: &mut Retired) -> Result<(), String> {
         let next = self
             .camera_change
             .take_if(|c| c.id == capture)
             .ok_or("the camera change was superseded")?;
         let Some(live) = self.camera_capture.as_mut() else {
+            retired.cameras.push(next);
             return Err("the camera stopped during the change".into());
         };
         {
@@ -873,6 +992,7 @@ impl NativeSession {
             // clearing the slot in between must not be written over.
             let mut slot = lock(&self.camera);
             let Some(publication) = slot.as_mut().filter(|p| p.capture == Some(live.id)) else {
+                retired.cameras.push(next);
                 return Err("the camera stopped during the change".into());
             };
             // The source keeps the size it was published at: the encoder follows
@@ -880,9 +1000,9 @@ impl NativeSession {
             next.capture.take_over(&live.capture);
             publication.capture = Some(next.id);
         }
-        // Dropping the old capture joins its thread and frees its device; the
+        // Releasing the old capture joins its thread and frees its device; the
         // preview lives on in `next`.
-        drop(std::mem::replace(live, next));
+        retired.cameras.push(std::mem::replace(live, next));
         Ok(())
     }
 
@@ -925,371 +1045,31 @@ impl NativeSession {
     /// Stop capture `capture` if it is still the running one (a stale id is a
     /// no-op): unpublish it and release the pipeline and the device. A
     /// pending change's capture is only dropped.
-    pub async fn stop_camera(&mut self, capture: u64) {
+    pub async fn stop_camera(&mut self, capture: u64) -> Retired {
+        let mut retired = Retired::default();
         if self.camera_change.as_ref().is_some_and(|c| c.id == capture) {
-            self.camera_change.take();
+            retired.cameras.extend(self.camera_change.take());
         }
         if self
             .camera_capture
             .as_ref()
             .is_some_and(|c| c.id == capture)
         {
-            self.release_camera().await;
+            retired.merge(self.release_camera().await);
         }
+        retired
     }
 
     /// Unpublish whatever camera is published and stop its capture: the
     /// preview socket ends with it.
-    async fn release_camera(&mut self) {
-        self.camera_change.take();
+    pub async fn release_camera(&mut self) -> Retired {
+        let mut retired = Retired::default();
+        retired.cameras.extend(self.camera_change.take());
         self.release_camera_publication().await;
         self.frames.set_camera(None);
-        // Dropping joins the capture thread and tears down the pipeline.
-        self.camera_capture.take();
-    }
-
-    /// Start capturing `target` for a screen share, replacing any capture
-    /// already running. Returns the capture's id and a receiver that resolves
-    /// with the first frame's size — on Wayland only once the user has
-    /// completed the portal's dialog — or with why capture never began
-    /// ([`screen::PORTAL_NOT_STARTED`] for a portal dialog that ended without
-    /// one). The caller awaits it without holding the session, so a leave or
-    /// a stop is never blocked behind the dialog: either drops the capture,
-    /// which resolves it.
-    pub async fn start_screen(
-        &mut self,
-        target: Target,
-        options: CaptureOptions,
-    ) -> Result<(u64, Started), String> {
-        self.release_screen().await;
-        self.next_capture += 1;
-        let id = self.next_capture;
-        let on_event = self.on_event.clone();
-        let (capture, started) = ScreenCapture::start(target, options, move || {
-            on_event(Event::ScreenCaptureEnded { capture: id })
-        })?;
-        self.frames.set_screen(Some(capture.preview()));
-        self.screen = Some(ScreenShare { id, capture });
-        Ok((id, started))
-    }
-
-    /// Publish capture `capture` as the screen share (replacing an earlier
-    /// publish of it). E2EE covers it through the room's one key provider,
-    /// exactly as the camera. Returns the publication's sid.
-    pub async fn publish_screen(
-        &mut self,
-        capture: u64,
-        opts: ScreenOptions,
-    ) -> Result<String, String> {
-        if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
-            return Err(format!("screen capture {capture} is not running"));
-        }
-        self.unpublish_screen().await;
-        let source = NativeVideoSource::new(
-            VideoResolution {
-                width: opts.width,
-                height: opts.height,
-            },
-            true,
-        );
-        let track = LocalVideoTrack::create_video_track(
-            "screen_share",
-            RtcVideoSource::Native(source.clone()),
-        );
-        let publication = self
-            .room
-            .local_participant()
-            .publish_track(LocalTrack::Video(track), screen_publish_options(&opts))
-            .await
-            .map_err(|e| e.to_string())?;
-        self.require_encrypted(&publication).await?;
-        let sid = publication.sid();
-        if let Some(screen) = &self.screen {
-            screen.capture.set_source(Some(source));
-        }
-        let capture = self.screen.as_ref().map(|s| s.id);
-        *lock(&self.screen_publication) = Some(VideoPublication::of_capture(sid.clone(), capture));
-        Ok(sid.to_string())
-    }
-
-    /// Publish the other applications' sound as the screen share's audio,
-    /// alongside running capture `capture` (replacing an earlier one). The
-    /// capture (`share_audio.rs`) starts here and ends with the publication.
-    /// Returns the publication's sid.
-    pub async fn publish_screen_audio(&mut self, capture: u64) -> Result<String, String> {
-        if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
-            return Err(format!("screen capture {capture} is not running"));
-        }
-        let source = screen_audio_source();
-        let app = self
-            .screen
-            .as_ref()
-            .and_then(|s| screen::target_pid(s.capture.target()));
-        let feed = ShareAudio::start(source.clone(), app);
-        self.publish_screen_audio_from(capture, source, Some(feed))
-            .await
-    }
-
-    /// As `publish_screen_audio`, but fed by the caller: the interop example's
-    /// synthetic stereo tone (CI has no sound server).
-    pub async fn publish_screen_audio_source(
-        &mut self,
-        capture: u64,
-        source: NativeAudioSource,
-    ) -> Result<String, String> {
-        self.publish_screen_audio_from(capture, source, None).await
-    }
-
-    async fn publish_screen_audio_from(
-        &mut self,
-        capture: u64,
-        source: NativeAudioSource,
-        feed: Option<ShareAudio>,
-    ) -> Result<String, String> {
-        if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
-            return Err(format!("screen capture {capture} is not running"));
-        }
-        // Replace semantics. On any error below `feed` drops with this frame,
-        // leaving the slot empty and no capture thread behind.
-        self.release_screen_audio().await;
-        let track = LocalAudioTrack::create_audio_track(
-            "screen_share_audio",
-            RtcAudioSource::Native(source),
-        );
-        let publication = self
-            .room
-            .local_participant()
-            .publish_track(LocalTrack::Audio(track), screen_audio_publish_options())
-            .await
-            .map_err(|e| e.to_string())?;
-        self.require_encrypted(&publication).await?;
-        let sid = publication.sid();
-        *lock(&self.screen_audio) = Some(VideoPublication::of_capture(sid.clone(), Some(capture)));
-        self.share_audio = feed;
-        Ok(sid.to_string())
-    }
-
-    /// The opus codec the published screen-share audio `sid` was negotiated
-    /// with, as the sender's stats report it: `(channels, sdp_fmtp_line)`.
-    /// The interop example prints it to prove the publisher is stereo.
-    pub async fn screen_audio_codec(&self, sid: &str) -> Result<(u32, String), String> {
-        let publication = self
-            .room
-            .local_participant()
-            .track_publications()
-            .into_values()
-            .find(|p| p.sid().as_str() == sid)
-            .ok_or_else(|| format!("screen audio {sid} is not published"))?;
-        let Some(LocalTrack::Audio(track)) = publication.track() else {
-            return Err(format!("screen audio {sid} has no audio track"));
-        };
-        let stats = track
-            .get_stats()
-            .await
-            .map_err(|e| format!("screen audio stats: {e}"))?;
-        stats
-            .into_iter()
-            .find_map(|s| match s {
-                RtcStats::Codec(c) if c.codec.mime_type.to_ascii_lowercase().contains("opus") => {
-                    Some((c.codec.channels, c.codec.sdp_fmtp_line))
-                }
-                _ => None,
-            })
-            .ok_or_else(|| "screen audio stats carry no opus codec".to_string())
-    }
-
-    /// Unpublish screen audio `sid` if it is still the published one; a stale
-    /// sid, one a later publish replaced, is a no-op.
-    pub async fn unpublish_screen_audio(&mut self, sid: &str) {
-        let issued = lock(&self.screen_audio)
-            .as_ref()
-            .is_some_and(|a| a.issued == sid);
-        if issued {
-            self.release_screen_audio().await;
-        }
-    }
-
-    /// Unpublish the screen audio and stop its capture thread (joined on
-    /// drop). Called by `release_screen` (stop, close, a new share) and not by
-    /// `unpublish_screen`, so a codec republish keeps the audio, as the web
-    /// path does (screenShare.ts: "Screen audio stays published"); the
-    /// interop example's `--republish-screen` and stop cover both.
-    async fn release_screen_audio(&mut self) {
-        let publication = lock(&self.screen_audio).take();
-        self.share_audio.take();
-        if let Some(publication) = publication {
-            if let Err(e) = self
-                .room
-                .local_participant()
-                .unpublish_track(&publication.live)
-                .await
-            {
-                log::warn!("[native_voice] screen audio unpublish: {e}");
-            }
-        }
-    }
-
-    /// Start capturing `target` to replace the published share's source,
-    /// leaving the live capture and its publication running. Returns the
-    /// new capture's id and its first-frame receiver, as `start_screen`;
-    /// the caller awaits it without holding the session, then calls
-    /// `finish_screen_change` (or `stop_screen` to give up).
-    pub fn start_screen_change(
-        &mut self,
-        target: Target,
-        options: CaptureOptions,
-    ) -> Result<(u64, Started), String> {
-        if !self.screen_published() {
-            return Err("no published screen share to change".into());
-        }
-        self.screen_change.take();
-        self.next_capture += 1;
-        let id = self.next_capture;
-        let on_event = self.on_event.clone();
-        let (capture, started) = ScreenCapture::start(target, options, move || {
-            on_event(Event::ScreenCaptureEnded { capture: id })
-        })?;
-        self.screen_change = Some(ScreenShare { id, capture });
-        Ok((id, started))
-    }
-
-    /// Move the published share onto capture `capture` (started by
-    /// `start_screen_change`): same publication and sid, same preview socket,
-    /// and the old capture is released. Fails, changing nothing, when a stop,
-    /// a new share or another change came first.
-    pub fn finish_screen_change(&mut self, capture: u64) -> Result<(), String> {
-        let next = self
-            .screen_change
-            .take_if(|c| c.id == capture)
-            .ok_or("the screen source change was superseded")?;
-        let Some(live) = self.screen.as_mut() else {
-            return Err("the screen share stopped during the source change".into());
-        };
-        {
-            // One guard for the published check and the write: a release
-            // clearing the slot in between must not be written over.
-            let mut slot = lock(&self.screen_publication);
-            let Some(publication) = slot.as_mut().filter(|p| p.capture == Some(live.id)) else {
-                return Err("the screen share stopped during the source change".into());
-            };
-            // The source keeps the size it was published at: the encoder follows
-            // each frame's own size, but the layer sizes the server was told stay
-            // (as on the web path's replaceTrack).
-            next.capture.take_over(&live.capture);
-            publication.capture = Some(next.id);
-        }
-        // Asked before the lock below: it is a round trip to the X server.
-        let app = screen::target_pid(next.capture.target());
-        {
-            // The share audio follows the capture that is live, so a
-            // withdrawal ends that one. A short lock of its own, taken after
-            // the video slot's guard is released.
-            let mut slot = lock(&self.screen_audio);
-            if let Some(audio) = slot.as_mut().filter(|a| a.capture == Some(live.id)) {
-                audio.capture = Some(next.id);
-                // A window's share sound is that app's: follow the new source.
-                if let Some(feed) = &self.share_audio {
-                    feed.set_app(app);
-                }
-            }
-        }
-        // Dropping the old share joins its capture thread (and, on Wayland,
-        // closes its portal session); the preview lives on in `next`.
-        drop(std::mem::replace(live, next));
-        Ok(())
-    }
-
-    /// Change the live share's quality: re-size and re-pace the running
-    /// capture, then publish it again with `publish` at the new size (the
-    /// SDK cannot change a sender's encoding). One `&mut self` hold covers
-    /// both steps, so a stop, source change or leave queued behind it runs
-    /// after the new publication exists and releases it, and one that came
-    /// first makes the gate refuse. Returns the new sid and the size.
-    pub async fn set_screen_quality(
-        &mut self,
-        capture: u64,
-        options: CaptureOptions,
-        publish: ScreenOptions,
-    ) -> Result<(String, u32, u32), QualityError> {
-        quality_gate(
-            self.screen.as_ref().map(|s| s.id),
-            self.screen_published(),
-            self.screen_change.is_some(),
-            capture,
-        )?;
-        let size = self
-            .screen
-            .as_ref()
-            .and_then(|s| s.capture.set_options(options));
-        let (width, height) = size.unwrap_or((publish.width, publish.height));
-        let sid = self
-            .publish_screen(
-                capture,
-                ScreenOptions {
-                    width,
-                    height,
-                    ..publish
-                },
-            )
-            .await
-            .map_err(QualityError::Publish)?;
-        Ok((sid, width, height))
-    }
-
-    /// Whether the running capture is the one published as the screen share.
-    fn screen_published(&self) -> bool {
-        let live = self.screen.as_ref().map(|s| s.id);
-        live.is_some()
-            && lock(&self.screen_publication)
-                .as_ref()
-                .is_some_and(|p| p.capture == live)
-    }
-
-    /// Stop capture `capture` if it is still the running one (a stale id is
-    /// a no-op): unpublish it, and release the capturer and, on Wayland, the
-    /// portal session. A pending source change's capture is only dropped.
-    pub async fn stop_screen(&mut self, capture: u64) {
-        if self.screen_change.as_ref().is_some_and(|s| s.id == capture) {
-            self.screen_change.take();
-        }
-        if self.screen.as_ref().is_some_and(|s| s.id == capture) {
-            self.release_screen().await;
-        }
-    }
-
-    /// Unpublish the screen share if `capture` is the running one, keeping the
-    /// capture alive (a codec republish publishes it again). A stale id is a
-    /// no-op.
-    pub async fn unpublish_screen_keep_capture(&mut self, capture: u64) {
-        if self.screen.as_ref().is_some_and(|s| s.id == capture) {
-            self.unpublish_screen().await;
-        }
-    }
-
-    async fn unpublish_screen(&mut self) {
-        if let Some(screen) = &self.screen {
-            screen.capture.set_source(None);
-        }
-        let publication = lock(&self.screen_publication).take();
-        if let Some(publication) = publication {
-            if let Err(e) = self
-                .room
-                .local_participant()
-                .unpublish_track(&publication.live)
-                .await
-            {
-                log::warn!("[native_voice] screen unpublish: {e}");
-            }
-        }
-    }
-
-    async fn release_screen(&mut self) {
-        self.screen_change.take();
-        self.release_screen_audio().await;
-        self.unpublish_screen().await;
-        self.frames.set_screen(None);
-        // Dropping joins the capture thread.
-        self.screen.take();
+        // Releasing joins the capture thread and tears down the pipeline.
+        retired.cameras.extend(self.camera_capture.take());
+        retired
     }
 
     /// The publisher and subscriber transports' raw stats.
@@ -1364,7 +1144,7 @@ impl NativeSession {
     /// Per-user volume: the gain for `identity`'s microphone, 1.0 is unity
     /// (the web path's `RemoteParticipant.setVolume`, 0 to 2 in practice).
     pub fn set_volume(&self, identity: &str, volume: f32) {
-        self.playout
+        self.playout_controls
             .mixer()
             .set_gain(identity, playout::Volume::Microphone, volume);
     }
@@ -1372,18 +1152,21 @@ impl NativeSession {
     /// The gain for `identity`'s screen-share audio, 1.0 is unity (the web
     /// path's screen-share element volume, 0 to 1, 0 when muted).
     pub fn set_screenshare_volume(&self, identity: &str, volume: f32) {
-        self.playout
+        self.playout_controls
             .mixer()
             .set_gain(identity, playout::Volume::ScreenShare, volume);
     }
 
     /// Switch the capture or playout device (a running stream moves to it).
     /// An empty id selects the default, the first listed device.
-    pub fn set_device(&mut self, kind: &str, device_id: &str) -> Result<(), String> {
-        match DeviceKind::parse(kind)? {
-            DeviceKind::Output => self.playout.set_device(device_id),
-            DeviceKind::Input => self.capture.set_device(device_id),
-        }
+    /// The caller runs [`DeviceSwitch::apply`] on a blocking thread, without
+    /// the session. Switches of one kind apply in the order they were made
+    /// here.
+    pub fn device_switch(&self, kind: &str) -> Result<DeviceSwitch, String> {
+        Ok(match DeviceKind::parse(kind)? {
+            DeviceKind::Output => DeviceSwitch::output(&self.playout),
+            DeviceKind::Input => DeviceSwitch::input(&self.capture),
+        })
     }
 
     pub fn resources(&self) -> Resources {
@@ -1394,8 +1177,8 @@ impl NativeSession {
         Resources {
             rooms: 1,
             local_tracks: usize::from(self.mic.is_some()) + camera + screen + screen_audio,
-            capture_streams: self.capture.streams(),
-            audio_streams: self.playout.readers(),
+            capture_streams: self.capture_controls.streams(),
+            audio_streams: self.playout_controls.readers(),
             video_sockets: self.frames.sockets(),
             screen_captures: screen::active_captures(),
             camera_captures: camera::active_captures(),
@@ -1407,9 +1190,15 @@ impl NativeSession {
     /// playout streams close with the session, and dropping the frame server
     /// closes its listener and every frame socket.
     pub async fn close(mut self) {
-        self.capture.stop();
-        self.release_camera().await;
-        self.release_screen().await;
+        // Ticketed after every step already made, so a start still in flight
+        // is skipped or stopped by it.
+        let stop = self.stop_step();
+        match off_runtime(move || stop.run()).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) | Err(e) => log::warn!("[native_voice] capture stop: {e}"),
+        }
+        self.release_camera().await.release().await;
+        self.release_screen().await.release().await;
         // The track's sid follows a republish; a stored publication's would not.
         if let Some(track) = self.mic.take() {
             let _ = self
@@ -1425,6 +1214,46 @@ impl NativeSession {
         if let Some(reports) = &self.capture_reports {
             reports.abort();
         }
+        release_blocking((self.capture, self.playout)).await;
+    }
+}
+
+/// Captures taken out of a session whose drop joins an OS thread and frees a
+/// device or portal session. The session methods that stop, replace or finish
+/// a capture return them so the caller releases them with [`Retired::release`]
+/// after dropping the session lock.
+#[derive(Default)]
+#[must_use = "release retired captures with `.release().await` once the session lock is dropped"]
+pub struct Retired {
+    cameras: Vec<CameraShare>,
+    screens: Vec<ScreenShare>,
+    share_audio: Vec<ShareAudio>,
+}
+
+impl Retired {
+    pub fn merge(&mut self, other: Retired) {
+        self.cameras.extend(other.cameras);
+        self.screens.extend(other.screens);
+        self.share_audio.extend(other.share_audio);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cameras.is_empty() && self.screens.is_empty() && self.share_audio.is_empty()
+    }
+
+    /// Drop them on a blocking thread; returns once every device is released.
+    pub async fn release(self) {
+        if !self.is_empty() {
+            release_blocking(self).await;
+        }
+    }
+}
+
+/// Drop `value` on a blocking thread and wait for it: dropping a capture
+/// joins its OS thread, which must not hold an async worker.
+pub async fn release_blocking<T: Send + 'static>(value: T) {
+    if let Err(e) = tokio::task::spawn_blocking(move || drop(value)).await {
+        log::warn!("[native_voice] release: {e}");
     }
 }
 

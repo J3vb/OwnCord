@@ -7,8 +7,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// InsertReportEvidence writes one snapshot row. attachmentsJSON is a JSON list
-// of {id, filename, mime, size} references, never bytes or stored_as.
+// InsertReportEvidence writes one snapshot row; attachmentsJSON lists {id, filename,
+// mime, size}, never bytes or stored_as.
 func (d *DB) InsertReportEvidence(ctx context.Context, reportID, seq int64, messageID *int64, authorID int64, content, attachmentsJSON string) error {
 	if err := d.q.InsertReportEvidence(ctx, dbgen.InsertReportEvidenceParams{
 		ReportID: reportID, Seq: seq, MessageID: messageID, AuthorID: authorID,
@@ -36,9 +36,8 @@ func (d *DB) ListReportEvidence(ctx context.Context, reportID int64) ([]ReportEv
 	return out, nil
 }
 
-// InsertReportNote adds one internal note, guarded on EXISTS(users) so an
-// erased moderator cannot land as author. It returns false when not inserted;
-// the caller answers 409.
+// InsertReportNote adds an internal note guarded on EXISTS(users) so an erased
+// moderator cannot author; false when not inserted (caller answers 409).
 func (d *DB) InsertReportNote(ctx context.Context, reportID, authorID int64, body string) (bool, error) {
 	return d.reportMutation(ctx, "InsertReportNote", reportID, authorID, "noted", "", func(q *dbgen.Queries) (int64, error) {
 		return q.InsertReportNote(ctx, dbgen.InsertReportNoteParams{ReportID: reportID, AuthorID: authorID, Body: body})
@@ -61,11 +60,9 @@ func (d *DB) ListReportNotes(ctx context.Context, reportID int64) ([]ReportNoteR
 	return out, nil
 }
 
-// InsertReportEvent appends a row to report_events, this feature's own
-// immutable history, never the shared audit_log (which a VIEW_AUDIT_LOG holder
-// can read without MODERATE_MEMBERS). detail is the state or outcome word only,
-// never free text (AssertSafeDetails and
-// TestReportEvents_EveryMutationWritesOne hold this).
+// InsertReportEvent appends a row to report_events, this feature's immutable history,
+// never the shared audit_log (readable with VIEW_AUDIT_LOG alone). detail is the state
+// or outcome word only, never free text.
 func (d *DB) InsertReportEvent(ctx context.Context, reportID, actorID int64, action, detail string) error {
 	if err := d.q.InsertReportEvent(ctx, dbgen.InsertReportEventParams{
 		ReportID: reportID, ActorID: actorID, Action: action, Detail: detail,
@@ -82,9 +79,7 @@ func eventFromRow(r dbgen.ReportEvent) ReportEvent {
 	}
 }
 
-// ListReportEvents returns a report's immutable history, oldest first, exposed
-// only inside the queue detail (MODERATE_MEMBERS plus ReportService.Get's
-// confidentiality guard).
+// ListReportEvents returns a report's history, oldest first, exposed only in the queue detail.
 func (d *DB) ListReportEvents(ctx context.Context, reportID int64) ([]ReportEvent, error) {
 	rows, err := d.q.ListReportEvents(ctx, reportID)
 	if err != nil {
@@ -97,11 +92,9 @@ func (d *DB) ListReportEvents(ctx context.Context, reportID int64) ([]ReportEven
 	return out, nil
 }
 
-// PruneReportContentOlderThan deletes the evidence and notes, and clears the
-// detail, of every report closed before cutoff ("YYYY-MM-DD HH:MM:SS" UTC,
-// comparable with datetime('now')). The reports row is kept: content is
-// bounded, the outcome indefinite. It returns the number of reports whose
-// detail was cleared, 0 exactly when nothing in range had content left.
+// PruneReportContentOlderThan deletes the evidence and notes, and clears the detail,
+// of every report closed before cutoff ("YYYY-MM-DD HH:MM:SS" UTC); the reports row is
+// kept. It returns the reports whose detail was cleared.
 func (d *DB) PruneReportContentOlderThan(ctx context.Context, cutoff string) (int64, error) {
 	if _, err := d.q.PruneReportEvidenceOlderThan(ctx, &cutoff); err != nil {
 		return 0, fmt.Errorf("PruneReportContentOlderThan evidence: %w", err)

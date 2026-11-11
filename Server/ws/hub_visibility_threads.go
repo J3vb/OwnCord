@@ -8,22 +8,14 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// The thread half of channel visibility. A thread has no permission
-// state of its own, so a socket may hold a thread's topic exactly while it may
-// hold the parent's. Three paths enforce that, each from a different trigger:
-// a parent's override change (RefreshChannelVisibility), a role change
-// (revokeUnreadableChannels and the role worker), and reconnect replay. This
-// file holds their shared pieces.
+// The thread half of channel visibility. A thread has no permission state of its own, so a socket
+// may hold a thread's topic exactly while it may hold the parent's. Three triggers enforce that (a
+// parent's override change, a role change, reconnect replay); this file holds their shared pieces.
 
-// computeReadableChannels narrows allowed (the visible set) to the NSFW
-// content readable set: every visible channel that is either not labelled, or
-// labelled and acknowledged by user. The acknowledgements come from one read,
-// taken only when a labelled channel sits in the visible set (typically none).
-//
-// A thread in allowed (admitThreads put it there for a socket that holds it)
-// takes its parent's label and consent: the thread row carries the parent's
-// NSFW flag and acknowledgements are keyed by the parent, so it is narrowed
-// exactly like the parent would be.
+// computeReadableChannels narrows allowed to the NSFW content readable set: visible channels that
+// are unlabelled, or labelled and acknowledged by user (one read, only when a labelled channel is
+// visible). A thread in allowed takes its parent's label and consent (acknowledgements are keyed by
+// the parent).
 func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityReader, user *db.User, allowed map[int64]bool) (map[int64]bool, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
@@ -81,12 +73,10 @@ func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityRe
 	return readable, nil
 }
 
-// admitHeldThread adds to allowed the threads user's live sockets hold in their
-// second slots, when that thread's parent is visible. computeAllowedChannels
-// lists parent channels only, so without this a role-change revoke or a
-// reconnect replay would treat the held thread as unreadable (or, for replay,
-// drop its frames). Visibility comes from the parent's entry in allowed, never
-// from the thread row alone: a parent the user cannot see admits nothing.
+// admitHeldThread adds to allowed the threads user's live sockets hold in their second slots when
+// the parent is visible. computeAllowedChannels lists parents only, so otherwise a role-change
+// revoke or reconnect replay would treat the held thread as unreadable. Visibility comes from the
+// parent's entry, never the thread row alone.
 func (h *Hub) admitHeldThread(ctx context.Context, database VisibilityReader, userID int64, allowed map[int64]bool) error {
 	for _, live := range h.clientsOf(userID) {
 		tid := live.getThreadID()
@@ -104,14 +94,10 @@ func (h *Hub) admitHeldThread(ctx context.Context, database VisibilityReader, us
 	return nil
 }
 
-// revokeHeldThread releases the thread in live's second slot when it belongs
-// to parentID, the channel live just lost. It walks the sockets, not the
-// parent's threads (a parent can have hundreds): the caller visits each
-// connected socket anyway, and only one that holds a thread costs a lookup.
-// The thread's parent is immutable, so the lookup cannot race a move. A thread
-// that cannot be resolved counts as belonging, so a failure revokes rather
-// than keeps. It sends no frame: the parent's channel_delete already tells the
-// client to close the panel.
+// revokeHeldThread releases the thread in live's second slot when it belongs to parentID, the
+// channel live just lost. It walks sockets, not the parent's threads (there may be hundreds). The
+// parent is immutable, so the lookup cannot race a move; an unresolvable thread counts as belonging
+// (revoke rather than keep). No frame: the parent's channel_delete closes the panel.
 func (h *Hub) revokeHeldThread(ctx context.Context, live *Client, parentID int64) {
 	tid := live.getThreadID()
 	if tid == 0 {
@@ -123,10 +109,9 @@ func (h *Hub) revokeHeldThread(ctx context.Context, live *Client, parentID int64
 	}
 }
 
-// roleThreadVerdict settles a held thread topic for the role worker without a
-// frame: the thread inherits its parent's verdict, taken from the round's own
-// decision when the parent is in it, otherwise resolved through the thread's
-// own subject (which is the parent's by inheritance).
+// roleThreadVerdict settles a held thread topic for the role worker without a frame: the thread
+// inherits its parent's verdict, from the round's decision when the parent is in it, else resolved
+// through the thread's own subject.
 func (h *Hub) roleThreadVerdict(ctx context.Context, uid int64, ch *db.Channel, allowed map[int64]bool) (bool, error) {
 	if v, decided := allowed[ch.Thread.ParentID]; decided {
 		return v, nil

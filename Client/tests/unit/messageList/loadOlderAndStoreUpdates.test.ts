@@ -10,6 +10,7 @@ import {
   setHasMore,
   useWiredMessageList,
 } from "../../helpers/messageListHarness";
+import { hoverRows } from "../../helpers/hoverRows";
 
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
@@ -387,6 +388,7 @@ describe("MessageList", () => {
       expect(row2).not.toBeNull();
       expect(row5).not.toBeNull();
       expect(row10).not.toBeNull();
+      hoverRows(w.container);
       const reply10 = w.container.querySelector<HTMLButtonElement>("[data-testid='msg-reply-10']")!;
       reply10.focus();
 

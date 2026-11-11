@@ -9,17 +9,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// Several roles per member.
-
-// ErrLastRole is returned by RemoveUserRole when the role is the member's
-// only one: a member always keeps at least one role. It is a conflict (409).
+// ErrLastRole is returned by RemoveUserRole when the role is the member's only one (409).
 var ErrLastRole = fmt.Errorf("%w: a member must keep at least one role", ErrConflict)
 
-// MemberRoleStore is the slice of the store the multi-role assignment methods
-// use. It is declared here, not on Store, so the Store surface does not grow;
-// *db.DB satisfies it.
+// MemberRoleStore is the slice of the store the multi-role methods use, declared here so Store does not grow.
 type MemberRoleStore interface {
-	// GrantUserRole and RevokeUserRole report whether a row actually changed.
 	GrantUserRole(ctx context.Context, userID, roleID int64) (bool, error)
 	RevokeUserRole(ctx context.Context, userID, roleID int64) (bool, error)
 }
@@ -32,11 +26,10 @@ func (s *ModerationService) memberRoleStore() (MemberRoleStore, error) {
 	return rs, nil
 }
 
-// AddUserRole grants roleID to the target next to their other roles, under
-// ChangeUserRole's checks (authorizeRoleAssignment): MANAGE_ROLES, the actor
-// outranks the target's top role, and the role sits below the actor's top role.
-// Granting a held role is a no-op: no write, audit row or fan-out. Cached
-// permissions are dropped before live clients are told.
+// AddUserRole grants roleID next to the target's other roles under ChangeUserRole's checks
+// (authorizeRoleAssignment: MANAGE_ROLES, actor outranks the target's top role, role below
+// the actor's top role). A held role is a no-op: no write, audit row or fan-out. Cached
+// permissions are dropped before clients are told.
 func (s *ModerationService) AddUserRole(ctx context.Context, actorID, targetID, roleID int64) (*db.Role, error) {
 	_, target, role, err := s.authorizeRoleAssignment(ctx, actorID, targetID, roleID)
 	if err != nil {
@@ -51,7 +44,6 @@ func (s *ModerationService) AddUserRole(ctx context.Context, actorID, targetID, 
 		return nil, fmt.Errorf("%w: failed to add role: %w", ErrInternal, err)
 	}
 	if !changed {
-		// Already held (or a concurrent duplicate won): no audit row, no fan-out.
 		return role, nil
 	}
 	// Drop the cached snapshot first: the hub resolves visibility through it.
@@ -64,10 +56,9 @@ func (s *ModerationService) AddUserRole(ctx context.Context, actorID, targetID, 
 	return role, nil
 }
 
-// RemoveUserRole revokes roleID under AddUserRole's checks. Removing the member's
-// only role answers ErrLastRole and changes nothing; the count and the delete share
-// one write transaction, so two concurrent removals of a member's last two roles
-// cannot both succeed. Removing a role the target does not hold is a no-op.
+// RemoveUserRole revokes roleID under AddUserRole's checks. Removing the only role
+// answers ErrLastRole; the count and delete share one write transaction, so two
+// concurrent removals of a member's last two roles cannot both succeed. Removing an unheld role is a no-op.
 func (s *ModerationService) RemoveUserRole(ctx context.Context, actorID, targetID, roleID int64) (*db.Role, error) {
 	_, target, role, err := s.authorizeRoleAssignment(ctx, actorID, targetID, roleID)
 	if err != nil {
@@ -85,8 +76,6 @@ func (s *ModerationService) RemoveUserRole(ctx context.Context, actorID, targetI
 		return nil, fmt.Errorf("%w: failed to remove role: %w", ErrInternal, err)
 	}
 	if !changed {
-		// Not held (or a concurrent duplicate DELETE already removed it): the
-		// request changed nothing, so it writes no audit row and fans out nothing.
 		return role, nil
 	}
 	s.perms.InvalidateUser(targetID)

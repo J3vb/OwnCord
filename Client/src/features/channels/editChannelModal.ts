@@ -7,7 +7,7 @@ import { shellText } from "../../i18n/shell";
 import type { SidebarScope } from "../../pages/main-page/sidebar-area/sidebarScope";
 
 type EditModalFields = Pick<
-  Parameters<typeof import("@components/EditChannelModal").createEditChannelModal>[0],
+  Parameters<typeof import("./editChannelDialog").createEditChannelModal>[0],
   | "channelId"
   | "channelName"
   | "channelType"
@@ -66,7 +66,7 @@ export function openEditChannelModal(sc: SidebarScope, channel: Channel): void {
   // refused, and a teardown in between drops the late modal.
   const pending: MountableComponent = { mount: () => {} };
   sc.activeModal = pending;
-  void import("@components/EditChannelModal").then(
+  void import("./editChannelDialog").then(
     ({ createEditChannelModal }) => {
       if (sc.activeModal !== pending) return;
       const modal = createEditChannelModal({

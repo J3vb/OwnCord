@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import android.webkit.WebView
+import androidx.appcompat.app.AppCompatActivity
 import app.tauri.annotation.Command
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
@@ -15,7 +16,6 @@ import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.File
-import java.util.concurrent.Executors
 
 // The rules for a shared file's name, apart from the plugin so a JVM test can
 // check them.
@@ -68,7 +68,10 @@ object SharedName {
 // replaces the last, and a share nobody took within ten minutes is dropped.
 @TauriPlugin
 class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
-  private val io = Executors.newSingleThreadExecutor()
+  private val io = RetirableWorker()
+  // Copy work holds this, not the activity, so a queued copy cannot keep a
+  // retired screen alive.
+  private val appContext = activity.applicationContext
   private val lock = Any()
   private var generation = 0
   private var ready: JSObject? = null
@@ -86,8 +89,17 @@ class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
       activity.intent = Intent(Intent.ACTION_MAIN)
     } else {
       // An earlier run's share nobody sent stays out of the cache.
-      io.execute { File(activity.cacheDir, INCOMING_DIR).deleteRecursively() }
+      io.execute { File(appContext.cacheDir, INCOMING_DIR).deleteRecursively() }
     }
+  }
+
+  override fun onDestroy(activity: AppCompatActivity) {
+    synchronized(lock) {
+      generation += 1
+      ready = null
+      copying = false
+    }
+    io.retire()
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -97,6 +109,7 @@ class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
 
   // True when `intent` was a share.
   private fun receive(intent: Intent): Boolean {
+    if (io.isRetired) return false
     val action = intent.action
     if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return false
     val uris = sharedUris(intent, action)
@@ -111,7 +124,7 @@ class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
       copying = true
       generation
     }
-    io.execute {
+    val accepted = io.execute(onCancelled = { endCopy(gen) }) {
       val share = try {
         copyShare(gen, uris, text)
       } catch (e: Exception) {
@@ -127,12 +140,21 @@ class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
       }
       // Only this share's folder and the one before it (whose files a chat
       // may still be reading) stay.
-      File(activity.cacheDir, INCOMING_DIR).listFiles()?.forEach { old ->
+      File(appContext.cacheDir, INCOMING_DIR).listFiles()?.forEach { old ->
         val n = old.name.toIntOrNull()
         if (n == null || n < gen - 1) old.deleteRecursively()
       }
     }
+    if (!accepted) {
+      endCopy(gen)
+      return false
+    }
     return true
+  }
+
+  // Marks the copy for `gen` as over, unless a newer share has replaced it.
+  private fun endCopy(gen: Int) {
+    synchronized(lock) { if (gen == generation) copying = false }
   }
 
   @Suppress("DEPRECATION")
@@ -157,11 +179,11 @@ class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   private fun copyShare(gen: Int, uris: List<Uri>, text: String): JSObject {
-    val dir = File(File(activity.cacheDir, INCOMING_DIR), gen.toString())
+    val dir = File(File(appContext.cacheDir, INCOMING_DIR), gen.toString())
     dir.deleteRecursively()
     val files = JSArray()
     val oversized = JSArray()
-    val resolver = activity.contentResolver
+    val resolver = appContext.contentResolver
     uris.forEachIndexed { index, uri ->
       // A newer share replaced this one: stop copying.
       if (synchronized(lock) { gen != generation }) return@forEachIndexed

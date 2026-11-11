@@ -170,6 +170,20 @@ func TestCreateForumPost_RequireTag(t *testing.T) {
 	}
 }
 
+// A forum already saved as require-tag with no tags left cannot be satisfied, so
+// a post without a tag goes through; with a tag present the rule still holds
+// (TestCreateForumPost_RequireTag).
+func TestCreateForumPost_RequireTagWithNoTagsAcceptsUntaggedPost(t *testing.T) {
+	f := newForumPostFixture(t)
+	if _, err := f.database.ReplaceForumSettings(bg(), frmForum, db.ForumSettingsWrite{
+		RequireTag: true, DefaultAutoArchiveMinutes: 60,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, "t", "c"))
+	mustDo(t, "an untagged post in a require-tag forum with no tags", err)
+}
+
 // Pre-flight edge case 1: a lost forum_post_create_ok, retried.
 func TestCreateForumPost_RetryIsIdempotent(t *testing.T) {
 	f := newForumPostFixture(t)

@@ -2,11 +2,9 @@ package ws
 
 import "github.com/J3vb/OwnCord/Server/permissions"
 
-// channelAffordances are one viewer's per-channel verdicts that the client
-// uses to pre-disable controls: the ready payload ships them per non-DM
-// channel and the targeted channel_create refreshes them. Each field is
-// exactly one predicate's verdict over one subject, so none can drift from the
-// rule the server enforces; the server stays the authority.
+// channelAffordances are one viewer's per-channel verdicts the client uses to
+// pre-disable controls; each is one predicate's verdict, so none can drift from
+// the enforced rule.
 type channelAffordances struct {
 	CanSend          bool // permissions.CanSendMessage
 	CanModerateVoice bool // permissions.AuthorizeVoiceModerator
@@ -16,9 +14,8 @@ type channelAffordances struct {
 	CanReact         bool // permissions.CanAddReaction
 }
 
-// affordancesFor is the only place the six affordance predicates are asked.
-// The ready builder, the composer refresh and every channel_create sender go
-// through it. The zero subject yields all false.
+// affordancesFor is the only place the six predicates are asked; the zero subject
+// yields all false.
 func affordancesFor(sub permissions.Subject) channelAffordances {
 	asMod, delErr := permissions.CanDeleteMessage(sub, false)
 	return channelAffordances{
@@ -31,8 +28,6 @@ func affordancesFor(sub permissions.Subject) channelAffordances {
 	}
 }
 
-// spreadInto writes the six verdicts into a ready channel entry. All six
-// keys are always present on a non-DM channel.
 func (a channelAffordances) spreadInto(entry map[string]any) {
 	entry["can_send"] = a.CanSend
 	entry["can_moderate_voice"] = a.CanModerateVoice

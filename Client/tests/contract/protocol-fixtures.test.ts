@@ -34,7 +34,7 @@ vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
-vi.mock("@lib/voice/screenShare", () => dispatcherMocks.screenShareMock());
+vi.mock("../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 
 vi.spyOn(console, "info").mockImplementation(() => {});
 

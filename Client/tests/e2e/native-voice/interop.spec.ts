@@ -78,7 +78,12 @@ function b64url(input: Buffer | string): string {
   return Buffer.from(input).toString("base64url");
 }
 
-/** A LiveKit join token, HS256, the way livekit-server-sdk mints one. */
+/** A LiveKit join token, HS256, the way livekit-server-sdk mints one. The
+ *  native peer ("user-2") gets the grant a server with
+ *  `voice.restrict_data_publishing` issues: it sends no data packets, so the
+ *  whole suite runs it without that right. The browser peer keeps the right
+ *  for its camera-subscribed acknowledgement; these tokens are signed with
+ *  this test's own media-server secret, never issued by an OwnCord server. */
 function joinToken(identity: string): string {
   const now = Math.floor(Date.now() / 1000);
   const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
@@ -88,7 +93,13 @@ function joinToken(identity: string): string {
       sub: identity,
       nbf: now - 10,
       exp: now + 600,
-      video: { room, roomJoin: true, canPublish: true, canSubscribe: true },
+      video: {
+        room,
+        roomJoin: true,
+        canPublish: true,
+        canSubscribe: true,
+        canPublishData: identity !== "user-2",
+      },
     }),
   );
   const signature = b64url(

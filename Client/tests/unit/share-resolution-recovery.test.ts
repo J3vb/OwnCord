@@ -139,7 +139,7 @@ describe("readingFromStats", () => {
     expect(r).toMatchObject({ fullWidth: 1280, width: 1280 });
   });
 
-  it("judges the larger-budget layer when two layers share a size", () => {
+  it("judges the layer listed last when two layers share a size, whatever a cap did to their rates", () => {
     const encodings = [
       { rid: "q", scaleResolutionDownBy: 1, maxBitrate: 1_200_000 },
       { rid: "h", scaleResolutionDownBy: 1, maxBitrate: 3_000_000 },
@@ -148,6 +148,10 @@ describe("readingFromStats", () => {
     const h = { ...outbound, rid: "h", frameWidth: 320 };
     expect(readingFromStats([q, h], encodings, 1280, 0)).toMatchObject({ width: 320 });
     expect(readingFromStats([h, q], encodings, 1280, 0)).toMatchObject({ width: 320 });
+    // A cap pulled both to the same rate: the top layer is still the last.
+    const capped = encodings.map((e) => ({ ...e, maxBitrate: 1_000_000 }));
+    expect(readingFromStats([q, h], capped, 1280, 0)).toMatchObject({ width: 320 });
+    expect(readingFromStats([h, q], capped, 1280, 0)).toMatchObject({ width: 320 });
   });
 
   it("skips a layer the allocator gave no bitrate", () => {

@@ -22,8 +22,15 @@ describe("threadsLoader lifecycle", () => {
     expect(loader.threadsStoreInUse()).toBe(true);
     runSessionResets("server_switch");
     expect(loader.threadsStoreInUse()).toBe(true);
+
+    // A frame still waiting for the store, then a reconnect: the reconnect's
+    // clear runs behind the frame, so its mark does not outlive the reconnect.
+    loader.withThreadsStore((m) => m.upsertThread(makeThread({ id: 5, starter_message_id: 2 })));
+    loader.resumeThreadFocus({ send: vi.fn() }, undefined);
     await vi.waitFor(() => expect(loader.loadedThreadsStore()).not.toBeNull());
     expect(ran).toEqual([]);
+    expect(loader.loadedThreadsStore()?.getThread(5)?.id).toBe(5);
+    expect(loader.loadedThreadsStore()?.threadsStore.getState().live.has(5)).toBe(false);
 
     // Once loaded the store stays in use and work runs at once.
     expect(loader.threadsStoreInUse()).toBe(true);

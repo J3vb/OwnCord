@@ -11,22 +11,17 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// Category permission templates: a category carries override rows that its synced
-// channels follow. Writing a template row writes the same row on every synced
-// channel in one transaction. The template is copied, never inherited:
-// permissions.EffectiveChannelPerms reads only a channel's own rows.
-// Authorization is the channel override policy widened to everything the write
-// touches: the escalation guard runs over the bits written plus the bits already on
-// the category row and on every synced channel row overwritten (clearing a deny
-// the actor's role lacks is a grant on any of them), and the hierarchy rules
-// apply to a role or member target as for a channel override. The guard runs inside
-// the write transaction, after the rows are read and before any is written, so a
-// refusal leaves nothing written.
+// Category permission templates: a category carries override rows its synced channels
+// follow. Writing a template row writes the same row on every synced channel in one
+// transaction; it is copied, never inherited. Authorization is the channel override policy
+// widened to everything written: the escalation guard runs over the bits written plus the
+// bits already on the category row and every synced row overwritten (clearing a deny the
+// actor lacks is a grant), and hierarchy rules apply to a role or member target. The guard
+// runs inside the write transaction before any write, so a refusal leaves nothing written.
 
-// CategoryPermStore is the persistence behind category permission templates.
-// *db.DB satisfies it; a Store that does not makes the operations answer
-// ErrInternal. Kept beside Store because Store's surface is ratcheted
-// (datastore_ratchet_test.go).
+// CategoryPermStore is the persistence behind category permission templates; a Store
+// that is not a *db.DB makes the operations answer ErrInternal. Kept beside Store
+// because Store's surface is ratcheted (datastore_ratchet_test.go).
 type CategoryPermStore interface {
 	WriteCategoryRoleOverride(ctx context.Context, categoryID, roleID, allow, deny int64, guard db.CategoryOverrideGuard) ([]int64, error)
 	ClearCategoryRoleOverride(ctx context.Context, categoryID, roleID int64, guard db.CategoryOverrideGuard) ([]int64, error)
@@ -48,33 +43,30 @@ func (s *channelOverrides) catPermStore() (CategoryPermStore, error) {
 }
 
 // AdminChannel is a channel as the admin list shows it: the row plus whether its
-// overrides follow its category's template. Admin-only; not on the websocket
-// payload.
+// overrides follow the category template. Admin-only.
 type AdminChannel struct {
 	db.Channel
 	PermissionsSynced bool `json:"permissions_synced"`
 }
 
-// PermEffect is who had cached permissions dropped after a write that copied or
-// replaced override rows. AffectedAll means the narrow list could not be read and
-// a full flush ran, since a missed eviction is a stale grant. Applied is false
-// when no override row changed.
+// PermEffect is who had cached permissions dropped after override rows were copied or
+// replaced. AffectedAll means the narrow list could not be read and a full flush ran (a
+// missed eviction is a stale grant). Applied is false when no row changed.
 type PermEffect struct {
 	Applied       bool
 	AffectedUsers []int64
 	AffectedAll   bool
 }
 
-// CategoryOverrideResult is the outcome of a template mutation: OverrideResult's
-// fields plus every synced channel the write rewrote, re-read after commit, for
-// which the service has already invalidated and refreshed visibility.
+// CategoryOverrideResult is OverrideResult plus every synced channel the write rewrote,
+// re-read after commit, already invalidated and visibility-refreshed.
 type CategoryOverrideResult struct {
 	OverrideResult
 	Channels []db.Channel
 }
 
-// CategoryPermissions returns every role's template row on the category (zero
-// masks when none) and the per-user rows. ErrNotFound when the category is gone.
+// CategoryPermissions returns every role's template row on the category (zero masks when
+// none) and the per-user rows; ErrNotFound when the category is gone.
 func (s *channelOverrides) CategoryPermissions(ctx context.Context, categoryID int64) ([]db.ChannelRoleOverride, []db.ChannelUserOverride, error) {
 	cp, err := s.catPermStore()
 	if err != nil {
@@ -94,7 +86,6 @@ func (s *channelOverrides) CategoryPermissions(ctx context.Context, categoryID i
 	return roles, users, nil
 }
 
-// requireCategory loads a category or answers ErrNotFound.
 func (s *channelOverrides) requireCategory(ctx context.Context, id int64) (*db.ChannelCategory, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("invalid category id%.0w", ErrBadRequest)
@@ -109,8 +100,7 @@ func (s *channelOverrides) requireCategory(ctx context.Context, id int64) (*db.C
 	return cat, nil
 }
 
-// ChannelPermissionsSynced reports whether the channel's overrides follow its
-// category's template.
+// ChannelPermissionsSynced reports whether the channel's overrides follow its category's template.
 func (s *channelOverrides) ChannelPermissionsSynced(ctx context.Context, channelID int64) (bool, error) {
 	cp, err := s.catPermStore()
 	if err != nil {
@@ -123,8 +113,6 @@ func (s *channelOverrides) ChannelPermissionsSynced(ctx context.Context, channel
 	return synced, nil
 }
 
-// requireGrantableAcross runs the escalation guard over one union: the bits
-// being written plus every existing row's bits.
 func requireGrantableAcross(actorRole *db.Role, allow, deny int64, rows ...db.OverrideBits) error {
 	for _, r := range rows {
 		allow |= r.Allow
@@ -133,9 +121,9 @@ func requireGrantableAcross(actorRole *db.Role, allow, deny int64, rows ...db.Ov
 	return requireGrantableChannelOverride(actorRole, allow, deny)
 }
 
-// categoryOverrideGuard is the guard a category write passes into the write
-// transaction. A refusal is also recorded in *refused, because the db layer wraps
-// errors with the operation name and the API answers the bare text.
+// categoryOverrideGuard is the guard a category write passes into the write transaction.
+// A refusal is also recorded in *refused because the db layer wraps errors with the
+// operation name and the API answers the bare text.
 func categoryOverrideGuard(actorRole *db.Role, allow, deny int64, refused *error) db.CategoryOverrideGuard {
 	return func(sc db.CategoryOverrideScope) error {
 		rows := make([]db.OverrideBits, 0, len(sc.Channels)+1)
@@ -151,9 +139,8 @@ func categoryOverrideGuard(actorRole *db.Role, allow, deny int64, refused *error
 	}
 }
 
-// resolveCategoryRoleTarget loads the target role and applies the role-hierarchy
-// rule (strictly below the actor's position); the escalation guard runs later,
-// inside the write transaction.
+// resolveCategoryRoleTarget loads the target role and applies the role-hierarchy rule
+// (strictly below the actor); the escalation guard runs later in the write transaction.
 func (s *channelOverrides) resolveCategoryRoleTarget(ctx context.Context, actorRole *db.Role, roleID int64) (*db.Role, error) {
 	role, err := s.st.GetRoleByID(ctx, roleID)
 	if err != nil {
@@ -168,8 +155,6 @@ func (s *channelOverrides) resolveCategoryRoleTarget(ctx context.Context, actorR
 	return role, nil
 }
 
-// resolveCategoryUserTarget loads the target member of a category write and
-// applies the user-hierarchy rule.
 func (s *channelOverrides) resolveCategoryUserTarget(ctx context.Context, actorRole *db.Role, userID int64) (*db.User, error) {
 	user, err := s.st.GetUserByID(ctx, userID)
 	if err != nil {
@@ -184,14 +169,12 @@ func (s *channelOverrides) resolveCategoryUserTarget(ctx context.Context, actorR
 	return user, nil
 }
 
-// PutCategoryRoleOverride writes a role's template row on the category and the
-// same row on every synced channel in it.
+// PutCategoryRoleOverride writes a role's template row on the category and every synced channel.
 func (s *channelOverrides) PutCategoryRoleOverride(ctx context.Context, actorID int64, actorRole *db.Role, categoryID, roleID, allowRaw, denyRaw int64) (CategoryOverrideResult, error) {
 	return s.categoryRoleMutation(ctx, actorID, actorRole, categoryID, roleID, allowRaw&permissions.AllPerms, denyRaw&permissions.AllPerms, false)
 }
 
-// DeleteCategoryRoleOverride clears a role's template row and its row on every
-// synced channel. Gated like a write: the bits being removed are checked.
+// DeleteCategoryRoleOverride clears a role's template row and its synced rows; gated like a write.
 func (s *channelOverrides) DeleteCategoryRoleOverride(ctx context.Context, actorID int64, actorRole *db.Role, categoryID, roleID int64) (CategoryOverrideResult, error) {
 	return s.categoryRoleMutation(ctx, actorID, actorRole, categoryID, roleID, 0, 0, true)
 }
@@ -240,14 +223,12 @@ func (s *channelOverrides) categoryRoleMutation(ctx context.Context, actorID int
 	return res, nil
 }
 
-// PutCategoryUserOverride writes a member's template row on the category and
-// the same row on every synced channel in it.
+// PutCategoryUserOverride writes a member's template row on the category and every synced channel.
 func (s *channelOverrides) PutCategoryUserOverride(ctx context.Context, actorID int64, actorRole *db.Role, categoryID, userID, allowRaw, denyRaw int64) (CategoryOverrideResult, error) {
 	return s.categoryUserMutation(ctx, actorID, actorRole, categoryID, userID, allowRaw&permissions.AllPerms, denyRaw&permissions.AllPerms, false)
 }
 
-// DeleteCategoryUserOverride clears a member's template row and its row on
-// every synced channel, gated like a write.
+// DeleteCategoryUserOverride clears a member's template row and its synced rows; gated like a write.
 func (s *channelOverrides) DeleteCategoryUserOverride(ctx context.Context, actorID int64, actorRole *db.Role, categoryID, userID int64) (CategoryOverrideResult, error) {
 	return s.categoryUserMutation(ctx, actorID, actorRole, categoryID, userID, 0, 0, true)
 }
@@ -295,9 +276,9 @@ func (s *channelOverrides) categoryUserMutation(ctx context.Context, actorID int
 	return res, nil
 }
 
-// applyCategoryEffects runs a write's post-commit work: drop the cached
-// permissions of everyone affected first (visibility resolves through that
-// cache), then re-derive the audience of each rewritten synced channel.
+// applyCategoryEffects runs post-commit work: drop cached permissions of everyone
+// affected first (visibility resolves through that cache), then re-derive each rewritten
+// channel's audience.
 func (s *channelOverrides) applyCategoryEffects(res CategoryOverrideResult) {
 	s.invalidatePermEffect(PermEffect{AffectedUsers: res.AffectedUsers, AffectedAll: res.AffectedAll})
 	for i := range res.Channels {
@@ -305,9 +286,6 @@ func (s *channelOverrides) applyCategoryEffects(res CategoryOverrideResult) {
 	}
 }
 
-// mapCategoryOverrideErr maps a category-write failure to a service error. A guard
-// refusal comes back as the guard's own error, without the db operation prefix; a
-// missing category is ErrNotFound.
 func mapCategoryOverrideErr(err, refused error) error {
 	switch {
 	case err == nil:
@@ -321,8 +299,6 @@ func mapCategoryOverrideErr(err, refused error) error {
 	}
 }
 
-// rereadChannels reads the channels a write touched after it committed. One
-// that is gone by now (deleted in the meantime) is skipped.
 func (s *channelOverrides) rereadChannels(ctx context.Context, ids []int64) []db.Channel {
 	out := make([]db.Channel, 0, len(ids))
 	for _, id := range ids {
@@ -336,8 +312,7 @@ func (s *channelOverrides) rereadChannels(ctx context.Context, ids []int64) []db
 }
 
 // effectOfRows names who to invalidate after override rows for the given roles and
-// members were copied or replaced on a channel: each role's holders and each
-// member. A role whose holders cannot be read widens it to a full flush.
+// members changed: each role's holders and each member. An unreadable role widens to a full flush.
 func (s *channelOverrides) effectOfRows(ctx context.Context, roleIDs, userIDs []int64) PermEffect {
 	roleIDs = dedupe(roleIDs)
 	users := dedupe(userIDs)

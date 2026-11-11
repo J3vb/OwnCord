@@ -209,7 +209,7 @@
   background: var(--bg-hover);
 }
 
-/* Menus as sheets (components/menuSheet.ts): the channel and server menus. A
+/* Menus as sheets (features/menus/menuSheet.ts): the channel and server menus. A
    row can carry a second line, a chevron (it opens a second page) or a check. */
 .menu-sheet-row {
   display: flex;
@@ -373,7 +373,7 @@
   min-height: 44px;
 }
 
-/* Tapping a voice channel: who is in there, then Join (components/VoiceJoinSheet.ts). */
+/* Tapping a voice channel: who is in there, then Join (features/channels/VoiceJoinSheet.ts). */
 .join-sheet {
   display: flex;
   flex-direction: column;

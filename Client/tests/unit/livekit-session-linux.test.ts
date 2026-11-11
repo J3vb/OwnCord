@@ -252,9 +252,9 @@ import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { nativeCounters } from "../../src/features/voice/native/counters";
 import { initToast, teardownToast } from "@lib/ui/toast";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import { setScreenSourcePicker } from "../../src/features/voice/native/screenPickerSlot";
-import { showScreenSharePicker } from "../../src/components/ScreenSharePicker";
+import { showScreenSharePicker } from "../../src/features/voice/ScreenSharePicker";
 
 const names = () => host.commands.map(([n]) => n);
 const emit = (envelope: NativeVoiceEnvelope) => {
@@ -651,8 +651,8 @@ describe("LiveKitSession on the Linux native backend", () => {
     // Wayland here: the portal picks, so no source list is shown.
     expect(host.commands).toEqual([
       ["screenSources", []],
-      // The default (medium) share: 3 Mbps at 30 fps with the simulcast
-      // layer. This file's livekit mock presets carry no resolution, so the
+      // The default (medium) share: 3 Mbps at 30 fps as one layer (the
+      // backup copy is off by default). This file's livekit mock presets carry no resolution, so the
       // capture keeps its 1080p fallback.
       ["startScreen", [1, "portal", { fps: 30, maxWidth: 1920, maxHeight: 1080 }]],
       [
@@ -665,7 +665,7 @@ describe("LiveKitSession on the Linux native backend", () => {
             height: 1080,
             maxBitrate: 3_000_000,
             maxFramerate: 30,
-            simulcast: true,
+            simulcast: false,
             codec: "vp8",
           },
         ],
@@ -689,7 +689,21 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(nativeCounters.screenTracks).toBe(0);
   });
 
+  it("a Linux share changes quality live as one layer by default", async () => {
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    const sharing = session.enableScreenshare();
+    await pressGoLive();
+    await sharing;
+    host.commands.length = 0;
+
+    await session.setScreenshareQuality("high");
+
+    expect(host.commands[0]?.[0]).toBe("setScreenQuality");
+    expect(host.commands[0]?.[1][3]).toMatchObject({ maxBitrate: 6_000_000, simulcast: false });
+  });
+
   it("a Linux share shows its picked quality and changes it live through the host", async () => {
+    prefs.set("screenShareBackupLayer", true);
     const ws = { send: vi.fn(() => "req-1"), on: vi.fn() };
     session.setWsClient(ws as never);
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);

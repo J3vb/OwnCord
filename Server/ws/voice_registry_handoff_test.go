@@ -187,11 +187,12 @@ func TestVoiceRegistry_ModMoveStashSurvivesRacingSwitch(t *testing.T) {
 		f := newTxnFixture(t, nil)
 		f.join(t)
 		ctx := context.Background()
+		seedRowModFlags(t, f.h, f.uid, f.chID, true, false)
 
 		hold := f.h.begin(f.uid) // the target's switch is mid-flight
 		done := make(chan bool, 1)
 		go func() {
-			done <- f.h.EvictForModeratorMove(ctx, f.uid, f.chID, true, false, nil)
+			done <- f.h.EvictForModeratorMove(ctx, f.uid, f.chID)
 		}()
 		waitForWaiters(t, f.h, f.uid, 2)
 
@@ -218,17 +219,17 @@ func TestVoiceRegistry_ModMoveStashSurvivesRacingSwitch(t *testing.T) {
 		f := newTxnFixture(t, nil)
 		f.join(t)
 		ctx := context.Background()
-		by := int64(42)
+		seedRowModFlags(t, f.h, f.uid, f.chID, true, true)
 
-		if !f.h.EvictForModeratorMove(ctx, f.uid, f.chID, true, true, &by) {
+		if !f.h.EvictForModeratorMove(ctx, f.uid, f.chID) {
 			t.Fatal("the move did not evict a target still in the channel")
 		}
 		if ch := f.c.voice.channel(); ch != 0 {
 			t.Errorf("target still in channel %d after the eviction", ch)
 		}
 		muted, deafened, mutedBy := f.c.voice.takeModFlags()
-		if !muted || !deafened || mutedBy == nil || *mutedBy != by {
-			t.Errorf("stash = (%v, %v, %v), want (true, true, %d)", muted, deafened, mutedBy, by)
+		if !muted || !deafened || mutedBy != nil {
+			t.Errorf("stash = (%v, %v, %v), want (true, true, nil)", muted, deafened, mutedBy)
 		}
 	})
 }
@@ -429,4 +430,18 @@ func TestVoiceRegistry_GraceFireRacesReconnect(t *testing.T) {
 			t.Errorf("%d voice_states deletes, want exactly 1", n)
 		}
 	})
+}
+
+// seedRowModFlags puts a moderator mute/deafen on userID's row in channelID, as
+// a mute before the move would have: an eviction carries the flags it reads off
+// the row.
+func seedRowModFlags(t *testing.T, h *Hub, userID, channelID int64, muted, deafened bool) {
+	t.Helper()
+	if !muted && !deafened {
+		return
+	}
+	st := h.voice.RestoreModFlags(context.Background(), userID, channelID, muted, deafened, nil)
+	if st == nil || st.ServerMuted != muted || st.ServerDeafened != deafened {
+		t.Fatalf("seeding moderator flags (%v, %v) on user %d failed: %+v", muted, deafened, userID, st)
+	}
 }

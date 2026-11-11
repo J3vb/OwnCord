@@ -23,6 +23,7 @@ import {
 import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { desktop } from "../../src/platform/desktop";
+import { hoverRow } from "../helpers/hoverRows";
 
 const MENU = ".message-context-menu";
 
@@ -421,6 +422,7 @@ describe("message right-click menu", () => {
     mount([makeMessage()]);
     row().getBoundingClientRect = () =>
       ({ left: 0, top: 120, right: 500, bottom: 160, width: 500, height: 40 }) as DOMRect;
+    hoverRow(row());
     const invoker = row().querySelector<HTMLElement>('[data-testid="msg-reply-1"]')!;
     invoker.focus();
     await open(invoker, { clientX: 0, clientY: 0 });
@@ -488,6 +490,7 @@ describe("message right-click menu", () => {
   it("row rebuilt while open: menu survives and Escape focuses the replacement", async () => {
     mount([makeMessage({ content: "before" })]);
     const oldRow = row();
+    hoverRow(oldRow);
     const invoker = oldRow.querySelector<HTMLElement>('[data-testid="msg-reply-1"]')!;
     invoker.focus();
     await open(invoker, { clientX: 0, clientY: 0 });

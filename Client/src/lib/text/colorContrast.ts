@@ -14,6 +14,11 @@
 
 export type Rgb = readonly [number, number, number];
 
+/** Applies `f` to each of three values, keeping the three-tuple type. */
+function map3<T>(t: readonly [T, T, T], f: (x: T, i: number) => number): Rgb {
+  return [f(t[0], 0), f(t[1], 1), f(t[2], 2)];
+}
+
 /**
  * Text for light accents. Black, not a softer near-black: with it, the better
  * of the two text colours reads at >= 4.58:1 on ANY accent; #111214 would
@@ -35,15 +40,15 @@ export function parseColor(value: string): Rgb | null {
   const v = value.trim().toLowerCase();
   const short = /^#([\da-f])([\da-f])([\da-f])$/.exec(v);
   if (short !== null) {
-    return [short[1]!, short[2]!, short[3]!].map((h) => parseInt(h + h, 16)) as unknown as Rgb;
+    return map3([short[1]!, short[2]!, short[3]!], (h) => parseInt(h + h, 16));
   }
   const long = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/.exec(v);
   if (long !== null) {
-    return [long[1]!, long[2]!, long[3]!].map((h) => parseInt(h, 16)) as unknown as Rgb;
+    return map3([long[1]!, long[2]!, long[3]!], (h) => parseInt(h, 16));
   }
   const fn = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(v);
   if (fn !== null) {
-    return [fn[1]!, fn[2]!, fn[3]!].map((n) => Math.min(255, Number(n))) as unknown as Rgb;
+    return map3([fn[1]!, fn[2]!, fn[3]!], (n) => Math.min(255, Number(n)));
   }
   return null;
 }
@@ -70,7 +75,7 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
 }
 
 export function mix(from: Rgb, to: Rgb, weight: number): Rgb {
-  return from.map((c, i) => Math.round(c + (to[i]! - c) * weight)) as unknown as Rgb;
+  return map3(from, (c, i) => Math.round(c + (to[i]! - c) * weight));
 }
 
 export interface AccentTokens {
@@ -110,7 +115,7 @@ export function deriveAccentTokens(accent: Rgb, surfaces: readonly Rgb[]): Accen
 type Hsl = readonly [number, number, number];
 
 function toHsl(rgb: Rgb): Hsl {
-  const [r, g, b] = rgb.map((c) => c / 255) as unknown as Rgb;
+  const [r, g, b] = map3(rgb, (c) => c / 255);
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
   const l = (max + min) / 2;
@@ -140,9 +145,10 @@ function fromHsl(hsl: Hsl): Rgb {
   }
   const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
   const p = 2 * l - q;
-  return [hueChannel(p, q, h + 1 / 3), hueChannel(p, q, h), hueChannel(p, q, h - 1 / 3)].map((c) =>
-    Math.round(c * 255),
-  ) as unknown as Rgb;
+  return map3(
+    [hueChannel(p, q, h + 1 / 3), hueChannel(p, q, h), hueChannel(p, q, h - 1 / 3)],
+    (c) => Math.round(c * 255),
+  );
 }
 
 const LIGHTNESS_STEP = 0.005;

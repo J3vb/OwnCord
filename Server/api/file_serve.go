@@ -37,15 +37,12 @@ func handleServeFile(uploads *service.UploadService, store FileStore, allowedOri
 	}
 }
 
-// handleServeThumb serves an image's thumbnail: made on first request, then kept
-// beside the original and removed with it (storage.Delete). An image the server
-// does not shrink (already inside thumbBox, a GIF, an animated WebP, a format
-// with no decoder, over thumbMaxDecodeBytes, or undecodable) is served as the
-// original, and a failed generation is kept as an empty thumbnail so it is never
-// retried. A request that finds no free slot within thumbSlotWait is served the
-// original without keeping anything, so a later request still makes the
-// thumbnail. A non-image is a 404. HEIC, HEIF and TIFF previews are always a
-// JPEG and a failed conversion is a 404 (serveConvertedPreview).
+// handleServeThumb serves an image's thumbnail, made on first request and kept beside the original. An
+// image the server does not shrink (inside thumbBox, a GIF, an animated WebP, no decoder, over
+// thumbMaxDecodeBytes, or undecodable) is served as the original; a failed generation is kept as an empty
+// thumbnail so it is never retried. A request finding no free slot within thumbSlotWait is served the
+// original without keeping anything. A non-image is a 404. HEIC, HEIF and TIFF previews are always a JPEG
+// and a failed conversion is a 404 (serveConvertedPreview).
 func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOrigins []string) http.HandlerFunc {
 	slots := newThumbSlots()
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -100,11 +97,9 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 	}
 }
 
-// generateThumb makes and keeps the thumbnail of the original f under a slot.
-// It returns the new thumbnail, or one another request kept while this one
-// waited for the slot, or neither when the original is to be served: it is not
-// thumbnailed, it did not decode, or no slot came free in time. ok is false
-// only when the request ended while waiting.
+// generateThumb makes and keeps the thumbnail of f under a slot. It returns the new thumbnail, one another
+// request kept while this one waited, or neither when the original is served. ok is false only when the
+// request ended while waiting.
 func generateThumb(r *http.Request, uploads *service.UploadService, store FileStore, slots *thumbSlots, storedAs string, f storage.File, format string) (thumb []byte, kept storage.File, ok bool) {
 	orientation, accepted := thumbOrientation(f, format)
 	if !accepted {
@@ -124,8 +119,8 @@ func generateThumb(r *http.Request, uploads *service.UploadService, store FileSt
 	return thumb, nil, true
 }
 
-// serveKeptThumb serves a kept thumbnail and closes it. A WebP's thumbnail is a
-// JPEG or a PNG, told apart by its first bytes.
+// serveKeptThumb serves a kept thumbnail and closes it; a WebP's is a JPEG or a PNG, told apart by its
+// first bytes.
 func serveKeptThumb(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, t storage.File, allowedOrigins []string) {
 	defer t.Close() //nolint:errcheck
 	mimeType := aa.MimeType
@@ -141,14 +136,10 @@ func serveKeptThumb(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAcc
 	serveFileContent(w, r, aa, mimeType, fileModTime(t), t, allowedOrigins)
 }
 
-// serveConvertedPreview answers the thumbnail route for a HEIC, HEIF or TIFF
-// original: always a JPEG, even for a picture inside thumbBox, because no
-// webview shows the original. It is generated once under the same slots as other
-// thumbnails (a HEIC holds heicSlotWeight of them) and kept; a failed or refused
-// conversion is kept as an empty thumbnail and answered 404 from then on, so it
-// is decoded at most once and the original is never served as an image. A
-// request that finds no free slot in time is answered 503 with a Retry-After,
-// and nothing is kept.
+// serveConvertedPreview answers the thumbnail route for a HEIC, HEIF or TIFF original: always a JPEG, since
+// no webview shows the original. Generated once under the same slots (a HEIC holds heicSlotWeight of them);
+// a failed conversion is kept as an empty thumbnail and answered 404 from then on, so the original is never
+// served as an image. No free slot in time answers 503 with Retry-After and keeps nothing.
 func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, uploads *service.UploadService, store FileStore, slots *thumbSlots, format string, allowedOrigins []string) {
 	serveKept := func(t storage.File) {
 		defer t.Close() //nolint:errcheck
@@ -181,7 +172,6 @@ func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.Attach
 		}
 		return
 	}
-	// A request that waited for the slot may find the preview already made.
 	t, found = keptThumb(store, aa.StoredAs)
 	var preview []byte
 	if t == nil && !found {
@@ -203,9 +193,8 @@ func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.Attach
 	}
 }
 
-// keptThumb reports what is kept for the original storedAs: its thumbnail (t),
-// an empty one recording that the original is served instead (t nil, found), or
-// nothing yet.
+// keptThumb reports what is kept for storedAs: its thumbnail, an empty one meaning the original is served
+// (t nil, found), or nothing yet.
 func keptThumb(store FileStore, storedAs string) (t storage.File, found bool) {
 	t, err := store.OpenThumb(storedAs)
 	if err != nil {
@@ -219,10 +208,8 @@ func keptThumb(store FileStore, storedAs string) (t storage.File, found bool) {
 	return nil, err == nil
 }
 
-// keepThumbnail stores a generated thumbnail for the next request, or an empty
-// one when generation failed. It is a cache, so a failure only costs a
-// regeneration; it still passes the disk-headroom floor like every write into
-// upload storage.
+// keepThumbnail stores a generated thumbnail, or an empty one when generation failed. It is a cache, but
+// still passes the disk-headroom floor like every write into upload storage.
 func keepThumbnail(ctx context.Context, uploads *service.UploadService, store FileStore, storedAs string, thumb []byte) {
 	res, err := uploads.ReserveHeadroom(ctx, int64(len(thumb)))
 	if err != nil {
@@ -238,9 +225,7 @@ func keepThumbnail(ctx context.Context, uploads *service.UploadService, store Fi
 	res.Commit()
 }
 
-// authorizeFileRead resolves the {id} file and applies its access rule (channel
-// read, DM participation, the uploader for an unlinked file, NSFW
-// acknowledgement), writing the refusal itself.
+// authorizeFileRead resolves the {id} file and applies its access rule, writing the refusal itself.
 func authorizeFileRead(w http.ResponseWriter, r *http.Request, uploads *service.UploadService) (*db.AttachmentAccess, bool) {
 	fileID := chi.URLParam(r, "id")
 	if fileID == "" {
@@ -261,8 +246,7 @@ func authorizeFileRead(w http.ResponseWriter, r *http.Request, uploads *service.
 	return aa, true
 }
 
-// fileModTime is f's modification time, or zero when unreadable (ServeContent
-// then sends no Last-Modified).
+// fileModTime is f's modification time, or zero when unreadable (ServeContent then sends no Last-Modified).
 func fileModTime(f storage.File) time.Time {
 	if info, err := f.Stat(); err == nil {
 		return info.ModTime()
@@ -271,12 +255,9 @@ func fileModTime(f storage.File) time.Time {
 }
 
 func serveFileContent(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, mimeType string, modTime time.Time, content io.ReadSeeker, allowedOrigins []string) {
-	// A download longer than the global 30 s WriteTimeout is truncated with no
-	// error. Wrap the writer so every chunk that lands pushes the write deadline
-	// out; a stalled peer is abandoned after transferProgressTimeout and a
-	// download closes after the lifetime its file size earns. A cut download
-	// has no way to answer: net/http closes the connection and the client sees
-	// fewer bytes than Content-Length.
+	// A download longer than the global 30 s WriteTimeout is truncated with no error, so wrap the writer to
+	// push the write deadline out on every chunk. A cut download cannot answer: the connection closes short
+	// of Content-Length.
 	deadlines := newTransferDeadline(w, r, aa.Size)
 	defer deadlines.release()
 	defer func() {
@@ -288,19 +269,16 @@ func serveFileContent(w http.ResponseWriter, r *http.Request, aa *db.AttachmentA
 	w = progressWriter{ResponseWriter: w, d: deadlines}
 
 	w.Header().Set("Content-Type", mimeType)
-	// Force download for MIME types that could execute content under the OwnCord
-	// origin (HTML, SVG, XML, PDF).
+	// Force download for MIME types that could execute content under the OwnCord origin.
 	disposition := "inline"
 	if isUnsafeInlineMIME(mimeType) {
 		disposition = "attachment"
 	}
 	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": aa.Filename}))
-	// These downloads are access-controlled, so shared/proxy caches must never
-	// store them: private + no-cache forces revalidation on every use, which
-	// makes a max-age dead weight.
+	// Access-controlled, so shared/proxy caches must never store it; no-cache forces revalidation on every
+	// use.
 	w.Header().Set("Cache-Control", "private, no-cache")
-	// Access-Control-Allow-Origin below reflects the request Origin, so
-	// responses vary by Origin and must not be cross-served.
+	// Access-Control-Allow-Origin reflects the request Origin, so responses vary by it.
 	w.Header().Set("Vary", "Origin")
 	if origin := r.Header.Get("Origin"); origin != "" {
 		for _, allowed := range allowedOrigins {
@@ -317,17 +295,14 @@ func serveFileContent(w http.ResponseWriter, r *http.Request, aa *db.AttachmentA
 	http.ServeContent(w, r, aa.Filename, modTime, content)
 }
 
-// writeFileAccessError maps an UploadService refusal onto the file routes'
-// responses: a missing or tombstoned attachment and one the caller may not read
-// are both plain 404/403 bodies that do not say which rule answered; anything
-// else is a 500 whose detail stays in the log.
+// writeFileAccessError maps an UploadService refusal onto the file routes: a missing and an unreadable
+// attachment are plain 404/403 bodies that do not say which rule answered; anything else is a 500 with
+// detail in the log.
 func writeFileAccessError(w http.ResponseWriter, r *http.Request, fileID string, err error) {
 	switch {
 	case errors.Is(err, service.ErrNotFound):
 		http.NotFound(w, r)
 	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
-		// The response carries the code and nothing else, so it cannot be told
-		// apart from any other refusal on this route.
 		writeErr(w, http.StatusForbidden, httperr.CodeNSFWAcknowledgementRequired, "")
 	case errors.Is(err, service.ErrForbidden):
 		writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "you do not have access to this file")

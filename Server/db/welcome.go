@@ -17,10 +17,9 @@ type WelcomeRow struct {
 	Timestamp string
 }
 
-// InsertWelcomeRow writes a welcome row (kind 8) into channelID authored by
-// userID and advances that member's read state past it, in one transaction, so
-// the row is not unread for the person it greets. content is the English
-// fallback only an old client shows; a current client draws its own greeting.
+// InsertWelcomeRow writes a welcome row (kind 8) into channelID authored by userID and
+// advances that member's read state past it, in one transaction. content is the
+// English fallback only an old client shows.
 func (d *DB) InsertWelcomeRow(ctx context.Context, channelID, userID int64, content string) (*WelcomeRow, error) {
 	var out *WelcomeRow
 	err := d.inWriteTx(ctx, "InsertWelcomeRow", func(q *dbgen.Queries) error {

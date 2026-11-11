@@ -13,31 +13,28 @@ import (
 	"strings"
 )
 
-// Reasons an attachment is not copied. Both are counted as skipped.
 var (
-	// ErrRemoteMedia is a link with a scheme; it is never fetched, since the
-	// server would call out to an address the file chose.
+	// ErrRemoteMedia is a link with a scheme; never fetched, since the server would call out to an address the
+	// file chose.
 	ErrRemoteMedia = errors.New("attachment is a remote link")
 	// ErrMediaMissing is a local path the export does not contain.
 	ErrMediaMissing = errors.New("attachment file is not in the export")
 )
 
-// Zip refusals.
 var (
-	// ErrUnsafeZip is an entry the importer will not touch: an absolute path, a
-	// parent-directory segment, a drive letter, a NUL byte or a symlink.
+	// ErrUnsafeZip is an entry the importer will not touch: an absolute path, a parent-directory segment, a
+	// drive letter, a NUL byte or a symlink.
 	ErrUnsafeZip = errors.New("the zip holds an unsafe entry")
 	// ErrZipTooLarge is a zip over the entry-count or uncompressed-size cap.
 	ErrZipTooLarge = errors.New("the zip is larger than the import allows")
 )
 
-// Defaults for ZipLimits.
 const (
 	DefaultMaxZipEntries = 100_000
 	DefaultMaxZipBytes   = 32 << 30
 )
 
-// ZipLimits bound what a zip may expand to. Zero fields take the defaults.
+// ZipLimits bound what a zip may expand to.
 type ZipLimits struct {
 	MaxEntries           int
 	MaxUncompressedBytes int64
@@ -46,17 +43,14 @@ type ZipLimits struct {
 // Media is an opened attachment file.
 type Media struct {
 	Reader io.ReadCloser
-	// Size is the declared size in bytes, used to reserve space. The reader
-	// still enforces its own limits.
+	// Size is the declared size in bytes, used to reserve space; the reader still enforces its own limits.
 	Size int64
 }
 
 // Export is an opened export: the JSON document and the local files it names.
 type Export interface {
-	// OpenJSON opens the export's JSON document.
 	OpenJSON() (io.ReadCloser, error)
-	// OpenMedia opens the file an attachment URL names, or returns
-	// ErrRemoteMedia or ErrMediaMissing.
+	// OpenMedia opens the file an attachment URL names, or returns ErrRemoteMedia or ErrMediaMissing.
 	OpenMedia(ref string) (Media, error)
 	Close() error
 }
@@ -87,7 +81,6 @@ func OpenFile(p string, lim ZipLimits) (Export, error) {
 	return nil, fmt.Errorf("%w: expected a .json or .zip file", ErrBadExport)
 }
 
-// jsonExport is a bare .json file: no media travels with it.
 type jsonExport struct{ path string }
 
 func (j jsonExport) OpenJSON() (io.ReadCloser, error) {
@@ -107,8 +100,8 @@ func (j jsonExport) OpenMedia(ref string) (Media, error) {
 
 func (j jsonExport) Close() error { return nil }
 
-// ZipExport reads an export from a zip. Nothing is extracted to disk: media is
-// streamed from the archive straight into storage.
+// ZipExport reads an export from a zip. Nothing is extracted to disk: media is streamed straight into
+// storage.
 type ZipExport struct {
 	zr     *zip.Reader
 	json   *zip.File
@@ -118,12 +111,12 @@ type ZipExport struct {
 	closer io.Closer
 }
 
-// byteBudget is the uncompressed bytes the zip may still yield, checked on every
-// read so an understated header cannot slip past the cap.
+// byteBudget is the uncompressed bytes the zip may still yield, checked on every read so an understated
+// header cannot slip past the cap.
 type byteBudget struct{ remaining int64 }
 
-// NewZipExport validates every entry of the zip and indexes it. It refuses the
-// whole archive on the first unsafe entry or when a cap is exceeded.
+// NewZipExport validates every entry of the zip and indexes it; it refuses the whole archive on the first
+// unsafe entry or when a cap is exceeded.
 func NewZipExport(ra io.ReaderAt, size int64, lim ZipLimits) (*ZipExport, error) {
 	if lim.MaxEntries <= 0 {
 		lim.MaxEntries = DefaultMaxZipEntries
@@ -166,8 +159,8 @@ func NewZipExport(ra io.ReaderAt, size int64, lim ZipLimits) (*ZipExport, error)
 			}
 		}
 	}
-	// A .json inside a folder is a downloaded attachment, unless nothing sits at
-	// the root (a zipped folder), when the single nested one is the document.
+	// A .json inside a folder is a downloaded attachment, unless nothing sits at the root (a zipped folder),
+	// when the single nested one is the document.
 	candidates := roots
 	if len(candidates) == 0 {
 		candidates = nested
@@ -183,7 +176,6 @@ func NewZipExport(ra io.ReaderAt, size int64, lim ZipLimits) (*ZipExport, error)
 	return z, nil
 }
 
-// isExportJSON picks the export document: a .json that is not archiver debris.
 func isExportJSON(name string) bool {
 	if !strings.HasSuffix(strings.ToLower(name), ".json") {
 		return false
@@ -194,7 +186,6 @@ func isExportJSON(name string) bool {
 
 var driveLetter = regexp.MustCompile(`^[A-Za-z]:`)
 
-// cleanZipName validates an entry name and returns it with '/' separators.
 func cleanZipName(raw string) (string, error) {
 	if strings.ContainsRune(raw, 0) {
 		return "", fmt.Errorf("%w: a NUL byte in a name", ErrUnsafeZip)
@@ -221,8 +212,8 @@ func (z *ZipExport) open(f *zip.File) (io.ReadCloser, error) {
 	return &budgetReader{rc: rc, budget: z.budget}, nil
 }
 
-// OpenMedia finds an attachment by the path its URL holds, relative to the zip
-// root or to the folder the JSON sits in.
+// OpenMedia finds an attachment by the path its URL holds, relative to the zip root or to the folder the JSON
+// sits in.
 func (z *ZipExport) OpenMedia(ref string) (Media, error) {
 	cands, err := localCandidates(ref)
 	if err != nil {
@@ -249,9 +240,8 @@ func (z *ZipExport) Close() error {
 	return nil
 }
 
-// localCandidates turns an attachment URL into the zip paths it could mean:
-// ErrRemoteMedia for anything with a scheme or a host, ErrMediaMissing for an
-// empty or escaping path.
+// localCandidates turns an attachment URL into the zip paths it could mean: ErrRemoteMedia for anything with
+// a scheme or a host, ErrMediaMissing for an empty or escaping path.
 func localCandidates(ref string) (candidates []string, err error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -296,8 +286,7 @@ type budgetReader struct {
 
 func (b *budgetReader) Read(p []byte) (int, error) {
 	if b.budget.remaining <= 0 {
-		// Spent. An entry that ended exactly on the cap is fine; one with a byte
-		// more is not.
+		// Spent: an entry that ended exactly on the cap is fine; one byte more is not.
 		var probe [1]byte
 		n, err := b.rc.Read(probe[:])
 		if n > 0 {

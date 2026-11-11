@@ -8,4 +8,6 @@ func init() {
 	// The hub's game activity switch: the setting could not be
 	// read, at construction (stage=init) or on a save (stage=apply).
 	supportEventCodes["game_activity_policy: reading the setting failed"] = "game_activity_policy_unreadable"
+	// The hub's video upload cap, same stages.
+	supportEventCodes["video_bitrate_cap: reading the setting failed"] = "video_bitrate_cap_unreadable"
 }

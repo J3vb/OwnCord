@@ -165,18 +165,25 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
     return li;
   }
 
-  function render(): void {
-    if (signal.aborted) return;
+  function focusedIds(): { focusedId: string | undefined; focusedCard: string | undefined } {
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusedId =
-      focused !== null && list.contains(focused) ? focused.dataset["userId"] : undefined;
-    const focusedCard =
-      focused !== null && activeList.contains(focused) ? focused.dataset["activeId"] : undefined;
+    return {
+      focusedId: focused !== null && list.contains(focused) ? focused.dataset["userId"] : undefined,
+      focusedCard:
+        focused !== null && activeList.contains(focused) ? focused.dataset["activeId"] : undefined,
+    };
+  }
 
-    for (const [id, btn] of tabButtons) btn.setAttribute("aria-pressed", String(id === tab));
+  function emptyText(): string {
+    if (query.trim() !== "") return t("empty.search", { query: query.trim() });
+    return t(tab === "online" ? "empty.online" : "empty.all");
+  }
 
-    const members = membersStore.getState().members;
-    const sc = peopleScope();
+  function paintPeople(
+    members: ReturnType<typeof membersStore.getState>["members"],
+    sc: ReturnType<typeof peopleScope>,
+    focusedId: string | undefined,
+  ): void {
     const rows = peopleRows(members.values(), sc, tab, query);
     setText(
       count,
@@ -184,19 +191,18 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
     );
     list.replaceChildren(...rows.map(personRow));
     empty.hidden = rows.length > 0;
-    if (rows.length === 0) {
-      setText(
-        empty,
-        query.trim() !== ""
-          ? t("empty.search", { query: query.trim() })
-          : t(tab === "online" ? "empty.online" : "empty.all"),
-      );
-    }
+    if (rows.length === 0) setText(empty, emptyText());
     if (focusedId !== undefined) {
       // The person left this tab: the search keeps focus inside the view.
       (list.querySelector<HTMLElement>(`[data-user-id="${focusedId}"]`) ?? search).focus();
     }
+  }
 
+  function paintActive(
+    members: ReturnType<typeof membersStore.getState>["members"],
+    sc: ReturnType<typeof peopleScope>,
+    focusedCard: string | undefined,
+  ): void {
     const cards = activeNow(
       members,
       voiceStore.getState().voiceUsers,
@@ -212,6 +218,18 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
         search
       ).focus();
     }
+  }
+
+  function render(): void {
+    if (signal.aborted) return;
+    const { focusedId, focusedCard } = focusedIds();
+
+    for (const [id, btn] of tabButtons) btn.setAttribute("aria-pressed", String(id === tab));
+
+    const members = membersStore.getState().members;
+    const sc = peopleScope();
+    paintPeople(members, sc, focusedId);
+    paintActive(members, sc, focusedCard);
   }
 
   watchPeople(render, signal);

@@ -7,8 +7,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 )
 
-// handlePingV2 is the V2 handler for ping (heartbeat) messages.
-// It rate-limits and returns a pong reply on success.
 func handlePingV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PingDeps)
 	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("ping", info.UserID), 2, time.Second) {
@@ -17,7 +15,6 @@ func handlePingV2(_ context.Context, cmd Command, info ClientInfo, deps any) Res
 	return Result{Reply: buildJSON(map[string]any{"type": MsgTypePong})}
 }
 
-// registerPingHandler registers the ping/pong handler (V2).
 func registerPingHandler(r *HandlerRegistry, deps PingDeps) {
 	r.RegisterV2(MsgTypePing, handlePingV2, deps)
 }

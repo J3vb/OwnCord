@@ -1,11 +1,12 @@
-import type { Room, RoomEventCallbacks } from "livekit-client";
+import type { RoomEventCallbacks } from "livekit-client";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 type AppListener = [event: keyof RoomEventCallbacks, listener: (...args: never[]) => void];
-const appListeners = new WeakMap<Room, AppListener[]>();
+const appListeners = new WeakMap<VoiceRoom, AppListener[]>();
 
 /** Subscribe the app to a Room event, recorded so detachRoom can remove it. */
 export function onRoom<E extends keyof RoomEventCallbacks>(
-  room: Room,
+  room: VoiceRoom,
   event: E,
   listener: RoomEventCallbacks[E],
 ): void {
@@ -21,7 +22,7 @@ export function onRoom<E extends keyof RoomEventCallbacks>(
  *  (the 10 s wait for a LocalTrackSubscribed publication, deferred track
  *  callbacks) must still run when disconnect() fires the event, or their
  *  timers and closures outlive the Room. */
-export function detachRoom(room: Room): void {
+export function detachRoom(room: VoiceRoom): void {
   for (const [event, listener] of appListeners.get(room) ?? []) room.off(event, listener);
   appListeners.delete(room);
 }
@@ -31,11 +32,10 @@ export function detachRoom(room: Room): void {
  *  removes that listener only when a Room that has left "disconnected"
  *  disconnects, so a Room discarded before connect() would otherwise stay
  *  reachable from navigator.mediaDevices for the page's lifetime. */
-export function releaseRoom(room: Room): Promise<void> {
+export function releaseRoom(room: VoiceRoom): Promise<void> {
   detachRoom(room);
-  navigator.mediaDevices?.removeEventListener(
-    "devicechange",
-    (room as unknown as { handleDeviceChange: EventListener }).handleDeviceChange,
-  );
+  // A private Room field; undefined (a test double) removes nothing.
+  const handler: EventListener = Reflect.get(room, "handleDeviceChange");
+  navigator.mediaDevices?.removeEventListener("devicechange", handler);
   return room.disconnect();
 }

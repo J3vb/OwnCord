@@ -68,7 +68,7 @@ vi.mock("./mediaControl", () => ({ syncShareGrant: vi.fn() }));
 vi.mock("./native/platform", () => ({ isLinuxDesktop: () => env.linux }));
 const createNativeRoom = vi.hoisted(() => vi.fn());
 vi.mock("./native/nativeRoom", () => ({ createNativeRoom }));
-vi.mock("../../lib/voice/screenShare", () => ({
+vi.mock("./screenShare", () => ({
   CAMERA_PRESETS: { low: {}, high: {}, source: {} },
   CAMERA_PUBLISH_BITRATES: { low: 1, high: 2, source: 3 },
   getCameraQuality: () => env.cameraQuality,
@@ -89,11 +89,7 @@ globalThis.Worker = vi.fn(function (this: { url: URL; terminate: () => void }, u
 }) as unknown as typeof Worker;
 
 import { setLocalCamera, setLocalScreenshare, setVoiceStatus } from "../../stores/voice.store";
-import {
-  bumpGeneration,
-  stopManualCameraTrack,
-  stopManualScreenTracks,
-} from "../../lib/voice/screenShare";
+import { bumpGeneration, stopManualCameraTrack, stopManualScreenTracks } from "./screenShare";
 import { syncShareGrant } from "./mediaControl";
 import { RoomLifecycle, type RoomLifecycleHost } from "./roomLifecycle";
 

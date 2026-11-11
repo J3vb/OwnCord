@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createNsfwConsentBar, createNsfwGate } from "@components/NsfwGate";
+import { createNsfwConsentBar, createNsfwGate } from "../../src/features/content-consent/NsfwGate";
 import { useMountContainer } from "../helpers/mountContainer";
 
 describe("NsfwGate component", () => {

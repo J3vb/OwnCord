@@ -7,7 +7,9 @@ const { createPopupMock } = vi.hoisted(() => ({
     isOpen: () => true,
   })),
 }));
-vi.mock("@components/UserProfilePopup", () => ({ createUserProfilePopup: createPopupMock }));
+vi.mock("../../src/features/profiles/userProfilePopup", () => ({
+  createUserProfilePopup: createPopupMock,
+}));
 
 import { openUserProfilePopup } from "../../src/features/profiles/openUserProfilePopup";
 import { handleUserUpdate } from "../../src/features/channels/wsHandlers";

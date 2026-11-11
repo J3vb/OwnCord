@@ -16,6 +16,7 @@ import {
   chatMessage,
   collect,
   connectAndAuth,
+  emitAuthOk,
   expectAuthLastSeq,
   openSocket,
   trackStates,
@@ -113,7 +114,7 @@ describe("ws frame shape check", () => {
     expect(events).toHaveLength(0);
   });
 
-  it("a bad sequenced frame advances the resume point and asks for a fresh state", async () => {
+  it("a bad sequenced frame redials as a fresh connect, so the server answers with a full state", async () => {
     await connectAndAuth(client);
     const bad = withoutContent("x") as { type: string; payload: unknown };
     emit({ ...bad, seq: 7 });
@@ -123,7 +124,37 @@ describe("ws frame shape check", () => {
     await vi.advanceTimersByTimeAsync(5_001);
     expect(wsConnectCalls()).toHaveLength(1);
     emitTauriEvent("ws-state", "open");
-    expectAuthLastSeq(7);
+    expectAuthLastSeq(0);
+  });
+
+  it("a socket that drops before that redial still reconnects as a fresh connect", async () => {
+    await connectAndAuth(client);
+    const bad = withoutContent("x") as { type: string; payload: unknown };
+    emit({ ...bad, seq: 7 });
+    expectConsole("warn", /Invalid WS frame, dropping/);
+
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(60_000);
+    emitTauriEvent("ws-state", "open");
+    expectAuthLastSeq(0);
+  });
+
+  it("the same bad frame right after the fresh state waits longer before the next redial", async () => {
+    await connectAndAuth(client);
+    const bad = withoutContent("x") as { type: string; payload: unknown };
+    emit({ ...bad, seq: 7 });
+    expectConsole("warn", /Invalid WS frame, dropping/);
+    await vi.advanceTimersByTimeAsync(5_001);
+    emitTauriEvent("ws-state", "open");
+    emitAuthOk({ replaySource: "none" });
+
+    emit({ ...bad, seq: 8 });
+    expectConsole("warn", /Invalid WS frame, dropping/);
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(4_900);
+    expect(wsConnectCalls()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(10_200);
+    expect(wsConnectCalls()).toHaveLength(1);
   });
 
   it("a bad frame without a seq does not ask for a fresh state", async () => {

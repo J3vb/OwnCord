@@ -16,9 +16,10 @@ import { getChannelsByCategory, type CategoryRef } from "@stores/channels.store"
 import { canManageChannels, visibleCategories } from "@lib/permissions";
 import { collapseCategories, isCategoryCollapsed, toggleCategory } from "@stores/ui.store";
 import { hasUnread, markChannelsRead } from "@lib/readState";
-import { createMenuItem, openMenuOnKeyboard, openMenuShell } from "@lib/ui/contextMenu";
+import { openMenuOnKeyboard, openMenuShell } from "@lib/ui/contextMenu";
 import { shellText } from "../../../i18n/shell";
 import { canMoveCategory } from "../categoryActions";
+import { menuItemAdder, type AddMenuItem } from "./menuItemAdder";
 
 /** The header a menu belongs to: its group key (what collapse state is saved under) and category. */
 export interface CategoryMenuTarget extends CategoryRef {
@@ -31,6 +32,63 @@ export interface CategoryMenuActions {
   readonly onRenameCategory?: ((category: CategoryRef) => void) | undefined;
   readonly onDeleteCategory?: ((category: CategoryRef) => void) | undefined;
   readonly onMoveCategory?: ((category: CategoryRef, direction: -1 | 1) => void) | undefined;
+}
+
+/** The MANAGE_CHANNELS entries, each only where the page wired its callback; a separator leads them. */
+function appendManageItems(
+  menu: HTMLElement,
+  target: CategoryMenuTarget,
+  actions: CategoryMenuActions,
+  addItem: AddMenuItem,
+): void {
+  const ref: CategoryRef = { id: target.id, name: target.name };
+  const real = target.id > 0;
+  const { onCreateCategory, onRenameCategory, onDeleteCategory, onMoveCategory } = actions;
+  const manage: (() => void)[] = [];
+  if (onCreateCategory !== undefined) {
+    manage.push(() =>
+      addItem(
+        shellText("category.create"),
+        "context-menu-item",
+        "ctx-category-create",
+        onCreateCategory,
+      ),
+    );
+  }
+  if (real && onRenameCategory !== undefined) {
+    manage.push(() =>
+      addItem(shellText("category.rename"), "context-menu-item", "ctx-category-rename", () =>
+        onRenameCategory(ref),
+      ),
+    );
+  }
+  if (real && onMoveCategory !== undefined) {
+    for (const [direction, label, testId] of [
+      [-1, "category.moveUp", "ctx-category-move-up"],
+      [1, "category.moveDown", "ctx-category-move-down"],
+    ] as const) {
+      const can = canMoveCategory(target.id, direction);
+      manage.push(() =>
+        addItem(
+          shellText(label),
+          can ? "context-menu-item" : "context-menu-item disabled",
+          testId,
+          can ? () => onMoveCategory(ref, direction) : null,
+        ),
+      );
+    }
+  }
+  if (real && onDeleteCategory !== undefined) {
+    manage.push(() =>
+      addItem(shellText("category.delete"), "context-menu-item danger", "ctx-category-delete", () =>
+        onDeleteCategory(ref),
+      ),
+    );
+  }
+  if (manage.length > 0) {
+    menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+    for (const add of manage) add();
+  }
 }
 
 /**
@@ -59,28 +117,7 @@ export function attachCategoryContextMenu(
   }
 
   function buildCategoryMenu(menu: HTMLElement, closeMenu: () => void): void {
-    const addItem = (
-      label: string,
-      className: string,
-      testId: string,
-      onClick: (() => void) | null,
-    ): void => {
-      const item = createMenuItem(label, className, { testId });
-      if (onClick === null) {
-        item.setAttribute("aria-disabled", "true");
-        item.classList.add("disabled");
-      } else {
-        item.addEventListener(
-          "click",
-          () => {
-            closeMenu();
-            onClick();
-          },
-          { signal: lifetimeSignal },
-        );
-      }
-      menu.appendChild(item);
-    };
+    const addItem = menuItemAdder(menu, closeMenu, lifetimeSignal);
 
     // Read live: the group's element is reused across renders, so the rows it
     // was built with may be stale by the time the menu opens.
@@ -112,59 +149,7 @@ export function attachCategoryContextMenu(
     );
 
     // Management: read now, like every other gate, so a role change is current.
-    if (canManageChannels()) {
-      const ref: CategoryRef = { id: target.id, name: target.name };
-      const real = target.id > 0;
-      const { onCreateCategory, onRenameCategory, onDeleteCategory, onMoveCategory } = actions;
-      const manage: (() => void)[] = [];
-      if (onCreateCategory !== undefined) {
-        manage.push(() =>
-          addItem(
-            shellText("category.create"),
-            "context-menu-item",
-            "ctx-category-create",
-            onCreateCategory,
-          ),
-        );
-      }
-      if (real && onRenameCategory !== undefined) {
-        manage.push(() =>
-          addItem(shellText("category.rename"), "context-menu-item", "ctx-category-rename", () =>
-            onRenameCategory(ref),
-          ),
-        );
-      }
-      if (real && onMoveCategory !== undefined) {
-        for (const [direction, label, testId] of [
-          [-1, "category.moveUp", "ctx-category-move-up"],
-          [1, "category.moveDown", "ctx-category-move-down"],
-        ] as const) {
-          const can = canMoveCategory(target.id, direction);
-          manage.push(() =>
-            addItem(
-              shellText(label),
-              can ? "context-menu-item" : "context-menu-item disabled",
-              testId,
-              can ? () => onMoveCategory(ref, direction) : null,
-            ),
-          );
-        }
-      }
-      if (real && onDeleteCategory !== undefined) {
-        manage.push(() =>
-          addItem(
-            shellText("category.delete"),
-            "context-menu-item danger",
-            "ctx-category-delete",
-            () => onDeleteCategory(ref),
-          ),
-        );
-      }
-      if (manage.length > 0) {
-        menu.appendChild(createElement("div", { class: "context-menu-sep" }));
-        for (const add of manage) add();
-      }
-    }
+    if (canManageChannels()) appendManageItems(menu, target, actions, addItem);
   }
 
   header.addEventListener(

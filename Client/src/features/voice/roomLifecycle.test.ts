@@ -37,7 +37,12 @@ vi.mock("../../lib/logger", () => ({
 }));
 vi.mock("../../lib/voice/deviceManager", () => ({ isMicPolicyGated: () => false }));
 vi.mock("../../lib/voice/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
-vi.mock("../../lib/voice/screenShare", () => ({
+vi.mock("./videoCapFollow", () => ({
+  VideoCapFollower: vi.fn(function () {
+    return { kick: vi.fn(), stop: vi.fn() };
+  }),
+}));
+vi.mock("./screenShare", () => ({
   CAMERA_PRESETS: { high: {} },
   CAMERA_PUBLISH_BITRATES: { high: 1 },
   getCameraQuality: () => "high",
@@ -150,8 +155,8 @@ const providerOf = (room: Room): unknown =>
 describe("createRoom", () => {
   it("replaces the previous room's E2EE worker and enables encryption", async () => {
     const { lifecycle } = setup();
-    const first = await lifecycle.createRoom(1);
-    await lifecycle.createRoom(1);
+    const first = await lifecycle.createWebRoom(1);
+    await lifecycle.createWebRoom(1);
     expect(workers).toHaveLength(2);
     expect(workers[0]!.terminate).toHaveBeenCalledOnce();
     expect(workers[1]!.terminate).not.toHaveBeenCalled();
@@ -160,8 +165,8 @@ describe("createRoom", () => {
 
   it("builds each room on its own key provider", async () => {
     const { lifecycle, e2ee } = setup();
-    const first = await lifecycle.createRoom(1);
-    const second = await lifecycle.createRoom(1);
+    const first = await lifecycle.createWebRoom(1);
+    const second = await lifecycle.createWebRoom(1);
     expect(e2ee.newKeyProvider).toHaveBeenCalledTimes(2);
     expect(providerOf(first)).toBe(e2ee.newKeyProvider.mock.results[0]!.value);
     expect(providerOf(second)).toBe(e2ee.newKeyProvider.mock.results[1]!.value);
@@ -173,7 +178,7 @@ describe("createRoom", () => {
   // processor's replaceTrack lands.
   it("attaches the mic processor to every audio track the room creates, before the publish", async () => {
     const { lifecycle, audioPipeline } = setup();
-    const room = await lifecycle.createRoom(1);
+    const room = await lifecycle.createWebRoom(1);
 
     const tracks = await room.localParticipant.createTracks({ audio: true });
 
@@ -184,7 +189,7 @@ describe("createRoom", () => {
   it("fails the track creation, and stops the track, when the processor cannot attach", async () => {
     const { lifecycle, audioPipeline } = setup();
     audioPipeline.attach.mockRejectedValueOnce(new Error("no worklet"));
-    const room = await lifecycle.createRoom(1);
+    const room = await lifecycle.createWebRoom(1);
 
     await expect(room.localParticipant.createTracks({ audio: true })).rejects.toThrow("no worklet");
   });

@@ -70,6 +70,24 @@ export interface PresenceSender {
  */
 const RETRY_MARGIN_MS = 1_000;
 
+/** Our own expiry is the one the server tells only us, so the client
+ *  states it for the optimistic apply: now + the chosen delay, or none.
+ *  A bare status flip (no text) says nothing about it. */
+function applyOptimistic(
+  userId: number,
+  status: UserStatus,
+  custom: string | undefined,
+  expiresIn: number | undefined,
+): void {
+  const expiresAt =
+    custom === undefined
+      ? undefined
+      : expiresIn === undefined
+        ? null
+        : new Date(Date.now() + expiresIn * 1000).toISOString();
+  updatePresence(userId, status, custom, expiresAt);
+}
+
 /**
  * Build a `PresenceSender` bound to one `ws` and one `RateLimiter`. Callers
  * that want to share a budget (which is every real caller — see module
@@ -151,18 +169,29 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     }, delayMs);
   }
 
-  function send(status: UserStatus, customStatus?: string, expiresInSeconds?: number): void {
+  /** The custom status and expiry a call carries once the queued ones are inherited. */
+  function resolveEffective(
+    customStatus: string | undefined,
+    expiresInSeconds: number | undefined,
+  ): { custom: string | undefined; expiresIn: number | undefined } {
     // A plain call inherits whatever custom_status is still queued behind
     // the limiter; an explicit call always wins outright.
-    const effectiveCustom =
+    const custom =
       customStatus !== undefined ? customStatus : retry !== null ? pendingCustom : undefined;
     // The expiry belongs to its text: inherited with it, dropped with it, and
     // never sent without any (the server refuses that frame).
-    const requestedExpiresIn =
+    const requested =
       customStatus !== undefined ? expiresInSeconds : retry !== null ? pendingExpiresIn : undefined;
-    const effectiveExpiresIn =
-      effectiveCustom !== undefined && effectiveCustom !== "" ? requestedExpiresIn : undefined;
-    const userId = authStore.getState().user?.id ?? 0;
+    const expiresIn = custom !== undefined && custom !== "" ? requested : undefined;
+    return { custom, expiresIn };
+  }
+
+  /** Remember what to restore if the server refuses the first change of a burst. */
+  function captureBaseline(
+    userId: number,
+    status: UserStatus,
+    effectiveCustom: string | undefined,
+  ): void {
     const existing = userId !== 0 ? membersStore.getState().members.get(userId) : undefined;
     if (
       pendingBaseline === null &&
@@ -178,18 +207,32 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
         customExpiresAt: existing.customStatusExpiresAt,
       };
     }
-    if (userId !== 0) {
-      // Our own expiry is the one the server tells only us, so the client
-      // states it for the optimistic apply: now + the chosen delay, or none.
-      // A bare status flip (no text) says nothing about it.
-      const expiresAt =
-        effectiveCustom === undefined
-          ? undefined
-          : effectiveExpiresIn === undefined
-            ? null
-            : new Date(Date.now() + effectiveExpiresIn * 1000).toISOString();
-      updatePresence(userId, status, effectiveCustom, expiresAt);
-    }
+  }
+
+  /** Put the presence_update frame on the wire and return its envelope id. */
+  function putOnWire(
+    status: UserStatus,
+    custom: string | undefined,
+    expiresIn: number | undefined,
+  ): string {
+    if (custom === undefined) return ws.send({ type: "presence_update", payload: { status } });
+    return ws.send({
+      type: "presence_update",
+      payload:
+        expiresIn === undefined
+          ? { status, custom_status: custom }
+          : { status, custom_status: custom, custom_status_expires_in: expiresIn },
+    });
+  }
+
+  function send(status: UserStatus, customStatus?: string, expiresInSeconds?: number): void {
+    const { custom: effectiveCustom, expiresIn: effectiveExpiresIn } = resolveEffective(
+      customStatus,
+      expiresInSeconds,
+    );
+    const userId = authStore.getState().user?.id ?? 0;
+    captureBaseline(userId, status, effectiveCustom);
+    if (userId !== 0) applyOptimistic(userId, status, effectiveCustom, effectiveExpiresIn);
     if (retry !== null) {
       clearTimeout(retry);
       retry = null;
@@ -201,20 +244,7 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
       pendingExpiresIn = undefined;
       lastSentCustom = effectiveCustom;
       lastSentExpiresIn = effectiveExpiresIn;
-      lastSentId =
-        effectiveCustom === undefined
-          ? ws.send({ type: "presence_update", payload: { status } })
-          : ws.send({
-              type: "presence_update",
-              payload:
-                effectiveExpiresIn === undefined
-                  ? { status, custom_status: effectiveCustom }
-                  : {
-                      status,
-                      custom_status: effectiveCustom,
-                      custom_status_expires_in: effectiveExpiresIn,
-                    },
-            });
+      lastSentId = putOnWire(status, effectiveCustom, effectiveExpiresIn);
     } else {
       // The window is still closed from an earlier send (any producer's) —
       // retry once it reopens instead of dropping this one silently, with a

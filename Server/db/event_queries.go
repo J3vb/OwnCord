@@ -10,9 +10,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// PersistEvent appends one event with the caller-supplied seq. The hub assigns
-// seq beforehand so the row seq always matches the wrapped-payload seq, even if
-// the persister drops events under load.
+// PersistEvent appends one event with the caller's seq, assigned by the hub so it
+// matches the wrapped payload.
 func (d *DB) PersistEvent(ctx context.Context, seq int64, eventType string, channelID int64, payload []byte) error {
 	_, err := d.writer.ExecContext(ctx,
 		`INSERT INTO events (seq, event_type, channel_id, payload) VALUES (?, ?, ?, ?)`,
@@ -24,12 +23,10 @@ func (d *DB) PersistEvent(ctx context.Context, seq int64, eventType string, chan
 	return nil
 }
 
-// PersistEvents appends a batch in one transaction with one prepared insert, so
-// the persister's flush costs one fsync instead of one per event. CreatedAt on
-// the input is ignored (the column defaults). Best effort: if the batch fails
-// (e.g. a duplicate seq) it falls back to per-row inserts so the good rows
-// land. It returns the rows persisted and, if any was lost, the first per-row
-// error.
+// PersistEvents appends a batch in one transaction with one prepared insert, so a
+// flush costs one fsync; CreatedAt on the input is ignored. A failed batch (e.g. a
+// duplicate seq) falls back to per-row inserts; it returns the rows persisted and the
+// first per-row error.
 func (d *DB) PersistEvents(ctx context.Context, events []PersistedEvent) (int, error) {
 	if len(events) == 0 {
 		return 0, nil
@@ -37,7 +34,6 @@ func (d *DB) PersistEvents(ctx context.Context, events []PersistedEvent) (int, e
 	if err := d.persistEventsTx(ctx, events); err == nil {
 		return len(events), nil
 	}
-	// Fallback: insert rows individually so one bad row does not drop the batch.
 	persisted := 0
 	var firstErr error
 	for _, e := range events {
@@ -52,8 +48,6 @@ func (d *DB) PersistEvents(ctx context.Context, events []PersistedEvent) (int, e
 	return persisted, firstErr
 }
 
-// persistEventsTx inserts all events inside one transaction; any failure
-// rolls the whole batch back.
 func (d *DB) persistEventsTx(ctx context.Context, events []PersistedEvent) error {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -96,12 +90,9 @@ func (d *DB) GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]P
 	return scanEventRows(rows)
 }
 
-// GetEventsSinceForChannels filters events to those whose channel_id is 0
-// (global broadcast) or in channelIDs.
+// GetEventsSinceForChannels returns events whose channel_id is 0 (global) or in channelIDs.
 func (d *DB) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, channelIDs []int64, limit int) ([]PersistedEvent, error) {
-	// IN clause is built manually since database/sql does not expand slices.
 	if len(channelIDs) == 0 {
-		// Only global broadcasts.
 		rows, err := d.reader.QueryContext(ctx,
 			`SELECT seq, event_type, channel_id, payload, created_at
 			   FROM events
@@ -143,10 +134,9 @@ func (d *DB) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, chan
 	return scanEventRows(rows)
 }
 
-// CountEventsInRange returns the unfiltered (all channels) count of events with
-// afterSeq < seq <= uptoSeq. seq is the primary key, so the count can only fall
-// short of (uptoSeq - afterSeq); callers use that to detect an interior gap
-// left by a lost row without enumerating every seq.
+// CountEventsInRange returns the unfiltered count of events with afterSeq < seq <=
+// uptoSeq; seq is the primary key, so a shortfall against (uptoSeq - afterSeq) reveals
+// a gap from a lost row.
 func (d *DB) CountEventsInRange(ctx context.Context, afterSeq, uptoSeq int64) (int64, error) {
 	var count int64
 	err := d.reader.QueryRowContext(ctx,
@@ -172,18 +162,14 @@ func (d *DB) GetMaxEventSeq(ctx context.Context) (int64, error) {
 	return maxSeq.Int64, nil
 }
 
-// pruneBatchSize bounds each DELETE's work. The pruner deletes in chunks so,
-// with a day's frames at 10^5-10^6 rows, no single statement holds the sole
-// writer connection for a noticeable stretch.
+// pruneBatchSize bounds each DELETE so no single statement holds the sole writer
+// connection for long.
 const pruneBatchSize = 5000
 
-// eventPruneStatementHookForTest runs once per DELETE the prune loop issues, so
-// the batching test can count statements without a driver trace. Test-only.
 var eventPruneStatementHookForTest func()
 
-// PruneEventsOlderThan deletes events older than cutoff in bounded chunks of
-// pruneBatchSize rows, yielding the writer connection between statements.
-// Returns the total rows deleted.
+// PruneEventsOlderThan deletes events older than cutoff in pruneBatchSize chunks,
+// yielding the writer between them; returns rows deleted.
 func (d *DB) PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
 	cutoffStr := cutoff.UTC().Format(dbtime.SQLiteLayout)
 	var total int64
@@ -191,8 +177,6 @@ func (d *DB) PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64,
 		if eventPruneStatementHookForTest != nil {
 			eventPruneStatementHookForTest()
 		}
-		// seq is the INTEGER PRIMARY KEY (the rowid), so the subquery bounds
-		// each statement to pruneBatchSize rows via idx_events_created_at.
 		res, err := d.writer.ExecContext(ctx,
 			`DELETE FROM events WHERE seq IN (
 			     SELECT seq FROM events WHERE created_at < ? LIMIT ?
@@ -236,9 +220,7 @@ func scanEventRows(rows rowsScanner) ([]PersistedEvent, error) {
 	return out, nil
 }
 
-// parseSQLiteTime parses the several timestamp formats SQLite may return.
 func parseSQLiteTime(s string) time.Time {
-	// SQLite CURRENT_TIMESTAMP returns "YYYY-MM-DD HH:MM:SS" in UTC.
 	for _, layout := range []string{
 		dbtime.SQLiteLayout,
 		time.RFC3339,

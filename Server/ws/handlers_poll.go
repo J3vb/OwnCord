@@ -6,17 +6,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// registerPollHandlers registers the poll V2 message handlers.
 func registerPollHandlers(r *HandlerRegistry, deps ChatDeps) {
 	r.RegisterV2(MsgTypePollCreate, handlePollCreateV2, deps)
 	r.RegisterV2(MsgTypePollVote, handlePollVoteV2, deps)
 	r.RegisterV2(MsgTypePollEnd, handlePollEndV2, deps)
 }
 
-// handlePollCreateV2 processes a poll_create command via the
-// MessageService. The reply is poll_create_ok; the events are the send path's,
-// so a poll is sequenced, replayed and counted for channel_activity exactly as
-// a message is.
 func handlePollCreateV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	pc := cmd.(PollCreateCmd)
@@ -45,9 +40,8 @@ func handlePollCreateV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 	return sendResultEvents(d, info, pc.ClientMessageID, pc.ChannelID, nil, reply, result)
 }
 
-// pollUpdatePayload is the poll_update frame: the poll's full counts and
-// version. UserID and AnswerIDs are present only on a vote, and name the voter
-// and their new set (which may be empty, a removal).
+// pollUpdatePayload is the poll_update frame: full counts and version; UserID and
+// AnswerIDs appear only on a vote (the new set may be empty).
 type pollUpdatePayload struct {
 	ChannelID   int64               `json:"channel_id"`
 	MessageID   int64               `json:"message_id"`
@@ -60,7 +54,6 @@ type pollUpdatePayload struct {
 	AnswerIDs   *[]int64            `json:"answer_ids,omitempty"`
 }
 
-// buildPollUpdate constructs a poll_update broadcast.
 func buildPollUpdate(u service.PollUpdate) []byte {
 	pl := pollUpdatePayload{
 		ChannelID: u.ChannelID, MessageID: u.MessageID, Version: u.Version, TotalVoters: u.TotalVoters,
@@ -79,8 +72,6 @@ func buildPollUpdate(u service.PollUpdate) []byte {
 	return buildJSON(wsMsg{Type: MsgTypePollUpdate, Payload: pl})
 }
 
-// pollUpdateEvent addresses a poll_update: to the DM's participants, or to the
-// channel's topic. Both are sequenced and replayable, as reaction_update is.
 func pollUpdateEvent(u service.PollUpdate) Event {
 	payload := buildPollUpdate(u)
 	if u.IsDM {
@@ -89,9 +80,6 @@ func pollUpdateEvent(u service.PollUpdate) Event {
 	return channelEvt{evType: MsgTypePollUpdate, channelID: u.ChannelID, payload: payload}
 }
 
-// handlePollVoteV2 processes a poll_vote command. The reply is
-// poll_vote_ok with the version and the stored selection. The poll_update is
-// emitted after the commit, and only when the selection changed.
 func handlePollVoteV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	vc := cmd.(PollVoteCmd)
@@ -106,7 +94,6 @@ func handlePollVoteV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	return Result{Reply: reply, Events: []Event{pollUpdateEvent(*res.Update)}}
 }
 
-// handlePollEndV2 processes a poll_end command.
 func handlePollEndV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	ec := cmd.(PollEndCmd)
@@ -117,9 +104,8 @@ func handlePollEndV2(ctx context.Context, cmd Command, info ClientInfo, deps any
 	return Result{Reply: buildPollEndOK(info.ReqID, ec.MessageID), Events: []Event{pollUpdateEvent(*u)}}
 }
 
-// PollUpdated is the poll expirer's hook (service.PollNotifier): it delivers
-// the update of a poll that ran out. The caller's context is the expirer's own
-// loop context.
+// PollUpdated is the poll expirer's hook (service.PollNotifier); ctx is the
+// expirer's loop context.
 func (h *Hub) PollUpdated(ctx context.Context, u service.PollUpdate) {
 	h.EmitEvents(ctx, []Event{pollUpdateEvent(u)})
 }

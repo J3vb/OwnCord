@@ -7,23 +7,16 @@ import (
 	"path"
 )
 
-// authzChokepointID is the rule's stable id (a const for the same
-// initialization-cycle reason as syncutilLocksID).
+// authzChokepointID is the rule's stable id (a const to avoid an initialization cycle).
 const authzChokepointID = "authz-chokepoint"
 
 // permissionsImportPath is the package that owns every authorization decision.
 const permissionsImportPath = "github.com/J3vb/OwnCord/Server/permissions"
 
-// rawPermChecks are the raw bit helpers exported by permissions.go: the six
-// call targets the residue grep treats as a raw check
-// (HasPerm, HasAnyPerm, HasServerPerm, HasAdmin, EffectivePerms,
-// EffectiveChannelPerms). They are the whole of that file's exported surface
-// apart from Name, which formats a bit rather than deciding on one.
-//
-// Everything else in the package is a chokepoint rather than a raw check and
-// is deliberately absent: the channel predicates (CanViewChannel,
-// CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanPassChannelPassword, CanModerateVoice),
-// Subject.Has, and Checker — those are what a call site is supposed to use.
+// rawPermChecks are the raw bit helpers exported by permissions.go that the
+// residue grep treats as a raw check. Name is absent because it formats a bit
+// rather than deciding on one; the channel predicates, Subject.Has and Checker
+// are the chokepoints a call site should use.
 var rawPermChecks = map[string]bool{
 	"HasPerm":               true,
 	"HasAnyPerm":            true,
@@ -36,31 +29,22 @@ var rawPermChecks = map[string]bool{
 // Residue classes. Each says why the sites in it are not a channel predicate,
 // so a whole class can be retired at once as its call sites move behind a service.
 const (
-	// classServerScoped: a server-wide permission with no channel to resolve
-	// a permissions.Subject for. These are the canonical server-wide check.
+	// classServerScoped: a server-wide permission with no channel to resolve a Subject for.
 	classServerScoped = "server-scoped"
-	// classAdminShortCircuit: HasAdmin used to skip the override query before
-	// the predicate runs. An optimisation, not a decision.
+	// classAdminShortCircuit: HasAdmin used to skip the override query; an optimisation, not a decision.
 	classAdminShortCircuit = "admin-short-circuit"
-	// classAdminPerimeter: HasAdmin as an authorization input for role
-	// hierarchy and the admin perimeter — the 2026-08-18 measurement's
-	// "no Outranks" class.
+	// classAdminPerimeter: HasAdmin as an authorization input for role hierarchy and the admin perimeter.
 	classAdminPerimeter = "admin-perimeter"
-	// classBulkReaderWalk: the bulk @everyone reader walk, a per-role layer
-	// walk whose mechanical conversion the owner declined on 2026-08-18.
+	// classBulkReaderWalk: the bulk @everyone reader walk, a per-role layer walk.
 	classBulkReaderWalk = "bulk-reader-walk"
-	// classBaseBitRejection: a base-bit early rejection ahead of
-	// CanModerateVoice. It never admits; it keeps FORBIDDEN ahead of the
-	// voice-state lookup.
+	// classBaseBitRejection: a base-bit early rejection ahead of CanModerateVoice
+	// that never admits; currently unused.
 	classBaseBitRejection = "base-bit-rejection"
 )
 
 // authzResidueClasses is the closed set of classes a row may carry;
-// TestAuthzResidueAllowIsLive rejects any other value. A row cannot invent a
-// class, and that includes the "unclassified" escape valve that was once
-// proposed: a genuinely new kind of residue means adding a constant above as a
-// deliberate, reviewable edit, so nothing reaches the allowlist without a
-// classification someone chose. authzClassList must name it too.
+// TestAuthzResidueAllowIsLive rejects any other. A genuinely new kind of
+// residue means adding a constant above as a reviewable edit.
 var authzResidueClasses = map[string]bool{
 	classServerScoped:      true,
 	classAdminShortCircuit: true,
@@ -69,59 +53,36 @@ var authzResidueClasses = map[string]bool{
 	classBaseBitRejection:  true,
 }
 
-// authzClassList names the legal classes in the violation message. Built from
-// the constants, so it cannot drift from them; TestAuthzResidueAllowIsLive
-// checks it covers authzResidueClasses.
+// authzClassList names the legal classes in the violation message.
 const authzClassList = classServerScoped + ", " + classAdminShortCircuit + ", " +
 	classAdminPerimeter + ", " + classBulkReaderWalk + ", " + classBaseBitRejection
 
-// calls is a helper-name → call-count multiset, aliased purely to keep the
-// residue table's literals short. An alias rather than a defined type, so the
-// exported field below stays a plain map[string]int.
+// calls is a helper-name to call-count multiset; an alias so the exported field stays a plain map[string]int.
 type calls = map[string]int
 
-// AuthzResidueEntry is one row of the residue table: why a
-// production symbol outside Server/permissions still calls a raw bit helper
-// instead of a predicate, and exactly which raw calls it is frozen at.
+// AuthzResidueEntry is one row of the residue table: why a production symbol
+// outside Server/permissions still calls a raw bit helper, and exactly which calls.
 type AuthzResidueEntry struct {
 	Class string // one of the classes above; the set is closed
 	Note  string // what this particular site does
-	// Calls is the exact multiset of raw helper calls the symbol may contain:
-	// helper name → count. It is what stops a row from being a licence for the
-	// whole function. A symbol with an extra call, a call of a different
-	// helper, or one more of the same helper fails authz-chokepoint at the
-	// offending line; one with fewer fails TestAuthzResidueAllowIsLive, which
-	// compares the multiset exactly rather than asking for at least one hit.
+	// Calls is the exact multiset of raw helper calls the symbol may contain
+	// (helper name to count), so a row is no licence for the whole function. An
+	// extra or different call fails authz-chokepoint at that line; fewer fails
+	// TestAuthzResidueAllowIsLive.
 	Calls calls
 }
 
-// AuthzResidueAllow is the residue. Rows are keyed by symbol — the file's
-// directory relative to the Server tree, then the enclosing function or
-// method, e.g. "ws.(*Hub).readyVisibleChannels" — never by file:line, because
-// lines move on every edit and a stale line number would silently stop
-// matching. The directory rather than the package clause keeps the four
-// `package main` files at different paths from colliding.
+// AuthzResidueAllow is the residue, keyed by symbol (directory relative to the
+// Server tree, then the enclosing function, e.g. "ws.(*Hub).readyVisibleChannels"),
+// never by file:line, which would silently stop matching as lines move.
 //
-// A row binds three things, not one: the symbol, which raw helpers it calls,
-// and how many times each. Allowlisting a symbol alone would exempt the whole
-// function — a second raw call added inside it, or a switch to a different
-// helper, would then pass silently and the residue could grow without review.
+// A row binds the symbol, which raw helpers it calls and how many times each;
+// allowlisting the symbol alone would let the residue grow without review.
 //
-// The list only shrinks and never widens: a symbol that stops calling a raw
-// helper, or whose counts no longer match, fails TestAuthzResidueAllowIsLive;
-// an extra or different call fails authz-chokepoint at the offending line; a
-// new raw call anywhere else fails it too. Rows are deleted as each
-// family moves behind a service. Raising a count is a reviewable edit here,
-// never a side effect of editing the function.
-//
-// 17 symbols, 19 bound calls (was 19/21 at dev 75d64dd4);
-// service.(*PermissionService).Subject was added for the TimedOut admin
-// short-circuit, and (briefly) service.(*ModerationService).Timeout for a
-// bare MUTE_MEMBERS check — that check was replaced with
-// permissions.CanModerateVoice over a real Subject, so Timeout's own row is
-// gone again; only Subject's remains. The two classBaseBitRejection rows
-// (ws.voiceModTarget and service.(*ModerationService).actorCanModerateVoiceFor)
-// were removed once both moved onto permissions.AuthorizeVoiceModerator.
+// The list only shrinks: a symbol that stops calling a raw helper, or whose
+// counts no longer match, fails TestAuthzResidueAllowIsLive; an extra or
+// different call, or a new raw call elsewhere, fails authz-chokepoint. Raising
+// a count is a reviewable edit here.
 var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// ── server-scoped: no channel exists to resolve a Subject for ──────────
 	"admin.adminAuthMiddleware":                {classServerScoped, "HasAnyPerm over AdminPerimeter gates the admin panel as a whole", calls{"HasAnyPerm": 1}},
@@ -130,16 +91,12 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"api.RequirePermission":                    {classServerScoped, "per-route server permission for the REST mux", calls{"HasServerPerm": 1}},
 	"service.(*EmojiService).RequireManage":    {classServerScoped, "MANAGE_SERVER is server-wide; emoji have no channel", calls{"HasServerPerm": 1}},
 	"service.(*ModerationService).requirePerm": {classServerScoped, "ban/kick/timeout are server-wide", calls{"HasServerPerm": 1}},
-	// service.(*ModerationService).Timeout's own row is GONE: the voice half used to defer to a bare, server-wide
-	// MUTE_MEMBERS bit with no channel to resolve a Subject for;
-	// it now builds a Subject for the target's CURRENT voice channel and asks
-	// permissions.CanModerateVoice — the canonical predicate, not a residue.
+	// Voice moderation asks permissions.CanModerateVoice, not a raw bit.
 	"service.(*RoleService).actorRole": {classServerScoped, "MANAGE_ROLES is server-wide", calls{"HasServerPerm": 1}},
 
 	// ── HasAdmin as a fetch short-circuit, ahead of the predicate ──────────
 	"service.(*ChannelService).ListVisibleChannels": {classAdminShortCircuit, "an administrator sees every channel; skips the override query", calls{"HasAdmin": 1}},
-	// The channel family's override guards — moved from the
-	// admin handlers with their code; the rows moved with them.
+	// The channel family's override guards.
 	"service.requireGrantableChannelOverride":         {classAdminPerimeter, "refuses an override that grants past the actor's own role", calls{"HasAdmin": 1}},
 	"service.(*channelOverrides).requireOutranks":     {classAdminPerimeter, "role-hierarchy check on the target user; admin bypass", calls{"HasAdmin": 1}},
 	"service.(*messageReads).GetAccessibleChannelIDs": {classAdminShortCircuit, "an administrator searches every channel; skips the override query", calls{"HasAdmin": 1}},
@@ -154,30 +111,18 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"service.requireGrantable":           {classAdminPerimeter, "refuses a role edit that grants past the actor's own bits", calls{"HasAdmin": 1}},
 
 	// ── bulk @everyone reader walk ─────────────────────────────────────────
-	// The one multi-call row: one EffectivePerms for the layer's mask, then
-	// HasAdmin twice — once to keep an administrator role in, once in the
-	// read test.
+	// The one multi-call row: one EffectivePerms, then HasAdmin twice (to keep an
+	// administrator role in, and in the read test).
 	"service.(*mentionState).readingRoles": {classBulkReaderWalk, "per-role layer walk over every role that can read the channel", calls{"EffectivePerms": 1, "HasAdmin": 2}},
 
-	// ws.voiceModTarget and service.(*ModerationService).actorCanModerateVoiceFor's
-	// own base-bit-rejection rows are GONE:
-	// both used to duplicate a base-bit HasServerPerm(MUTE_MEMBERS) check
-	// ahead of CanModerateVoice; they now
-	// call permissions.AuthorizeVoiceModerator, the canonical combined
-	// predicate, not a residue. classBaseBitRejection is unused as a result
-	// but stays defined — a future call site with the same shape reuses it
-	// rather than inventing a new class.
+	// The base-bit-rejection rows are gone (those sites call
+	// permissions.AuthorizeVoiceModerator); classBaseBitRejection stays defined
+	// for a future call site of that shape.
 }
 
 // authzChokepoint fails on any production symbol outside Server/permissions
-// that calls a raw permission bit helper without a residue row. Every
-// channel-scoped security property has exactly one predicate; this rule
-// keeps the next call site from re-deriving one of them by hand, which is how
-// the thirteen hand-rolled decision sites that were collapsed into those
-// predicates came to exist.
-//
-// Test files are out of scope — Run never parses them — so a parity table may
-// call the helpers freely.
+// that calls a raw permission bit helper without a residue row, so a call site
+// cannot re-derive a channel predicate by hand. Test files are out of scope.
 var authzChokepoint = Rule{
 	ID:    authzChokepointID,
 	Scope: nil, // every directory; permissions/ itself is excluded in Check
@@ -190,16 +135,13 @@ func checkAuthzChokepoint(f *ast.File, fset *token.FileSet, rel string) []Violat
 		out = append(out, Violation{Rule: authzChokepointID, File: rel, Line: h.Line, Msg: msg})
 	}
 
-	// Per symbol, how many calls of each helper have been seen so far in this
-	// file. A symbol's hits are always in one file — Go forbids two functions
-	// of the same name in a package — so one pass sees the whole multiset, and
-	// counting as we go means the violation lands on the extra call itself.
+	// Per symbol, how many calls of each helper were seen in this file (a
+	// symbol's hits are always in one file), so the violation lands on the extra call.
 	seen := make(map[string]calls)
 
 	for _, h := range authzHits(f, fset, rel) {
 		if h.Helper == "" {
-			// A dot-import binds no call to count, and an allowlisted symbol
-			// is no excuse for one.
+			// A dot-import binds no call to count, and an allowlisted symbol is no excuse.
 			flag(h, h.message())
 			continue
 		}
@@ -219,8 +161,7 @@ func checkAuthzChokepoint(f *ast.File, fset *token.FileSet, rel string) []Violat
 	return out
 }
 
-// authzHit is one raw permission check at one source location, tagged with the
-// symbol an AuthzResidueAllow row would name.
+// authzHit is one raw permission check at one source location, tagged with the symbol a row would name.
 type authzHit struct {
 	Symbol string // e.g. "ws.(*Hub).readyVisibleChannels"
 	Helper string // e.g. "HasAdmin", or "" for a dot-import
@@ -239,9 +180,7 @@ func (h authzHit) message() string {
 		"and one of the classes " + authzClassList
 }
 
-// excessMessage is the message for a call inside an allowlisted symbol that the
-// symbol's row does not account for: a helper the row never listed (want 0), or
-// one more of a helper than it binds.
+// excessMessage is the message for a call a symbol's row does not account for.
 func (h authzHit) excessMessage(want, got int) string {
 	return fmt.Sprintf("raw permissions.%s at %s: the residue row binds %d call(s) of %s here, found %d. "+
 		"A row freezes an inventory, it is not a licence for the function — resolve a permissions.Subject "+
@@ -253,24 +192,18 @@ func (h authzHit) excessMessage(want, got int) string {
 // authzPredicateList names the channel predicates a call site should be using.
 const authzPredicateList = "CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanPassChannelPassword, CanModerateVoice, CanReadContent, CanDeleteMessage, CanPinMessage, CanMentionRole"
 
-// authzHits reports every raw permission check in one file, whether or not it
-// is allowlisted, so the rule and TestAuthzResidueAllowIsLive read the same
-// scan from opposite directions.
+// authzHits reports every raw permission check in one file, allowlisted or not,
+// so the rule and TestAuthzResidueAllowIsLive read the same scan.
 //
-// It matches the selector, not the call: `f := permissions.HasAdmin` followed
-// by `f(bits)` is the same decision made at the same place, and a rule that
-// only looked at CallExpr would miss it.
+// It matches the selector, not the call, so `f := permissions.HasAdmin; f(bits)` is caught.
 func authzHits(f *ast.File, fset *token.FileSet, rel string) []authzHit {
 	dir := path.Dir(rel)
 	if dir == "." {
 		dir = ""
 	}
-	// permissions/ needs no exemption and deliberately does not get one: a file
-	// in that package cannot import itself, so it binds no "permissions"
-	// identifier and matches nothing here. A directory-keyed exemption would be
-	// worse than redundant — it would silently exempt a future
-	// permissions/<sub>, which is a different package that does import
-	// permissions and must be checked like any other.
+	// permissions/ needs no exemption: a file in that package binds no
+	// "permissions" identifier. A directory-keyed exemption would also silently
+	// exempt a future permissions/<sub>, which must be checked like any other.
 	names, dotImports := importNames(f, permissionsImportPath)
 
 	var out []authzHit

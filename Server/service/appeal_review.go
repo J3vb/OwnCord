@@ -11,10 +11,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// Queue lists appeals for the moderator view: state is "open", "assigned",
-// "decided" (both terminal states) or "" for open+assigned. An appeal whose
-// appellant is the CALLER is omitted, as reports' Queue does: a moderator must
-// not learn who is assigned to, or how the queue fills around, their OWN appeal.
+// Queue lists appeals for the moderator view: state "open", "assigned", "decided" or ""
+// for open+assigned. The caller's own appeal is omitted so a moderator cannot learn who is
+// assigned to it or how the queue fills around it.
 func (s *AppealService) Queue(ctx context.Context, actorID int64, state string) ([]db.AppealQueueRow, error) {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return nil, err
@@ -37,19 +36,15 @@ func (s *AppealService) Queue(ctx context.Context, actorID int64, state string) 
 	return out, nil
 }
 
-// AppealDetail is the payload of GET .../appeals/{id}: the appeal and the
-// appealed action.
+// AppealDetail is the payload of GET .../appeals/{id}: the appeal and the appealed action.
 type AppealDetail struct {
 	Appeal db.Appeal
 	Action db.ModerationAction
 }
 
-// Get returns one appeal with its appealed action; 404 for an unknown id. A
-// moderator-appellant is refused their OWN appeal with 403 SELF_REVIEW. Unlike a
-// report's subject (NotFound, who must not learn the report exists), an appellant
-// already knows their appeal exists, so there is no oracle; the refusal is the
-// guardAppellantSelfReview conflict-of-interest rule applied to the read that
-// would show who is assigned and who decided.
+// Get returns one appeal with its appealed action; 404 for an unknown id. A moderator
+// appellant gets 403 SELF_REVIEW on their OWN appeal: no existence oracle there, and the
+// read would show who is assigned and who decided.
 func (s *AppealService) Get(ctx context.Context, actorID int64, publicID string) (*AppealDetail, error) {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return nil, err
@@ -68,12 +63,9 @@ func (s *AppealService) Get(ctx context.Context, actorID int64, publicID string)
 	return &AppealDetail{Appeal: *appeal, Action: *action}, nil
 }
 
-// guardAppellantSelfReview refuses a moderator acting on their own filed appeal
-// (the mirror of report.go's GuardSelfReviewFor). It differs from the
-// deciding-moderator eligibility check inside DecideAppealTx/AssignAppealTx/
-// AssignAppealForced and has NO sole-moderator escape: on a one-moderator install
-// the appeal waits for a second moderator, a governance gap this service does not
-// paper over.
+// guardAppellantSelfReview refuses a moderator acting on their own appeal. Unlike the
+// eligibility check inside the Assign/Decide transactions it has NO sole-moderator
+// escape: on a one-moderator install the appeal waits for a second moderator.
 func (s *AppealService) guardAppellantSelfReview(actorID int64, appeal *db.Appeal) error {
 	if appeal.AppellantID != 0 && appeal.AppellantID == actorID {
 		return ErrSelfReview
@@ -81,13 +73,9 @@ func (s *AppealService) guardAppellantSelfReview(actorID int64, appeal *db.Appea
 	return nil
 }
 
-// Assign assigns appeal publicID to actorID. 409 if already assigned to someone
-// else, unless force is set and the caller outranks the current assignee (as
-// ban/kick/timeout and the report queue). Symmetric with Decide's self-review
-// rule: the moderator who took the appealed action may not assign it to
-// themself where another eligible reviewer exists. That test runs INSIDE both
-// assignment transactions, so a second eligible moderator appearing between a
-// pre-check and the write cannot go uncaught.
+// Assign assigns appeal publicID to actorID; 409 if assigned to someone else unless force
+// is set and the caller outranks the assignee. The self-review rule runs INSIDE both
+// assignment transactions so a late second moderator cannot go uncaught.
 func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID string, force bool) error {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return err
@@ -128,17 +116,10 @@ func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID stri
 	return nil
 }
 
-// assignAppealFn is the store write assignAppeal drives: AssignAppealForced for
-// force-reassign, AssignAppealTx otherwise.
 type assignAppealFn func(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
 	checkSelfReview bool, appellantID, permBit, adminBit int64,
 	checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
 
-// assignAppeal is Assign's single write branch. The forced path requires actorID
-// to outrank the observed assignee's fresh position, read inside the write's
-// transaction (see forceReassignGuarded); the plain path (no current assignee, or
-// re-assigning to oneself) re-checks authority freshly in its own transaction, as
-// Decide does. checkSelfReview runs inside that same transaction.
 func (s *AppealService) assignAppeal(ctx context.Context, assign assignAppealFn, appealID, actorID, observed int64, checkSelfReview bool, appellantID int64) error {
 	ok, err := assign(ctx, appealID, actorID, observed, actorID, checkSelfReview, appellantID,
 		permissions.ModerateMembers, permissions.Administrator, s.checkModeratorAuthority)
@@ -159,19 +140,14 @@ func (s *AppealService) assignAppeal(ctx context.Context, assign assignAppealFn,
 
 var validAppealOutcomes = map[string]bool{"upheld": true, "overturned": true}
 
-// ErrReversalFailed is a 409: the overturn's reversal hit a genuine error, so the
-// whole decision rolled back and the appellant was never told "overturned" while
-// the sanction stayed in effect.
+// ErrReversalFailed is a 409: the overturn's reversal failed, so the whole decision
+// rolled back rather than telling the appellant "overturned" while the sanction stands.
 var ErrReversalFailed = fmt.Errorf("%w: could not apply the decision's effect", ErrConflict)
 
-// Decide records outcome ("upheld" or "overturned") against appeal publicID. An
-// overturn first passes requireOverturnAuthority: the decider must outrank the
-// sanctioned target and, for a ban, hold BAN_MEMBERS, as the direct reversal path
-// enforces. The self-review count, the guarded write (on the OBSERVED
-// state/assignee) and the overturn's reversal run in ONE transaction
-// (db.DecideAppealTx), so a moderator banned or erased in between, or a failing
-// reversal, cannot land a decision the data no longer supports. Upholding changes
-// nothing further. Both audit appeal_decide with the outcome word.
+// Decide records outcome ("upheld" or "overturned"). An overturn first passes
+// requireOverturnAuthority. Self-review count, guarded write and reversal run in ONE
+// transaction (db.DecideAppealTx), so a moderator banned or erased meanwhile, or a failing
+// reversal, cannot land an unsupported decision. Audits appeal_decide.
 func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, outcome, note string) error {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return err
@@ -212,8 +188,6 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 		db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}, s.checkModeratorAuthority)
 	if err != nil {
 		slog.Error("appeal decide: transaction error", "appeal_id", appeal.ID, "action_id", action.ID, "err", err)
-		// A failed reversal has its own conflict outcome below; any other error
-		// is a database failure, not a lost race.
 		if result != db.AppealWriteReversalFailed {
 			return fmt.Errorf("%w: %w", ErrInternal, err)
 		}
@@ -225,7 +199,6 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 	case db.AppealWriteReversalFailed:
 		return ErrReversalFailed
 	case db.AppealWriteForbidden:
-		// The decider's own bit was revoked, or a ban landed, after requireModerate.
 		return fmt.Errorf("%w: missing MODERATE_MEMBERS permission", ErrForbidden)
 	default: // db.AppealWriteConflict: the observed row changed or was already decided.
 		return fmt.Errorf("%w: appeal already decided or withdrawn", ErrConflict)
@@ -248,12 +221,9 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 	return nil
 }
 
-// checkModeratorAuthority is DecideAppealTx's and AssignAppealTx's fresh
-// authority check: rolePerms/banned/banExpires are read live inside the same
-// transaction as the guarded write, not trusted from requireModerate's earlier,
-// possibly stale check. permissions.CanModerate is the canonical predicate;
-// auth.IsEffectivelyBanned keeps ban-lapse parsing in one place. A revoked bit or
-// a ban that landed first refuses (db.AppealWriteForbidden).
+// checkModeratorAuthority is DecideAppealTx's and AssignAppealTx's fresh check: perms and
+// ban state are read inside the guarded write's transaction, not trusted from
+// requireModerate. A revoked bit or ban that landed first refuses (db.AppealWriteForbidden).
 func (s *AppealService) checkModeratorAuthority(rolePerms int64, banned bool, banExpires *string) error {
 	if auth.IsEffectivelyBanned(&db.User{Banned: banned, BanExpires: banExpires}) {
 		return ErrForbidden

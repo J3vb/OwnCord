@@ -1,5 +1,4 @@
 /** User-initiated checks of the current client's path; never starts a call. */
-import type { Room } from "livekit-client";
 import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
 import { loadPref } from "@lib/prefs/preferences";
@@ -8,6 +7,7 @@ import { nativeAudioDevices, type AudioDevice } from "../../features/voice/nativ
 import { probeNativeMicrophone, type NativeMicProbe } from "../../features/voice/native/micProbe";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 export type DiagnosticStatus = "running" | "passed" | "failed" | "not-tested";
 export type DiagnosticStage =
@@ -34,7 +34,7 @@ export function diagnosticLabel(stage: DiagnosticStage): string {
 export interface DiagnosticServices {
   api: Pick<ApiClient, "getSession" | "getConfig" | "getHealth" | "getMe">;
   ws: Pick<WsClient, "ping">;
-  getRoom(): Room | null | Promise<Room | null>;
+  getRoom(): VoiceRoom | null | Promise<VoiceRoom | null>;
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
   /** The native backend's microphones on Linux, where the webview cannot
    *  open the devices voice uses; null elsewhere. */
@@ -49,10 +49,10 @@ interface NativeSignaling {
   isSignalingConnected(): boolean;
 }
 
-function nativeSignaling(room: Room): NativeSignaling | null {
-  const candidate = room as unknown as Partial<NativeSignaling>;
-  return typeof candidate.isSignalingConnected === "function"
-    ? (candidate as NativeSignaling)
+function nativeSignaling(room: VoiceRoom): NativeSignaling | null {
+  const probe: unknown = Reflect.get(room, "isSignalingConnected");
+  return typeof probe === "function"
+    ? { isSignalingConnected: () => probe.call(room) === true }
     : null;
 }
 
@@ -127,7 +127,7 @@ interface DecodingSnapshot {
   frames: number;
 }
 
-async function readDecoding(room: Room): Promise<Map<string, DecodingSnapshot> | null> {
+async function readDecoding(room: VoiceRoom): Promise<Map<string, DecodingSnapshot> | null> {
   const manager = room.engine.pcManager;
   // LiveKit receives media on the publisher in single-peer-connection mode.
   // Dual-connection sessions keep their incoming tracks on the subscriber.
@@ -161,29 +161,34 @@ function connectionFailure(error: unknown): string {
   return t("diagnostics.detail.connectionRefused");
 }
 
-/** Each result belongs to one session. Abort rejects without emitting stale
- * results; the caller can report cancellation without preserving green checks. */
-export async function runConnectionDiagnostics(
+type CheckOutcome = string | { status: "not-tested"; detail: string };
+
+/** One diagnostics run: the services, the combined abort signal and the two
+ * emitters every stage shares. */
+interface DiagnosticRun {
+  readonly services: DiagnosticServices;
+  readonly lifetime: AbortSignal;
+  emit(stage: DiagnosticStage, status: DiagnosticStatus, detail: string): void;
+  check(
+    stage: DiagnosticStage,
+    task: () => Promise<CheckOutcome>,
+    failure: (error: unknown) => string,
+  ): Promise<void>;
+}
+
+function createRun(
   onResult: (result: DiagnosticResult) => void,
   signal: AbortSignal,
-  includeMicrophone: boolean,
-  services: DiagnosticServices | null = configured,
-): Promise<void> {
-  // i18n-exempt: internal configuration guard, never rendered
-  if (!services) throw new Error("Diagnostics are not available yet.");
-  const { api, ws } = services;
-  const owner = api.getSession();
+  services: DiagnosticServices,
+): DiagnosticRun {
+  const owner = services.api.getSession();
   const lifetime = AbortSignal.any([signal, owner.signal]);
   const emit = (stage: DiagnosticStage, status: DiagnosticStatus, detail: string): void => {
     lifetime.throwIfAborted();
     owner.assertCurrent();
     onResult({ stage, status, detail });
   };
-  const check = async (
-    stage: DiagnosticStage,
-    task: () => Promise<string | { status: "not-tested"; detail: string }>,
-    failure: (error: unknown) => string,
-  ): Promise<void> => {
+  const check: DiagnosticRun["check"] = async (stage, task, failure) => {
     emit(stage, "running", t("diagnostics.detail.checking"));
     try {
       const outcome = await bounded(task(), lifetime, stage === "microphone" ? 12_000 : 8_000);
@@ -194,97 +199,184 @@ export async function runConnectionDiagnostics(
       emit(stage, "failed", failure(error));
     }
   };
+  return { services, lifetime, emit, check };
+}
 
-  if (api.getConfig().host) {
-    await check(
-      "connection",
-      async () => {
-        await api.getHealth(undefined, 5000, lifetime);
-        return t("diagnostics.detail.connectionPassed");
-      },
-      connectionFailure,
-    );
-  } else {
-    emit("connection", "not-tested", t("diagnostics.detail.noServer"));
+async function checkConnection(run: DiagnosticRun): Promise<void> {
+  const { api } = run.services;
+  if (!api.getConfig().host) {
+    run.emit("connection", "not-tested", t("diagnostics.detail.noServer"));
+    return;
   }
+  await run.check(
+    "connection",
+    async () => {
+      await api.getHealth(undefined, 5000, run.lifetime);
+      return t("diagnostics.detail.connectionPassed");
+    },
+    connectionFailure,
+  );
+}
 
-  if (api.getConfig().token) {
-    await check(
-      "authentication",
-      async () => {
-        await api.getMe(lifetime);
-        return t("diagnostics.detail.authPassed");
-      },
-      () => t("diagnostics.detail.authFailed"),
-    );
-    await check(
-      "websocket",
-      async () => {
-        await ws.ping(lifetime);
-        return t("diagnostics.detail.wsPassed");
-      },
-      () => t("diagnostics.detail.wsFailed"),
-    );
-  } else {
-    emit("authentication", "not-tested", t("diagnostics.detail.signInAccount"));
-    emit("websocket", "not-tested", t("diagnostics.detail.signInMessage"));
+async function checkAccount(run: DiagnosticRun): Promise<void> {
+  const { api, ws } = run.services;
+  if (!api.getConfig().token) {
+    run.emit("authentication", "not-tested", t("diagnostics.detail.signInAccount"));
+    run.emit("websocket", "not-tested", t("diagnostics.detail.signInMessage"));
+    return;
   }
+  await run.check(
+    "authentication",
+    async () => {
+      await api.getMe(run.lifetime);
+      return t("diagnostics.detail.authPassed");
+    },
+    () => t("diagnostics.detail.authFailed"),
+  );
+  await run.check(
+    "websocket",
+    async () => {
+      await ws.ping(run.lifetime);
+      return t("diagnostics.detail.wsPassed");
+    },
+    () => t("diagnostics.detail.wsFailed"),
+  );
+}
 
-  if (includeMicrophone) {
-    await check(
-      "microphone",
-      async () => {
-        const selected = loadPref<string>("audioInputDevice", "");
-        const nativeInputs = await services.listNativeInputs();
-        if (nativeInputs !== null) {
-          // Linux voice opens the device in the native backend, so the check
-          // opens it there for a second and passes only when levels arrive.
-          // i18n-exempt: internal guard mapped to the microphone failure catalog line
-          if (nativeInputs.length === 0) throw new Error("No native microphone.");
-          const present = selected === "" || nativeInputs.some((d) => d.deviceId === selected);
-          const probe = await services.probeNativeInput(present ? selected : "", lifetime);
-          if (probe === "in-call") {
-            return { status: "not-tested", detail: t("diagnostics.detail.micNativeInCall") };
-          }
-          if (probe === "silent") throw new SilentMicrophone();
-          return present
-            ? t("diagnostics.detail.micNativePresent")
-            : t("diagnostics.detail.micNativeDefault");
-        }
-        // getUserMedia cannot cancel a permission prompt. Always stop the tracks
-        // in its fulfillment handler, even after timeout, close or server switch.
-        const audio = selected ? { deviceId: { exact: selected } } : {};
-        const stream = await services
-          .getUserMedia({ audio, video: false })
-          .catch((err: unknown) => {
-            if (!isMissingDeviceError(err, audio)) throw err;
-            return services.getUserMedia({ audio: { deviceId: "default" }, video: false });
-          });
-        try {
-          if (!stream.getAudioTracks().some((track) => track.readyState === "live")) {
-            // i18n-exempt: internal guard mapped to the microphone failure catalog line
-            throw new Error("No live audio track.");
-          }
-          return t("diagnostics.detail.micPassed");
-        } finally {
-          for (const track of stream.getTracks()) track.stop();
-        }
-      },
-      (error) => {
-        if (error instanceof DOMException && error.name === "NotAllowedError") {
-          return t("diagnostics.detail.micDenied");
-        }
-        if (error instanceof DOMException && error.name === "TimeoutError") {
-          return t("diagnostics.detail.micTimeout");
-        }
-        if (error instanceof SilentMicrophone) return t("diagnostics.detail.micSilent");
-        return t("diagnostics.detail.micFailed");
-      },
-    );
-  } else {
-    emit("microphone", "not-tested", t("diagnostics.detail.micSkipped"));
+/** Linux voice opens the device in the native backend, so the check opens it
+ * there for a second and passes only when levels arrive. */
+async function nativeMicrophoneOutcome(
+  run: DiagnosticRun,
+  selected: string,
+  nativeInputs: AudioDevice[],
+): Promise<CheckOutcome> {
+  // i18n-exempt: internal guard mapped to the microphone failure catalog line
+  if (nativeInputs.length === 0) throw new Error("No native microphone.");
+  const present = selected === "" || nativeInputs.some((d) => d.deviceId === selected);
+  const probe = await run.services.probeNativeInput(present ? selected : "", run.lifetime);
+  if (probe === "in-call") {
+    return { status: "not-tested", detail: t("diagnostics.detail.micNativeInCall") };
   }
+  if (probe === "silent") throw new SilentMicrophone();
+  return present
+    ? t("diagnostics.detail.micNativePresent")
+    : t("diagnostics.detail.micNativeDefault");
+}
 
+async function webMicrophoneOutcome(
+  services: DiagnosticServices,
+  selected: string,
+): Promise<CheckOutcome> {
+  // getUserMedia cannot cancel a permission prompt. Always stop the tracks
+  // in its fulfillment handler, even after timeout, close or server switch.
+  const audio = selected ? { deviceId: { exact: selected } } : {};
+  const stream = await services.getUserMedia({ audio, video: false }).catch((err: unknown) => {
+    if (!isMissingDeviceError(err, audio)) throw err;
+    return services.getUserMedia({ audio: { deviceId: "default" }, video: false });
+  });
+  try {
+    if (!stream.getAudioTracks().some((track) => track.readyState === "live")) {
+      // i18n-exempt: internal guard mapped to the microphone failure catalog line
+      throw new Error("No live audio track.");
+    }
+    return t("diagnostics.detail.micPassed");
+  } finally {
+    for (const track of stream.getTracks()) track.stop();
+  }
+}
+
+function microphoneFailure(error: unknown): string {
+  const name = error instanceof DOMException ? error.name : "";
+  if (name === "NotAllowedError") return t("diagnostics.detail.micDenied");
+  if (name === "TimeoutError") return t("diagnostics.detail.micTimeout");
+  if (error instanceof SilentMicrophone) return t("diagnostics.detail.micSilent");
+  return t("diagnostics.detail.micFailed");
+}
+
+async function checkMicrophone(run: DiagnosticRun, includeMicrophone: boolean): Promise<void> {
+  if (!includeMicrophone) {
+    run.emit("microphone", "not-tested", t("diagnostics.detail.micSkipped"));
+    return;
+  }
+  await run.check(
+    "microphone",
+    async () => {
+      const selected = loadPref<string>("audioInputDevice", "");
+      const nativeInputs = await run.services.listNativeInputs();
+      if (nativeInputs !== null) return nativeMicrophoneOutcome(run, selected, nativeInputs);
+      return webMicrophoneOutcome(run.services, selected);
+    },
+    microphoneFailure,
+  );
+}
+
+function isSignalingOpen(room: VoiceRoom, native: NativeSignaling | null): boolean {
+  const socketOpen = native
+    ? native.isSignalingConnected()
+    : room.engine.client.ws?.readyState === WebSocket.OPEN;
+  return room.state === "connected" && socketOpen;
+}
+
+interface MediaEvidence {
+  audio: boolean;
+  video: boolean;
+}
+
+function mediaEvidence(
+  before: Map<string, DecodingSnapshot> | null,
+  after: Map<string, DecodingSnapshot> | null,
+): MediaEvidence {
+  const evidence = { audio: false, video: false };
+  if (!before || !after) return evidence;
+  for (const [id, value] of after) {
+    const previous = before.get(id);
+    if (!previous) continue;
+    evidence.audio ||= value.energy > previous.energy && value.samples > previous.samples;
+    evidence.video ||= value.frames > previous.frames;
+  }
+  return evidence;
+}
+
+function mediaKindsKey({
+  audio,
+  video,
+}: MediaEvidence):
+  | "diagnostics.detail.kinds.audioAndVideo"
+  | "diagnostics.detail.kinds.audio"
+  | "diagnostics.detail.kinds.video" {
+  if (audio && video) return "diagnostics.detail.kinds.audioAndVideo";
+  return audio ? "diagnostics.detail.kinds.audio" : "diagnostics.detail.kinds.video";
+}
+
+async function checkMedia(run: DiagnosticRun, room: VoiceRoom): Promise<void> {
+  const { services, lifetime, emit } = run;
+  emit("media", "running", t("diagnostics.detail.listening"));
+  try {
+    const before = await bounded(readDecoding(room), lifetime, 5000);
+    await pause(lifetime, 3000);
+    const after = await bounded(readDecoding(room), lifetime, 5000);
+    if (
+      (await bounded(Promise.resolve(services.getRoom()), lifetime, 5000)) !== room ||
+      room.state !== "connected"
+    ) {
+      emit("media", "failed", t("diagnostics.detail.callChanged"));
+      return;
+    }
+    const evidence = mediaEvidence(before, after);
+    if (evidence.audio || evidence.video) {
+      const kinds = t(mediaKindsKey(evidence));
+      emit("media", "passed", t("diagnostics.detail.mediaPassed", { kinds }));
+    } else {
+      emit("media", "not-tested", t("diagnostics.detail.mediaMissing"));
+    }
+  } catch {
+    lifetime.throwIfAborted();
+    emit("media", "failed", t("diagnostics.detail.mediaFailed"));
+  }
+}
+
+async function checkVoice(run: DiagnosticRun): Promise<void> {
+  const { services, lifetime, emit } = run;
   lifetime.throwIfAborted();
   const room = await bounded(Promise.resolve(services.getRoom()), lifetime, 5000);
   if (!room) {
@@ -297,10 +389,7 @@ export async function runConnectionDiagnostics(
     return;
   }
   const native = nativeSignaling(room);
-  const signalingOpen = native
-    ? native.isSignalingConnected()
-    : room.engine.client.ws?.readyState === WebSocket.OPEN;
-  if (room.state !== "connected" || !signalingOpen) {
+  if (!isSignalingOpen(room, native)) {
     emit("signaling", "failed", t("diagnostics.detail.signalingClosed"));
     emit("media", "not-tested", t("diagnostics.detail.restoreVoice"));
     return;
@@ -314,42 +403,22 @@ export async function runConnectionDiagnostics(
     emit("media", "not-tested", t("diagnostics.detail.noParticipant"));
     return;
   }
-  emit("media", "running", t("diagnostics.detail.listening"));
-  try {
-    const before = await bounded(readDecoding(room), lifetime, 5000);
-    await pause(lifetime, 3000);
-    const after = await bounded(readDecoding(room), lifetime, 5000);
-    if (
-      (await bounded(Promise.resolve(services.getRoom()), lifetime, 5000)) !== room ||
-      room.state !== "connected"
-    ) {
-      emit("media", "failed", t("diagnostics.detail.callChanged"));
-      return;
-    }
-    let audio = false;
-    let video = false;
-    if (before && after) {
-      for (const [id, value] of after) {
-        const previous = before.get(id);
-        if (!previous) continue;
-        audio ||= value.energy > previous.energy && value.samples > previous.samples;
-        video ||= value.frames > previous.frames;
-      }
-    }
-    if (audio || video) {
-      const kinds = t(
-        audio && video
-          ? "diagnostics.detail.kinds.audioAndVideo"
-          : audio
-            ? "diagnostics.detail.kinds.audio"
-            : "diagnostics.detail.kinds.video",
-      );
-      emit("media", "passed", t("diagnostics.detail.mediaPassed", { kinds }));
-    } else {
-      emit("media", "not-tested", t("diagnostics.detail.mediaMissing"));
-    }
-  } catch {
-    lifetime.throwIfAborted();
-    emit("media", "failed", t("diagnostics.detail.mediaFailed"));
-  }
+  await checkMedia(run, room);
+}
+
+/** Each result belongs to one session. Abort rejects without emitting stale
+ * results; the caller can report cancellation without preserving green checks. */
+export async function runConnectionDiagnostics(
+  onResult: (result: DiagnosticResult) => void,
+  signal: AbortSignal,
+  includeMicrophone: boolean,
+  services: DiagnosticServices | null = configured,
+): Promise<void> {
+  // i18n-exempt: internal configuration guard, never rendered
+  if (!services) throw new Error("Diagnostics are not available yet.");
+  const run = createRun(onResult, signal, services);
+  await checkConnection(run);
+  await checkAccount(run);
+  await checkMicrophone(run, includeMicrophone);
+  await checkVoice(run);
 }

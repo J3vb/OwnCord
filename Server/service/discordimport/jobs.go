@@ -11,9 +11,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// live is every job running in this process, across Runners; a running job in
-// the database that is not in it is left over and a new start may take it over.
-// startMu makes inserting and registering a job one step.
+// live is every job running in this process, across Runners; a running job in the database that is not in it
+// is left over and a new start may take it over. startMu makes inserting and registering a job one step.
 var live = struct {
 	startMu syncutil.Mutex
 	mu      syncutil.Mutex
@@ -43,12 +42,11 @@ func setLive(id int64, on bool) {
 // ErrServerStopped is the reason recorded on a job a shutdown cut short.
 var ErrServerStopped = errors.New("the server stopped before the import finished")
 
-// abandonBudget caps the time spent retrying one clean-up.
 const abandonBudget = 10 * time.Second
 
-// abandon ends an unfinished job and deletes its channel, retrying a busy
-// database with a doubling wait for at most abandonBudget; a closed halt (the
-// server is stopping) ends the retries early and boot clean-up finishes it.
+// abandon ends an unfinished job and deletes its channel, retrying a busy database with a doubling wait for
+// at most abandonBudget; a closed halt (the server is stopping) ends the retries early and boot clean-up
+// finishes it.
 func (r *Runner) abandon(ctx context.Context, halt <-chan struct{}, jobID, channelID int64, status, reason string, pr db.ImportProgress) {
 	delay := r.retryDelay
 	deadline := time.Now().Add(abandonBudget)
@@ -76,8 +74,8 @@ func (r *Runner) abandon(ctx context.Context, halt <-chan struct{}, jobID, chann
 	slog.Error("discord import clean-up failed", "job_id", jobID, "error", err)
 }
 
-// chunkOverdue reports whether the files copied for the open chunk have passed
-// the byte budget or have waited too long for the chunk to commit.
+// chunkOverdue reports whether the files copied for the open chunk have passed the byte budget or waited too
+// long for the chunk to commit.
 func (r *Runner) chunkOverdue(st *runState) bool {
 	if st.chunkBytes == 0 {
 		return false
@@ -86,7 +84,6 @@ func (r *Runner) chunkOverdue(st *runState) bool {
 		r.cfg.ChunkAge > 0 && r.now().Sub(st.chunkSince) >= r.cfg.ChunkAge
 }
 
-// now reads the configured clock.
 func (r *Runner) now() time.Time {
 	if r.cfg.Now != nil {
 		return r.cfg.Now()
@@ -111,8 +108,8 @@ func (r *Runner) Running(id int64) *Job {
 	return r.jobs[id]
 }
 
-// CategoryExists reports whether a category can hold the import's channel;
-// id 0 means no category and always can.
+// CategoryExists reports whether a category can hold the import's channel; id 0 means no category and always
+// can.
 func (r *Runner) CategoryExists(ctx context.Context, id int64) (bool, error) {
 	if id == 0 {
 		return true, nil

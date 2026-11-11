@@ -16,24 +16,19 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// runConfigCLI implements `chatserver config reset-overrides [--all] [key ...]`:
-// drop settings saved from the admin panel while the server is stopped, so an
-// owner whose panel change made the panel unreachable can start the server
-// again without a shell or a hand-edit of the overrides file.
+// runConfigCLI implements `chatserver config reset-overrides [--all] [key ...]`: drop settings saved
+// from the admin panel while the server is stopped, so an owner whose change made the panel
+// unreachable can start again without a shell.
 //
-// It is offline and modelled on `restore`: it takes the database's process
-// lock, so it refuses while a server is running and cannot race a panel save.
-// It never calls config.Load, which writes a default config.yaml and fails on
-// an unparseable overrides file. It prints key names only, never values.
-//
-// Exit codes: 0 done (or nothing to do), 1 refused or failed, 2 usage error.
+// Offline, like `restore`: it takes the database's process lock, so it refuses while a server runs.
+// It never calls config.Load, which writes a default config.yaml and fails on an unparseable
+// overrides file. It prints key names only, never values. Exit: 0 done, 1 refused or failed, 2 usage.
 func runConfigCLI(cfgPath string, args []string) int {
 	return configCLI(os.Stdout, os.Stderr, cfgPath, args)
 }
 
 func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
-	// The config package logs one INFO line per override it applies; those are
-	// noise here. Warnings and the command's own output stay.
+	// The config package logs one INFO line per applied override; that is noise here.
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	defer slog.SetDefault(prev)
@@ -67,8 +62,7 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 		}
 	}
 
-	// data_dir cannot be moved by the overrides file, so the base layers find
-	// it without reading the file this command is about to change.
+	// data_dir cannot be moved by the overrides file, so the base layers find it without reading it.
 	base, err := config.BaseConfig(cfgPath)
 	if err != nil {
 		sayf(stderr, "error: load config: %v\n", err)
@@ -90,8 +84,7 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 	}
 	defer release()
 
-	// Read under the lock, so the file cannot change between the read and the
-	// write.
+	// Read under the lock so the file cannot change before the write.
 	current, readErr := config.ReadOverrides(overridesPath)
 	if *all {
 		return resetAll(stdout, stderr, overridesPath, current, readErr)
@@ -105,20 +98,16 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 	return resetKeys(stdout, stderr, overridesPath, current, keys)
 }
 
-// lockServerPaths takes the process lock at every database path a running
-// server may hold. The panel can move database.path, and a running server
-// holds the lock at the path it booted with: the base path unless an earlier
-// save has since been applied by a restart. Both the base path and the path the
-// overrides now name are locked (base first, always), so a pending move cannot
-// let this command rewrite the file under a live server. A saved chain
-// A -> B -> C with no restart in between is not covered: the server does not
-// record the path it is running on. When the file does not parse, no server can
-// have booted on it, so only the base path applies.
+// lockServerPaths takes the process lock at every database path a running server may hold. The
+// panel can move database.path while a server holds the lock at the path it booted with, so both
+// the base path and the overrides' path are locked (base first), and a pending move cannot let
+// this command rewrite the file under a live server. A chain A -> B -> C with no restart between
+// is not covered: the server does not record its running path. If the file does not parse, no
+// server booted on it, so only the base path applies.
 func lockServerPaths(stderr io.Writer, cfgPath, overridesPath, baseDBPath string) (release func(), ok bool) {
 	lockPaths := []string{lockTarget(baseDBPath)}
 	if effective, err := config.Preview(cfgPath, overridesPath, nil); err == nil {
-		// One file can be named two ways (relative and absolute); a second
-		// lock on it would fail against our own first one.
+		// One file can be named two ways (relative, absolute); a second lock would fail against our own.
 		if p := lockTarget(effective.Database.Path); p != lockPaths[0] {
 			lockPaths = append(lockPaths, p)
 		}
@@ -140,8 +129,7 @@ func lockServerPaths(stderr io.Writer, cfgPath, overridesPath, baseDBPath string
 	return releaseAll, true
 }
 
-// lockTarget is the absolute, cleaned database path the lock is taken for,
-// so two spellings of one file compare equal.
+// lockTarget is the absolute, cleaned database path, so two spellings of one file compare equal.
 func lockTarget(dbPath string) string {
 	if dbPath == "" {
 		dbPath = filepath.Join("data", "chatserver.db")
@@ -152,10 +140,8 @@ func lockTarget(dbPath string) string {
 	return filepath.Clean(dbPath)
 }
 
-// lockDatabase takes the process lock for dbPath. When the database's
-// directory does not exist, no process can hold the lock, so the reset may
-// proceed (a server cannot boot there either). Any other failure, including
-// another process holding the lock, refuses (ok=false, after printing why).
+// lockDatabase takes the process lock for dbPath. A missing database directory means no process can
+// hold it, so the reset proceeds; any other failure, including a held lock, refuses (ok=false).
 func lockDatabase(stderr io.Writer, dbPath string) (release func(), ok bool) {
 	release, err := db.AcquireProcessLock(dbPath)
 	if err == nil {
@@ -171,9 +157,8 @@ func lockDatabase(stderr io.Writer, dbPath string) (release func(), ok bool) {
 	return nil, false
 }
 
-// resetKeys removes the named keys, or, with none named, every key whose wrong
-// value can lock the owner out (config.RequiresConfirmation). Settings that are
-// not in the file are reported and left alone.
+// resetKeys removes the named keys or, with none named, every key whose wrong value can lock the
+// owner out (config.RequiresConfirmation). Keys not in the file are reported and left alone.
 func resetKeys(stdout, stderr io.Writer, overridesPath string, current map[string]any, named []string) int {
 	candidates := named
 	if len(candidates) == 0 {
@@ -214,9 +199,8 @@ func resetKeys(stdout, stderr io.Writer, overridesPath string, current map[strin
 	return 0
 }
 
-// resetAll drops the whole overrides layer. A file that parses is removed. One
-// that does not is renamed aside, because the file holds write-only secrets and
-// is never deleted unread.
+// resetAll drops the whole overrides layer. A file that parses is removed; one that does not is
+// renamed aside, because it holds write-only secrets and is never deleted unread.
 func resetAll(stdout, stderr io.Writer, overridesPath string, current map[string]any, readErr error) int {
 	if readErr != nil {
 		aside := overridesPath + ".unreadable-" + time.Now().UTC().Format("20060102T150405Z")
@@ -282,8 +266,7 @@ It prints the names of the keys it removed, never their values.
 `)
 }
 
-// sayf, sayln and say write the command's output. A failed write to the
-// terminal leaves nothing more useful to report, so their errors are dropped.
+// sayf, sayln and say write the command's output; a failed terminal write has nothing to report.
 func sayf(w io.Writer, format string, a ...any) { _, _ = fmt.Fprintf(w, format, a...) }
 
 func sayln(w io.Writer, a ...any) { _, _ = fmt.Fprintln(w, a...) }

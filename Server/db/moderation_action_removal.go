@@ -5,10 +5,9 @@ import (
 	"fmt"
 )
 
-// RecordRemovalAction writes one removal ledger row targeting targetID, in its
-// own transaction. A ban purge records its removal after the batches have
-// committed, so the row is not part of any batch's transaction; the actor
-// guard is recordLedgerRow's.
+// RecordRemovalAction writes one removal ledger row targeting targetID, in its own
+// transaction: a ban purge records its removal after the batches have committed. The
+// actor guard is recordLedgerRow's.
 func (d *DB) RecordRemovalAction(ctx context.Context, targetID, actorID int64, reason string) error {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {

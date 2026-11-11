@@ -6,7 +6,7 @@
 // desktop portal's dialog is the picker (and the consent) — so the dialog
 // shows only the quality step and hands "portal" to the host.
 //
-// The dialog itself lives in the UI layer (`components/ScreenSharePicker.ts`).
+// The dialog itself lives in the UI layer (`features/voice/ScreenSharePicker.ts`).
 // This module is a lower layer and must not import a component, so
 // the UI registers the dialog through `screenPickerSlot.ts` — the same
 // injection shape as `lib/readState.ts`'s `setMarkReadSender` — and this
@@ -21,9 +21,9 @@ import {
   getScreenShareMaxBitrate,
   getScreenShareQuality,
   isScreenShareSimulcast,
-} from "@lib/voice/screenShare";
+} from "../screenShare";
 import type { NativeVoiceScreenCapture } from "../../../platform/contracts/nativeVoice";
-import type { StreamQuality } from "@lib/voice/screenShare";
+import type { StreamQuality } from "../screenShare";
 import { getScreenSourcePicker } from "./screenPickerSlot";
 import { captureOptions } from "./screenTrack";
 

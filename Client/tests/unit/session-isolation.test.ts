@@ -48,7 +48,7 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   onOpenUrl: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@lib/nav/messageNavigation", () => mainMocks.navMessageNavigationMock());
-vi.mock("@components/CertMismatchModal", () => mainMocks.certMismatchModalMock());
+vi.mock("../../src/features/connection/CertMismatchModal", () => mainMocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mainMocks.netCertReconnectMock());
 const PROFILES = [
   {
@@ -211,8 +211,10 @@ import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { voiceStore } from "@stores/voice.store";
 import { currentUserPermissions } from "@lib/permissions";
 import { cleanupNotificationAudio } from "@lib/media/notificationSound";
+// The app loads this with the dispatcher chunk (mocked here); it registers the audio reset.
+import "@lib/notifications";
 import { leaveVoice } from "@lib/voice/livekitSession";
-import { deleteCredential, loadCredential } from "@lib/net/credentials";
+import { deleteCredential, resumeSavedSession } from "@lib/net/credentials";
 import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { createProfileManager } from "@lib/presence/profiles";
 import { createConnectPage } from "@pages/ConnectPage";
@@ -222,7 +224,7 @@ const A = "a.example:8443";
 const B = "b.example:8443";
 
 const storedA = async (host: string) =>
-  host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null;
+  host === A ? ({ outcome: "resumed", username: "alex", token: "stored-token-a" } as const) : null;
 
 // main.ts builds its profile manager once at startup, before the per-test
 // mock clear wipes mock.results.
@@ -242,7 +244,7 @@ beforeEach(() => {
   mockGetHealth.mockReset().mockResolvedValue(HEALTHY);
   mockApiLogout.mockClear();
   vi.mocked(deleteCredential).mockReset().mockResolvedValue(true);
-  vi.mocked(loadCredential).mockReset().mockResolvedValue(null);
+  vi.mocked(resumeSavedSession).mockReset().mockResolvedValue(null);
   sessionStorage.clear();
   clearAuth();
 });
@@ -468,7 +470,7 @@ describe("quick switch keeps each server's saved sign-in", () => {
   });
 
   it("resumes with the stored token when switching back, without a password", async () => {
-    vi.mocked(loadCredential).mockImplementation(storedA);
+    vi.mocked(resumeSavedSession).mockImplementation(storedA);
     await loginWithPassword(A, 1);
     await quickSwitchTo(B);
     // B has no stored credential: the prefilled form waits for a password.
@@ -488,7 +490,7 @@ describe("quick switch keeps each server's saved sign-in", () => {
   });
 
   it("times out a resume to an offline server, returning to the form with an error", async () => {
-    vi.mocked(loadCredential).mockImplementation(storedA);
+    vi.mocked(resumeSavedSession).mockImplementation(storedA);
     await loginWithPassword(A, 1);
 
     await quickSwitchTo(A);
@@ -508,7 +510,7 @@ describe("quick switch keeps each server's saved sign-in", () => {
   });
 
   it("keeps A's sign-in through Add server, so switching back skips the password", async () => {
-    vi.mocked(loadCredential).mockImplementation(storedA);
+    vi.mocked(resumeSavedSession).mockImplementation(storedA);
     await loginWithPassword(A, 1);
 
     // SidebarArea's Add server: end the session with no switch target.
@@ -580,7 +582,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
 
   /** Resume A's stored token while A is down, and let the pre-auth deadline lapse. */
   async function resumeAgainstDownServer(): Promise<void> {
-    vi.mocked(loadCredential).mockImplementation(storedA);
+    vi.mocked(resumeSavedSession).mockImplementation(storedA);
     await loginWithPassword(A, 1);
     mockGetHealth.mockImplementation(async (host: string) => {
       if (host === A) throw new Error("connection refused");
@@ -755,7 +757,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
     manager.getAutoConnectProfile.mockReturnValue({ ...PROFILES[0]!, autoConnect: true });
     try {
       // The logout's credential delete loses the race: the read still finds it.
-      vi.mocked(loadCredential).mockImplementation(storedA);
+      vi.mocked(resumeSavedSession).mockImplementation(storedA);
       await loginWithPassword(A, 1);
       const before = connectsToA();
 
@@ -794,7 +796,7 @@ describe("a stored-token resume refused SERVER_BUSY keeps connecting (P5-S04)", 
   }
 
   async function resumeA(): Promise<number> {
-    vi.mocked(loadCredential).mockImplementation(storedA);
+    vi.mocked(resumeSavedSession).mockImplementation(storedA);
     await loginWithPassword(A, 1);
     await quickSwitchTo(A);
     await vi.advanceTimersByTimeAsync(10);

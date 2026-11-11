@@ -10,6 +10,7 @@ import { appMetadata } from "./appMetadata";
 import { appProcess } from "./appProcess";
 import { autostart } from "./autostart";
 import { callService } from "./callService";
+import { meteredNetwork } from "./meteredNetwork";
 import { credentials } from "./credentials";
 import { deepLinks } from "./deepLinks";
 import { devTools } from "./devTools";
@@ -49,6 +50,7 @@ export const desktop: Platform = {
   appProcess,
   autostart,
   callService,
+  meteredNetwork,
   credentials,
   deepLinks,
   devTools,

@@ -20,6 +20,7 @@ import {
   setVoiceConfig,
   getChannelVoiceUsers,
   setVoiceStatus,
+  setSwitchingTo,
   setEncryptionDegraded,
   setPeerVerification,
   clearPeerVerification,
@@ -761,6 +762,54 @@ describe("voice store", () => {
 
       expect(voiceStore.getState().voiceConfigs.get(10)?.quality).toBe("low");
       expect(voiceStore.getState().voiceConfigs.get(20)?.quality).toBe("high");
+    });
+  });
+
+  describe("setSwitchingTo — a switch that keeps the live call", () => {
+    beforeEach(() => {
+      joinVoiceChannel(42);
+      setVoiceStatus("connected");
+    });
+
+    it("records the target and leaves the call as it is", () => {
+      const before = voiceStore.getState();
+      setSwitchingTo(99);
+
+      expect(voiceStore.getState()).toMatchObject({
+        currentChannelId: 42,
+        voiceStatus: "connected",
+        joinedAt: before.joinedAt,
+        switchingTo: 99,
+      });
+    });
+
+    it("hands back the same state when nothing changes", () => {
+      const fresh = voiceStore.getState();
+      setSwitchingTo(null);
+      expect(voiceStore.getState()).toBe(fresh);
+
+      setSwitchingTo(99);
+      const waiting = voiceStore.getState();
+      setSwitchingTo(99);
+      expect(voiceStore.getState()).toBe(waiting);
+    });
+
+    it("a row for the call the user is in does not end the wait", () => {
+      setSwitchingTo(99);
+      // The dispatcher re-enters the current channel on every own voice_state.
+      joinVoiceChannel(42);
+      expect(voiceStore.getState().switchingTo).toBe(99);
+    });
+
+    it.each([
+      ["entering the target", () => joinVoiceChannel(99)],
+      ["entering any other channel", () => joinVoiceChannel(7)],
+      ["leaving voice", () => leaveVoiceChannel()],
+      ["a store reset", () => resetVoiceStore()],
+    ])("%s ends the wait", (_name, act) => {
+      setSwitchingTo(99);
+      act();
+      expect(voiceStore.getState().switchingTo).toBeNull();
     });
   });
 

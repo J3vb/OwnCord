@@ -10,8 +10,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/migrations"
 )
 
-// DiagnosticTable is a count, never a row or a schema definition. Names come
-// from this binary's allowlist, so custom schema names cannot leak data.
+// DiagnosticTable is a count, never a row or schema; names come from an allowlist so
+// custom schema names cannot leak.
 type DiagnosticTable struct {
 	Name string `json:"name"`
 	Rows int64  `json:"rows"`
@@ -38,9 +38,9 @@ var diagnosticTables = []string{
 	"totp_used_codes", "trusted_senders", "user_blocks", "user_storage", "users", "voice_states",
 }
 
-// Diagnostics reads all counts from one short-lived read transaction. Query
-// text is dynamic only for identifiers from the binary-owned list above;
-// sqlc cannot express dynamic identifiers. Callers impose a total deadline.
+// Diagnostics reads all counts from one short-lived read transaction. Query text is
+// dynamic only for identifiers from the binary-owned list above (sqlc cannot express
+// them). Callers impose a total deadline.
 func (d *DB) Diagnostics(ctx context.Context) (*DiagnosticSnapshot, error) {
 	tx, err := d.reader.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -84,8 +84,8 @@ func (d *DB) Diagnostics(ctx context.Context) (*DiagnosticSnapshot, error) {
 	return out, nil
 }
 
-// DiagnosticNames returns the registered usernames and display names and the
-// server name, so the support bundle can redact them from event text.
+// DiagnosticNames returns usernames, display names and the server name so the support
+// bundle can redact them.
 func (d *DB) DiagnosticNames(ctx context.Context) ([]string, error) {
 	rows, err := d.reader.QueryContext(ctx, `SELECT username FROM users
 		UNION SELECT display_name FROM users WHERE display_name IS NOT NULL

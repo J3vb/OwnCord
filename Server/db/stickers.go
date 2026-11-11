@@ -9,14 +9,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// ErrStickerGone means the sticker a send named no longer exists by the time
-// the message is written (it was deleted after the service looked it up). No
-// message is stored.
+// ErrStickerGone means the sticker a send named was deleted after the service looked
+// it up; no message is stored.
 var ErrStickerGone = errors.New("sticker no longer exists")
 
-// Sticker is one row of the stickers table: a server-wide custom sticker.
-// StoredAs is the storage-layer id of the image bytes (the column is named
-// filename); it never reaches a client.
+// Sticker is one server-wide custom sticker. StoredAs is the storage-layer id of the
+// image bytes (column `filename`); it never reaches a client.
 type Sticker struct {
 	ID         int64
 	Name       string
@@ -34,23 +32,20 @@ func stickerFromGen(r dbgen.Sticker) *Sticker {
 	}
 }
 
-// StickerImageURL is the server-relative path the image bytes of a sticker are
-// served from.
+// StickerImageURL is the server-relative path a sticker's image is served from.
 func StickerImageURL(id int64) string {
 	return fmt.Sprintf("/api/v1/stickers/%d/image", id)
 }
 
-// MessageStickerInfo is the sticker block of a sticker message. ID and URL are
-// null once the sticker has been deleted; Name is the label kept from send
-// time.
+// MessageStickerInfo is the sticker block of a sticker message; ID and URL are null
+// once the sticker was deleted; Name is kept from send time.
 type MessageStickerInfo struct {
 	ID   *int64  `json:"id"`
 	Name string  `json:"name"`
 	URL  *string `json:"url"`
 }
 
-// NewMessageStickerInfo builds the sticker block of a message. A nil stickerID
-// means the sticker was deleted, and the block carries no id or url.
+// NewMessageStickerInfo builds the block; a nil stickerID means the sticker was deleted.
 func NewMessageStickerInfo(stickerID *int64, name string) *MessageStickerInfo {
 	info := &MessageStickerInfo{Name: name}
 	if stickerID != nil {
@@ -61,8 +56,7 @@ func NewMessageStickerInfo(stickerID *int64, name string) *MessageStickerInfo {
 	return info
 }
 
-// StickerRef names the sticker a send carries. Name is the snapshot stored with
-// the message.
+// StickerRef names the sticker a send carries; Name is the snapshot stored with the message.
 type StickerRef struct {
 	ID   int64
 	Name string
@@ -80,8 +74,7 @@ func (d *DB) GetSticker(ctx context.Context, id int64) (*Sticker, error) {
 	return stickerFromGen(r), nil
 }
 
-// GetStickerByName returns the sticker with the given name (compared ignoring
-// case), or (nil, nil).
+// GetStickerByName returns the sticker with the given name (compared ignoring case), or (nil, nil).
 func (d *DB) GetStickerByName(ctx context.Context, name string) (*Sticker, error) {
 	r, err := d.q.GetStickerByName(ctx, name)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -115,8 +108,8 @@ func (d *DB) CountStickers(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-// CreateSticker inserts a sticker. A name clash surfaces as a unique-constraint
-// error (IsUniqueConstraintError).
+// CreateSticker inserts a sticker; a name clash is a unique-constraint error
+// (IsUniqueConstraintError).
 func (d *DB) CreateSticker(ctx context.Context, name string, emoji *string, storedAs, mimeType string, uploadedBy int64) (*Sticker, error) {
 	r, err := d.q.CreateSticker(ctx, dbgen.CreateStickerParams{
 		Name: name, Emoji: emoji, Filename: storedAs, MimeType: mimeType, UploadedBy: uploadedBy,
@@ -127,8 +120,7 @@ func (d *DB) CreateSticker(ctx context.Context, name string, emoji *string, stor
 	return stickerFromGen(r), nil
 }
 
-// UpdateSticker renames a sticker and sets its related emoji. It returns
-// (nil, nil) when the sticker does not exist.
+// UpdateSticker renames a sticker and sets its related emoji; (nil, nil) when it does not exist.
 func (d *DB) UpdateSticker(ctx context.Context, id int64, name string, emoji *string) (*Sticker, error) {
 	r, err := d.q.UpdateSticker(ctx, dbgen.UpdateStickerParams{Name: name, Emoji: emoji, ID: id})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -140,8 +132,8 @@ func (d *DB) UpdateSticker(ctx context.Context, id int64, name string, emoji *st
 	return stickerFromGen(r), nil
 }
 
-// DeleteSticker removes a sticker and reports whether a row was deleted.
-// Messages that used it keep their name and lose the link (ON DELETE SET NULL).
+// DeleteSticker removes a sticker and reports whether a row was deleted; messages that
+// used it keep their name (ON DELETE SET NULL).
 func (d *DB) DeleteSticker(ctx context.Context, id int64) (bool, error) {
 	res, err := d.q.DeleteSticker(ctx, id)
 	if err != nil {
@@ -154,10 +146,8 @@ func (d *DB) DeleteSticker(ctx context.Context, id int64) (bool, error) {
 	return n > 0, nil
 }
 
-// insertStickerRow is the sticker step of CreateMessageDelivery: the
-// message_stickers row, after the message exists, in the same transaction. A
-// sticker deleted since the service looked it up inserts nothing, and the send
-// fails with ErrStickerGone.
+// insertStickerRow is the sticker step of CreateMessageDelivery; a sticker deleted
+// since the lookup inserts nothing and the send fails with ErrStickerGone.
 func insertStickerRow(ctx context.Context, q *dbgen.Queries, messageID int64, s *StickerRef) error {
 	res, err := q.InsertMessageSticker(ctx, dbgen.InsertMessageStickerParams{
 		MessageID: messageID, Name: s.Name, StickerID: s.ID,
@@ -175,8 +165,8 @@ func insertStickerRow(ctx context.Context, q *dbgen.Queries, messageID int64, s 
 	return nil
 }
 
-// GetMessageSticker returns the sticker block of one message, or (nil, nil)
-// when the message is not a sticker message.
+// GetMessageSticker returns the sticker block of one message, or (nil, nil) when it is
+// not a sticker message.
 func (d *DB) GetMessageSticker(ctx context.Context, messageID int64) (*MessageStickerInfo, error) {
 	infos, err := d.stickerInfos(ctx, []int64{messageID})
 	if err != nil {
@@ -185,8 +175,6 @@ func (d *DB) GetMessageSticker(ctx context.Context, messageID int64) (*MessageSt
 	return infos[messageID], nil
 }
 
-// stickerInfos builds the sticker block of each id that is a sticker message.
-// Ids that are not are absent from the result.
 func (d *DB) stickerInfos(ctx context.Context, ids []int64) (map[int64]*MessageStickerInfo, error) {
 	rows, err := d.q.GetMessageStickersByMessageIDs(ctx, padIDs(ids))
 	if err != nil {
@@ -199,9 +187,6 @@ func (d *DB) stickerInfos(ctx context.Context, ids []int64) (map[int64]*MessageS
 	return out, nil
 }
 
-// attachStickers fills Sticker on every ordinary, live row in msgs that is a
-// sticker message, with one batched read. A page with no candidate rows costs
-// no query.
 func (d *DB) attachStickers(ctx context.Context, msgs []MessageAPIResponse) error {
 	var ids []int64
 	for i := range msgs {
@@ -224,8 +209,6 @@ func (d *DB) attachStickers(ctx context.Context, msgs []MessageAPIResponse) erro
 	return nil
 }
 
-// attachSearchStickers fills Sticker on the search hits that are sticker
-// messages, with one batched read.
 func (d *DB) attachSearchStickers(ctx context.Context, results []MessageSearchResult) ([]MessageSearchResult, error) {
 	if len(results) == 0 {
 		return results, nil

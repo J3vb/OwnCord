@@ -18,7 +18,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// ticketEntry holds a single-use ticket with a creation timestamp for TTL.
 type ticketEntry struct {
 	createdAt time.Time
 	tokenHash string
@@ -36,7 +35,6 @@ var logTickets = &ticketStore{
 
 const ticketTTL = 30 * time.Second
 
-// issue creates a new single-use ticket and returns its hex string.
 func (ts *ticketStore) issue(tokenHash string) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -47,7 +45,6 @@ func (ts *ticketStore) issue(tokenHash string) (string, error) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
-	// Opportunistic cleanup of expired tickets.
 	now := time.Now()
 	for k, v := range ts.tickets {
 		if now.Sub(v.createdAt) > ticketTTL {
@@ -59,7 +56,6 @@ func (ts *ticketStore) issue(tokenHash string) (string, error) {
 	return ticket, nil
 }
 
-// redeem validates and consumes a ticket.
 func (ts *ticketStore) redeem(ticket string) (ticketEntry, bool) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
@@ -76,10 +72,9 @@ func (ts *ticketStore) redeem(ticket string) (ticketEntry, bool) {
 	return entry, true
 }
 
-// handleLogTicket issues a short-lived, single-use ticket for the SSE log stream.
-// POST /admin/api/logs/ticket — requires normal admin auth (header). The ticket
-// is bound to the hash of whichever bearer credential authenticated the request
-// (login session or API token), so both principal kinds can stream logs.
+// handleLogTicket issues a short-lived single-use ticket for the SSE log stream (POST /logs/ticket, normal
+// admin auth). It binds to the hash of whichever bearer credential authenticated, session or API token, so
+// both principal kinds can stream logs.
 func handleLogTicket(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		hash, ok := r.Context().Value(adminTokenHashKey).(string)
@@ -98,24 +93,18 @@ func handleLogTicket(database *db.DB) http.HandlerFunc {
 	}
 }
 
-// logStreamAuthorize runs the log stream's authentication prologue: it redeems
-// the single-use ticket, resolves the principal behind it, and returns the
-// re-check closure the stream calls to confirm the viewer still has access. It
-// writes the error response itself and reports false when the caller must stop.
-// onResolve, when set, is called each time the closure resolves the principal
-// (tests count those; production passes nil).
+// logStreamAuthorize redeems the single-use ticket, resolves the principal, and returns the re-check closure
+// the stream calls to confirm the viewer still has access. It writes the error itself and reports false when
+// the caller must stop. onResolve counts resolves in tests; production passes nil.
 func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB, onResolve func()) (func() bool, bool) {
-	// Authenticate via single-use ticket.
 	ticket := r.URL.Query().Get("ticket")
 	entry, ok := logTickets.redeem(ticket)
 	if ticket == "" || !ok {
 		writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired ticket")
 		return nil, false
 	}
-	// Stream lifetime == request lifetime, so all principal re-checks below use
-	// the stream request's context. The ticket's hash is resolved like
-	// adminAuthMiddleware resolves a bearer credential (session first, then API
-	// token), so revoking either kind mid-stream cuts the stream.
+	// Stream lifetime == request lifetime, so re-checks use the stream request's context. The ticket's hash
+	// resolves like adminAuthMiddleware does (session, then API token), so revoking either mid-stream cuts it.
 	ctx := r.Context()
 	user, role, _, err := auth.ResolveTokenHash(ctx, database, entry.tokenHash)
 	if err != nil || user == nil || role == nil {
@@ -130,8 +119,7 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB,
 		if resolveErr != nil || current == nil || currentRole == nil {
 			return false
 		}
-		// A ban mid-stream must cut the stream, same as adminAuthMiddleware
-		// rejects a banned user on the request path.
+		// A ban mid-stream must cut the stream, as adminAuthMiddleware rejects a banned user on the request path.
 		if auth.IsEffectivelyBanned(current) {
 			return false
 		}
@@ -144,15 +132,12 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB,
 	return principalStillAuthorized, true
 }
 
-// backfillChunk is how many backfill entries go out per write. The principal is
-// re-checked before each chunk rather than each entry: a check is a few DB
-// queries, and per entry that cost a full ring's worth of round-trips before
-// the first line reached the browser. A credential revoked mid-backfill still
-// cuts the stream within one chunk.
+// backfillChunk is how many backfill entries go out per write. The principal is re-checked per chunk, not per
+// entry: a check is a few DB queries, and per entry that delayed the first line by a full ring of
+// round-trips. A credential revoked mid-backfill still cuts the stream within one chunk.
 const backfillChunk = 500
 
-// writeBackfill sends the backfill in chunks, flushing after each, and reports
-// false when the principal lost access and the stream must end.
+// writeBackfill sends the backfill in chunks, flushing each; false means the principal lost access.
 func writeBackfill(w http.ResponseWriter, flusher http.Flusher, backfill []LogEntry, stillAuthorized func() bool) bool {
 	var buf bytes.Buffer
 	for start := 0; start < len(backfill); start += backfillChunk {
@@ -173,9 +158,7 @@ func writeBackfill(w http.ResponseWriter, flusher http.Flusher, backfill []LogEn
 	return true
 }
 
-// handleLogStream serves an SSE endpoint that streams log entries in real-time.
-// Auth is via query param ?ticket= — a short-lived single-use ticket obtained
-// from POST /admin/api/logs/ticket (which requires normal admin auth).
+// handleLogStream serves the SSE log stream; auth is ?ticket= from POST /admin/api/logs/ticket.
 func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 	return handleLogStreamWith(database, ringBuf, logStreamHooks{})
 }
@@ -194,14 +177,12 @@ func handleLogStreamWith(database *db.DB, ringBuf *RingBuffer, hooks logStreamHo
 		liveStillAuthorized := throttledCheck(principalStillAuthorized, logStreamRecheckEvery, now)
 		ctx := r.Context()
 
-		// Check that we can flush (required for SSE).
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "streaming not supported")
 			return
 		}
 
-		// Set SSE headers.
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
@@ -209,22 +190,17 @@ func handleLogStreamWith(database *db.DB, ringBuf *RingBuffer, hooks logStreamHo
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
 
-		// This handler streams through the ordinary ResponseWriter, so it is
-		// subject to http.Server.WriteTimeout: net/http sets the write deadline
-		// once, when headers are read, and writing more data does not extend it.
-		// Left in place, every write past it (keepalives included) silently
-		// times out, since the caller discards write errors per SSE convention,
-		// and the stream goes dead until the client reconnects and replays the
-		// full backfill. SetWriteDeadline(zero) clears it on HTTP/1 and cancels
-		// the per-stream timer on HTTP/2; ErrNotSupported means no real
-		// connection (tests) and is ignored.
+		// This handler streams through the ordinary ResponseWriter, so http.Server.WriteTimeout applies: net/http
+		// sets the write deadline once at header read and writing does not extend it, so every write past it
+		// (keepalives included) would silently time out (SSE callers discard write errors) and the stream goes dead
+		// until the client reconnects and replays the backfill. SetWriteDeadline(zero) clears it on HTTP/1 and
+		// cancels the per-stream timer on HTTP/2; ErrNotSupported (tests) is ignored.
 		if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
 			slog.Warn("log stream: failed to clear write deadline; stream may be cut by WriteTimeout", "err", err)
 		}
 
-		// Snapshot the backfill and subscribe atomically: the principal
-		// re-check below is a DB round-trip, so a Snapshot()-then-Subscribe()
-		// gap would silently drop entries written in between.
+		// Snapshot the backfill and subscribe atomically: the principal re-check is a DB round-trip, so a
+		// Snapshot()-then-Subscribe() gap would drop entries written between.
 		backfill, ch, unsub := ringBuf.SnapshotAndSubscribe()
 		defer unsub()
 
@@ -232,8 +208,7 @@ func handleLogStreamWith(database *db.DB, ringBuf *RingBuffer, hooks logStreamHo
 			return
 		}
 
-		// Keepalive ticker against intermediary/proxy idle timeouts (the
-		// connection's own WriteTimeout was already neutralized above).
+		// Keepalive against proxy idle timeouts (WriteTimeout was neutralized above).
 		keepalive := time.NewTicker(15 * time.Second)
 		defer keepalive.Stop()
 

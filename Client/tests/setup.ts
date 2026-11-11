@@ -26,6 +26,8 @@
 import { webcrypto as nodeWebCrypto } from "node:crypto";
 import * as nodeWebStreams from "node:stream/web";
 import { setLogLevel } from "../src/lib/logger";
+import { installFrameShapes } from "../src/lib/net/wireCheck";
+import * as wireShapes from "../src/lib/net/wireShapes";
 import { installConsoleGuard } from "./helpers/console";
 import { installLifecycleGuard } from "./helpers/lifecycle";
 
@@ -77,6 +79,11 @@ if (typeof Element.prototype.scrollIntoView !== "function") {
 // debug/info log entry (buffer entry, listener call) raises the level back for
 // itself and restores "warn" afterwards.
 setLogLevel("warn");
+
+// The app installs the frame shape table when the signed-in session code loads
+// (app/sessionDispatcher.ts), before any socket dials. Unit tests drive the
+// socket without that loader, so they start from the same installed state.
+installFrameShapes(wireShapes);
 
 // ...and that a test does not leak a bare window/document listener or a real
 // interval: the guard fails the test that made it, unless its file is on the

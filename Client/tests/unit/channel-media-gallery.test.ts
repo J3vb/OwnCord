@@ -17,11 +17,11 @@ import {
   createChannelMediaGallery,
   localMonthKey,
   MEDIA_SEARCH_DEBOUNCE_MS,
-} from "@components/ChannelMediaGallery";
+} from "../../src/features/messaging/ChannelMediaGallery";
 import type {
   ChannelMediaGalleryOptions,
   ChannelMediaGalleryPanel,
-} from "@components/ChannelMediaGallery";
+} from "../../src/features/messaging/ChannelMediaGallery";
 import type { ChannelMediaItem, ChannelMediaPage, ChannelMediaQuery } from "@lib/types";
 
 function item(

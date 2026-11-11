@@ -10,7 +10,7 @@ import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
 import type { DmChannel } from "@stores/dm.store";
 import { createAvatarElement, pickAvatarColor } from "../../../features/profiles/avatar";
-import { buildGroupAvatarStack } from "@components/DmSidebar";
+import { buildGroupAvatarStack } from "../../../features/direct-messages/DmSidebar";
 import { membersStore } from "@stores/members.store";
 import { messagingText } from "../../../i18n/messaging";
 

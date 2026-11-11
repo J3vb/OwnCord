@@ -4,7 +4,8 @@
  */
 import type { UserStatus } from "@lib/types";
 import { authStore } from "@stores/auth.store";
-import { loadUserStatus } from "@lib/presence/userStatus";
+import { statusAccount } from "@lib/presence/serverStatus";
+import { settleSavedStatus } from "@lib/presence/statusAgreement";
 import type { PageState, PageApi } from "./pageState";
 
 export function createPagePresence(st: PageState, _pg: PageApi) {
@@ -13,21 +14,14 @@ export function createPagePresence(st: PageState, _pg: PageApi) {
   // ---------------------------------------------------------------------------
 
   /**
-   * Re-assert the status the user picked, if the server disagrees.
-   *
-   * This used to fire on every connect, because the server stamped everyone
-   * online at handshake and the client had to race to correct it — which is
-   * what made a chosen Do Not Disturb (and "appear offline") flash online on
-   * every reconnect. The server now reads the saved status and announces
-   * *that*, so this is a no-op in the normal case and only speaks up when the
-   * two genuinely differ (an older server, or a status changed while the
-   * socket was down).
+   * Bring the saved status and the server's into line on connect: adopt a
+   * status another device chose, or send the one chosen here (the rules are in
+   * lib/presence/statusAgreement).
    */
   function restoreSavedPresence(): void {
-    const status = loadUserStatus();
-    const serverStatus = authStore.getState().user?.status;
-    if (serverStatus === status) return;
-    applyPresence(status);
+    const user = authStore.getState().user;
+    const toSend = settleSavedStatus(statusAccount(user?.id ?? 0), user?.status);
+    if (toSend !== null) applyPresence(toSend);
   }
 
   /** Send a presence change and reflect it locally. Shared by the settings

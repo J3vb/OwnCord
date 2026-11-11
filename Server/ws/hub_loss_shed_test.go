@@ -144,7 +144,7 @@ func TestChannelReadAudience_UnresolvedUserIsMarkedForResync(t *testing.T) {
 	if len(audience) != 2 {
 		t.Fatalf("audience = %v, want the two resolvable users", audience)
 	}
-	h.broadcastChannelScopedTo(chID, []byte(`{"type":"voice_state","payload":{"channel_id":1}}`), audience, "voice")
+	h.broadcastChannelScopedTo(chID, []byte(`{"type":"voice_state","payload":{"channel_id":1}}`), audience, 0, "voice")
 	drainQueueThroughDispatch(h)
 	h.BroadcastToAll([]byte(`{"type":"server_filler"}`))
 	drainQueueThroughDispatch(h)
@@ -165,7 +165,10 @@ func TestChannelReadAudience_UnresolvedUserIsMarkedForResync(t *testing.T) {
 func chanHasFrame(ch chan []byte, typ string) bool {
 	for {
 		select {
-		case f := <-ch:
+		case f, ok := <-ch:
+			if !ok {
+				return false
+			}
 			if strings.Contains(string(f), typ) {
 				return true
 			}

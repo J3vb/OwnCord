@@ -223,7 +223,7 @@ export function userRoleColorVar(userId: number): string {
 export function resolveAuthor(user: {
   id: number;
   username: string;
-  avatar: string | null;
+  avatar?: string | null;
   display_name?: string | null;
 }): { username: string; displayName: string | null; avatar: string | null } {
   const member = membersStore.getState().members.get(user.id);
@@ -237,7 +237,7 @@ export function resolveAuthor(user: {
   return {
     username: user.username,
     displayName: user.display_name ?? null,
-    avatar: user.avatar,
+    avatar: user.avatar ?? null,
   };
 }
 

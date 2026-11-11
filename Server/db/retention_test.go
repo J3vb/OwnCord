@@ -304,3 +304,28 @@ func TestRetentionRuns_Journal(t *testing.T) {
 		t.Fatalf("an empty finished run is listed: %+v", runs)
 	}
 }
+
+// The record holds the last sweep the database finished, and a channel that is
+// gone records nothing.
+func TestRetentionSwept_HoldsTheLastFinishedSweep(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	ch := seedChannel(t, database, "swept-chan")
+	if sweep, ok, err := database.RetentionSwept(ctx, ch); err != nil || ok || sweep != "" {
+		t.Fatalf("RetentionSwept before any sweep = (%q, %v, %v), want no record", sweep, ok, err)
+	}
+	for _, sweep := range []string{"second", "", "first"} {
+		if err := database.RecordRetentionSwept(ctx, ch, sweep); err != nil {
+			t.Fatalf("RecordRetentionSwept(%q): %v", sweep, err)
+		}
+		if got, ok, err := database.RetentionSwept(ctx, ch); err != nil || !ok || got != sweep {
+			t.Fatalf("RetentionSwept = (%q, %v, %v), want %q", got, ok, err, sweep)
+		}
+	}
+	if err := database.RecordRetentionSwept(ctx, ch+1000, "any"); err != nil {
+		t.Fatalf("RecordRetentionSwept for a missing channel: %v", err)
+	}
+	if _, ok, err := database.RetentionSwept(ctx, ch+1000); err != nil || ok {
+		t.Fatalf("RetentionSwept for a missing channel = (%v, %v), want no record", ok, err)
+	}
+}

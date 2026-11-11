@@ -7,7 +7,7 @@ import dispatcherSource from "../../../src/lib/dispatcher.ts?raw";
 describe("bundle hygiene", () => {
   // screenShare.ts has VALUE imports from livekit-client (~1.3 MB) at module
   // scope. dispatcher.ts is imported statically from main.ts, so a top-level
-  // `import ... from "@lib/voice/screenShare"` here drags the whole library into
+  // `import ... from "../../../src/features/voice/screenShare"` here drags the whole library into
   // the startup bundle — every other voice call site in this file already
   // loads its module lazily (see the livekitSession() helper), and
   // screenShare.ts's one export used here (rollbackPendingVideo) must follow

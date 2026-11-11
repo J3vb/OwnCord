@@ -23,6 +23,7 @@ import {
 import { resetMembersState, resetMessagesState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { mountMessageInput } from "../helpers/messageInputHarness";
+import { hoverRows } from "../helpers/hoverRows";
 
 function seed(messages: readonly Message[]): void {
   resetMessagesState({ messagesByChannel: new Map([[1, [...messages]]]) });
@@ -116,6 +117,7 @@ describe("inline message editor", () => {
   describe("opening", () => {
     it("the hover Edit button opens the editor in that row with the message text, caret at the end", async () => {
       mount([mine(1), mine(2)]);
+      hoverRows(container);
 
       byId("msg-edit-2")!.click();
       await vi.waitFor(() => expect(editor(2)).not.toBeNull());

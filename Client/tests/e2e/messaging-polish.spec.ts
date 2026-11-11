@@ -97,6 +97,7 @@ test.describe("message reading", () => {
 
   test("a virtualized rebuild keeps focus on the row's action control", async ({ page }) => {
     const reply = page.locator(`[data-testid='msg-reply-${RENDERED}']`);
+    await page.locator(`[data-testid='message-${RENDERED}']`).hover();
     await reply.scrollIntoViewIfNeeded();
     await reply.focus();
     await expect(reply).toBeFocused();
@@ -143,7 +144,8 @@ test.describe("message reading", () => {
     // matches (a programmatic focus after a mouse click does not): focus the
     // button, step away and back with Tab.
     const reply = page.locator(`[data-testid='msg-reply-${RENDERED}']`);
-    await reply.focus();
+    await page.locator(`[data-testid='msg-more-${RENDERED}']`).focus();
+    await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Tab");
     await expect(reply).toBeFocused();
@@ -286,7 +288,8 @@ test.describe("changed-area screenshots (evidence)", () => {
     });
 
     // Action bar revealed by keyboard focus rather than hover alone.
-    await page.locator(`[data-testid='msg-reply-${RENDERED}']`).focus();
+    await page.locator(`[data-testid='msg-more-${RENDERED}']`).focus();
+    await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Tab");
     await testInfo.attach("actions-focus-dark.png", {

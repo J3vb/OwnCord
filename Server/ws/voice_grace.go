@@ -1,19 +1,12 @@
 package ws
 
-// The reconnect grace window. A clean close ends the read loop before a
-// replacement socket arrives (a Wi-Fi roam, VPN reconnect or NAT rebind resets the
-// TCP path while the LiveKit media path, an independent UDP flow, was never
-// interrupted). Running handleVoiceLeave on that close unless a replacement had
-// already registered would drop the call on a blip shorter than the reconnect race
-// and force a manual rejoin plus a fresh key exchange.
-//
-// The window holds a completed membership (DB row, SFU participant, key holder) for
-// voiceGraceWindow after the socket drops. A resuming socket (lastSeq > 0)
-// registering inside it inherits the parked membership through registerNow, as it
-// would a still-registered old client's session; nothing is torn down. If the window
-// expires first the membership is torn down through finishVoiceLeave, so the
-// invariant is unchanged. Only a completed join is parked: an incomplete one has no
-// delivered membership to preserve and leaves immediately.
+// The reconnect grace window. A clean close ends the read loop before a replacement socket
+// arrives (Wi-Fi roam, VPN reconnect, NAT rebind), while the LiveKit media path (an
+// independent UDP flow) was never interrupted; leaving immediately would drop the call and
+// force a manual rejoin plus a fresh key exchange. A completed membership (DB row, SFU
+// participant, key holder) is held for voiceGraceWindow after the socket drops. A resuming
+// socket (lastSeq > 0) registering inside it inherits it through registerNow; otherwise
+// expiry tears it down through finishVoiceLeave. An incomplete join is not parked.
 
 import (
 	"context"
@@ -24,60 +17,51 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// voiceGraceWindow is the reconnect grace. 15 s covers a typical roam and stays
-// well under the 60 s stale sweep, whose backstop still reaps a membership whose
-// client never returns. A var so tests can shrink it.
+// voiceGraceWindow is the reconnect grace: covers a typical roam, well under the 60 s stale
+// sweep backstop. A var so tests can shrink it.
 var voiceGraceWindow = 15 * time.Second
 
-// voiceGraceEntry is one parked membership: the disconnected socket (for the
-// teardown's log line and username) and its slotSnap, whose E2EE key must survive
-// with it (the client keeps its keypair across a blip). The snap is immutable once parked.
+// voiceGraceEntry is one parked membership: the disconnected socket (for the teardown log)
+// and its slotSnap, whose E2EE key must survive with it. The snap is immutable once parked.
 type voiceGraceEntry struct {
 	client *Client
 	snap   slotSnap
 	timer  *time.Timer
 }
 
-// voiceGraceState is the userID to parked-membership map. A second drop while the
-// first is parked replaces the entry (and stops its timer), so a user never has
-// two windows pending.
+// voiceGraceState is the userID to parked-membership map. A second drop replaces the entry
+// (and stops its timer), so a user never has two windows pending.
 type voiceGraceState struct {
 	mu      syncutil.Ranked[lockRankLeaf]
 	entries map[int64]*voiceGraceEntry
 	closed  bool // set by close at shutdown: put arms nothing from then on
 	// moved remembers, per device session, a parked call another device took over
-	// (voiceJoinMoveCall): the parking session was never told, so it is told when it
-	// next registers. Consumed by takeMoved, dropped when stale (movedNoteTTL) and
-	// capped (movedNoteCap).
+	// (voiceJoinMoveCall), to tell the parking session when it next registers. Dropped when stale
+	// (movedNoteTTL) and capped (movedNoteCap).
 	moved map[movedKey]movedNote
-	// modMoves holds, per user, a moderator move that evicted a parked call, for
-	// the parking session to collect on resume (voice_grace_modmove.go).
+	// modMoves holds, per user, a moderator move that evicted a parked call, for the parking
+	// session to collect on resume (voice_grace_modmove.go).
 	modMoves map[int64]*parkedModMove
-	// expiring counts expiry teardowns past takeForExpiry, so close can wait for one
-	// already writing to the database.
+	// expiring counts expiry teardowns past takeForExpiry so close can wait for one writing to the DB.
 	expiring sync.WaitGroup
 }
 
-// movedKey names the device session a moved-away parked call belonged to.
 type movedKey struct {
 	userID    int64
 	tokenHash string
 }
 
-// movedNote is the channel of the moved-away call, and when.
 type movedNote struct {
 	chID int64
 	at   time.Time
 }
 
 const (
-	// movedNoteTTL bounds how long a session may be away and still be told its parked
-	// call moved; past it the client has given the call up.
+	// movedNoteTTL bounds how long a session may be away and still be told its call moved.
 	movedNoteTTL = 10 * time.Minute
 	movedNoteCap = 1024
 )
 
-// markMoved records that tokenHash's parked call in chID moved to another device.
 func (s *voiceGraceState) markMoved(userID int64, tokenHash string, chID int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -96,7 +80,6 @@ func (s *voiceGraceState) markMoved(userID int64, tokenHash string, chID int64) 
 	s.moved[movedKey{userID, tokenHash}] = movedNote{chID: chID, at: now}
 }
 
-// takeMoved returns and clears the moved-call channel for the session, or 0.
 func (s *voiceGraceState) takeMoved(userID int64, tokenHash string) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -118,10 +101,9 @@ func (s *voiceGraceState) isClosed() bool {
 	return s.closed
 }
 
-// close stops every parked entry's timer and drops the entries without teardown or
-// database write, and refuses later put calls. A timer already fired and waiting on
-// the member lock finds its entry gone (takeForExpiry); one whose teardown already
-// started is waited for, so no expiry writes after close returns.
+// close stops every parked entry's timer and drops the entries without teardown or DB
+// write, and refuses later put calls. A fired timer waiting on the member lock finds its
+// entry gone; one already tearing down is waited for, so no expiry writes after close returns.
 func (s *voiceGraceState) close() {
 	s.mu.Lock()
 	s.closed = true
@@ -135,8 +117,8 @@ func (s *voiceGraceState) close() {
 	s.expiring.Wait()
 }
 
-// put parks e for userID and starts its expiry timer under the lock, so no reader
-// sees the entry without its timer. After close it reports false, parking nothing.
+// put parks e for userID and starts its expiry timer under the lock, so no reader sees the
+// entry without its timer. After close it reports false.
 func (s *voiceGraceState) put(userID int64, e *voiceGraceEntry, expire func()) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -154,22 +136,20 @@ func (s *voiceGraceState) put(userID int64, e *voiceGraceEntry, expire func()) b
 	return true
 }
 
-// get returns userID's parked entry or nil. Its snap is immutable once parked, so
-// the caller may read it without the lock.
+// get returns userID's parked entry or nil; its snap is immutable so reading it needs no lock.
 func (s *voiceGraceState) get(userID int64) *voiceGraceEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.entries[userID]
 }
 
-// take removes and returns userID's parked entry, or nil, stopping its timer so a
-// resuming socket that inherits the membership does not also get the expiry teardown.
+// take removes and returns userID's entry, stopping its timer so an inheriting socket does not also get the
+// expiry teardown.
 func (s *voiceGraceState) take(userID int64) *voiceGraceEntry {
 	return s.takeJoin(userID, 0, "")
 }
 
-// takeJoin is take limited to an entry parking a join in channelID with joinToken;
-// zero channelID or empty joinToken matches any.
+// takeJoin is take limited to an entry parking channelID with joinToken; zero/empty matches any.
 func (s *voiceGraceState) takeJoin(userID, channelID int64, joinToken string) *voiceGraceEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -182,8 +162,8 @@ func (s *voiceGraceState) takeJoin(userID, channelID int64, joinToken string) *v
 	return e
 }
 
-// takeIfSame removes userID's entry only while it is still e, so a superseded
-// window's timer never tears down a newer session.
+// takeIfSame removes userID's entry only while it is still e, so a superseded timer never tears down a newer
+// session.
 func (s *voiceGraceState) takeIfSame(userID int64, e *voiceGraceEntry) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -195,8 +175,8 @@ func (s *voiceGraceState) takeIfSame(userID int64, e *voiceGraceEntry) bool {
 	return true
 }
 
-// takeForExpiry is takeIfSame for the expiry timer, also counting the teardown in
-// flight; the caller calls s.expiring.Done when it ends.
+// takeForExpiry is takeIfSame for the expiry timer, also counting the teardown in flight (caller calls
+// s.expiring.Done).
 func (s *voiceGraceState) takeForExpiry(userID int64, e *voiceGraceEntry) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -216,8 +196,8 @@ func (s *voiceGraceState) has(userID, channelID int64) bool {
 	return e != nil && e.snap.chID == channelID
 }
 
-// snapshot copies the parked (userID to channelID) pairs so a caller can skip them
-// without holding this lock while taking the hub lock.
+// snapshot copies the parked (userID to channelID) pairs so callers can skip them without holding this lock
+// while taking the hub lock.
 func (s *voiceGraceState) snapshot() map[int64]int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -228,10 +208,9 @@ func (s *voiceGraceState) snapshot() map[int64]int64 {
 	return out
 }
 
-// disconnectVoice is the socket-teardown voice step (readPump and a failed
-// handshake), under the teardown's txn. A completed membership is parked
-// (voiceTxn.park); anything else (disabled window, failed/half join, a kick that
-// refuses reconnection) leaves immediately.
+// disconnectVoice is the socket-teardown voice step (readPump, failed handshake) under the
+// teardown's txn. A completed membership is parked; anything else (disabled window, half
+// join, a kick refusing reconnection) leaves immediately.
 func (h *Hub) disconnectVoice(ctx context.Context, txn *voiceTxn, c *Client, reason string) {
 	snap, handled := txn.park(c) //nolint:contextcheck // the grace timer outlives the disconnect ctx; expiry uses its own.
 	if handled {
@@ -240,15 +219,11 @@ func (h *Hub) disconnectVoice(ctx context.Context, txn *voiceTxn, c *Client, rea
 	h.finishVoiceLeave(ctx, txn, c, snap.chID, snap.joinToken, reason)
 }
 
-// park clears c's slot and parks a completed membership in the grace window,
-// reporting whether nothing is left for the caller to tear down: the slot held no
-// membership, it is parked, or the registry is closed (shutdown: the slot is
-// cleared, no timer armed and nothing written, as the next boot wipes the rows).
-// False means the membership was not parkable (incomplete join, disabled window,
-// a kick refusing reconnection) and the caller leaves immediately with the
-// returned snap. The timer outlives the disconnect ctx; expiry runs the teardown
-// under its own context and the member lock, dropping the entry first
-// (expireVoiceGrace).
+// park clears c's slot and parks a completed membership, reporting whether nothing is left
+// for the caller to tear down: no membership, parked, or the registry is closed (shutdown:
+// the next boot wipes the rows). False means not parkable and the caller leaves immediately
+// with the returned snap. The timer outlives the disconnect ctx; expiry runs under its own
+// context and the member lock, dropping the entry first (expireVoiceGrace).
 func (t *voiceTxn) park(c *Client) (slotSnap, bool) {
 	snap := t.clear(c)
 	if snap.chID == 0 {
@@ -275,12 +250,11 @@ func (t *voiceTxn) park(c *Client) (slotSnap, bool) {
 	return snap, true
 }
 
-// expireVoiceGrace tears down a parked membership whose window elapsed. Under the
-// member lock it takes the entry back only if it is still this one (takeForExpiry),
-// so exactly one of this teardown and a resuming socket's voiceTxn.inherit runs
-// when both land together, and a superseded window's timer never tears down a newer
-// session. The entry is removed before the slow finishVoiceLeave, which never runs
-// with the grace lock held.
+// expireVoiceGrace tears down a parked membership whose window elapsed. Under the member
+// lock it takes the entry only if still this one (takeForExpiry), so exactly one of this
+// teardown and a resuming socket's voiceTxn.inherit runs, and a superseded timer never tears
+// down a newer session. The entry is removed before the slow finishVoiceLeave, which never
+// runs with the grace lock held.
 func (h *Hub) expireVoiceGrace(userID int64, entry *voiceGraceEntry) {
 	txn := h.begin(userID)
 	defer txn.end()
@@ -291,9 +265,8 @@ func (h *Hub) expireVoiceGrace(userID int64, entry *voiceGraceEntry) {
 	h.leaveParkedVoice(context.Background(), txn, entry, voiceLeaveReasonGraceExpired)
 }
 
-// leaveParkedVoice runs the full voice teardown for a parked membership already
-// taken from the grace window; false for a nil entry. The caller holds Hub.begin
-// for the entry's user.
+// leaveParkedVoice runs the full teardown for a parked membership already taken from the
+// window; false for nil. The caller holds Hub.begin for the entry's user.
 func (h *Hub) leaveParkedVoice(ctx context.Context, txn *voiceTxn, e *voiceGraceEntry, reason string) bool {
 	if e == nil {
 		return false
@@ -302,9 +275,8 @@ func (h *Hub) leaveParkedVoice(ctx context.Context, txn *voiceTxn, e *voiceGrace
 	return true
 }
 
-// dropOrphanVoiceGrace drops userID's parked membership when its exact voice_states
-// row (channel and joined_at) is gone, so a resume never inherits a membership with
-// no row. A failed read keeps the entry.
+// dropOrphanVoiceGrace drops userID's parked membership when its exact voice_states row is
+// gone, so a resume never inherits one with no row. A failed read keeps the entry.
 func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 	e := h.voiceHub.reg.voiceGrace.get(userID)
 	if e == nil {
@@ -320,20 +292,15 @@ func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 	}
 }
 
-// inherit is registerNow's grace-window step: a resuming socket (lastSeq > 0)
-// inherits the membership its previous socket parked, so a short blip keeps the
-// call. The parked snap carries the completed join's token and E2EE key; adopting
-// it lets registerNow's subscribe block restore the voice topic as the
-// still-registered-old-client transfer does. Taking the entry stops its expiry
-// timer, and expireVoiceGrace's takeForExpiry under the same member lock finds it
-// gone, so inheriting and tearing down never both run. Returns the inherited
-// channel id or 0. Only the same session (token hash) inherits or discards a parked
-// entry. Skipped when the old-client transfer already supplied a session (c is in
-// voice: a reconnect that beat the drop teardown). A fresh connect (lastSeq == 0) is
-// a deliberate reload, not a blip, so it discards any parked entry.
+// inherit is registerNow's grace step: a resuming socket (lastSeq > 0) inherits the
+// membership its previous socket parked, so a blip keeps the call. The snap carries the
+// join token and E2EE key, letting registerNow's subscribe restore the voice topic. Taking
+// the entry stops its timer, and expireVoiceGrace's takeForExpiry, under the same member lock,
+// finds it gone, so inheriting and teardown never both run. Returns the channel id or 0. Skipped when the
+// old-client transfer already supplied a session. A fresh connect (lastSeq == 0) is a
+// deliberate reload and discards any parked entry.
 func (t *voiceTxn) inherit(c *Client) int64 {
-	// Only the session that parked the call may take it back. Another device's parked
-	// call stays parked for its own device (and expires on its own).
+	// Only the session that parked the call may take it back; another device's stays parked for itself.
 	e := t.h.voiceHub.reg.voiceGrace.get(c.userID)
 	if e == nil || e.client.tokenHash != c.tokenHash {
 		return 0

@@ -19,23 +19,19 @@ const (
 	ThreadSortCreated  = db.ThreadSortCreated
 )
 
-// ThreadListParams narrows and orders one thread list request. The zero value
-// is a parent's open threads, newest activity first, no tag filter.
+// ThreadListParams narrows and orders one thread list request. The zero value is a parent's open threads,
+// newest activity first, no tag filter.
 type ThreadListParams struct {
-	// Sort is ThreadSortActivity (or "") or ThreadSortCreated.
 	Sort string
-	// TagIDs keeps the posts carrying any of these tags; forum parents only,
-	// at most db.MaxPostTags, each a tag of that forum.
-	TagIDs []int64
-	// Archived lists archived threads instead of open ones.
+	// TagIDs keeps the posts carrying any of these tags; forum parents only, at most
+	// db.MaxPostTags, each a tag of that forum.
+	TagIDs   []int64
 	Archived bool
 }
 
-// List returns a channel's threads with the given archived state, gated by the
-// parent's read. They come newest activity first, or newest created first
-// under ThreadSortCreated. hasMore reports another page. A tag filter on a
-// parent that is not a forum, or naming a tag the forum does not have, is
-// ErrBadRequest.
+// List returns a channel's threads with the given archived state, gated by the parent's read: newest activity
+// first, or newest created first under ThreadSortCreated. hasMore reports another page. A tag filter on a
+// non-forum parent, or naming a tag the forum lacks, is ErrBadRequest.
 func (s *ThreadService) List(ctx context.Context, userID, parentID int64, p ThreadListParams, after ThreadCursor, limit int) (threads []db.ThreadInfo, next ThreadCursor, hasMore bool, err error) {
 	ts, err := s.store()
 	if err != nil {
@@ -95,14 +91,14 @@ func (s *ThreadService) List(ctx context.Context, userID, parentID int64, p Thre
 // ThreadCursor is the position a thread list page stops at (db.ThreadCursor).
 type ThreadCursor = db.ThreadCursor
 
-// FormatThreadCursor renders a cursor as the opaque `before` value of the list
-// route: the activity time and the id of the page's last row, joined by "_".
+// FormatThreadCursor renders a cursor as the opaque `before` value of the list route: the activity time and
+// the id of the page's last row, joined by "_".
 func FormatThreadCursor(c ThreadCursor) string {
 	return c.Activity + "_" + strconv.FormatInt(c.ID, 10)
 }
 
-// FormatThreadCursorFor renders the `next_before` of a page in the given sort:
-// the activity cursor under activity, the last row's id alone under created.
+// FormatThreadCursorFor renders the `next_before` of a page in the given sort: the activity cursor under
+// activity, the last row's id alone under created.
 func FormatThreadCursorFor(sort string, c ThreadCursor) string {
 	if sort == ThreadSortCreated {
 		return strconv.FormatInt(c.ID, 10)
@@ -110,9 +106,8 @@ func FormatThreadCursorFor(sort string, c ThreadCursor) string {
 	return FormatThreadCursor(c)
 }
 
-// ParseThreadCursorFor reads a `before` value in the given sort. A cursor from
-// the other sort does not parse, so it is ErrBadRequest rather than a page
-// from the wrong place.
+// ParseThreadCursorFor reads a `before` value in the given sort. A cursor from the other sort does not parse
+// (ErrBadRequest) rather than giving a page from the wrong place.
 func ParseThreadCursorFor(sort, raw string) (ThreadCursor, error) {
 	if sort != ThreadSortCreated {
 		return ParseThreadCursor(raw)

@@ -36,3 +36,6 @@ var _ uploadPolicyBroadcaster = (*ws.Hub)(nil)
 // handlePatchSettings reaches ApplyGameActivityPolicy the same way; a renamed
 // hub method would leave a switched-off game activity showing on open clients.
 var _ gameActivityPolicyApplier = (*ws.Hub)(nil)
+
+// The video cap reaches the hub the same way.
+var _ videoBitrateCapApplier = (*ws.Hub)(nil)

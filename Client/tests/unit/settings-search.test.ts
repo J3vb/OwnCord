@@ -92,7 +92,6 @@ vi.mock("@tauri-apps/api/core", () => ({
       active: null,
       notFound: false,
       resetAfterCrash: false,
-      autoOff: false,
     };
   },
 }));

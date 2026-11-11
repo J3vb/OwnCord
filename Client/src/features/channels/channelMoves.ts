@@ -5,7 +5,7 @@
  */
 
 import { channelsStore, updateChannelPosition, type Channel } from "../../stores/channels.store";
-import type { ChannelReorderData } from "./ChannelSidebar";
+import type { ChannelReorderData } from "./channelSidebarTypes";
 
 export interface ChannelMoves {
   /** Null when the channel is already first in its group. */

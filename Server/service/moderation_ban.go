@@ -37,8 +37,7 @@ func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64
 		return err
 	}
 
-	// Authorization before existence: an actor without ban authority learns nothing
-	// about which user ids exist.
+	// Authorization before existence: an actor without ban authority learns nothing about which user ids exist.
 	if err := s.requireBanPermission(ctx, actorID); err != nil {
 		return err
 	}
@@ -57,24 +56,21 @@ func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64
 		return fmt.Errorf("%w: failed to ban user: %w", ErrInternal, err)
 	}
 
-	// Audit rows must survive a request canceled after the ban committed. The detail
-	// is a fixed phrase, never the reason: the reason is already on users.ban_reason
-	// for AdminPerimeter holders, and a second copy of free text could quote a message.
+	// Audit rows must survive a request canceled after the commit. Fixed phrase, never the reason (already on
+	// users.ban_reason; a second copy of free text could quote a message).
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_ban", "user", targetID, "user banned")
 
 	slog.Info("user banned", "actor_id", actorID, "target_id", targetID)
 	return nil
 }
 
-// ForceLogout revokes every session of the target (the client's "Kick"; OwnCord is
-// single-server so "remove from guild" has no referent). Gated on KICK_MEMBERS plus
-// the ban hierarchy rule.
+// ForceLogout revokes every session of the target (the client's "Kick"). Gated on KICK_MEMBERS plus the ban
+// hierarchy rule.
 func (s *ModerationService) ForceLogout(ctx context.Context, actorID, targetID int64) error {
 	return s.forceLogout(ctx, actorID, targetID, "", nil)
 }
 
-// forceLogout's reason is the ledger row's text; empty falls back to "all sessions
-// terminated".
+// forceLogout's reason is the ledger text; empty falls back to "all sessions terminated".
 func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID int64, reason string, reportID *int64) error {
 	if err := requireHumanActor(actorID); err != nil {
 		return err
@@ -109,15 +105,13 @@ func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID i
 		return fmt.Errorf("%w: failed to log out user: %w", ErrInternal, err)
 	}
 
-	// The sessions are gone; drop the socket now rather than at the hub's 30-second
-	// sweep (as profile_handler.go and recovery.go do), since kick exists for
-	// immediate ejection. A notifier without this (tests, nil) is a no-op.
+	// Drop the socket now rather than at the hub's 30-second sweep: kick exists for immediate ejection. A
+	// notifier without this is a no-op.
 	if d, ok := s.notifier.(SessionDisconnector); ok {
 		d.DisconnectRevokedUser(targetID)
 	}
 
-	// Audit rows must survive a request canceled after the commit. Fixed phrase,
-	// never the reason, as in Ban's audit row.
+	// Audit rows must survive a request cancel. Fixed phrase, never the reason.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "force_logout", "user", targetID,
 		"all sessions terminated")
 

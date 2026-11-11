@@ -7,12 +7,6 @@ import (
 	"time"
 )
 
-// The per-signal evaluators behind AttentionService.Evaluate; each runs under the
-// service's lock and ends in settle.
-
-// attentionLevel commits the first measured level immediately, so a reading is
-// never shown healthy before one is established, and every later new level only
-// after attentionSustain repeats (sustain 1 commits immediately).
 type attentionLevel struct {
 	status, pending string
 	streak          int
@@ -80,8 +74,6 @@ func (s *AttentionService) evalDisk(r attentionReadings, now time.Time) {
 
 func attentionMB(b uint64) string { return fmt.Sprintf("%.0f MB", float64(b)/(1<<20)) }
 
-// attentionRate turns a cumulative counter into a per-minute rate with a
-// learned baseline and a hysteresis band.
 type attentionRate struct {
 	level    attentionLevel
 	last     float64
@@ -113,13 +105,10 @@ func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.
 	}
 	rate := (*total - st.last) / now.Sub(st.lastAt).Minutes()
 	st.last, st.lastAt = *total, now
-	// The first measured interval holds the post-restart resume burst and is never
-	// learned. During warm-up a quietWarmup signal learns every later sample and
-	// raises nothing; any other signal learns only samples at or below its floor and
-	// raises at the floor, so pressure present at boot is raised, not learned. After
-	// warm-up only healthy samples are learned, so sustained pressure never becomes
-	// the normal. A stopped dispatch loop commits at once; any other rate level starts
-	// healthy and needs attentionSustain samples to change.
+	// The first measured interval holds the post-restart resume burst and is never learned.
+	// During warm-up a quietWarmup signal learns everything and raises nothing; others learn
+	// only samples at or below the floor and raise at it, so pressure at boot is raised, not
+	// learned. After warm-up only healthy samples are learned.
 	first := st.level.status == ""
 	if first {
 		st.level.status = AttentionStatusOK
@@ -159,8 +148,6 @@ func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.
 	s.settle(sig, spec.title, spec.action)
 }
 
-// learn folds rate into the baseline under evalRate's learning rules; healthy
-// is whether this sample both settled and measured ok.
 func (st *attentionRate) learn(rate float64, first, warm, healthy bool, spec rateSpec) {
 	learn := false
 	switch {
@@ -183,9 +170,8 @@ func (st *attentionRate) learn(rate float64, first, warm, healthy bool, spec rat
 	st.samples++
 }
 
-// BackupScheduleInterval is the scheduled-backup interval for a
-// backup_schedule setting value; "off" or anything unrecognised is 0,
-// scheduling disabled.
+// BackupScheduleInterval is the interval for a backup_schedule value; "off" or anything
+// unrecognised is 0 (disabled).
 func BackupScheduleInterval(schedule string) time.Duration {
 	switch strings.ToLower(strings.TrimSpace(schedule)) {
 	case "daily":
@@ -235,11 +221,9 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 	s.settle(sig, title, action)
 }
 
-// evalVoice reports the LiveKit voice path's health and restart state. A managed
-// companion that is not running (crash loop gave up, or never started) is the
-// failure users report most, so it warns, and critical once restarts exhausted the
-// backoff. An external LiveKit is health-probed and warns when it does not answer;
-// an unconfigured voice path is unknown, never healthy.
+// evalVoice reports the LiveKit voice path's health. A managed companion that is not
+// running warns, critical once restarts exhausted the backoff. An external LiveKit warns
+// when its probe fails; an unconfigured path is unknown, never healthy.
 func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	sig := AttentionSignal{ID: "voice", Label: "Voice (LiveKit)", ObservedAt: now}
 	title := "Voice is unavailable"
@@ -251,8 +235,7 @@ func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	}
 	v := *r.voice
 	if !v.Managed {
-		// External LiveKit: a probe answer warns when unreachable; no probe
-		// (unconfigured) is unknown. Its output never reaches Server Logs.
+		// External LiveKit: unreachable warns; no probe is unknown. Its output never reaches Server Logs.
 		action = "Confirm the external LiveKit is reachable at voice.livekit_url. Its output is not in Server Logs or the support bundle: read it where it runs, e.g. docker compose logs livekit."
 		if v.Reachable == nil {
 			sig.Status, sig.Detail = AttentionStatusUnknown, "LiveKit is not configured"
@@ -273,9 +256,6 @@ func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 		s.settle(sig, title, action)
 		return
 	}
-	// Hysteresis like the disk signal: the first level commits at once, every later
-	// change needs attentionSustain samples, so one noisy minute neither raises nor
-	// clears.
 	raw := AttentionStatusOK
 	switch {
 	case v.GaveUp:
@@ -300,13 +280,12 @@ func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	s.settle(sig, title, action)
 }
 
-// evalCertificate reports how long the served TLS certificate has left. Nothing
-// renews a self-signed or manual certificate, and a failing ACME renewal is silent
-// until handshakes fail, so the panel warns ahead of the date. autocert renews
-// min(lifetime/3, 30 days) before expiry, so ACME warns once a third of that window
-// has passed unrenewed and is critical two thirds in; a fixed window would flag
-// every healthy short-lived certificate. TLS off (a reverse proxy serves it) and
-// ACME before its first handshake are unknown.
+// evalCertificate reports how long the served TLS certificate has left. Nothing renews a
+// self-signed or manual certificate and a failing ACME renewal is silent until handshakes
+// fail, so the panel warns ahead. autocert renews min(lifetime/3, 30 days) before expiry,
+// so ACME warns once a third of that window passed and is critical two thirds in (a fixed
+// window would flag healthy short-lived certificates). TLS off and ACME before its first
+// handshake are unknown.
 func (s *AttentionService) evalCertificate(r attentionReadings, now time.Time) {
 	sig := AttentionSignal{ID: "certificate", Label: "TLS certificate", ObservedAt: now}
 	title := "The TLS certificate expires soon"
@@ -345,9 +324,6 @@ func (s *AttentionService) evalCertificate(r attentionReadings, now time.Time) {
 	s.settle(sig, title, action)
 }
 
-// evalBootStatus reports how the previous run ended: a marker left
-// behind by a kill, a crash or a hardware exit is a warning, a clean shutdown
-// is ok, and a first start with no marker is unknown.
 func (s *AttentionService) evalBootStatus(now time.Time) {
 	sig := AttentionSignal{ID: "last_exit", Label: "Last server exit", ObservedAt: now}
 	title := "The server did not shut down cleanly"
@@ -371,10 +347,6 @@ func (s *AttentionService) evalBootStatus(now time.Time) {
 	s.settle(sig, title, action)
 }
 
-// evalRestoreOutcome reports the staged backup restore this start handled:
-// ok when it was applied, a warning when it was rolled back or
-// refused and the previous database is still in use. Without a restore there
-// is no signal.
 func (s *AttentionService) evalRestoreOutcome(now time.Time) {
 	r := s.restore
 	if !r.Recorded {

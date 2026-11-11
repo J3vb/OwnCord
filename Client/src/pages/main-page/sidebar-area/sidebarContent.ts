@@ -4,22 +4,26 @@
  */
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import type { DmSidebar } from "@components/DmSidebar";
+import type { DmSidebar } from "../../../features/direct-messages/DmSidebar";
 import { createVoiceModerationCallbacks } from "../VoiceCallbacks";
 import { createSidebarMemberSection, memberPanelUi } from "../SidebarMemberSection";
 import { loadMemberLayout } from "../../../features/members/memberLayout";
 import { createMemberPanel, type MemberPanel } from "../../../features/members/memberPanel";
-import { selectDmConversation, handleCreateDm, findDirectDm } from "../SidebarDmHelpers";
+import {
+  selectDmConversation,
+  handleCreateDm,
+  findDirectDm,
+  dmConversations,
+} from "../../../features/direct-messages/SidebarDmHelpers";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
-import { createSidebarDmSection } from "../SidebarDmSection";
+import { createSidebarDmSection } from "../../../features/direct-messages/SidebarDmSection";
 import { uiStore } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { trackCurrentView } from "../../../features/navigation/contentView";
 import { navigationText } from "../../../i18n/navigation";
-import { dmConversations } from "./sidebarShared";
-import { mountDmPhoneHead } from "./sidebarDmPhoneHead";
+import { mountDmPhoneHead } from "../../../features/direct-messages/sidebarDmPhoneHead";
 import type { SidebarScope } from "./sidebarScope";
 
 /** Destroy the mounted content and everything the previous mode added. */

@@ -17,14 +17,14 @@ const h = vi.hoisted(() => ({
   createPicker: vi.fn(),
 }));
 
-vi.mock("@components/CreateChannelModal", () => {
+vi.mock("../../src/features/channels/CreateChannelModal", () => {
   if (h.failCreate.value) {
     h.failCreate.value = false;
     throw new Error("chunk load failed");
   }
   return { createCreateChannelModal: h.createModal };
 });
-vi.mock("../../src/pages/main-page/MemberPickerModal", () => {
+vi.mock("../../src/features/direct-messages/MemberPickerModal", () => {
   if (h.failPicker.value) {
     h.failPicker.value = false;
     throw new Error("chunk load failed");
@@ -47,21 +47,21 @@ vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 
 vi.mock("../../src/features/channels/ChannelSidebar", () => mocks.channelSidebarMock());
 
-vi.mock("@components/DmSidebar", () => mocks.dmSidebarMock());
+vi.mock("../../src/features/direct-messages/DmSidebar", () => mocks.dmSidebarMock());
 
 vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
 
-vi.mock("@components/UserBar", () => mocks.userBarMock());
+vi.mock("../../src/features/voice/UserBar", () => mocks.userBarMock());
 
-vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
+vi.mock("../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock());
 
-vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
+vi.mock("../../src/features/navigation/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 
-vi.mock("@components/EditChannelModal", () => mocks.editChannelModalMock());
+vi.mock("../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());
 
-vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
+vi.mock("../../src/features/channels/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 
 vi.mock("../../src/pages/main-page/VoiceCallbacks", () => mocks.pageVoiceCallbacksMock());
 
@@ -70,7 +70,7 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayMana
 import { createSidebarArea } from "../../src/pages/main-page/SidebarArea";
 import { setSidebarMode } from "../../src/stores/ui.store";
 import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
-import { createDmSidebar } from "@components/DmSidebar";
+import { createDmSidebar } from "../../src/features/direct-messages/DmSidebar";
 import { showToast } from "@lib/ui/toast";
 import { shellText } from "../../src/i18n/shell";
 

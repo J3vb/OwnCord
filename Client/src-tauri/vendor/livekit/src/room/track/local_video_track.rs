@@ -356,6 +356,53 @@ impl LocalVideoTrack {
             .collect()
     }
 
+    // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
+    /// Each sender encoding's `max_bitrate` and `scale_resolution_down_by`
+    /// (1.0 when unset), in encoding order. The SDK lists the full-size layer
+    /// first, so a caller finds it by its scale, not its place. Empty if no
+    /// transceiver is set.
+    pub fn sender_layers(&self) -> Vec<(Option<u64>, f64)> {
+        let Some(transceiver) = self.transceiver() else {
+            return Vec::new();
+        };
+        transceiver
+            .sender()
+            .parameters()
+            .encodings
+            .iter()
+            .map(|e| (e.max_bitrate, e.scale_resolution_down_by.unwrap_or(1.0)))
+            .collect()
+    }
+
+    // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
+    /// Sets each sender encoding's `max_bitrate` in place, with no republish
+    /// and no renegotiation: the encoder's rate changes live. A no-op when
+    /// there is no transceiver or `rates` does not match the encodings one for
+    /// one (the layers changed under the caller).
+    pub fn set_sender_max_bitrates(&self, rates: &[Option<u64>]) -> RoomResult<()> {
+        let Some(transceiver) = self.transceiver() else {
+            return Ok(());
+        };
+        let sender = transceiver.sender();
+        let mut params = sender.parameters();
+        if params.encodings.len() != rates.len() {
+            return Ok(());
+        }
+        let mut changed = false;
+        for (encoding, rate) in params.encodings.iter_mut().zip(rates) {
+            if encoding.max_bitrate != *rate {
+                changed = true;
+                encoding.max_bitrate = *rate;
+            }
+        }
+        if changed {
+            sender.set_parameters(params).map_err(|e| {
+                RoomError::Internal(format!("failed to set sender parameters: {}", e))
+            })?;
+        }
+        Ok(())
+    }
+
     /// Toggle simulcast encoding layers on/off based on subscriber demand.
     /// Used by dynacast: the SFU tells us which quality levels are needed,
     /// and we set `encoding.active` accordingly on the RTP sender.

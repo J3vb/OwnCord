@@ -10,11 +10,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// Ending a call, and the start-up and stop passes that settle live calls.
-
-// endCall closes a live call at endAt (clamped to its start), rewrites the
-// fallback text and hands the ended row to the sink. Ending twice does
-// nothing: only the call that ended it is announced.
 func (s *CallLogService) endCall(ctx context.Context, open *db.OpenCall, endAt time.Time) error {
 	var length time.Duration
 	if started, ok := parseCallTime(open.StartedAt); ok {
@@ -42,11 +37,10 @@ func laterOf(a, b time.Time) time.Time {
 	return a
 }
 
-// announceEnded hands the ended row to the sink. The audience is the current
-// audience plus whoever the start went to and is still a participant, so a
-// 1:1 participant whose trust changed mid-call still gets the end while a
-// member who left or was removed from a group gets nothing more. A failed
-// participant read announces nothing; the ended row is still stored.
+// announceEnded hands the ended row to the sink. The audience is the current audience plus
+// whoever the start went to and is still a participant, so a 1:1 participant whose trust
+// changed mid-call still gets the end while a member who left a group does not. A failed
+// participant read announces nothing; the row is still stored.
 func (s *CallLogService) announceEnded(ctx context.Context, open *db.OpenCall, content string, startAudience []int64) {
 	sink := s.loadSink()
 	if sink == nil {
@@ -72,8 +66,6 @@ func (s *CallLogService) announceEnded(ctx context.Context, open *db.OpenCall, c
 	})
 }
 
-// endAudience is the start audience narrowed to current participants, joined
-// with the current delivery audience, sorted and without duplicates.
 func endAudience(startAudience []int64, isGroup bool, targets []db.DMDeliveryTarget, authorID int64) []int64 {
 	members := dmTargetIDs(targets)
 	audience := dmDeliveryAudience(isGroup, targets, authorID)
@@ -86,8 +78,6 @@ func endAudience(startAudience []int64, isGroup bool, targets []db.DMDeliveryTar
 	return slices.Compact(audience)
 }
 
-// recoverOpenCalls ends every call a previous run left open, at the time it
-// was last seen occupied.
 func (s *CallLogService) recoverOpenCalls(ctx context.Context) {
 	open, err := s.st.ListOpenCalls(ctx)
 	if err != nil {
@@ -105,11 +95,9 @@ func (s *CallLogService) recoverOpenCalls(ctx context.Context) {
 	}
 }
 
-// stampLastSeen records "someone was here" on every live call, so the next
-// boot ends it at shutdown time: now for a call with someone present, and the
-// moment the room emptied (or its leave note, still pending) for a call
-// waiting out its end grace. A database
-// write only; nothing is broadcast.
+// stampLastSeen marks every live call as occupied now, or at the moment its room emptied
+// (or its pending leave note) for a call in its end grace, so the next boot ends it at
+// shutdown time. Database write only.
 func (s *CallLogService) stampLastSeen(ctx context.Context) {
 	open, err := s.st.ListOpenCalls(ctx)
 	if err != nil {

@@ -23,7 +23,7 @@ import type {
   TileConfig,
   VideoGridCallbacks,
   VideoGridComponent,
-} from "@components/VideoGrid";
+} from "../../features/voice/videoGrid/VideoGrid";
 
 export interface LazyVideoGrid extends VideoGridComponent {
   /** Start loading the grid's code (idempotent). Called when the user joins
@@ -48,7 +48,10 @@ function liveOrNull(stream: MediaStream | null): MediaStream | null {
   return stream.getVideoTracks()[0]?.readyState === "ended" ? null : stream;
 }
 
-const videoGridScreen = createLazyScreen("video-grid", () => import("@components/VideoGrid"));
+const videoGridScreen = createLazyScreen(
+  "video-grid",
+  () => import("../../features/voice/videoGrid/VideoGrid"),
+);
 
 export function createLazyVideoGrid(): LazyVideoGrid {
   let real: VideoGridComponent | null = null;
@@ -216,7 +219,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
       if (entry === undefined) return;
       streams.delete(userId);
       if (entry.config !== undefined && entry.config.isSelf !== true) forgetWatch(userId);
-      if (focusedTileId === userId) focusedTileId = firstTile();
+      if (focusedTileId === userId) focusedTileId = null;
     },
 
     clearStreams(): void {
@@ -300,9 +303,4 @@ export function createLazyVideoGrid(): LazyVideoGrid {
     },
     raiseCallPopout: (): boolean => real?.raiseCallPopout() ?? false,
   };
-
-  function firstTile(): number | null {
-    for (const id of streams.keys()) return id;
-    return null;
-  }
 }

@@ -15,17 +15,13 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// ─── Forum posts ────────────────────────────────────────────────
-//
-// A post is a thread under a forum with no starter message; its opening message
-// is the thread's first message. CreateForumPost writes the thread, the
-// message, the tags and the send receipt in one delivery transaction, so there
-// is never a post without its opening message or the reverse.
+// Forum posts: a thread under a forum with no starter message; its opening message is the
+// thread's first message. CreateForumPost writes thread, message, tags and send receipt in
+// one delivery transaction, so neither exists without the other.
 
 // ForumPostParams is one forum_post_create.
 type ForumPostParams struct {
-	// ClientMessageID is required: a post is a send, and a lost acknowledgement
-	// must never leave a second post behind.
+	// ClientMessageID is required: a post is a send, and a lost acknowledgement must never leave a second post.
 	ClientMessageID string
 	ChannelID       int64 // the forum
 	UserID          int64
@@ -43,14 +39,10 @@ type ForumPostResult struct {
 	MessageID int64
 	// Thread is the post. Send is nil for a duplicate.
 	Thread *db.ThreadInfo
-	// Send is the result the chat_message and mention bookkeeping read; its
-	// Channel is the post's thread row.
+	// Send is the result the chat_message and mention bookkeeping read; its Channel is the post's thread row.
 	Send *SendMessageResult
 }
 
-// fingerprint is the canonical JSON of the raw title and the sorted tag ids,
-// which with the forum id, the raw text and the ordered uploads binds a retry to
-// its receipt.
 func (p ForumPostParams) fingerprint() (string, error) {
 	tags := slices.Clone(p.TagIDs)
 	slices.Sort(tags)
@@ -65,12 +57,9 @@ func (p ForumPostParams) fingerprint() (string, error) {
 	return string(b), nil
 }
 
-// cleanPostTags validates a post's tag set against its forum: ids are positive
-// and distinct, at most db.MaxPostTags, and at least one when the forum
-// requires a tag. Whether each id is a tag of the forum is the writer
-// transaction's check (db.ErrForumTagUnknown), so a delete that commits first
-// wins. A nil forum checks the shape only (count, ids), which a caller can do
-// before it has read the forum.
+// cleanPostTags validates a post's tag set: ids positive and distinct, at most
+// db.MaxPostTags, at least one when the forum requires a tag. Whether an id belongs to the
+// forum is the writer transaction's check (db.ErrForumTagUnknown). A nil forum checks shape only.
 func cleanPostTags(forum *db.Channel, ids []int64) ([]int64, error) {
 	if len(ids) > db.MaxPostTags {
 		return nil, fmt.Errorf("%w: a post takes at most %d tags", ErrBadRequest, db.MaxPostTags)
@@ -82,7 +71,7 @@ func cleanPostTags(forum *db.Channel, ids []int64) ([]int64, error) {
 		}
 		seen[id] = true
 	}
-	if forum != nil && forum.Forum != nil && forum.Forum.RequireTag && len(ids) == 0 {
+	if forum != nil && forum.Forum != nil && forum.Forum.RequireTag && len(forum.Forum.Tags) > 0 && len(ids) == 0 {
 		return nil, fmt.Errorf("%w: this forum requires a tag on every post", ErrBadRequest)
 	}
 	if ids == nil {
@@ -91,8 +80,6 @@ func cleanPostTags(forum *db.Channel, ids []int64) ([]int64, error) {
 	return ids, nil
 }
 
-// forumPostError maps the delivery transaction's forum errors; the rest are
-// the shared delivery mapping.
 func forumPostError(err error) error {
 	switch {
 	case errors.Is(err, db.ErrForumGone):
@@ -104,16 +91,12 @@ func forumPostError(err error) error {
 	}
 }
 
-// CreateForumPost creates a post and its opening message as the caller. The
-// send gates apply to the forum unchanged (READ and SEND, not timed out, not
-// archived, ATTACH_FILES for uploads, the forum's slow mode), on top of the
-// thread_create budget: a post is a thread, and one bucket stops alternating
-// between the two.
-//
-// The order is: the chat rate gate and a receipt lookup (a retry of a committed
-// post is answered before anything else), the create budget, the forum and send
-// gates, validation, slow mode, then the one transaction. Callers emit the
-// events from the result, as for SendMessage.
+// CreateForumPost creates a post and its opening message as the caller. The send gates
+// apply unchanged (READ and SEND, not timed out, not archived, ATTACH_FILES, slow mode) on
+// top of the thread_create budget: one bucket stops alternating between the two.
+// Order: chat rate gate and receipt lookup (a retry is answered first), create budget,
+// forum and send gates, validation, slow mode, then one transaction. Callers emit events
+// from the result.
 func (s *MessageService) CreateForumPost(ctx context.Context, p ForumPostParams) (*ForumPostResult, error) {
 	ctx, done := traceCall(ctx, "service/message", "MessageService.CreateForumPost",
 		telemetry.Int64("user_id", p.UserID),
@@ -142,8 +125,8 @@ func (s *MessageService) CreateForumPost(ctx context.Context, p ForumPostParams)
 	if retry != nil {
 		return s.forumPostReplay(ctx, p.UserID, retry.MessageID)
 	}
-	// Shape checks cost no token: a malformed request never spends the budget,
-	// as in ThreadService.Create. The forum-dependent ones follow the gates.
+	// Shape checks cost no token: a malformed request never spends the budget, as in
+	// ThreadService.Create. Forum-dependent checks follow the gates.
 	if _, err := cleanThreadName(p.Name); err != nil {
 		return nil, err
 	}
@@ -157,7 +140,8 @@ func (s *MessageService) CreateForumPost(ctx context.Context, p ForumPostParams)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkMessageSlowMode(ctx, sp, forum); err != nil {
+	refundSlow, err := s.checkMessageSlowMode(ctx, sp, forum)
+	if err != nil {
 		return nil, err
 	}
 	mentions := s.resolveMentions(ctx, content, p.UserID, p.ChannelID, false).withReplyPing(0)
@@ -167,18 +151,19 @@ func (s *MessageService) CreateForumPost(ctx context.Context, p ForumPostParams)
 	delivery.MentionedRoleIDs = mentions.RoleIDs
 	saved, err := s.st.CreateMessageDelivery(ctx, *delivery)
 	if err != nil {
+		refundSlow()
 		return nil, forumPostError(err)
 	}
 	if saved.Duplicate {
+		refundSlow()
 		return s.forumPostReplay(ctx, p.UserID, saved.Message.ID)
 	}
 	return s.forumPostResult(ctx, sp, saved, content, mentions), nil
 }
 
-// forumPostGates is every refusal that writes nothing: the channel is a forum
-// the caller may send in, the title and tags are valid, the text is sanitised,
-// and uploads need ATTACH_FILES. It returns the forum, the post to write and
-// the sanitised text.
+// forumPostGates is every refusal that writes nothing: the channel is a forum the caller
+// may send in, title and tags are valid, text is sanitised, uploads need ATTACH_FILES.
+// Returns the forum, the post to write and the sanitised text.
 func (s *MessageService) forumPostGates(ctx context.Context, p ForumPostParams) (*db.Channel, *db.ForumPostInput, string, error) {
 	forum, err := s.st.GetChannel(ctx, p.ChannelID)
 	if err != nil {
@@ -215,14 +200,13 @@ func (s *MessageService) forumPostGates(ctx context.Context, p ForumPostParams) 
 	return forum, &db.ForumPostInput{Name: name, AutoArchiveMinutes: minutes, TagIDs: tags}, content, nil
 }
 
-// DefaultForumAutoArchiveMinutes is the idle period of a post in a forum whose
-// settings name none (the column default, migration 075).
+// DefaultForumAutoArchiveMinutes is the idle period of a post in a forum whose settings name none (the column
+// default).
 const DefaultForumAutoArchiveMinutes = 4320
 
-// forumPostReplay answers a retry of a committed post: the receipt names the
-// opening message, whose channel is the post. The thread is read as it is now,
-// but only for a caller who can still see the forum: one who has lost it gets
-// the acknowledgement without the thread body, as ThreadService.Create does.
+// forumPostReplay answers a retry of a committed post: the receipt names the opening
+// message, whose channel is the post. The thread is read as it is now, but only for a
+// caller who can still see the forum; one who lost it gets the bare acknowledgement.
 func (s *MessageService) forumPostReplay(ctx context.Context, userID, messageID int64) (*ForumPostResult, error) {
 	msg, err := s.st.GetMessage(ctx, messageID)
 	if err != nil {
@@ -244,8 +228,6 @@ func (s *MessageService) forumPostReplay(ctx context.Context, userID, messageID 
 	return &ForumPostResult{Duplicate: true, MessageID: messageID, Thread: t}, nil
 }
 
-// canViewForum reports whether the user can still see the forum. Any read
-// failure answers false: the caller then gets the bare acknowledgement.
 func (s *MessageService) canViewForum(ctx context.Context, userID, forumID int64) bool {
 	forum, err := s.st.GetChannel(ctx, forumID)
 	if err != nil || forum == nil {
@@ -255,9 +237,6 @@ func (s *MessageService) canViewForum(ctx context.Context, userID, forumID int64
 	return err == nil && permissions.CanViewChannel(sub) == nil
 }
 
-// forumPostResult builds the result of a committed post and runs its
-// post-commit work on the uncancellable tail: attachments read-back, mention
-// badges and push, all addressed to the post's thread.
 func (s *MessageService) forumPostResult(ctx context.Context, sp SendMessageParams, saved *db.MessageDelivery, content string, mentions mentionSet) *ForumPostResult {
 	bgCtx := context.WithoutCancel(ctx)
 	msg, thread := saved.Message, saved.Thread
@@ -300,17 +279,15 @@ func (s *MessageService) forumPostResult(ctx context.Context, sp SendMessagePara
 	return &ForumPostResult{MessageID: msg.ID, Thread: thread, Send: send}
 }
 
-// isPostOpening reports whether msgID is the opening message of the forum post
-// ch: an edit of it changes the preview the forum list shows, so the
-// post's viewers hear a thread_changed. A read failure answers false; the
-// edit is already committed and the list catches up on the next change.
+// isPostOpening reports whether msgID is the opening message of forum post ch: an edit of
+// it changes the forum list's preview, so viewers hear a thread_changed. A read failure
+// answers false; the edit is committed and the list catches up on the next change.
 func (s *MessageService) isPostOpening(ctx context.Context, ch *db.Channel, msgID int64) bool {
 	if s.threads == nil || !ch.IsThread() {
 		return false
 	}
-	// Only a forum's posts have an opening message: a parent-type read is
-	// cheaper than the thread read with its post block, and most edits are not
-	// in a thread at all.
+	// Only a forum's posts have an opening message: a parent-type read is cheaper than the
+	// thread read with its post block, and most edits are not in a thread.
 	parent, err := s.st.GetChannel(ctx, ch.Thread.ParentID)
 	if err != nil || parent == nil || parent.Type != db.ForumTypeName {
 		return false

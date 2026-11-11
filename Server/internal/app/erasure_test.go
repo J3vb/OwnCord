@@ -14,7 +14,7 @@ import (
 
 // historyAbsentLog reports whether a start-up log says the erasure history is
 // gone. The rule is deliberately the same one the drill's step 6 asserts on
-// (cmd/smoke/drills.go, saysHistoryGone) — including that the two words have to
+// (cmd/smoke/drills_restore_inspect.go, saysHistoryGone) — including that the two words have to
 // fall on one line, because an operator greps a log one line at a time. It is
 // spelled again here because that harness is another package; if the two ever
 // disagree, step 6 is the one that fails.

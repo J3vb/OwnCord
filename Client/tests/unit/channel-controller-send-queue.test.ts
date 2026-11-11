@@ -39,7 +39,7 @@ vi.mock("../../src/features/messaging/MessageInput", () => ({
     };
   }),
 }));
-vi.mock("@components/TypingIndicator", () => ({
+vi.mock("../../src/features/messaging/TypingIndicator", () => ({
   createTypingIndicator: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
 vi.mock("../../src/pages/main-page/ChatHeader", () => ({ updateChatHeaderForDm: vi.fn() }));

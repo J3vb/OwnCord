@@ -9,7 +9,6 @@
  * every mutator call.
  */
 
-import { createStore } from "@lib/store";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { adoptStarterThreads } from "./threadsLoader";
 import type {
@@ -20,13 +19,12 @@ import type {
   ReactionUpdatePayload,
   PollUpdatePayload,
   PollVoteOkPayload,
-  MessageUser,
-  Attachment,
   MessageResponse,
-  MessageStickerInfo,
 } from "@lib/types";
+import { createStore } from "@lib/store";
+import { createMessagesSelectors } from "./messagesSelectors";
 import { chatPayloadToMessage, INITIAL_STATE } from "../features/messaging/messageModel";
-import type { Message, MessagesState, PendingReaction } from "../features/messaging/messageModel";
+import type { MessagesState, PendingReaction } from "../features/messaging/messageModel";
 import {
   reduceAddMessage,
   reduceAddOptimisticMessage,
@@ -35,6 +33,8 @@ import {
   reduceConfirmSend,
   findSendChannel,
   reduceApplyServerMessage,
+  buildOptimisticMessage,
+  type OptimisticMessageParams,
 } from "../features/messaging/liveMessages";
 import {
   reduceSetChannelLoading,
@@ -55,6 +55,7 @@ import {
   reduceDeleteMessage,
   reduceBulkDeleteMessages,
   reduceSetMessagePinned,
+  reduceMarkStickersDeleted,
 } from "../features/messaging/messageEdits";
 import {
   reduceAddOptimisticReaction,
@@ -76,6 +77,16 @@ export type { MessageStatus } from "../features/messaging/messageModel";
 // -----------------------------------------------------------------------------
 
 export const messagesStore = createStore<MessagesState>(INITIAL_STATE);
+
+// Selectors live in messagesSelectors.ts, built from this store.
+export const {
+  getChannelMessages,
+  isChannelLoaded,
+  hasMoreMessages,
+  getHistoryLoadState,
+  isWindowDetached,
+  hasMessageLoaded,
+} = createMessagesSelectors(messagesStore);
 
 // -----------------------------------------------------------------------------
 // Actions
@@ -106,38 +117,8 @@ export function addMessage(payload: ChatMessagePayload): void {
  * carries the correlationId returned by ws.send and renders immediately as
  * "sending"; confirmSend / markSendFailed reconcile it against the server.
  */
-export function addOptimisticMessage(params: {
-  correlationId: string;
-  clientMessageId?: string;
-  channelId: number;
-  user: MessageUser;
-  content: string;
-  replyTo: number | null;
-  attachments?: readonly Attachment[];
-  /** A sticker send: the row shows the image at once; `content` is the server's fallback text. */
-  sticker?: MessageStickerInfo;
-  timestamp: string;
-  /** "uploading" for a send queued behind its files; absent means "pending". */
-  status?: "uploading";
-}): void {
-  const optimistic: Message = {
-    id: 0,
-    channelId: params.channelId,
-    user: params.user,
-    content: params.content,
-    replyTo: params.replyTo,
-    attachments: params.attachments ?? [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: params.timestamp,
-    status: params.status ?? "pending",
-    correlationId: params.correlationId,
-    clientMessageId: params.clientMessageId,
-    errorCode: null,
-    ...(params.sticker !== undefined && { sticker: params.sticker }),
-  };
+export function addOptimisticMessage(params: OptimisticMessageParams): void {
+  const optimistic = buildOptimisticMessage(params);
   messagesStore.setState((prev) => reduceAddOptimisticMessage(prev, params, optimistic));
 }
 
@@ -391,23 +372,7 @@ export function deleteMessage(payload: ChatDeletedPayload): void {
  * (channel, thread and DM rows all live here) are touched.
  */
 export function markStickersDeleted(liveIds: ReadonlySet<number>): void {
-  messagesStore.setState((prev) => {
-    let changed: Map<number, readonly Message[]> | null = null;
-    for (const [channelId, list] of prev.messagesByChannel) {
-      const stale = (m: Message): boolean =>
-        m.sticker?.id !== null && m.sticker !== undefined && !liveIds.has(m.sticker.id);
-      if (!list.some(stale)) continue;
-      const next: Map<number, readonly Message[]> = changed ?? new Map(prev.messagesByChannel);
-      changed = next;
-      next.set(
-        channelId,
-        list.map((m) =>
-          stale(m) ? { ...m, sticker: { id: null, name: m.sticker!.name, url: null } } : m,
-        ),
-      );
-    }
-    return changed === null ? prev : { ...prev, messagesByChannel: changed };
-  });
+  messagesStore.setState((prev) => reduceMarkStickersDeleted(prev, liveIds));
 }
 
 /**
@@ -523,42 +488,3 @@ export function resetMessagesStore(): void {
   messagesStore.setState(() => INITIAL_STATE);
 }
 void registerSessionReset("messages:store", resetMessagesStore); // app-lifetime
-
-// -----------------------------------------------------------------------------
-// Selectors
-// -----------------------------------------------------------------------------
-
-/** Get messages for a channel, or empty array if none loaded. */
-export function getChannelMessages(channelId: number): readonly Message[] {
-  return messagesStore.select((s) => s.messagesByChannel.get(channelId) ?? []);
-}
-
-/** Check whether initial messages have been loaded for a channel. */
-export function isChannelLoaded(channelId: number): boolean {
-  return messagesStore.select((s) => s.loadedChannels.has(channelId));
-}
-
-/** Check whether a channel has more older messages to fetch. */
-export function hasMoreMessages(channelId: number): boolean {
-  return messagesStore.select((s) => s.hasMore.get(channelId) ?? false);
-}
-
-/** First-page history fetch state for a channel; null when idle/loaded. */
-export function getHistoryLoadState(channelId: number): "loading" | "error" | null {
-  return messagesStore.select((s) => s.historyLoadState.get(channelId) ?? null);
-}
-
-/**
- * Whether the channel's loaded window is an around-window detached from the
- * live tail — newer messages exist below what is rendered.
- */
-export function isWindowDetached(channelId: number): boolean {
-  return messagesStore.select((s) => s.detachedChannels.has(channelId));
-}
-
-/** Whether a message id is present in a channel's loaded window. */
-export function hasMessageLoaded(channelId: number, messageId: number): boolean {
-  return messagesStore.select(
-    (s) => s.messagesByChannel.get(channelId)?.some((m) => m.id === messageId) ?? false,
-  );
-}

@@ -54,7 +54,9 @@ export const sessionHooks: readonly SessionHook[] = [
     name: "screenSourcePicker",
     install: () =>
       setScreenSourcePicker((request) =>
-        import("@components/ScreenSharePicker").then((m) => m.showScreenSharePicker(request)),
+        import("../../features/voice/ScreenSharePicker").then((m) =>
+          m.showScreenSharePicker(request),
+        ),
       ),
     uninstall: () => setScreenSourcePicker(null),
   },

@@ -358,7 +358,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     const host = st.threadHost;
     // A second click while the code loads must not queue a second popover.
     anchor.setAttribute("aria-expanded", "true");
-    import("../../components/ThreadListPopover").then(
+    import("../../features/threads/ThreadListPopover").then(
       ({ openThreadListPopover }) => {
         if (signal.aborted) {
           anchor.setAttribute("aria-expanded", "false");

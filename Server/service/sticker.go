@@ -11,9 +11,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// StickerStore is the slice of the database the sticker routes and send use beyond
-// Store. *db.DB satisfies it; declared here so Store, whose size is pinned, does
-// not grow.
+// StickerStore is the slice of the database the sticker routes and send use beyond Store; declared here so
+// Store, whose size is pinned, does not grow.
 type StickerStore interface {
 	db.Auditor
 	ListStickers(ctx context.Context) ([]*db.Sticker, error)
@@ -34,11 +33,9 @@ type Sticker = db.Sticker
 // MessageStickerInfo is the sticker block a chat_message frame carries.
 type MessageStickerInfo = db.MessageStickerInfo
 
-// StickerService owns the server-wide custom sticker set: who may change it, what
-// a name may look like, and the uniqueness and count rules. Stickers are gated on
-// MANAGE_SERVER through the emoji service's gate, like custom emoji, so one place
-// answers "who may change server-wide branding" and no new permission bit exists.
-// Reading is ungated.
+// StickerService owns the server-wide custom sticker set: who may change it, what a name may look like, and
+// the uniqueness and count rules. Gated on MANAGE_SERVER through the emoji service's gate, like custom emoji,
+// so no new permission bit exists. Reading is ungated.
 type StickerService struct {
 	st   StickerStore
 	gate func(ctx context.Context, actorID int64) error
@@ -54,27 +51,25 @@ const (
 	MinStickerNameLen = 2
 	// MaxStickerNameLen is the upper bound on a sticker name's length.
 	MaxStickerNameLen = 30
-	// MaxStickerCount bounds the set; every client holds the whole list and
-	// re-receives it on every sticker_update.
+	// MaxStickerCount bounds the set; every client holds the whole list and re-receives it on every
+	// sticker_update.
 	MaxStickerCount = 60
 	// MaxStickerEmojiBytes bounds the optional related emoji or shortcode.
 	MaxStickerEmojiBytes = 64
 )
 
-// StickerImageURL is the server-relative path a sticker's bytes are served from,
-// defined once because REST, sticker_update and the message block must agree.
+// StickerImageURL is the server-relative path a sticker's bytes are served from, defined once because REST,
+// sticker_update and the message block must agree.
 func StickerImageURL(id int64) string { return db.StickerImageURL(id) }
 
-// stickerNameRe is the exact spelling of a sticker name: ASCII letters, digits,
-// space, underscore and hyphen. ASCII only, so the column's NOCASE collation
-// (ASCII-only folding) makes uniqueness fully case-insensitive.
+// stickerNameRe is the exact spelling of a sticker name: ASCII letters, digits, space, underscore and hyphen.
+// ASCII only, so the column's NOCASE collation makes uniqueness fully case-insensitive.
 var stickerNameRe = regexp.MustCompile(`^[A-Za-z0-9 _-]{2,30}$`)
 
-// stickerShortcodeRe is a custom-emoji shortcode as a sticker's related emoji.
 var stickerShortcodeRe = regexp.MustCompile(`^:[a-z0-9_]{2,32}:$`)
 
-// ValidateStickerName trims a name and checks it, returning the stored form.
-// The case the uploader typed is kept.
+// ValidateStickerName trims a name and checks it, returning the stored form; the case the uploader typed is
+// kept.
 func ValidateStickerName(raw string) (string, error) {
 	name := strings.TrimSpace(raw)
 	if !stickerNameRe.MatchString(name) {
@@ -85,9 +80,8 @@ func ValidateStickerName(raw string) (string, error) {
 	return name, nil
 }
 
-// ValidateStickerEmoji checks the optional related emoji: empty for none, a
-// custom-emoji shortcode like :wave:, or a single emoji. Returns the stored form,
-// nil for none.
+// ValidateStickerEmoji checks the optional related emoji: empty for none, a custom-emoji shortcode like
+// :wave:, or a single emoji. Returns the stored form, nil for none.
 func ValidateStickerEmoji(raw string) (*string, error) {
 	e := strings.TrimSpace(raw)
 	if e == "" {
@@ -118,13 +112,13 @@ func ValidateStickerEmoji(raw string) (*string, error) {
 	return &e, nil
 }
 
-// RequireManage reports whether actorID may add, rename or remove stickers.
-// Handlers call it BEFORE reading an upload body.
+// RequireManage reports whether actorID may add, rename or remove stickers. Handlers call it BEFORE reading
+// an upload body.
 func (s *StickerService) RequireManage(ctx context.Context, actorID int64) error {
 	return s.gate(ctx, actorID)
 }
 
-// List returns every sticker, ordered by name. Ungated.
+// List returns every sticker, ordered by name.
 func (s *StickerService) List(ctx context.Context) ([]*db.Sticker, error) {
 	list, err := s.st.ListStickers(ctx)
 	if err != nil {
@@ -133,7 +127,7 @@ func (s *StickerService) List(ctx context.Context) ([]*db.Sticker, error) {
 	return list, nil
 }
 
-// Get returns one sticker by id, or ErrNotFound. Used by the image route.
+// Get returns one sticker by id, or ErrNotFound.
 func (s *StickerService) Get(ctx context.Context, id int64) (*db.Sticker, error) {
 	st, err := s.st.GetSticker(ctx, id)
 	if err != nil {
@@ -145,10 +139,9 @@ func (s *StickerService) Get(ctx context.Context, id int64) (*db.Sticker, error)
 	return st, nil
 }
 
-// Create records an already-stored image as a sticker. The caller has validated and
-// stored the bytes; this owns the permission gate, name and emoji rules, count cap
-// and audit entry. A name collision is ErrConflict, not ErrBadRequest. Callers
-// delete the orphaned file when this errors.
+// Create records an already-stored image as a sticker. The caller has validated and stored the bytes; this
+// owns the permission gate, name and emoji rules, count cap and audit entry. A name collision is ErrConflict.
+// Callers delete the orphaned file when this errors.
 func (s *StickerService) Create(ctx context.Context, actorID int64, rawName, rawEmoji, storedAs, mimeType string) (*db.Sticker, error) {
 	if err := s.gate(ctx, actorID); err != nil {
 		return nil, err
@@ -178,7 +171,6 @@ func (s *StickerService) Create(ctx context.Context, actorID int64, rawName, raw
 	created, err := s.st.CreateSticker(ctx, name, emoji, storedAs, mimeType, actorID)
 	if err != nil {
 		if db.IsUniqueConstraintError(err) {
-			// Lost a race with another Create between the check and the INSERT.
 			return nil, errStickerNameTaken(name)
 		}
 		return nil, fmt.Errorf("%w: failed to create sticker: %w", ErrInternal, err)
@@ -189,7 +181,7 @@ func (s *StickerService) Create(ctx context.Context, actorID int64, rawName, raw
 	return created, nil
 }
 
-// Update renames a sticker and sets its related emoji. The image never changes.
+// Update renames a sticker and sets its related emoji.
 func (s *StickerService) Update(ctx context.Context, actorID, id int64, rawName, rawEmoji string) (*db.Sticker, error) {
 	if err := s.gate(ctx, actorID); err != nil {
 		return nil, err
@@ -228,8 +220,8 @@ func (s *StickerService) Update(ctx context.Context, actorID, id int64, rawName,
 	return updated, nil
 }
 
-// Delete removes a sticker and returns the row that was removed, so the caller
-// can unlink the stored file. Messages that used it keep their name.
+// Delete removes a sticker and returns the removed row so the caller can unlink the stored file. Messages
+// that used it keep their name.
 func (s *StickerService) Delete(ctx context.Context, actorID, id int64) (*db.Sticker, error) {
 	if err := s.gate(ctx, actorID); err != nil {
 		return nil, err

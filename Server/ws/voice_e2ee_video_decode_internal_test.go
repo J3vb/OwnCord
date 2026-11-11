@@ -113,7 +113,10 @@ func drainChanTimeoutInternal(ch chan []byte) [][]byte {
 	var out [][]byte
 	for {
 		select {
-		case m := <-ch:
+		case m, ok := <-ch:
+			if !ok {
+				return out
+			}
 			out = append(out, m)
 		case <-time.After(20 * time.Millisecond):
 			return out

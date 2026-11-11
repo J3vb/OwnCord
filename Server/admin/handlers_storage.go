@@ -20,31 +20,28 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// StorageFiles is the upload directory the Storage page counts and deletes
-// from; *storage.Storage satisfies it.
+// StorageFiles is the upload directory the Storage page counts and deletes from (*storage.Storage).
 type StorageFiles interface {
 	List() ([]storage.Entry, error)
 	Delete(name string) error
 }
 
-// uploadRemovalBroadcaster tells a message's readers that one of its files was
-// removed; *ws.Hub satisfies it. A hub without it (tests) still removes files,
-// and readers see the change on their next load.
+// uploadRemovalBroadcaster tells a message's readers a file was removed (*ws.Hub). Without it (tests) files
+// are still removed and readers see it on next load.
 type uploadRemovalBroadcaster interface {
 	AttachmentsChanged(ctx context.Context, res *service.AttachmentsChangedResult)
 	MessageDeletedByUpload(ctx context.Context, res *service.DeleteMessageResult)
 }
 
-// storageAPI serves the Storage page: what fills the disk, every upload, bulk
-// delete, leftover files, and each member's usage and own upload limit.
+// storageAPI serves the Storage page: disk usage, uploads, bulk delete, leftovers, per-member usage and
+// limits.
 type storageAPI struct {
 	svc     *service.Services
 	files   StorageFiles
 	hub     HubBroadcaster
 	paths   backupPaths
 	dataDir string
-	// now is the clock the leftover age is measured against; tests move it.
-	now func() time.Time
+	now     func() time.Time
 }
 
 func newStorageAPI(svc *service.Services, hub HubBroadcaster, opts SetupOptions, paths backupPaths) *storageAPI {
@@ -55,8 +52,8 @@ func newStorageAPI(svc *service.Services, hub HubBroadcaster, opts SetupOptions,
 	return a
 }
 
-// mountStorageRoutes registers the Storage page's routes under MANAGE_SERVER:
-// seeing and freeing disk space is server management, like retention.
+// mountStorageRoutes registers the Storage routes under MANAGE_SERVER: seeing and freeing disk is server
+// management, like retention.
 func mountStorageRoutes(r chi.Router, a *storageAPI) {
 	r.Group(func(r chi.Router) {
 		r.Use(requirePerm(permissions.ManageServer))
@@ -78,8 +75,7 @@ func (a *storageAPI) uploads(w http.ResponseWriter) (*service.UploadService, boo
 	return a.svc.Uploads, true
 }
 
-// storageSummary is what fills the disk. DiskFreeBytes is left out when the
-// volume cannot be read.
+// storageSummary is what fills the disk; DiskFreeBytes is omitted when the volume cannot be read.
 type storageSummary struct {
 	Uploads        []service.UploadKindTotal `json:"uploads"`
 	UploadBytes    int64                     `json:"upload_bytes"`
@@ -183,15 +179,12 @@ func (a *storageAPI) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, page)
 }
 
-// storageDeleteRequest is the body of POST /storage/files/delete.
 type storageDeleteRequest struct {
 	IDs []string `json:"ids"`
 }
 
-// storageDeleteResult says what happened to each file of a bulk delete.
-// AlreadyGone counts as done: someone else removed it first. FilesKept is how
-// many rows were removed while their bytes could not be; the leftover scan
-// finds those.
+// storageDeleteResult says what happened to each file. AlreadyGone counts as done (someone removed it first);
+// FilesKept counts rows removed whose bytes could not be, which the leftover scan finds.
 type storageDeleteResult struct {
 	Deleted     []string `json:"deleted"`
 	AlreadyGone []string `json:"already_gone"`
@@ -201,10 +194,9 @@ type storageDeleteResult struct {
 	FilesKept   int      `json:"files_kept"`
 }
 
-// handleDeleteFiles removes up to service.AdminRemoveMaxFiles files. Each file
-// is handled on its own and on a context the client cannot cancel, so a closed
-// browser never leaves one half done: its row, bytes, announcement and audit
-// entry all happen, and the answer lists what was removed and what was not.
+// handleDeleteFiles removes up to service.AdminRemoveMaxFiles files, each on its own context the client
+// cannot cancel, so a closed browser never leaves one half done (row, bytes, announcement and audit entry all
+// happen); the answer lists what was and was not removed.
 func (a *storageAPI) handleDeleteFiles(w http.ResponseWriter, r *http.Request) {
 	up, ok := a.uploads(w)
 	if !ok {
@@ -246,7 +238,6 @@ func (a *storageAPI) handleDeleteFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-// uniqueIDs drops empty and repeated ids, keeping the first order.
 func uniqueIDs(in []string) []string {
 	seen := make(map[string]bool, len(in))
 	out := make([]string, 0, len(in))
@@ -261,8 +252,8 @@ func uniqueIDs(in []string) []string {
 	return out
 }
 
-// deleteBytes removes a removed row's file unless another row still names it.
-// It reports false when bytes that should go stayed on disk.
+// deleteBytes removes a removed row's file unless another row still names it; false when bytes that should go
+// stayed on disk.
 func (a *storageAPI) deleteBytes(ctx context.Context, up *service.UploadService, storedAs string) bool {
 	if a.files == nil || storedAs == "" {
 		return true
@@ -282,9 +273,8 @@ func (a *storageAPI) deleteBytes(ctx context.Context, up *service.UploadService,
 	return true
 }
 
-// announce tells the readers of the message that held a removed file, as a
-// member's own removal does. The uploader stands as the author, so a message
-// left with no text and no files is deleted like theirs would be.
+// announce tells the readers of the message that held a removed file, as a member's own removal does. The
+// uploader stands as author, so a message left with no text and no files is deleted like theirs would be.
 func (a *storageAPI) announce(ctx context.Context, removed service.AdminRemovedUpload) {
 	if removed.MessageID == nil || a.svc.Messages == nil {
 		return
@@ -323,8 +313,8 @@ func (a *storageAPI) handleScanLeftovers(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, scan)
 }
 
-// lister is the upload directory as a service.StorageLister, nil when the server
-// has none (a nil interface, never a typed nil).
+// lister returns the upload directory as a service.StorageLister, a true nil interface (never a typed nil)
+// when there is none.
 func (a *storageAPI) lister() service.StorageLister {
 	if a.files == nil {
 		return nil

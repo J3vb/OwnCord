@@ -2,6 +2,7 @@ import { describe, it, expect, vi, type Mock } from "vitest";
 import * as mocks from "../../helpers/apiMocks";
 import { createApiClient, type OnUnauthorized } from "../../../src/lib/api";
 import { expectConsole } from "../../helpers/console";
+import { validReply } from "../../helpers/restReplyFixtures";
 import {
   jsonResponse,
   errorResponse,
@@ -29,7 +30,7 @@ describe("API Client", () => {
 
   describe("config management", () => {
     it("setConfig updates token", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({}));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("MemberResponse")));
       api.setConfig({ token: "new-token" });
       await api.getMe();
       const headers = fetchCallOpts().headers as Record<string, string>;
@@ -50,7 +51,7 @@ describe("API Client", () => {
 
     it("omits Authorization header when no token is set", async () => {
       const noTokenApi = createApiClient({ host: "localhost:8443" });
-      mockFetch.mockResolvedValue(jsonResponse({}));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("AuthResponse")));
       await noTokenApi.login("u", "p");
       const headers = fetchCallOpts().headers as Record<string, string>;
       expect(headers["Authorization"]).toBeUndefined();
@@ -61,7 +62,7 @@ describe("API Client", () => {
     // token forward — otherwise a login/register request to a new server
     // rides a still-live session token for the old one.
     it("setConfig drops the previous token when switching to a different host without a new token", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({}));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("MemberResponse")));
       // `api` (beforeEach) already holds token "test-token" for "localhost:8443".
       api.setConfig({ host: "evil.example.com:8443" });
       await api.getMe();
@@ -70,7 +71,7 @@ describe("API Client", () => {
     });
 
     it("setConfig keeps the token when the host is unchanged", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({}));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("MemberResponse")));
       api.setConfig({ host: "localhost:8443" });
       await api.getMe();
       const headers = fetchCallOpts().headers as Record<string, string>;
@@ -78,7 +79,7 @@ describe("API Client", () => {
     });
 
     it("setConfig keeps a token provided alongside a host change", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({}));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("MemberResponse")));
       api.setConfig({ host: "new.example.com:8443", token: "fresh-token" });
       await api.getMe();
       const headers = fetchCallOpts().headers as Record<string, string>;
@@ -120,15 +121,18 @@ describe("API Client", () => {
 
   describe("user endpoints", () => {
     it("getMe calls GET /auth/me", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ id: 1, username: "me" }));
+      const member = validReply("MemberResponse");
+      mockFetch.mockResolvedValue(jsonResponse(member));
       const result = await api.getMe();
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/me");
       expect(fetchCallOpts().method).toBe("GET");
-      expect(result).toEqual({ id: 1, username: "me" });
+      expect(result).toEqual(member);
     });
 
     it("updateProfile sends PATCH /users/me with data", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ id: 1, username: "newname" }));
+      mockFetch.mockResolvedValue(
+        jsonResponse({ ...validReply("MemberResponse"), username: "newname" }),
+      );
       await api.updateProfile({ username: "newname" });
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me");
       expect(fetchCallOpts().method).toBe("PATCH");
@@ -137,14 +141,16 @@ describe("API Client", () => {
     });
 
     it("updateProfile sends avatar field", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ id: 1, avatar: "data:image/png;base64,abc" }));
+      mockFetch.mockResolvedValue(
+        jsonResponse({ ...validReply("MemberResponse"), avatar: "data:image/png;base64,abc" }),
+      );
       await api.updateProfile({ avatar: "data:image/png;base64,abc" });
       const body = JSON.parse(fetchCallOpts().body as string);
       expect(body.avatar).toBe("data:image/png;base64,abc");
     });
 
     it("updateProfile sends display_name and about, empty string included", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ id: 1, username: "u" }));
+      mockFetch.mockResolvedValue(jsonResponse({ ...validReply("MemberResponse"), username: "u" }));
       // "" is how the API says "clear it"; omitting a field means "leave it
       // alone", so the two must not be collapsed on the way out.
       await api.updateProfile({ username: "u", display_name: "Ada L.", about: "" });
@@ -253,7 +259,7 @@ describe("API Client", () => {
 
   describe("channel endpoints", () => {
     it("getPins calls GET /channels/{id}/pins", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ messages: [] }));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("MessagesResponse")));
       await api.getPins(7);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/channels/7/pins");
       expect(fetchCallOpts().method).toBe("GET");
@@ -335,9 +341,8 @@ describe("API Client", () => {
 
   describe("file upload", () => {
     it("uploadFile sends POST /uploads with FormData", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ url: "https://cdn/file.png", filename: "file.png" }),
-      );
+      const uploaded = { ...validReply("UploadResponse"), url: "https://cdn/file.png" };
+      mockFetch.mockResolvedValue(jsonResponse(uploaded));
       const file = new File(["hello"], "file.png", { type: "image/png" });
       const result = await api.uploadFile(file);
 
@@ -350,7 +355,7 @@ describe("API Client", () => {
       expect(headers["Authorization"]).toBe("Bearer test-token");
       // Should NOT set Content-Type (browser sets multipart boundary)
       expect(headers["Content-Type"]).toBeUndefined();
-      expect(result).toEqual({ url: "https://cdn/file.png", filename: "file.png" });
+      expect(result).toEqual(uploaded);
     });
 
     it("uploadAvatar posts multipart to /users/me/avatar", async () => {
@@ -399,7 +404,7 @@ describe("API Client", () => {
 
     it("removeAvatar sends DELETE /users/me/avatar and returns the user", async () => {
       mockFetch.mockResolvedValue(
-        jsonResponse({ id: 1, username: "alice", role: "member", status: "online" }),
+        jsonResponse({ ...validReply("MemberResponse"), username: "alice", role: "member" }),
       );
       const user = await api.removeAvatar("alice");
 
@@ -413,7 +418,7 @@ describe("API Client", () => {
       mockFetch
         .mockResolvedValueOnce(errorResponse(405, "METHOD_NOT_ALLOWED", "no"))
         .mockResolvedValueOnce(
-          jsonResponse({ id: 1, username: "alice", role: "member", status: "online" }),
+          jsonResponse({ ...validReply("MemberResponse"), username: "alice", role: "member" }),
         );
       const user = await api.removeAvatar("alice");
       expectConsole("warn", /\[api\] API error/);
@@ -463,7 +468,7 @@ describe("API Client", () => {
 
     it("uploadFile omits Authorization header when no token set", async () => {
       const noTokenApi = createApiClient({ host: "localhost:8443" });
-      mockFetch.mockResolvedValue(jsonResponse({ url: "https://cdn/f.png", filename: "f.png" }));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("UploadResponse")));
       const file = new File(["data"], "f.png");
       await noTokenApi.uploadFile(file);
       const headers = fetchCallOpts().headers as Record<string, string>;
@@ -471,7 +476,7 @@ describe("API Client", () => {
     });
 
     it("uploadFile passes AbortSignal", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ url: "u", filename: "f" }));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("UploadResponse")));
       const controller = new AbortController();
       await api.uploadFile(new File(["x"], "f"), controller.signal);
       // Requests combine caller cancellation with the session lifetime.
@@ -500,7 +505,9 @@ describe("API Client", () => {
     });
 
     it("createInvite calls POST /invites with data", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ id: 1, code: "abc123", max_uses: 5 }));
+      mockFetch.mockResolvedValue(
+        jsonResponse({ ...validReply("InviteResponse"), code: "abc123", max_uses: 5 }),
+      );
       const result = await api.createInvite({ max_uses: 5, expires_in_hours: 24 });
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/invites");
       expect(fetchCallOpts().method).toBe("POST");
@@ -587,25 +594,28 @@ describe("API Client", () => {
 
   describe("DM endpoints", () => {
     it("getDmChannels calls GET /dms", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ channels: [] }));
+      const list = validReply("DmChannelsResponse");
+      mockFetch.mockResolvedValue(jsonResponse(list));
       const result = await api.getDmChannels();
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms");
       expect(fetchCallOpts().method).toBe("GET");
-      expect(result).toEqual({ channels: [] });
+      expect(result).toEqual(list);
     });
 
     it("createDm calls POST /dms with recipient_id", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ channel: { id: 10, type: "dm" } }));
+      const created = validReply("CreateDmResponse");
+      mockFetch.mockResolvedValue(jsonResponse(created));
       const result = await api.createDm(42);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms");
       expect(fetchCallOpts().method).toBe("POST");
       const body = JSON.parse(fetchCallOpts().body as string);
       expect(body).toEqual({ recipient_id: 42 });
-      expect(result).toEqual({ channel: { id: 10, type: "dm" } });
+      expect(result).toEqual(created);
     });
 
     it("createGroupDm calls POST /dms/group with recipient_ids and a name", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, is_group: true }));
+      const group = { ...validReply("GroupDmResponse"), channel_id: 11, is_group: true };
+      mockFetch.mockResolvedValue(jsonResponse(group));
       const result = await api.createGroupDm([2, 3], "Crew");
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/group");
       expect(fetchCallOpts().method).toBe("POST");
@@ -613,11 +623,13 @@ describe("API Client", () => {
         recipient_ids: [2, 3],
         name: "Crew",
       });
-      expect(result).toEqual({ channel_id: 11, is_group: true });
+      expect(result).toEqual(group);
     });
 
     it("createGroupDm sends an empty name when none is given", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11 }));
+      mockFetch.mockResolvedValue(
+        jsonResponse({ ...validReply("GroupDmResponse"), channel_id: 11 }),
+      );
       await api.createGroupDm([2, 3]);
       expect(JSON.parse(fetchCallOpts().body as string)).toEqual({
         recipient_ids: [2, 3],
@@ -626,7 +638,9 @@ describe("API Client", () => {
     });
 
     it("renameGroupDm calls PATCH /dms/{channelId}", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, name: "New" }));
+      mockFetch.mockResolvedValue(
+        jsonResponse({ ...validReply("GroupDmResponse"), channel_id: 11, name: "New" }),
+      );
       await api.renameGroupDm(11, "New");
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11");
       expect(fetchCallOpts().method).toBe("PATCH");
@@ -634,12 +648,13 @@ describe("API Client", () => {
     });
 
     it("addGroupDmMembers calls POST /dms/{id}/members with user_ids and returns the summary", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, owner_id: 1 }));
+      const summary = { ...validReply("GroupDmResponse"), channel_id: 11, owner_id: 1 };
+      mockFetch.mockResolvedValue(jsonResponse(summary));
       const result = await api.addGroupDmMembers(11, [4, 5]);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/members");
       expect(fetchCallOpts().method).toBe("POST");
       expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ user_ids: [4, 5] });
-      expect(result).toEqual({ channel_id: 11, owner_id: 1 });
+      expect(result).toEqual(summary);
     });
 
     it("addGroupDmMembers and setGroupDmOwner resolve undefined on a 204", async () => {
@@ -649,7 +664,12 @@ describe("API Client", () => {
     });
 
     it("uploadGroupDmIcon posts multipart `file` to /dms/{id}/icon and returns the summary", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, icon: "/api/v1/files/9" }));
+      const iconSummary = {
+        ...validReply("GroupDmResponse"),
+        channel_id: 11,
+        icon: "/api/v1/files/9",
+      };
+      mockFetch.mockResolvedValue(jsonResponse(iconSummary));
       const file = new File(["x"], "group-icon.png", { type: "image/png" });
       const result = await api.uploadGroupDmIcon(11, file);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/icon");
@@ -657,7 +677,7 @@ describe("API Client", () => {
       const body = fetchCallOpts().body as FormData;
       expect(body).toBeInstanceOf(FormData);
       expect((body.get("file") as File).name).toBe("group-icon.png");
-      expect(result).toEqual({ channel_id: 11, icon: "/api/v1/files/9" });
+      expect(result).toEqual(iconSummary);
     });
 
     it("uploadGroupDmIcon and removeGroupDmIcon resolve undefined on a 204", async () => {
@@ -667,11 +687,12 @@ describe("API Client", () => {
     });
 
     it("removeGroupDmIcon calls DELETE /dms/{id}/icon", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, icon: "" }));
+      const cleared = { ...validReply("GroupDmResponse"), channel_id: 11, icon: "" };
+      mockFetch.mockResolvedValue(jsonResponse(cleared));
       const result = await api.removeGroupDmIcon(11);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/icon");
       expect(fetchCallOpts().method).toBe("DELETE");
-      expect(result).toEqual({ channel_id: 11, icon: "" });
+      expect(result).toEqual(cleared);
     });
 
     it("removeGroupDmMember calls DELETE /dms/{id}/members/{userId}", async () => {
@@ -682,12 +703,13 @@ describe("API Client", () => {
     });
 
     it("setGroupDmOwner calls PUT /dms/{id}/owner with user_id", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, owner_id: 4 }));
+      const owned = { ...validReply("GroupDmResponse"), channel_id: 11, owner_id: 4 };
+      mockFetch.mockResolvedValue(jsonResponse(owned));
       const result = await api.setGroupDmOwner(11, 4);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/owner");
       expect(fetchCallOpts().method).toBe("PUT");
       expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ user_id: 4 });
-      expect(result).toEqual({ channel_id: 11, owner_id: 4 });
+      expect(result).toEqual(owned);
     });
 
     it("closeDm calls DELETE /dms/{channelId}", async () => {
@@ -695,16 +717,6 @@ describe("API Client", () => {
       await api.closeDm(10);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/10");
       expect(fetchCallOpts().method).toBe("DELETE");
-    });
-  });
-
-  describe("voice endpoints", () => {
-    it("getVoiceCredentials calls GET /voice/credentials", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ url: "wss://lk", token: "vt" }));
-      const result = await api.getVoiceCredentials();
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/voice/credentials");
-      expect(fetchCallOpts().method).toBe("GET");
-      expect(result).toEqual({ url: "wss://lk", token: "vt" });
     });
   });
 });

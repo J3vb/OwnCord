@@ -15,9 +15,9 @@ type ThreadDeps struct {
 	ChannelSvc *service.ChannelService
 }
 
-// registerThreadHandlers registers the five thread commands. A hub built
-// without Services has no thread service, so they answer INTERNAL there
-// (threadsUnavailable) and the ready payload does not advertise `threads`.
+// registerThreadHandlers registers the five thread commands. A hub without
+// Services has no thread service: they answer INTERNAL (threadsUnavailable) and
+// ready does not advertise `threads`.
 func registerThreadHandlers(r *HandlerRegistry, deps ThreadDeps) {
 	r.RegisterV2(MsgTypeThreadCreate, handleThreadCreateV2, deps)
 	r.RegisterV2(MsgTypeThreadUpdate, handleThreadUpdateV2, deps)
@@ -26,14 +26,12 @@ func registerThreadHandlers(r *HandlerRegistry, deps ThreadDeps) {
 	r.RegisterV2(MsgTypeThreadFollow, handleThreadFollowV2, deps)
 }
 
-// threadsUnavailable is the answer of a hub that has no thread service.
 func threadsUnavailable() Result {
 	return Result{Error: ClientError{Code: ErrCodeInternal, Message: "threads are unavailable"}}
 }
 
-// threadErrorToResult is serviceErrorToResult plus the two thread refusals:
-// a create that lost a race names the winner, and a locked thread has its own
-// code. Everything else is the shared mapping.
+// threadErrorToResult is serviceErrorToResult plus two thread refusals: a create
+// that lost a race names the winner, and a locked thread has its own code.
 func threadErrorToResult(err error) Result {
 	var exists *service.ThreadExistsError
 	switch {
@@ -44,9 +42,9 @@ func threadErrorToResult(err error) Result {
 	}
 }
 
-// handleThreadCreateV2 starts a thread. The reply is thread_create_ok to the
-// sender; every viewer of the parent hears thread_changed (coalesced). A retry
-// by the thread's owner replies the same thread and announces nothing.
+// handleThreadCreateV2 replies thread_create_ok; every viewer of the parent hears
+// thread_changed (coalesced). A retry by the owner replies the same thread and
+// announces nothing.
 func handleThreadCreateV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ThreadDeps)
 	if d.ThreadSvc == nil {
@@ -67,7 +65,6 @@ func handleThreadCreateV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	return res
 }
 
-// handleThreadUpdateV2 renames, archives, locks or retimes a thread.
 func handleThreadUpdateV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ThreadDeps)
 	if d.ThreadSvc == nil {
@@ -87,9 +84,9 @@ func handleThreadUpdateV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	}
 }
 
-// handleThreadDeleteV2 deletes a thread. thread_deleted is sequenced on the
-// parent; the note makes the hub cancel the thread's pending frame and release
-// every socket that had it open.
+// handleThreadDeleteV2: thread_deleted is sequenced on the parent; the note makes
+// the hub cancel the thread's pending frame and release every socket that had it
+// open.
 func handleThreadDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ThreadDeps)
 	if d.ThreadSvc == nil {
@@ -100,14 +97,14 @@ func handleThreadDeleteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if err != nil {
 		return threadErrorToResult(err)
 	}
-	// The note comes first: it drops the thread's coalescer entry, so a flush
-	// that read the thread before the delete cannot announce it after the
-	// sequenced thread_deleted.
+	// The note comes first: it drops the coalescer entry, so a flush that read
+	// the thread before the delete cannot announce it after thread_deleted.
 	events := []Event{
 		threadNoteEvt{threadID: t.ID, parentID: t.ParentID, deleted: true},
 		channelEvt{evType: MsgTypeThreadDeleted, channelID: t.ParentID, payload: buildThreadDeleted(t.ParentID, t.ID)},
 	}
-	// Each follower's rows went with the thread: tell them they no longer follow it.
+	// Each follower's rows went with the thread: tell them they no longer follow
+	// it.
 	gone := buildThreadFollowUpdate(t.ID, false, nil)
 	for _, uid := range followers {
 		events = append(events, threadFollowEvt{targetUserID: uid, payload: gone})
@@ -115,17 +112,16 @@ func handleThreadDeleteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	return Result{Events: events}
 }
 
-// handleThreadFollowV2 follows or unfollows a thread for the sender. The reply
-// is thread_follow_ok with the state the follow is in; the same state follows
-// to the sender's socket as a thread_follow_update, which is how the thread
-// reaches a client that did not have it.
+// handleThreadFollowV2 replies thread_follow_ok; the same state goes to the
+// sender's socket as thread_follow_update, which is how the thread reaches a
+// client that lacked it.
 func handleThreadFollowV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ThreadDeps)
 	if d.ThreadSvc == nil {
 		return threadsUnavailable()
 	}
 	c := cmd.(ThreadFollowCmd)
-	// Its own budget, the focus one: following is user-paced.
+	// Own budget (the focus one): following is user-paced.
 	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("threadfollow", info.UserID), focusRateLimit, focusRateWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many thread follow changes"}}
 	}
@@ -145,10 +141,10 @@ func handleThreadFollowV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	}
 }
 
-// handleThreadFocusV2 moves the second subscription slot. A null thread_id
-// closes it. Opening runs the thread-aware admission (the parent's overrides
-// apply) and marks the thread read like channel_focus; the applier then
-// re-validates after the Subscribe (applyThreadFocus).
+// handleThreadFocusV2 moves the second subscription slot (null thread_id closes
+// it). Opening runs thread-aware admission (the parent's overrides apply) and
+// marks the thread read; the applier re-validates after Subscribe
+// (applyThreadFocus).
 func handleThreadFocusV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ThreadDeps)
 	if d.ThreadSvc == nil {
@@ -159,8 +155,8 @@ func handleThreadFocusV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	if id == 0 {
 		return Result{SetThreadID: &id}
 	}
-	// Its own budget: a panel being opened and closed is user-paced, so a
-	// refused frame is an error, not a deferral.
+	// Own budget: opening and closing a panel is user-paced, so a refused frame
+	// is an error, not a deferral.
 	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("threadfocus", info.UserID), focusRateLimit, focusRateWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many thread focus changes"}}
 	}
@@ -178,8 +174,6 @@ func handleThreadFocusV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	return Result{SetThreadID: &id, Events: []Event{channelReadEvt(info.UserID, id, readThroughNoted)}}
 }
 
-// wireThreads installs the thread handlers, the coalescer's reader and the
-// archiver's notifier. A hub built without services has no threads.
 func (h *Hub) wireThreads(reg *HandlerRegistry, svc *service.Services) {
 	deps := ThreadDeps{Limiter: h.limiter}
 	if svc != nil {

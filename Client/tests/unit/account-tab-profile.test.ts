@@ -12,7 +12,7 @@ import {
   prepareBannerFile,
   validateAvatarFile,
 } from "../../src/features/settings/AccountTab";
-import { authStore } from "@stores/auth.store";
+import { authStore, updateUser } from "@stores/auth.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { ApiClientError } from "@lib/api";
 import * as imageCrop from "@lib/ui/imageCrop";
@@ -109,11 +109,19 @@ describe("Account tab profile fields", () => {
 
   /** Focus only lands on what is shown, so open the collapsed editor first. */
   /** Opens the profile editor over a save that stays pending until `settle` is called. */
-  function openEditorWithHeldSave() {
+  function openEditorWithHeldSave(onStored: () => void = () => {}) {
     setUser({});
     let settle!: () => void;
     const options = makeOptions({
-      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
+      onUpdateProfile: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            settle = () => {
+              onStored();
+              resolve();
+            };
+          }),
+      ),
     });
     container.appendChild(buildAccountTab(options, ac.signal));
 
@@ -186,6 +194,31 @@ describe("Account tab profile fields", () => {
     expect(name.value).toBe("Ada");
   });
 
+  it("shows the stored text after a save and no longer counts it as unsaved", async () => {
+    setUser({ display_name: "Alice", about: "" });
+    // The server cleans the text; the store gets what the server returned.
+    const options = makeOptions({
+      onUpdateProfile: vi.fn(async () => {
+        updateUser({ about: "mail me at" });
+      }),
+    });
+    let isDirty: () => boolean = () => false;
+    container.appendChild(
+      buildAccountTab(options, ac.signal, (check) => {
+        isDirty = check;
+      }),
+    );
+    const about = container.querySelector<HTMLTextAreaElement>('[data-testid="about-input"]')!;
+    about.value = "mail me at <me@example.org>";
+    expect(isDirty()).toBe(true);
+    container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!.click();
+
+    await vi.waitFor(() => {
+      expect(about.value).toBe("mail me at");
+    });
+    expect(isDirty()).toBe(false);
+  });
+
   it("leaves focus where the user moved it while the save was in flight", async () => {
     const { settle, save } = openEditorWithHeldSave();
     const about = container.querySelector<HTMLTextAreaElement>('[data-testid="about-input"]')!;
@@ -198,6 +231,27 @@ describe("Account tab profile fields", () => {
       expect(save.disabled).toBe(false);
     });
     expect(document.activeElement).toBe(about);
+  });
+
+  it("keeps what was typed while the save was in flight and shows the stored name in the header", async () => {
+    // The server cleans the name it was sent.
+    const { settle, save } = openEditorWithHeldSave(() =>
+      updateUser({ display_name: "Bob by.", about: "sent" }),
+    );
+    const name = container.querySelector<HTMLInputElement>('[data-testid="display-name-input"]')!;
+    const about = container.querySelector<HTMLTextAreaElement>('[data-testid="about-input"]')!;
+    name.value = "Bob  by";
+    about.value = "sent";
+    save.click();
+    about.value = "sent and more";
+    settle();
+
+    await vi.waitFor(() => {
+      expect(save.disabled).toBe(false);
+    });
+    expect(about.value).toBe("sent and more");
+    expect(name.value).toBe("Bob by.");
+    expect(container.querySelector(".account-header-name")?.textContent).toBe("Bob by.");
   });
 
   it("puts focus back on Save when it fell to the page during the save", async () => {

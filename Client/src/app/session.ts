@@ -20,23 +20,23 @@ import {
   PREAUTH_CONNECT_TIMEOUT_MS,
   type WsClient,
 } from "@lib/ws";
-import { wireDispatcher } from "@lib/dispatcher";
+import { loadDispatcher, loadedDispatcher, prefetchDispatcher } from "./sessionDispatcher";
+import type { DispatcherModule } from "./sessionDispatcher";
+import { startReadyDeadline } from "./readyDeadline";
 import { setIdentityKeyProvider } from "@lib/ws";
 import { setLastChannelHost } from "@lib/prefs/lastChannel";
 import { authStore, clearAuth, type LogoutReason } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { leaveVoiceChannel } from "@stores/voice.store";
-import { createConnectedOverlay } from "@components/ConnectedOverlay";
-import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
+import { createConnectedOverlay } from "../features/connection/ConnectedOverlay";
+import type { ConnectedOverlayControl } from "../features/connection/ConnectedOverlay";
 import { createLogger } from "@lib/logger";
-import {
-  saveCredential,
-  deleteCredential,
-  createUserUpdateCredentialSaver,
-} from "@lib/net/credentials";
-import type { SessionScope } from "@lib/net/sessionScope";
+import { deleteCredential, createUserUpdateCredentialSaver } from "@lib/net/credentials";
 import { connectText } from "../i18n/connect";
+import { persistSessionCredential } from "./sessionCredential";
 import type { PageId } from "./context";
+
+export { READY_TIMEOUT_MS } from "./readyDeadline";
 
 const log = createLogger("main");
 
@@ -47,6 +47,12 @@ let currentPage: () => PageId;
 let navigate: (page: PageId) => void;
 
 let dispatcherCleanup: (() => void) | null = null;
+// The UX connection status writer (docs/architecture/ux §3), wired once from
+// the first dispatcher load: nothing dials before it, so no transition is missed.
+let connectionStatusWired = false;
+// Bumped by every startSession and abandonInFlight: a same-host, same-token
+// re-entry keeps the API scope, which alone cannot tell a waiting attempt it lost.
+let attemptSeq = 0;
 // Tears down the session-scoped WS listeners registered in startSession
 // (user_update, onStateChange, ready). dispatcherCleanup only clears
 // dispatcher-registered handlers, so these need their own teardown to avoid
@@ -59,12 +65,6 @@ let lastConnectToken = "";
 // connected overlay. False once `ready` arrives, or once the first dial ends
 // without auth_ok (an auth_error leaves the user on the form, still targeted).
 let signingIn = false;
-
-/**
- * How long the connected overlay waits for `ready` after auth_ok (restarted
- * on every reconnect) before it gives up and returns to the connect page.
- */
-export const READY_TIMEOUT_MS = 30_000;
 
 /**
  * Hands the controller the services and the router's two operations it works
@@ -84,6 +84,9 @@ export function configureSession(
   appEl = appElement;
   currentPage = currentPageId;
   navigate = navigateTo;
+  // Runs before the first render, but the chunk can only evaluate in a later
+  // task, so the first screen never waits on it.
+  prefetchDispatcher();
 }
 
 // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is loaded
@@ -117,6 +120,7 @@ export function signInPending(): boolean {
  * auto-login cancel and the invite deep link.
  */
 export function abandonInFlight(): void {
+  attemptSeq += 1;
   sessionCleanup?.();
   sessionCleanup = null;
   dispatcherCleanup?.();
@@ -183,10 +187,11 @@ export function startSession(
     (await import("@lib/net/identity")).getDeviceIdentityPublicKey(identityHost),
   );
   owner.addCleanup(() => setIdentityKeyProvider(null));
-  ws.connect({ host, token });
-  dispatcherCleanup = wireDispatcher(ws, api);
-  owner.addCleanup(dispatcherCleanup);
-  log.info("Dispatcher wired, connecting WS");
+  // The dispatcher is wired at the end; its teardown keeps this cleanup slot.
+  const attempt = ++attemptSeq;
+  const stillOwns = (): boolean => attempt === attemptSeq && owner.isCurrent();
+  let attemptUnwire: (() => void) | null = null;
+  owner.addCleanup(() => attemptUnwire?.());
 
   // A stored-token resume (auto-login / quick switch) sends no REST preflight,
   // so a server that is down leaves this handshake behind the "Auto-connecting…"
@@ -277,59 +282,12 @@ export function startSession(
   // in" saves it session-only (it goes with the tab) rather than not at all,
   // so a reload does not sign the user out.
   const keepToken = __OWNCORD_WEB__ || rememberPassword || autoConnect;
-  if (!keepToken && rememberIsUserChoice) {
-    void (async () => {
-      // The store holds one credential per host (`login_account(host) =
-      // host`), and `save_credential` already overwrites it with no
-      // username check — a remembered login by a second account on this
-      // host would have clobbered it anyway. The stored username is a
-      // stale copy, not an account identity, so guarding the delete on it
-      // can't protect a second account; it can only leave the password the
-      // user just declined sitting on disk. Delete unconditionally for the
-      // host. Cost: if two accounts share a host, opting out as one
-      // removes the credential the other saved.
-      //
-      // A failed delete leaves that password on disk. Silence there would
-      // tell the user the opt-out took effect when it did not, so it is
-      // surfaced the same way a failed save is.
-      const removed = await deleteCredential(host);
-      if (!removed && owner.isCurrent()) {
-        log.warn("Credential delete failed — the saved password is still stored", {
-          host,
-        });
-        setTransientError(connectText("session.passwordRemoveFailed"));
-      }
-    })();
-  }
-  if (keepToken) {
-    // Auto connect without Remember: keep the token only. A user's own login
-    // also erases any password saved under an earlier Remember opt-in
-    // (clearPassword); a stored-token resume never clears anything.
-    const clearPassword = !rememberPassword && rememberIsUserChoice;
-    // The user's own login decides where a portal token lives; a resume says
-    // nothing, so the token stays in the area it was read from.
-    const savedPassword = rememberPassword ? password : undefined;
-    (__OWNCORD_WEB__
-      ? saveCredential(
-          host,
-          username,
-          token,
-          savedPassword,
-          clearPassword,
-          rememberIsUserChoice ? !autoConnect : undefined,
-        )
-      : saveCredential(host, username, token, savedPassword, clearPassword)
-    )
-      .then((ok) => {
-        if (!ok && owner.isCurrent()) {
-          log.warn("Credential save failed — auto-login will not work for this server");
-          setTransientError(connectText("session.credentialsSaveFailed"));
-        }
-      })
-      .catch(() => {
-        // saveCredential already catches internally; this is defence-in-depth
-      });
-  }
+  persistSessionCredential(
+    owner,
+    { host, username, token, password },
+    { rememberPassword, rememberIsUserChoice, autoConnect },
+    keepToken,
+  );
 
   // Update saved credentials when the current user changes their username.
   // Guarded by the same remember-password opt-out as the initial save above.
@@ -410,7 +368,9 @@ export function startSession(
     appEl.appendChild(connectedOverlay.element);
     connectedOverlay.show();
 
-    const readyDeadline = startReadyDeadline(owner, host);
+    const readyDeadline = startReadyDeadline(owner, host, () =>
+      endAuthedSession(connectText("session.readyTimeout")),
+    );
     const unsubReconnect = ws.onStateChange((wsState) => {
       if (wsState === "connected") readyDeadline.restart();
     });
@@ -431,6 +391,33 @@ export function startSession(
     sessionUnsubs.length = 0;
   };
   owner.addCleanup(sessionCleanup);
+
+  // Dial only once the handlers are wired, and only if this attempt still owns the session.
+  const wireAndDial = ({ wireDispatcher, wireConnectionStatus }: DispatcherModule): void => {
+    if (!connectionStatusWired) {
+      connectionStatusWired = true;
+      void wireConnectionStatus(ws);
+    }
+    if (!stillOwns()) return;
+    attemptUnwire = wireDispatcher(ws, api);
+    dispatcherCleanup = attemptUnwire;
+    ws.connect({ host, token });
+    log.info("Dispatcher wired, connecting WS");
+  };
+  // Already loaded (nearly always, after the boot prefetch): wire and dial in
+  // this task, so a server switch replaces the old socket at once.
+  const loaded = loadedDispatcher();
+  if (loaded !== null) {
+    wireAndDial(loaded);
+    return;
+  }
+  loadDispatcher()
+    .then(wireAndDial)
+    .catch((err: unknown) => {
+      if (!stillOwns()) return;
+      log.error("Session code failed to load", { error: String(err) });
+      endPreauth(connectText("session.codeLoadFailed"), false);
+    });
 }
 
 /** Ends a session that got past sign-in, keeping the stored sign-in, and says why on the form. */
@@ -439,39 +426,6 @@ function endAuthedSession(message: string, reason: LogoutReason = "user"): void 
   abandonInFlight();
   if (authStore.getState().isAuthenticated) clearAuth(reason);
   setTransientError(message);
-}
-
-/**
- * The connected overlay has no Cancel, and the main page cannot mount without
- * `ready`: a server that signs the user in but stalls building `ready` (or a
- * proxy that drops the large frame) would hold it forever. Give up after
- * READY_TIMEOUT_MS, restarted on each reconnect while it is still waiting,
- * and tear the session down the way the invite link does, keeping the stored
- * sign-in for the next try.
- */
-function startReadyDeadline(owner: SessionScope, host: string): { restart(): void; clear(): void } {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const clear = (): void => {
-    if (timer !== null) clearTimeout(timer);
-    timer = null;
-  };
-  const giveUp = (): void => {
-    timer = null;
-    if (!owner.isCurrent()) return;
-    log.warn("Server did not send ready in time", { host, timeoutMs: READY_TIMEOUT_MS });
-    endAuthedSession(connectText("session.readyTimeout"));
-  };
-  const arm = (): void => {
-    clear();
-    timer = setTimeout(giveUp, READY_TIMEOUT_MS);
-  };
-  arm();
-  return {
-    restart: () => {
-      if (timer !== null) arm();
-    },
-    clear,
-  };
 }
 
 /** Handle logout / disconnect. App-lifetime: never unsubscribed. */

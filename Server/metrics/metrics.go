@@ -1,11 +1,7 @@
-// Package metrics provides the small, stdlib-only, allocation-free in-process
-// metric primitives behind GET /api/v1/metrics and the support bundle.
-//
-// They are separate from the OpenTelemetry instruments in Server/telemetry:
-// the OTel SDK is compiled only under -tags otel and the shipped release and
-// Docker builds use no build tags, so an OTel-only latency figure is invisible
-// to operators who did not rebuild the server. A fixed-bucket histogram and an
-// atomic max cost no allocation on the hot path and need no dependency.
+// Package metrics provides stdlib-only, allocation-free in-process metric
+// primitives behind GET /api/v1/metrics and the support bundle. They are
+// separate from Server/telemetry's OTel instruments, which exist only under
+// -tags otel and so are invisible to operators on the untagged release builds.
 package metrics
 
 import (
@@ -13,14 +9,12 @@ import (
 	"sync/atomic"
 )
 
-// latencyBoundsMs are the shared histogram bucket upper bounds, in
-// milliseconds: sub-millisecond fan-out work through multi-second stalls. An
-// array (not a slice) so len() is a compile-time constant for the bucket array.
+// latencyBoundsMs are the shared histogram bucket upper bounds in milliseconds,
+// an array so len() is a compile-time constant.
 var latencyBoundsMs = [...]float64{0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000}
 
 // Summary is a read-side snapshot of a Histogram. P50/P95/P99 are the upper
-// bound of the bucket the quantile falls into, capped at Max: a coarse
-// estimate; Max is exact.
+// bound of the quantile's bucket, capped at Max: coarse; Max is exact.
 type Summary struct {
 	Count uint64  `json:"count"`
 	P50   float64 `json:"p50"`
@@ -30,22 +24,18 @@ type Summary struct {
 }
 
 // Histogram is a fixed-bucket, lock-free latency histogram. The zero value is
-// usable and starts empty; it must not be copied after first use (its buckets
-// are atomics).
+// usable; do not copy it after first use (atomic buckets).
 type Histogram struct {
 	buckets [numBuckets]atomic.Uint64 // last bucket is +Inf
 	total   atomic.Uint64
 	max     atomic.Uint64 // microseconds, lifetime
-	// sum is every observation added up, in microseconds (the Prometheus
-	// exposition's _sum). Written by Observe, read by Counts.
+	// sum is every observation in microseconds (the exposition's _sum).
 	sum atomic.Uint64
-	// intervalMax is the largest observation since the last takeIntervalMax,
-	// in microseconds. Observe raises it beside max; only the Windows sampler
-	// resets it, so the lifetime max is never disturbed.
+	// intervalMax is the largest observation since the last takeIntervalMax, in
+	// microseconds; only the Windows sampler resets it, never the lifetime max.
 	intervalMax atomic.Uint64
 }
 
-// numBuckets is the bucket count: one per bound plus the +Inf bucket.
 const numBuckets = len(latencyBoundsMs) + 1
 
 // Counts is a raw read of a Histogram's cumulative state.
@@ -54,7 +44,7 @@ type Counts struct {
 	SumMicros uint64
 }
 
-// Observe records one observation, in milliseconds. Allocation-free.
+// Observe records one observation in milliseconds, allocation-free.
 func (h *Histogram) Observe(ms float64) {
 	if ms < 0 || math.IsNaN(ms) {
 		ms = 0
@@ -66,11 +56,9 @@ func (h *Histogram) Observe(ms float64) {
 			break
 		}
 	}
-	// The maxima are stored BEFORE the counts. The Windows sampler reads the
-	// buckets and then swaps intervalMax, so a counted observation's max is in
-	// that interval or an earlier one: each observation is counted once and
-	// its max held by one interval, though at a sample boundary the two can
-	// land in adjacent windows.
+	// Maxima are stored BEFORE the counts: the sampler reads buckets then swaps
+	// intervalMax, so a counted observation's max is in its interval or an earlier
+	// one (at a boundary the two can land in adjacent windows).
 	micros := uint64(ms * 1000)
 	atomicMax(&h.max, micros)
 	atomicMax(&h.intervalMax, micros)
@@ -79,10 +67,9 @@ func (h *Histogram) Observe(ms float64) {
 	h.sum.Add(micros)
 }
 
-// Counts returns the cumulative bucket counts and the sum of observations, in
-// microseconds. Every bucket only grows, so a later Counts minus an earlier
-// one is never negative. The reads are individually atomic, not a single
-// consistent cut.
+// Counts returns cumulative bucket counts and the sum in microseconds. Buckets
+// only grow, so a later Counts minus an earlier one is never negative; the
+// reads are individually atomic, not one consistent cut.
 func (h *Histogram) Counts() Counts {
 	var c Counts
 	for i := range h.buckets {
@@ -92,19 +79,17 @@ func (h *Histogram) Counts() Counts {
 	return c
 }
 
-// readBuckets copies the bucket counters into dst without allocating.
 func (h *Histogram) readBuckets(dst *[numBuckets]uint64) {
 	for i := range h.buckets {
 		dst[i] = h.buckets[i].Load()
 	}
 }
 
-// takeIntervalMax returns the largest observation (microseconds) since the
-// previous call and resets it. Only the Windows sampler calls it.
+// takeIntervalMax returns the largest observation (microseconds) since the previous call and resets it;
+// Windows sampler only.
 func (h *Histogram) takeIntervalMax() uint64 { return h.intervalMax.Swap(0) }
 
-// Snapshot returns the current distribution. A histogram with no observations
-// reports the zero Summary.
+// Snapshot returns the current distribution; empty yields the zero Summary.
 func (h *Histogram) Snapshot() Summary {
 	total := h.total.Load()
 	if total == 0 {
@@ -122,9 +107,8 @@ func (h *Histogram) Snapshot() Summary {
 	}
 }
 
-// quantile returns the upper bound of the bucket holding the q-quantile of
-// buckets (total observations), capped at maxMicros; in the +Inf bucket it is
-// the exact max. It is pure: Snapshot and the windowed figures both call it.
+// quantile returns the upper bound of the bucket holding the q-quantile, capped
+// at maxMicros (the exact max in the +Inf bucket). Pure.
 func quantile(buckets *[numBuckets]uint64, total, maxMicros uint64, q float64) float64 {
 	target := uint64(math.Ceil(float64(total) * q))
 	maxMs := float64(maxMicros) / 1000
@@ -138,18 +122,15 @@ func quantile(buckets *[numBuckets]uint64, total, maxMicros uint64, q float64) f
 	return maxMs
 }
 
-// MaxGauge holds the largest value observed since start, in milliseconds. Its
-// zero value is usable; it fits a "worst single hold" figure
-// (hub_seqmu_max_hold_ms).
+// MaxGauge holds the largest value observed since start, in milliseconds; the
+// zero value is usable (e.g. hub_seqmu_max_hold_ms).
 type MaxGauge struct {
 	micros atomic.Uint64
-	// intervalMax is the largest value since the last takeIntervalMax; see
-	// Histogram.intervalMax.
+	// intervalMax: see Histogram.intervalMax.
 	intervalMax atomic.Uint64
 }
 
-// Observe records ms if it is the new maximum. Negative and NaN values are
-// ignored. Allocation-free.
+// Observe records ms if it is the new maximum; negative and NaN are ignored.
 func (g *MaxGauge) Observe(ms float64) {
 	if ms < 0 || math.IsNaN(ms) {
 		return
@@ -159,14 +140,13 @@ func (g *MaxGauge) Observe(ms float64) {
 	atomicMax(&g.intervalMax, micros)
 }
 
-// takeIntervalMax returns the largest value (microseconds) since the previous
-// call and resets it. Only the Windows sampler calls it.
+// takeIntervalMax returns the largest value (microseconds) since the previous call and resets it; Windows
+// sampler only.
 func (g *MaxGauge) takeIntervalMax() uint64 { return g.intervalMax.Swap(0) }
 
 // Millis returns the largest value observed, in milliseconds.
 func (g *MaxGauge) Millis() float64 { return float64(g.micros.Load()) / 1000 }
 
-// atomicMax stores v into *p when v exceeds the current value.
 func atomicMax(p *atomic.Uint64, v uint64) {
 	for {
 		cur := p.Load()

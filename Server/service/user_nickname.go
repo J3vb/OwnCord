@@ -12,20 +12,16 @@ import (
 
 // NicknameStore is the one write the moderator nickname route needs.
 type NicknameStore interface {
-	// SetDisplayNameAsModerator writes a member's nickname for a moderator and returns
-	// the value it replaced. It re-reads the actor's MANAGE_NICKNAMES (or ADMINISTRATOR)
-	// bit across every held role and the actor-outranks-target rank live in its
-	// transaction, returning db.ErrOutranked when either fails.
+	// SetDisplayNameAsModerator writes a member's nickname for a moderator and returns the value it replaced. It
+	// re-reads, in its transaction, the actor's MANAGE_NICKNAMES (or ADMINISTRATOR) bit across every held role
+	// and actor-outranks-target, returning db.ErrOutranked when either fails.
 	SetDisplayNameAsModerator(ctx context.Context, actorID, targetID int64, name *string) (old *string, err error)
 }
 
-// setDisplayNameAsModerator is the moderator nickname write. It takes the target's
-// profile lock, the one UpdateProfile's read-merge-write holds, so the two
-// serialize and neither merges against a row the other is about to replace. The
-// write re-checks the actor's authority in its transaction. The returned user is
-// the committed row, never the request. Lock order: profileLocks[target], then the
-// single writer connection, as in UpdateProfile; no hub lock is held, the caller
-// broadcasts after.
+// setDisplayNameAsModerator is the moderator nickname write. It takes the target's profile lock (the one
+// UpdateProfile's read-merge-write holds) so the two serialize. The write re-checks the actor's authority in
+// its transaction. The returned user is the committed row. Lock order: profileLocks[target], then the single
+// writer connection; no hub lock is held, the caller broadcasts after.
 func (s *UserService) setDisplayNameAsModerator(ctx context.Context, actorID, targetID int64, name *string) (*db.User, error) {
 	unlock := s.profileLocks.lock(targetID)
 	defer unlock()
@@ -36,7 +32,6 @@ func (s *UserService) setDisplayNameAsModerator(ctx context.Context, actorID, ta
 	}
 	ns, ok := s.st.(NicknameStore)
 	if !ok {
-		// A Store double without the slice; the route then reports an internal error.
 		return nil, errors.New("moderator nickname write unavailable")
 	}
 	old, err := ns.SetDisplayNameAsModerator(ctx, actorID, targetID, name)
@@ -44,9 +39,9 @@ func (s *UserService) setDisplayNameAsModerator(ctx context.Context, actorID, ta
 		return nil, fmt.Errorf("set display name: %w", err)
 	}
 
-	// The write has committed: the re-read and audit row must survive a canceled
-	// request, and a failed re-read must not be reported as a failed write, so fall
-	// back to the pre-write row with the one column this call changed.
+	// The write has committed: the re-read and audit row must survive a canceled request, and a failed re-read
+	// must not be reported as a failed write, so fall back to the pre-write row with the one column this call
+	// changed.
 	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), targetID)
 	if err != nil || user == nil {
 		slog.Error("moderator nickname re-read failed; returning locally merged row",
@@ -61,8 +56,8 @@ func (s *UserService) setDisplayNameAsModerator(ctx context.Context, actorID, ta
 	return user, nil
 }
 
-// quoteNickname renders a nickname for an audit detail: the value Go-quoted
-// (so a quote or " -> " inside it stays unambiguous), or (none) when unset.
+// quoteNickname renders a nickname for an audit detail: Go-quoted (so a quote or " -> " inside stays
+// unambiguous), or (none) when unset.
 func quoteNickname(n *string) string {
 	if n == nil || *n == "" {
 		return "(none)"

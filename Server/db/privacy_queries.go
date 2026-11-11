@@ -22,8 +22,7 @@ func DefaultUserPrivacy() UserPrivacy {
 	return UserPrivacy{AllowMemberDMs: true, MessageRequests: true}
 }
 
-// GetUserPrivacy returns the user's privacy settings, or the defaults when the
-// user has never saved any.
+// GetUserPrivacy returns the user's privacy settings, or defaults when never saved.
 func (d *DB) GetUserPrivacy(ctx context.Context, userID int64) (UserPrivacy, error) {
 	row, err := d.q.GetUserPrivacy(ctx, userID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -35,8 +34,8 @@ func (d *DB) GetUserPrivacy(ctx context.Context, userID int64) (UserPrivacy, err
 	return UserPrivacy{AllowMemberDMs: row.AllowMemberDms != 0, MessageRequests: row.MessageRequests != 0}, nil
 }
 
-// SetUserPrivacy replaces the user's whole privacy row in one statement, so
-// concurrent writers leave one complete body and never a mix.
+// SetUserPrivacy replaces the user's whole privacy row in one statement, so concurrent
+// writers never mix.
 func (d *DB) SetUserPrivacy(ctx context.Context, userID int64, p UserPrivacy) error {
 	err := d.q.UpsertUserPrivacy(ctx, dbgen.UpsertUserPrivacyParams{
 		UserID:          userID,
@@ -49,10 +48,10 @@ func (d *DB) SetUserPrivacy(ctx context.Context, userID int64, p UserPrivacy) er
 	return nil
 }
 
-// DMRefusesSender reports whether recipientID has turned off direct messages
-// from members and holds no trust row for senderID. A recipient with no saved
-// privacy row never refuses. Trust in any source (accepted, sent_first,
-// grandfathered) keeps a conversation reachable.
+// DMRefusesSender reports whether recipientID has turned off direct messages from
+// members and holds no trust row for senderID. No saved privacy row never refuses;
+// trust in any source (accepted, sent_first, grandfathered) keeps a conversation
+// reachable.
 func (d *DB) DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
 	n, err := d.q.DMRefusesSender(ctx, dbgen.DMRefusesSenderParams{SenderID: senderID, RecipientID: recipientID})
 	if err != nil {

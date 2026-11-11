@@ -1599,6 +1599,8 @@ type mockHub struct {
 	uploadPolicyBroadcasts int
 	// gameActivityPolicies records every ApplyGameActivityPolicy call.
 	gameActivityPolicies []bool
+	// videoBitrateCaps records every ApplyVideoBitrateCap call.
+	videoBitrateCaps []int
 }
 
 type bulkDeleteCall struct {
@@ -1717,6 +1719,10 @@ func (m *mockHub) BroadcastUploadPolicy() {
 
 func (m *mockHub) ApplyGameActivityPolicy(saved bool) {
 	m.gameActivityPolicies = append(m.gameActivityPolicies, saved)
+}
+
+func (m *mockHub) ApplyVideoBitrateCap(savedKbps int) {
+	m.videoBitrateCaps = append(m.videoBitrateCaps, savedKbps)
 }
 
 func (m *mockHub) UserCount() int {

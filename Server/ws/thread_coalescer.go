@@ -9,29 +9,25 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// threadChangedInterval is the window the thread_changed coalescer holds a thread
-// to: at most one frame per thread per window. A var so tests can shorten it.
+// threadChangedInterval is the window the thread_changed coalescer holds a thread to: at most one frame per
+// thread per window. A var so tests can shorten it.
 var threadChangedInterval = 2 * time.Second
 
-// threadFlushTimeout bounds one flush's database read.
 const threadFlushTimeout = 5 * time.Second
 
-// threadNote tells the hub a thread changed (deleted false), or is gone.
 type threadNote struct {
 	threadID int64
 	parentID int64 // set on a delete, for the frame to the sockets that had it open
 	deleted  bool
 }
 
-// ThreadNoteEvent feeds the thread_changed coalescer. Not a ChannelEvent: nothing is
-// sequenced on emit; the coalescer sequences the frame when it flushes.
+// ThreadNoteEvent feeds the thread_changed coalescer. Not a ChannelEvent: the coalescer sequences the frame
+// when it flushes.
 type ThreadNoteEvent interface {
 	Event
 	ThreadNote() threadNote
 }
 
-// threadNoteEvt is a committed thread change (create, rename, archive, lock,
-// a message) or a delete.
 type threadNoteEvt struct {
 	threadID int64
 	parentID int64
@@ -42,33 +38,28 @@ func (e threadNoteEvt) EventType() string            { return MsgTypeThreadChang
 func (e threadNoteEvt) ThreadNote() threadNote       { return threadNote(e) }
 func (e threadNoteEvt) deliveryClass() deliveryClass { return classThreadNote }
 
-// threadTimer is one thread's coalescing state. window is true once the
-// leading frame went out, so the timer's next firing closes the window rather
-// than opening it; pending is a change that arrived since the last flush.
+// threadTimer is one thread's coalescing state. window is true once the leading frame went
+// out (the next firing closes the window); pending is a change since the last flush.
 type threadTimer struct {
 	t       *time.Timer
 	window  bool
 	pending bool
 }
 
-// threadHub is the hub's thread state: the thread service the coalescer reads
-// through, and one timer per thread with a window open. The map is guarded by
-// Hub.mu and holds only threads with a recent change, so it is bounded by the
-// number of threads active in the last window.
+// threadHub is the hub's thread state: the thread service and one timer per thread with a
+// window open. The map is guarded by Hub.mu and bounded by threads active in the last window.
 type threadHub struct {
 	svc     *service.ThreadService
 	timers  map[int64]*threadTimer
 	stopped bool
 }
 
-// ThreadChanged implements service.ThreadNotifier: the archiver reports an
-// archived thread here.
+// ThreadChanged implements service.ThreadNotifier (the archiver reports here).
 func (h *Hub) ThreadChanged(threadID int64) { h.noteThreadChanged(threadID) }
 
-// noteThreadChanged records that thread threadID changed. The first change
-// after a quiet period flushes at once (the leading edge), later ones inside
-// the window are folded into one trailing flush when it closes. The frame
-// carries absolute values, so folding loses nothing.
+// noteThreadChanged records that threadID changed. The first change after a quiet period
+// flushes at once (leading edge); later ones in the window fold into one trailing flush.
+// The frame carries absolute values, so folding loses nothing.
 func (h *Hub) noteThreadChanged(threadID int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -88,9 +79,8 @@ func (h *Hub) noteThreadChanged(threadID int64) {
 	e.t = time.AfterFunc(0, func() { h.fireThreadTimer(threadID, e) })
 }
 
-// fireThreadTimer runs when a thread's timer fires: the leading flush, or the
-// end of a window. It does nothing once the hub's lifecycle ended or the entry
-// was dropped (a delete, a stop).
+// fireThreadTimer runs when a thread's timer fires (leading flush or window end); a no-op
+// once the hub's lifecycle ended or the entry was dropped.
 func (h *Hub) fireThreadTimer(threadID int64, e *threadTimer) {
 	if h.lifecycle.ctx.Err() != nil {
 		return
@@ -118,11 +108,10 @@ func (h *Hub) fireThreadTimer(threadID int64, e *threadTimer) {
 	h.mu.Unlock()
 }
 
-// flushThreadChanged reads the thread's current state and sequences a
-// thread_changed on its parent. The read is not atomic with the broadcast, so
-// a delete can land in between: the frame is dropped unless e is still the
-// thread's live timer entry (a delete removes it, forgetThread, before it
-// announces thread_deleted), so no thread_changed follows a thread_deleted.
+// flushThreadChanged reads the thread's current state and sequences a thread_changed on its
+// parent. The read is not atomic with the broadcast, so the frame is dropped unless e is
+// still the thread's live entry (a delete removes it via forgetThread before announcing
+// thread_deleted): no thread_changed follows a thread_deleted.
 func (h *Hub) flushThreadChanged(threadID int64, e *threadTimer) {
 	ctx, cancel := context.WithTimeout(h.lifecycle.ctx, threadFlushTimeout)
 	defer cancel()
@@ -148,22 +137,19 @@ func (h *Hub) flushThreadChanged(threadID int64, e *threadTimer) {
 	h.sendThreadFollowUpdates(ctx, t, e)
 }
 
-// threadFollowBeforeSendHook, when non-nil, runs in sendThreadFollowUpdates
-// after the audience is resolved and before the final live check, so a test can
-// land an unfollow or a delete in exactly that window.
+// threadFollowBeforeSendHook runs in sendThreadFollowUpdates after the audience is resolved
+// and before the final live check. Test-only.
 var threadFollowBeforeSendHook func()
 
-// sendThreadFollowUpdates tells each connected follower of t that they follow it,
-// with its current state, so a rename, archive, lock or new message reaches the
-// sidebar row of a client that did not hear thread_changed (its parent is not the
-// focused channel), and a user a post just made a follower hears it. A follower is
-// only a candidate: it must also be in the parent's read audience (and have
-// acknowledged an NSFW parent), so a user who lost the parent hears nothing and the
-// follow row stays for when they regain it. The audience read is not atomic with the
-// send, so the entry is checked live and the followers read again after it: an
-// unfollow or delete that committed meanwhile has already sent its own
-// following:false, and this frame must not follow it. A failed read drops the
-// frames, since ready is authoritative.
+// sendThreadFollowUpdates tells each connected follower of t they follow it, with its
+// current state, so a rename, archive, lock or new message reaches the sidebar of a client
+// that did not hear thread_changed, and a user a post just made a follower hears it. A
+// follower is only a candidate: it must also be in the parent's read audience (and have
+// acknowledged an NSFW parent); the follow row stays for when they regain access. The
+// audience read is not atomic with the send, so the entry is checked live and followers
+// read again after it: an unfollow or delete that committed meanwhile already sent its own
+// following:false and this frame must not follow it. A failed read drops the frames (ready
+// is authoritative).
 func (h *Hub) sendThreadFollowUpdates(ctx context.Context, t *service.ThreadInfo, e *threadTimer) {
 	audience, forumScoped := h.threadFollowAudience(ctx, t)
 	if len(audience) == 0 {
@@ -194,7 +180,6 @@ func (h *Hub) sendThreadFollowUpdates(ctx context.Context, t *service.ThreadInfo
 			h.SendToUserLow(uid, payload)
 			continue
 		}
-		// A forum's posts go only to a connection that declared forums.
 		for _, c := range h.clientsOf(uid) {
 			if !lacksForums(c) {
 				c.sendLowMsg(payload)
@@ -203,12 +188,10 @@ func (h *Hub) sendThreadFollowUpdates(ctx context.Context, t *service.ThreadInfo
 	}
 }
 
-// threadFollowAudience is the connected followers of t who may read it: the
-// followers intersected with the parent's read audience and, for an NSFW
-// parent, with the users who acknowledged it (one batch read, as
-// resolveChannelActivity does). A failed read yields nobody. forumScoped
-// reports a forum's post, whose frames go only to connections that declared
-// forums.
+// threadFollowAudience is the connected followers of t who may read it: followers
+// intersected with the parent's read audience and, for an NSFW parent, the users who
+// acknowledged it (one batch read). A failed read yields nobody. forumScoped reports a
+// forum's post, whose frames go only to connections that declared forums.
 func (h *Hub) threadFollowAudience(ctx context.Context, t *service.ThreadInfo) ([]int64, bool) {
 	vis := h.readers.Visibility
 	if vis == nil {
@@ -242,8 +225,7 @@ func (h *Hub) threadFollowAudience(ctx context.Context, t *service.ThreadInfo) (
 	return out, forumScoped
 }
 
-// forgetThread drops a deleted thread's coalescing state, so no timer fires a
-// frame for a thread that no longer exists.
+// forgetThread drops a deleted thread's coalescing state so no timer fires for it.
 func (h *Hub) forgetThread(threadID int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -253,8 +235,7 @@ func (h *Hub) forgetThread(threadID int64) {
 	}
 }
 
-// stopThreadFeed cancels every pending timer and refuses new ones. closeStop
-// calls it, so no thread timer outlives the hub.
+// stopThreadFeed cancels every pending timer and refuses new ones (closeStop calls it).
 func (h *Hub) stopThreadFeed() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -265,8 +246,8 @@ func (h *Hub) stopThreadFeed() {
 	}
 }
 
-// handleThreadNote applies a ThreadNoteEvent: a change feeds the coalescer, a
-// delete drops the thread's state and releases every socket that had it open.
+// handleThreadNote applies a ThreadNoteEvent: a change feeds the coalescer, a delete drops
+// the thread's state and releases every socket that had it open.
 func (h *Hub) handleThreadNote(n threadNote) {
 	if !n.deleted {
 		h.noteThreadChanged(n.threadID)
@@ -276,9 +257,8 @@ func (h *Hub) handleThreadNote(n threadNote) {
 	h.releaseThreadSockets(n.threadID, n.parentID)
 }
 
-// noteIfThread feeds the coalescer when channelID is a thread, for the paths
-// that change a thread's messages without a handler result (a bulk delete or a
-// purge). An ordinary channel costs one lookup and nothing more.
+// noteIfThread feeds the coalescer when channelID is a thread, for paths that change a
+// thread's messages without a handler result (bulk delete, purge). Costs one lookup otherwise.
 func (h *Hub) noteIfThread(channelID int64) {
 	svc := h.threadHub.svc
 	if svc == nil {

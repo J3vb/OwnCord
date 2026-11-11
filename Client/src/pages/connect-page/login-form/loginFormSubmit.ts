@@ -19,7 +19,35 @@ import {
   AUTH_BUSY_JITTER_MS,
   isAuthBusy,
 } from "./loginShared";
+import type { FormMode } from "../LoginForm";
 import type { LoginFormState, LoginFormInternals } from "./loginState";
+
+interface ValidationError {
+  message: string;
+  field: FieldId | null;
+  inline?: boolean; // shown under the field (its hint); the banner points there
+}
+
+/** The text a failed submit shows, capped so a server-controlled message cannot phish. */
+function submitErrorMessage(err: unknown): string {
+  let message: string;
+  if (err instanceof TransportError || err instanceof ApiClientError) {
+    // A transport failure or server refusal: plain catalog copy for an
+    // unreachable server or a known code, the capitalised server message
+    // otherwise.
+    message = errorText(err, connectText("error.serverFallback"));
+  } else if (err instanceof Error) {
+    message = err.message;
+  } else if (typeof err === "string") {
+    message = err;
+  } else if (err !== null && typeof err === "object" && "message" in err) {
+    message = String(err.message);
+  } else {
+    message = String(err);
+  }
+  // Cap length to prevent phishing via server-controlled error messages
+  return message.length > 200 ? message.slice(0, 200) + "..." : message;
+}
 
 export function createLoginFormSubmit(st: LoginFormState, lf: LoginFormInternals) {
   function handleToggleMode(): void {
@@ -56,16 +84,7 @@ export function createLoginFormSubmit(st: LoginFormState, lf: LoginFormInternals
     }
   }
 
-  function validateForm(): {
-    message: string;
-    field: FieldId | null;
-    /** The message is shown under the field (its hint); the banner points there. */
-    inline?: boolean;
-  } | null {
-    const host = lf.currentHost();
-    const username = st.usernameInput.value.trim();
-    const password = st.passwordInput.value;
-
+  function validateAccount(host: string, username: string): ValidationError | null {
     if (!host) {
       return { message: connectText("validation.hostRequired"), field: "host" };
     }
@@ -83,48 +102,59 @@ export function createLoginFormSubmit(st: LoginFormState, lf: LoginFormInternals
         return { message: usernameProblemText(problem), field: "username", inline: true };
       }
     }
+    return null;
+  }
+
+  function validatePassword(password: string): ValidationError | null {
     // A saved password is already known-good; it is never re-validated here
     // because its plaintext is not available to this process. The bypass is
     // login-only: registration always needs a real, freshly typed password.
-    if (!st.usingSavedPassword || st.formMode !== "login") {
-      if (!password) {
-        return { message: connectText("validation.passwordRequired"), field: "password" };
-      }
-      if (password.length < MIN_PASSWORD_LENGTH) {
-        return {
-          message: connectText("validation.passwordTooShort", { min: MIN_PASSWORD_LENGTH }),
-          field: "password",
-        };
-      }
+    if (st.usingSavedPassword && st.formMode === "login") return null;
+    if (!password) {
+      return { message: connectText("validation.passwordRequired"), field: "password" };
     }
-    if (st.formMode === "register") {
-      // The placeholder can re-enter the field as literal text (reveal it,
-      // copy the bullets, paste them back — `beforeinput` clears the flag
-      // before the paste lands), with nothing left marking it as anything
-      // but ordinary text. Registration is the only place that turns that
-      // text into a lasting, guessable credential, so it is the only place
-      // it is refused — statelessly, because gating this on remembered
-      // history (whether the field had shown the placeholder before) was
-      // wrong in both directions.
-      if (password === SAVED_PASSWORD_PLACEHOLDER) {
-        return { message: connectText("validation.placeholderPassword"), field: "password" };
-      }
-      const mode = lf.currentRegistrationMode();
-      if (mode === "closed") {
-        // No field is at fault (and the invite field is hidden in this mode),
-        // so the banner stands alone.
-        return { message: connectText("registration.closedNotice"), field: null };
-      }
-      // `invite` and an unknown mode (older server / failed read) both require
-      // a code. Never widen registration because the mode could not be read.
-      if (mode === "invite" || mode === null) {
-        const inviteCode = normaliseInviteCode(st.inviteInput.value);
-        if (!inviteCode) {
-          return { message: connectText("validation.inviteRequired"), field: "invite" };
-        }
-      }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return {
+        message: connectText("validation.passwordTooShort", { min: MIN_PASSWORD_LENGTH }),
+        field: "password",
+      };
     }
     return null;
+  }
+
+  function validateRegistration(password: string): ValidationError | null {
+    // The placeholder can re-enter the field as literal text (reveal it,
+    // copy the bullets, paste them back — `beforeinput` clears the flag
+    // before the paste lands), with nothing left marking it as anything
+    // but ordinary text. Registration is the only place that turns that
+    // text into a lasting, guessable credential, so it is the only place
+    // it is refused — statelessly, because gating this on remembered
+    // history (whether the field had shown the placeholder before) was
+    // wrong in both directions.
+    if (password === SAVED_PASSWORD_PLACEHOLDER) {
+      return { message: connectText("validation.placeholderPassword"), field: "password" };
+    }
+    const mode = lf.currentRegistrationMode();
+    if (mode === "closed") {
+      // No field is at fault (and the invite field is hidden in this mode),
+      // so the banner stands alone.
+      return { message: connectText("registration.closedNotice"), field: null };
+    }
+    // `invite` and an unknown mode (older server / failed read) both require
+    // a code. Never widen registration because the mode could not be read.
+    if ((mode === "invite" || mode === null) && !normaliseInviteCode(st.inviteInput.value)) {
+      return { message: connectText("validation.inviteRequired"), field: "invite" };
+    }
+    return null;
+  }
+
+  function validateForm(): ValidationError | null {
+    const password = st.passwordInput.value;
+    return (
+      validateAccount(lf.currentHost(), st.usernameInput.value.trim()) ??
+      validatePassword(password) ??
+      (st.formMode === "register" ? validateRegistration(password) : null)
+    );
   }
 
   /**
@@ -181,6 +211,36 @@ export function createLoginFormSubmit(st: LoginFormState, lf: LoginFormInternals
     }
   }
 
+  function showValidationError(validationError: ValidationError): void {
+    // An inline message is said once, under the field; the banner points at it.
+    const inline = validationError.inline === true;
+    if (inline) st.usernameHint.showError(validationError.message);
+    const banner = inline ? connectText("limits.checkField") : validationError.message;
+    lf.transitionTo("error", banner, validationError.field);
+  }
+
+  // A rejected submit: show it, noting a refused certificate for a later retry.
+  function failSubmit(err: unknown, host: string, mode: FormMode): void {
+    const message = submitErrorMessage(err);
+    // The server refused the name itself (a reserved name, a character the
+    // client check does not mirror): say so under the field and keep what
+    // was typed, so it can be edited rather than retyped.
+    if (
+      st.formMode === "register" &&
+      err instanceof ApiClientError &&
+      err.code === RestErrorCode.INVALID_INPUT &&
+      /^username\b/i.test(err.message)
+    ) {
+      st.usernameHint.showError(message);
+      lf.transitionTo("error", connectText("limits.checkField"), "username");
+      return;
+    }
+    if (err instanceof ApiClientError && err.code === TLS_CERT_CODE) {
+      st.certRefusedSubmit = { host, mode };
+    }
+    lf.transitionTo("error", message);
+  }
+
   async function handleFormSubmit(e: Event): Promise<void> {
     e.preventDefault();
 
@@ -190,13 +250,7 @@ export function createLoginFormSubmit(st: LoginFormState, lf: LoginFormInternals
 
     const validationError = validateForm();
     if (validationError !== null) {
-      if (validationError.inline === true) {
-        // Said once, under the field; the banner points at it.
-        st.usernameHint.showError(validationError.message);
-        lf.transitionTo("error", connectText("limits.checkField"), validationError.field);
-        return;
-      }
-      lf.transitionTo("error", validationError.message, validationError.field);
+      showValidationError(validationError);
       return;
     }
 
@@ -224,42 +278,7 @@ export function createLoginFormSubmit(st: LoginFormState, lf: LoginFormInternals
       // If the callback didn't throw, the caller handles navigation.
       // The caller may also call showTotp() or showError() on this page.
     } catch (err: unknown) {
-      let message: string;
-      if (err instanceof TransportError || err instanceof ApiClientError) {
-        // A transport failure or server refusal: plain catalog copy for an
-        // unreachable server or a known code, the capitalised server message
-        // otherwise.
-        message = errorText(err, connectText("error.serverFallback"));
-      } else if (err instanceof Error) {
-        message = err.message;
-      } else if (typeof err === "string") {
-        message = err;
-      } else if (err !== null && typeof err === "object" && "message" in err) {
-        message = String(err.message);
-      } else {
-        message = String(err);
-      }
-      // Cap length to prevent phishing via server-controlled error messages
-      if (message.length > 200) {
-        message = message.slice(0, 200) + "...";
-      }
-      // The server refused the name itself (a reserved name, a character the
-      // client check does not mirror): say so under the field and keep what
-      // was typed, so it can be edited rather than retyped.
-      if (
-        st.formMode === "register" &&
-        err instanceof ApiClientError &&
-        err.code === RestErrorCode.INVALID_INPUT &&
-        /^username\b/i.test(err.message)
-      ) {
-        st.usernameHint.showError(message);
-        lf.transitionTo("error", connectText("limits.checkField"), "username");
-        return;
-      }
-      if (err instanceof ApiClientError && err.code === TLS_CERT_CODE) {
-        st.certRefusedSubmit = { host, mode };
-      }
-      lf.transitionTo("error", message);
+      failSubmit(err, host, mode);
     }
   }
 
