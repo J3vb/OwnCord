@@ -21,7 +21,6 @@ import { type ApiClient, ApiClientError, errorText } from "@lib/api";
 import type { ToastContainer } from "@lib/ui/toastContainer";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
-import { moderationText } from "../../i18n/moderation";
 import type { BlockDeps } from "../blocks/blockActions";
 import {
   addMemberRole,
@@ -289,7 +288,7 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
             fallbackFocus: () => memberList.focusMember(userId),
           });
         },
-        () => getToast()?.show(moderationText("nicknameDialog.failed"), "error"),
+        () => getToast()?.show(shellText("member.nicknameFailed"), "error"),
       );
     },
     // Loaded on first use: the dialog and request code stay out of MainPage.
