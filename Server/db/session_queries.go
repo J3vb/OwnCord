@@ -13,16 +13,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// maxSessionsPerUser caps concurrent sessions per user; the oldest is evicted
-// beyond it, bounding accumulation from credential stuffing or token theft.
+// maxSessionsPerUser caps concurrent sessions per user, evicting the oldest, to bound
+// accumulation from credential stuffing or token theft.
 const maxSessionsPerUser = 25
 
-// CreateSession inserts a new session and returns its ID, evicting the oldest
-// session at the per-user cap. tokenHash must already be hashed.
+// CreateSession inserts a session, evicting the oldest at the cap; tokenHash must be hashed.
 func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error) {
-	// Evict oldest sessions at or above the cap. A failed eviction must not
-	// block login (the next CreateSession trims again, and a persistent failure
-	// fails InsertSession anyway), but it must not be invisible.
 	if err := d.q.EvictOldestSessions(ctx, dbgen.EvictOldestSessionsParams{
 		UserID: userID,
 		Offset: maxSessionsPerUser - 1,
@@ -34,15 +30,13 @@ func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device,
 	return insertSession(ctx, d.q, userID, tokenHash, device, ip, true)
 }
 
-// CreateFirstSession inserts an account's first session already seen, since
-// there is no other device to tell, and needs no cap eviction.
+// CreateFirstSession inserts an account's first session already seen, with no cap eviction.
 func (d *DB) CreateFirstSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error) {
 	return insertSession(ctx, d.q, userID, tokenHash, device, ip, false)
 }
 
-// insertSession inserts one session row through q (d.q, or d.q.WithTx(tx) when
-// it must commit with other writes). unseen marks a new login the account has
-// not acknowledged.
+// insertSession inserts one session row through q; unseen marks a new login the
+// account has not acknowledged.
 func insertSession(ctx context.Context, q *dbgen.Queries, userID int64, tokenHash, device, ip string, unseen bool) (int64, error) {
 	expiresAt := time.Now().Add(sessionTTL).UTC().Format(dbtime.ISOLayout)
 	deviceCopy, ipCopy := device, ip
@@ -61,8 +55,7 @@ func insertSession(ctx context.Context, q *dbgen.Queries, userID int64, tokenHas
 	return sessionRowID(res, err, userID)
 }
 
-// GetSessionByTokenHash retrieves a session by its hashed token, or nil if
-// not found.
+// GetSessionByTokenHash retrieves a session by its hashed token, or nil if not found.
 func (d *DB) GetSessionByTokenHash(ctx context.Context, tokenHash string) (*Session, error) {
 	s, err := d.q.GetSessionByTokenHash(ctx, tokenHash)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -83,8 +76,8 @@ type SessionWithBanStatus struct {
 	BanExpires *string
 }
 
-// GetSessionWithBanStatus returns the session joined with the user's ban
-// status in a single query. Returns nil, nil when not found.
+// GetSessionWithBanStatus returns the session joined with the user's ban status; nil,
+// nil when not found.
 func (d *DB) GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*SessionWithBanStatus, error) {
 	row, err := d.q.GetSessionWithBanStatus(ctx, tokenHash)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -108,12 +101,10 @@ func (d *DB) GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*Se
 	}, nil
 }
 
-// GetSessionsWithBanStatusBatch returns session+ban rows for every token hash,
-// keyed by hash; hashes with no session are absent. The ws revoked-session
-// sweep uses it to cost one query instead of N.
+// GetSessionsWithBanStatusBatch returns session+ban rows by token hash (unknown hashes
+// absent), one query for the ws revoked-session sweep.
 func (d *DB) GetSessionsWithBanStatusBatch(ctx context.Context, tokenHashes []string) (map[string]*SessionWithBanStatus, error) {
 	result := make(map[string]*SessionWithBanStatus, len(tokenHashes))
-	// Chunk the IN list far below SQLite's bound-parameter limit.
 	const chunkSize = 500
 	for start := 0; start < len(tokenHashes); start += chunkSize {
 		chunk := tokenHashes[start:min(start+chunkSize, len(tokenHashes))]
@@ -145,7 +136,6 @@ func (d *DB) GetSessionsWithBanStatusBatch(ctx context.Context, tokenHashes []st
 	return result, nil
 }
 
-// scanSessionsWithBanStatus scans batch rows into result and closes rows.
 func scanSessionsWithBanStatus(rows *sql.Rows, result map[string]*SessionWithBanStatus) error {
 	defer rows.Close() //nolint:errcheck
 	for rows.Next() {
@@ -178,8 +168,8 @@ func (d *DB) DeleteSession(ctx context.Context, tokenHash string) error {
 	return nil
 }
 
-// DeleteOtherSessions removes all of the user's sessions except keepSessionID
-// (after a password or 2FA change).
+// DeleteOtherSessions removes all of the user's sessions except keepSessionID (after a password or
+// 2FA change).
 func (d *DB) DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error) {
 	result, err := d.q.DeleteOtherSessions(ctx, dbgen.DeleteOtherSessionsParams{
 		UserID: userID,
@@ -192,10 +182,9 @@ func (d *DB) DeleteOtherSessions(ctx context.Context, userID, keepSessionID int6
 	return n, nil
 }
 
-// DeleteExpiredSessions removes sessions whose expires_at is past. The
-// comparison is plain text against idx_sessions_expires_at, so the cutoff must
-// use dbtime.ISOLayout, the stored format; a space-separated cutoff would
-// compare wrong (' ' sorts before 'T') and delete nothing.
+// DeleteExpiredSessions removes sessions whose expires_at is past. The cutoff must use
+// dbtime.ISOLayout so idx_sessions_expires_at compares right: a space-separated cutoff
+// would delete nothing (' ' < 'T').
 func (d *DB) DeleteExpiredSessions(ctx context.Context) error {
 	cutoff := time.Now().UTC().Format(dbtime.ISOLayout)
 	if err := d.q.DeleteExpiredSessions(ctx, cutoff); err != nil {

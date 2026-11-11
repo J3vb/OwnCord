@@ -11,7 +11,7 @@ import {
   hasLocalScreenshareAudio,
 } from "@lib/voice/livekitSession";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
-import type { VideoGridComponent } from "@components/VideoGrid";
+import type { VideoGridComponent } from "../../features/voice/videoGrid/VideoGrid";
 import { shellText } from "../../i18n/shell";
 import { buildCallPeople, type CallAvatarCache } from "./callPeople";
 import { createCallChatResize, type CallChatResize } from "../../features/voice/callChatResize";
@@ -67,7 +67,7 @@ export interface VideoModeController {
   isVideoMode(): boolean;
   /** The grid is up in this window (open and not popped out). */
   isGridInWindow(): boolean;
-  /** Set focus on a specific video tile (focus mode). */
+  /** Focus a specific video tile (pinned, the rest small). */
   setFocus(tileId: number): void;
   /** Get the currently focused tile ID, or null if none. */
   getFocusedTileId(): number | null;

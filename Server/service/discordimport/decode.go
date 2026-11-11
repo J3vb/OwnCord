@@ -8,24 +8,22 @@ import (
 	"io"
 )
 
-// Visitor receives the export piece by piece. Header is called once, before
-// the first message (and also for an export with none). A non-nil error from
-// either stops the decode and is returned as is.
+// Visitor receives the export piece by piece. Header is called once, before the first message (also for an
+// export with none). A non-nil error from either stops the decode and is returned as is.
 type Visitor struct {
 	Header  func(Header) error
 	Message func(Message) error
 }
 
-// Summary is what the decode saw; MessageCount is 0 until the end because the
-// exporter writes it after the messages.
+// Summary is what the decode saw; MessageCount is 0 until the end because the exporter writes it after the
+// messages.
 type Summary struct {
 	MessageCount int
 	Seen         int
 }
 
-// Decode streams a DiscordChatExporter JSON document one message at a time, so
-// memory stays flat for any export size. The channel block must precede the
-// messages, as the exporter writes it. ctx is checked between messages.
+// Decode streams a DiscordChatExporter JSON document one message at a time, so memory stays flat for any
+// export size. The channel block must precede the messages. ctx is checked between messages.
 func Decode(ctx context.Context, r io.Reader, v Visitor) (Summary, error) {
 	var sum Summary
 	dec := json.NewDecoder(r)
@@ -119,8 +117,8 @@ func expectDelim(dec *json.Decoder, want json.Delim) error {
 	return nil
 }
 
-// wrapDecode marks a JSON syntax or type error as a bad export and leaves the
-// visitor's own errors (and cancellation) alone.
+// wrapDecode marks a JSON syntax or type error as a bad export and leaves the visitor's own errors (and
+// cancellation) alone.
 func wrapDecode(err error) error {
 	if _, ok := errors.AsType[*json.SyntaxError](err); ok {
 		return fmt.Errorf("%w: %w", ErrBadExport, err)

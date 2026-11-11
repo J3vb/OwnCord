@@ -45,6 +45,24 @@ export interface MicControlState {
   readonly title: string;
 }
 
+/** The mic button's label: the first state that applies, a moderator's mute
+ *  before the AFK lock before listen-only before an idle push-to-talk key. */
+function micTitle(
+  serverMuted: boolean,
+  afkLocked: boolean,
+  listenOnly: boolean,
+  pttGated: boolean,
+  userMuted: boolean,
+): string {
+  if (serverMuted) return t("widget.mutedByModerator");
+  if (afkLocked) return t("widget.control.afkLocked");
+  if (listenOnly) return t("widget.control.listenOnly");
+  if (pttGated) {
+    return t(isAndroidApp() ? "widget.control.pttGated.android" : "widget.control.pttGated");
+  }
+  return t(userMuted ? "widget.control.unmute" : "widget.control.mute");
+}
+
 /** A moderator's mute is not ours to lift (the server refuses it), so the
  *  button is disabled and says why. In a call joined listen-only there is no
  *  mic to mute, and an idle push-to-talk key reads as its own state, not a mute. */
@@ -56,15 +74,7 @@ export function micControlState(voice: VoiceState): MicControlState {
   const afkLocked = inCall && voice.inAfkChannel === true;
   const listenOnly = inCall && voice.listenOnly && !serverMuted && !afkLocked;
   const pttGated = inCall && voice.pttGated === true && !userMuted && !listenOnly && !afkLocked;
-  const title = serverMuted
-    ? t("widget.mutedByModerator")
-    : afkLocked
-      ? t("widget.control.afkLocked")
-      : listenOnly
-        ? t("widget.control.listenOnly")
-        : pttGated
-          ? t(isAndroidApp() ? "widget.control.pttGated.android" : "widget.control.pttGated")
-          : t(userMuted ? "widget.control.unmute" : "widget.control.mute");
+  const title = micTitle(serverMuted, afkLocked, listenOnly, pttGated, userMuted);
   return {
     userMuted,
     listenOnly,

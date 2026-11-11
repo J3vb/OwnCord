@@ -15,9 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
-// AdminUploadStore is the slice of the database the admin Storage page reads and
-// writes beyond Store: every member's uploads, their removal, and the per-member
-// upload limit.
+// AdminUploadStore is the slice of the database the admin Storage page needs beyond Store.
 type AdminUploadStore interface {
 	ListAllUploads(ctx context.Context, q db.AdminUploadQuery) ([]db.AdminUpload, error)
 	UploadTotals(ctx context.Context) ([]db.UploadKindTotal, error)
@@ -32,32 +30,27 @@ type AdminUploadStore interface {
 
 var _ AdminUploadStore = (*db.DB)(nil)
 
-// The Storage page's row types, named here so the admin transport reads them
-// from the service rather than importing db.
 type (
 	UploadKindTotal    = db.UploadKindTotal
 	MemberStorage      = db.MemberStorage
 	AdminRemovedUpload = db.AdminRemovedAttachment
 )
 
-// Bounds of the admin Storage page.
 const (
 	// AdminRemoveMaxFiles is the most files one bulk delete takes.
 	AdminRemoveMaxFiles = 100
 	// MemberStorageMaxIDs is the most members one storage lookup reads.
 	MemberStorageMaxIDs = 100
-	// MemberQuotaMaxMB caps a per-member limit at about 10 TB, far above any disk,
-	// so the byte figure never overflows.
+	// MemberQuotaMaxMB caps a per-member limit at about 10 TB so the byte figure never overflows.
 	MemberQuotaMaxMB = 10_000_000
-	// LeftoverMinAge is how old a file nothing names must be before the Storage
-	// page counts or removes it, so an upload still in progress is never touched.
+	// LeftoverMinAge is the age a nameless file must reach before it is counted or removed,
+	// so an in-progress upload is never touched.
 	LeftoverMinAge = 24 * time.Hour
 	// LeftoverCleanupMax is the most leftover files one cleanup removes.
 	LeftoverCleanupMax = 1000
 )
 
-// AdminUploadsRequest is one page of the Storage page's file list. OlderThanDays
-// 0 means any age; Kind "" means every kind.
+// AdminUploadsRequest is one page request. OlderThanDays 0 means any age; Kind "" any kind.
 type AdminUploadsRequest struct {
 	Sort          string
 	Name          string
@@ -69,15 +62,13 @@ type AdminUploadsRequest struct {
 	Limit         int
 }
 
-// AdminUploadsPage is one page of every member's uploads. NextCursor is "" on the
-// last page.
+// AdminUploadsPage is one page of every member's uploads; NextCursor is "" on the last.
 type AdminUploadsPage struct {
 	Items      []db.AdminUpload `json:"items"`
 	NextCursor string           `json:"next_cursor,omitempty"`
 }
 
-// LeftoverScan is what the storage directory holds that no row names and is old
-// enough to remove.
+// LeftoverScan is what the storage directory holds that no row names and is old enough to remove.
 type LeftoverScan struct {
 	Count int   `json:"count"`
 	Bytes int64 `json:"bytes"`
@@ -90,9 +81,8 @@ func (s *UploadService) adminStore() (AdminUploadStore, error) {
 	return s.admin, nil
 }
 
-// effectiveQuotaLocked is userID's upload limit in bytes (0 is unlimited): their
-// own limit when an admin set one, else the server-wide one. The caller holds
-// quota.mu.
+// effectiveQuotaLocked is userID's upload limit in bytes (0 unlimited): their own limit
+// else the server-wide one. The caller holds quota.mu.
 func (s *UploadService) effectiveQuotaLocked(ctx context.Context, userID int64) (int64, error) {
 	base := s.quota.limits.UserQuotaBytes
 	if s.admin == nil {
@@ -132,8 +122,6 @@ func (s *UploadService) ListAllUploads(ctx context.Context, in AdminUploadsReque
 	return page, nil
 }
 
-// adminUploadQuery checks a list request and turns it into the database query,
-// asking for one row past the page so the caller knows whether more follow.
 func adminUploadQuery(in AdminUploadsRequest, now time.Time) (db.AdminUploadQuery, int, error) {
 	q := db.AdminUploadQuery{Sort: in.Sort, Kind: in.Kind, UploaderID: in.UploaderID, ChannelID: in.ChannelID}
 	switch q.Sort {
@@ -177,8 +165,7 @@ func adminUploadQuery(in AdminUploadsRequest, now time.Time) (db.AdminUploadQuer
 	return q, limit, nil
 }
 
-// UploadTotals reports how many files of each kind the server holds and their
-// bytes.
+// UploadTotals reports how many files of each kind the server holds and their bytes.
 func (s *UploadService) UploadTotals(ctx context.Context) ([]UploadKindTotal, error) {
 	st, err := s.adminStore()
 	if err != nil {
@@ -191,13 +178,10 @@ func (s *UploadService) UploadTotals(ctx context.Context) ([]UploadKindTotal, er
 	return totals, nil
 }
 
-// RemoveUploadAsAdmin deletes one file whoever uploaded it, with the same rules
-// as RemoveOwnUpload: a live avatar, banner or group icon is ErrUploadInUse, an
-// unknown or already removed file is ErrNotFound. The delete and the uploader's
-// recount share the quota lock with a member's own removal and with uploads, so
-// when an admin and the member remove the same file at once exactly one gets the
-// row and the bytes are given back once. A removal is audited against the
-// uploader.
+// RemoveUploadAsAdmin deletes one file whoever uploaded it, with RemoveOwnUpload's rules
+// (a live avatar, banner or group icon is ErrUploadInUse, an unknown file ErrNotFound).
+// It shares the quota lock with member removal, so a racing admin and member remove the
+// file once and return the bytes once. Audited against the uploader.
 func (s *UploadService) RemoveUploadAsAdmin(ctx context.Context, actorID int64, fileID string) (AdminRemovedUpload, error) {
 	st, err := s.adminStore()
 	if err != nil {
@@ -233,9 +217,8 @@ func (s *UploadService) RemoveUploadAsAdmin(ctx context.Context, actorID int64, 
 	return removed, nil
 }
 
-// SetMemberQuota sets userID's own upload limit in MB: nil returns them to the
-// server-wide limit, 0 lifts the limit for them. An unknown user is ErrNotFound.
-// The change is audited.
+// SetMemberQuota sets userID's own limit in MB: nil returns them to the server-wide
+// limit, 0 lifts it. An unknown user is ErrNotFound. Audited.
 func (s *UploadService) SetMemberQuota(ctx context.Context, actorID, userID int64, quotaMB *int64) error {
 	st, err := s.adminStore()
 	if err != nil {
@@ -272,9 +255,8 @@ func (s *UploadService) AuditLeftoverCleanup(ctx context.Context, actorID int64,
 		fmt.Sprintf("removed %d leftover files", n))
 }
 
-// MemberStorage reads the counted bytes and own limit of up to
-// MemberStorageMaxIDs members. A member missing from the answer has uploaded
-// nothing and follows the server-wide limit.
+// MemberStorage reads counted bytes and own limit of up to MemberStorageMaxIDs members;
+// a missing member has uploaded nothing and follows the server-wide limit.
 func (s *UploadService) MemberStorage(ctx context.Context, userIDs []int64) ([]MemberStorage, error) {
 	st, err := s.adminStore()
 	if err != nil {
@@ -290,15 +272,13 @@ func (s *UploadService) MemberStorage(ctx context.Context, userIDs []int64) ([]M
 	return rows, nil
 }
 
-// LeftoverStore is the upload directory a leftover cleanup lists and deletes
-// from; *storage.Storage satisfies it.
+// LeftoverStore is the upload directory a leftover cleanup lists and deletes from; *storage.Storage
+// satisfies it.
 type LeftoverStore interface {
 	StorageLister
 	Delete(name string) error
 }
 
-// leftovers lists the files in the storage directory that no attachment, emoji
-// or sticker row names and that are older than cutoff.
 func (s *UploadService) leftovers(ctx context.Context, lister StorageLister, cutoff time.Time) ([]storage.Entry, error) {
 	st, err := s.adminStore()
 	if err != nil {
@@ -349,11 +329,9 @@ func (s *UploadService) ScanLeftovers(ctx context.Context, lister StorageLister,
 	return scan, nil
 }
 
-// CleanLeftovers deletes up to limit leftover files older than cutoff and
-// reports how many went. A file that will not delete is skipped and stays in
-// the next scan. The age floor keeps an upload whose row is not written yet out
-// of reach; a file named again after the scan is checked once more just before
-// its delete.
+// CleanLeftovers deletes up to limit leftover files older than cutoff and reports how
+// many went; a file that will not delete is skipped. A file named again after the scan
+// is rechecked just before its delete.
 func (s *UploadService) CleanLeftovers(ctx context.Context, files LeftoverStore, cutoff time.Time, limit int) (int, error) {
 	if files == nil || limit <= 0 {
 		return 0, nil

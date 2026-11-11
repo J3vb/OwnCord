@@ -15,7 +15,7 @@ CI fails on drift, and the next generator run silently discards your edit.
 | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------- |
 | `Server/db/dbgen/`                                                                                | `Server/db/queries/sqlite/*.sql`, `Server/migrations/`               | `db-change` skill                                     |
 | `Server/ws/message_types.go`, `Server/httperr/codes.go` **and** `Client/src/lib/protocolTypes.ts` | `protocol/schema.json`                                               | `protocol-change` skill                               |
-| `Client/src/lib/net/wireShapes.ts`                                                                | `Client/src/lib/wire*.ts` payload types, `lib/net/restReplies.ts`    | `cd Client && npm run gen:wire`                       |
+| `Client/src/lib/net/wireShapes.ts`, `Client/src/lib/net/restShapes.ts`                            | `Client/src/lib/wire*.ts` payload types, `lib/net/restReplies.ts`    | `cd Client && npm run gen:wire`                       |
 | `gendocs:*` blocks in `docs/api.md`, `docs/schema.md`, `docs/server-configuration.md`             | `Server/api/route_groups.go`, `Server/migrations/`, `Server/config/` | `cd Server && go run -tags otel,wazero ./cmd/gendocs` |
 
 ## Bug-hunt ledger
@@ -38,7 +38,7 @@ scratch and stays local.
 
 ## Tools for agents
 
-Optional; none is needed to build or test. The last four are also CI checks
+Optional; none is needed to build or test. The last five are also CI checks
 that fail closed on a new finding (Workflow Security Lint and Supply-chain Scan
 are required on `dev`; triggers in `scripts/ci-select.mjs`, pinned versions in
 `.github/workflows/ci.yml`). Run the matching one before pushing that kind of
@@ -52,6 +52,7 @@ change.
 - `cargo-deny` — after changing `Client/src-tauri/Cargo.toml`/`.lock`: `cargo deny --manifest-path Client/src-tauri/Cargo.toml check`
 - `zizmor` — after editing `.github/workflows/`: `zizmor --offline .github/workflows/`
 - `actionlint` — after editing a workflow (CI pins 1.7.7): `actionlint .github/workflows/*.yml`
+- `gitleaks` — after adding config, fixtures or sample values that look like keys: `gitleaks dir --config .gitleaks.toml .` (CI pins 8.30.1)
 
 ## AI Quality Guardrails & Engineering Standards
 
@@ -97,8 +98,8 @@ and proceeds, so a reviewer can see what was assumed.
 
 - **`any` is banned.** Use the precise type, a generated protocol type, or
   `unknown` plus a narrowing check. `@typescript-eslint/no-explicit-any` is an
-  error in `eslint.config.js`. The residue in `src/lib/voice/livekitReconnect.ts`
-  only shrinks — never add an `eslint-disable` for this rule.
+  error in `eslint.config.js`, and `src/` has no use left — never add an
+  `eslint-disable` for this rule.
 - **Every Tauri `invoke()` is wrapped in `try/catch`** where it is called, in
   `src/platform/desktop/` (the only place a `@tauri-apps` import may appear).
   The `catch` turns the rejection into a typed result or a user-visible

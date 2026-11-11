@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// restartTiming is the supervisor's backoff: the fast tier doubles baseDelay up
-// to maxDelay and gives up after maxRetries exits that each came within
-// stableAfter of the start; the slow tier then tries every slowRetry.
+// restartTiming is the backoff: the fast tier doubles baseDelay up to maxDelay and gives up after maxRetries
+// exits within stableAfter of start; the slow tier then retries every slowRetry.
 type restartTiming struct {
 	baseDelay   time.Duration
 	maxDelay    time.Duration
@@ -26,9 +25,8 @@ var defaultRestartTiming = restartTiming{
 }
 
 // slowRetry parks runLoop after the fast tier gave up, so a short-lived cause
-// (a port held for a moment, a full disk) does not keep voice down until OwnCord
-// restarts. It returns when the timer fires or Restart wakes it; manual is true
-// for the latter. ok is false when the loop must exit (Stop or cancel).
+// (a held port, a full disk) does not keep voice down until restart. manual is
+// true when Restart woke it; ok is false when the loop must exit.
 func (p *Process) slowRetry(ctx context.Context, rapidFailures int) (manual, ok bool) {
 	wait := p.timing.slowRetry
 	if !p.gaveUp.Swap(true) {
@@ -53,8 +51,7 @@ func (p *Process) slowRetry(ctx context.Context, rapidFailures int) (manual, ok 
 	case <-ctx.Done():
 	}
 
-	// Clear the wait and drain a wake that landed after the timer fired, under the
-	// lock Restart sends with: once nextRetry is zero no further wake is queued.
+	// Clear the wait and drain a late wake under the lock Restart sends with.
 	p.mu.Lock()
 	p.nextRetry = time.Time{}
 	select {
@@ -76,10 +73,9 @@ func (p *Process) slowRetry(ctx context.Context, rapidFailures int) (manual, ok 
 	return manual, true
 }
 
-// Restart wakes a supervisor that stopped restarting the companion and gives it
-// the full set of quick retries again. It reports false when there is nothing to
-// restart: the companion is running or still in its quick retries, the manager
-// is stopped, or LiveKit is externally managed (nil manager).
+// Restart gives a supervisor that stopped restarting the full set of quick
+// retries again. It reports false when there is nothing to restart (running,
+// still in quick retries, stopped, or externally managed).
 func (p *Process) Restart() bool {
 	if p == nil {
 		return false

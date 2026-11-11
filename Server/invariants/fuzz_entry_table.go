@@ -115,9 +115,7 @@ var FuzzGaps = map[string]FuzzGap{
 	"api.handleCreateSticker":           {Source: "sticker upload (multipart)"},
 	"api.readStickerUpload":             {Source: "sticker upload (multipart)"},
 	"api.handleUpload":                  {Source: "attachment upload (multipart)"},
-	"api.handleUploadAvatar":            {Source: "avatar upload (multipart)"},
-	"api.handleUploadBanner":            {Source: "banner upload (multipart)"},
-	"api.handleUploadGroupIcon":         {Source: "group DM icon upload (multipart)"},
+	"api.readProfileImageForm":          {Source: "avatar, banner and group DM icon upload (multipart)"},
 	"api.storedImageSize":               {Source: "uploaded images, read back from storage"},
 
 	"ws.(*Hub).authenticateConn":  {Source: "WebSocket auth frame (FuzzAuthPayload checks a copy of its decode, not this function)"},
@@ -134,7 +132,7 @@ var FuzzGaps = map[string]FuzzGap{
 }
 
 // fuzzGapCeiling is len(FuzzGaps). It only goes down.
-const fuzzGapCeiling = 29
+const fuzzGapCeiling = 27
 
 // FuzzTrustedDecodes decode bytes this server wrote itself (its database, its
 // own frames and files) or files the operator owns. Each value says why the

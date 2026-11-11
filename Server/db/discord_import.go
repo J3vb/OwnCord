@@ -13,17 +13,16 @@ import (
 )
 
 // The db half of the Discord import: a channel is built with import_pending = 1
-// (which client-facing reads skip), filled chunk by chunk and published in one
+// (client-facing reads skip it), filled chunk by chunk and published in one
 // transaction.
 
-// ErrImportNameTaken is returned by EnsureImportAccount when an ordinary
-// account already holds the hidden account's name.
+// ErrImportNameTaken is returned by EnsureImportAccount when an ordinary account holds
+// the hidden name.
 var ErrImportNameTaken = errors.New("an existing account holds the name reserved for the import account")
 
 // ErrImportRunning is returned by StartImport while another import runs.
 var ErrImportRunning = errors.New("another import is already running")
 
-// Import job states, as stored in import_jobs.status.
 const (
 	ImportRunning   = "running"
 	ImportDone      = "done"
@@ -34,12 +33,9 @@ const (
 // ImportInterruptedMessage is the error recorded on a job a restart cut short.
 const ImportInterruptedMessage = "the server restarted before the import finished"
 
-// ImportAbandonedMessage is the error recorded on a job whose importer was
-// gone when a new import started.
+// ImportAbandonedMessage is recorded on a job whose importer was gone when a new import started.
 const ImportAbandonedMessage = "the import stopped without finishing and was cleared"
 
-// importAccountName is the username of the hidden import account. The
-// "[imported" prefix is reserved at registration (auth.ValidateUsername).
 const importAccountName = "[imported]"
 
 // ImportJob is one row of import_jobs.
@@ -69,25 +65,22 @@ type ImportProgress struct {
 
 // StartImportParams describes the channel and job a new import creates.
 type StartImportParams struct {
-	// Name and Topic are already cleaned by the caller.
 	Name  string
 	Topic string
-	// CategoryID is the category to place the channel in, 0 for none. An
-	// unknown id is ErrNotFound and nothing is written.
-	CategoryID int64
-	// CreatedBy is the admin who started the import, 0 when unknown.
+	// CategoryID is the category to place the channel in, 0 for none; an unknown id is
+	// ErrNotFound and nothing is written.
+	CategoryID       int64
 	CreatedBy        int64
 	SourceName       string
 	DiscordChannelID string
-	// AdoptStale lets the start take over a running job that none of
-	// LiveJobIDs names: the importer that owned it is gone (its cleanup
-	// failed), so the job is failed and its channel deleted first.
+	// AdoptStale lets the start take over a running job that none of LiveJobIDs
+	// names (its importer is gone): the job is failed and its channel deleted first.
 	AdoptStale bool
 	LiveJobIDs []int64
 }
 
-// EnsureImportAccount returns the hidden import account's id, creating it on
-// first use as a 'system' users row with an unmatchable password and no role.
+// EnsureImportAccount returns the hidden import account's id, creating a 'system'
+// users row with an unmatchable password on first use.
 func (d *DB) EnsureImportAccount(ctx context.Context) (int64, error) {
 	if id, err := d.q.GetImportAccountID(ctx); err == nil {
 		return id, nil
@@ -115,7 +108,6 @@ func (d *DB) EnsureImportAccount(ctx context.Context) (int64, error) {
 		return id, nil
 	}
 	if IsUniqueConstraintError(err) {
-		// Another caller created it between the read and the insert.
 		if existing, getErr := d.q.GetImportAccountID(ctx); getErr == nil {
 			return existing, nil
 		}
@@ -124,8 +116,8 @@ func (d *DB) EnsureImportAccount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("EnsureImportAccount: %w", err)
 }
 
-// StartImport creates the pending channel and its running job in one
-// transaction. It returns ErrImportRunning when a job is already running.
+// StartImport creates the pending channel and running job in one transaction;
+// ErrImportRunning if one runs.
 func (d *DB) StartImport(ctx context.Context, p StartImportParams) (channelID, jobID int64, err error) {
 	err = d.inWriteTx(ctx, "StartImport", func(q *dbgen.Queries) error {
 		if p.AdoptStale {
@@ -178,27 +170,20 @@ func (d *DB) StartImport(ctx context.Context, p StartImportParams) (channelID, j
 	return channelID, jobID, nil
 }
 
-// ImportAttachment is a file already stored and recorded (unlinked) for an
-// imported message.
+// ImportAttachment is a stored, unlinked file for an imported message.
 type ImportAttachment struct{ ID string }
 
 // ImportMessage is one message of a chunk.
 type ImportMessage struct {
-	// Key is the message's Discord id. The chunk's result maps it to the new
-	// row id so later replies can find it.
-	Key string
-	// ReplyKey is the Discord id of the message this one replies to, or "".
-	ReplyKey string
-	Content  string
-	// Timestamp and EditedAt are UTC. EditedAt is the zero time when unedited.
-	Timestamp time.Time
-	EditedAt  time.Time
-	Pinned    bool
-	// DiscordUserID, AuthorName and AuthorColor fill message_import_authors.
+	Key           string
+	ReplyKey      string
+	Content       string
+	Timestamp     time.Time
+	EditedAt      time.Time
+	Pinned        bool
 	DiscordUserID string
 	AuthorName    string
 	AuthorColor   string
-	// AttachmentIDs are unlinked attachment rows the import account uploaded.
 	AttachmentIDs []string
 }
 
@@ -208,15 +193,13 @@ type ImportChunkParams struct {
 	ChannelID int64
 	AuthorID  int64
 	Messages  []ImportMessage
-	// KnownIDs maps Discord ids of earlier chunks to row ids, for replies.
-	KnownIDs map[string]int64
-	// Progress is stored on the job in the same transaction as the rows.
-	Progress ImportProgress
+	KnownIDs  map[string]int64
+	Progress  ImportProgress
 }
 
-// ImportChunk inserts the messages, author rows, attachment links and job
-// progress in one transaction and returns each message's row id by Discord id.
-// A reply to an unknown message becomes a plain message.
+// ImportChunk inserts the messages, author rows, attachment links and job progress in
+// one transaction and returns each row id by Discord id. A reply to an unknown message
+// becomes a plain message.
 func (d *DB) ImportChunk(ctx context.Context, p ImportChunkParams) (map[string]int64, error) {
 	ids := make(map[string]int64, len(p.Messages))
 	err := d.inWriteTx(ctx, "ImportChunk", func(q *dbgen.Queries) error {
@@ -236,8 +219,7 @@ func (d *DB) ImportChunk(ctx context.Context, p ImportChunkParams) (map[string]i
 				editedAt = &s
 			}
 			if m.Pinned {
-				// The same fixed-width stamp SetMessagePinned writes, so pinned
-				// messages order the same way.
+				// The same fixed-width stamp SetMessagePinned writes, so pinned messages order alike.
 				s := m.Timestamp.UTC().Format("2006-01-02 15:04:05.000000000")
 				pinnedAt = &s
 			}
@@ -299,10 +281,9 @@ func updateImportProgress(ctx context.Context, q *dbgen.Queries, jobID int64, pr
 	return nil
 }
 
-// PublishImport makes the finished channel visible in one transaction: it
-// clears import_pending, moves read pointers past lastMessageID and marks the
-// job done. It returns ErrNotFound, writing nothing, if the job is no longer
-// running or the channel no longer pending.
+// PublishImport makes the finished channel visible in one transaction: clears
+// import_pending, moves read pointers past lastMessageID and marks the job done.
+// ErrNotFound, writing nothing, if the job is no longer running.
 func (d *DB) PublishImport(ctx context.Context, jobID, channelID, lastMessageID int64, pr ImportProgress) error {
 	err := d.inWriteTx(ctx, "PublishImport", func(q *dbgen.Queries) error {
 		n, err := q.PublishImportChannel(ctx, channelID)
@@ -342,9 +323,8 @@ func finishImportJob(ctx context.Context, q *dbgen.Queries, jobID int64, status,
 	return nil
 }
 
-// FailInterruptedImports runs at boot: a job still running, and any channel
-// still pending, belong to a dead process, so both are cleaned up. It returns
-// how many jobs it failed.
+// FailInterruptedImports runs at boot: a running job and pending channel belong to a
+// dead process; it returns jobs failed.
 func (d *DB) FailInterruptedImports(ctx context.Context) (int, error) {
 	failed := 0
 	err := d.inWriteTx(ctx, "FailInterruptedImports", func(q *dbgen.Queries) error {

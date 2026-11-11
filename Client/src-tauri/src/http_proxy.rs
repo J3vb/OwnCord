@@ -112,7 +112,7 @@ impl HttpProxyState {
 use crate::proxy_common::{
     connect_tls_over, copy_with_deadline, dial_tcp, random_tunnel_token, read_request_headers,
     resolve_remote_target, run_accept_loop, spawn_watched, strip_tunnel_token,
-    validate_remote_host, CountingStream, TunnelEndpoint, FORBIDDEN_RESPONSE,
+    validate_remote_host, AbortOnDrop, CountingStream, TunnelEndpoint, FORBIDDEN_RESPONSE,
 };
 #[cfg(test)]
 use owncord_parse::proxy::MAX_UPLOAD_PROGRESS_ID_LEN;
@@ -485,7 +485,7 @@ async fn run_data_phase<R: Runtime>(
     };
     let counter = Arc::new(AtomicU64::new(0));
     let mut counted = CountingStream::new(&mut *local, Arc::clone(&counter));
-    let ticker = tokio::spawn({
+    let _ticker = AbortOnDrop(tokio::spawn({
         let app = app.clone();
         let counter = Arc::clone(&counter);
         async move {
@@ -499,10 +499,8 @@ async fn run_data_phase<R: Runtime>(
                 );
             }
         }
-    });
-    let result = copy_with_deadline(&mut counted, tls, DATA_PHASE_IDLE_TIMEOUT).await;
-    ticker.abort();
-    result
+    }));
+    copy_with_deadline(&mut counted, tls, DATA_PHASE_IDLE_TIMEOUT).await
 }
 
 /// Idle bound for the data-copy phase of a tunneled connection (step 3
@@ -777,6 +775,53 @@ mod tests {
                 .expect("read");
             assert_eq!(reply, FORBIDDEN_RESPONSE, "request: {request:?}");
         }
+
+        stop_http_proxy(app.state(), host).await.expect("stop");
+    }
+
+    #[tokio::test]
+    async fn stopping_a_tunnel_closes_its_parked_connection_and_a_restart_serves() {
+        use tokio::io::AsyncReadExt;
+        let app = tauri::test::mock_builder()
+            .manage(HttpProxyState::new())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        let host = "127.0.0.1:9".to_string();
+
+        let first = start_http_proxy(app.handle().clone(), app.state(), host.clone())
+            .await
+            .expect("first start");
+        let mut parked = TcpStream::connect(("127.0.0.1", first.port))
+            .await
+            .expect("connect");
+        let partial = format!("GET /{}/api/v1/health HTTP/1.1\r\nHost: x\r\n", first.token);
+        parked.write_all(partial.as_bytes()).await.expect("write");
+
+        stop_http_proxy(app.state(), host.clone())
+            .await
+            .expect("stop");
+        let mut buf = Vec::new();
+        let closed = tokio::time::timeout(Duration::from_secs(5), parked.read_to_end(&mut buf))
+            .await
+            .expect("parked connection closes after stop");
+        assert!(closed.is_err() || buf.is_empty());
+
+        let second = start_http_proxy(app.handle().clone(), app.state(), host.clone())
+            .await
+            .expect("second start");
+        let mut client = TcpStream::connect(("127.0.0.1", second.port))
+            .await
+            .expect("connect");
+        client
+            .write_all(b"GET /x HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .expect("write");
+        let mut reply = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut reply))
+            .await
+            .expect("reply in time")
+            .expect("read");
+        assert_eq!(reply, FORBIDDEN_RESPONSE);
 
         stop_http_proxy(app.state(), host).await.expect("stop");
     }

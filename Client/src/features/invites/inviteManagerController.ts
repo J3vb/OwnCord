@@ -6,7 +6,7 @@ import { canManageInvites } from "@lib/permissions";
 import { createLogger } from "@lib/logger";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
 import { createAsyncOverlayController } from "@lib/ui/asyncOverlay";
-import type { InviteItem } from "@components/InviteManager";
+import type { InviteItem } from "./InviteManager";
 import type { InviteResponse } from "@lib/types";
 import { showToast } from "@lib/ui/toast";
 import { authStore } from "@stores/auth.store";
@@ -16,23 +16,24 @@ import { shellText } from "../../i18n/shell";
 
 const log = createLogger("overlays");
 
-const inviteManagerScreen = createLazyScreen(
-  "invite-manager",
-  () => import("@components/InviteManager"),
-);
+const inviteManagerScreen = createLazyScreen("invite-manager", () => import("./InviteManager"));
+
+function usernameOf(o: object): string {
+  const name = "username" in o ? o.username : undefined;
+  return typeof name === "string" ? name : "";
+}
 
 export function mapInviteResponse(r: InviteResponse): InviteItem {
-  const extra = r as unknown as Record<string, unknown>;
   // The server now sends creator_username; the legacy nested created_by object
   // is kept as a fallback for an older server.
-  const nested = extra["created_by"];
+  const nested = "created_by" in r ? r.created_by : undefined;
   const creatorUsername =
     typeof r.creator_username === "string" && r.creator_username !== ""
       ? r.creator_username
       : typeof nested === "object" && nested !== null
-        ? ((nested as { username?: string }).username ?? "")
+        ? usernameOf(nested)
         : "";
-  const uses = r.use_count ?? (typeof extra["uses"] === "number" ? extra["uses"] : 0);
+  const uses = r.use_count ?? r.uses ?? 0;
   return {
     code: r.code,
     createdBy: creatorUsername !== "" ? creatorUsername : shellText("invite.unknownCreator"),
@@ -71,7 +72,7 @@ export interface InviteManagerController {
 interface InviteLoad {
   readonly invites: InviteResponse[];
   readonly featuredCode: string | null;
-  readonly screen: typeof import("@components/InviteManager");
+  readonly screen: typeof import("./InviteManager");
 }
 
 const DEFAULT_INVITE_HOURS = 168;

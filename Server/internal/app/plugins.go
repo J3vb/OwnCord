@@ -10,8 +10,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/plugin"
 )
 
-// initPlugins constructs the plugin runtime, returning nil when plugins
-// are disabled or failed to start.
+// initPlugins constructs the plugin runtime, returning nil when plugins are
+// disabled or failed to start.
 func initPlugins(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB) *plugin.Registry {
 	var pluginRegistry *plugin.Registry
 	if cfg.Plugins.Enabled {
@@ -35,9 +35,8 @@ func initPlugins(bgCtx context.Context, log *slog.Logger, cfg *config.Config, da
 	return pluginRegistry
 }
 
-// closePlugins shuts the plugin runtime down; a nil registry is the disabled
-// case. ctx is the plugins step's App.Close budget: the 5s cap sits within it,
-// so a wedged plugin cannot push teardown past the budget the operator was told.
+// closePlugins shuts the plugin runtime down (nil registry = disabled); the 5s
+// cap sits within ctx, so a wedged plugin cannot push teardown past its budget.
 func closePlugins(ctx context.Context, registry *plugin.Registry) {
 	if registry == nil {
 		return

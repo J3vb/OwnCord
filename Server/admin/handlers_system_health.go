@@ -9,8 +9,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// SystemDatabase is the database card's figures, read by
-// SystemSources.Database. Sizes are 0 for an in-memory database.
+// SystemDatabase is the database card's figures (SystemSources.Database); sizes are 0 for an in-memory
+// database.
 type SystemDatabase struct {
 	FileBytes       int64   `json:"file_bytes"`
 	WALBytes        int64   `json:"wal_bytes"`
@@ -24,11 +24,10 @@ type SystemDatabase struct {
 	WriterWaitMs    float64 `json:"writer_wait_ms"`
 }
 
-// systemHealthDBTimeout bounds the database read, so a locked or slow
-// database shows its card as unreadable instead of holding the page.
+// systemHealthDBTimeout bounds the database read so a locked or slow database shows its card unreadable
+// instead of holding the page.
 const systemHealthDBTimeout = 2 * time.Second
 
-// Database card states.
 const (
 	systemDBOK          = "ok"
 	systemDBTimeout     = "timeout"
@@ -38,24 +37,21 @@ const (
 
 type systemHealthResponse struct {
 	CapturedAt time.Time `json:"captured_at"`
-	// Snapshot is health.json from the support bundle, byte for byte the same
-	// shape, so "Copy for support" hands over what a bundle would carry.
+	// Snapshot is health.json from the support bundle, same shape, so "Copy for support" hands over what a
+	// bundle carries.
 	Snapshot healthSnapshot       `json:"snapshot"`
 	Hub      systemHealthHub      `json:"hub"`
 	Database systemHealthDatabase `json:"database"`
 	Process  systemHealthProcess  `json:"process"`
 	LiveKit  systemHealthLiveKit  `json:"livekit"`
-	// Signals are the attention panel's current measurements; each card
-	// shows the ones that belong to it, so there is one warning system.
+	// Signals are the attention panel's measurements; each card shows its own, so there is one warning system.
 	Signals []service.AttentionSignal `json:"signals"`
 }
 
 type systemHealthHub struct {
-	// Connections counts sockets (an account on two devices counts twice);
-	// null when the hub does not report it.
-	Connections *int `json:"connections"`
-	// MaxConnections is server.max_ws_connections; 0 is unlimited.
-	MaxConnections int `json:"max_connections"`
+	// Connections counts sockets (two devices count twice); null when the hub does not report it.
+	Connections    *int `json:"connections"`
+	MaxConnections int  `json:"max_connections"`
 }
 
 type systemHealthDatabase struct {
@@ -69,16 +65,14 @@ type systemHealthProcess struct {
 }
 
 type systemHealthLiveKit struct {
-	// Managed: OwnCord runs LiveKit itself, and the snapshot carries the
-	// supervisor's state. An external LiveKit's figures are on the
-	// Dashboard's LiveKit card.
+	// Managed: OwnCord runs LiveKit itself and the snapshot carries the supervisor's state; an external
+	// LiveKit's figures are on the LiveKit card.
 	Managed bool `json:"managed"`
 }
 
-// handleGetSystemHealth serves the System health page: the support bundle's
-// health snapshot plus the database, process and connection figures around
-// it. Everything is read in process; only the database card touches the
-// database, under systemHealthDBTimeout.
+// handleGetSystemHealth serves the System health page: the support bundle's health snapshot plus database,
+// process and connection figures. Everything is read in process; only the database card touches the database,
+// under systemHealthDBTimeout.
 func handleGetSystemHealth(src SystemSources, hub HubBroadcaster, attention *service.AttentionService, version string, now func() time.Time) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		at := now().UTC()

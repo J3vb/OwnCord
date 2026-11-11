@@ -119,7 +119,22 @@
   display: block;
   margin: 0 auto 8px;
 }
-.oc-glow-layer {
+.oc-logo-stack {
+  position: relative;
+  display: block;
+  width: fit-content;
+  margin: 0 auto 8px;
+}
+.oc-logo-stack .oc-logo {
+  position: relative;
+  margin: 0;
+}
+.oc-glow-svg {
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  pointer-events: none;
+  will-change: opacity;
   animation: glowPulse 4s ease-in-out infinite;
 }
 .brand-name {
@@ -1470,10 +1485,13 @@
     padding: 12px 14px 4px;
     text-align: left;
   }
-  .server-branding .oc-logo {
+  .server-branding .oc-logo-stack {
+    margin: 0;
+  }
+  .server-branding .oc-logo,
+  .server-branding .oc-glow-svg {
     width: 36px;
     height: 36px;
-    margin: 0;
   }
   .server-branding .brand-tagline {
     display: none;
@@ -1529,7 +1547,7 @@
     padding-right: 52px;
     text-align: left;
   }
-  .connect-page:has(.server-panel) .form-logo .oc-logo,
+  .connect-page:has(.server-panel) .form-logo .oc-logo-stack,
   .connect-page:has(.server-panel) .form-logo h1 {
     display: none;
   }
@@ -1664,11 +1682,9 @@
 @keyframes glowPulse {
   0%,
   100% {
-    filter: blur(4px);
     opacity: 0.35;
   }
   50% {
-    filter: blur(6px);
     opacity: 0.5;
   }
 }
@@ -1693,7 +1709,7 @@
   }
   .connect-page::before,
   .server-panel::before,
-  .oc-glow-layer {
+  .oc-glow-svg {
     animation: none !important;
   }
   .btn-primary:hover::after {

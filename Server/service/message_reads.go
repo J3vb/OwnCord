@@ -19,9 +19,8 @@ type messageReadStore interface {
 	SearchMessagesFiltered(ctx context.Context, q db.SearchQuery, page db.SearchPage) ([]db.MessageSearchResult, error)
 	GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]db.ReactionUser, error)
 	ListChannels(ctx context.Context) ([]db.Channel, error)
-	// GetMemberGrants fetches every held role's override and the per-user layer for
-	// one member in batch queries: the single fetch behind every "what can this
-	// member do here" site, so none pays an N+1.
+	// GetMemberGrants is the single batched fetch behind every "what can this member do here" site, avoiding
+	// N+1.
 	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
 	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)

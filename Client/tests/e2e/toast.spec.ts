@@ -1,3 +1,4 @@
+import { devices } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   emitWsMessage,
@@ -127,5 +128,65 @@ test.describe("Toast Notifications", () => {
       "[data-testid='toast-container'] > [data-testid='toast']",
     );
     await expect(containerChildren).toHaveCount(2);
+  });
+});
+
+async function showStickyToast(page: import("@playwright/test").Page): Promise<void> {
+  await startFullSession(page);
+  await emitWsMessage(page, {
+    type: "error",
+    payload: { code: "RATE_LIMITED", message: "too many requests" },
+  });
+  await expect(page.locator("[data-testid='toast']", { hasText: "Too many requests" })).toBeVisible(
+    {
+      timeout: 5_000,
+    },
+  );
+}
+
+async function setOverlay(page: import("@playwright/test").Page, cls: string, on: boolean) {
+  await page.evaluate(
+    ({ cls, on }) => {
+      document.querySelectorAll("[data-test-overlay]").forEach((el) => el.remove());
+      if (!on) return;
+      const el = document.createElement("div");
+      el.className = cls;
+      el.setAttribute("data-test-overlay", "");
+      document.body.appendChild(el);
+    },
+    { cls, on },
+  );
+}
+
+test.describe("Toast position with an overlay open (desktop)", () => {
+  test("drops to the window edge under a dialog and returns when it closes", async ({ page }) => {
+    await showStickyToast(page);
+    const container = page.locator("[data-testid='toast-container']");
+    const before = (await container.boundingBox())!;
+    await setOverlay(page, "modal-overlay", true);
+    await expect
+      .poll(async () => ((await container.boundingBox())?.y ?? 0) + before.height)
+      .toBeGreaterThan(before.y + before.height + 1);
+    const viewportHeight = page.viewportSize()!.height;
+    const under = (await container.boundingBox())!;
+    expect(viewportHeight - (under.y + under.height)).toBeLessThanOrEqual(24);
+    await setOverlay(page, "modal-overlay", false);
+    await expect
+      .poll(async () => Math.round((await container.boundingBox())!.y))
+      .toBe(Math.round(before.y));
+  });
+});
+
+test.describe("Toast position with a sheet open (Pixel 7)", () => {
+  const { defaultBrowserType: _browser, ...pixel7 } = devices["Pixel 7"];
+  test.use(pixel7);
+
+  test("moves to the top while a bottom sheet is open", async ({ page }) => {
+    await showStickyToast(page);
+    const container = page.locator("[data-testid='toast-container']");
+    await setOverlay(page, "bottom-sheet-overlay", true);
+    await expect.poll(async () => (await container.boundingBox())?.y ?? 9999).toBeLessThan(80);
+    await setOverlay(page, "bottom-sheet-overlay", false);
+    await expect.poll(async () => (await container.boundingBox())?.y ?? 0).toBeGreaterThan(200);
   });
 });

@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../src/stores/voice.store";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
-import { createVoiceWidget } from "../../src/components/VoiceWidget";
+import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
 import { resetMembersState } from "../helpers/storeResets";
 import { resetAuthState, resetChannelsState, resetVoiceState } from "../helpers/storeSeeds";
 import { resetUiState } from "../helpers/dmHarness";

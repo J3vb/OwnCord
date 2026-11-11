@@ -71,7 +71,7 @@ test.describe("Logout Flow", () => {
 // the connect page — whose auto-login would read that same credential back.
 // The credential commands run off the IPC thread, so a read that wins the race
 // signs the user straight back into the server they just left. This fixture
-// keeps load_credential returning a usable credential (delete_credential is a
+// keeps resume_saved_session returning a usable credential (delete_credential is a
 // no-op) so the assertion holds on the client's own refusal to auto-login,
 // not on the delete having already landed.
 test.describe("Logout Flow — auto-connect profile", () => {

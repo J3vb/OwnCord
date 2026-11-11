@@ -6,9 +6,7 @@ import (
 
 // Command is the minimal interface for all client-to-server commands.
 type Command interface {
-	// Type returns the message type constant (e.g. MsgTypeChatSend).
 	Type() string
-	// UserID returns the authenticated user who sent this command.
 	UserID() int64
 }
 
@@ -28,12 +26,9 @@ type ChatSendCmd struct {
 	ChannelID       int64
 	Content         string
 	ReplyTo         *int64
-	// ReplyPing is true only when the client sent reply_ping=true on a reply.
-	ReplyPing   bool
-	attachments []string
-	// StickerID is the sticker a sticker message carries, 0 for an
-	// ordinary send.
-	StickerID int64
+	ReplyPing       bool
+	attachments     []string
+	StickerID       int64
 }
 
 func (c ChatSendCmd) Type() string          { return MsgTypeChatSend }
@@ -74,14 +69,11 @@ func (c TypingStartCmd) UserID() int64 { return c.userID }
 type PresenceUpdateCmd struct {
 	userID int64
 	Status string
-	// CustomStatus is nil when the payload carried no custom_status field at
-	// all, which means "leave the stored text alone". A present-but-empty
-	// string clears it. The distinction matters because the auto-idle timer
-	// sends a bare status flip several times an hour and must not wipe the
-	// text the user typed.
+	// CustomStatus is nil when the payload carried no custom_status, meaning
+	// "leave the stored text alone"; a present-but-empty string clears it. The
+	// auto-idle timer sends bare status flips and must not wipe the user's text.
 	CustomStatus *string
-	// ExpiresIn is custom_status_expires_in (seconds), nil when absent.
-	ExpiresIn *int64
+	ExpiresIn    *int64
 }
 
 func (c PresenceUpdateCmd) Type() string  { return MsgTypePresenceUpdate }
@@ -168,10 +160,9 @@ type VoiceScreenshareCmd struct {
 func (c VoiceScreenshareCmd) Type() string  { return MsgTypeVoiceScreenshare }
 func (c VoiceScreenshareCmd) UserID() int64 { return c.userID }
 
-// VoiceModMuteCmd represents a voice_mod_mute message: a moderator setting
-// another user's server mute. channelID is the voice channel the moderator
-// believes the target is in — the handler refuses when it disagrees, so a
-// stale sidebar cannot mute someone who has since moved.
+// VoiceModMuteCmd is a moderator setting another user's server mute. channelID is
+// the channel the moderator believes the target is in; the handler refuses on a
+// mismatch, so a stale sidebar cannot mute someone who has moved.
 type VoiceModMuteCmd struct {
 	userID    int64
 	ChannelID int64
@@ -182,8 +173,7 @@ type VoiceModMuteCmd struct {
 func (c VoiceModMuteCmd) Type() string  { return MsgTypeVoiceModMute }
 func (c VoiceModMuteCmd) UserID() int64 { return c.userID }
 
-// VoiceModDeafenCmd represents a voice_mod_deafen message. See VoiceModMuteCmd
-// for the channelID contract.
+// VoiceModDeafenCmd represents a voice_mod_deafen message.
 type VoiceModDeafenCmd struct {
 	userID    int64
 	ChannelID int64
@@ -194,8 +184,8 @@ type VoiceModDeafenCmd struct {
 func (c VoiceModDeafenCmd) Type() string  { return MsgTypeVoiceModDeafen }
 func (c VoiceModDeafenCmd) UserID() int64 { return c.userID }
 
-// VoiceModMoveCmd represents a voice_mod_move message: a moderator moving a
-// user to another voice channel.
+// VoiceModMoveCmd represents a voice_mod_move message: a moderator moving a user to another voice
+// channel.
 type VoiceModMoveCmd struct {
 	userID      int64
 	TargetID    int64
@@ -205,8 +195,7 @@ type VoiceModMoveCmd struct {
 func (c VoiceModMoveCmd) Type() string  { return MsgTypeVoiceModMove }
 func (c VoiceModMoveCmd) UserID() int64 { return c.userID }
 
-// VoiceModKickCmd represents a voice_mod_kick message: a moderator
-// disconnecting a user from voice.
+// VoiceModKickCmd represents a voice_mod_kick message: a moderator disconnecting a user from voice.
 type VoiceModKickCmd struct {
 	userID   int64
 	TargetID int64
@@ -215,33 +204,29 @@ type VoiceModKickCmd struct {
 func (c VoiceModKickCmd) Type() string  { return MsgTypeVoiceModKick }
 func (c VoiceModKickCmd) UserID() int64 { return c.userID }
 
-// VoiceE2EEAnnounceCmd represents a voice_e2ee_announce message. signature is the
-// ECDSA identity-key signature over the ephemeral public key; optional at the
-// protocol level (legacy clients omit it and the receiving client enforces the
-// fail-closed posture).
+// VoiceE2EEAnnounceCmd is a voice_e2ee_announce message. Its signature is the ECDSA identity-key
+// signature over the ephemeral public key; optional at the protocol level (legacy clients omit it and
+// the receiving client enforces fail-closed).
 type VoiceE2EEAnnounceCmd struct {
 	userID    int64
 	PublicKey string
 	Signature string
-	// IdentityKey is the announcing device's identity public key from the
-	// announce payload, already validated and trimmed by the parser; "" when the
-	// client sent none or an invalid one (the connection's auth key is used then).
+	// IdentityKey is the announcing device's identity public key, validated and
+	// trimmed by the parser; "" when absent or invalid (the connection's auth key
+	// is used then).
 	IdentityKey string
-	// VideoDecode is the sender's raw video_decode list. Unvalidated
-	// here; handleVoiceE2EEAnnounceV2 runs it through sanitizeVideoDecode.
+	// VideoDecode is the raw video_decode list, unvalidated until
+	// sanitizeVideoDecode.
 	VideoDecode []string
-	// KeySlots is the sender's key_slots flag; anything but JSON true is false.
-	KeySlots bool
-	// BoundOffers is the sender's bound_offers flag; anything but JSON true is false.
+	KeySlots    bool
 	BoundOffers bool
 }
 
 func (c VoiceE2EEAnnounceCmd) Type() string  { return MsgTypeVoiceE2EEAnnounce }
 func (c VoiceE2EEAnnounceCmd) UserID() int64 { return c.userID }
 
-// VoiceWatchCmd represents a voice_watch message: the whole set of users whose
-// screen share the sender watches now. Unvalidated here; handleVoiceWatchV2
-// bounds, filters, dedupes and sorts it.
+// VoiceWatchCmd is the whole set of users whose screen share the sender watches;
+// unvalidated, handleVoiceWatchV2 bounds, filters, dedupes and sorts it.
 type VoiceWatchCmd struct {
 	userID  int64
 	UserIDs []int64
@@ -274,10 +259,9 @@ type VoiceE2EEOfferCmd struct {
 func (c VoiceE2EEOfferCmd) Type() string  { return MsgTypeVoiceE2EEOffer }
 func (c VoiceE2EEOfferCmd) UserID() int64 { return c.userID }
 
-// CallRingCmd represents a call_ring message: "start ringing the other people
-// in this DM". It carries only the channel — who is calling is the
-// authenticated sender, and there is no call id because there is no call
-// record (see registerCallHandlers).
+// CallRingCmd starts ringing the other people in a DM. It carries only the
+// channel: the caller is the authenticated sender and there is no call record
+// (see registerCallHandlers).
 type CallRingCmd struct {
 	userID    int64
 	ChannelID int64

@@ -96,6 +96,19 @@
   background: var(--bg-hover);
   color: var(--text-normal);
 }
+/* Data saver: a media item that waits for its own tap. */
+.data-saver-placeholder {
+  display: grid;
+  place-content: center;
+  width: 100%;
+  min-height: 140px;
+  padding: var(--space-4);
+  background: var(--bg-secondary);
+  overflow-wrap: anywhere;
+}
+.data-saver-action {
+  color: var(--accent-text);
+}
 
 .msg-day-divider {
   display: flex;

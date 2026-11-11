@@ -409,6 +409,10 @@ func TestMessageRequest_TrustedSendReusesParticipantAndTrustRead(t *testing.T) {
 	if n := spy.trusted.Load(); n != 0 {
 		t.Errorf("IsTrustedSender calls = %d, want 0 — trust rides on the participant read", n)
 	}
+	// The first send records the sender's own trust; later ones find it on the same read.
+	if n := spy.trustWrites.Load(); n != 1 {
+		t.Errorf("TrustSender writes on the first send = %d, want 1", n)
+	}
 	if n := spy.participantIDs.Load() + spy.isGroup.Load(); n != 0 {
 		t.Errorf("separate GetDMParticipantIDs/IsGroupDM reads = %d, want 0", n)
 	}
@@ -421,6 +425,12 @@ func TestMessageRequest_TrustedSendReusesParticipantAndTrustRead(t *testing.T) {
 	}
 	if len(result.RequestCreatedFor) != 0 {
 		t.Errorf("RequestCreatedFor = %v, want none for a trusted sender", result.RequestCreatedFor)
+	}
+	mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "and again",
+	})
+	if n := spy.trustWrites.Load(); n != 1 {
+		t.Errorf("TrustSender writes after a second send = %d, want still 1", n)
 	}
 }
 

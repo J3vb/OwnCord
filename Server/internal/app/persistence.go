@@ -12,12 +12,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// startEventPersister starts the event persister and pruner, returning both as
-// (nil, nil) when event persistence is disabled.
-//
-// seedHubReplayState runs whenever hub is non-nil, not only when persistence
-// is enabled: it seeds the hub's seq counter from a persisted floor even in
-// ring-buffer-only mode.
+// startEventPersister starts the persister and pruner, returning (nil, nil)
+// when persistence is disabled. seedHubReplayState runs whenever hub is
+// non-nil, so ring-buffer-only mode still gets a seq floor.
 func startEventPersister(bgCtx context.Context, log *slog.Logger, cfg *config.Config, hub *ws.Hub, database *db.DB) (*ws.EventPersister, <-chan struct{}) {
 	if hub == nil {
 		return nil, nil
@@ -46,9 +43,8 @@ func startEventPersister(bgCtx context.Context, log *slog.Logger, cfg *config.Co
 	return persister, prunerDone
 }
 
-// stopEventPersister drains the event persister and pruner. A nil persister is
-// the disabled case and must leave bgCtx alone; Run's backstop close step
-// cancels it. ctx is the event-persistence step's App.Close budget, which the
+// stopEventPersister drains the persister and pruner. A nil persister is the
+// disabled case and must leave bgCtx alone; ctx is the step's budget, which the
 // 5s cap sits within.
 func stopEventPersister(ctx context.Context, log *slog.Logger, bgCancel context.CancelFunc, persister *ws.EventPersister, prunerDone <-chan struct{}) {
 	if persister == nil {
@@ -58,9 +54,7 @@ func stopEventPersister(ctx context.Context, log *slog.Logger, bgCancel context.
 	stopCtx, stopCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer stopCancel()
 	persister.Stop(stopCtx)
-	// Cancel the shared background context and join the pruner before the
-	// later database.Close, so no prune is mid-query against a closing pool.
-	// Bounded: a stuck prune delays shutdown by at most the timeout.
+	// Cancel bgCtx and join the pruner before database.Close, so no prune runs against a closing pool.
 	bgCancel()
 	select {
 	case <-prunerDone:
@@ -69,10 +63,9 @@ func stopEventPersister(ctx context.Context, log *slog.Logger, bgCancel context.
 	}
 }
 
-// newAuditWriter installs the async audit writer: audit-log INSERTs move off
-// the request path into a batching goroutine. Paths that never install one
-// (the token CLI, tests) stay synchronous. It starts after the database opens,
-// so App.Close drains its queue while the handle is live.
+// newAuditWriter installs the async audit writer, moving audit INSERTs off the
+// request path. Paths that install none (the token CLI, tests) stay
+// synchronous.
 func newAuditWriter(bgCtx context.Context, database *db.DB) *db.AuditWriter {
 	auditWriter := db.NewAuditWriter(database, 1024, 50, 100*time.Millisecond)
 	auditWriter.Start(bgCtx)
@@ -81,49 +74,29 @@ func newAuditWriter(bgCtx context.Context, database *db.DB) *db.AuditWriter {
 	return auditWriter
 }
 
-// stopAuditWriter drains the async audit writer within the audit-writer step's
-// App.Close budget.
+// stopAuditWriter drains the async audit writer within the step's budget.
 func stopAuditWriter(ctx context.Context, auditWriter *db.AuditWriter) {
 	stopCtx, stopCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer stopCancel()
 	auditWriter.Stop(stopCtx)
 }
 
-// wsSeqFloorSettingKey is the settings-table key seedHubSeqFloor persists its
-// reserved floor under.
 const wsSeqFloorSettingKey = db.WSSeqFloorSettingKey
 
-// wsSeqFloorReserve is the block seedHubSeqFloor reserves above the persisted
-// floor on every boot. It only has to exceed the hub-sequenced broadcasts one
-// boot could emit before its next restart; 1e9 leaves a huge margin while
-// uint64 still allows billions of restarts before the floor could wrap.
+// wsSeqFloorReserve is the block reserved above the persisted floor each boot;
+// it only has to exceed one boot's hub-sequenced broadcasts, and 1e9 leaves a
+// huge margin before uint64 could wrap.
 const wsSeqFloorReserve = db.WSSeqFloorReserve
 
-// seedHubReplayState seeds the hub's monotonic seq counter at startup from two
-// independent sources, both through hub.SeedSeq, which only moves h.seq
-// forward (CAS-max), so their order and availability do not matter:
-//
-//  1. seedHubSeqFloor reserves and persists a fresh block of seq space on every
-//     boot, whether or not event persistence is enabled. Without it a
-//     ring-buffer-only boot restarted h.seq at 0/1, so a client reconnecting
-//     with a last_seq from a prior boot could land inside the new boot's live
-//     ring window, and EventRingBuffer.EventsSinceFiltered could not tell it
-//     from a legitimate one and would serve a partial cross-epoch replay as an
-//     ordinary resume. A floor far above anything one boot reaches puts every
-//     earlier seq below the ring's oldest entry, so a stale last_seq is
-//     rejected by the "afterSeq <= oldestSeq" guard in ringbuffer.go and falls
-//     through to a full ready (serve.go handleReconnect, the `events == nil`
-//     branch), with no protocol change.
-//  2. When persistence is enabled and the events table has history,
-//     MAX(events.seq) is exact and wins if it is higher. This branch also
-//     forces the paired visibilityChangeSeq watermark forward via
-//     MarkVisibilityChanged: that watermark (see ws/hub_events.go
-//     mustFullResync) is in-memory only and starts at 0 on a fresh process, and
-//     channel-visibility changes to an offline client (RefreshChannelVisibility,
-//     revokeUnreadableChannels) are targeted, unsequenced messages never
-//     written to the events table. Without the call, a client resuming at or
-//     before the pre-restart max would pass mustFullResync's zeroed watermark
-//     and could miss a visibility change.
+// seedHubReplayState seeds the hub's seq counter at startup from two sources
+// via hub.SeedSeq, which only moves the counter forward (CAS-max), so order
+// does not matter: 1. seedHubSeqFloor reserves a fresh block of seq space on
+// every boot, with or without persistence. 2. With persistence and history, MAX(events.seq) wins if
+// higher; this branch also forces visibilityChangeSeq forward via MarkVisibilityChanged: that in-memory
+// watermark starts at 0 on a fresh process, and visibility changes to an
+// offline client are unsequenced and never written to events, so without it a
+// client resuming before the pre-restart max could miss one (ws/hub_events.go
+// mustFullResync).
 func seedHubReplayState(ctx context.Context, hub *ws.Hub, database *db.DB, log *slog.Logger) {
 	seedHubSeqFloor(ctx, hub, database, log)
 
@@ -140,12 +113,8 @@ func seedHubReplayState(ctx context.Context, hub *ws.Hub, database *db.DB, log *
 	hub.MarkVisibilityChanged()
 }
 
-// seedHubSeqFloor reserves and persists a fresh block of the hub's sequence
-// space on every boot, independent of event persistence (see seedHubReplayState).
-// A read or write failure against the settings table is logged, not fatal: the
-// sidecar beside the database still carries the floor, and when neither copy
-// can be written this boot keeps plain ring-buffer behaviour rather than block
-// startup over a safety net.
+// seedHubSeqFloor reserves and persists a fresh block of seq space on every
+// boot.
 func seedHubSeqFloor(ctx context.Context, hub *ws.Hub, database *db.DB, log *slog.Logger) {
 	var floor uint64
 	settingsReadable := true
@@ -163,17 +132,12 @@ func seedHubSeqFloor(ctx context.Context, hub *ws.Hub, database *db.DB, log *slo
 		}
 		floor = parsed
 	case errors.Is(err, db.ErrNotFound):
-		// No prior boot has reserved a floor: start from 0.
 	default:
 		log.Warn("event persistence: failed to read persisted ws seq floor", "error", err)
 		settingsReadable = false
 	}
 
-	// The sidecar beside the database survives a backup restore, which rewinds
-	// the settings copy to the backup's older value. Taking the max keeps this
-	// boot's block above everything the pre-restore server could hand out, so a
-	// pre-restore last_seq forces a full resync. A missing or damaged sidecar is
-	// not fatal: the settings value seeds the block alone.
+	// The sidecar survives a backup restore; max keeps this boot above any pre-restore seq (forces resync).
 	sidecar, ok, serr := database.WSSeqFloorSidecar()
 	if serr != nil {
 		log.Warn("event persistence: ws seq floor sidecar unreadable; using the settings value", "error", serr)
@@ -182,20 +146,15 @@ func seedHubSeqFloor(ctx context.Context, hub *ws.Hub, database *db.DB, log *slo
 		floor = max(floor, sidecar)
 	}
 	if !settingsReadable && !ok {
-		// Neither copy of the floor is known; leave the hub unseeded rather
-		// than guess a value that could sit below an earlier block.
 		return
 	}
 
-	// floor <= MaxWSSeqFloor, so the sum cannot wrap; it saturates at the limit.
 	newFloor := floor + wsSeqFloorReserve
 	if newFloor > db.MaxWSSeqFloor {
 		log.Error("event persistence: ws seq floor reached its limit, keeping the limit", "floor", floor)
 		newFloor = db.MaxWSSeqFloor
 	}
-	// Either durable copy keeps the next boot above this block, so the hub is
-	// seeded when one write lands. Sidecar first so a failed settings write
-	// still leaves the block recorded.
+	// Sidecar first, so a failed settings write still leaves the block recorded.
 	sidecarErr := database.StoreWSSeqFloorSidecar(newFloor)
 	if sidecarErr != nil {
 		log.Warn("event persistence: failed to persist ws seq floor sidecar", "error", sidecarErr)

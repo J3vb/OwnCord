@@ -2,7 +2,7 @@
  *  badges, stream viewers, tile labels, your call controls, and the grid's
  *  load on a join. */
 
-import type { CallState } from "@components/VideoGrid";
+import type { CallState } from "./videoGrid/VideoGrid";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { uiStore } from "@stores/ui.store";
 import { isSelfMuted, streamViewers, type VoiceState, type VoiceUser } from "@stores/voice.store";

@@ -12,15 +12,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// writeFrameChunk caps the payload of one outbound data frame.
 const writeFrameChunk = 16 << 10
 
-// writeFragmented writes msg as one text message in frames of at most
-// writeFrameChunk bytes. coder/websocket holds its frame write lock for a whole
-// frame, and a control frame (the Pong answering a Ping, or pingPump's Ping) waits
-// for it under a fixed 5s deadline. One large frame on a slow link could hold it up
-// to writeTimeout (10s), failing the Pong and readPump's conn.Read, dropping a live
-// session. Between fragments the lock is free, so a control frame waits one chunk at most.
+// writeFragmented writes msg as one text message in frames of at most writeFrameChunk
+// bytes. coder/websocket holds its frame write lock for a whole frame and a control frame
+// (Pong, Ping) waits for it under a fixed 5s deadline, so one large frame on a slow link
+// could fail the Pong and drop a live session. Between fragments the lock is free.
 func writeFragmented(ctx context.Context, conn *websocket.Conn, msg []byte) error {
 	if len(msg) <= writeFrameChunk {
 		return conn.Write(ctx, websocket.MessageText, msg)
@@ -39,19 +36,16 @@ func writeFragmented(ctx context.Context, conn *websocket.Conn, msg []byte) erro
 	return w.Close()
 }
 
-// writeDeadline bounds each write by a timeout without a context.WithTimeout per
-// frame (propagateCancel and Deadline were ~5% of server CPU under load). One
-// cancellable context serves the pump; a timer cancels it only while a write is in
-// flight, so an idle gap never counts. Cancelling is one-way, so a timer firing as
-// a write succeeds would poison the shared context for every later frame; a fired
-// timer is observed and reset before the context is reused.
+// writeDeadline bounds each write by a timeout without a context.WithTimeout per frame
+// (~5% of server CPU under load). One cancellable context serves the pump; a timer cancels
+// it only while a write is in flight. Cancelling is one-way, so a fired timer would poison
+// the shared context: it is observed and reset before reuse.
 type writeDeadline struct {
 	parent  context.Context
 	ctx     context.Context
 	cancel  context.CancelFunc
 	timer   *time.Timer
 	timeout time.Duration
-	// writeFn is the frame writer; a field so a test can interleave the timer with a write.
 	writeFn func(context.Context, *websocket.Conn, []byte) error
 }
 
@@ -61,9 +55,8 @@ func newWriteDeadline(parent context.Context, timeout time.Duration) *writeDeadl
 	return d
 }
 
-// reset mints a fresh context, cancel and timer. An AfterFunc timer captures the
-// cancel it was created with, so a new context needs a new timer; stopping the old
-// one leaves at most one armed.
+// reset mints a fresh context, cancel and timer: an AfterFunc timer captures its cancel, so
+// a new context needs a new timer; stopping the old one leaves at most one armed.
 func (d *writeDeadline) reset() {
 	if d.timer != nil {
 		d.timer.Stop()
@@ -90,10 +83,9 @@ func (d *writeDeadline) stop() {
 	d.cancel()
 }
 
-// writePumpWrite writes one message under writeTimeout; false only when the write
-// failed. A failed write closes the connection: it may have left a message
-// half-sent, and readPump's teardown must run rather than leave a peer that never
-// hears another event.
+// writePumpWrite writes one message under writeTimeout; false only when the write failed.
+// A failed write closes the connection (it may have left a message half-sent) so readPump's
+// teardown runs.
 func writePumpWrite(wd *writeDeadline, conn *websocket.Conn, c *Client, msg []byte) bool {
 	if err := wd.write(conn, c.stampCseq(msg)); err != nil {
 		slog.Warn("ws writePump error", "user_id", c.userID, "err", err)
@@ -103,8 +95,8 @@ func writePumpWrite(wd *writeDeadline, conn *websocket.Conn, c *Client, msg []by
 	return true
 }
 
-// writePumpDrainChannel writes every message still buffered on ch without blocking;
-// false only when a write failed (empty or closed is true).
+// writePumpDrainChannel writes every message still buffered on ch without blocking; false only on a failed
+// write.
 func writePumpDrainChannel(wd *writeDeadline, conn *websocket.Conn, c *Client, ch chan []byte) bool {
 	for {
 		select {
@@ -121,9 +113,8 @@ func writePumpDrainChannel(wd *writeDeadline, conn *websocket.Conn, c *Client, c
 	}
 }
 
-// writePumpDrainAndClose flushes whatever the kick paths queued before closing the
-// send channels (e.g. the BANNED frame that makes the client clear its
-// credentials); returning on the first closed channel would drop those frames.
+// writePumpDrainAndClose flushes what the kick paths queued (e.g. the BANNED frame that
+// makes the client clear credentials) before closing; returning on the first closed channel would drop them.
 func writePumpDrainAndClose(wd *writeDeadline, conn *websocket.Conn, c *Client) {
 	if writePumpDrainChannel(wd, conn, c, c.sendHigh) && writePumpDrainChannel(wd, conn, c, c.send) {
 		writePumpDrainChannel(wd, conn, c, c.sendLow)
@@ -131,9 +122,8 @@ func writePumpDrainAndClose(wd *writeDeadline, conn *websocket.Conn, c *Client) 
 	_ = conn.Close(websocket.StatusNormalClosure, "")
 }
 
-// writePumpDeliver handles one frame from a send channel: a closed channel drains
-// and closes the connection, a failed write ends the pump without draining. False
-// means writePump must return.
+// writePumpDeliver handles one frame: a closed channel drains and closes, a failed write
+// ends the pump without draining. False means writePump must return.
 func writePumpDeliver(wd *writeDeadline, conn *websocket.Conn, c *Client, msg []byte, ok bool) bool {
 	if !ok {
 		writePumpDrainAndClose(wd, conn, c)
@@ -142,9 +132,8 @@ func writePumpDeliver(wd *writeDeadline, conn *websocket.Conn, c *Client, msg []
 	return writePumpWrite(wd, conn, c, msg)
 }
 
-// writePump drains the client's send channels to the WebSocket in priority order
-// high > normal > low: DMs and mentions first, then chat and reactions, then
-// typing and presence only when nothing higher is pending.
+// writePump drains the client's send channels in priority order high > normal > low (DMs and
+// mentions, then chat and reactions, then typing and presence only when nothing is pending).
 func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 	wd := newWriteDeadline(ctx, writeTimeout)
 	defer wd.stop()
@@ -158,10 +147,9 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 		default:
 		}
 
-		// Try high or normal non-blocking. Go's select among ready cases is uniformly
-		// random, so sendLow cannot be a peer here: it would win the coin flip against a
-		// pending normal frame about half the time, contradicting low-only-when-idle. Fall
-		// through to sendLow only once this default proves neither has anything ready.
+		// Try high or normal non-blocking. A select among ready cases is uniformly random, so
+		// sendLow as a peer would win about half the time against a pending normal frame,
+		// contradicting low-only-when-idle.
 		select {
 		case msg, ok := <-c.sendHigh:
 			if !writePumpDeliver(wd, conn, c, msg, ok) {
@@ -176,8 +164,8 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 		default:
 		}
 
-		// Nothing high or normal is ready: block on all three (plus shutdown) so an idle
-		// connection still gets typing/presence frames without busy-looping.
+		// Nothing high or normal is ready: block on all three (plus shutdown) so an idle connection still
+		// gets low frames without busy-looping.
 		select {
 		case msg, ok := <-c.sendHigh:
 			if !writePumpDeliver(wd, conn, c, msg, ok) {
@@ -197,17 +185,15 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 	}
 }
 
-// pingInterval is how often the server sends a protocol Ping and how long it waits
-// for the Pong. The peer's stack answers it itself, so liveness does not rest on the
-// client's app-level ping (a webview timer a minimised window may throttle). A live
-// peer refreshes activity every interval; a silent (half-open) one is closed at
-// most 2x pingInterval after going quiet.
+// pingInterval is how often the server pings and how long it waits for the Pong. The peer's
+// stack answers itself, so liveness does not rest on the client's app-level ping (a webview
+// timer a minimised window may throttle). A silent (half-open) peer is closed at most
+// 2x pingInterval after going quiet.
 var pingInterval = 25 * time.Second
 
-// pingPump sends a protocol Ping every interval until ctx ends. A Pong refreshes
-// activity for the stale sweep; a missing Pong closes the connection and readPump's
-// teardown takes over. The Pong is read by readPump's conn.Read, so pingPump only
-// works alongside it.
+// pingPump sends a protocol Ping every interval until ctx ends. A Pong refreshes activity
+// for the stale sweep; a missing one closes the connection. The Pong is read by readPump's
+// conn.Read, so pingPump only works alongside it.
 func pingPump(ctx context.Context, conn *websocket.Conn, c *Client, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -227,33 +213,27 @@ func pingPump(ctx context.Context, conn *websocket.Conn, c *Client, interval tim
 			}
 			return
 		}
-		// A Pong is liveness, not a received message, so not touch().
 		c.mu.Lock()
 		c.lastActivity = time.Now()
 		c.mu.Unlock()
 	}
 }
 
-// readPump reads from the WebSocket and dispatches messages; it blocks until disconnect.
 func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 	var lastReadErr error
 	defer func() {
-		// The connection is gone so ctx is (or is about to be) cancelled, but teardown DB
-		// writes must complete: detach cancellation, keep values.
+		// Teardown DB writes must complete though ctx is cancelled: detach cancellation, keep values.
 		cleanupCtx := context.WithoutCancel(ctx)
-		// Snapshot voice state before unregister to avoid a TOCTOU with replacement
-		// connections. The voice lock spans snapshot to park, so a reconnect's transfer
-		// (voiceTxn.inherit) runs wholly before or after this teardown.
+		// Snapshot voice state before unregister to avoid a TOCTOU with replacement connections. The voice
+		// lock spans snapshot to park, so a reconnect's transfer runs wholly before or after this teardown.
 		txn := hub.begin(c.userID)
 		voiceChID := c.voice.channel()
 		replaced := hub.unregisterNow(c)
-		// Clean up voice only when this was the user's final connection. A replacement owns
-		// the transferred voice session and the join_token guard cannot tell (the transfer
-		// keeps the same joined_at), so cleaning here would delete the replacement's row
-		// whenever teardown snapshots voiceChID before the transfer zeroes it. A completed
-		// membership is parked in the grace window (voice_grace.go) so a resuming socket
-		// can inherit the call; disconnectVoice tears down at once for an incomplete join
-		// or a disabled window.
+		// Clean up voice only when this was the final connection. A replacement owns the
+		// transferred session and the join_token guard cannot tell (same joined_at), so cleaning
+		// here would delete the replacement's row when teardown snapshots voiceChID before the
+		// transfer zeroes it. A completed membership is parked (voice_grace.go) for a resuming
+		// socket; disconnectVoice tears down at once for an incomplete join or a disabled window.
 		if c.user != nil && voiceChID != 0 && !replaced {
 			hub.disconnectVoice(cleanupCtx, txn, c, voiceLeaveReasonDisconnect)
 		}
@@ -286,29 +266,25 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			}
 			slog.Info("websocket disconnected", attrs...)
 
-			// shouldMarkOffline re-checks h.clients instead of trusting `replaced`, which was
-			// sampled before handleVoiceLeave (can block for seconds): a reconnect landing in
-			// that window would otherwise be invisible and this dead connection's teardown
-			// would mark the live user offline.
+			// shouldMarkOffline re-checks h.clients instead of `replaced`, sampled before
+			// handleVoiceLeave (can block for seconds): a reconnect in that window would otherwise
+			// get the live user marked offline.
 			if hub.shouldMarkOffline(c, replaced) {
-				// A real disconnect is offline for everyone, the user included, so no invisible
-				// mapping. The row keeps a chosen status (idle/dnd/invisible) standing, which the
-				// next connect reads to avoid stamping the user back online. StampDisconnect clears
-				// only the non-choice "online" and refreshes last_seen; the stale-choice problem is
-				// handled at read time, where a member with no live connection renders offline.
+				// A real disconnect is offline for everyone, the user included: no invisible mapping. The
+				// row keeps a chosen status (idle/dnd/invisible) standing for the next connect;
+				// StampDisconnect clears only "online" and refreshes last_seen. A member with no live
+				// connection renders offline at read time.
 				_ = hub.presence.StampDisconnect(cleanupCtx, c.userID)
-				// custom_status is nil, not c.user.CustomStatus: that is an auth-time snapshot never
-				// updated, so broadcasting it would resurrect a status the user changed or cleared
-				// (presentableMembers applies the same rule to ready). StampDisconnect is a DB
-				// write, so a device may have registered since shouldMarkOffline claimed the
-				// offline. Re-check right before the enqueue: that device's online presence is
-				// queued after it registers, so skipping here keeps offline from landing last.
+				// custom_status is nil, not the auth-time c.user.CustomStatus, which would resurrect a
+				// status the user changed or cleared. StampDisconnect is a DB write, so a device may have
+				// registered since shouldMarkOffline claimed offline: re-check before the enqueue (its
+				// online presence is queued after it registers) so offline does not land last.
 				if !hub.isConnected(c.userID) {
 					hub.QueuePresence(c.userID, db.StatusOffline, nil)
 				}
 			} else if !replaced {
-				// Another device stays: its presence is now the user's, so the game, song or
-				// status this one held must not linger.
+				// Another device stays: its presence is now the user's, so this one's game/song/status must
+				// not linger.
 				hub.rebroadcastAfterDeviceLeft(c)
 			}
 		}

@@ -14,7 +14,7 @@
  */
 
 import { setOwnedTimeout } from "../../lib/dom";
-import { newClientMessageId } from "../../lib/pendingMessages";
+import { newClientMessageId, pendingMessageSessionFloor } from "../../lib/pendingMessages";
 import type { ClientMessage, ServerMessage } from "../../lib/types";
 import type { ConnectionState, WsListener } from "../../lib/ws";
 import { claimForwardRequest, releaseForwardRequest } from "./forwardRequests";
@@ -84,8 +84,8 @@ export function createForwardSession(opts: ForwardSessionOptions): ForwardSessio
     status: "queued",
     reason: null,
     forwarded: false,
-    forwardCmid: newClientMessageId(),
-    commentCmid: newClientMessageId(),
+    forwardCmid: newClientMessageId(pendingMessageSessionFloor()),
+    commentCmid: newClientMessageId(pendingMessageSessionFloor()),
   }));
   const waiting = new Map<string, Waiter>();
   // Envelope ids given up on as UNCONFIRMED stay claimed until the session ends,

@@ -61,8 +61,6 @@ func (d *DB) TouchSessions(ctx context.Context, tokenHashes []string) error {
 // SQLite's host-parameter limit.
 const maxBatchIDs = 1000
 
-// inWriteTx runs fn against the writer in one transaction, so a batch costs
-// one commit however many statements it needs.
 func (d *DB) inWriteTx(ctx context.Context, op string, fn func(q *dbgen.Queries) error) error {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {

@@ -183,7 +183,7 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
 // R3: discarded `setTimeout` handles (expression statement or `void`).
 const R3_ALLOWLIST: readonly R3Entry[] = [
   {
-    file: "components/Toast.ts",
+    file: "lib/ui/toastContainer.ts",
     fn: "removeToast",
     reason: "self-bounded: fallback removal after transitionend; touches only the node it removes",
   },
@@ -191,7 +191,7 @@ const R3_ALLOWLIST: readonly R3Entry[] = [
 // R4: every `new AbortController` outside the two primitives.
 const R4_ALLOWLIST: readonly R4Entry[] = [
   {
-    file: "components/SearchOverlay.ts",
+    file: "features/navigation/SearchOverlay.ts",
     fn: "executeSearch",
     category: "cancellation-token",
     reason: "owner: the next search (query, scope or Load more), which aborts this one",

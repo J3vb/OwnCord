@@ -7,12 +7,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// checkReplyTarget requires a reply's target to be a message in the same
-// channel that is not deleted. Every way of failing that gives one answer.
-// SendMessage runs it after the retry lookup, so a retry of a committed send
-// still gets its original message even if the target has gone since.
-// It returns the target it read, nil when the send is not a reply, so the ping
-// needs no second query.
+// checkReplyTarget requires a reply's target to be a non-deleted message in the same channel; every failure
+// gives one answer. SendMessage runs it after the retry lookup, so a retry of a committed send still gets its
+// original message. Returns the target it read (nil when not a reply) so the ping needs no second query.
 func (s *MessageService) checkReplyTarget(ctx context.Context, p SendMessageParams) (*db.ReferencedMessage, error) {
 	if p.ReplyTo == nil {
 		return nil, nil
@@ -31,10 +28,8 @@ func (s *MessageService) checkReplyTarget(ctx context.Context, p SendMessagePara
 	return ref, nil
 }
 
-// replyPingTarget is the user id a reply_ping adds to the mention set, 0 for
-// none: the ping is off, the send is no reply, the parent author is unknown, the
-// parent is an imported message (its owner is the hidden import account, not a
-// person), or the sender replies to their own message.
+// replyPingTarget is the user id a reply_ping adds to the mention set, 0 for none: ping off, no reply,
+// unknown parent author, imported parent (hidden import account), or a self-reply.
 func replyPingTarget(p SendMessageParams, ref *db.ReferencedMessage) int64 {
 	if !p.ReplyPing || p.ReplyTo == nil || ref == nil || ref.User == nil || ref.User.ID == p.UserID ||
 		ref.ImportedAuthor != nil {

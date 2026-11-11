@@ -104,11 +104,11 @@ test("a real remote camera produces a labelled tile while the local self tile ha
   await watch.click();
   await expectDecodedMedia(alice, true);
 
-  // Plain grid layout, not focus mode: both tiles live directly under the grid.
-  await expect(alice.locator("[data-testid='video-grid']")).not.toHaveClass(/focus-mode/);
+  // Plain grid layout: no tile is focused.
+  await expect(alice.locator("[data-testid='video-grid'] .video-cell.focused")).toHaveCount(0);
 });
 
-test("watching a stream focuses its tile, and clicking a thumbnail switches focus", async ({
+test("watching a stream focuses its tile, and clicking another tile switches focus", async ({
   alice,
   bob,
 }) => {
@@ -127,23 +127,15 @@ test("watching a stream focuses its tile, and clicking a thumbnail switches focu
   await expect(bobRow.locator(".vu-status")).toBeVisible({ timeout: 10_000 });
   await bobRow.click();
   await expectDecodedMedia(alice, true);
-  const grid = alice.locator("[data-testid='video-grid']");
-  await expect(grid).toHaveClass(/focus-mode/, { timeout: 5_000 });
-  await expect(alice.locator(".video-focus-main .video-cell[data-user-id='2']")).toHaveClass(
-    /focused/,
-  );
-  await expect(alice.locator(".video-focus-strip .video-cell[data-user-id='1']")).toHaveClass(
-    /thumb/,
-  );
+  const aliceTile = alice.locator(".video-cell[data-user-id='1']");
+  const bobTile = alice.locator(".video-cell[data-user-id='2']");
+  await expect(bobTile).toHaveClass(/focused/, { timeout: 5_000 });
+  await expect(aliceTile).not.toHaveClass(/focused/);
 
-  // Clicking the thumbnail promotes it into the main area and demotes the other.
-  await alice.locator(".video-focus-strip .video-cell[data-user-id='1']").click();
-  await expect(alice.locator(".video-focus-main .video-cell[data-user-id='1']")).toHaveClass(
-    /focused/,
-  );
-  await expect(alice.locator(".video-focus-strip .video-cell[data-user-id='2']")).toHaveClass(
-    /thumb/,
-  );
+  // Clicking the other tile moves the focus to it.
+  await aliceTile.click();
+  await expect(aliceTile).toHaveClass(/focused/);
+  await expect(bobTile).not.toHaveClass(/focused/);
 });
 
 /** Open `page`'s grid on a peer's camera from their voice roster row. A

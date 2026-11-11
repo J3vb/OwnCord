@@ -9,7 +9,6 @@
 // =============================================================================
 
 import { connectText } from "../i18n/connect";
-import type { RestErrorCodeValue } from "./protocolTypes";
 import type {
   Attachment,
   ChannelType,
@@ -20,8 +19,6 @@ import type {
 } from "./wireCommon";
 import type {
   CallInfo,
-  DmChannelPayload,
-  DmRecipient,
   ForwardInfo,
   GroupEventInfo,
   ImportedAuthor,
@@ -29,7 +26,6 @@ import type {
   ReferencedMessage,
   ThreadInfo,
 } from "./wireServer";
-import type { DmRequestListItem } from "./wireVoiceDm";
 export { isTextLikeChannel } from "./wireCommon";
 export type {
   UserStatus,
@@ -99,7 +95,6 @@ export type {
   VoiceLeavePayload,
   VoiceConfigPayload,
   VoiceSpeakersPayload,
-  DmRecipient,
   DmChannelPayload,
 } from "./wireServer";
 export type {
@@ -111,14 +106,6 @@ export type {
 } from "./wireVoiceDm";
 export type { PollCreateAnswer } from "./wireClient";
 export type { ServerMessage, ClientMessage } from "./wireUnions";
-
-/**
- * Error codes the server can send: generated from `error_codes` in
- * protocol/schema.json, so a code the server adds reaches this union by
- * regenerating, not by hand. Compare against the `WsErrorCode` /
- * `RestErrorCode` constants in `@lib/protocolTypes`, never a bare string.
- */
-export type { RestErrorCodeValue } from "./protocolTypes";
 
 // -----------------------------------------------------------------------------
 // Permission Bitfield (from SCHEMA.md)
@@ -194,8 +181,9 @@ export interface HealthResponse {
   readonly status: string;
   /** Version is omitted from unauthenticated endpoints to prevent fingerprinting. */
   readonly version?: string;
-  readonly uptime: number;
-  readonly online_users: number;
+  /** Both are read defensively: a server that does not report them still answers. */
+  readonly uptime?: number;
+  readonly online_users?: number;
 }
 
 /** Registration mode reported by `server-info`. */
@@ -251,7 +239,8 @@ export function retentionNotice(info: ServerInfoResponse | undefined): string | 
 export interface ServerInfoResponse {
   readonly name: string;
   readonly protocol_epoch: number;
-  readonly browser_client_enabled: boolean;
+  /** Not read by this client; an older server may not send it. */
+  readonly browser_client_enabled?: boolean;
   /** Unknown/missing is treated as unavailable; see `parseRegistrationMode`. */
   readonly registration_mode?: RegistrationMode;
   /** Server-default message retention window; `messages_days: 0` = indefinitely. */
@@ -356,8 +345,10 @@ export interface PurgeResponse {
 export interface MemberResponse {
   readonly id: number;
   readonly username: string;
-  readonly avatar: string | null;
-  readonly role: string;
+  /** Omitted while the account has no avatar (Server/api/profile_handler.go's userResponse). */
+  readonly avatar?: string | null;
+  /** The role's name. The server sends `role_id` instead, so this is absent from it. */
+  readonly role?: string;
   readonly status: UserStatus;
   /** Whether 2FA is enrolled. Present on the caller's own GET /users/me
    *  response — the only place the server states it. */
@@ -391,127 +382,24 @@ export interface AdminUser {
   readonly ban_expires?: string;
 }
 
-/** Search result item. */
-export interface SearchResultItem {
-  readonly message_id: number;
-  readonly channel_id: number;
-  readonly channel_name: string;
-  readonly user: MessageUser;
-  readonly content: string;
-  readonly timestamp: string;
-  /** Present on an imported message; `user` is then the hidden import account. */
-  readonly imported_author?: ImportedAuthor;
-}
-
-/** GET /api/search response. */
-export interface SearchResponse {
-  readonly results: readonly SearchResultItem[];
-  /**
-   * Cursor for the next page of a newest-first (`sort=recent`) search, or null
-   * or absent when there is none. Only `recent` paging sets it.
-   */
-  readonly next_before?: number | null;
-}
-
-/** REST API error response body. */
-export interface ApiError {
-  /** UNKNOWN: the client's own fallback for a reply with no JSON error body. */
-  readonly error: RestErrorCodeValue | "UNKNOWN";
-  readonly message: string;
-}
-
-/** Single invite object from GET/POST /api/invites. */
-export interface InviteResponse {
-  readonly id: number;
-  readonly code: string;
-  readonly url: string;
-  readonly max_uses: number | null;
-  readonly use_count?: number;
-  readonly expires_at: string | null;
-  readonly revoked?: boolean;
-  readonly created_at?: string;
-  readonly creator_username?: string;
-}
-
-/** Upload response from POST /api/uploads. */
-export interface UploadResponse {
-  readonly id: string;
-  readonly filename: string;
-  readonly size: number;
-  readonly mime: string;
-  readonly url: string;
-  readonly duration_ms?: number;
-  readonly waveform?: string;
-}
-
-/**
- * GET /api/v1/gif/{search,trending} response.
- *
- * The GIF provider key lives on the server; the client only ever talks to its
- * own server here. The media URLs still point at Klipy's CDN and are validated
- * against the CDN allowlist in gifProvider before being rendered.
- */
-export interface GifApiResult {
-  readonly id: string;
-  readonly title: string;
-  readonly media_formats: {
-    readonly tinygif?: { readonly url: string };
-    readonly gif?: { readonly url: string };
-  };
-}
-
-/** One saved GIF (GET /api/v1/gif/favorites). */
-export interface GifFavorite {
-  readonly url: string;
-  readonly preview_url: string;
-  readonly title: string;
-}
-
-export interface GifFavoritesResponse {
-  readonly favorites: readonly GifFavorite[];
-}
-
-/** Envelope for both GIF endpoints. */
-export interface GifSearchResponse {
-  readonly results: readonly GifApiResult[];
-  /** Opaque cursor for the next page (send back as `pos`); "" or absent when there is none. */
-  readonly next?: string;
-}
-
-/** GET /api/v1/dms response. */
-export interface DmChannelsResponse {
-  readonly dm_channels: readonly DmChannelPayload[];
-}
-
-/** POST /api/v1/dms response. */
-export interface CreateDmResponse {
-  readonly channel_id: number;
-  readonly recipient: DmRecipient;
-  readonly created: boolean;
-}
-
-/** POST /api/v1/dms/group and PATCH /api/v1/dms/{id} both answer with the
- *  same DM summary shape the list and the ready payload use. */
-export type GroupDmResponse = DmChannelPayload;
-
-/** GET /api/v1/dm-requests response: the caller's pending inbox, newest first. */
-export interface DmRequestListResponse {
-  readonly requests: readonly DmRequestListItem[];
-}
-
-/** GET /api/v1/blocks response. */
-export interface BlockedUsersResponse {
-  readonly blocked_user_ids: readonly number[];
-}
-
-/** TURN/STUN credentials from GET /api/voice/credentials. */
-export interface IceServer {
-  readonly urls: string;
-  readonly username?: string;
-  readonly credential?: string;
-}
-
-export interface VoiceCredentialsResponse {
-  readonly ice_servers: readonly IceServer[];
-  readonly expires_in: number;
-}
+export type {
+  SearchResultItem,
+  SearchResponse,
+  ApiError,
+  InviteResponse,
+  UploadResponse,
+  GifFavorite,
+  GifFavoritesResponse,
+  GifSearchResponse,
+  DmChannelsResponse,
+  CreateDmResponse,
+  GroupDmResponse,
+  DmRequestListResponse,
+  BlockedUsersResponse,
+  PublicIdResponse,
+  TotpEnrolmentResponse,
+  RecoveryCodesResponse,
+  TimeoutResult,
+  ReportActResult,
+  NicknameResult,
+} from "./typesRest";

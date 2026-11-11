@@ -2,12 +2,12 @@
 // gate and re-apply the user's mute and deafen, for the session that is still
 // current when the publish settles; after a reconnect, also bring back the
 // camera and screen share the drop stopped.
-import type { Room } from "livekit-client";
 import {
   voiceStore,
   isPttPollingLive,
   setPttGated as setPttGatedState,
   setListenOnly,
+  type VoiceState,
 } from "@stores/voice.store";
 import { pttGates } from "@lib/ui/inputMode";
 import { createLogger } from "@lib/logger";
@@ -18,12 +18,13 @@ import { voiceText } from "../../i18n/voice";
 import { type LostMedia, restoreLostMedia } from "./mediaLostNotice";
 import { isLinuxDesktop } from "./native/platform";
 import type { SessionState } from "./sessionState";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("livekitSession");
 
 /** What the restore reads from the session; `room` is read live each time. */
 export interface LocalVoiceRestoreHost {
-  room(): Room | null;
+  room(): VoiceRoom | null;
   readonly audioPipeline: AudioPipeline;
   readonly media: MediaControl;
   readonly audioElements: AudioElements;
@@ -31,15 +32,12 @@ export interface LocalVoiceRestoreHost {
   applyMicMuteState(muted: boolean): Promise<void>;
 }
 
-export async function restoreLocalVoiceState(
+/** Close or open the push-to-talk gate for the freshly published mic. */
+function armPttGate(
   mode: "join" | "reconnect",
+  state: VoiceState,
   host: LocalVoiceRestoreHost,
-): Promise<void> {
-  const room = host.room();
-  if (room === null) return;
-  syncShareGrant(room);
-
-  const state = voiceStore.getState();
+): void {
   // In Push to Talk mode a bound key (or, in the Android app, the on-screen
   // talk button) means transmission is gated by press/release (a key bound
   // in Voice Activity mode gates nothing), but the Rust poller only emits
@@ -63,6 +61,46 @@ export async function restoreLocalVoiceState(
   const pttArmed = mode === "join" ? pttGates(isPttPollingLive()) : state.pttGated === true;
   if (mode === "join") setPttGatedState(pttArmed);
   host.audioPipeline.setPttGated(pttArmed);
+}
+
+/** A refused or missing mic joins listen-only; say why, once. */
+function noteMicFailure(
+  mode: "join" | "reconnect",
+  micErr: unknown,
+  host: LocalVoiceRestoreHost,
+): void {
+  if (mode === "reconnect") {
+    log.warn("Auto-reconnect: mic unavailable — listen-only mode", micErr);
+  } else if (micErr instanceof DOMException && micErr.name === "NotAllowedError") {
+    log.warn("Microphone permission denied — joined in listen-only mode");
+    host.onError(voiceText("session.listenOnlyPermission"));
+  } else if (micErr instanceof DOMException && micErr.name === "NotFoundError") {
+    log.warn("No microphone found — joined in listen-only mode");
+    host.onError(voiceText("session.listenOnlyMissing"));
+  } else {
+    log.warn("Microphone unavailable — joined in listen-only mode", micErr);
+    host.onError(voiceText("session.listenOnlyUnavailable"));
+  }
+}
+
+function logMicRestored(mode: "join" | "reconnect"): void {
+  log.info(
+    mode === "join"
+      ? "Published mic via LiveKit native capture"
+      : "Auto-reconnect restored live microphone",
+  );
+}
+
+export async function restoreLocalVoiceState(
+  mode: "join" | "reconnect",
+  host: LocalVoiceRestoreHost,
+): Promise<void> {
+  const room = host.room();
+  if (room === null) return;
+  syncShareGrant(room);
+
+  const state = voiceStore.getState();
+  armPttGate(mode, state, host);
   const muted = state.localMuted || state.localDeafened;
   const deafened = state.localDeafened;
   // The AFK channel is listen-only: publish nothing there, and do not read
@@ -73,30 +111,13 @@ export async function restoreLocalVoiceState(
   try {
     await host.media.enableMicrophone(room, shouldEnableMicrophone);
     if (host.room() !== room) return;
-    if (shouldEnableMicrophone) {
-      log.info(
-        mode === "join"
-          ? "Published mic via LiveKit native capture"
-          : "Auto-reconnect restored live microphone",
-      );
-    }
+    if (shouldEnableMicrophone) logMicRestored(mode);
     if (host.room() !== room) return;
     setListenOnly(false); // Mic acquired successfully
   } catch (micErr) {
     if (host.room() !== room) return;
     setListenOnly(true);
-    if (mode === "reconnect") {
-      log.warn("Auto-reconnect: mic unavailable — listen-only mode", micErr);
-    } else if (micErr instanceof DOMException && micErr.name === "NotAllowedError") {
-      log.warn("Microphone permission denied — joined in listen-only mode");
-      host.onError(voiceText("session.listenOnlyPermission"));
-    } else if (micErr instanceof DOMException && micErr.name === "NotFoundError") {
-      log.warn("No microphone found — joined in listen-only mode");
-      host.onError(voiceText("session.listenOnlyMissing"));
-    } else {
-      log.warn("Microphone unavailable — joined in listen-only mode", micErr);
-      host.onError(voiceText("session.listenOnlyUnavailable"));
-    }
+    noteMicFailure(mode, micErr, host);
   }
 
   // setMicrophoneEnabled above can block for seconds on the
@@ -130,7 +151,7 @@ export interface LostMediaRestoreHost {
   sendWatching(): void;
   getLost(): LostMedia | null;
   setLost(lost: LostMedia | null): void;
-  room(): Room | null;
+  room(): VoiceRoom | null;
   stateType(): SessionState["type"];
   enableCamera(): Promise<void>;
   enableScreenshare(): Promise<void>;

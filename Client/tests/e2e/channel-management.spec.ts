@@ -112,7 +112,13 @@ async function openSession(page: Page, opts: MockOpts = {}): Promise<void> {
         {
           pattern: "/api/v1/moderation/channels",
           status: opts.admin?.status ?? 200,
-          body: opts.admin?.body ?? {},
+          body: opts.admin?.body ?? {
+            id: 50,
+            name: "new-lounge",
+            type: "voice",
+            category: "Text Channels",
+            position: 1,
+          },
         },
       ],
       simulateWsFlow: true,

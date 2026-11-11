@@ -1,3 +1,4 @@
+import { hoverRow } from "./hoverRows";
 import { expect, vi, beforeEach, afterEach } from "vitest";
 import { renderMessage, setServerHost } from "../../src/features/messaging/message-list/renderers";
 import type { Message } from "../../src/stores/messages.store";
@@ -130,6 +131,8 @@ export function mountMessage(
   const ac = new AbortController();
   const el = renderMessage(msg, false, [msg], opts, ac.signal);
   container.appendChild(el);
+  // A pointer over the row builds its whole hover bar.
+  hoverRow(el);
   return { el, ac };
 }
 

@@ -9,8 +9,7 @@ import (
 	"time"
 )
 
-// cacheEntry is one cached result: a preview, an image's bytes, or the
-// failure a fetch ended in.
+// cacheEntry is one cached preview, image bytes, or failure.
 type cacheEntry struct {
 	key     string
 	preview previewData
@@ -21,8 +20,8 @@ type cacheEntry struct {
 	expires time.Time
 }
 
-// resultCache is a byte-weighted LRU with a time-to-live, so a long-running
-// server neither grows without bound nor serves a changed page forever.
+// resultCache is a byte-weighted LRU with a TTL, so a long-running server neither grows unbounded nor serves
+// a changed page forever.
 type resultCache struct {
 	mu      sync.Mutex
 	limit   int64
@@ -59,9 +58,8 @@ func (c *resultCache) get(key string) (*cacheEntry, bool) {
 	return entry, true
 }
 
-// put stores entry for the cache's TTL, evicting least recently used entries
-// until the cache is back under its byte limit. An entry larger than the whole
-// limit is not kept.
+// put stores entry for the TTL, evicting least recently used entries to stay under the byte limit;
+// an entry larger than the limit is not kept.
 func (c *resultCache) put(entry *cacheEntry) {
 	c.putFor(entry, c.ttl)
 }
@@ -97,10 +95,9 @@ type handle struct {
 	url   string
 }
 
-// handleTable maps opaque handles to preview image URLs. Each user has their
-// own oldest-first list, capped, so one member previewing a lot cannot expire
-// anyone else's handles; asking again for an image that already has a handle
-// hands back the same one. A handle answers only the user it was minted for.
+// handleTable maps opaque handles to preview image URLs. Each user has a capped oldest-first list,
+// so one member cannot expire another's handles; the same image gets the same handle, and a handle
+// answers only the user it was minted for.
 type handleTable struct {
 	mu       sync.Mutex
 	perOwner int

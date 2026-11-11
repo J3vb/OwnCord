@@ -18,6 +18,7 @@ import type {
   ChatPinnedPayload,
   ChatSendOkPayload,
   GameActivityPolicyPayload,
+  VideoBitrateCapPayload,
   MemberTimeoutsPayload,
   MentionCountPayload,
   ModActionPayload,
@@ -159,6 +160,7 @@ export type ServerMessage =
   | (WsEnvelope<StickerUpdatePayload> & { readonly type: "sticker_update" })
   | (WsEnvelope<UploadPolicyPayload> & { readonly type: "upload_policy" })
   | (WsEnvelope<GameActivityPolicyPayload> & { readonly type: "game_activity_policy" })
+  | (WsEnvelope<VideoBitrateCapPayload> & { readonly type: "video_bitrate_cap" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
   | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
   | (WsEnvelope<DmRequestPayload> & { readonly type: "dm_request" })

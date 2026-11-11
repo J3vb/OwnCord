@@ -2,6 +2,7 @@ import { describe, it, expect, vi, type Mock } from "vitest";
 import * as mocks from "../../helpers/apiRequestsMocks";
 import { ApiClientError, TransportError, type OnUnauthorized } from "../../../src/lib/api";
 import { expectConsole } from "../../helpers/console";
+import { validReply } from "../../helpers/restReplyFixtures";
 import {
   Api,
   okResponse,
@@ -44,11 +45,17 @@ describe("REST client requests", () => {
     }
 
     it.each([
-      ["uploadAvatar", (a: Api) => a.uploadAvatar(file), "/users/me/avatar"],
-      ["uploadBanner", (a: Api) => a.uploadBanner(file), "/users/me/banner"],
-      ["uploadFile", (a: Api) => a.uploadFile(file), "/uploads"],
-      ["uploadGroupDmIcon", (a: Api) => a.uploadGroupDmIcon(9, file), "/dms/9/icon"],
-    ] as const)("%s posts the file as form data", async (_name, call, path) => {
+      ["uploadAvatar", (a: Api) => a.uploadAvatar(file), "/users/me/avatar", "UploadResponse"],
+      ["uploadBanner", (a: Api) => a.uploadBanner(file), "/users/me/banner", "UploadResponse"],
+      ["uploadFile", (a: Api) => a.uploadFile(file), "/uploads", "UploadResponse"],
+      [
+        "uploadGroupDmIcon",
+        (a: Api) => a.uploadGroupDmIcon(9, file),
+        "/dms/9/icon",
+        "GroupDmOrNone",
+      ],
+    ] as const)("%s posts the file as form data", async (_name, call, path, reply) => {
+      mockFetch.mockResolvedValue(okResponse(validReply(reply)));
       await call(api);
       expect(callUrl()).toBe(`${BASE}${path}`);
       expect(callInit().method).toBe("POST");
@@ -60,6 +67,7 @@ describe("REST client requests", () => {
     });
 
     it("uploadEmoji sends the shortcode and the image", async () => {
+      mockFetch.mockResolvedValue(okResponse(validReply("EmojiResponse")));
       await api.uploadEmoji("party", file);
       expect(callUrl()).toBe(`${BASE}/emoji`);
       expect(callInit().method).toBe("POST");
@@ -70,6 +78,7 @@ describe("REST client requests", () => {
     });
 
     it("uploadFile declares a voice message's length and waveform in the query", async () => {
+      mockFetch.mockResolvedValue(okResponse(validReply("UploadResponse")));
       await api.uploadFile(file, undefined, undefined, {
         durationMs: 1234.6,
         waveform: "AB_-cd",
@@ -78,6 +87,7 @@ describe("REST client requests", () => {
     });
 
     it("uploadFile percent-encodes the waveform", async () => {
+      mockFetch.mockResolvedValue(okResponse(validReply("UploadResponse")));
       await api.uploadFile(file, undefined, undefined, { durationMs: 10, waveform: "a b&c" });
       expect(callUrl()).toBe(`${BASE}/uploads?voice_duration_ms=10&voice_waveform=a%20b%26c`);
     });
@@ -85,8 +95,9 @@ describe("REST client requests", () => {
 
   describe("removeAvatar", () => {
     it("deletes the avatar", async () => {
-      mockFetch.mockResolvedValue(okResponse({ id: 1 }));
-      await expect(api.removeAvatar("ann")).resolves.toEqual({ id: 1 });
+      const member = validReply("MemberResponse");
+      mockFetch.mockResolvedValue(okResponse(member));
+      await expect(api.removeAvatar("ann")).resolves.toEqual(member);
       expect(mockFetch).toHaveBeenCalledTimes(1);
       expect(callUrl()).toBe(`${BASE}/users/me/avatar`);
       expect(callInit().method).toBe("DELETE");
@@ -95,8 +106,11 @@ describe("REST client requests", () => {
     it("falls back to a profile PATCH when the server answers 405", async () => {
       mockFetch
         .mockResolvedValueOnce(failResponse(405, { error: "METHOD_NOT_ALLOWED", message: "no" }))
-        .mockResolvedValueOnce(okResponse({ id: 1, avatar: "" }));
-      await expect(api.removeAvatar("ann")).resolves.toEqual({ id: 1, avatar: "" });
+        .mockResolvedValueOnce(okResponse({ ...validReply("MemberResponse"), avatar: "" }));
+      await expect(api.removeAvatar("ann")).resolves.toEqual({
+        ...validReply("MemberResponse"),
+        avatar: "",
+      });
       expectConsole("warn", /API error/);
       expect(mockFetch).toHaveBeenCalledTimes(2);
       expect(callUrl(1)).toBe(`${BASE}/users/me`);
@@ -124,7 +138,17 @@ describe("REST client requests", () => {
 
   describe("sessions", () => {
     it("getSessions reads GET /users/me/sessions and unwraps the list", async () => {
-      const sessions = [{ id: 1, device: "d", ip: "i", is_current: true }];
+      const sessions = [
+        {
+          id: 1,
+          device: "d",
+          ip: "i",
+          created_at: "2026-11-06 10:00:00",
+          last_used: "2026-11-06 10:00:00",
+          is_current: true,
+          unseen: false,
+        },
+      ];
       mockFetch.mockResolvedValue(okResponse({ sessions }));
       await expect(api.getSessions()).resolves.toEqual(sessions);
       expect(callUrl()).toBe(`${BASE}/users/me/sessions`);
@@ -145,7 +169,7 @@ describe("REST client requests", () => {
 
   describe("adminListUsers", () => {
     const page = (from: number, n: number) =>
-      Array.from({ length: n }, (_, i) => ({ id: from + i }));
+      Array.from({ length: n }, (_, i) => ({ ...validReply("AdminUserList")[0]!, id: from + i }));
 
     it("fetches one page and stops on a short page", async () => {
       mockFetch.mockResolvedValue(okResponse(page(0, 3)));
@@ -155,6 +179,15 @@ describe("REST client requests", () => {
       expect(callInit().method).toBe("GET");
     });
 
+    it("adds banned=1 on every page when asked for banned users only", async () => {
+      mockFetch
+        .mockResolvedValueOnce(okResponse(page(0, 500)))
+        .mockResolvedValueOnce(okResponse(page(500, 2)));
+      await expect(api.adminListUsers(undefined, { bannedOnly: true })).resolves.toHaveLength(502);
+      expect(callUrl(0)).toBe(`${BASE}/moderation/members?limit=500&offset=0&banned=1`);
+      expect(callUrl(1)).toBe(`${BASE}/moderation/members?limit=500&offset=500&banned=1`);
+    });
+
     it("walks every page of 500 until a short one arrives", async () => {
       mockFetch
         .mockResolvedValueOnce(okResponse(page(0, 500)))
@@ -162,19 +195,21 @@ describe("REST client requests", () => {
         .mockResolvedValueOnce(okResponse(page(1000, 7)));
       const users = await api.adminListUsers();
       expect(users).toHaveLength(1007);
-      expect(users[1006]).toEqual({ id: 1006 });
+      expect(users[1006]).toMatchObject({ id: 1006 });
       expect(mockFetch).toHaveBeenCalledTimes(3);
       expect(callUrl(1)).toBe(`${BASE}/moderation/members?limit=500&offset=500`);
       expect(callUrl(2)).toBe(`${BASE}/moderation/members?limit=500&offset=1000`);
     });
 
+    // 100,000 rows each pass the reply shape check, which is slow when the
+    // nightly test-depth run has rewritten that check.
     it("stops after 200 pages when a server never sends a short one", async () => {
       mockFetch.mockImplementation(() => Promise.resolve(okResponse(page(0, 500))));
       const users = await api.adminListUsers();
       expect(mockFetch).toHaveBeenCalledTimes(200);
       expect(users).toHaveLength(200 * 500);
       expect(callUrl(199)).toBe(`${BASE}/moderation/members?limit=500&offset=${199 * 500}`);
-    });
+    }, 20_000);
   });
 
   describe("logout", () => {
@@ -226,6 +261,7 @@ describe("REST client requests", () => {
 
   describe("upload progress", () => {
     it("is not subscribed for a JSON call", async () => {
+      mockFetch.mockResolvedValue(okResponse(validReply("MemberResponse")));
       await api.getMe();
       expect(callHeaders()["X-Upload-Id"]).toBeUndefined();
       expect(progressHandlers.size).toBe(0);
@@ -244,7 +280,7 @@ describe("REST client requests", () => {
       for (const tick of ticks) {
         for (const handler of progressHandlers) handler({ payload: { id, ...tick } });
       }
-      finish(okResponse({ id: "srv" }));
+      finish(okResponse(validReply("UploadResponse")));
       await upload;
       return seen;
     }
@@ -279,7 +315,7 @@ describe("REST client requests", () => {
 
     it("ignores another upload's ticks and stops listening once settled", async () => {
       const seen: number[] = [];
-      mockFetch.mockResolvedValue(okResponse({ id: "srv" }));
+      mockFetch.mockResolvedValue(okResponse(validReply("UploadResponse")));
       const upload = api.uploadFile(new File(["x"], "a.png"), undefined, (f) => seen.push(f));
       await upload;
       for (const handler of progressHandlers) handler({ payload: { id: "x", sent: 1, total: 2 } });
@@ -290,13 +326,15 @@ describe("REST client requests", () => {
 
   describe("health and server-info probes", () => {
     it("getHealth fetches /health for the signed-in server with a signal and no auth", async () => {
-      mockFetch.mockResolvedValue(okResponse({ status: "ok" }));
-      await expect(api.getHealth()).resolves.toEqual({ status: "ok" });
+      const health = validReply("HealthResponse");
+      mockFetch.mockResolvedValue(okResponse(health));
+      await expect(api.getHealth()).resolves.toEqual(health);
       expect(callUrl()).toBe(`${BASE}/health`);
       expect((callInit().signal as AbortSignal).aborted).toBe(false);
     });
 
     it("getHealth reaches an explicit host", async () => {
+      mockFetch.mockResolvedValue(okResponse(validReply("HealthResponse")));
       await api.getHealth("other.test:9000");
       expect(callUrl()).toBe("https://other.test:9000/api/v1/health");
     });
@@ -309,13 +347,15 @@ describe("REST client requests", () => {
     });
 
     it("getServerInfo fetches /server-info for the signed-in server", async () => {
-      mockFetch.mockResolvedValue(okResponse({ name: "srv" }));
-      await expect(api.getServerInfo()).resolves.toEqual({ name: "srv" });
+      const info = validReply("ServerInfoResponse");
+      mockFetch.mockResolvedValue(okResponse(info));
+      await expect(api.getServerInfo()).resolves.toEqual(info);
       expect(callUrl()).toBe(`${BASE}/server-info`);
       expect((callInit().signal as AbortSignal).aborted).toBe(false);
     });
 
     it("getServerInfo reaches an explicit host", async () => {
+      mockFetch.mockResolvedValue(okResponse(validReply("ServerInfoResponse")));
       await api.getServerInfo("other.test:9000");
       expect(callUrl()).toBe("https://other.test:9000/api/v1/server-info");
     });
@@ -348,8 +388,9 @@ describe("REST client requests", () => {
         await vi.waitFor(() => expect(mockFetch).toHaveBeenCalled());
         api.endSession();
         expect((callInit().signal as AbortSignal).aborted).toBe(false);
-        release(okResponse({ ok: true }));
-        await expect(pending).resolves.toEqual({ ok: true });
+        const body = validReply(name === "getHealth" ? "HealthResponse" : "ServerInfoResponse");
+        release(okResponse(body));
+        await expect(pending).resolves.toEqual(body);
       },
     );
 
@@ -462,7 +503,7 @@ describe("REST client requests", () => {
     });
 
     it("does not hand back sessions listed as the session ended", async () => {
-      mockFetch.mockResolvedValue(okResponse({ sessions: [{ id: 1 }] }));
+      mockFetch.mockResolvedValue(okResponse(validReply("SessionsListResponse")));
       // The request's own cleanup is the last thing to run before its result
       // reaches getSessions, so ending the session there lands in between.
       const clear = globalThis.clearTimeout;

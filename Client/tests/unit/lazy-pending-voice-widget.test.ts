@@ -30,19 +30,19 @@ vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 
 vi.mock("../../src/features/channels/ChannelSidebar", () => mocks.channelSidebarMock());
 
-vi.mock("@components/DmSidebar", () => mocks.dmSidebarMock());
+vi.mock("../../src/features/direct-messages/DmSidebar", () => mocks.dmSidebarMock());
 
 vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
 
-vi.mock("@components/UserBar", () => mocks.userBarMock());
+vi.mock("../../src/features/voice/UserBar", () => mocks.userBarMock());
 
-vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
+vi.mock("../../src/features/navigation/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 
-vi.mock("@components/EditChannelModal", () => mocks.editChannelModalMock());
+vi.mock("../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());
 
-vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
+vi.mock("../../src/features/channels/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 
 vi.mock("../../src/pages/main-page/VoiceCallbacks", () => mocks.pageVoiceCallbacksMock());
 
@@ -73,7 +73,7 @@ describe("SidebarArea voice widget", () => {
         for (const unsub of result.unsubscribers) unsub();
         result = null;
       }
-      vi.doUnmock("@components/VoiceWidget");
+      vi.doUnmock("../../src/features/voice/VoiceWidget");
     },
   );
 
@@ -82,11 +82,11 @@ describe("SidebarArea voice widget", () => {
     h.gate = makeGate();
     h.loads.value = 0;
     // A gated stand-in for the lazy chunk that still yields the real widget.
-    vi.doUnmock("@components/VoiceWidget");
-    vi.doMock("@components/VoiceWidget", async () => {
+    vi.doUnmock("../../src/features/voice/VoiceWidget");
+    vi.doMock("../../src/features/voice/VoiceWidget", async () => {
       h.loads.value += 1;
       await h.gate!.promise;
-      return await vi.importActual<object>("@components/VoiceWidget");
+      return await vi.importActual<object>("../../src/features/voice/VoiceWidget");
     });
     vi.mocked(toast.showToast).mockClear();
   });

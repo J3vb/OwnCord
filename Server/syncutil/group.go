@@ -5,23 +5,19 @@ import (
 	"time"
 )
 
-// Group owns background jobs that outlive the request or message that
-// spawned them, so a lifecycle owner can join them (or abandon them with a
-// count) before the resources they use are closed.
+// Group owns background jobs that outlive the request that spawned them, so a
+// lifecycle owner can join them (or abandon them with a count) before their
+// resources close.
 //
-// It is the hub's "life plus WaitGroup" pattern with an admission gate: a bare
-// sync.WaitGroup fed from handler goroutines would race Add against Wait, so Go
-// refuses new work once Stop has begun, under the same mutex that counts
-// running jobs.
-//
-// A nil *Group is usable: Go runs the job on a fresh, unowned group, so tests
-// and the token CLI get fire-and-forget behaviour without a bare go statement.
+// Go refuses new work once Stop has begun, under the same mutex that counts
+// running jobs, so Add cannot race Wait as with a bare sync.WaitGroup. A nil
+// *Group is usable: Go runs the job on a fresh, unowned group.
 type Group struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
 	// mu guards the fields below. It is a LEAF lock: never held across fn, I/O,
-	// a channel operation or another lock, so any call site can take it.
+	// a channel operation or another lock.
 	mu         Mutex
 	draining   bool
 	running    int
@@ -31,9 +27,8 @@ type Group struct {
 }
 
 // NewGroup returns a group whose jobs are cancelled when parent ends or Stop
-// cancels them. Pass a context that does not die before the owner's Stop
-// (typically context.WithoutCancel of a longer-lived context), or the jobs
-// are cancelled before Stop can give them their grace.
+// cancels them. Pass a context that outlives the owner's Stop, or jobs are
+// cancelled before they get their grace.
 func NewGroup(parent context.Context) *Group {
 	ctx, cancel := context.WithCancel(parent)
 	return &Group{
@@ -44,14 +39,12 @@ func NewGroup(parent context.Context) *Group {
 	}
 }
 
-// Go runs fn on its own goroutine and reports whether it was admitted. It
-// returns false, without running fn, once a drain has begun.
+// Go runs fn on its own goroutine and reports whether it was admitted; once a
+// drain has begun it returns false without running fn.
 //
 // fn receives ctx's values but not its cancellation: the job outlives its
-// caller (a request context is cancelled when the response is written) and
-// ends when the group is cancelled. A job that needs a deadline applies its
-// own inside fn. The pattern is ws/hub_sweep.go's sweepTailCtx; it keeps
-// logctx values and contextcheck intact.
+// caller and ends when the group is cancelled. A job needing a deadline applies
+// its own.
 func (g *Group) Go(ctx context.Context, fn func(context.Context)) bool {
 	if g == nil {
 		g = NewGroup(context.WithoutCancel(ctx))
@@ -83,8 +76,7 @@ func (g *Group) finish() {
 	g.mu.Unlock()
 }
 
-// closeIdleLocked closes idle once a drain has begun and nothing runs. The
-// caller holds mu.
+// closeIdleLocked closes idle once draining with nothing running; the caller holds mu.
 func (g *Group) closeIdleLocked() {
 	if g.draining && g.running == 0 && !g.idleClosed {
 		g.idleClosed = true
@@ -92,8 +84,8 @@ func (g *Group) closeIdleLocked() {
 	}
 }
 
-// Draining is closed when Stop begins. A job that waits (a countdown, a
-// backoff) selects on it to abandon work the shutdown must not complete.
+// Draining is closed when Stop begins; a waiting job selects on it to abandon
+// work the shutdown must not complete.
 func (g *Group) Draining() <-chan struct{} {
 	if g == nil {
 		return nil
@@ -101,12 +93,10 @@ func (g *Group) Draining() <-chan struct{} {
 	return g.drain
 }
 
-// Stop drains the group, in this order: close admission and Draining; wait up
-// to grace for running jobs to finish on their own; cancel every job's
-// context; wait until they finish or ctx is done. It returns how many jobs
-// are still running, which the caller logs. A job that ignores cancellation
-// is abandoned, not waited for. Stop starts no goroutine, and is safe to call
-// more than once and concurrently.
+// Stop drains the group: close admission and Draining; wait up to grace for
+// jobs to finish; cancel every job's context; wait until they finish or ctx is
+// done. It returns how many jobs still run; a job ignoring cancellation is
+// abandoned. Safe to call more than once and concurrently.
 func (g *Group) Stop(ctx context.Context, grace time.Duration) (stragglers int) {
 	if g == nil {
 		return 0

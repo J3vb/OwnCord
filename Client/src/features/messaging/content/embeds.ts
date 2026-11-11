@@ -5,6 +5,8 @@
 
 import { createElement, setText } from "@lib/dom";
 import { observeMedia } from "./mediaVisibility";
+import { dataSaverActive } from "./dataSaver";
+import { mediaName, renderDeferredMedia } from "./deferredMedia";
 import { createLogger } from "@lib/logger";
 import {
   isExternalGif,
@@ -155,6 +157,7 @@ function clearOgEntry(url: string): void {
 
 /** Render a link preview card with OG metadata (title, description, image). */
 export function renderGenericLinkPreview(url: string): HTMLDivElement {
+  const deferImages = dataSaverActive();
   const wrap = createElement("div", { class: "msg-embed msg-embed-link" });
 
   let displayHost = "";
@@ -238,8 +241,17 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
       wrap.dataset.embedState = "loaded";
       statusEl.hidden = true;
       hostEl.hidden = false;
-      const imageSettled = applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
-      if (meta.image === null) {
+      const imageSettled = applyOgMeta(
+        meta,
+        titleEl,
+        descEl,
+        hostEl,
+        imageWrap,
+        url,
+        displayHost,
+        deferImages,
+      );
+      if (meta.image === null || deferImages) {
         show();
         return;
       }
@@ -319,6 +331,7 @@ export function applyOgMeta(
   imageWrap: HTMLElement,
   url: string,
   displayHost: string,
+  deferImages = dataSaverActive(),
 ): Promise<void> {
   setText(titleEl, meta.title ?? displayHost);
   setText(hostEl, meta.siteName ?? displayHost);
@@ -331,6 +344,18 @@ export function applyOgMeta(
     descEl.style.display = "none";
   }
   if (meta.image === null) return Promise.resolve();
+  if (deferImages) {
+    const handle = meta.image;
+    imageWrap.style.display = "";
+    imageWrap.appendChild(
+      renderDeferredMedia(mediaName(url), () => {
+        const image = createElement("div", { class: "msg-embed-link-image" });
+        void showOgImage(meta, handle, image, url);
+        return image;
+      }),
+    );
+    return Promise.resolve();
+  }
   return showOgImage(meta, meta.image, imageWrap, url);
 }
 

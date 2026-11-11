@@ -71,7 +71,11 @@ SELECT
     CAST(EXISTS (
         SELECT 1 FROM trusted_senders t
         WHERE t.recipient_id = dp.user_id AND t.sender_id = ?1
-    ) AS INTEGER) AS trusts_sender
+    ) AS INTEGER) AS trusts_sender,
+    CAST(EXISTS (
+        SELECT 1 FROM trusted_senders t
+        WHERE t.recipient_id = ?1 AND t.sender_id = dp.user_id
+    ) AS INTEGER) AS trusted_by_sender
 FROM dm_participants dp
 JOIN channels c ON c.id = dp.channel_id AND c.type = 'dm'
 WHERE dp.channel_id = ?2
@@ -83,15 +87,17 @@ type GetDMDeliveryTargetsParams struct {
 }
 
 type GetDMDeliveryTargetsRow struct {
-	UserID       int64 `json:"userId"`
-	IsGroup      int64 `json:"isGroup"`
-	IsOpen       int64 `json:"isOpen"`
-	TrustsSender int64 `json:"trustsSender"`
+	UserID          int64 `json:"userId"`
+	IsGroup         int64 `json:"isGroup"`
+	IsOpen          int64 `json:"isOpen"`
+	TrustsSender    int64 `json:"trustsSender"`
+	TrustedBySender int64 `json:"trustedBySender"`
 }
 
 // One read for a DM send's whole fan-out decision: every participant, the
 // channel's group flag, whether the participant's DM row is already open, and
-// whether the participant trusts sender_id (message requests).
+// whether the participant trusts sender_id (message requests) and is trusted by
+// sender_id (so a send records the sender's own trust only when it is missing).
 func (q *Queries) GetDMDeliveryTargets(ctx context.Context, arg GetDMDeliveryTargetsParams) ([]GetDMDeliveryTargetsRow, error) {
 	rows, err := q.db.QueryContext(ctx, getDMDeliveryTargets, arg.SenderID, arg.ChannelID)
 	if err != nil {
@@ -106,6 +112,7 @@ func (q *Queries) GetDMDeliveryTargets(ctx context.Context, arg GetDMDeliveryTar
 			&i.IsGroup,
 			&i.IsOpen,
 			&i.TrustsSender,
+			&i.TrustedBySender,
 		); err != nil {
 			return nil, err
 		}

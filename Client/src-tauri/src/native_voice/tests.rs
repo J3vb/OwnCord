@@ -244,3 +244,105 @@ fn a_monitor_that_finishes_after_a_connect_is_refused() {
         Err(MIC_TEST_IN_CALL.to_string())
     );
 }
+
+/// A stop supersedes a preview start still in flight, so the late start
+/// releases its own capture instead of claiming the slot.
+#[test]
+fn a_preview_stop_supersedes_a_start_in_flight() {
+    let mut inner = Inner::default();
+    let generation = inner.begin_standalone();
+    assert!(inner.clear_standalone().is_none());
+    assert!(!inner.standalone_is_latest(generation));
+    let replacement = inner.begin_standalone();
+    assert!(inner.standalone_is_latest(replacement));
+}
+
+/// Releasing waits for the drop, which runs on a blocking thread and not on
+/// the async worker that awaits it.
+#[tokio::test]
+async fn release_blocking_drops_off_the_async_worker() {
+    struct Probe(std::sync::mpsc::Sender<std::thread::ThreadId>);
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            let _ = self.0.send(std::thread::current().id());
+        }
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::current().id();
+    release_blocking(Probe(tx)).await;
+    let dropped_on = rx.try_recv().expect("dropped before the await returned");
+    assert_ne!(dropped_on, worker);
+}
+
+/// Nothing retired releases at once.
+#[tokio::test]
+async fn an_empty_retired_releases_without_waiting() {
+    let retired = Retired::default();
+    assert!(retired.is_empty());
+    retired.release().await;
+}
+
+/// A command-shaped sequence: the stop holds the gate through a release that
+/// stays blocked until the test lets it go, other async work keeps running,
+/// and a start queued behind the stop begins only after the old capture is
+/// gone. No clock is involved: the test releases the blocked drop itself.
+#[tokio::test(flavor = "current_thread")]
+async fn a_start_behind_a_stop_waits_for_the_release_and_the_worker_stays_free() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    struct Held {
+        go: std::sync::mpsc::Receiver<()>,
+        released: Arc<AtomicBool>,
+    }
+    impl Drop for Held {
+        fn drop(&mut self) {
+            let _ = self.go.recv();
+            self.released.store(true, Ordering::SeqCst);
+        }
+    }
+    let gate = Arc::new(tokio::sync::Mutex::new(()));
+    let released = Arc::new(AtomicBool::new(false));
+    let (go_tx, go_rx) = std::sync::mpsc::channel();
+    let held = Held {
+        go: go_rx,
+        released: released.clone(),
+    };
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let stop = {
+        let gate = gate.clone();
+        tokio::spawn(async move {
+            let _gate = gate.lock().await;
+            let _ = entered_tx.send(());
+            release_blocking(held).await;
+        })
+    };
+    entered_rx.await.unwrap();
+    let start = {
+        let (gate, released) = (gate.clone(), released.clone());
+        tokio::spawn(async move {
+            let _gate = gate.lock().await;
+            released.load(Ordering::SeqCst)
+        })
+    };
+    // The blocked release holds a blocking thread, not this worker: it keeps
+    // scheduling, and the queued start has not run.
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    assert!(!start.is_finished());
+    assert!(!released.load(Ordering::SeqCst));
+    go_tx.send(()).unwrap();
+    stop.await.unwrap();
+    assert!(start.await.unwrap(), "the start ran after the release");
+}
+
+/// A device switch that finishes after its session ended is not reported.
+#[test]
+fn a_device_switch_result_for_an_ended_session_is_not_reported() {
+    assert_eq!(switch_outcome(3, true, Ok(())), Ok(()));
+    assert_eq!(
+        switch_outcome(3, true, Err("not found".to_string())),
+        Err("not found".to_string())
+    );
+    assert!(switch_outcome(3, false, Ok(())).is_err());
+}

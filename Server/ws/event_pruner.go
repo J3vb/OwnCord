@@ -1,8 +1,5 @@
-// Phase B Step 7 — Event Persistence Layer (pruner).
-//
-// StartEventPruner runs a background goroutine that deletes events older than
-// the configured retention window. It is the bounded-storage half of the
-// event persistence design: the persister appends, the pruner trims.
+// StartEventPruner deletes events older than the retention window: the bounded-
+// storage half of event persistence (the persister appends, the pruner trims).
 
 package ws
 
@@ -12,25 +9,17 @@ import (
 	"time"
 )
 
-// maxStartupDelay caps how long StartEventPruner waits before its first
-// prune pass. We want a short delay so a freshly started server with a
-// tiny dataset doesn't keep stale rows around for a full interval, but we
-// don't want the delay to exceed the interval itself (otherwise a server
-// running with interval=5s would wait longer than its own tick).
+// maxStartupDelay caps the wait before the first prune so a fresh server does not
+// keep stale rows for a full interval, and never exceeds the interval itself.
 const maxStartupDelay = time.Minute
 
-// eventPruneStore is the single EventStore method the pruner calls. The
-// pruner only trims by age, so it takes the narrow interface rather than the
-// seven-method EventStore the persister and replay paths need.
 type eventPruneStore interface {
 	PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
-// StartEventPruner launches a goroutine that wakes every interval and deletes
-// events older than retention. The goroutine exits when ctx is cancelled; the
-// returned channel closes when it has fully exited (i.e. no prune can still
-// be touching the store) — the same join contract EventPersister.Stop gives,
-// so shutdown can order "background work done" before "database closed".
+// StartEventPruner prunes events older than retention every interval until ctx is
+// cancelled. The returned channel closes when it has fully exited, so shutdown
+// can order it before the database closes (like EventPersister.Stop).
 func StartEventPruner(ctx context.Context, s eventPruneStore, retention, interval time.Duration) <-chan struct{} {
 	done := make(chan struct{})
 	if s == nil {
@@ -43,12 +32,9 @@ func StartEventPruner(ctx context.Context, s eventPruneStore, retention, interva
 	if interval <= 0 {
 		interval = time.Hour
 	}
-	// Bound the startup delay by the interval so short test intervals
-	// (e.g. 100ms in event_pruner_test.go) don't wait a full minute.
 	startupDelayDuration := min(interval, maxStartupDelay)
 	go func() {
 		defer close(done)
-		// Run once shortly after startup so a tiny dataset stays small.
 		startupDelay := time.NewTimer(startupDelayDuration)
 		defer startupDelay.Stop()
 		select {

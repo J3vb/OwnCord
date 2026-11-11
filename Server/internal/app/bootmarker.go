@@ -12,35 +12,32 @@ import (
 	"github.com/J3vb/OwnCord/Server/stackutil"
 )
 
-// bootMarkerRelPath is where the boot marker lives under the data directory.
-// It is written at start and rewritten at a clean close, so the next start can
-// tell whether the previous run ended cleanly.
+// bootMarkerRelPath is the boot marker under the data directory, rewritten at a
+// clean close so the next start can tell how the last run ended.
 const bootMarkerRelPath = "boot.json"
 
-// bootMarkerFile is the on-disk record. Clean is false while a run is in
-// progress and true only after a clean close rewrites it.
+// bootMarkerFile is the on-disk record; Clean is false while a run is in
+// progress.
 type bootMarkerFile struct {
 	StartedAt   time.Time `json:"started_at"`
 	LastPanicAt time.Time `json:"last_panic_at,omitzero"`
 	Clean       bool      `json:"clean"`
 }
 
-// bootMarker is the running process's handle on the marker file: it rewrites
-// the file when a panic is recovered and once more on a clean close.
+// bootMarker is the running process's handle on the marker file.
 type bootMarker struct {
 	path string
 	file bootMarkerFile
-	// unreported is an unclean previous exit this run has not yet shown on the
-	// attention panel; close carries it forward instead of writing clean.
+	// unreported is an unclean previous exit not yet shown on the attention
+	// panel; close carries it forward instead of writing clean.
 	unreported *bootMarkerFile
 
 	mu sync.Mutex
 }
 
 // readBootMarker reads the marker at path. A missing file is a first start
-// (Recorded false, so the panel says unknown, not unclean). An unparseable file
-// is recorded and unclean: a torn or corrupt record is missing evidence, and
-// calling it clean would hide the crash.
+// (Recorded false); an unparseable one counts as unclean, since calling a torn
+// record clean would hide the crash.
 func readBootMarker(path string) service.BootStatus {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is the server's own data-dir marker
 	if err != nil {
@@ -58,10 +55,8 @@ func readBootMarker(path string) service.BootStatus {
 	}
 }
 
-// openBootMarker reads any previous marker, records the new run as in
-// progress, and returns the handle that will close it. A write failure is
-// returned so the caller decides whether a marker-less run is acceptable;
-// production boots anyway.
+// openBootMarker reads any previous marker and records the new run as in
+// progress.
 func openBootMarker(path string, startedAt time.Time) (*bootMarker, error) {
 	m := &bootMarker{path: path, file: bootMarkerFile{StartedAt: startedAt}}
 	if err := m.write(); err != nil {
@@ -78,8 +73,8 @@ func (m *bootMarker) write() error {
 	return writeFileAtomic(m.path, data, 0o600)
 }
 
-// recordPanic notes the last recovered panic against the running marker, so a
-// crash that never reaches close still names it at the next start.
+// recordPanic notes the last recovered panic, so a crash that never reaches
+// close still names it at the next start.
 func (m *bootMarker) recordPanic(at time.Time) {
 	m.mu.Lock()
 	m.file.LastPanicAt = at
@@ -96,9 +91,8 @@ func (m *bootMarker) reported() {
 	m.mu.Unlock()
 }
 
-// close rewrites the marker as a clean shutdown, or, when this run inherited an
-// unclean exit it never reported, restores that exit so the next start reports
-// it.
+// close rewrites the marker as clean, or restores an inherited unclean exit
+// this run never reported.
 func (m *bootMarker) close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -110,9 +104,8 @@ func (m *bootMarker) close() error {
 	return m.write()
 }
 
-// writeFileAtomic writes data through a sibling temp file and a rename, so a
-// crash mid-write cannot leave a torn marker that reads as a clean exit. Local
-// to app so the marker does not depend on auth's key writer.
+// writeFileAtomic writes through a sibling temp file and a rename, so a crash
+// mid-write cannot leave a torn marker that reads as a clean exit.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm) //nolint:gosec // G304: caller-supplied server-owned path under the data dir
@@ -136,18 +129,12 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmp, path)
 }
 
-// bootMarkerPath is the marker's path under the data directory.
 func bootMarkerPath(dataDir string) string {
 	return filepath.Join(dataDir, bootMarkerRelPath)
 }
 
-// startBootMarker is the boot-marker stage. It runs after the database stage,
-// so only the process holding the data directory's single-process lock touches
-// the marker. It reads the previous run's marker, records this run as in
-// progress and installs the process-global panic recorder, so a kill, crash or
-// hardware exit leaves evidence the next start reports. Its close rewrites the
-// marker as clean. A marker that cannot be written is logged, not fatal: a
-// server that refuses to boot over a note about the next boot is a worse outage.
+// startBootMarker runs after the database stage, so only the process holding
+// the data directory's lock touches the marker.
 func (a *App) startBootMarker() error {
 	path := bootMarkerPath(a.cfg.Server.DataDir)
 	a.prevBoot = readBootMarker(path)
@@ -173,7 +160,6 @@ func (a *App) startBootMarker() error {
 	return nil
 }
 
-// formatMarkerTime renders a marker time for a log line, empty when unset.
 func formatMarkerTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
@@ -181,8 +167,7 @@ func formatMarkerTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// recordBootStatus folds the previous run's exit into the attention panel;
-// StartRuntime builds the service without knowing the boot marker.
+// recordBootStatus folds the previous run's exit into the attention panel.
 func (a *App) recordBootStatus(svc *service.Services) {
 	if svc == nil || svc.Attention == nil {
 		return

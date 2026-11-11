@@ -36,8 +36,13 @@ async function mockTauriSessionWithDms(page: import("@playwright/test").Page): P
     httpRoutes: [
       ...BASE_SESSION_ROUTES,
       { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-      { pattern: "/api/v1/dms", method: "POST", status: 200, body: MOCK_DM_CHANNELS[0] },
-      { pattern: "GET /api/v1/dms", status: 200, body: MOCK_DM_CHANNELS },
+      {
+        pattern: "/api/v1/dms",
+        method: "POST",
+        status: 200,
+        body: { ...MOCK_DM_CHANNELS[0], created: false },
+      },
+      { pattern: "GET /api/v1/dms", status: 200, body: { dm_channels: MOCK_DM_CHANNELS } },
       { pattern: "DELETE /api/v1/dms/", status: 200, body: { success: true } },
     ],
     simulateWsFlow: true,

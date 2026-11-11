@@ -95,9 +95,10 @@ pub struct MessageTarget {
 /// Show a notification that opens `channel_id`/`message_id` (or just the
 /// channel, when there is no message id) when clicked. `ring` marks an incoming
 /// call's notification, which `clear_call_notification` withdraws later.
-/// Async so showing it never blocks the UI thread on the notification server.
+/// Showing it waits for the notification server on a blocking thread, so
+/// neither the UI thread nor an async worker is held while it answers.
 #[tauri::command(async)]
-pub fn notify_message<R: Runtime>(
+pub async fn notify_message<R: Runtime>(
     app: AppHandle<R>,
     title: String,
     body: String,
@@ -112,7 +113,14 @@ pub fn notify_message<R: Runtime>(
         message_id,
     };
     let tag = ring_toast_tag(&target, ring.unwrap_or(false));
-    show_message_notification(&app, &title, &body, target, tag)
+    tauri::async_runtime::spawn_blocking(move || {
+        show_message_notification(&app, &title, &body, target, tag)
+    })
+    .await
+    .map_err(|e| {
+        log::warn!("[notify] notification task ended early: {e}");
+        "notification task failed".to_string()
+    })?
 }
 
 /// Withdraw the ringing call notification for `channel_id` once the ring has

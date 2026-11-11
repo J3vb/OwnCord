@@ -7,22 +7,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// errStickerNotFound is the answer for a sticker send that names a sticker that
-// does not exist, or no longer does. It satisfies errors.Is for both
-// ErrNotFound and ErrStickerNotFound (the precise wire code).
+// errStickerNotFound answers a sticker send naming a missing sticker; it satisfies errors.Is for ErrNotFound
+// and ErrStickerNotFound.
 func errStickerNotFound() error {
 	return fmt.Errorf("%w: %w: that sticker no longer exists", ErrNotFound, ErrStickerNotFound)
 }
 
-// stickerFallback is the text a sticker message stores as its content, so
-// search, push and older clients still read something.
+// stickerFallback is the content a sticker message stores so search, push and older clients read something.
 func stickerFallback(name string) string {
 	return "[Sticker: " + name + "]"
 }
 
-// validateStickerSend checks the shape of a sticker send before anything is
-// read: no text, no attachments, and a client_message_id (the sticker row
-// commits with the message and its receipt, as a poll's rows do).
+// validateStickerSend checks the shape of a sticker send: no text, no attachments, and a client_message_id.
 func (s *MessageService) validateStickerSend(p SendMessageParams) error {
 	if s.sticker == nil {
 		return fmt.Errorf("%w: stickers are not available", ErrInternal)
@@ -39,9 +35,8 @@ func (s *MessageService) validateStickerSend(p SendMessageParams) error {
 	return nil
 }
 
-// resolveSticker looks the sticker up and returns the reference the message
-// row is written with and the fallback content. A missing sticker is
-// ErrStickerNotFound.
+// resolveSticker returns the reference the message row is written with and the fallback content;
+// ErrStickerNotFound if missing.
 func (s *MessageService) resolveSticker(ctx context.Context, p SendMessageParams) (*db.StickerRef, string, error) {
 	st, err := s.sticker.GetSticker(ctx, p.StickerID)
 	if err != nil {

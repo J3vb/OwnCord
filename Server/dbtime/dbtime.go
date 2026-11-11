@@ -1,26 +1,19 @@
-// Package dbtime names the two text layouts the database stores timestamps
-// in, and reads a value written in either.
+// Package dbtime names the two text layouts the database stores timestamps in,
+// and reads either.
 //
-// SQLite has no date type: a timestamp is TEXT, and a comparison against
-// datetime('now') or another column is byte by byte. 'T' (0x54) sorts after
-// ' ' (0x20), so a value in ISOLayout compared with one in SQLiteLayout reads
-// as later than any time on the same day. A column written by SQL DEFAULTs or
-// datetime('now') holds SQLiteLayout, and a Go-side value compared with it
-// must use the same layout; the expiry columns written from Go hold ISOLayout,
-// and their SQL compares against strftime('%Y-%m-%dT%H:%M:%SZ', 'now').
-//
-// The db-time-layouts invariant (Server/invariants) keeps these layouts here
-// rather than retyped by hand.
+// SQLite timestamps are TEXT compared byte by byte, and 'T' (0x54) sorts after
+// ' ' (0x20), so an ISOLayout value compared with a SQLiteLayout one reads as
+// later than any time that day. Columns written by SQL DEFAULTs or datetime('now')
+// hold SQLiteLayout, and Go-side values compared with them must match; the expiry
+// columns written from Go hold ISOLayout. The db-time-layouts invariant keeps the layouts here.
 package dbtime
 
 import "time"
 
-// SQLiteLayout is the text SQLite's datetime('now') writes: UTC, second
-// precision, a space between date and time, no zone suffix.
+// SQLiteLayout is what datetime('now') writes: UTC, seconds, a space, no zone suffix.
 const SQLiteLayout = "2006-01-02 15:04:05"
 
-// ISOLayout is ISO-8601 UTC with a 'T' and a 'Z', the text
-// strftime('%Y-%m-%dT%H:%M:%SZ', ...) writes.
+// ISOLayout is ISO-8601 UTC with 'T' and 'Z', as strftime('%Y-%m-%dT%H:%M:%SZ', ...) writes.
 const ISOLayout = "2006-01-02T15:04:05Z"
 
 // Parse reads s in SQLiteLayout or ISOLayout as a UTC instant, reporting

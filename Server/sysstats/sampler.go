@@ -43,7 +43,6 @@ type Snapshot struct {
 	Points []Point
 }
 
-// sample is one ring slot. NaN marks a missing figure.
 type sample struct {
 	at               int64
 	procCPU, machCPU float32
@@ -204,7 +203,6 @@ func (s sample) point() Point {
 	return p
 }
 
-// pct rounds a percentage to one decimal; NaN is missing.
 func pct(v float32) *float64 {
 	if math.IsNaN(float64(v)) {
 		return nil

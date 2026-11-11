@@ -8,7 +8,7 @@
  * to credential handling is not this milestone's business.
  */
 import { createLogger } from "@lib/logger";
-import type { CredentialStore } from "../contracts/credentials";
+import type { CredentialStore, SavedSessionResume } from "../contracts/credentials";
 
 const log = createLogger("credentials");
 
@@ -22,6 +22,27 @@ async function getInvoke(): Promise<
   } catch {
     return null;
   }
+}
+
+/** The backend's tagged answer as the contract's union, or null when it is not one. */
+function parseResume(result: unknown): SavedSessionResume | null {
+  if (result === null || typeof result !== "object") return null;
+  const res = result as Record<string, unknown>;
+  if (
+    res.outcome === "sign_in_needed" ||
+    res.outcome === "certificate_unverified" ||
+    res.outcome === "refused"
+  ) {
+    return { outcome: res.outcome };
+  }
+  if (
+    res.outcome === "resumed" &&
+    typeof res.username === "string" &&
+    typeof res.token === "string"
+  ) {
+    return { outcome: "resumed", username: res.username, token: res.token };
+  }
+  return null;
 }
 
 export const credentials: CredentialStore = {
@@ -54,7 +75,9 @@ export const credentials: CredentialStore = {
   },
 
   /**
-   * Load a credential from Windows Credential Manager.
+   * Load what the connect page prefills from Windows Credential Manager: the
+   * saved username and whether a password is stored. The backend returns
+   * neither secret here.
    *
    * Returns null when nothing is stored for `host` or Tauri is unavailable.
    * Any other failure — the store can't be read, the OS keychain is locked,
@@ -73,17 +96,33 @@ export const credentials: CredentialStore = {
       const result = await invoke("load_credential", { host });
       if (result && typeof result === "object") {
         const cred = result as Record<string, unknown>;
-        if (typeof cred.username === "string" && typeof cred.token === "string") {
-          return {
-            username: cred.username,
-            token: cred.token,
-            hasPassword: cred.has_password === true,
-          };
+        if (typeof cred.username === "string") {
+          return { username: cred.username, hasPassword: cred.has_password === true };
         }
       }
       return null;
     } catch (err) {
       log.error("Failed to load credential", { host, error: String(err) });
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
+
+  /**
+   * Resume the saved session for `host`. The backend decides whether the stored
+   * token may be used as it is or has to be accepted by the host's own server
+   * first; either way a token arrives here only once it may be used.
+   *
+   * Returns null when nothing is stored, Tauri is unavailable, or the command
+   * resolves with an unexpected shape. Any other failure rejects with an
+   * `Error` carrying the backend's reason.
+   */
+  async resume(host) {
+    const invoke = await getInvoke();
+    if (!invoke) return null;
+    try {
+      return parseResume(await invoke("resume_saved_session", { host }));
+    } catch (err) {
+      log.error("Failed to resume the saved session", { host, error: String(err) });
       throw err instanceof Error ? err : new Error(String(err));
     }
   },

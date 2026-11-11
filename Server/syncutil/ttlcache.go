@@ -2,10 +2,9 @@ package syncutil
 
 import "time"
 
-// TTLCache memoises one value for a fixed time. The zero value is ready to
-// use. It is safe for concurrent callers: the mutex is held across the load,
-// so concurrent misses share one query instead of each running it. A failed
-// load is returned to its caller and never cached.
+// TTLCache memoises one value for a fixed time; the zero value is ready. The
+// mutex is held across the load so concurrent misses share one query. A failed
+// load is returned and never cached.
 type TTLCache[T any] struct {
 	// Now supplies the clock; nil means time.Now. Tests inject a fake.
 	Now func() time.Time

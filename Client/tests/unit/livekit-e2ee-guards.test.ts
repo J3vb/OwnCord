@@ -918,6 +918,28 @@ describe("handleOffer wiring", () => {
   });
 });
 
+describe("setup superseded after the announce drain", () => {
+  it("returns false without arming a waiter or announcing into the torn-down session", async () => {
+    auth.id = OFFER_RECEIVER;
+    const { mgr, ws } = create();
+    await mgr.handleAnnounce(42, pk(42));
+    const imported = deferred<CryptoKey>();
+    vi.mocked(importPublicKey).mockImplementationOnce(() => imported.promise);
+    const setup = mgr.setupKeyExchange(false, CHANNEL);
+    await vi.waitFor(() => expect(importPublicKey).toHaveBeenCalled());
+    const flows = mgr as unknown as { _flows: { announce: { chain: Promise<void> } } };
+    void flows._flows.announce.chain.then(() => mgr.clearState());
+    ws.send.mockClear();
+
+    imported.resolve({ type: "peer", b64: pk(42) } as unknown as CryptoKey);
+
+    expect(await setup).toBe(false);
+    expect(internals(mgr)._roomKeyResolver).toBeNull();
+    expect(internals(mgr)._roomKeyRejector).toBeNull();
+    expect(sends(ws, "voice_e2ee_announce")).toHaveLength(0);
+  });
+});
+
 describe("handleParticipantLeft", () => {
   it("forgets everything held for the peer and counts each departure", async () => {
     const { mgr } = create({ channel: null });
@@ -992,6 +1014,43 @@ describe("handleParticipantLeft", () => {
       "E2EE: key rotation already in progress — deferring re-election as holder",
       { userId: 42, channelId: 1 },
     );
+  });
+
+  describe("when we already hold the key", () => {
+    it("rekeys when the last peer leaves, offering the new key to nobody", async () => {
+      const { mgr, ws } = await holder();
+      await mgr.handleAnnounce(42, pk(42));
+      expect(mgr.epoch).toBe(1);
+      ws.send.mockClear();
+
+      await mgr.handleParticipantLeft(42);
+
+      expect(mgr.epoch).toBe(2);
+      expect(mgr.peerPublicKeys.size).toBe(0);
+      expect(sends(ws, "voice_e2ee_offer")).toHaveLength(0);
+      expect(internals(mgr)._isKeyHolder).toBe(true);
+      expect(mgr.rotatingKey).toBe(false);
+    });
+
+    it("defers the rekey behind a rotation already in flight instead of dropping it", async () => {
+      const { mgr } = await holder();
+      await mgr.handleAnnounce(42, pk(42));
+      mgr.rotatingKey = true;
+
+      await mgr.handleParticipantLeft(42);
+
+      expect(mgr.rotationPending).toBe(true);
+      expect(mgr.epoch).toBe(1);
+    });
+
+    it("does not rekey when the leaver never had a key on file", async () => {
+      const { mgr } = await holder();
+
+      await mgr.handleParticipantLeft(42);
+
+      expect(mgr.epoch).toBe(1);
+      expect(mgr.rotationPending).toBe(false);
+    });
   });
 
   describe("when the lowest remaining user id is ours", () => {

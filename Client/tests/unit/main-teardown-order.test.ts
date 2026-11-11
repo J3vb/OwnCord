@@ -45,6 +45,7 @@ vi.mock("@lib/logPersistence", () => mocks.logPersistenceMock());
 vi.mock("@lib/net/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
+  resumeSavedSession: vi.fn().mockResolvedValue(null),
   deleteCredential: vi.fn(async (_host: string) => {
     events.push("credential-delete");
     return true;
@@ -55,7 +56,7 @@ vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
-vi.mock("@components/CertMismatchModal", () => mocks.certMismatchModalMock());
+vi.mock("../../src/features/connection/CertMismatchModal", () => mocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mocks.netCertReconnectMock());
 vi.mock("@lib/presence/profiles", (importOriginal) => mocks.presenceProfilesMock(importOriginal));
 
@@ -344,11 +345,13 @@ describe("main.ts session teardown order", () => {
     // (the next ws.connect supersedes it): overlay gone, dispatcher 1 and its
     // session listeners unsubscribed, no ws.disconnect.
     expect(overlays()).toBe(0);
+    // The second dispatcher is wired before its dial, so it sees "connecting".
     expect(events).toEqual([
       "dispatcher-1-unsub",
       "session-unsub",
       "dispatcher-1-unsub",
       "credential-delete",
+      "dispatcher-2-saw-connecting",
     ]);
     expect(events).not.toContain("ws-disconnect");
 
@@ -370,11 +373,12 @@ describe("main.ts session teardown order", () => {
 
     await startLogin(HOST);
     // Nothing of the dead attempt is torn down again, and nothing fires early.
-    expect(events).toEqual(["credential-delete"]);
+    // The new dispatcher is wired before its dial, so it sees "connecting".
+    expect(events).toEqual(["credential-delete", "dispatcher-2-saw-connecting"]);
 
     await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
     expectConsole("warn", /Pre-auth connection timed out/);
-    expect(events.slice(1)).toEqual([
+    expect(events.slice(2)).toEqual([
       "dispatcher-2-unsub",
       "session-unsub",
       "ws-disconnect",

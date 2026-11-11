@@ -6,14 +6,14 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "@lib/dom";
 import { voiceText } from "../../../i18n/voice";
 import type { StreamSample } from "../remoteTracks";
-import type { GridState } from "@components/video-grid/gridState";
+import type { GridState } from "./gridState";
 
 /** What the stats poller takes from the grid's shared helpers. */
 export interface GridStatsDeps {
   readonly pollMs: number;
-  readonly log: typeof import("@components/video-grid/gridShared").log;
-  readonly sizeOf: typeof import("@components/video-grid/gridShared").sizeOf;
-  readonly loadInfo: () => Promise<typeof import("@components/video-grid/streamInfo")>;
+  readonly log: typeof import("./gridShared").log;
+  readonly sizeOf: typeof import("./gridShared").sizeOf;
+  readonly loadInfo: () => Promise<typeof import("./streamInfo")>;
 }
 
 export function createGridStats(st: GridState, deps: GridStatsDeps) {

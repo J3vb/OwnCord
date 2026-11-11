@@ -12,18 +12,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// Windowed metrics: a 10 s sampler over a 15 minute horizon. The two windows
-// the endpoint reports (1m, 15m) are cut from one ring of horizon/tick + 2 = 92
-// samples, about 120 KB allocated once.
+// Windowed metrics: a 10 s sampler over a 15 minute horizon; the 1m and 15m
+// windows are cut from one ring of 92 samples (about 120 KB).
 const (
 	metricsWindowTick    = 10 * time.Second
 	metricsWindowHorizon = 15 * time.Minute
 )
 
 // newMetricsWindows builds the ring over the hub's sources and the two database
-// pools' wait figures. It starts nothing: startHub runs the sampler under the
-// app's lifecycle context and stops it before the hub, since tests also call
-// StartRuntime directly and own no goroutine to stop.
+// pools' wait figures. It starts nothing: startHub runs the sampler, so tests
+// calling StartRuntime directly own no goroutine to stop.
 func newMetricsWindows(hub *ws.Hub, writerStats, readerStats func() sql.DBStats) (*metrics.Windows, error) {
 	hists, gauges, counters := hub.WindowSources()
 	counters = append(counters, dbWaitCounters(writerStats, readerStats)...)
@@ -40,17 +38,16 @@ func newMetricsWindows(hub *ws.Hub, writerStats, readerStats func() sql.DBStats)
 	return w, nil
 }
 
-// dbWaitCounters is the four database wait counters. Their names are read back
-// by api.NewWindowMetrics; metrics_sampler_test.go pins the pair.
+// dbWaitCounters is the four database wait counters; api.NewWindowMetrics reads
+// their names (pinned by metrics_sampler_test.go).
 func dbWaitCounters(writerStats, readerStats func() sql.DBStats) []metrics.NamedCounter {
 	return append(
 		poolWait("db_writer_wait_count", "db_writer_wait_nanos", writerStats),
 		poolWait("db_reader_wait_count", "db_reader_wait_nanos", readerStats)...)
 }
 
-// poolWait returns the cumulative wait count and wait time (nanoseconds) of one
-// connection pool as two counters, clamping negative values to zero. The two
-// reads are separate Stats() calls, each atomic on its own.
+// poolWait returns one pool's cumulative wait count and time (ns) as two
+// counters, clamping negatives to zero.
 func poolWait(countName, nanosName string, stats func() sql.DBStats) []metrics.NamedCounter {
 	return []metrics.NamedCounter{
 		{Name: countName, Read: func() uint64 { return nonNegative(stats().WaitCount) }},
@@ -65,9 +62,8 @@ func nonNegative(v int64) uint64 {
 	return uint64(v)
 }
 
-// startMetricsWindows runs the sampler under a child of bgCtx and registers its
-// close step: cancel, then wait for the goroutine to exit within the step's
-// budget (the db-optimize shape).
+// startMetricsWindows runs the sampler under a child of bgCtx; its close step
+// cancels and waits for the goroutine within the step's budget.
 func (a *App) startMetricsWindows(w *metrics.Windows) {
 	ctx, cancel := context.WithCancel(a.bgCtx)
 	done := w.Run(ctx)
@@ -82,8 +78,8 @@ func (a *App) startMetricsWindows(w *metrics.Windows) {
 	})
 }
 
-// startSystemStats runs the Dashboard health row's sampler under a child of
-// bgCtx and registers its close step, the same shape as startMetricsWindows.
+// startSystemStats runs the Dashboard health row's sampler, shaped like
+// startMetricsWindows.
 func (a *App) startSystemStats(s *sysstats.Sampler) {
 	ctx, cancel := context.WithCancel(a.bgCtx)
 	done := s.Run(ctx)
@@ -98,7 +94,6 @@ func (a *App) startSystemStats(s *sysstats.Sampler) {
 	})
 }
 
-// startLiveKitStats runs the LiveKit card's sampler the same way.
 func (a *App) startLiveKitStats(s *lkstats.Sampler) {
 	ctx, cancel := context.WithCancel(a.bgCtx)
 	done := s.Run(ctx)

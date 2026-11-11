@@ -68,45 +68,52 @@ export interface Store<T> {
   flush(): void;
 }
 
+/** Same size and identical entries. */
+function mapsShallowEqual(a: Map<unknown, unknown>, b: Map<unknown, unknown>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, val] of a) {
+    if (!b.has(key) || b.get(key) !== val) return false;
+  }
+  return true;
+}
+
+/** Same size and membership. */
+function setsShallowEqual(a: Set<unknown>, b: Set<unknown>): boolean {
+  if (a.size !== b.size) return false;
+  for (const val of a) {
+    if (!b.has(val)) return false;
+  }
+  return true;
+}
+
+/** Same length and identical elements. */
+function arraysShallowEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/** Same own enumerable keys count and identical values under `a`'s keys. */
+function keysShallowEqual(a: object, b: object): boolean {
+  const keysA = Object.keys(a);
+  if (keysA.length !== Object.keys(b).length) return false;
+  for (const key of keysA) {
+    if ((a as Record<string, unknown>)[key] !== (b as Record<string, unknown>)[key]) return false;
+  }
+  return true;
+}
+
 /** Shallow-compare two values. Returns true if they are structurally equal
  *  at the top level (same keys/length and identical element references). */
 function shallowEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
-
-  // Map: compare by size and entry identity
-  if (a instanceof Map && b instanceof Map) {
-    if (a.size !== b.size) return false;
-    for (const [key, val] of a) {
-      if (!b.has(key) || b.get(key) !== val) return false;
-    }
-    return true;
-  }
-
-  // Set: compare by size and membership
-  if (a instanceof Set && b instanceof Set) {
-    if (a.size !== b.size) return false;
-    for (const val of a) {
-      if (!b.has(val)) return false;
-    }
-    return true;
-  }
-
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false;
-    }
-    return true;
-  }
-
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
-  if (keysA.length !== keysB.length) return false;
-  for (const key of keysA) {
-    if ((a as Record<string, unknown>)[key] !== (b as Record<string, unknown>)[key]) return false;
-  }
-  return true;
+  if (a instanceof Map && b instanceof Map) return mapsShallowEqual(a, b);
+  if (a instanceof Set && b instanceof Set) return setsShallowEqual(a, b);
+  if (Array.isArray(a) && Array.isArray(b)) return arraysShallowEqual(a, b);
+  return keysShallowEqual(a, b);
 }
 
 export { shallowEqual };

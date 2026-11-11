@@ -9,9 +9,9 @@ const log = createLogger("member-menu");
 
 /** Run `use` with the loaded menu module; a failed load is logged. */
 export function withMemberMenu(
-  use: (menu: typeof import("../../components/AdminActions")) => void,
+  use: (menu: typeof import("../moderation/AdminActions")) => void,
 ): void {
-  import("../../components/AdminActions")
+  import("../moderation/AdminActions")
     .then(use)
     .catch((err: unknown) => log.warn("Member menu failed to open", { error: String(err) }));
 }

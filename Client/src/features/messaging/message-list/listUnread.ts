@@ -18,6 +18,7 @@ import {
   noteLiveMessageSeen,
   noteMessageSeen,
   noteVisibleMessageSeen,
+  wouldRaiseSeen,
 } from "@lib/readState";
 import { readPointerEnabled } from "@lib/net/serverCapabilities";
 import { markMessageUnread } from "./markUnread";
@@ -180,7 +181,10 @@ export function createListUnread(st: ListState, api: ListApi) {
     // pointer (nothing is sent unless the newest seen id is above it); without
     // one, the local unread count gates it, as before.
     if (readPointerEnabled()) {
-      if (!isChannelCovered()) noteMessageSeen(st.options.channelId, newestLoadedId());
+      const newest = newestLoadedId();
+      if (wouldRaiseSeen(st.options.channelId, newest) && !isChannelCovered()) {
+        noteMessageSeen(st.options.channelId, newest);
+      }
       // Every append auto-scrolls and lands here: send on reaching the bottom
       // only. Arrivals watched at the bottom go by the throttled live path.
       if (st.bottomMarked) return;
@@ -197,7 +201,7 @@ export function createListUnread(st: ListState, api: ListApi) {
    * tree, not the DOM, so a scroll event costs one lookup.
    */
   function noteVisibleRowsSeen(m?: ScrollMetrics): void {
-    if (st.root === null || !readPointerEnabled() || isChannelCovered()) return;
+    if (st.root === null || !readPointerEnabled()) return;
     if (st.newDividerDeferred || st.virtualItems.length === 0) return;
     // The last pixel in view: a row starting exactly at the bottom edge is not.
     const { scrollTop, clientHeight } = m ?? readMetrics(st.root);
@@ -205,13 +209,19 @@ export function createListUnread(st: ListState, api: ListApi) {
     for (let i = Math.min(api.offsetToIndex(bottom), st.virtualItems.length - 1); i >= 0; i--) {
       const item = st.virtualItems[i]!;
       if (item.kind === "blocked-run" && !item.expanded) {
-        noteVisibleMessageSeen(st.options.channelId, item.lastId);
+        noteNewestVisible(item.lastId);
         return;
       }
       if (item.kind !== "message" || item.message.id <= 0) continue;
-      noteVisibleMessageSeen(st.options.channelId, item.message.id);
+      noteNewestVisible(item.message.id);
       return;
     }
+  }
+
+  /** The cover check searches the page, so it runs only when the marker would move. */
+  function noteNewestVisible(id: number): void {
+    if (!wouldRaiseSeen(st.options.channelId, id) || isChannelCovered()) return;
+    noteVisibleMessageSeen(st.options.channelId, id);
   }
 
   /** The newest confirmed message loaded here (pending rows have no id yet); 0 for none. */

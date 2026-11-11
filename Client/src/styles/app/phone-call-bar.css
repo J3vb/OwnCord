@@ -1,4 +1,4 @@
-/* The call bar under the chat header (components/PhoneCallBar.ts): phones only.
+/* The call bar under the chat header (features/voice/PhoneCallBar.ts): phones only.
    The header keeps its height; the bar is about 56px with an 8px margin. */
 .phone-call-bar {
   display: none;

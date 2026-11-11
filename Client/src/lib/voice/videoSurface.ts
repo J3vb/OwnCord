@@ -11,6 +11,10 @@
 // <video> at a time: a second consumer of the same track needs a renderer of
 // its own (the settings camera preview has one).
 
+/** Fired (bubbling) by a surface canvas whose picture changed size, since a
+ *  <video> showing it gets no `resize` of its own. */
+export const SURFACE_RESIZE_EVENT = "videosurfaceresize";
+
 const surfaces = new WeakMap<MediaStreamTrack, HTMLCanvasElement>();
 /** The surface each <video> last showed, to take down when its stream goes. */
 const shown = new WeakMap<HTMLVideoElement, HTMLCanvasElement>();

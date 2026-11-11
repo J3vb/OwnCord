@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** The Forward picker (components/ForwardPicker.ts) and its results. Its own
+/** The Forward picker (features/messaging/ForwardPicker.ts) and its results. Its own
  *  catalog so the copy loads with that lazy module, not with the main page. */
 export const forwardText = defineCatalog("forward", {
   title: "Forward message",

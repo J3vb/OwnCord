@@ -16,7 +16,8 @@ SELECT COUNT(*) FROM dm_participants WHERE channel_id = ?;
 -- name: GetDMDeliveryTargets :many
 -- One read for a DM send's whole fan-out decision: every participant, the
 -- channel's group flag, whether the participant's DM row is already open, and
--- whether the participant trusts sender_id (message requests).
+-- whether the participant trusts sender_id (message requests) and is trusted by
+-- sender_id (so a send records the sender's own trust only when it is missing).
 SELECT
     dp.user_id AS user_id,
     c.is_group AS is_group,
@@ -27,7 +28,11 @@ SELECT
     CAST(EXISTS (
         SELECT 1 FROM trusted_senders t
         WHERE t.recipient_id = dp.user_id AND t.sender_id = sqlc.arg(sender_id)
-    ) AS INTEGER) AS trusts_sender
+    ) AS INTEGER) AS trusts_sender,
+    CAST(EXISTS (
+        SELECT 1 FROM trusted_senders t
+        WHERE t.recipient_id = sqlc.arg(sender_id) AND t.sender_id = dp.user_id
+    ) AS INTEGER) AS trusted_by_sender
 FROM dm_participants dp
 JOIN channels c ON c.id = dp.channel_id AND c.type = 'dm'
 WHERE dp.channel_id = sqlc.arg(channel_id);

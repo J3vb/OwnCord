@@ -39,33 +39,54 @@ function isCode(value: unknown): value is EventCode {
   return typeof value === "string" && Object.hasOwn(EVENT_CODES, value);
 }
 
+/** A finite number, or undefined. */
+function finiteNumber(value: EventFieldValue): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** A string matching the field's pattern, or undefined. */
+function patternString(pattern: RegExp, value: EventFieldValue): string | undefined {
+  return typeof value === "string" && pattern.test(value) ? value : undefined;
+}
+
 function checkValue(spec: FieldSpec, value: EventFieldValue): EventFieldValue | undefined {
   switch (spec.type) {
     case "enum":
       return typeof value === "string" && spec.values.includes(value) ? value : undefined;
     case "int":
-      return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : undefined;
+      return checkInt(value);
     case "ms":
-      return typeof value === "number" && Number.isFinite(value) && value >= 0
-        ? Math.round(value)
-        : undefined;
+      return checkMs(value);
     case "bool":
       return typeof value === "boolean" ? value : undefined;
     case "code":
       return isCode(value) ? value : undefined;
     case "host":
-      // The pattern alone would pass a dotted IPv4 address.
-      return typeof value === "string" && FIELD_PATTERNS.host.test(value) && !/^[\d.]+$/.test(value)
-        ? value
-        : undefined;
+      return checkHost(value);
     case "version":
     case "token":
     case "hash":
     case "pseudonym":
-      return typeof value === "string" && FIELD_PATTERNS[spec.type].test(value) ? value : undefined;
+      return patternString(FIELD_PATTERNS[spec.type], value);
     default:
       return undefined;
   }
+}
+
+function checkInt(value: EventFieldValue): number | undefined {
+  const n = finiteNumber(value);
+  return n === undefined ? undefined : Math.round(n);
+}
+
+function checkMs(value: EventFieldValue): number | undefined {
+  const n = finiteNumber(value);
+  return n !== undefined && n >= 0 ? Math.round(n) : undefined;
+}
+
+function checkHost(value: EventFieldValue): string | undefined {
+  // The pattern alone would pass a dotted IPv4 address.
+  const host = patternString(FIELD_PATTERNS.host, value);
+  return host !== undefined && !/^[\d.]+$/.test(host) ? host : undefined;
 }
 
 /** The event with only the allowlisted, well-typed fields of its code. */

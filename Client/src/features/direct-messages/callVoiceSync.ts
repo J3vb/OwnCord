@@ -15,10 +15,20 @@ export interface CallVoiceHost {
   cameraOnJoin: number | null;
 }
 
-/** An incoming ring is answered by being in its room, however you got there. */
-function cancelAnsweredRing(state: VoiceState, host: CallVoiceHost): void {
+/** Whether the signed-in user is in `channelId`'s room on any device. */
+export function inRoomOnAnyDevice(state: VoiceState, channelId: number, selfId: number): boolean {
+  return state.voiceUsers.get(channelId)?.has(selfId) === true;
+}
+
+/** An incoming ring is answered by being in its room, however you got there,
+ *  on this device or another one of yours. */
+function cancelAnsweredRing(state: VoiceState, host: CallVoiceHost, selfId: () => number): void {
   const ring = host.ringCtrl?.current() ?? null;
-  if (ring !== null && state.currentChannelId === ring.channelId) {
+  if (ring === null) return;
+  if (
+    state.currentChannelId === ring.channelId ||
+    inRoomOnAnyDevice(state, ring.channelId, selfId())
+  ) {
     host.ringCtrl?.cancel(ring.channelId);
   }
 }
@@ -37,6 +47,8 @@ function clearFinishedOutgoing(state: VoiceState, host: CallVoiceHost, selfId: (
 /** "Join with video" turns the camera on as soon as the accepted call is connected. */
 function enableCameraOnJoin(state: VoiceState, host: CallVoiceHost): void {
   if (host.cameraOnJoin === null) return;
+  // The switch into that call still waits for the server.
+  if (state.switchingTo === host.cameraOnJoin) return;
   if (state.currentChannelId !== host.cameraOnJoin) {
     host.cameraOnJoin = null;
     return;
@@ -54,7 +66,7 @@ export function syncCallsWithVoice(
   host: CallVoiceHost,
   selfId: () => number,
 ): void {
-  cancelAnsweredRing(state, host);
+  cancelAnsweredRing(state, host, selfId);
   clearFinishedOutgoing(state, host, selfId);
   enableCameraOnJoin(state, host);
 }

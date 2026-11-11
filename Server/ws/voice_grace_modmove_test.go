@@ -14,7 +14,10 @@ func pendingFrameOfType(t *testing.T, c *Client, want string) map[string]any {
 	var found map[string]any
 	for {
 		select {
-		case raw := <-c.send:
+		case raw, ok := <-c.send:
+			if !ok {
+				return found
+			}
 			var f struct {
 				Type    string         `json:"type"`
 				Payload map[string]any `json:"payload"`
@@ -36,7 +39,8 @@ func pendingFrameOfType(t *testing.T, c *Client, want string) map[string]any {
 // the voice_moved send.
 func (h *vmHarness) moveParked(m *vmMember, from, to int64, muted bool) (evicted, sent bool) {
 	h.t.Helper()
-	evicted = h.hub.EvictForModeratorMove(context.Background(), m.userID, from, muted, false, nil)
+	seedRowModFlags(h.t, h.hub, m.userID, from, muted, false)
+	evicted = h.hub.EvictForModeratorMove(context.Background(), m.userID, from)
 	if evicted {
 		sent = h.hub.SendToVoiceDevice(m.userID, buildVoiceMoved(to, "", 1))
 	}
@@ -102,7 +106,8 @@ func TestVoiceMembership_ParkedMoveResumeBeforeSend(t *testing.T) {
 	h.connect(alice)
 	h.join(alice, chA)
 	h.disconnect(alice, true)
-	if !h.hub.EvictForModeratorMove(context.Background(), alice.userID, chA, false, true, nil) {
+	seedRowModFlags(t, h.hub, alice.userID, chA, false, true)
+	if !h.hub.EvictForModeratorMove(context.Background(), alice.userID, chA) {
 		t.Fatalf("move missed the parked call")
 	}
 	h.resume(alice)
@@ -130,7 +135,8 @@ func TestVoiceMembership_ParkedMoveDroppedByFreshConnect(t *testing.T) {
 	h.connect(alice)
 	h.join(alice, chA)
 	h.disconnect(alice, true)
-	if !h.hub.EvictForModeratorMove(context.Background(), alice.userID, chA, true, false, nil) {
+	seedRowModFlags(t, h.hub, alice.userID, chA, true, false)
+	if !h.hub.EvictForModeratorMove(context.Background(), alice.userID, chA) {
 		t.Fatalf("move missed the parked call")
 	}
 	h.connect(alice)
@@ -157,7 +163,8 @@ func TestVoiceMembership_ParkedMoveExpiresWithWindow(t *testing.T) {
 	h.connect(alice)
 	h.join(alice, chA)
 	h.disconnect(alice, true)
-	if !h.hub.EvictForModeratorMove(context.Background(), alice.userID, chA, true, false, nil) {
+	seedRowModFlags(t, h.hub, alice.userID, chA, true, false)
+	if !h.hub.EvictForModeratorMove(context.Background(), alice.userID, chA) {
 		t.Fatalf("move missed the parked call")
 	}
 	g := &h.hub.voiceHub.reg.voiceGrace

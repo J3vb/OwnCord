@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { CHANNEL_TYPES, createCreateChannelModal } from "@components/CreateChannelModal";
-import type { CreateChannelModalOptions } from "@components/CreateChannelModal";
+import {
+  CHANNEL_TYPES,
+  createCreateChannelModal,
+} from "../../src/features/channels/CreateChannelModal";
+import type { CreateChannelModalOptions } from "../../src/features/channels/CreateChannelModal";
 import { NO_CATEGORY, setChannels, type CategoryRef } from "@stores/channels.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import {

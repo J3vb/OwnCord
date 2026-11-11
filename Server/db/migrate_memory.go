@@ -8,15 +8,14 @@ import (
 	"sync"
 )
 
-// A fresh in-memory database used to run every migration on each Migrate,
-// about a second per call under the race detector, which dominated CI because
-// tests open hundreds. A fresh private ":memory:" database instead receives a
-// copy of one migrated image built once per process by the same migration
-// path. File databases and shared-cache memory URIs never take this path (a
-// copy would detach a shared-cache connection from the cache), so production
-// always runs the migrations. Two differences from in-place migration, neither
-// read today: schema_versions.applied_at is when the image was built, and the
-// copy is an SQLite memdb capped at 1 GiB.
+// A fresh in-memory database used to run every migration on each Migrate
+// (about a second per call under the race detector, dominating CI). A fresh
+// private ":memory:" database instead receives a copy of one migrated image
+// built once per process by the same migration path. File databases and
+// shared-cache memory URIs never take this path (a copy would detach a
+// shared-cache connection), so production always runs the migrations.
+// Differences, neither read today: schema_versions.applied_at is the image's
+// build time, and the copy is an SQLite memdb capped at 1 GiB.
 
 type rawSerializer interface{ Serialize() ([]byte, error) }
 type rawDeserializer interface{ Deserialize(buf []byte) error }
@@ -27,8 +26,8 @@ var freshMemoryImage struct {
 	err  error
 }
 
-// migratedMemoryImage returns the serialized image of an in-memory database
-// with every embedded migration applied. Callers must not modify it.
+// migratedMemoryImage returns the serialized in-memory image with every migration
+// applied; callers must not modify it.
 func migratedMemoryImage() ([]byte, error) {
 	freshMemoryImage.once.Do(func() {
 		freshMemoryImage.img, freshMemoryImage.err = buildMigratedMemoryImage()
@@ -67,10 +66,9 @@ func buildMigratedMemoryImage() ([]byte, error) {
 	return img, nil
 }
 
-// restoreFreshMemory copies the migrated image into database when it is an
-// empty in-memory database. It reports false when database is not eligible or
-// the copy could not be made, leaving database untouched so the caller runs the
-// migrations itself and reports any real error from them.
+// restoreFreshMemory copies the migrated image into an empty in-memory database.
+// It reports false when ineligible or the copy failed, leaving database
+// untouched so the caller runs the migrations and reports any real error.
 //
 //nolint:contextcheck // Migrate takes no context; the copy is an in-memory memcpy.
 func restoreFreshMemory(database *DB) bool {
@@ -101,10 +99,9 @@ func restoreFreshMemory(database *DB) bool {
 	if err != nil {
 		return false
 	}
-	// Deserialize resets the per-schema PRAGMAs (cache_size, synchronous,
-	// mmap_size) to defaults, so openMemory's set is applied again. A failure
-	// leaves a correct database with default tuning, so the copy stands. It runs on
-	// the pinned connection, the only one in the pool.
+	// Deserialize resets per-schema PRAGMAs to defaults, so openMemory's set is
+	// applied again; a failure leaves a correct database with default tuning. Runs on the
+	// pinned connection.
 	for _, p := range memoryPragmas {
 		if _, err := conn.ExecContext(ctx, p.stmt); err != nil {
 			break
@@ -113,9 +110,8 @@ func restoreFreshMemory(database *DB) bool {
 	return true
 }
 
-// memoryPragmas is the same PRAGMA set as filePragmas, Exec'd because there is
-// exactly one connection to configure. journal_mode is a no-op for :memory:
-// (SQLite reports "memory") but is kept for symmetry with file mode.
+// memoryPragmas is filePragmas' set, Exec'd because there is one connection;
+// journal_mode is a no-op for :memory: but kept for symmetry.
 var memoryPragmas = []struct{ name, stmt string }{
 	{"enabling WAL mode", "PRAGMA journal_mode=WAL;"},
 	{"setting busy_timeout", "PRAGMA busy_timeout=5000;"},

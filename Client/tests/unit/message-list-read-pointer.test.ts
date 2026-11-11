@@ -22,6 +22,7 @@ import {
   writeReadPointer,
 } from "@lib/readState";
 import { setMarkUnreadSender } from "../../src/features/messaging/message-list/markUnread";
+import * as dialogOpenModule from "../../src/lib/ui/dialogOpen";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
@@ -35,6 +36,13 @@ import "../helpers/resizeObserverStub";
 import { resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNEL_ID = 1;
+
+function openDialog(): HTMLElement {
+  const dialog = document.createElement("div");
+  dialog.className = "modal-overlay";
+  document.body.appendChild(dialog);
+  return dialog;
+}
 
 function resetStores(): void {
   resetGateStores();
@@ -475,6 +483,36 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       expect(marks).toHaveLength(1);
       expect(marks[0]![1]).toBeGreaterThan(sent!);
       expect(marks[0]![1]).toBeLessThan(40);
+    });
+
+    describe("the dialog check", () => {
+      it("a dialog over the chat holds the marker, and it moves once the dialog closes", () => {
+        setMessages(CHANNEL_ID, Array.from({ length: 40 }, (_, i) => i + 1).map(msg));
+        openChannel(30, 5);
+        mount();
+        const dialog = openDialog();
+        scrollTo(600);
+        leaveChannel(CHANNEL_ID);
+        expect(marks).toEqual([]);
+        dialog.remove();
+        scrollTo(900);
+        leaveChannel(CHANNEL_ID);
+        expect(marks).toHaveLength(1);
+        expect(marks[0]![1]).toBeGreaterThan(5);
+      });
+
+      it("rows at or below the highest seen id never ask whether a dialog is open", () => {
+        setMessages(CHANNEL_ID, Array.from({ length: 40 }, (_, i) => i + 1).map(msg));
+        openChannel(30, 5);
+        mount();
+        scrollTo(600);
+        const spy = vi.spyOn(dialogOpenModule, "dialogOpen");
+        scrollTo(600);
+        scrollTo(300);
+        scrollTo(600);
+        expect(spy).not.toHaveBeenCalled();
+        spy.mockRestore();
+      });
     });
 
     it("a partial scroll in a blurred window records nothing", () => {

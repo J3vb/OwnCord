@@ -95,25 +95,42 @@ export function checkNewUsername(raw: string): UsernameProblem | null {
   let prev = "";
   let run = 0;
   for (const [i, ch] of chars.entries()) {
-    const cp = ch.codePointAt(0) ?? 0;
-    if (isInvisibleFiller(cp)) return "invisible";
-    const isMark = MARK.test(ch);
-    if (LETTER.test(ch) || DIGIT.test(ch)) {
-      run = 0;
-    } else if (ch === "_" || ch === "." || ch === "-") {
-      if (i === 0) return "start";
-      run = 0;
-    } else if (isMark) {
-      if (i === 0 || !(LETTER.test(prev) || MARK.test(prev))) return "markPlacement";
-      run++;
-      if (run > MAX_COMBINING_RUN) return "markStack";
-    } else {
-      return "chars";
-    }
-    if (i === 0 && !LETTER.test(ch) && !DIGIT.test(ch)) return "start";
+    const step = checkUsernameChar(ch, i, prev, run);
+    if (step.problem !== null) return step.problem;
+    run = step.run;
     prev = ch;
   }
   return null;
+}
+
+/** Whether a combining mark at `i` follows a letter or another mark. */
+function markFollowsLetter(i: number, prev: string): boolean {
+  return i !== 0 && (LETTER.test(prev) || MARK.test(prev));
+}
+
+/** What one character does to a username: the problem it raises, else the new combining-mark run. */
+function checkUsernameChar(
+  ch: string,
+  i: number,
+  prev: string,
+  run: number,
+): { readonly problem: UsernameProblem | null; readonly run: number } {
+  if (isInvisibleFiller(ch.codePointAt(0) ?? 0)) return { problem: "invisible", run };
+  const alnum = LETTER.test(ch) || DIGIT.test(ch);
+  let nextRun = 0;
+  if (alnum) {
+    nextRun = 0;
+  } else if (ch === "_" || ch === "." || ch === "-") {
+    if (i === 0) return { problem: "start", run };
+  } else if (MARK.test(ch)) {
+    nextRun = run + 1;
+    if (!markFollowsLetter(i, prev)) return { problem: "markPlacement", run };
+    if (nextRun > MAX_COMBINING_RUN) return { problem: "markStack", run: nextRun };
+  } else {
+    return { problem: "chars", run };
+  }
+  if (i === 0 && !alnum) return { problem: "start", run: nextRun };
+  return { problem: null, run: nextRun };
 }
 
 /** Catalog text for a username problem. */

@@ -141,7 +141,6 @@ pub(crate) fn folder_for(mime: &str) -> Folder {
 pub(crate) mod android {
     use super::{bytes_from_numbers, folder_for, mime_for, safe_name, Folder, OUTGOING_DIR};
     use serde::{Deserialize, Serialize};
-    use std::borrow::Cow;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{Duration, SystemTime};
@@ -238,18 +237,16 @@ pub(crate) mod android {
         }
     }
 
-    /// Writes the request's bytes to a fresh slot of `outgoing/` under the
-    /// name it carries. Each call gets its own slot, so two saves of the same
-    /// name never write one file.
-    fn stage(app: &AppHandle, request: &Request<'_>) -> Result<(PathBuf, String), String> {
+    /// Copies the request's bytes and name out of the borrowed request.
+    fn request_parts(request: &Request<'_>) -> Result<(Vec<u8>, String), String> {
         // The custom-protocol IPC hands the bytes over raw; the postMessage
         // fallback hands them over as a JSON array of numbers.
-        let bytes: Cow<'_, [u8]> = match request.body() {
-            InvokeBody::Raw(bytes) => Cow::Borrowed(bytes),
-            InvokeBody::Json(serde_json::Value::Array(values)) => Cow::Owned(
+        let bytes: Vec<u8> = match request.body() {
+            InvokeBody::Raw(bytes) => bytes.clone(),
+            InvokeBody::Json(serde_json::Value::Array(values)) => {
                 bytes_from_numbers(values.iter().map(serde_json::Value::as_u64))
-                    .ok_or("file bytes are not bytes")?,
-            ),
+                    .ok_or("file bytes are not bytes")?
+            }
             InvokeBody::Json(_) => return Err("file bytes missing".into()),
         };
         let raw_name = request
@@ -257,9 +254,33 @@ pub(crate) mod android {
             .get(NAME_HEADER)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
-        let name = safe_name(raw_name);
+        Ok((bytes, safe_name(raw_name)))
+    }
+
+    /// Writes the request's bytes to a fresh slot of `outgoing/` under the
+    /// name it carries. Each call gets its own slot, so two saves of the same
+    /// name never write one file. The prune and the write run on a blocking
+    /// thread.
+    async fn stage(
+        app: &AppHandle,
+        bytes: Vec<u8>,
+        name: String,
+    ) -> Result<(PathBuf, String), String> {
         let dir = outgoing_dir(app)?;
-        prune(&dir);
+        tauri::async_runtime::spawn_blocking(move || stage_bytes(&dir, &bytes, name))
+            .await
+            .map_err(|e| {
+                log::warn!("[files] stage task ended early: {e}");
+                "could not stage the file".to_string()
+            })?
+    }
+
+    fn stage_bytes(
+        dir: &std::path::Path,
+        bytes: &[u8],
+        name: String,
+    ) -> Result<(PathBuf, String), String> {
+        prune(dir);
         let slot = format!(
             "{}-{}",
             SystemTime::now()
@@ -269,7 +290,7 @@ pub(crate) mod android {
             NEXT_SLOT.fetch_add(1, Ordering::Relaxed)
         );
         let path = dir.join(slot).join(&name);
-        crate::json_store::write_atomic(&path, &bytes)
+        crate::json_store::write_atomic(&path, bytes)
             .map_err(|e| format!("could not stage the file: {e}"))?;
         Ok((path, name))
     }
@@ -294,7 +315,8 @@ pub(crate) mod android {
     /// wait for the Kotlin side never holds the main thread.
     #[tauri::command]
     pub async fn save_file(app: AppHandle, request: Request<'_>) -> Result<SaveOutcome, String> {
-        let (path, name) = stage(&app, &request)?;
+        let (bytes, name) = request_parts(&request)?;
+        let (path, name) = stage(&app, bytes, name).await?;
         let args = file_args(&path, name);
         let folder = args.folder;
         let files = app.state::<FilesHandle>();
@@ -324,7 +346,8 @@ pub(crate) mod android {
     /// Open the system share sheet on the request's bytes.
     #[tauri::command]
     pub async fn share_file(app: AppHandle, request: Request<'_>) -> Result<(), String> {
-        let (path, name) = stage(&app, &request)?;
+        let (bytes, name) = request_parts(&request)?;
+        let (path, name) = stage(&app, bytes, name).await?;
         let args = file_args(&path, name);
         let files = app.state::<FilesHandle>();
         files

@@ -10,10 +10,11 @@
  */
 
 import { loadPref } from "../../lib/prefs/preferences";
+import { dataSaverActive } from "./content/dataSaver";
 
 /** Whether custom emoji should animate. Read at render, so a new message follows the switch. */
 export function animateEmojiEnabled(): boolean {
-  return loadPref<boolean>("animateEmoji", true);
+  return !dataSaverActive() && loadPref<boolean>("animateEmoji", true);
 }
 
 /** The first frame of a loaded image as a PNG data URL, or null when it cannot be drawn. */

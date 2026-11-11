@@ -70,11 +70,11 @@
     },
     "lib/voice/livekitE2EE.ts": {
       "features/voice/e2eeEpoch.ts": 1,
+      "features/voice/e2eeFlows.ts": 1,
       "features/voice/e2eeIdentity.ts": 1,
       "features/voice/e2eeOffer.ts": 1,
       "features/voice/e2eePeerState.ts": 1,
       "features/voice/e2eeWorker.ts": 1,
-      "stores/auth.store.ts": 1,
       "stores/voice.store.ts": 1
     },
     "lib/voice/livekitReconnect.ts": {
@@ -115,7 +115,9 @@
     },
     "lib/readState.ts": {
       "stores/channels.store.ts": 1,
-      "stores/dm.store.ts": 1,
+      "stores/dm.store.ts": 1
+    },
+    "lib/readStateAway.ts": {
       "stores/messages.store.ts": 1,
       "stores/ui.store.ts": 1
     },
@@ -123,15 +125,6 @@
       "features/voice/mediaEncryption.ts": 1,
       "features/voice/releaseRoom.ts": 1,
       "features/voice/sessionState.ts": 1,
-      "stores/voice.store.ts": 1
-    },
-    "lib/voice/screenShare.ts": {
-      "features/voice/native/devices.ts": 1,
-      "features/voice/native/platform.ts": 1,
-      "features/voice/native/screenPickerSlot.ts": 1,
-      "features/voice/peerDecode.ts": 1,
-      "features/voice/shareSenderStats.ts": 1,
-      "features/voice/videoCodec.ts": 1,
       "stores/voice.store.ts": 1
     },
     "lib/presence/statusTimer.ts": {

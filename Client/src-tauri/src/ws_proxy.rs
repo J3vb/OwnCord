@@ -550,9 +550,10 @@ pub async fn ws_disconnect(
     // path a superseding connect() already has. The returned generation is
     // unused: nothing will ever install under it.
     state.begin_connection().await;
-    // Logout / server switch: no session is live, so the credential commands
-    // fall back to their pre-session rule, which admits a read only for a host
-    // whose login was verified this app run. That set is kept.
+    // Logout / server switch: no session is live, so the saved-login commands
+    // fall back to their pre-session rules (see `active_session`): a stored
+    // token is handed over as it is only for a host whose login was verified
+    // this app run. That set is kept.
     session.clear_active();
     Ok(())
 }

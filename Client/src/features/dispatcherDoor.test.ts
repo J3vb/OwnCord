@@ -4,7 +4,9 @@
 // lint. The handler bodies live in features/*/wsHandlers.ts as plain
 // functions, which the lexical rule cannot follow — so this test pins the
 // other half: only dispatcher.ts may call them, they never subscribe to the
-// socket themselves, and the rule's single exemption has not grown.
+// socket themselves, and the rule's single exemption has not grown. A handler
+// module split across files stays one module here: the parts only handler
+// modules import are held to the same rules.
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { ESLint } from "eslint";
@@ -16,7 +18,6 @@ const srcDir = path.join(clientRoot, "src");
 const aliases: Record<string, string> = {
   "@lib/": "src/lib/",
   "@stores/": "src/stores/",
-  "@components/": "src/components/",
   "@pages/": "src/pages/",
 };
 
@@ -45,20 +46,59 @@ function importsOf(file: string): string[] {
   });
 }
 
+const importers = new Map<string, string[]>();
+for (const file of sourceFiles) {
+  for (const imported of importsOf(file)) {
+    importers.set(imported, [...(importers.get(imported) ?? []), file]);
+  }
+}
+
+/**
+ * The handler modules plus every module that only they (or another such part)
+ * import: the pieces a wsHandlers.ts was split into. A module anything else
+ * imports is shared code, not a handler body.
+ */
+function handlerParts(): string[] {
+  const parts = new Set(handlerFiles);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [file, from] of importers) {
+      if (parts.has(file) || !from.every((importer) => parts.has(importer))) continue;
+      parts.add(file);
+      grew = true;
+    }
+  }
+  return [...parts];
+}
+
+const rel = (file: string): string => path.relative(srcDir, file).split(path.sep).join("/");
+
 describe("the dispatcher door", () => {
   it("finds the handler modules it guards", () => {
     expect(handlerFiles.length).toBeGreaterThan(0);
+    // The split-out parts are found too, not only the wsHandlers.ts files.
+    expect(handlerParts().map(rel)).toEqual(
+      expect.arrayContaining(["features/voice/wsErrors.ts", "features/messaging/sendErrors.ts"]),
+    );
+  });
+
+  it("every ws* module of a feature is a handler part, imported by handler modules only", () => {
+    const parts = new Set(handlerParts());
+    const wsNamed = sourceFiles.filter((file) =>
+      /^features\/[^/]+\/ws[A-Z]\w*\.ts$/.test(rel(file)),
+    );
+    expect(wsNamed.length).toBeGreaterThan(handlerFiles.length);
+    for (const file of wsNamed) expect(parts.has(file), rel(file)).toBe(true);
   });
 
   it("every wsHandlers module is imported by lib/dispatcher.ts and by nothing else", () => {
     for (const handler of handlerFiles) {
-      const importers = sourceFiles.filter((file) => importsOf(file).includes(handler));
-      expect(importers.map((file) => path.relative(srcDir, file))).toEqual(["lib/dispatcher.ts"]);
+      expect((importers.get(handler) ?? []).map(rel)).toEqual(["lib/dispatcher.ts"]);
     }
   });
 
-  it("no wsHandlers module subscribes to the socket itself", () => {
-    for (const handler of handlerFiles) {
+  it("no handler module or part of one subscribes to the socket itself", () => {
+    for (const handler of handlerParts()) {
       const text = readFileSync(handler, "utf8");
       expect(text, path.relative(srcDir, handler)).not.toMatch(
         /\bws\.on\(|\.onStateChange\(|\.onSendFailure\(/,

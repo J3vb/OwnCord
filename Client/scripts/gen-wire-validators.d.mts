@@ -9,7 +9,9 @@ export interface WireTables {
   shapes: TableEntry[];
   /** Wire frame type to the shape number of its payload. */
   frames: Record<string, number>;
-  /** REST reply name to the shape number of its body. */
+  /** The REST table: entry n describes shape number n of `rest`. */
+  restShapes: TableEntry[];
+  /** REST reply name to the shape number of its body, in `restShapes`. */
   rest: Record<string, number>;
 }
 
@@ -22,6 +24,9 @@ export interface GenerateOptions {
 export const UNIONS_FILE: string;
 export const REST_FILE: string;
 export const OUT_FILE: string;
+export const REST_OUT_FILE: string;
 export function buildTables(options?: GenerateOptions): WireTables;
 export function renderModule(tables: WireTables): Promise<string>;
+export function renderRestModule(tables: WireTables): Promise<string>;
 export function generate(options?: GenerateOptions): Promise<string>;
+export function generateRest(options?: GenerateOptions): Promise<string>;

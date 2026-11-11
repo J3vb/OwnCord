@@ -1,5 +1,3 @@
-// Package syncutil provides mutex types that switch between sync.Mutex
-// and go-deadlock equivalents based on the "deadlock" build tag.
-// Production builds use the standard library; test/dev builds with
-// -tags=deadlock get automatic deadlock detection.
+// Package syncutil provides mutex types that are sync's in production and
+// go-deadlock's under -tags=deadlock, plus ranked locks and small helpers.
 package syncutil

@@ -80,6 +80,18 @@ vi.mock("./codecSwitch", () => ({
     }
   },
 }));
+const capFollow = vi.hoisted(() => ({ kick: vi.fn(), stop: vi.fn() }));
+// The video cap follower has its own tests (videoCapFollow.test.ts).
+vi.mock("./videoCapFollow", () => ({
+  VideoCapFollower: class {
+    kick(): void {
+      capFollow.kick();
+    }
+    stop(): void {
+      capFollow.stop();
+    }
+  },
+}));
 const changeScreenshareSource = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => undefined));
 const setScreenshareQuality = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => undefined));
 vi.mock("./screenshareChange", () => ({ changeScreenshareSource, setScreenshareQuality }));
@@ -87,7 +99,7 @@ const setH264GpuProfiles = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
 vi.mock("./videoCodec", () => ({ h264GpuPublish: (codec: string) => codec === "h264" }));
 const inPlaceSource = vi.hoisted(() => ({ value: null as { changeSource: () => void } | null }));
-vi.mock("../../lib/voice/screenShare", () => ({
+vi.mock("./screenShare", () => ({
   enableCamera: vi.fn(async (..._args: unknown[]) => undefined),
   disableCamera: vi.fn(async (..._args: unknown[]) => undefined),
   enableScreenshare: vi.fn(async (..._args: unknown[]) => undefined),
@@ -112,7 +124,7 @@ import {
   disableScreenshare,
   reconcileVideoFlags,
   inPlaceSourceChange,
-} from "../../lib/voice/screenShare";
+} from "./screenShare";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "./cameraSwitch";
 import { voiceText } from "../../i18n/voice";
 import { MediaControl, syncShareGrant, type MediaControlHost } from "./mediaControl";
@@ -233,6 +245,8 @@ beforeEach(() => {
   for (const fn of [log.debug, log.info, log.warn, log.error]) fn.mockClear();
   codecSwitch.kick.mockClear();
   codecSwitch.stop.mockClear();
+  capFollow.kick.mockClear();
+  capFollow.stop.mockClear();
 });
 
 describe("setMuted / setDeafened", () => {
@@ -1031,6 +1045,15 @@ describe("session wiring", () => {
     const { media } = setup();
     media.stopCodecSwitch();
     expect(codecSwitch.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the video cap follower after a camera or share finished starting, and stops it with the session", async () => {
+    const { media } = setup();
+    await media.enableCamera();
+    await media.enableScreenshare();
+    expect(capFollow.kick).toHaveBeenCalledTimes(2);
+    media.stopCodecSwitch();
+    expect(capFollow.stop).toHaveBeenCalledTimes(1);
   });
 
   it("passes the server's video flags to the reconcile", () => {

@@ -18,5 +18,6 @@ func init() {
 		"failed to clean up orphaned group icon file":                                            "groupicon_orphan_file",
 		"failed to check group icon file":                                                        "groupicon_access_check",
 		"group row: author lookup failed":                                                        "groupevent_author_lookup",
+		"MessageService.SendMessage: recording the sender's trust failed":                        "messageservice_sendmessage_sender_trust_failed",
 	})
 }

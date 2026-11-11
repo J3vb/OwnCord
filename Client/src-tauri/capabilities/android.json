@@ -1,0 +1,10 @@
+{
+  "identifier": "android",
+  "description": "Android network-cost event subscription for the main window.",
+  "windows": ["main"],
+  "platforms": ["android"],
+  "permissions": [
+    "owncord-metered-network:allow-register-listener",
+    "owncord-metered-network:allow-remove-listener"
+  ]
+}

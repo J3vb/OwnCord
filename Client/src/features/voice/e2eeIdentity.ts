@@ -94,6 +94,11 @@ export class E2EEIdentity {
     }
   }
 
+  /** The signed-in user's id; 0 when there is none yet. */
+  myUserId(): number {
+    return authStore.getState().user?.id ?? 0;
+  }
+
   /** Build the voice_e2ee_announce payload, signing the ephemeral public key
    *  with our identity key (F3). The payload also carries that identity key's
    *  public half as `identity_public_key`: the `auth` frame cannot (the user id

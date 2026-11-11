@@ -8,17 +8,13 @@ import (
 )
 
 // ErrAlreadyLocked reports that another live process holds the database's
-// single-process lock. The locks used here (flock on Unix, an exclusive file
-// handle on Windows) are released by the OS when their holder exits, so a
-// held lock always means a running process, never a stale file.
+// single-process lock (flock on Unix, an exclusive handle on Windows); the OS releases
+// it when the holder exits.
 var ErrAlreadyLocked = errors.New("database lock held by another process")
 
-// AcquireProcessLock takes the database's single-process lock for dbPath and
-// returns its release, for short-lived tooling (the `chatserver restore` CLI)
-// that must refuse when a server is already running rather than swap the file
-// under it. It tries once with no retry window, since an operator wants a fast
-// refusal. A refusal wraps ErrAlreadyLocked; any other error means the lock
-// file could not be opened at all (e.g. its directory is missing).
+// AcquireProcessLock takes the single-process lock for dbPath and returns its release,
+// for short-lived tooling (the `chatserver restore` CLI) that must refuse when a
+// server is running. It tries once; a refusal wraps ErrAlreadyLocked.
 func AcquireProcessLock(dbPath string) (release func(), err error) {
 	release, err = tryLockFile(lockFilePath(dbPath))
 	if errors.Is(err, ErrAlreadyLocked) {
@@ -30,19 +26,13 @@ func AcquireProcessLock(dbPath string) (release func(), err error) {
 	return release, nil
 }
 
-// lockFilePath is the sidecar lock file next to the SQLite database.
 func lockFilePath(dbPath string) string { return dbPath + ".lock" }
 
-// acquireProcessLock takes the single-process lock for dbPath, retrying for a
-// bounded window before giving up with ErrAlreadyLocked.
-//
-// A restart handoff does not overlap by design: the old process closes the
-// database (releasing this lock) before its replacement starts, in both spawn
-// and supervised modes (Server/internal/app/restart.go). The retry is a safety
-// net for cases that can still race: a supervisor relaunching the service while
-// a wedged predecessor is being killed, and a final update from a release that
-// still spawned mid-drain. A genuinely concurrent second process still fails,
-// after the wait.
+// acquireProcessLock takes the lock for dbPath, retrying for a bounded window
+// before ErrAlreadyLocked. A restart handoff does not overlap by design (the old
+// process closes the database first, Server/internal/app/restart.go); the retry
+// covers a supervisor relaunching while a wedged predecessor is killed, or a
+// final update that spawned mid-drain. A genuinely concurrent process still fails after the wait.
 func acquireProcessLock(dbPath string) (release func(), err error) {
 	const (
 		retryFor   = 30 * time.Second

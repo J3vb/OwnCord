@@ -5,9 +5,8 @@ import (
 	"log/slog"
 )
 
-// runOnce starts one companion and waits for it to exit; err is why it exited.
-// live is false when the manager was stopped or cancelled, so runLoop must
-// return without restarting.
+// runOnce starts one companion and waits for it to exit; live is false when
+// stopped or cancelled, so runLoop returns without restarting.
 func (p *Process) runOnce(ctx context.Context, cfgPath, binPath string) (live bool, err error) {
 	cmd := newLiveKitCmd(ctx, cfgPath, binPath)
 	p.mu.Lock()
@@ -15,9 +14,8 @@ func (p *Process) runOnce(ctx context.Context, cfgPath, binPath string) (live bo
 		p.mu.Unlock()
 		return false, nil
 	}
-	// Start inside the critical section that publishes p.cmd: Start writes cmd.Process,
-	// which IsRunning and Stop read under p.mu; started after the unlock, that write
-	// races every such read.
+	// Start inside the critical section that publishes p.cmd: it writes cmd.Process, which IsRunning and Stop
+	// read under p.mu.
 	err = cmd.Start()
 	if err == nil {
 		if jobErr := containLiveKitProcess(cmd.Process); jobErr != nil {

@@ -9,12 +9,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// Windows turns the cumulative figures above into "the last minute" and "the
-// last fifteen minutes". A sampler ticks every WindowSpec.Tick and copies each
-// source into a preallocated ring: a histogram's raw bucket counts, the
-// largest value seen since the previous sample, and each counter's cumulative
-// value. A window is the newest sample minus an older one. Nothing here is on
-// the hot path; Observe pays only the two extra atomics in metrics.go.
+// Windows turns the cumulative figures into "the last minute" and "the last
+// fifteen minutes": a sampler copies each source (histogram bucket counts, the
+// max since the previous sample, counter values) into a preallocated ring every
+// WindowSpec.Tick, and a window is the newest sample minus an older one. Nothing
+// here is on the hot path.
 
 // ErrBadWindowSpec is wrapped by every NewWindows validation failure.
 var ErrBadWindowSpec = errors.New("metrics: invalid window spec")
@@ -32,16 +31,14 @@ type NamedMaxGauge struct {
 	G    *MaxGauge
 }
 
-// NamedCounter reads a cumulative, non-decreasing figure. A value that falls
-// (a reset, a replaced pool) is treated as a restart from zero, never as a
-// negative delta.
+// NamedCounter reads a cumulative, non-decreasing figure; a fall (reset,
+// replaced pool) is treated as a restart from zero, never a negative delta.
 type NamedCounter struct {
 	Name string
 	Read func() uint64
 }
 
-// WindowSpec fixes what is sampled and how often. It is immutable once
-// NewWindows returns: nothing registers later.
+// WindowSpec fixes what is sampled and how often; immutable once NewWindows returns.
 type WindowSpec struct {
 	Tick, Horizon time.Duration
 	Histograms    []NamedHistogram
@@ -49,10 +46,9 @@ type WindowSpec struct {
 	Counters      []NamedCounter
 }
 
-// WindowSnapshot is one window's figures. Seconds is the time the window really
-// covers (newest sample minus its base sample), which is shorter than the
-// requested length for a young process and longer after missed ticks. AsOf is the
-// newest sample's timestamp, so a reader can see how stale the figures are.
+// WindowSnapshot is one window's figures. Seconds is the time actually covered:
+// shorter than requested for a young process, longer after missed ticks. AsOf
+// is the newest sample's timestamp, showing staleness.
 type WindowSnapshot struct {
 	Seconds    float64
 	AsOf       time.Time
@@ -61,8 +57,7 @@ type WindowSnapshot struct {
 	Counters   map[string]uint64  // delta over the window
 }
 
-// slot is one sample. The slices are views into the ring's backing arrays,
-// laid out in spec order.
+// slot is one sample; the slices are views into the ring's backing arrays in spec order.
 type slot struct {
 	t        time.Time
 	buckets  []uint64 // len(histograms) * numBuckets
@@ -75,23 +70,20 @@ type Windows struct {
 	spec WindowSpec
 	now  func() time.Time
 
-	// mu guards ring, head and length. It is a LEAF lock: the sampler reads
-	// every source (atomics, and sql.DB.Stats which takes database/sql's own
-	// mutex) before taking it; Snapshot does arithmetic only and is never
-	// called with another lock held (only HTTP handlers call it).
+	// mu guards ring, head and length. LEAF lock: the sampler reads every source
+	// (including sql.DB.Stats, which takes database/sql's mutex) before taking it,
+	// and Snapshot (HTTP handlers only) does arithmetic only.
 	mu     syncutil.Mutex
 	ring   []slot
 	head   int // next slot to write
 	length int // slots holding a sample, at most len(ring)
 
-	// scratch is the sampler's read buffer. Only sample touches it, and sample
-	// has one caller at a time (Run's goroutine, or a test), so it needs no lock.
+	// scratch is the sampler's read buffer; sample has one caller at a time, so no lock.
 	scratch slot
 }
 
-// NewWindows builds the ring for spec. now is the clock (nil means time.Now); a
-// test injects its own. It rejects a non-positive Tick, a Horizon shorter than
-// Tick, an empty or duplicate name, and a nil source.
+// NewWindows builds the ring for spec; now is the clock (nil means time.Now). It
+// rejects a non-positive Tick, a Horizon below Tick, an empty or duplicate name, and a nil source.
 func NewWindows(spec WindowSpec, now func() time.Time) (*Windows, error) {
 	if spec.Tick <= 0 {
 		return nil, fmt.Errorf("%w: tick %v must be positive", ErrBadWindowSpec, spec.Tick)
@@ -138,13 +130,11 @@ func NewWindows(spec WindowSpec, now func() time.Time) (*Windows, error) {
 		now = time.Now
 	}
 
-	// Own copies of the slices, so a caller cannot change the layout later.
 	spec.Histograms = append([]NamedHistogram(nil), spec.Histograms...)
 	spec.MaxGauges = append([]NamedMaxGauge(nil), spec.MaxGauges...)
 	spec.Counters = append([]NamedCounter(nil), spec.Counters...)
 
-	// horizon/tick samples span the horizon; two more cover the base sample
-	// sitting just outside it and a tick that ran late.
+	// horizon/tick samples span the horizon; two more cover the base sample just outside it and a late tick.
 	n := int(spec.Horizon/spec.Tick) + 2
 	nb := len(spec.Histograms) * numBuckets
 	nm := len(spec.Histograms) + len(spec.MaxGauges)
@@ -170,10 +160,9 @@ func NewWindows(spec WindowSpec, now func() time.Time) (*Windows, error) {
 	}, nil
 }
 
-// Run takes one sample at once (the baseline a window is measured from), then
-// one per tick until ctx is cancelled. The returned channel closes once the
-// goroutine has exited, so shutdown can order it before the hub and database
-// close.
+// Run takes one baseline sample, then one per tick until ctx is cancelled. The
+// returned channel closes once the goroutine exits, so shutdown can order it
+// before the hub and database close.
 func (w *Windows) Run(ctx context.Context) <-chan struct{} {
 	w.sample(w.now())
 	done := make(chan struct{})
@@ -193,15 +182,11 @@ func (w *Windows) Run(ctx context.Context) <-chan struct{} {
 	return done
 }
 
-// sample records one sample stamped now. It is the only path that takes
-// samples and allocates nothing.
-//
-// Order matters: buckets are read first and the interval maxima swapped
-// afterwards. Observe stores its max before its bucket count, so any
-// observation counted here already has its max in this interval or an earlier
-// one. An observation landing between the two steps has its max taken now and
-// its count in the next sample, so it is counted once; at a window edge its
-// count and max can show in adjacent windows.
+// sample records one sample stamped now; allocation-free. Order matters: buckets
+// are read first, interval maxima swapped after, and Observe stores its max
+// before its count, so a counted observation's max is in this interval or an
+// earlier one. One landing between the steps is counted once, though at a window
+// edge its count and max can show in adjacent windows.
 func (w *Windows) sample(now time.Time) {
 	sc := &w.scratch
 	for i, nh := range w.spec.Histograms {
@@ -231,10 +216,9 @@ func (w *Windows) sample(now time.Time) {
 }
 
 // Snapshot reports the window of length d ending at the newest sample. The base
-// sample is the newest one at least d older than it, chosen by timestamp, not
-// slot count, so a sampling gap widens Seconds instead of attributing a long
-// stretch to a short window. When no sample is that old the oldest held is
-// used. It reports false until two samples exist, and for a non-positive d.
+// is the newest sample at least d older, by timestamp not slot count, so a
+// sampling gap widens Seconds instead of misattributing a long stretch; with
+// none that old, the oldest held. False until two samples exist or d <= 0.
 func (w *Windows) Snapshot(d time.Duration) (WindowSnapshot, bool) {
 	if d <= 0 {
 		return WindowSnapshot{}, false
@@ -246,11 +230,9 @@ func (w *Windows) Snapshot(d time.Duration) (WindowSnapshot, bool) {
 	}
 	at := func(age int) *slot { return &w.ring[(w.head-1-age+2*len(w.ring))%len(w.ring)] }
 	newest := at(0)
-	// Half a tick of tolerance: a real ticker stamps samples slightly off the
-	// grid, so an exact "t <= newest-d" test would often miss the sample one
-	// tick back and cover d plus a whole tick (70 s for "1m"). With it the base
-	// is the sample nearest d back. The ring's two spare slots still hold the
-	// base for the longest window.
+	// Half a tick of tolerance: a real ticker stamps slightly off the grid, so an
+	// exact test would often miss the sample one tick back and cover d plus a tick
+	// (70 s for "1m"). The two spare slots still hold the base for the longest window.
 	cutoff := newest.t.Add(-d + w.spec.Tick/2)
 	baseAge := w.length - 1 // the oldest held, unless a newer one is old enough
 	for age := 1; age < w.length; age++ {
@@ -262,7 +244,6 @@ func (w *Windows) Snapshot(d time.Duration) (WindowSnapshot, bool) {
 	base := at(baseAge)
 
 	nh, ng := len(w.spec.Histograms), len(w.spec.MaxGauges)
-	// Window max: the largest interval max among the samples in (base, newest].
 	imax := make([]uint64, nh+ng)
 	for age := range baseAge {
 		for i, v := range at(age).imax {
@@ -281,18 +262,15 @@ func (w *Windows) Snapshot(d time.Duration) (WindowSnapshot, bool) {
 		var delta [numBuckets]uint64
 		var count uint64
 		for b := range delta {
-			// Each bucket only grows; the clamp covers a source that was reset.
 			delta[b] = satSub(newest.buckets[i*numBuckets+b], base.buckets[i*numBuckets+b])
 			count += delta[b]
 		}
 		if count == 0 {
-			// A racing observation can leave its max here and its count in
-			// the next sample; keep the max visible.
+			// A racing observation can leave its max here and its count in the next sample; keep the max.
 			out.Histograms[h.Name] = Summary{Max: float64(imax[i]) / 1000}
 			continue
 		}
-		// The count is the sum of the bucket deltas, never the histogram's
-		// total, so a torn read cannot give a count that disagrees with them.
+		// Count is the sum of bucket deltas, not the histogram total, so a torn read cannot disagree with them.
 		out.Histograms[h.Name] = Summary{
 			Count: count,
 			P50:   quantile(&delta, count, imax[i], 0.50),
@@ -310,8 +288,7 @@ func (w *Windows) Snapshot(d time.Duration) (WindowSnapshot, bool) {
 	return out, true
 }
 
-// satSub is a-b, or 0 when b is larger: a cumulative figure that went
-// backwards was reset, and the window then reports no change, not a negative.
+// satSub is a-b, or 0 when b is larger: a reset cumulative figure reports no change, not a negative.
 func satSub(a, b uint64) uint64 {
 	if a < b {
 		return 0

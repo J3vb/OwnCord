@@ -1,8 +1,7 @@
 package ws
 
-// appealStatusPayload is the appeal_status frame's payload:
-// targeted at the appellant only, unsequenced, not replayed. decisionNote
-// is nil until the appeal is decided.
+// appealStatusPayload is the appeal_status frame: targeted at the appellant only,
+// unsequenced, not replayed.
 type appealStatusPayload struct {
 	ID           string  `json:"id"`
 	State        string  `json:"state"`
@@ -15,11 +14,10 @@ func buildAppealStatus(publicID, state string, decisionNote *string) []byte {
 	}})
 }
 
-// NotifyAppealStatus delivers a live appeal_status frame to userID (the
-// appellant), satisfying service.AppealStatusNotifier. Targeted and
-// unsequenced (SendToUserLow, mirroring NotifyModAction/BroadcastModQueue):
-// a disconnected appellant simply sees the new state on their next
-// GET /api/v1/appeals/mine, so a missed frame here costs nothing.
+// NotifyAppealStatus delivers a live appeal_status frame to the appellant
+// (service.AppealStatusNotifier).
+// Unsequenced: a missed frame is covered by the appellant's next GET
+// /api/v1/appeals/mine.
 func (h *Hub) NotifyAppealStatus(userID int64, publicID, state string, decisionNote *string) {
 	h.SendToUserLow(userID, buildAppealStatus(publicID, state, decisionNote))
 }

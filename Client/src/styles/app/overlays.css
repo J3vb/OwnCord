@@ -228,7 +228,7 @@
 }
 
 /* ── Toast Notification ── */
-/* Stacked just above the composer and centred on it: Toast.ts writes the
+/* Stacked just above the composer and centred on it: toastContainer.ts writes the
    composer's top edge and box as --toast-bottom, --toast-center and
    --toast-room. Without a composer (voice, forum, home) the stack keeps clear
    of a bottom control bar; the fallback centre is the chat column (half the
@@ -249,7 +249,7 @@
 }
 /* A dialog or the settings overlay hides the composer: drop to the window
    edge, under a centred panel's own buttons. */
-body:has(.modal-overlay, .settings-overlay:where(.open)) .toast-container {
+body .toast-container.toast-container--under-dialog {
   bottom: calc(var(--safe-bottom, 0px) + 16px);
   left: 50%;
   width: min(560px, 100vw - 32px);

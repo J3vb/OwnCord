@@ -2,15 +2,13 @@ package hubstats
 
 import "sync/atomic"
 
-// Counters are the hub's process-lifetime totals for the metrics endpoint. The
-// fields are plain atomics: callers Add and Load them directly. It must not be
-// copied.
+// Counters are the hub's process-lifetime totals for the metrics endpoint: plain atomics
+// that callers Add and Load directly. Must not be copied.
 type Counters struct {
 	// BroadcastDrops counts messages dropped because the broadcast channel was full.
 	BroadcastDrops atomic.Uint64
-
-	// Aggregate backpressure counters: the per-client drop count is read once at
-	// disconnect and lost; these survive as process totals.
+	// Aggregate backpressure counters: the per-client drop count is lost at disconnect; these survive as process
+	// totals.
 	BPQueueDisconnects atomic.Uint64 // clients disconnected because send (or high+send) overflowed
 	BPHighFallbacks    atomic.Uint64 // high-priority sends that fell back to the normal buffer
 	BPLowDrops         atomic.Uint64 // low-priority messages silently dropped on overflow

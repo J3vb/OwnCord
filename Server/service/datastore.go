@@ -4,12 +4,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// Store is what New needs to build every service: the union of the interface
-// each service declares beside its own type (blockStore in block.go, and so
-// on), plus the slices New hands to the services that already took one.
-// *db.DB satisfies it. A service takes only its own interface, so a test fake
-// for it implements only the methods that service calls; nothing but New takes
-// Store (TestStoreConsumers).
+// Store is what New needs to build every service: the union of each service's own
+// interface plus the slices New hands to services that already took one. Only New takes
+// Store (TestStoreConsumers); each service takes its own interface.
 type Store interface {
 	appealStore
 	authStore

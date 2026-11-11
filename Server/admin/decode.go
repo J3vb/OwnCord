@@ -9,18 +9,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
-// decodeJSON reads one JSON value from r.Body into v, so the same bad body
-// gets the same reply on every admin route: 413 PAYLOAD_TOO_LARGE when it
-// runs past the route's http.MaxBytesReader cap, 400 BAD_REQUEST for anything
-// else that does not decode, an empty body included. It returns false after
-// writing the reply.
+// decodeJSON reads one JSON value from r.Body into v so the same bad body gets the same reply on every route:
+// 413 PAYLOAD_TOO_LARGE past the route's MaxBytesReader cap, 400 BAD_REQUEST otherwise (empty body included).
+// Returns false after writing the reply.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return decodeBody(w, json.NewDecoder(r.Body), v, false)
 }
 
-// decodeOptionalJSON is decodeJSON for a route whose body may be left out:
-// an empty body leaves v as it was and returns true. No admin route takes an
-// optional body yet; it is kept so admin offers the same three forms as api.
+// decodeOptionalJSON is decodeJSON for an optional body: empty leaves v as it was. No admin route uses it
+// yet; kept so admin offers the same three forms as api.
 func decodeOptionalJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return decodeBody(w, json.NewDecoder(r.Body), v, true)
 }
@@ -49,8 +46,7 @@ func decodeBody(w http.ResponseWriter, dec *json.Decoder, v any, optional bool) 
 	return false
 }
 
-// writeBodyErr answers a body that failed to decode. err is the decoder's
-// error, or nil when a second JSON value followed the first.
+// writeBodyErr answers a body that failed to decode; err is nil when a second JSON value followed the first.
 func writeBodyErr(w http.ResponseWriter, err error) {
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		writeErr(w, http.StatusRequestEntityTooLarge, httperr.CodePayloadTooLarge, "request body is too large")

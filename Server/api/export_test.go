@@ -325,3 +325,15 @@ func UseThumbSlotsForTest(n int, wait time.Duration) (hold func() (release func(
 	}
 	return hold, func() { newThumbSlots = prev }
 }
+
+// IssuedCredentialForTest is the credential AdmitAllVoiceSessionsForTest hands the proxy.
+const IssuedCredentialForTest = "issued-credential-for-test"
+
+// AdmitAllVoiceSessionsForTest is a VoiceSessionGate that admits every request,
+// for proxy tests about transport rather than admission.
+func AdmitAllVoiceSessionsForTest(context.Context, string) (ws.VoiceSessionTicket, error) {
+	return ws.VoiceSessionTicket{
+		Token:   IssuedCredentialForTest,
+		Confirm: func(context.Context) error { return nil },
+	}, nil
+}

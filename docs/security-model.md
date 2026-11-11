@@ -433,7 +433,7 @@ documents. Any disagreement is a bug in this page.
 - [docs/architecture/voice-e2ee.md](architecture/voice-e2ee.md), [docs/architecture/system-overview.md](architecture/system-overview.md)
 - [Server/invariants/authz_chokepoint.go](../Server/invariants/authz_chokepoint.go), [Server/invariants/egress_sites.go](../Server/invariants/egress_sites.go), [Server/api/absence_contract_test.go](../Server/api/absence_contract_test.go), [Server/auth/totp_encrypt.go](../Server/auth/totp_encrypt.go), [Server/auth/totp.go](../Server/auth/totp.go)
 - [Server/db/logvalue.go](../Server/db/logvalue.go), [Server/config/logvalue.go](../Server/config/logvalue.go), [Server/db/audittest/audittest.go](../Server/db/audittest/audittest.go), [Server/db/models.go](../Server/db/models.go), [Server/service/recovery.go](../Server/service/recovery.go), [Server/storage/storage.go](../Server/storage/storage.go)
-- [Client/src-tauri/src/tofu.rs](../Client/src-tauri/src/tofu.rs), [Client/src-tauri/src/credentials.rs](../Client/src-tauri/src/credentials.rs), [Client/src-tauri/src/external_content.rs](../Client/src-tauri/src/external_content.rs), [Client/src/lib/net/identity.ts](../Client/src/lib/net/identity.ts), [Client/src/platform/desktop/nativeProxies.ts](../Client/src/platform/desktop/nativeProxies.ts)
+- [Client/src-tauri/src/tofu.rs](../Client/src-tauri/src/tofu.rs), [Client/src-tauri/src/credentials.rs](../Client/src-tauri/src/credentials.rs), [Client/src-tauri/src/credentials/session_resume.rs](../Client/src-tauri/src/credentials/session_resume.rs), [Client/src-tauri/src/external_content.rs](../Client/src-tauri/src/external_content.rs), [Client/src/lib/net/identity.ts](../Client/src/lib/net/identity.ts), [Client/src/platform/desktop/nativeProxies.ts](../Client/src/platform/desktop/nativeProxies.ts)
 - [CLAUDE.md](../CLAUDE.md), [Server/CLAUDE.md](../Server/CLAUDE.md), [Client/CLAUDE.md](../Client/CLAUDE.md)
 
 ## Accounts and sign-in in detail
@@ -681,14 +681,15 @@ The Tauri desktop client uses the following security measures.
   `CRYPTPROTECT_UI_FORBIDDEN`, or ChaCha20-Poly1305 elsewhere. See
   [credential-storage.md](credential-storage.md).
 - **Passwords never reach the frontend.** Plaintext passwords are **never**
-  returned to the frontend over IPC. Only tokens are visible to JavaScript.
+  returned to the frontend over IPC. Only tokens are visible to JavaScript,
+  and only through `resume_saved_session` (below).
   The field is `#[serde(skip)]` on `CredentialData`, and a test locks this in
   (`credential_data_never_serializes_the_password`). A remembered password is
   shown in the login form as a placeholder. The `login_with_saved_password`
   command reads the password in Rust and logs in through the same pinned
   loopback proxy a normal request uses.
 - **Auto-login uses tokens.** It uses stored tokens to reconnect, not
-  passwords.
+  passwords. A server switch resumes the same way.
 - **Commands are scoped to the active host.** Credential and identity commands
   only act on the active session host, which Rust holds in its state.
   - That host is set only when the proxy relays the server's `auth_ok` over the
@@ -697,12 +698,22 @@ The Tauri desktop client uses the following security measures.
   - The relayed `auth_ok` also records every host a login was verified for
     during this app run. That set survives a disconnect and a credential
     removal.
-  - While no session is active, the connect-page credential prefill, stored
-    token resume and saved-password login work only for a host in that set,
-    never for another saved host.
+  - While a session is active, every saved-login command is refused for
+    another host.
+  - While no session is active, `resume_saved_session` hands the stored token
+    to the page as it is only for a host in that set. For any other saved host
+    Rust signs in itself: it asks that host's own server, over its pinned
+    connection, whether it still accepts the token, and hands the token over
+    only if it does. A refused token never reaches the page, which shows the
+    sign-in form.
   - Before any login has been verified in this app run, the set is empty and
     the first-run behaviour applies. So a restart can still auto-login from a
     saved credential.
+  - The connect-page prefill (`load_credential`) returns the saved username
+    and whether a password is stored, never the token or the password. It and
+    the saved-password login run for any saved host while no session is
+    active; the saved-password login sends the password only to that host's
+    own server.
   - The pending-message commands (unsent message text) act on the active
     host, or while no session is active on a host in that set. They never
     skip the set, even before the first verified login.

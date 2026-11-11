@@ -29,7 +29,7 @@ vi.mock("@stores/members.store", async (importOriginal) => {
   };
 });
 
-import { createTypingIndicator } from "@components/TypingIndicator";
+import { createTypingIndicator } from "../../src/features/messaging/TypingIndicator";
 
 function setTypingUsers(users: Array<{ id: number; username: string }>): void {
   typingUsers = users;

@@ -35,7 +35,7 @@ vi.mock("@lib/voice/livekitSession", () =>
 );
 
 import type { LazyVideoGrid } from "../../src/pages/main-page/lazyVideoGrid";
-import type { VideoGridCallbacks, TileConfig } from "../../src/components/VideoGrid";
+import type { VideoGridCallbacks, TileConfig } from "../../src/features/voice/videoGrid/VideoGrid";
 
 type LazyModule = typeof import("../../src/pages/main-page/lazyVideoGrid");
 
@@ -114,7 +114,7 @@ describe("createLazyVideoGrid", () => {
     h.grids.length = 0;
     h.errors.length = 0;
     h.throwOnce = false;
-    vi.doMock("@components/VideoGrid", gatedFactory);
+    vi.doMock("../../src/features/voice/videoGrid/VideoGrid", gatedFactory);
     lazy = await import("../../src/pages/main-page/lazyVideoGrid");
     toast = await import("@lib/ui/toast");
     vi.mocked(toast.showToast).mockClear();
@@ -123,7 +123,7 @@ describe("createLazyVideoGrid", () => {
   });
   afterEach(() => {
     grid.destroy?.();
-    vi.doUnmock("@components/VideoGrid");
+    vi.doUnmock("../../src/features/voice/videoGrid/VideoGrid");
   });
 
   const loaded = async (): Promise<void> => {
@@ -336,7 +336,7 @@ describe("createLazyVideoGrid", () => {
     expect(grid.hasStreams()).toBe(true);
 
     h.gate = makeGate();
-    vi.doMock("@components/VideoGrid", gatedFactory);
+    vi.doMock("../../src/features/voice/videoGrid/VideoGrid", gatedFactory);
     grid.ensureLoaded();
     await vi.waitFor(() => expect(h.loads.value).toBe(2));
     await loaded();
@@ -360,7 +360,7 @@ describe("createLazyVideoGrid", () => {
     expect(toast.showToast).toHaveBeenCalledTimes(1);
 
     // A join tries again.
-    vi.doMock("@components/VideoGrid", gatedFactory);
+    vi.doMock("../../src/features/voice/videoGrid/VideoGrid", gatedFactory);
     grid.ensureLoaded();
     await vi.waitFor(() => expect(h.loads.value).toBe(2));
     await loaded();
@@ -372,7 +372,7 @@ describe("createLazyVideoGrid", () => {
     grid.watch(3);
     await vi.waitFor(() => expect(toast.showToast).toHaveBeenCalledTimes(1));
     h.gate = makeGate();
-    vi.doMock("@components/VideoGrid", gatedFactory);
+    vi.doMock("../../src/features/voice/videoGrid/VideoGrid", gatedFactory);
     grid.watch(3);
     await vi.waitFor(() => expect(h.loads.value).toBe(2));
   });
@@ -423,7 +423,9 @@ describe("createLazyVideoGrid", () => {
 
 describe("parity with the real grid", () => {
   /** One scripted sequence of grid calls, the way MainPage and the call panel make them. */
-  function script(g: LazyVideoGrid | import("../../src/components/VideoGrid").VideoGridComponent) {
+  function script(
+    g: LazyVideoGrid | import("../../src/features/voice/videoGrid/VideoGrid").VideoGridComponent,
+  ) {
     const content = (): HTMLElement => {
       const el = document.createElement("div");
       el.textContent = "avatar";
@@ -479,21 +481,20 @@ describe("parity with the real grid", () => {
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     vi.resetModules();
     h.gate = makeGate();
-    vi.doMock("@components/VideoGrid", async () => {
+    vi.doMock("../../src/features/voice/videoGrid/VideoGrid", async () => {
       await h.gate!.promise;
-      return await vi.importActual<object>("@components/VideoGrid");
+      return await vi.importActual<object>("../../src/features/voice/videoGrid/VideoGrid");
     });
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.doUnmock("@components/VideoGrid");
+    vi.doUnmock("../../src/features/voice/videoGrid/VideoGrid");
   });
 
   it("draws the same tiles, labels, focus and badges as the real grid", async () => {
-    const actual =
-      await vi.importActual<typeof import("../../src/components/VideoGrid")>(
-        "@components/VideoGrid",
-      );
+    const actual = await vi.importActual<
+      typeof import("../../src/features/voice/videoGrid/VideoGrid")
+    >("../../src/features/voice/videoGrid/VideoGrid");
     const directSlot = document.createElement("div");
     document.body.appendChild(directSlot);
     const direct = actual.createVideoGrid();
@@ -525,17 +526,16 @@ describe("parity with the real grid", () => {
   });
 
   it("draws the same call view when a watched null tile gets its stream before load", async () => {
-    const actual =
-      await vi.importActual<typeof import("../../src/components/VideoGrid")>(
-        "@components/VideoGrid",
-      );
+    const actual = await vi.importActual<
+      typeof import("../../src/features/voice/videoGrid/VideoGrid")
+    >("../../src/features/voice/videoGrid/VideoGrid");
     const callbacks = {
       callControls: { onMuteToggle: vi.fn(), onDeafenToggle: vi.fn(), onLeave: vi.fn() },
       setStreamWatched: vi.fn(),
       forgetStreamWatch: vi.fn(),
     };
     const run = (
-      g: LazyVideoGrid | import("../../src/components/VideoGrid").VideoGridComponent,
+      g: LazyVideoGrid | import("../../src/features/voice/videoGrid/VideoGrid").VideoGridComponent,
     ): void => {
       g.setCallbacks(callbacks);
       g.setCallState({ muted: false, deafened: false, listenOnly: false });

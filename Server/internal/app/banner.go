@@ -15,10 +15,9 @@ import (
 )
 
 // printBanner writes the startup banner to stderr, apart from the structured
-// log on stdout. fingerprint is the served leaf certificate's SHA-256 in the
-// client's pin format, or "" when there is none to print (TLS off, or ACME
-// before its first handshake); users compare it out of band before accepting
-// the client's trust prompt.
+// log. fingerprint is the served leaf certificate's SHA-256 in the client's pin
+// format, or "" when there is none (TLS off, or ACME before its first
+// handshake).
 func printBanner(cfg *config.Config, ver string, tls bool, fingerprint string) {
 	scheme := "http"
 	if tls {
@@ -31,10 +30,9 @@ func printBanner(cfg *config.Config, ver string, tls bool, fingerprint string) {
 	baseURL := scheme + "://" + net.JoinHostPort(localIP, strconv.Itoa(port))
 	adminURL := baseURL + "/admin"
 
-	// The address above is the most widely reachable one, which on a dual-stack
-	// host can be a global IPv6, while the default admin allowlist admits only
-	// loopback, private and unique-local addresses, so that admin URL answers
-	// 403 even from the host. Offer a LAN address too when one exists.
+	// The most reachable address can be a global IPv6 outside the default admin
+	// allowlist (loopback, private, unique-local), so that admin URL answers
+	// 403 even from the host; offer a LAN address too.
 	lanLine := bannerLANAdminLine(scheme, pickBannerLANAddr(addrs), localIP, port)
 
 	tlsStatus := "disabled"
@@ -79,10 +77,8 @@ func printBanner(cfg *config.Config, ver string, tls bool, fingerprint string) {
 	_, _ = fmt.Fprint(os.Stderr, banner)
 }
 
-// printSetupToken writes the setup token to stderr beside the banner, never to
-// slog: the log buffer is streamed to the admin panel and may be shipped
-// elsewhere, and the token must stay on the console of whoever started the
-// server.
+// printSetupToken writes the setup token to stderr, never slog: the log buffer
+// is streamed to the admin panel and may be shipped elsewhere.
 func printSetupToken(token string) {
 	_, _ = fmt.Fprintf(os.Stderr, `   ─────────────────────────────────────────────
     First-run setup is open. The setup wizard at /admin asks for
@@ -95,24 +91,20 @@ func printSetupToken(token string) {
 `, token)
 }
 
-// wsURL builds the WebSocket URL with the correct scheme.
 func wsURL(httpScheme, ip string, port int) string {
 	ws := "ws"
 	if httpScheme == "https" {
 		ws = "wss"
 	}
-	// JoinHostPort brackets an IPv6 literal, keeping the URL valid.
 	return ws + "://" + net.JoinHostPort(ip, strconv.Itoa(port))
 }
 
-// diskWarnBytes is the boot-time "getting low" tier, shaping only startup log
-// noise. The critical tier is server.min_free_disk_mb, the floor /health
-// degrades at and the upload path refuses at, so all three agree.
+// diskWarnBytes is the boot-time "getting low" tier; the critical tier is
+// server.min_free_disk_mb, which /health and uploads also use.
 const diskWarnBytes = 1 << 30 // 1 GiB — warn
 
-// warnLowDisk logs when the volume holding path is low on space: an error
-// below critical (the configured floor; 0 disables it), a warning below
-// diskWarnBytes. Probe failures are silent: unknown is not full.
+// warnLowDisk logs an error below critical (0 disables it) and a warning below
+// diskWarnBytes; probe failures are silent.
 func warnLowDisk(log *slog.Logger, label, path string, critical uint64) {
 	free, err := diskutil.FreeBytes(path)
 	if err != nil {
@@ -127,11 +119,9 @@ func warnLowDisk(log *slog.Logger, label, path string, critical uint64) {
 	}
 }
 
-// pickBannerAddr chooses the most widely reachable address in addrs, taking
-// the list as a parameter so tests can inject topologies. Ranking by
-// netclass.Kind puts a public address above a private one; "the first
-// global-unicast IPv4" would print a LAN address (net.IP's IsGlobalUnicast is
-// true for RFC1918) or a Docker bridge.
+// pickBannerAddr chooses the most widely reachable address in addrs. Ranking by
+// netclass.Kind matters because "first global-unicast IPv4" would print a LAN
+// address (IsGlobalUnicast is true for RFC1918) or a Docker bridge.
 func pickBannerAddr(addrs []netip.Addr) (string, netclass.Kind) {
 	best := ""
 	bestKind := netclass.KindLoopback
@@ -143,9 +133,8 @@ func pickBannerAddr(addrs []netip.Addr) (string, netclass.Kind) {
 		rank := netclass.Rank(k)
 		isV4 := a.Unmap().Is4()
 
-		// Higher rank wins; at equal rank IPv4 wins, as an owner copying one
-		// address out of a banner is likelier to be able to use it. Further
-		// ties keep the first seen.
+		// Higher rank wins; at equal rank IPv4 wins, as it is likelier to be
+		// usable when copied from a banner.
 		if rank > bestRank || (rank == bestRank && isV4 && !bestIsV4) {
 			best, bestKind, bestRank, bestIsV4 = a.String(), k, rank, isV4
 		}
@@ -156,10 +145,8 @@ func pickBannerAddr(addrs []netip.Addr) (string, netclass.Kind) {
 	return best, bestKind
 }
 
-// pickBannerLANAddr returns the address the admin allowlist is most likely to
-// admit (private or unique-local), or "" when the host has none. It ignores
-// reachability ranking because the most reachable address can lie outside the
-// default admin perimeter.
+// pickBannerLANAddr returns the private or unique-local address the admin
+// allowlist is most likely to admit, or "" when none.
 func pickBannerLANAddr(addrs []netip.Addr) string {
 	var lan []netip.Addr
 	for _, a := range addrs {
@@ -175,8 +162,7 @@ func pickBannerLANAddr(addrs []netip.Addr) string {
 }
 
 // bannerLANAdminLine builds the extra "Admin (LAN)" line, or "" when the
-// primary admin URL already is the LAN address or there is none. Kept apart so
-// it is testable without capturing the banner.
+// primary admin URL already is the LAN address or there is none.
 func bannerLANAdminLine(scheme, lanIP, primaryIP string, port int) string {
 	if lanIP == "" || lanIP == primaryIP {
 		return ""
@@ -184,11 +170,7 @@ func bannerLANAdminLine(scheme, lanIP, primaryIP string, port int) string {
 	return "\n    Admin (LAN) " + scheme + "://" + net.JoinHostPort(lanIP, strconv.Itoa(port)) + "/admin"
 }
 
-// bannerQualifier is the one line telling the banner's reader what kind of
-// address was printed and what that means for anyone outside this machine.
-// Every class gets a line, including the one that looks like success: a public
-// address on an interface says nothing of the firewall, ISP or forwarding rule,
-// and silence is how a reachability limit got read as application success.
+// bannerQualifier tells the reader what kind of address was printed.
 func bannerQualifier(kind netclass.Kind, addr string, port int) string {
 	switch kind {
 	case netclass.KindGlobal:

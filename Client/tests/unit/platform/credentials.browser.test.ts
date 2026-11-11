@@ -56,8 +56,12 @@ describe("browser credentials", () => {
     expect(session.keys()).toEqual([]);
     await expect(browserBinding.load("chat.example")).resolves.toEqual({
       username: "alice",
-      token: "tok",
       hasPassword: false,
+    });
+    await expect(browserBinding.resume("chat.example")).resolves.toEqual({
+      outcome: "resumed",
+      username: "alice",
+      token: "tok",
     });
   });
 
@@ -69,7 +73,7 @@ describe("browser credentials", () => {
     expect(local.keys()).toEqual([]);
     expect(local.values().join()).not.toContain("tok");
     expect(session.keys()).toEqual(["owncord:credential:chat.example"]);
-    await expect(browserBinding.load("chat.example")).resolves.toMatchObject({ token: "tok" });
+    await expect(browserBinding.resume("chat.example")).resolves.toMatchObject({ token: "tok" });
   });
 
   it("moves a kept token to session-only, leaving no copy behind", async () => {
@@ -77,7 +81,7 @@ describe("browser credentials", () => {
     await browserBinding.save("chat.example", "alice", "kept");
     await browserBinding.save("chat.example", "alice", "tab", undefined, false, true);
     expect(local.keys()).toEqual([]);
-    await expect(browserBinding.load("chat.example")).resolves.toMatchObject({ token: "tab" });
+    await expect(browserBinding.resume("chat.example")).resolves.toMatchObject({ token: "tab" });
   });
 
   it("moves a session-only token to kept when asked, leaving no copy behind", async () => {
@@ -85,7 +89,7 @@ describe("browser credentials", () => {
     await browserBinding.save("chat.example", "alice", "tab", undefined, false, true);
     await browserBinding.save("chat.example", "alice", "kept", undefined, false, false);
     expect(session.keys()).toEqual([]);
-    await expect(browserBinding.load("chat.example")).resolves.toMatchObject({ token: "kept" });
+    await expect(browserBinding.resume("chat.example")).resolves.toMatchObject({ token: "kept" });
   });
 
   it("keeps a session-only token in sessionStorage on a save that does not say", async () => {
@@ -94,7 +98,7 @@ describe("browser credentials", () => {
     await browserBinding.save("chat.example", "alice2", "tab2");
     expect(local.keys()).toEqual([]);
     expect(session.keys()).toEqual(["owncord:credential:chat.example"]);
-    await expect(browserBinding.load("chat.example")).resolves.toMatchObject({
+    await expect(browserBinding.resume("chat.example")).resolves.toMatchObject({
       username: "alice2",
       token: "tab2",
     });
@@ -114,8 +118,12 @@ describe("browser credentials", () => {
     local.setItem("owncord:credential:chat.example", '{"username":"alice","token":"tok"}');
     await expect(browserBinding.load("chat.example")).resolves.toEqual({
       username: "alice",
-      token: "tok",
       hasPassword: false,
+    });
+    await expect(browserBinding.resume("chat.example")).resolves.toEqual({
+      outcome: "resumed",
+      username: "alice",
+      token: "tok",
     });
   });
 
@@ -149,7 +157,7 @@ describe("browser credentials", () => {
     await expect(browserBinding.delete("chat.example", "mine")).resolves.toBe(true);
     expect(session.keys()).toEqual([]);
     expect(local.keys()).toEqual(["owncord:credential:chat.example"]);
-    await expect(browserBinding.load("chat.example")).resolves.toMatchObject({
+    await expect(browserBinding.resume("chat.example")).resolves.toMatchObject({
       token: "other-tab",
     });
   });
@@ -186,7 +194,7 @@ describe("browser credentials", () => {
     await browserBinding.save("b.example", "bob", "tok-b");
     await browserBinding.delete("a.example");
     await expect(browserBinding.load("a.example")).resolves.toBeNull();
-    await expect(browserBinding.load("b.example")).resolves.toMatchObject({ token: "tok-b" });
+    await expect(browserBinding.resume("b.example")).resolves.toMatchObject({ token: "tok-b" });
   });
 
   it("resolves null for a stored record that is not a credential", async () => {
@@ -195,6 +203,7 @@ describe("browser credentials", () => {
     await expect(browserBinding.load("chat.example")).resolves.toBeNull();
     local.setItem("owncord:credential:chat.example", '{"username":"alice"}');
     await expect(browserBinding.load("chat.example")).resolves.toBeNull();
+    await expect(browserBinding.resume("chat.example")).resolves.toBeNull();
   });
 
   it("has no saved-password login", async () => {

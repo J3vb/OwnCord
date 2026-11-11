@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { attemptAutoReconnect, type ReconnectDeps } from "../../src/lib/voice/livekitReconnect";
+import { attemptAutoReconnect } from "../../src/lib/voice/livekitReconnect";
+import type { ReconnectDeps } from "../../src/features/voice/reconnectDeps";
 import { expectConsole } from "../helpers/console";
 
 /** Each failed attempt logs one warning the console guard wants claimed. */
@@ -36,6 +37,8 @@ describe("attemptAutoReconnect: superseded before the slow-phase token refresh",
       canKeepRetrying: () => true,
       serverMembership: async () => "held",
       leaveVoice: vi.fn(),
+      switchInFlight: () => false,
+      yieldToSwitch: vi.fn(),
       onError: vi.fn(),
     } as unknown as ReconnectDeps;
   });

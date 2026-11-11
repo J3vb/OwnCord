@@ -12,8 +12,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// RetentionChange describes exactly one proposed edit. Nil Days removes a
-// channel override, while zero Days explicitly retains that channel forever.
+// RetentionChange is one proposed edit: nil Days removes a channel override, zero Days
+// retains forever.
 type RetentionChange struct {
 	Scope     string `json:"scope"`
 	ChannelID int64  `json:"channel_id,omitempty"`
@@ -27,8 +27,8 @@ type RetentionPolicySnapshot struct {
 	Revision   string             `json:"revision"`
 }
 
-// RetentionEffect includes every non-DM channel, including indefinite ones.
-// Protected categories are disjoint: indefinite takes precedence over pinned.
+// RetentionEffect covers every non-DM channel; protected categories are disjoint,
+// indefinite taking precedence over pinned.
 type RetentionEffect struct {
 	RetentionWindow
 	Cutoff              string `json:"cutoff,omitempty"`
@@ -81,8 +81,7 @@ func (d *DB) RetentionPolicySnapshot(ctx context.Context) (*RetentionPolicySnaps
 	return retentionPolicyTx(ctx, tx)
 }
 
-// PreviewRetentionChange never writes policy or messages. Its policy and
-// message counts all belong to the same read transaction and observation time.
+// PreviewRetentionChange never writes; its counts share one read transaction and observation time.
 func (d *DB) PreviewRetentionChange(ctx context.Context, change RetentionChange, revision string, observed time.Time) (*RetentionChangeEffect, error) {
 	tx, err := d.reader.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -128,7 +127,6 @@ func proposedRetentionWindows(ctx context.Context, tx *sql.Tx, p *RetentionPolic
 	default:
 		overrides[change.ChannelID] = *change.Days
 	}
-	// A thread takes its parent's override, as RetentionWindows does.
 	rows, err := tx.QueryContext(ctx, `SELECT id, name, COALESCE(parent_channel_id, id) FROM channels WHERE type <> 'dm' AND is_group = 0 AND import_pending = 0 ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -176,7 +174,6 @@ func validateRetentionChangeTx(ctx context.Context, tx *sql.Tx, change Retention
 	var group bool
 	err := tx.QueryRowContext(ctx, `SELECT type, is_group FROM channels WHERE id = ?`, change.ChannelID).Scan(&kind, &group)
 	if errors.Is(err, sql.ErrNoRows) || kind == "thread" {
-		// A thread has no policy of its own; its parent's applies.
 		return ErrNotFound
 	}
 	if err != nil {
@@ -190,9 +187,9 @@ func validateRetentionChangeTx(ctx context.Context, tx *sql.Tx, change Retention
 
 var ErrRetentionProtectedChannel = errors.New("retention does not apply to direct messages")
 
-// ApplyRetentionChange checks and changes the revision on the sole writer
-// connection in one transaction. Every other writer triggers a new revision,
-// including legacy settings writes and deletes that cascade a channel override.
+// ApplyRetentionChange checks and changes the revision on the sole writer connection
+// in one transaction. Every other writer triggers a new revision, including legacy
+// settings writes and deletes cascading a channel override.
 func (d *DB) ApplyRetentionChange(ctx context.Context, actorID int64, change RetentionChange, revision string) (string, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {

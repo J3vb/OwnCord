@@ -12,17 +12,15 @@ type rejoinBlock struct {
 	until     time.Time
 }
 
-// RejoinBlocks is the userID -> latest moderator removal map that refuses an
-// automatic voice_join back into the channel the user was removed from. A later
-// removal replaces the earlier one; expired entries are dropped when read. The
-// window is the caller's policy: Block takes the expiry.
+// RejoinBlocks is the userID -> latest moderator removal map that refuses an automatic
+// voice_join back into the channel the user was removed from. A later removal replaces the
+// earlier; expired entries are dropped when read. Block takes the expiry (the caller's policy).
 type RejoinBlocks struct {
 	mu      syncutil.Ranked[lockrank.Leaf]
 	entries map[int64]rejoinBlock
 }
 
-// Block records that userID was removed from channelID, refusing a rejoin there
-// until until.
+// Block records that userID was removed from channelID, refusing a rejoin there until until.
 func (s *RejoinBlocks) Block(userID, channelID int64, until time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -32,8 +30,7 @@ func (s *RejoinBlocks) Block(userID, channelID int64, until time.Time) {
 	s.entries[userID] = rejoinBlock{channelID: channelID, until: until}
 }
 
-// Blocked reports whether userID's latest removal, still in force, was from
-// channelID.
+// Blocked reports whether userID's latest removal, still in force, was from channelID.
 func (s *RejoinBlocks) Blocked(userID, channelID int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
