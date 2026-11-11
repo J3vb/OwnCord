@@ -113,6 +113,7 @@
   padding: 4px;
   overflow-x: auto;
   overflow-y: hidden;
+  scrollbar-width: thin;
   background: var(--bg-tertiary);
 }
 .video-people-strip[hidden] {
@@ -126,9 +127,10 @@
 .video-people-strip .video-cell {
   flex: 0 0 auto;
   width: 120px;
-  height: 88px;
+  /* Leaves room under the cells for a scrollbar that takes layout space. */
+  height: 76px;
   min-width: 120px;
-  min-height: 88px;
+  min-height: 76px;
 }
 .video-people-strip--side .video-cell {
   width: auto;
