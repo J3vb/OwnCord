@@ -1,10 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +41,13 @@ func touchSafetyCopy(t *testing.T, dir, name string, age time.Duration) {
 	mustDo(t, "Chtimes", os.Chtimes(p, when, when))
 }
 
+// captureLog points m's logger at a buffer and returns it.
+func captureLog(m *maintenance) *bytes.Buffer {
+	var buf bytes.Buffer
+	m.log = slog.New(slog.NewTextHandler(&buf, nil))
+	return &buf
+}
+
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
@@ -47,10 +56,42 @@ func fileExists(p string) bool {
 func TestReconcileFiles_KeepsUnreferencedUploadsWhileARestoreSafetyCopyIsFresh(t *testing.T) {
 	m, uploadFile, backupDir := reconcileHoldFixture(t)
 	touchSafetyCopy(t, backupDir, "pre_restore_20261111_080000.db", time.Hour)
+	logs := captureLog(m)
 
 	mustDo(t, "reconcileFiles", m.reconcileFiles(context.Background()))
 	if !fileExists(uploadFile) {
 		t.Fatal("an upload made since the restored backup was removed while the pre-restore copy is fresh")
+	}
+	// The log says until when: the copy's time plus the hold, an hour short of 7 days from now.
+	if out := logs.String(); !strings.Contains(out, "skipped while a restore safety copy is fresh") || !strings.Contains(out, "until=") {
+		t.Fatalf("no log line saying the pass was held and until when: %q", out)
+	}
+}
+
+func TestReconcileFiles_KeepsUploadsWhenTheBackupFolderCannotBeRead(t *testing.T) {
+	m, uploadFile, _ := reconcileHoldFixture(t)
+	// A regular file where the folder should be: reading it fails, but not with "does not exist".
+	notAFolder := filepath.Join(t.TempDir(), "backups")
+	mustDo(t, "WriteFile", os.WriteFile(notAFolder, []byte("x"), 0o600))
+	m.backupDir = notAFolder
+	logs := captureLog(m)
+
+	mustDo(t, "reconcileFiles", m.reconcileFiles(context.Background()))
+	if !fileExists(uploadFile) {
+		t.Fatal("an upload was removed although the backup folder could not be read")
+	}
+	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "backup folder could not be read") {
+		t.Fatalf("no warning for the unreadable backup folder: %q", out)
+	}
+}
+
+func TestReconcileFiles_RemovesStrandedUploadsWhenTheBackupFolderDoesNotExist(t *testing.T) {
+	m, uploadFile, _ := reconcileHoldFixture(t)
+	m.backupDir = filepath.Join(t.TempDir(), "never-created")
+
+	mustDo(t, "reconcileFiles", m.reconcileFiles(context.Background()))
+	if fileExists(uploadFile) {
+		t.Fatal("a stranded file was kept although there is no backup folder and so no safety copy")
 	}
 }
 

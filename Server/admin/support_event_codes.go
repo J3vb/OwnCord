@@ -301,6 +301,8 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"restore refused: backup schema is newer than this server":                                                     "restore_refused_backup_schema_is_newer",
 	"restore refused: could not preserve message retry cutoff":                                                     "restore_refused_preserve_retry_cutoff_failed",
 	"restore refused: could not read backup schema version":                                                        "restore_refused_read_schema_version_failed",
+	"storage reconciliation skipped: backup folder could not be read":                                              "storage_reconcile_backup_folder_unreadable",
+	"storage reconciliation skipped while a restore safety copy is fresh":                                          "storage_reconcile_held_for_restore",
 	"retention marker: messages present past the recorded cutoff, removed again":                                   "retention_marker_messages_past_cutoff",
 	"retention markers replayed":                                                                                   "retention_markers_replayed",
 	"retention: journaled replay purge failed again":                                                               "retention_journaled_replay_purge_failed_again",

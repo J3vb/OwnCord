@@ -374,7 +374,7 @@ func (m *maintenance) reconcileFiles(ctx context.Context) error {
 	// A recent restore left a safety copy whose uploads the restored database
 	// does not know: leave them until it has aged out (see restoreFileHold).
 	now := time.Now()
-	if restoreHoldActive(admin.ResolveBackupDir(m.backupDir), now) {
+	if m.restoreHoldsReclaim(now) {
 		return nil
 	}
 	removed, err := m.erasure.Reconcile(ctx, m.files, now.Add(-1*time.Hour), reconcileFilesPerTick)
@@ -396,6 +396,18 @@ func (m *maintenance) recountStorage(ctx context.Context) error {
 	}
 	_, err := m.uploads.RecountStorage(ctx)
 	return err
+}
+
+// restoreHoldsReclaim reports whether this pass must stand down, and logs why.
+func (m *maintenance) restoreHoldsReclaim(now time.Time) bool {
+	held, until, err := restoreHoldActive(admin.ResolveBackupDir(m.backupDir), now)
+	switch {
+	case err != nil:
+		m.log.Warn("storage reconciliation skipped: backup folder could not be read", "err", err)
+	case held:
+		m.log.Info("storage reconciliation skipped while a restore safety copy is fresh", "until", until.UTC().Format(time.RFC3339))
+	}
+	return held
 }
 
 // reconcileFilesPerTick bounds how many stranded files one tick removes.
