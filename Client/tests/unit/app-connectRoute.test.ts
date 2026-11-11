@@ -356,6 +356,7 @@ describe("renderConnect", () => {
       expect(hoisted.notifiers).toHaveLength(0);
       setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
       await flushStore();
+      await vi.dynamicImportSettled();
       expect(hoisted.page["showIncompatible"]).toHaveBeenCalledWith("s.example", 5, 3);
       expect(hoisted.notifiers).toHaveLength(1);
       expect(uiStore.getState().updateRequiredHost).toBeNull();
@@ -365,15 +366,40 @@ describe("renderConnect", () => {
       const [page] = mount();
       setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
       await flushStore();
+      await vi.dynamicImportSettled();
       expect(hoisted.notifiers).toHaveLength(1);
       expect(hoisted.notifiers[0]!.destroy).not.toHaveBeenCalled();
       page.destroy();
       expect(hoisted.notifiers[0]!.destroy).toHaveBeenCalledTimes(1);
     });
 
-    it("offers a refusal that was recorded before mount", () => {
+    it("never mounts a banner whose chunk arrives after the route is gone", async () => {
+      const [page] = mount();
+      setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
+      await flushStore();
+      page.destroy();
+      await vi.dynamicImportSettled();
+      expect(hoisted.notifiers).toHaveLength(0);
+    });
+
+    it("a later refusal replaces the banner", async () => {
+      mount();
+      setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
+      await flushStore();
+      await vi.dynamicImportSettled();
+      setUpdateRequiredHost({ host: "t.example", serverEpoch: 6, clientEpoch: 3 });
+      await flushStore();
+      await vi.dynamicImportSettled();
+      expect(hoisted.notifiers).toHaveLength(2);
+      expect(hoisted.notifiers[0]!.destroy).toHaveBeenCalledTimes(1);
+      expect(hoisted.notifiers[1]!.destroy).not.toHaveBeenCalled();
+      expect(hoisted.notifiers[1]!.mount).toHaveBeenCalledTimes(1);
+    });
+
+    it("offers a refusal that was recorded before mount", async () => {
       setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
       mount();
+      await vi.dynamicImportSettled();
       expect(hoisted.notifiers).toHaveLength(1);
       expect(uiStore.getState().updateRequiredHost).toBeNull();
     });

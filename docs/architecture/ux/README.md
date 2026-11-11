@@ -80,8 +80,9 @@ source of truth in `ui.store.connectionStatus`
 `onStateChange`, and read by any control that needs a live socket.
 
 > **✓ Implemented (2026-07).** `ui.store.connectionStatus` is now the single
-> source of truth: `main.ts` calls `wireConnectionStatus(ws)`, whose writer
-> lives in `lib/dispatcher.ts`
+> source of truth: `app/session.ts` calls `wireConnectionStatus(ws)` once, on
+> the first load of `lib/dispatcher.ts` (before the first dial), whose writer
+> lives there
 > (`ws.onStateChange` → `toConnectionStatus` → `setConnectionStatus`), mapping
 > the internal 5-state machine onto the 3-state status (`connecting` /
 > `authenticating` read as `reconnecting`, since a reconnect cycle passes
