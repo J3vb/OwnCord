@@ -27,7 +27,12 @@ import type { ApiClient } from "@lib/api";
 import type { VoiceUploadMeta } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
-import { getChannelMessages, messagesStore, setMessagePinned } from "@stores/messages.store";
+import {
+  getChannelMessages,
+  messagesStore,
+  reattachToPresent,
+  setMessagePinned,
+} from "@stores/messages.store";
 import { getThread, threadsStore } from "@stores/threads.store";
 import { createConfirmModal } from "../dialogs/confirmModal";
 import { safetyStore } from "../safety/store";
@@ -197,7 +202,13 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       channelType: "thread",
       currentUserId: currentUserId(),
       onScrollTop: () => msgCtrl.loadOlderMessages(threadId, signal),
+      onScrollBottom: () => msgCtrl.loadNewerMessages(threadId, signal),
       onRetryLoad: () => void msgCtrl.loadMessages(threadId, signal),
+      onJumpToPresent: () => {
+        // Dropping the detached flag clears "loaded", so the reload refetches the live tail.
+        reattachToPresent(threadId);
+        void msgCtrl.loadMessages(threadId, signal);
+      },
       onReplyClick: (messageId) => {
         const msg = getChannelMessages(threadId).find((m) => m.id === messageId);
         if (msg === undefined) return;
