@@ -6,9 +6,11 @@
 // startup IIFE sits in a function whose synchronous prefix still captures
 // `startupAttempt` before its first await. Nothing here runs at import time.
 
-import { errorText } from "@lib/api";
+import { errorText, TransportError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
-import { loadCredential } from "@lib/net/credentials";
+import { resumeSavedSession } from "@lib/net/credentials";
+import type { SavedSessionResume } from "@lib/net/credentials";
+import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";
 import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import type { ProfileManager, ServerProfile } from "@lib/presence/profiles";
@@ -26,6 +28,7 @@ type ConnectPage = Pick<
   | "selectServer"
   | "refreshProfiles"
   | "showAutoConnecting"
+  | "resetToIdle"
   | "showError"
   | "showServerWait"
   | "hideServerWait"
@@ -47,11 +50,18 @@ function consumeQuickSwitchTarget(): string | null {
   return target;
 }
 
+// The backend answers a resume from the local store at once, unless it has to
+// ask the server: only a resume that takes this long shows that it is busy.
+const RESUME_PROGRESS_DELAY_MS = 400;
+// A switch can ask before the old session's close has reached the backend.
+const REFUSED_RETRY_DELAY_MS = 300;
+
 /**
- * Returns [startup, cancel, forgetHost] as a tuple, not an object: object keys
- * survive minification, and this runs in the startup chunk. `startup` loads the
- * profiles and may resume a session; `cancel` marks the auto-login cancelled;
- * `forgetHost` ends a server wait on that host.
+ * Returns [startup, cancel, forgetHost, certAccepted] as a tuple, not an
+ * object: object keys survive minification, and this runs in the startup
+ * chunk. `startup` loads the profiles and may resume a session; `cancel` marks
+ * the auto-login cancelled; `forgetHost` ends a server wait on that host;
+ * `certAccepted` carries on with a resume that host's certificate held up.
  */
 export function createAutoLogin(
   api: ApiClient,
@@ -65,11 +75,15 @@ export function createAutoLogin(
     autoConnect: boolean,
   ) => void,
   getProfileList: () => Parameters<ConnectPage["refreshProfiles"]>[0],
-): readonly [() => void, () => void, (host: string) => void] {
+): readonly [() => void, () => void, (host: string) => void, (host: string) => void] {
   // The web portal's one host; read only behind `__OWNCORD_WEB__`.
   const fixedHost = __OWNCORD_WEB__ ? (desktop.serverScope.fixedHost ?? undefined) : undefined;
   let autoLoginCancelled = false;
   let serverWait: { readonly host: string; readonly scope: SessionScope } | null = null;
+  let certHeldResume: {
+    readonly profile: ResumableProfile;
+    readonly attempt: SessionScope;
+  } | null = null;
 
   interface ResumableProfile {
     readonly name: string;
@@ -161,29 +175,106 @@ export function createAutoLogin(
     );
   }
 
+  // A resume that failed. The backend could not ask the server whether it
+  // still accepts the saved sign-in: that server is down or out of reach, so
+  // say so and wait for it, as a resume that timed out does. Anything else (an
+  // unreadable store) is shown as it is.
+  function resumeFailed(profile: ResumableProfile, err: unknown, waitIfDown: boolean): void {
+    if (err instanceof TransportError) {
+      log.warn("Saved sign-in could not be checked", { host: profile.host, error: err.message });
+      connectPage.showError(connectText("session.connectTimeout"));
+      if (waitIfDown) waitForServer(profile);
+      return;
+    }
+    const message = errorText(err, connectText("session.autoLoginFailed"));
+    log.warn("Auto-login failed", { host: profile.host, error: message });
+    connectPage.showError(connectText("session.autoLoginFailedDetail", { message }));
+  }
+
+  // What the backend answered for a resume this attempt still owns.
+  function applyResume(
+    profile: ResumableProfile,
+    resumed: SavedSessionResume | null,
+    waitIfDown: boolean,
+    attempt: SessionScope,
+    retryRefused: boolean,
+  ): void {
+    switch (resumed?.outcome) {
+      case "resumed":
+        launchResume(profile, resumed.username, resumed.token, waitIfDown);
+        return;
+      case "sign_in_needed":
+        log.info("Saved sign-in no longer accepted", { host: profile.host });
+        connectPage.showError(connectText("error.unauthorized"));
+        return;
+      case "certificate_unverified":
+        // The certificate prompt is up; accepting it carries on (certAccepted).
+        certHeldResume = { profile, attempt };
+        connectPage.showError(connectText("error.tlsFailed"));
+        return;
+      case "refused":
+        if (retryRefused) {
+          const retry = pageOwner.fork(attempt.signal);
+          setOwnedTimeout(
+            retry.signal,
+            () => {
+              retry.dispose();
+              if (!autoLoginCancelled) void resumeStoredSession(profile, waitIfDown, false);
+            },
+            REFUSED_RETRY_DELAY_MS,
+          );
+          return;
+        }
+        log.warn("Saved sign-in not resumed: another session is active", { host: profile.host });
+        connectPage.showError(connectText("session.autoLoginFailed"));
+        return;
+      default:
+    }
+  }
+
   // Resume a profile's session from its stored token — startup auto-login
-  // and a quick switch back to a server share this path. No-op when the
-  // host has no stored token. A resume the wait itself started does not wait
+  // and a quick switch to a server share this path. No-op when the host has
+  // no stored token. For a saved server not signed in to yet during this app
+  // run the backend asks that server before it hands the token over; a refusal
+  // leaves the sign-in form up. A resume the wait itself started does not wait
   // again: a server that answers but never signs in gets the offline error.
-  async function resumeStoredSession(profile: ResumableProfile, waitIfDown = true): Promise<void> {
+  async function resumeStoredSession(
+    profile: ResumableProfile,
+    waitIfDown = true,
+    retryRefused = true,
+  ): Promise<void> {
     if (!mayResume(profile)) return;
     const attempt = api.getSession();
+    // A superseded attempt (e.g. a manual login started while this resume was
+    // still pending) must neither sign in nor paint an error over the login
+    // that superseded it.
+    const owned = (): boolean =>
+      !autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent();
+    const pending = pageOwner.fork(attempt.signal);
+    let progressShown = false;
+    setOwnedTimeout(
+      pending.signal,
+      () => {
+        if (!owned()) return;
+        progressShown = true;
+        connectPage.showAutoConnecting(profile.name);
+      },
+      RESUME_PROGRESS_DELAY_MS,
+    );
+    let resumed: SavedSessionResume | null;
     try {
-      const cred = await loadCredential(profile.host);
-      if (!pageOwner.isCurrent() || !attempt.isCurrent()) return;
-      if (cred?.username && cred?.token && !autoLoginCancelled) {
-        launchResume(profile, cred.username, cred.token, waitIfDown);
-      }
+      resumed = await resumeSavedSession(profile.host);
     } catch (err) {
-      // A superseded attempt (e.g. a manual login started while this
-      // credential read was still pending) must not paint an error over
-      // the login that superseded it.
-      if (!autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent()) {
-        const message = errorText(err, connectText("session.autoLoginFailed"));
-        log.warn("Auto-login failed", { host: profile.host, error: message });
-        connectPage.showError(connectText("session.autoLoginFailedDetail", { message }));
-      }
+      if (owned()) resumeFailed(profile, err, waitIfDown);
+      return;
+    } finally {
+      pending.dispose();
     }
+    if (!owned()) return;
+    // A stored sign-in without a name or a token cannot sign in.
+    if (resumed?.outcome === "resumed" && !(resumed.username && resumed.token)) resumed = null;
+    if (progressShown && resumed?.outcome !== "resumed") connectPage.resetToIdle();
+    applyResume(profile, resumed, waitIfDown, attempt, retryRefused);
   }
 
   // Auto-select the quick-switch target server profile so the user can
@@ -250,8 +341,8 @@ export function createAutoLogin(
       const quickSwitchTarget = consumeQuickSwitchTarget();
       if (quickSwitchTarget !== null) {
         const targetProfile = selectQuickSwitchTarget(quickSwitchTarget);
-        // A quick switch keeps each server's saved sign-in, so
-        // switching back resumes with the stored token exactly as auto-login
+        // A quick switch keeps each server's saved sign-in, so switching to
+        // a saved server resumes with the stored token exactly as auto-login
         // does. Without a stored credential the prefilled form stays up.
         if (targetProfile !== undefined && startupAttempt.isCurrent()) {
           await resumeStoredSession(targetProfile);
@@ -280,6 +371,12 @@ export function createAutoLogin(
     },
     (host) => {
       if (serverWait?.host === host) serverWait.scope.dispose();
+    },
+    (host) => {
+      const held = certHeldResume;
+      if (held === null || normalizeHostForCertCompare(held.profile.host) !== host) return;
+      certHeldResume = null;
+      if (!autoLoginCancelled && held.attempt.isCurrent()) void resumeStoredSession(held.profile);
     },
   ];
 }

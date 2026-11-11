@@ -48,6 +48,30 @@ check and encrypted fallback as the other secrets. They only reach the host of
 the current session, or, while its connection is down, a host whose login was
 verified during this app run.
 
+## The stored token reaches JavaScript only to sign in
+
+The session token is what auto-login and a server switch resume with, so the
+page needs it, but only at that moment:
+
+- `CredentialData.token` is `#[serde(skip)]`, so `load_credential` (the
+  connect-page prefill) cannot return it. The prefill gets the username and
+  `has_password`.
+- `resume_saved_session` is the one command that returns it. For the active
+  host, a host whose login was verified during this app run, or any saved host
+  before the first verified login of the run, it returns the token as stored.
+- For any other saved host (the first switch to a second server), Rust first
+  sends `GET /api/v1/auth/me` with the token to that host's own server, over
+  the loopback `http_proxy` tunnel and its TOFU certificate pin. A `200`
+  returns the token to the page. A `401` or `403` returns `sign_in_needed`
+  without it, and the page shows the sign-in form. When the tunnel refuses the
+  server's certificate (first use, or a changed one) the command returns
+  `certificate_unverified`: the certificate prompt is up, and accepting it
+  runs the resume again. No answer, or any other one, is an error: the page
+  says the server cannot be reached and waits for it.
+- While another host's session is active the command returns `refused` and
+  hands nothing over. A switch that asks before the old session has closed
+  asks once more a moment later.
+
 ## The stored password never crosses IPC back to JavaScript
 
 The saved login holds a password only when the user ticked "Remember

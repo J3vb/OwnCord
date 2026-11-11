@@ -1,20 +1,34 @@
 /**
  * Credential storage — the OS credential manager seam `lib/net/credentials.ts`
- * wraps today. Seam: `saveCredential`, `loadCredential`, `deleteCredential`
- * and `loginWithSavedPassword` are exported functions already, so each
- * contract method below has that function's exact signature.
+ * wraps today. Seam: `saveCredential`, `loadCredential`, `resumeSavedSession`,
+ * `deleteCredential` and `loginWithSavedPassword` are exported functions
+ * already, so each contract method below has that function's exact signature.
  *
  * The "not running natively" outcome is kept exactly as callers see it
  * today — `false` / `null`, never a thrown error — so a legacy binding of
  * today's functions type-checks against this contract with no cast.
  */
 
-/** Re-declared, structurally identical to `SavedCredential` (`lib/net/credentials.ts`). */
+/**
+ * What the connect page prefills for a host. It carries no secret: the session
+ * token comes from `resume`, and a stored password never leaves the store.
+ */
 export interface SavedCredential {
   readonly username: string;
-  readonly token: string;
   readonly hasPassword: boolean;
 }
+
+/**
+ * The answer to `resume` for a host with a saved sign-in: the token to sign in
+ * with; `sign_in_needed` when the host's server no longer accepts it;
+ * `certificate_unverified` when that server's certificate has to be confirmed
+ * first; or `refused` while another server's session is active.
+ */
+export type SavedSessionResume =
+  | { readonly outcome: "resumed"; readonly username: string; readonly token: string }
+  | { readonly outcome: "sign_in_needed" }
+  | { readonly outcome: "certificate_unverified" }
+  | { readonly outcome: "refused" };
 
 /** Re-declared, structurally identical to `SavedLoginResponse` (`lib/net/credentials.ts`). */
 export interface SavedLoginResponse {
@@ -38,6 +52,15 @@ export interface CredentialStore {
     sessionOnly?: boolean,
   ): Promise<boolean>;
   load(host: string): Promise<SavedCredential | null>;
+  /**
+   * The saved session for `host`, or null when nothing is stored. The desktop
+   * store hands the token over as stored for a server already signed in to
+   * during this app run (or before the first sign-in of the run); for any
+   * other saved server it first asks that server whether it still accepts the
+   * token. Rejects when the store cannot be read or that server cannot be
+   * asked.
+   */
+  resume(host: string): Promise<SavedSessionResume | null>;
   /**
    * `token` names the token the caller is signing out or was refused.
    * A store that can hold several copies (the browser's two Web Storage areas,

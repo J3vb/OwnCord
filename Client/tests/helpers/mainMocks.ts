@@ -160,6 +160,7 @@ export function netCredentialsMock() {
   return {
     saveCredential: vi.fn().mockResolvedValue(true),
     loadCredential: vi.fn().mockResolvedValue(null),
+    resumeSavedSession: vi.fn().mockResolvedValue(null),
     deleteCredential: vi.fn().mockResolvedValue(undefined),
     createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
   };

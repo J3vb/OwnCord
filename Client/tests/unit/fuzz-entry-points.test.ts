@@ -83,6 +83,10 @@ const commandCovered: Record<string, Covered> = {
     source: "host and user id",
     targets: [`${parseTests}/pins_properties.rs`, `${fuzzTargets}/pin_inputs.rs`],
   },
+  resume_saved_session: {
+    source: "server host, compared as a pin key and then dialled through the tunnel",
+    targets: [`${parseTests}/pins_properties.rs`, `${parseTests}/proxy_properties.rs`],
+  },
   start_http_proxy: {
     source: "server host, then every request head through the tunnel",
     targets: [`${parseTests}/proxy_properties.rs`, `${fuzzTargets}/http_request_head.rs`],
