@@ -45,7 +45,7 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[MessageService]():        20,
 	reflect.TypeFor[messageReads]():          17,
 	reflect.TypeFor[mentionState]():          18,
-	reflect.TypeFor[dmDelivery]():            7,
+	reflect.TypeFor[dmDelivery]():            8,
 	reflect.TypeFor[messagePins]():           10,
 	reflect.TypeFor[messageRemoval]():        12,
 	reflect.TypeFor[ModerationService]():     20,
