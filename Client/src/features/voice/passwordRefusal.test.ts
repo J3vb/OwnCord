@@ -31,10 +31,15 @@ let nextId: number;
 const ws: DispatchWs = {
   send: vi.fn((msg: { type: string; payload: unknown }) => {
     sent.push(msg);
-    return `join-${++nextId}`;
+    return msg.type === "voice_join" ? `join-${++nextId}` : "other";
   }),
   disconnect: vi.fn(),
 };
+/** The joins sent. A refused join with no session here is also followed by one
+ *  bare voice_leave, which the server ignores when it holds no call. */
+const joins = (): { type: string; payload: unknown }[] =>
+  sent.filter((msg) => msg.type === "voice_join");
+const leaves = (): number => sent.filter((msg) => msg.type === "voice_leave").length;
 
 /** The error chain's order: rollback first, then the password dialog. */
 function refuse(code: Payload<"error">["code"], id: string | undefined): boolean {
@@ -108,6 +113,16 @@ describe("password dialog on a refused voice_join", () => {
     expect(joinRetryInMs()).toBe(0);
   });
 
+  it("gives back whatever the server may hold: one bare leave for the refused join", async () => {
+    joinVoiceChannel(4);
+    noteJoinSent("join-0");
+    refuse("PASSWORD_REQUIRED", "join-0");
+
+    await vi.waitFor(() => expect(leaves()).toBe(1));
+    expect(sent).toEqual([{ type: "voice_leave", payload: {} }]);
+    expect(leaveVoice).not.toHaveBeenCalled();
+  });
+
   it("submitting re-sends the user's join with the password and closes the dialog", async () => {
     joinVoiceChannel(4);
     noteJoinSent("join-0");
@@ -116,12 +131,14 @@ describe("password dialog on a refused voice_join", () => {
 
     await typeAndSubmit("hunter2");
 
-    expect(sent).toEqual([
+    expect(joins()).toEqual([
       {
         type: "voice_join",
         payload: { channel_id: 4, user_initiated: true, password: "hunter2" },
       },
     ]);
+    // The refused join's leave went out before the retry, so it cannot end it.
+    expect(sent.map((msg) => msg.type)).toEqual(["voice_leave", "voice_join"]);
     expect(voiceStore.getState().currentChannelId).toBe(4);
     expect(voiceStore.getState().voiceStatus).toBe("joining");
     expect(dialog()).toBeNull();
@@ -134,11 +151,11 @@ describe("password dialog on a refused voice_join", () => {
     await vi.waitFor(() => expect(dialog()).not.toBeNull());
 
     input().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    expect(sent).toHaveLength(0);
+    expect(joins()).toHaveLength(0);
 
     input().value = "pw";
     input().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    expect(sent).toHaveLength(1);
+    expect(joins()).toHaveLength(1);
   });
 
   it("reopens with 'Wrong password' when the retry is refused", async () => {
@@ -156,8 +173,8 @@ describe("password dialog on a refused voice_join", () => {
     expect(joinRetryInMs()).toBe(0);
     // Trying again sends again.
     await typeAndSubmit("again");
-    expect(sent).toHaveLength(2);
-    expect(sent[1]).toEqual({
+    expect(joins()).toHaveLength(2);
+    expect(joins()[1]).toEqual({
       type: "voice_join",
       payload: { channel_id: 4, user_initiated: true, password: "again" },
     });
@@ -196,7 +213,7 @@ describe("password dialog on a refused voice_join", () => {
     press("channel-password-cancel");
 
     expect(dialog()).toBeNull();
-    expect(sent).toHaveLength(0);
+    expect(joins()).toHaveLength(0);
     expect(voiceStore.getState().currentChannelId).toBeNull();
   });
 
@@ -237,7 +254,7 @@ describe("password dialog on a refused voice_join", () => {
     refuse("PASSWORD_REQUIRED", "join-auto");
     await Promise.resolve();
     expect(document.querySelectorAll("[data-testid='channel-password-dialog']")).toHaveLength(1);
-    expect(sent).toHaveLength(0);
+    expect(joins()).toHaveLength(0);
     expect(voiceStore.getState().currentChannelId).toBeNull();
     expect(joinRetryInMs()).toBe(0);
   });
@@ -286,10 +303,10 @@ describe("password dialog on a refused voice_join", () => {
     noteJoinSent("join-other");
 
     expect(dialog()).toBeNull();
-    expect(sent).toHaveLength(0);
+    expect(joins()).toHaveLength(0);
     // A late submit for the old channel is refused too.
     sendPasswordJoin(ws, 4, "late");
-    expect(sent).toHaveLength(0);
+    expect(joins()).toHaveLength(0);
   });
 
   it("closes when its channel is deleted", async () => {
@@ -298,7 +315,7 @@ describe("password dialog on a refused voice_join", () => {
     channelsStore.flush();
     expect(dialog()).toBeNull();
     sendPasswordJoin(ws, 4, "late");
-    expect(sent).toHaveLength(0);
+    expect(joins()).toHaveLength(0);
   });
 
   it("backs off after a non-password refusal of a retry, and the next retry honours it", async () => {
@@ -310,7 +327,7 @@ describe("password dialog on a refused voice_join", () => {
 
     expect(joinRetryInMs()).toBeGreaterThan(0);
     sendPasswordJoin(ws, 4, "again");
-    expect(sent).toHaveLength(1);
+    expect(joins()).toHaveLength(1);
     expect(showToast).toHaveBeenCalled();
   });
 

@@ -13,7 +13,6 @@ import {
   refusalWasPasswordRetry,
   takeJoinRefusal,
   takeRefusedJoin,
-  takeStrandedMembership,
 } from "./joinRequest";
 import { noteVoiceLeave } from "./leaveOwed";
 import { clearAfkMove } from "./moveHint";
@@ -98,23 +97,24 @@ export function handleVoiceJoinRollback(
     // socket than the one shown: end both sides, as for any other refusal.
     if (payload.code !== WsErrorCode.ALREADY_JOINED) return;
   }
-  endRefusedJoin(ws, payload.code);
+  endRefusedJoin(ws);
 }
 
 /** Take down what a refused join left: the optimistic store entry, a session
- *  still up or connecting, and a call the server holds for this socket. */
-function endRefusedJoin(ws: DispatchWs, code: string): void {
-  // With no session here the server can still hold a call for this socket:
-  // a join it granted whose token this device let pass (the user had
-  // already clicked on), or the one a refused re-join found in place. A
-  // bare leave gives it back. A join sent while the session module was
-  // still loading owns all of that instead.
-  const stranded = takeStrandedMembership() || code === WsErrorCode.ALREADY_JOINED;
+ *  still up or connecting, and any call the server holds for this socket. */
+function endRefusedJoin(ws: DispatchWs): void {
+  // With no session here the server can still hold a call for this socket: a
+  // join it granted whose token this device let pass (the user had already
+  // clicked on) or never received, or the one a refused re-join found in
+  // place. This device cannot tell, and shows no call from here on, so it
+  // always sends a bare leave: the server ignores one from a socket that
+  // holds nothing. A join sent while the session module was still loading
+  // owns all of that instead.
   const refusedJoin = joinSequence();
   void livekitSession().then(({ isVoiceSessionActive, leaveVoice, failPendingRejoin }) => {
     failPendingRejoin();
     if (isVoiceSessionActive()) void leaveVoice(true);
-    else if (stranded && joinSequence() === refusedJoin) {
+    else if (joinSequence() === refusedJoin) {
       noteVoiceLeave();
       ws.send({ type: "voice_leave", payload: {} });
     }

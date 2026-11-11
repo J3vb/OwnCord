@@ -90,7 +90,7 @@ import { buildBlockedUsersSection } from "../../src/features/safety/BlockedUsers
 import { createAvatarElement } from "../../src/features/profiles/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
 import { isVoiceLeaveOwed, noteVoiceLeave } from "../../src/features/voice/leaveOwed";
-import { noteTokenIgnored, takeStrandedMembership } from "../../src/features/voice/joinRequest";
+import { noteJoinSent, takeJoinRefusal } from "../../src/features/voice/joinRequest";
 import { noteWatchSent, takeWatchRefusal } from "../../src/lib/voice/watchRequest";
 import { applyVideoBitrateCap, videoBitrateCap } from "../../src/features/voice/videoBitrateCap";
 import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
@@ -465,10 +465,10 @@ const PROBES: readonly Probe[] = [
   {
     name: "voice:join-request",
     mutate: () => {
-      noteTokenIgnored();
+      noteJoinSent("join-probe", false, 5);
     },
-    // takeStrandedMembership consumes the mark, so a live one reads as not initial.
-    isInitial: () => !takeStrandedMembership(),
+    // A refusal is taken only for a join still pending, so a live one reads as not initial.
+    isInitial: () => !takeJoinRefusal("FORBIDDEN", "join-probe"),
   },
   {
     name: "voice:move-hint",

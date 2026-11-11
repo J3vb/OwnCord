@@ -26,7 +26,6 @@ import {
   setJoinUrlKind,
 } from "../../lib/voice/voiceJoinTrace";
 import { noteJoinSucceeded } from "./joinBackoff";
-import { noteTokenAccepted, noteTokenIgnored } from "./joinRequest";
 import type { JoinHost } from "./joinHost";
 import {
   clearForNewAttempt,
@@ -248,6 +247,12 @@ export class JoinOrchestration {
     return true;
   }
 
+  /** Show this attempt's progress, unless the user has clicked on to another
+   *  channel since: the status on screen is then that join's to write. */
+  private showStatus(channelId: number, status: "joining" | "securing"): void {
+    if (voiceStore.getState().currentChannelId === channelId) setVoiceStatus(status);
+  }
+
   /** Shared connect-with-retry + post-connect setup used by both the primary
    *  handleVoiceToken path and the pending-join drain loop.
    *  Returns true if the room ended up connected and set up,
@@ -270,7 +275,7 @@ export class JoinOrchestration {
     const myGeneration = this.host.nextJoinGeneration();
     this.setState({ type: "connecting", pendingJoin: null, joinGeneration: myGeneration });
     // "joining" = connecting to the room; the E2EE "securing" phase is set below.
-    setVoiceStatus("joining");
+    this.showStatus(channelId, "joining");
     // SRE-M2: one timeline line per attempt. beginJoinAttempt abandons any
     // unfinished previous attempt without recording it — a superseded join is
     // normal churn, not a failure.
@@ -311,7 +316,7 @@ export class JoinOrchestration {
       // "securing" — until the room key is ready the call is not yet private.
       // Non-key-holders block here waiting for the key holder's offer (up to
       // ~15s); key holders pass through near-instantly.
-      setVoiceStatus("securing");
+      this.showStatus(channelId, "securing");
       advanceJoinStage(traceId, "keyExchange");
       const keyExchangeOk = await this._e2ee.setupKeyExchange(isKeyHolder ?? false, channelId);
       if (!keyExchangeOk) {
@@ -385,12 +390,10 @@ export class JoinOrchestration {
       });
       // The server made this socket a member to mint that token. With no call
       // wanted here at all, give the membership back; a join already sent for
-      // another channel moves it instead.
+      // another channel moves it instead, and gives it back if it is refused.
       if (voiceStore.getState().currentChannelId === null) this.host.sendVoiceLeave();
-      else noteTokenIgnored();
       return;
     }
-    noteTokenAccepted();
     await this.host.connectAndSetup(token, url, channelId, directUrl, isKeyHolder);
     // Drain pending joins iteratively to avoid unbounded recursion when
     // rapid channel switches queue multiple requests.
