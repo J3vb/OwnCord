@@ -62,6 +62,9 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 		}
 		if !exhausted {
 			rep.Budgeted = true
+		} else if err := s.st.RecordRetentionSwept(ctx, w.ChannelID, cutoff); err != nil {
+			sweepErr = err
+			break
 		}
 	}
 	rep.Channels = run.channels
@@ -253,6 +256,15 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 		if ch, err := s.st.GetChannel(ctx, channelID); err != nil || ch == nil {
 			return 0, nil //nolint:nilerr // a marker for a channel that no longer exists has nothing to sweep
 		}
+		// The database itself already swept this channel to the cutoff (or past
+		// it): there is nothing a restore brought back. Replaying anyway would take
+		// a message that was pinned at the sweep and unpinned since, which the
+		// current policy keeps.
+		if swept, err := s.st.RetentionSweptCutoff(ctx, channelID); err != nil {
+			return 0, fmt.Errorf("retention swept cutoff for channel %d: %w", channelID, err)
+		} else if swept >= cutoff {
+			return 0, nil
+		}
 		total := 0
 		for {
 			// One pass is one fresh RetentionTickBudget with its own run, finished before the next, so only one
@@ -280,6 +292,9 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 				return total, sweepErr
 			}
 			if exhausted {
+				if err := s.st.RecordRetentionSwept(ctx, channelID, t); err != nil {
+					return total, fmt.Errorf("record retention swept cutoff for channel %d: %w", channelID, err)
+				}
 				return total, nil
 			}
 		}

@@ -438,3 +438,70 @@ func TestSettings_RetentionDaysValidatedAndAudited(t *testing.T) {
 	}
 	_ = auth.NewRateLimiter()
 }
+
+// pinnedRetentionFixture seeds a channel with three old messages and one old
+// pinned message, sweeps it once under a 7-day window and returns what a later
+// start-up replay needs.
+func pinnedRetentionFixture(t *testing.T) (database *db.DB, dir string, markers *db.MarkerStore, chID, pinnedID int64) {
+	t.Helper()
+	ctx := context.Background()
+	database = newTestDB(t)
+	dir = t.TempDir()
+	uid, _ := database.CreateUser(ctx, "ret-owner", "hash", 1)
+	chID, _ = seedRetentionChannel(t, database, "pins", uid, dir, 3)
+	res, err := database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp, pinned) VALUES (?, ?, 'pinned rules', ?, 1)`,
+		chID, uid, retentionNow.Add(-40*24*time.Hour).Format("2006-01-02 15:04:05"))
+	mustDo(t, "insert pinned", err)
+	pinnedID, _ = res.LastInsertId()
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}))
+	markers = newTestMarkers(t)
+	svc := NewRetentionService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	svc.SetClock(func() time.Time { return retentionNow })
+	if rep, err := svc.Tick(ctx); err != nil || rep.Messages != 3 {
+		t.Fatalf("Tick = %+v, %v", rep, err)
+	}
+	return database, dir, markers, chID, pinnedID
+}
+
+func replayAtStartup(t *testing.T, database *db.DB, dir string, markers *db.MarkerStore) int {
+	t.Helper()
+	fresh := NewRetentionService(database)
+	fresh.SetFiles(newTestStorage(t, dir))
+	fresh.SetMarkers(markers)
+	n, err := fresh.ReplayMarkers(context.Background())
+	mustDo(t, "ReplayMarkers", err)
+	return n
+}
+
+func TestRetention_ReplayKeepsAMessageUnpinnedAfterRetentionWasTurnedOff(t *testing.T) {
+	ctx := context.Background()
+	database, dir, markers, chID, pinnedID := pinnedRetentionFixture(t)
+	mustDo(t, "off", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "0"}))
+	_, err := database.ExecContext(ctx, `UPDATE messages SET pinned = 0, pinned_at = NULL WHERE id = ?`, pinnedID)
+	mustDo(t, "unpin", err)
+
+	if n := replayAtStartup(t, database, dir, markers); n != 0 {
+		t.Errorf("replay removed %d message(s) from a database that already swept to the recorded cutoff", n)
+	}
+	// The recent message and the unpinned one remain.
+	if got := countMessages(t, database, chID); got != 2 {
+		t.Errorf("messages after start-up = %d, want 2: the unpinned message was deleted although retention is off", got)
+	}
+}
+
+func TestRetention_ReplayStillSweepsWhenTheDatabaseHasNoRecordOfTheCutoff(t *testing.T) {
+	ctx := context.Background()
+	database, dir, markers, chID, pinnedID := pinnedRetentionFixture(t)
+	// A restored older backup (or a sweep interrupted before it recorded its
+	// cutoff) carries no swept record: the replay must still run.
+	_, err := database.ExecContext(ctx, `DELETE FROM channel_retention_swept WHERE channel_id = ?`, chID)
+	mustDo(t, "forget the swept cutoff", err)
+	_, err = database.ExecContext(ctx, `UPDATE messages SET pinned = 0, pinned_at = NULL WHERE id = ?`, pinnedID)
+	mustDo(t, "unpin", err)
+
+	if n := replayAtStartup(t, database, dir, markers); n != 1 {
+		t.Errorf("replay removed %d message(s), want the 1 past the recorded cutoff", n)
+	}
+}
