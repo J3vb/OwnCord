@@ -1,7 +1,6 @@
 // LiveKit auto-reconnect logic — extracted from livekitSession.ts.
 // Owns the retry loop, supersession detection, and reconnect state transitions.
 
-import { Room } from "livekit-client";
 import { leaveVoiceChannel } from "@stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
@@ -12,6 +11,7 @@ import { releaseRoom } from "../../features/voice/releaseRoom";
 import { ROOM_CONNECT_OPTIONS, type SessionState } from "../../features/voice/sessionState";
 import { voiceText } from "../../i18n/voice";
 import { redactTunnelUrl } from "@lib/voice/voiceJoinTrace";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("livekitReconnect");
 
@@ -176,7 +176,7 @@ function resyncModulesIfSafe(run: ReconnectRun, current: SessionState): void {
  *  the loop is over. The release is a round trip, so it looks again after it:
  *  false when the join it stopped for is gone by then (the user clicked back),
  *  and the loop goes on as after a failed attempt. */
-async function abortAttempt(run: ReconnectRun, room: Room): Promise<boolean> {
+async function abortAttempt(run: ReconnectRun, room: VoiceRoom): Promise<boolean> {
   try {
     await releaseRoom(room);
   } catch (disconnectErr) {
@@ -200,7 +200,7 @@ function restateReconnecting(deps: ReconnectDeps): SessionState {
 /** Transition to "connected" — the single atomic write — and wire the new room. */
 function installConnected(
   run: ReconnectRun,
-  room: Room,
+  room: VoiceRoom,
   token: string,
   attempt: number,
   resolvedUrl: string,
@@ -225,7 +225,7 @@ function installConnected(
   room.startAudio().catch((err) => log.debug("Failed to start audio after reconnect", err));
 }
 
-async function switchSavedInput(room: Room, deviceId: string): Promise<void> {
+async function switchSavedInput(room: VoiceRoom, deviceId: string): Promise<void> {
   try {
     await room.switchActiveDevice("audioinput", deviceId, false);
   } catch (err) {
@@ -233,7 +233,7 @@ async function switchSavedInput(room: Room, deviceId: string): Promise<void> {
   }
 }
 
-async function switchSavedOutput(room: Room, deviceId: string): Promise<void> {
+async function switchSavedOutput(room: VoiceRoom, deviceId: string): Promise<void> {
   try {
     await room.switchActiveDevice("audiooutput", deviceId);
   } catch (err) {
@@ -249,7 +249,7 @@ async function switchSavedOutput(room: Room, deviceId: string): Promise<void> {
  *  followed by an isStateConnected() checkpoint that reads the live value.
  *  Without them a stale tail re-arms the shared token timer and sends a
  *  refresh against somebody else's session. */
-async function finishConnectedTail(run: ReconnectRun, room: Room): Promise<void> {
+async function finishConnectedTail(run: ReconnectRun, room: VoiceRoom): Promise<void> {
   const { deps, channelId } = run;
   // The saved input goes in before the mic is re-captured, as on
   // the join path (joinOrchestration), so the reconnect opens it once.
@@ -296,7 +296,7 @@ function handleAttemptFailure(
   run: ReconnectRun,
   attempt: number,
   err: unknown,
-  attemptRoom: Room | null,
+  attemptRoom: VoiceRoom | null,
 ): void {
   log.warn("Auto-reconnect failed", { attempt, url: run.url, error: err });
   // Tear down this attempt's room (deps.getState() has no room in "reconnecting"
@@ -348,7 +348,7 @@ function endedAfterConnectedFailure(
   run: ReconnectRun,
   attempt: number,
   err: unknown,
-  room: Room,
+  room: VoiceRoom,
 ): boolean {
   if (!run.deps.isStateConnected(run.channelId, room)) return false;
   log.error("Auto-reconnect failed after connecting — leaving voice", { attempt, error: err });
@@ -369,9 +369,9 @@ async function runAttempt(run: ReconnectRun, attempt: number): Promise<boolean> 
     (state.type === "reconnecting" ? state.latestToken : undefined) ?? run.initialToken;
   // Aliased outside the try so the catch can tear down the attempt's own
   // room: deps.getState() has no room while state is "reconnecting".
-  let attemptRoom: Room | null = null;
+  let attemptRoom: VoiceRoom | null = null;
   // The room this attempt wrote into the state as the connected session.
-  let installedRoom: Room | null = null;
+  let installedRoom: VoiceRoom | null = null;
   try {
     const newRoom = await deps.createRoom();
     attemptRoom = newRoom;

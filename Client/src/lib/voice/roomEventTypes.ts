@@ -11,6 +11,11 @@ import type {
   DisconnectReason,
 } from "livekit-client";
 import type { AudioElements } from "@lib/voice/audioElements";
+import type {
+  VoiceRemoteParticipant,
+  VoiceRemotePublication,
+  VoiceRoom,
+} from "@lib/voice/voiceRoom";
 
 // --- Callback types ---
 
@@ -25,8 +30,8 @@ export type RemoteVideoRemovedCallback = (userId: number, isScreenshare: boolean
 // --- Dependencies passed from LiveKitSession ---
 
 export interface RoomEventDeps {
-  getRoom: () => import("livekit-client").Room | null;
-  setRoom: (room: import("livekit-client").Room | null) => void;
+  getRoom: () => VoiceRoom | null;
+  setRoom: (room: VoiceRoom | null) => void;
   getCurrentChannelId: () => number | null;
   getAudioElements: () => AudioElements;
   getOnRemoteVideoCallback: () => RemoteVideoCallback | null;
@@ -73,15 +78,15 @@ export interface RoomEventHandlers {
     participant: RemoteParticipant,
   ) => void;
   readonly handleTrackPublished: (
-    publication: RemoteTrackPublication,
-    participant: RemoteParticipant,
+    publication: VoiceRemotePublication,
+    participant: VoiceRemoteParticipant,
   ) => void;
   readonly handleTrackUnpublished: (
     publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ) => void;
   /** The room joined: the participants already in it publish no TrackPublished. */
-  readonly handleConnected: (room: import("livekit-client").Room) => void;
+  readonly handleConnected: (room: VoiceRoom) => void;
   readonly handleActiveSpeakersChanged: (speakers: Participant[]) => void;
   readonly handleParticipantDisconnected: (participant: RemoteParticipant) => void;
   readonly handleTrackMuted: (publication: TrackPublication, participant: Participant) => void;

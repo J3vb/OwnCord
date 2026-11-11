@@ -4,18 +4,19 @@
  * the correlation that lets a server refusal roll a published track back.
  */
 
-import type { Room, LocalVideoTrack, LocalTrack } from "livekit-client";
+import type { LocalVideoTrack, LocalTrack } from "livekit-client";
 import { Track } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { createLogger } from "@lib/logger";
 import type { NativeCameraTrack } from "./native/nativeCameraTrack";
 import type { PublishCodec } from "./videoCodec";
 import type { StreamQuality } from "../../lib/voice/videoPresets";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("screenShare");
 
 export interface VideoTrackDeps {
-  readonly getRoom: () => Room | null;
+  readonly getRoom: () => VoiceRoom | null;
   readonly getWs: () => WsClient | null;
   readonly onError: (message: string) => void;
   /** Called after publishing a track to re-apply the audio pipeline. */
@@ -93,7 +94,7 @@ export interface CameraTrackState extends GenerationGuarded {
  *  any track with a `mediaStreamTrack` (browser `LocalTrack` or a native
  *  camera/screen track). */
 export function unpublishManualTrack(
-  room: Room,
+  room: VoiceRoom,
   track: LocalTrack | { mediaStreamTrack: MediaStreamTrack },
 ): void {
   try {

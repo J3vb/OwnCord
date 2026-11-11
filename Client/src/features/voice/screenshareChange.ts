@@ -18,7 +18,6 @@ import {
   createLocalScreenTracks,
   type LocalTrack,
   type LocalVideoTrack,
-  type Room,
 } from "livekit-client";
 import type { WsClient } from "../../lib/ws";
 import { createLogger } from "../../lib/logger";
@@ -54,11 +53,12 @@ import { applyScreenShareContentHint, budgetedRate } from "../../lib/voice/video
 import { recordSenderLayers, setSenderTop } from "../../lib/voice/senderLayers";
 import { liveVideoBudget } from "./videoBudgetNow";
 import { recordEvent } from "../../lib/diagnostics/eventSink";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("screenShare");
 
 interface LiveShare {
-  readonly room: Room;
+  readonly room: VoiceRoom;
   readonly ws: WsClient;
   readonly video: LocalVideoTrack;
   readonly tracks: LocalTrack[];

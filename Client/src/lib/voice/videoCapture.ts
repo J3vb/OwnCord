@@ -4,7 +4,6 @@
  * step, and the share's publish options.
  */
 import {
-  type Room,
   type LocalVideoTrack,
   type LocalTrack,
   type TrackPublishOptions,
@@ -20,6 +19,7 @@ import {
   SCREENSHARE_AUDIO_PUBLISH,
   type StreamQuality,
 } from "./videoPresets";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("screenShare");
 
@@ -37,8 +37,8 @@ interface NativeCameraParticipant {
 }
 
 export function hasCameraTracks(
-  participant: Room["localParticipant"],
-): participant is Room["localParticipant"] & NativeCameraParticipant {
+  participant: VoiceRoom["localParticipant"],
+): participant is VoiceRoom["localParticipant"] & NativeCameraParticipant {
   return typeof (participant as Partial<NativeCameraParticipant>).createCameraTracks === "function";
 }
 
@@ -49,7 +49,7 @@ export function hasCameraTracks(
  *  cast is the same seam the native room crosses: `NativeCameraTrack` is
  *  structurally the `LocalVideoTrack` slice enableCamera uses. */
 export async function createCameraTrack(
-  room: Room,
+  room: VoiceRoom,
   quality: StreamQuality,
   savedVideoDevice: string,
 ): Promise<LocalVideoTrack> {

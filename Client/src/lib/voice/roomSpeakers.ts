@@ -2,7 +2,8 @@
 // hold so a ring does not blink off between words, and the publish to the
 // voice store. Split from roomEventHandlers.ts.
 
-import { Track, type Participant, type Room } from "livekit-client";
+import { Track, type Participant } from "livekit-client";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 /** A speaker LiveKit drops stays lit this long, so a ring does not blink off between words. */
 const SPEAKER_HOLD_MS = 200;
@@ -12,7 +13,7 @@ const SPEAKER_HOLD_MS = 200;
  *  trails a mute by a detection window. So a remote speaker counts only as
  *  the room's current session for its identity, with the microphone on.
  *  Native participants carry no sid, so both sides compare undefined. */
-function canBeSpeaking(room: Room, speaker: Participant): boolean {
+function canBeSpeaking(room: VoiceRoom, speaker: Participant): boolean {
   if (speaker.identity === room.localParticipant.identity) return true;
   const current = room.remoteParticipants.get(speaker.identity);
   if (current === undefined || current.sid !== speaker.sid) return false;
@@ -25,7 +26,7 @@ export interface SpeakerTrackerDeps {
   setSpeakers: (update: { channel_id: number; speakers: number[] }) => void;
   /** The user id behind a participant identity (parseUserId). */
   parseUserId: (identity: string) => number;
-  getRoom: () => Room | null;
+  getRoom: () => VoiceRoom | null;
   getCurrentChannelId: () => number | null;
 }
 

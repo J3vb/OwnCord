@@ -2,7 +2,6 @@
 // gate and re-apply the user's mute and deafen, for the session that is still
 // current when the publish settles; after a reconnect, also bring back the
 // camera and screen share the drop stopped.
-import type { Room } from "livekit-client";
 import {
   voiceStore,
   isPttPollingLive,
@@ -19,12 +18,13 @@ import { voiceText } from "../../i18n/voice";
 import { type LostMedia, restoreLostMedia } from "./mediaLostNotice";
 import { isLinuxDesktop } from "./native/platform";
 import type { SessionState } from "./sessionState";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("livekitSession");
 
 /** What the restore reads from the session; `room` is read live each time. */
 export interface LocalVoiceRestoreHost {
-  room(): Room | null;
+  room(): VoiceRoom | null;
   readonly audioPipeline: AudioPipeline;
   readonly media: MediaControl;
   readonly audioElements: AudioElements;
@@ -151,7 +151,7 @@ export interface LostMediaRestoreHost {
   sendWatching(): void;
   getLost(): LostMedia | null;
   setLost(lost: LostMedia | null): void;
-  room(): Room | null;
+  room(): VoiceRoom | null;
   stateType(): SessionState["type"];
   enableCamera(): Promise<void>;
   enableScreenshare(): Promise<void>;

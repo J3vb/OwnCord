@@ -27,6 +27,7 @@ export const shards = {
     "src/lib/voice/livekitE2EE.ts",
     "src/lib/voice/livekitUrlResolver.ts",
     "src/lib/voice/shareFlags.ts",
+    "src/lib/voice/voiceRoom.ts",
   ],
   "livekit-2": [
     "src/features/voice/cameraSwitch.ts",

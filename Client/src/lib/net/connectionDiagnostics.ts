@@ -1,5 +1,4 @@
 /** User-initiated checks of the current client's path; never starts a call. */
-import type { Room } from "livekit-client";
 import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
 import { loadPref } from "@lib/prefs/preferences";
@@ -8,6 +7,7 @@ import { nativeAudioDevices, type AudioDevice } from "../../features/voice/nativ
 import { probeNativeMicrophone, type NativeMicProbe } from "../../features/voice/native/micProbe";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 export type DiagnosticStatus = "running" | "passed" | "failed" | "not-tested";
 export type DiagnosticStage =
@@ -34,7 +34,7 @@ export function diagnosticLabel(stage: DiagnosticStage): string {
 export interface DiagnosticServices {
   api: Pick<ApiClient, "getSession" | "getConfig" | "getHealth" | "getMe">;
   ws: Pick<WsClient, "ping">;
-  getRoom(): Room | null | Promise<Room | null>;
+  getRoom(): VoiceRoom | null | Promise<VoiceRoom | null>;
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
   /** The native backend's microphones on Linux, where the webview cannot
    *  open the devices voice uses; null elsewhere. */
@@ -49,7 +49,7 @@ interface NativeSignaling {
   isSignalingConnected(): boolean;
 }
 
-function nativeSignaling(room: Room): NativeSignaling | null {
+function nativeSignaling(room: VoiceRoom): NativeSignaling | null {
   const probe: unknown = Reflect.get(room, "isSignalingConnected");
   return typeof probe === "function"
     ? { isSignalingConnected: () => probe.call(room) === true }
@@ -127,7 +127,7 @@ interface DecodingSnapshot {
   frames: number;
 }
 
-async function readDecoding(room: Room): Promise<Map<string, DecodingSnapshot> | null> {
+async function readDecoding(room: VoiceRoom): Promise<Map<string, DecodingSnapshot> | null> {
   const manager = room.engine.pcManager;
   // LiveKit receives media on the publisher in single-peer-connection mode.
   // Dual-connection sessions keep their incoming tracks on the subscriber.
@@ -310,7 +310,7 @@ async function checkMicrophone(run: DiagnosticRun, includeMicrophone: boolean): 
   );
 }
 
-function isSignalingOpen(room: Room, native: NativeSignaling | null): boolean {
+function isSignalingOpen(room: VoiceRoom, native: NativeSignaling | null): boolean {
   const socketOpen = native
     ? native.isSignalingConnected()
     : room.engine.client.ws?.readyState === WebSocket.OPEN;
@@ -348,7 +348,7 @@ function mediaKindsKey({
   return audio ? "diagnostics.detail.kinds.audio" : "diagnostics.detail.kinds.video";
 }
 
-async function checkMedia(run: DiagnosticRun, room: Room): Promise<void> {
+async function checkMedia(run: DiagnosticRun, room: VoiceRoom): Promise<void> {
   const { services, lifetime, emit } = run;
   emit("media", "running", t("diagnostics.detail.listening"));
   try {

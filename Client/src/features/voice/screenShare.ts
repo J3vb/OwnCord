@@ -7,9 +7,10 @@
  * local camera and screenshare tracks via a LiveKit Room.
  */
 
-import { type Room, Track } from "livekit-client";
+import { Track } from "livekit-client";
 import type { ShareSenderSample, SenderStatsTrack } from "./shareSenderStats";
 import { readSenderSample } from "./shareHostLinks";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 export {
   CAMERA_PRESETS,
   CAMERA_PUBLISH_BITRATES,
@@ -56,7 +57,7 @@ export {
   type LiveCodec,
 } from "./videoRepublish";
 
-export function getLocalCameraStream(room: Room | null): MediaStream | null {
+export function getLocalCameraStream(room: VoiceRoom | null): MediaStream | null {
   if (room === null) return null;
   const cameraPub = room.localParticipant.getTrackPublication(Track.Source.Camera);
   if (cameraPub?.track?.mediaStreamTrack)
@@ -64,7 +65,7 @@ export function getLocalCameraStream(room: Room | null): MediaStream | null {
   return null;
 }
 
-export function getLocalScreenshareStream(room: Room | null): MediaStream | null {
+export function getLocalScreenshareStream(room: VoiceRoom | null): MediaStream | null {
   if (room === null) return null;
   const screenPub = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
   if (screenPub?.track?.mediaStreamTrack)
@@ -75,14 +76,16 @@ export function getLocalScreenshareStream(room: Room | null): MediaStream | null
 /** What your screen share is sending and why it falls short (its own tile's
  *  readout), or null where the track has no sender stats (the Linux
  *  native track publishes in the backend) or nothing is shared. */
-export function getLocalScreenshareStats(room: Room | null): Promise<ShareSenderSample | null> {
+export function getLocalScreenshareStats(
+  room: VoiceRoom | null,
+): Promise<ShareSenderSample | null> {
   const track = room?.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track as
     SenderStatsTrack | undefined;
   return readSenderSample(track);
 }
 
 /** Sender evidence for camera encoder checks, using the same stats reader as shares. */
-export function getLocalCameraStats(room: Room | null): Promise<ShareSenderSample | null> {
+export function getLocalCameraStats(room: VoiceRoom | null): Promise<ShareSenderSample | null> {
   const track = room?.localParticipant.getTrackPublication(Track.Source.Camera)?.track as
     SenderStatsTrack | undefined;
   return readSenderSample(track);
