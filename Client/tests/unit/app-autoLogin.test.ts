@@ -458,6 +458,14 @@ describe("a saved server not signed in to yet during this app run", () => {
     loadGate.resolve();
   }
 
+  function expectSignedInToBeta(): void {
+    expect(hoisted.startSession.mock.calls[0]?.slice(0, 3)).toEqual([
+      "beta.example",
+      "btok",
+      "bob",
+    ]);
+  }
+
   it("signs in once the server accepted the saved sign-in", async () => {
     hoisted.resumeSavedSession.mockResolvedValue({
       outcome: "resumed",
@@ -468,11 +476,7 @@ describe("a saved server not signed in to yet during this app run", () => {
     await flush();
     expect(hoisted.resumeSavedSession).toHaveBeenCalledWith("beta.example");
     expect(page.showAutoConnecting).toHaveBeenCalledWith("Beta");
-    expect(hoisted.startSession.mock.calls[0]?.slice(0, 3)).toEqual([
-      "beta.example",
-      "btok",
-      "bob",
-    ]);
+    expectSignedInToBeta();
     expect(page.showError).not.toHaveBeenCalled();
   });
 
@@ -501,11 +505,7 @@ describe("a saved server not signed in to yet during this app run", () => {
     expect(page.showError).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(300);
     expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(2);
-    expect(hoisted.startSession.mock.calls[0]?.slice(0, 3)).toEqual([
-      "beta.example",
-      "btok",
-      "bob",
-    ]);
+    expectSignedInToBeta();
     expect(page.showError).not.toHaveBeenCalled();
   });
 
@@ -565,11 +565,7 @@ describe("a saved server not signed in to yet during this app run", () => {
       certAccepted("beta.example");
       await flush();
       expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(2);
-      expect(hoisted.startSession.mock.calls[0]?.slice(0, 3)).toEqual([
-        "beta.example",
-        "btok",
-        "bob",
-      ]);
+      expectSignedInToBeta();
       // Once: a second accept for the same server starts nothing.
       certAccepted("beta.example");
       await flush();
