@@ -6,9 +6,11 @@ import { startStatusTimerWatcher } from "@lib/presence/statusTimer";
 import { clampExpiresIn, clearAfterSeconds, type ClearAfterId } from "@lib/text/statusChoices";
 import {
   clearStatusTimer,
+  loadAgreedStatus,
   loadStatusTimer,
   loadUserStatus,
   loadUserStatusOrigin,
+  saveAgreedStatus,
   saveStatusTimer,
   saveUserStatus,
 } from "@lib/presence/userStatus";
@@ -216,9 +218,12 @@ describe("status timer watcher", () => {
     it("adopts an Idle from another device as automatic, so auto-idle can bring it back", () => {
       pickTimed("dnd", HOUR);
       const w = startStatusTimerWatcher({ onRevert });
+      saveAgreedStatus("one.example#7", "dnd");
       setOwnPresence("idle");
       expect(loadUserStatus()).toBe("idle");
       expect(loadUserStatusOrigin()).toBe("auto");
+      // An automatic idle stands for the Online it returns to.
+      expect(loadAgreedStatus()?.status).toBe("online");
       w.destroy();
     });
 
@@ -232,10 +237,13 @@ describe("status timer watcher", () => {
     });
 
     it("adopts a status chosen on another device although no timer is running", () => {
+      saveAgreedStatus("one.example#7", "online");
       const w = startStatusTimerWatcher({ onRevert });
       setOwnPresence("dnd");
       expect(loadUserStatus()).toBe("dnd");
       expect(loadUserStatusOrigin()).toBe("manual");
+      // The server holds it, so the next connect has nothing to send over it.
+      expect(loadAgreedStatus()).toEqual({ owner: "one.example#7", status: "dnd" });
       expect(onRevert).not.toHaveBeenCalled();
       vi.advanceTimersByTime(HOUR);
       expect(loadUserStatus()).toBe("dnd");

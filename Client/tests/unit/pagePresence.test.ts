@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import {
+  confirmAgreedStatus,
   loadStatusTimer,
   loadUserStatus,
   saveStatusTimer,
   saveUserStatus,
+  type StatusOrigin,
 } from "@lib/presence/userStatus";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { createPagePresence } from "../../src/pages/main-page/pagePresence";
@@ -32,6 +34,15 @@ function makePresence() {
   const presence = createPagePresence(st as unknown as PageState, {} as PageApi);
   stops.push(() => st.unsubscribers.forEach((u) => u()));
   return { presence, send };
+}
+
+/** A status set on this device whose frame went out on the live socket. */
+function setAndSend(
+  status: Exclude<ServerStatus, undefined>,
+  origin: StatusOrigin = "manual",
+): void {
+  saveUserStatus(status, origin);
+  confirmAgreedStatus(status);
 }
 
 /** The socket drops, `whileDown` happens, and it comes back to a server saying `status`. */
@@ -84,10 +95,42 @@ describe("page presence on connect", () => {
     setServerStatus("online");
     const { presence, send } = makePresence();
     presence.restoreSavedPresence();
-    saveUserStatus("dnd");
+    setAndSend("dnd");
     reconnectTo("invisible");
     presence.restoreSavedPresence();
     expect(send).not.toHaveBeenCalled();
+    expect(loadUserStatus()).toBe("invisible");
+  });
+
+  it("sends a pick again when its frame had not gone out before the reconnect", () => {
+    setServerStatus("online");
+    const { presence, send } = makePresence();
+    presence.restoreSavedPresence();
+    // Picked while connected, still waiting behind the send limit.
+    saveUserStatus("dnd");
+    reconnectTo("online");
+    presence.restoreSavedPresence();
+    expect(send).toHaveBeenCalledExactlyOnceWith("dnd");
+    expect(loadUserStatus()).toBe("dnd");
+
+    // That frame is lost as well: the next connect still sends it.
+    reconnectTo("online");
+    presence.restoreSavedPresence();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(loadUserStatus()).toBe("dnd");
+  });
+
+  it("adopts another device's choice once the pick sent after a reconnect is on the wire", () => {
+    setServerStatus("online");
+    const { presence, send } = makePresence();
+    presence.restoreSavedPresence();
+    saveUserStatus("dnd");
+    reconnectTo("online");
+    presence.restoreSavedPresence();
+    confirmAgreedStatus("dnd");
+    reconnectTo("invisible");
+    presence.restoreSavedPresence();
+    expect(send).toHaveBeenCalledExactlyOnceWith("dnd");
     expect(loadUserStatus()).toBe("invisible");
   });
 
@@ -95,7 +138,7 @@ describe("page presence on connect", () => {
     setServerStatus("online");
     const { presence, send } = makePresence();
     presence.restoreSavedPresence();
-    saveUserStatus("idle", "auto");
+    setAndSend("idle", "auto");
     reconnectTo("dnd", () => saveUserStatus("online"));
     presence.restoreSavedPresence();
     expect(send).not.toHaveBeenCalled();
@@ -106,7 +149,7 @@ describe("page presence on connect", () => {
     setServerStatus("online");
     const { presence, send } = makePresence();
     presence.restoreSavedPresence();
-    saveUserStatus("idle", "auto");
+    setAndSend("idle", "auto");
     reconnectTo("dnd");
     presence.restoreSavedPresence();
     expect(send).not.toHaveBeenCalled();
@@ -117,7 +160,7 @@ describe("page presence on connect", () => {
     setServerStatus("online");
     const { presence } = makePresence();
     presence.restoreSavedPresence();
-    saveUserStatus("dnd");
+    setAndSend("dnd");
     saveStatusTimer("dnd", Date.now() + 3_600_000);
     reconnectTo("dnd");
     presence.restoreSavedPresence();
@@ -132,7 +175,7 @@ describe("page presence on connect", () => {
     setServerStatus("online");
     const first = makePresence();
     first.presence.restoreSavedPresence();
-    saveUserStatus("dnd");
+    setAndSend("dnd");
     saveStatusTimer("dnd", Date.now() + 3_600_000);
 
     setChannelMutesHost("two.example");

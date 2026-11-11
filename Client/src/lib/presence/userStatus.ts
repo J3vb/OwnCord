@@ -112,6 +112,23 @@ export function saveAgreedStatus(owner: string, status: UserStatus): void {
   savePref(USER_STATUS_AGREED_PREF_KEY, { owner, status });
 }
 
+/** What the user chose on this device: an idle the idle watcher set stands for
+ *  the Online it goes back to. */
+export function chosenStatus(status: UserStatus = loadUserStatus()): UserStatus {
+  return status === "idle" && loadUserStatusOrigin() === "auto" ? "online" : status;
+}
+
+/**
+ * The server this device last settled with now holds `status`: a change put on
+ * the wire, one it refused and that was put back, or another device's that was
+ * adopted here. A change still waiting to be sent is not agreed yet, so the
+ * next connect sends it again instead of taking the server's older status.
+ */
+export function confirmAgreedStatus(status: UserStatus): void {
+  const agreed = loadAgreedStatus();
+  if (agreed !== null) saveAgreedStatus(agreed.owner, chosenStatus(status));
+}
+
 // ---------------------------------------------------------------------------
 // Custom status text
 // ---------------------------------------------------------------------------

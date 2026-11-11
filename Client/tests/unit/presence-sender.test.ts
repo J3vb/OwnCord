@@ -10,9 +10,11 @@ import { membersStore, updatePresence } from "@stores/members.store";
 import { createPresenceSender } from "@lib/presence/presence";
 import { createPresenceLimiter, type RateLimiter } from "@lib/net/rateLimiter";
 import {
+  loadAgreedStatus,
   loadCustomStatus,
   loadUserStatus,
   loadUserStatusOrigin,
+  saveAgreedStatus,
   saveCustomStatus,
   saveUserStatus,
 } from "@lib/presence/userStatus";
@@ -62,6 +64,77 @@ describe("createPresenceSender — last requested status always reaches the serv
       fireError("RATE_LIMITED", "some-other-id");
       vi.advanceTimersByTime(30_000);
       expect(sent).toHaveLength(1);
+    });
+  });
+});
+
+describe("createPresenceSender — the status agreed with the server", () => {
+  usePresenceFixture(undefined);
+  const ACCOUNT = "one.example#1";
+  const agreed = () => loadAgreedStatus()?.status;
+
+  it("moves when a status goes on the wire, not while it waits behind the limiter", () => {
+    withSender({ fakeTimers: true }, ({ sender }) => {
+      saveAgreedStatus(ACCOUNT, "online");
+      saveUserStatus("dnd");
+      sender.send("dnd");
+      expect(loadAgreedStatus()).toEqual({ owner: ACCOUNT, status: "dnd" });
+
+      saveUserStatus("invisible");
+      sender.send("invisible");
+      expect(agreed()).toBe("dnd");
+
+      vi.advanceTimersByTime(11_000);
+      expect(agreed()).toBe("invisible");
+    });
+  });
+
+  it("goes back to what the server held when the frame is answered RATE_LIMITED", () => {
+    withSender({ fakeTimers: true }, ({ sender, sent, fireError }) => {
+      saveAgreedStatus(ACCOUNT, "online");
+      saveUserStatus("dnd");
+      sender.send("dnd");
+      fireError("RATE_LIMITED", "id-1");
+      expect(agreed()).toBe("online");
+
+      vi.advanceTimersByTime(11_000);
+      expect(sent).toHaveLength(2);
+      expect(agreed()).toBe("dnd");
+    });
+  });
+
+  it("stays put for a frame written while the socket is not connected", () => {
+    withSender({}, ({ sender, ws }) => {
+      vi.mocked(ws.getState).mockReturnValue("reconnecting");
+      saveAgreedStatus(ACCOUNT, "online");
+      saveUserStatus("dnd");
+      sender.send("dnd");
+      expect(agreed()).toBe("online");
+    });
+  });
+
+  it("records an automatic idle as the Online it returns to, and nothing before a first connect", () => {
+    withSender({}, ({ sender }) => {
+      saveUserStatus("idle", "auto");
+      sender.send("idle");
+      expect(loadAgreedStatus()).toBeNull();
+    });
+    withSender({}, ({ sender }) => {
+      saveAgreedStatus(ACCOUNT, "dnd");
+      sender.send("idle");
+      expect(agreed()).toBe("online");
+    });
+  });
+
+  it("goes back with a refused status that is rolled back", () => {
+    withSender({}, ({ sender }) => {
+      saveAgreedStatus(ACCOUNT, "online");
+      saveUserStatus("online");
+      sender.send("dnd", "text");
+      expect(agreed()).toBe("dnd");
+      sender.rollbackRefused("id-1");
+      expect(loadUserStatus()).toBe("online");
+      expect(agreed()).toBe("online");
     });
   });
 });

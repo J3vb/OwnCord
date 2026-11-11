@@ -4,21 +4,14 @@
  */
 import type { UserStatus } from "@lib/types";
 import { authStore } from "@stores/auth.store";
-import { onUserStatusChange } from "@lib/presence/userStatus";
-import { createStatusAgreement } from "@lib/presence/statusAgreement";
+import { settleSavedStatus } from "@lib/presence/statusAgreement";
 import { getChannelMutesHost } from "@lib/prefs/channelMutes";
-import { uiStore } from "@stores/ui.store";
 import type { PageState, PageApi } from "./pageState";
 
 export function createPagePresence(st: PageState, _pg: PageApi) {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
-
-  const agreement = createStatusAgreement(
-    () => uiStore.getState().connectionStatus === "connected",
-  );
-  st.unsubscribers.push(onUserStatusChange((status) => agreement.saved(status)));
 
   /**
    * Bring the saved status and the server's into line on connect: adopt a
@@ -28,7 +21,7 @@ export function createPagePresence(st: PageState, _pg: PageApi) {
   function restoreSavedPresence(): void {
     const user = authStore.getState().user;
     const account = `${getChannelMutesHost() ?? ""}#${user?.id ?? 0}`;
-    const toSend = agreement.settle(account, user?.status);
+    const toSend = settleSavedStatus(account, user?.status);
     if (toSend !== null) applyPresence(toSend);
   }
 
