@@ -208,6 +208,30 @@ describe("ForumView list", () => {
     expect(app.classList.contains("app--forum-split")).toBe(false);
   });
 
+  it("keeps the split class when an older view aborts after a newer split view mounted", () => {
+    localStorage.setItem("owncord:settings:forumLayout", '"split"');
+    const app = document.createElement("div");
+    app.className = "app";
+    document.body.appendChild(app);
+    const views = [new AbortController(), new AbortController()].map((own) => {
+      const el = document.createElement("div");
+      app.appendChild(el);
+      renderForumView(el, {
+        channelId: FORUM,
+        signal: own.signal,
+        api: { listThreads } as unknown as ApiClient,
+        ws: createMockWsClient() as never,
+        openPost,
+      } satisfies ForumViewContext);
+      return { own, el };
+    });
+    views[0]!.el.classList.remove("forum-view--split");
+    views[0]!.own.abort();
+    expect(app.classList.contains("app--forum-split")).toBe(true);
+    views[1]!.own.abort();
+    expect(app.classList.contains("app--forum-split")).toBe(false);
+  });
+
   it("gives each row the author's avatar and a reply count, and marks the open post", async () => {
     serve({ "0:": page([makePost(1, { message_count: 4 }), makePost(2)]) });
     mount();
