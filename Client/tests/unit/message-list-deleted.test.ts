@@ -19,6 +19,7 @@ import {
   setMessages,
 } from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
+import { hoverRows } from "../helpers/hoverRows";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
@@ -390,6 +391,7 @@ describe("MessageList — deleted messages leave the list", () => {
   it("focus on a deleted row's control moves to the next row", () => {
     setMessages(CHANNEL_ID, [1, 2, 3].map(spaced));
     mount();
+    hoverRows(container);
     const reply = container.querySelector<HTMLButtonElement>("[data-testid='msg-reply-2']")!;
     reply.focus();
     expect(document.activeElement).toBe(reply);
@@ -404,6 +406,7 @@ describe("MessageList — deleted messages leave the list", () => {
   it("focus on the last row's control moves up when that row is deleted", () => {
     setMessages(CHANNEL_ID, [1, 2, 3].map(spaced));
     mount();
+    hoverRows(container);
     container.querySelector<HTMLButtonElement>("[data-testid='msg-reply-3']")!.focus();
 
     del(3);

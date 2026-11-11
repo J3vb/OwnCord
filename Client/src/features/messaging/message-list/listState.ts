@@ -1,4 +1,5 @@
 /** The mutable state one message list instance keeps, shared by its modules. */
+import type { FocusCapture } from "./listFocus";
 import type { Disposable } from "@lib/disposable";
 import type { Message } from "@stores/messages.store";
 import type { MessageRenderOptions } from "./renderers";
@@ -35,6 +36,8 @@ export interface ListState {
   // The editor held focus when its row was released by a window slide; it is
   // focused again when the row comes back.
   editRefocus: boolean;
+  /** Keyboard focus is in the list: every row draws its whole hover bar. */
+  fullBars: boolean;
   /** Non-scrolling frame around the scroller; what is actually appended to
    *  the parent. The floating controls anchor to this box — an absolutely
    *  positioned box whose containing block is the scroller itself sits in
@@ -228,10 +231,8 @@ export interface ListApi {
   measureRendered(from?: number, to?: number): void;
   updateSpacers(): void;
   releaseTrackedMedia(): void;
-  captureRowFocus(): { own: string | null; row: string | null; index: number } | null;
-  restoreRowFocus(
-    captured: { own: string | null; row: string | null; index: number } | null,
-  ): boolean;
+  captureRowFocus(): FocusCapture | null;
+  restoreRowFocus(captured: FocusCapture | null): boolean;
   beginRowRender(): void;
   activeJumpIndex(): number;
   edgeOf(el: Element): number;

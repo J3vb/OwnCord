@@ -21,6 +21,7 @@ import {
   setHistoryLoadState,
   useWiredMessageList,
 } from "../../helpers/messageListHarness";
+import { hoverRows } from "../../helpers/hoverRows";
 
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
@@ -104,6 +105,7 @@ describe("MessageList", () => {
       uiStore.flush();
       setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 })]);
       w.msgList.mount(w.container);
+      hoverRows(w.container);
       const row1 = w.container.querySelector("[data-testid='message-1']");
       const deleteBtn = (): HTMLButtonElement =>
         w.container.querySelector<HTMLButtonElement>("[data-testid='msg-delete-1']")!;

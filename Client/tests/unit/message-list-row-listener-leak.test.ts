@@ -6,6 +6,7 @@ import { messagesStore } from "@stores/messages.store";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
 import { makeMessage, useMessageListHarness, setMessages } from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
+import { hoverRows } from "../helpers/hoverRows";
 
 // Reaction controls lock while the socket is down (3A-3); these tests react online.
 beforeEach(() => {
@@ -40,6 +41,7 @@ describe("MessageList row listener lifecycle", () => {
     const later = makeMessage({ id: 3, content: "later", timestamp: "2024-01-15T12:01:00Z" });
     setMessages(1, [makeMessage({ id: 2, content: "hello" }), later]);
     msgList.mount(container);
+    hoverRows(container);
 
     const reactBtn = container.querySelector(
       '[data-testid="msg-react-2"]',
@@ -69,6 +71,7 @@ describe("MessageList row listener lifecycle", () => {
     const first = makeMessage({ id: 1, content: "hello" });
     setMessages(1, [first]);
     msgList.mount(container);
+    hoverRows(container);
 
     const reactBtn = container.querySelector(
       '[data-testid="msg-react-1"]',

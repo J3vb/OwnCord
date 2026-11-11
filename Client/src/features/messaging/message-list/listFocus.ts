@@ -3,7 +3,19 @@
  * rendered window, so a rebuild can put focus back on its replacement.
  */
 import { ROW_FOCUSABLE_SELECTOR } from "./messageActions";
+import { ensureActionsBar } from "./messageActionBar";
 import type { ListState } from "./listState";
+
+/** Test ids of the hover bar's buttons (not the inline editor's `msg-edit-input-`). */
+const BAR_CONTROL = /^msg-(?:quick-react|react|edit|reply|pin|delete)-\d/;
+
+export interface FocusCapture {
+  own: string | null;
+  row: string | null;
+  index: number;
+  /** The message row the control sat in: its hover bar is rebuilt before the lookup. */
+  message: string | null;
+}
 
 export function createRowFocus(st: ListState) {
   /**
@@ -18,7 +30,7 @@ export function createRowFocus(st: ListState) {
    * the list. Restoring never scrolls, so a reader scrolling away from the
    * focused row or a history-prepend anchor is not pulled back to it.
    */
-  function captureRowFocus(): { own: string | null; row: string | null; index: number } | null {
+  function captureRowFocus(): FocusCapture | null {
     const active = document.activeElement;
     if (
       !(active instanceof HTMLElement) ||
@@ -30,15 +42,22 @@ export function createRowFocus(st: ListState) {
     const row = active.closest<HTMLElement>("[data-testid]");
     const index =
       row === null ? -1 : [...row.querySelectorAll(ROW_FOCUSABLE_SELECTOR)].indexOf(active);
-    return { own: active.dataset.testid ?? null, row: row?.dataset.testid ?? null, index };
+    return {
+      own: active.dataset.testid ?? null,
+      row: row?.dataset.testid ?? null,
+      index,
+      message: active.closest<HTMLElement>(".message")?.dataset.testid ?? null,
+    };
   }
 
   /** Put focus back on the captured control's replacement; false when it has none. */
-  function restoreRowFocus(
-    captured: { own: string | null; row: string | null; index: number } | null,
-  ): boolean {
+  function restoreRowFocus(captured: FocusCapture | null): boolean {
     if (captured === null || st.contentContainer === null) return false;
     let target: HTMLElement | null | undefined = null;
+    if (captured.message !== null && BAR_CONTROL.test(captured.own ?? "")) {
+      const row = st.contentContainer.querySelector(`[data-testid="${captured.message}"]`);
+      if (row !== null) ensureActionsBar(row);
+    }
     if (captured.own !== null) {
       target = st.contentContainer.querySelector<HTMLElement>(`[data-testid="${captured.own}"]`);
     } else if (captured.row !== null && captured.index >= 0) {

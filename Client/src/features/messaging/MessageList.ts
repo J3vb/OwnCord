@@ -56,6 +56,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     edit: null,
     editGen: 0,
     editRefocus: false,
+    fullBars: false,
     region: null,
     root: null,
     wasAtBottom: true,
