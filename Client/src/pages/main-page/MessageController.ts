@@ -4,9 +4,13 @@
  */
 
 import type { ApiClient } from "@lib/api";
-import type { MessageResponse } from "@lib/types";
+import type { MessageResponse, MessagesResponse } from "@lib/types";
 import { createLogger } from "@lib/logger";
 import { shellText } from "../../i18n/shell";
+import { channelsStore } from "@stores/channels.store";
+import { dmStore } from "@stores/dm.store";
+import { setChannelWarmHandler } from "@lib/nav/channelNavigation";
+import { createChannelWarmup } from "../../features/messaging/channelWarmup";
 import {
   setMessages,
   prependMessages,
@@ -21,6 +25,7 @@ import {
   setOlderLoadFailed,
 } from "@stores/messages.store";
 
+const emptyPage: MessagesResponse = { messages: [], has_more: false };
 const log = createLogger("message-ctrl");
 const PAGE_SIZE = 50;
 /** The server's largest history page (maxMessageLimit). */
@@ -48,6 +53,16 @@ export interface MessageController {
   loadOlderMessages(channelId: number, signal: AbortSignal): Promise<void>;
   /** Load the next page below a detached window; reaching the newest message reattaches it. */
   loadNewerMessages(channelId: number, signal: AbortSignal): Promise<void>;
+}
+
+/** A first visit to a text channel or DM that is not on screen. */
+function worthWarming(channelId: number): boolean {
+  const channels = channelsStore.getState();
+  if (channels.activeChannelId === channelId) return false;
+  if (isChannelLoaded(channelId) || getChannelMessages(channelId).length > 0) return false;
+  const ch = channels.channels.get(channelId);
+  if (ch !== undefined) return ch.type === "text" || ch.type === "announcement" || ch.type === "dm";
+  return dmStore.getState().channels.some((c) => c.channelId === channelId);
 }
 
 function installTail(
@@ -80,6 +95,22 @@ function installTail(
 
 export function createMessageController(opts: MessageControllerOptions): MessageController {
   const { api, showError } = opts;
+  const warmup = createChannelWarmup(api, PAGE_SIZE);
+
+  /** The page the press already asked for when this is a first visit, else the normal request. */
+  async function firstPage(
+    channelId: number,
+    limit: number,
+    firstVisit: boolean,
+    signal: AbortSignal,
+  ): Promise<{ first: MessagesResponse; warmed: MessagesResponse | null }> {
+    const pending = firstVisit ? warmup.take(channelId, signal) : null;
+    const taken = pending === null ? null : await pending;
+    // Nothing to top up from on an empty page: ask the normal way.
+    const warmed = taken !== null && taken.messages.length > 0 ? taken : null;
+    if (warmed !== null || signal.aborted) return { first: warmed ?? emptyPage, warmed };
+    return { first: await api.getMessages(channelId, { limit }, signal), warmed: null };
+  }
 
   async function loadMessages(channelId: number, signal: AbortSignal): Promise<void> {
     // Mounting a channel starts it clean: an older-page failure from an
@@ -108,7 +139,8 @@ export function createMessageController(opts: MessageControllerOptions): Message
     // reconciles the refetched page into them.
     setChannelLoading(channelId);
     try {
-      const first = await api.getMessages(channelId, { limit }, signal);
+      const { first, warmed } = await firstPage(channelId, limit, cached.length === 0, signal);
+      if (signal.aborted) return;
       const head = cached[0]?.id ?? 0;
       const { fetched, hasMoreBefore } = await pageBackToHead(
         channelId,
@@ -124,6 +156,13 @@ export function createMessageController(opts: MessageControllerOptions): Message
       // the race is discarded instead of clobbering the jump's window.
       if (!signal.aborted && !isChannelLoaded(channelId)) {
         installTail(channelId, fetched, hasMoreBefore, cached, head);
+        // The page was read before channel_focus left, so a message posted, edited
+        // or deleted in between reached neither the page nor the live feed: the
+        // revisit refetch reconciles the rows just shown, off the paint path.
+        if (warmed !== null) {
+          invalidateChannelMessageWindow(channelId);
+          void loadMessages(channelId, signal);
+        }
       }
     } catch (err) {
       // Same re-check as the success path above: a jump's window that already
@@ -289,6 +328,19 @@ export function createMessageController(opts: MessageControllerOptions): Message
       }
     }
   }
+
+  // The controller owns the press-to-warm door while its session lives; a newer
+  // controller (a new sign-in) takes the door over, and the session end releases it.
+  const releaseDoor = setChannelWarmHandler({
+    warm: (channelId) => {
+      if (worthWarming(channelId)) warmup.warm(channelId);
+    },
+    cancel: warmup.cancel,
+  });
+  api.getSession?.().addCleanup?.(() => {
+    releaseDoor();
+    warmup.destroy();
+  });
 
   return { loadMessages, loadOlderMessages, loadNewerMessages };
 }
