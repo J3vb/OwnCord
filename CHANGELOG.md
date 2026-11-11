@@ -92,6 +92,7 @@ and only when it changes something a contributor or fork holder must do
 - Voice: if a join failed at its very last step while a moderator had you server-muted or deafened, the retry joined unmuted; the mute now carries over to the retry.
 - A thread that was renamed, locked, unlocked, archived or deleted while you were in another channel now shows its current name and state when you return, instead of keeping the old chip and a wrongly locked or unlocked composer.
 - If the app cannot read a live update from the server, it now reconnects for a fresh copy of everything instead of reconnecting and still missing that update.
+- Blocking or unblocking someone on one device now reaches your other signed-in devices after they reconnect, without restarting the app.
 - Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
 - Linux: switching audio devices or muting and unmuting no longer makes other voice controls wait.
 - Linux: stopping a camera or screen share no longer makes other voice controls wait, and starting the camera again right after waits for the old one to close.

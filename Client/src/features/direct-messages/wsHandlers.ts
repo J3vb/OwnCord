@@ -108,7 +108,11 @@ export function applyReadyDms(payload: Payload<"ready">): void {
   });
 }
 
-/** The block slice of `ready`: forget "blocked by them" and re-fetch our own blocks. */
+/**
+ * The block slice of `ready`, and of a resumed `auth_ok` (a block or unblock made
+ * on another device is not replayed): forget "blocked by them" and re-fetch our
+ * own blocks.
+ */
 export function applyReadyBlocks(api: DispatchApi | undefined): void {
   // Refresh DM block state (channels-members-dms.md §3.2). "Being blocked"
   // is only known from a refused send, so it's stale after a reconnect —
