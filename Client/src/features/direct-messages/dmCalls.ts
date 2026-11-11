@@ -5,6 +5,7 @@ import { showToast } from "@lib/ui/toast";
 import { accountText as account } from "../../i18n/account";
 import { shellText } from "../../i18n/shell";
 import { joinBackoffText } from "../voice/joinBackoffText";
+import { switchWaiting } from "../voice/joinClick";
 import { uiStore } from "@stores/ui.store";
 import { getActiveChannel } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
@@ -199,6 +200,9 @@ export function createDmCalls(st: PageState, _pg: PageApi, deps: DmCallsDeps) {
       showToast(backoffText, "error");
       return;
     }
+    // A switch out of the call the user is in still waits for the server, and
+    // a join sent now would be dropped: keep the ring for the next click.
+    if (switchWaiting()) return;
     const ring = st.ringCtrl?.current() ?? null;
     if (ring === null) return;
     st.cameraOnJoin = withVideo ? ring.channelId : null;

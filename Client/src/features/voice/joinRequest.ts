@@ -182,6 +182,12 @@ export function leaveEndsEarlierStay(channelId: number, now = Date.now()): boole
   return sentJoins.slice(index).some((join) => join.channelId === channelId);
 }
 
+/** The server refused join `id`: whichever join that is, wanted still or not,
+ *  the stay it asked for never began and no voice_leave will come for it. */
+export function forgetRefusedStay(id: string | undefined): void {
+  if (id !== undefined) sentJoins = sentJoins.filter((join) => join.id !== id);
+}
+
 /**
  * Records the envelope id of the voice_join just sent; a newer join replaces an
  * older one. `passwordRetry` marks the user's retry with a typed password.
@@ -229,8 +235,7 @@ export function takeJoinRefusal(
     settleAnswerWait();
     return true;
   }
-  // Whichever join the id names, the stay it asked for never began.
-  sentJoins = sentJoins.filter((join) => join.id !== id);
+  forgetRefusedStay(id);
   if (pendingId === null || id !== pendingId) return false;
   refusal = { id, channelId, passwordRetry: pendingPasswordRetry };
   pendingId = null;

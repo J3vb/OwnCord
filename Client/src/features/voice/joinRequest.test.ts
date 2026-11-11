@@ -4,6 +4,7 @@ import { joinVoiceChannel, resetVoiceStore } from "../../stores/voice.store";
 import {
   LEAVE_ECHO_WAIT_MS,
   OLD_SERVER_JOIN_CODES,
+  forgetRefusedStay,
   leaveEndsEarlierStay,
   noteJoinAnswered,
   noteJoinSent,
@@ -138,6 +139,14 @@ describe("which stay in a channel a voice_leave ends", () => {
     join(1, "a");
     join(1, "b");
     takeJoinRefusal("CHANNEL_FULL", refused);
+    expect(leaveEndsEarlierStay(1)).toBe(false);
+  });
+
+  it("forgets a refused join's stay when nothing was left to roll back", () => {
+    join(1, "a");
+    forgetRefusedStay("a");
+    forgetRefusedStay(undefined);
+    join(1, "b");
     expect(leaveEndsEarlierStay(1)).toBe(false);
   });
 

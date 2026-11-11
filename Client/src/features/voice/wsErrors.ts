@@ -8,6 +8,7 @@ import { showToast } from "../../lib/ui/toast";
 import { noteJoinFailed } from "./joinBackoff";
 import {
   type JoinAnswerWait,
+  forgetRefusedStay,
   joinSequence,
   refusalWasPasswordRetry,
   takeJoinRefusal,
@@ -74,6 +75,9 @@ export function handleVoiceJoinRollback(
   // store while it waits (voiceStore.switchingTo): the server refuses a locked
   // or full channel before it leaves the call the user is in, so that call was
   // never touched here either and its refusal has nothing to undo.
+  // Even when nothing is left to roll back (the user already left): an error
+  // answering some other command names no join, so this drops nothing then.
+  forgetRefusedStay(id);
   const { voiceStatus, currentChannelId, switchingTo = null } = voiceStore.getState();
   if (voiceStatus !== "joining" && switchingTo === null) return;
   if (!takeJoinRefusal(payload.code, id, switchingTo ?? currentChannelId)) return;

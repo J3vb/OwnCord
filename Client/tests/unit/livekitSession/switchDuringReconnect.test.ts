@@ -361,6 +361,23 @@ describe("clicks on voice channels while in a live call", () => {
     });
   });
 
+  it("ends the call on a leave after a refusal that came once the user had left", async () => {
+    widget.onDisconnect();
+    sidebar.onVoiceJoin(NEW);
+    widget.onDisconnect();
+    // The answer to a join the user no longer waits for.
+    refuse("CHANNEL_FULL");
+    sidebar.onVoiceJoin(NEW);
+    await granted(NEW);
+    expect(store()).toMatchObject(inCall(NEW));
+
+    // The server takes the user out of the channel: nothing earlier explains it.
+    leaveEcho(NEW);
+    await settle();
+    expect(store()).toMatchObject({ currentChannelId: null, voiceStatus: "idle" });
+    expect(voice.isVoiceSessionActive()).toBe(false);
+  });
+
   it("ends in the last clicked channel when three switches cross their answers", async () => {
     sidebar.onVoiceJoin(NEW);
     await granted(NEW);
