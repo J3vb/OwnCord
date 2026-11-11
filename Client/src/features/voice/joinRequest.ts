@@ -119,28 +119,6 @@ function armAnswerTimer(seq: number, channelId: number): void {
   }, JOIN_ANSWER_WAIT_MS);
 }
 
-// The server granted a join this device no longer wanted (its token arrived
-// after the user had clicked another channel), so it may hold a call for this
-// socket that no session here shows.
-let strandedMembership = false;
-
-/** A token for a channel the user already clicked away from was let pass. */
-export function noteTokenIgnored(): void {
-  strandedMembership = true;
-}
-
-/** The server's membership is accounted for again: a token was taken up. */
-export function noteTokenAccepted(): void {
-  strandedMembership = false;
-}
-
-/** Whether a let-pass token may have left a membership behind; read once. */
-export function takeStrandedMembership(): boolean {
-  const stranded = strandedMembership;
-  strandedMembership = false;
-  return stranded;
-}
-
 /** A voice_token for `channelId` arrived: the join for that channel is answered. */
 export function noteJoinAnswered(channelId: number): void {
   // Every stay asked for before the granted one has ended on the server, and
@@ -273,7 +251,6 @@ export function resetJoinRequest(): void {
   pendingId = null;
   pendingPasswordRetry = false;
   refusal = null;
-  strandedMembership = false;
   sentJoins = [];
   settleAnswerWait();
 }

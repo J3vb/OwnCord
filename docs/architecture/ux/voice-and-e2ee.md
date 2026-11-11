@@ -343,17 +343,22 @@ attempt waits for the next delay, or runs with the token it has. Clicking anothe
 a reconnect runs hands the call to that join: from the click on, the loop starts nothing new for the old
 channel, and if it would give up (or fail late) before the join is answered it only clears its own session,
 with no `voice_leave` and no "Voice connection lost". The join's token then connects as usual; a refusal
-still ends the old call on the server. If neither arrives within 15 s of the hand-over (counted again
-for a newer click, or while the chat socket is itself reconnecting), the call ends as a give-up does.
+still ends the old call on the server. If neither arrives, the join's own bound below runs out first
+(it counts from the click) and ends the call like any unanswered join; the hand-over keeps a 15 s wait
+of its own behind it (counted again for a newer click, or while the chat socket is itself reconnecting)
+that ends the call as a give-up does.
 Every `voice_join` has the same bound from the moment it is sent (`features/voice/joinRequest.ts`): with
 neither a `voice_token` nor a refusal after 15 s on a settled chat socket, the join ends like the user's
 own Disconnect, with a `voice_leave` and "Could not join voice: the server did not answer. Try again."
 A server that advertises `voice_messages` echoes the join's id on every refusal, so there an error with
 no id never counts as the join's refusal. When the user clicks faster than the server answers, the
 answers of several joins interleave: a self `voice_state` for a channel other than the one the store
-names is not followed, a `voice_token` for a channel the user already clicked away from is let pass, and
-whenever that leaves this client showing no call (the token arrives with no channel selected, or the
-later join is refused) it sends a bare `voice_leave` so the server does not keep a call nobody sees.
+names is not followed, and a `voice_token` for a channel the user already clicked away from is let pass.
+A token that arrives with no channel selected, and every refused join that finds no session here, is
+answered with a bare `voice_leave`, so the server never keeps a call nobody sees (it ignores a leave
+from a socket that holds no call). A join attempt writes the status on screen only while the store names
+its channel: a room that finishes connecting after a click on another channel leaves that channel's
+"Connecting…" as it is, and the refusal or the 15 s bound of the newer join still ends it.
 A click on another channel from a connected call keeps that call until the server acts on the switch
 (`features/voice/joinClick.ts`): the store keeps naming the call and only records the target
 (`voiceStore.switchingTo`). The old channel's self `voice_leave` or the new channel's `voice_token`
