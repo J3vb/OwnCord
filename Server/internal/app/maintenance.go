@@ -366,12 +366,18 @@ func (m *maintenance) resumeErasure(ctx context.Context) error {
 
 // reconcileFiles removes upload files no row names, which the orphan sweep
 // strands when it stops between its DELETE and its unlinks or a restore leaves
-// behind.
+// behind. It stands down while a recent restore's safety copy exists.
 func (m *maintenance) reconcileFiles(ctx context.Context) error {
 	if m.erasure == nil || m.files == nil {
 		return nil
 	}
-	removed, err := m.erasure.Reconcile(ctx, m.files, time.Now().Add(-1*time.Hour), reconcileFilesPerTick)
+	// A recent restore left a safety copy whose uploads the restored database
+	// does not know: leave them until it has aged out (see restoreFileHold).
+	now := time.Now()
+	if restoreHoldActive(admin.ResolveBackupDir(m.backupDir), now) {
+		return nil
+	}
+	removed, err := m.erasure.Reconcile(ctx, m.files, now.Add(-1*time.Hour), reconcileFilesPerTick)
 	if err != nil {
 		return err
 	}
