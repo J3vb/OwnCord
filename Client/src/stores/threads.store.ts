@@ -423,14 +423,17 @@ export function noteOpenThreadMessage(threadId: number, messageId: number): void
 export function clearFollowedCounts(threadId: number): void {
   commit((prev) => withCountsCleared(prev, threadId));
 }
-// Leaving a parent channel ends the guarantee for its threads' frames.
+// Leaving a parent channel ends the guarantee for its threads' frames, and a
+// mark made while a parent was not open (a follow update) never had one.
 let openParentId = channelsStore.getState().activeChannelId;
 void channelsStore.subscribeSelector(
   (s) => s.activeChannelId,
   (next) => {
     const left = openParentId;
     openParentId = next;
-    if (left !== null && left !== next) clearLiveThreads(left);
+    if (left === next) return;
+    if (left !== null) clearLiveThreads(left);
+    if (next !== null) clearLiveThreads(next);
   },
 ); // app-lifetime: the store lives as long as the app
 void registerSessionReset("threads:store", resetThreadsStore); // app-lifetime

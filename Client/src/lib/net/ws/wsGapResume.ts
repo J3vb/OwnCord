@@ -19,7 +19,7 @@ export function noteCseq(s: WsState, cseq: number): void {
   if (cseq !== expected) armGapResume(s, { expected, received: cseq });
 }
 
-export function armGapResume(s: WsState, detail: object): void {
+export function armGapResume(s: WsState, detail: object, fresh = false): void {
   if (s.gapResumeTimer !== null) return;
   const plan = planGapResume(s.gapStreak, s.lastGapResumeAt, Date.now(), s.random());
   s.gapStreak = plan.streak;
@@ -28,9 +28,6 @@ export function armGapResume(s: WsState, detail: object): void {
     delayMs: Math.round(plan.delay),
   });
   const owner = s.socketId;
-  // A rejected frame was already counted into the resume point, so resuming from
-  // it would replay nothing: that redial asks for the full state instead.
-  const fresh = "rejected" in detail;
   s.gapResumeTimer = s.clock.setTimeout(() => {
     s.gapResumeTimer = null;
     if (owner !== s.socketId) return;

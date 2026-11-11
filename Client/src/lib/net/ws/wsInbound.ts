@@ -185,7 +185,9 @@ function onAuthOk(s: WsState, payload: { replay_source?: string }): void {
 // like auth_error, stopping every timer here (the close arrives stale). A lost
 // sequenced frame is made up for by a fresh state.
 function onRejected(s: WsState, verdict: ReturnType<typeof reportRejectedFrame>): void {
-  if (verdict === "resync") armGapResume(s, { rejected: "shape" });
+  // The rejected frame was already counted into the resume point, so resuming
+  // from it would replay nothing: this redial asks for the full state instead.
+  if (verdict === "resync") armGapResume(s, { rejected: "shape" }, true);
   if (verdict !== "fatal") return;
   s.intentionalClose = true;
   stopHeartbeat(s);

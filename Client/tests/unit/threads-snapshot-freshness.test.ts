@@ -66,6 +66,15 @@ describe("a snapshot of a thread no live frame set", () => {
     expect(getThread(91)).toMatchObject(FRESH);
   });
 
+  it("replaces a live frame heard while its parent was not open, once it is opened", () => {
+    const other = { id: 92, parent_id: 2, starter_message_id: 5 };
+    upsertThread(makeThread({ ...OLD, ...other }));
+    setActiveChannel(2);
+    channelsStore.flush();
+    adoptThreadSnapshots([makeThread({ ...FRESH, ...other })]);
+    expect(getThread(92)).toMatchObject(FRESH);
+  });
+
   it("replaces a live frame after an authenticated reconnect", async () => {
     upsertThread(makeThread(OLD));
     withThreadsStore(() => undefined);
@@ -84,6 +93,13 @@ describe("a starter row refetched without a thread", () => {
     await vi.waitFor(() => expect(threadOfMessage({ id: 1 })).toBeUndefined());
     expect(getThread(91)).toBeUndefined();
     expect(threadsStore.getState().byStarter.has(1)).toBe(false);
+  });
+
+  it("keeps the thread of a deleted starter row, which never carries one", async () => {
+    adoptThreadSnapshots([makeThread()]);
+    adoptStarterThreads([{ id: 1, deleted: true }, { id: 2 }]);
+    await vi.waitFor(() => expect(loadedThreadsStore()).not.toBeNull());
+    expect(getThread(91)?.id).toBe(91);
   });
 
   it("keeps a thread a live frame set while its parent is open", async () => {

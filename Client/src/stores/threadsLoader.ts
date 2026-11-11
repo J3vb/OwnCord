@@ -62,13 +62,18 @@ export function loadedThreadsStore(): ThreadsModule | null {
 
 /** The `thread` on each fetched starter row: a REST snapshot (see adoptThreadSnapshots). */
 export function adoptStarterThreads(
-  rows: readonly { readonly id?: number; readonly thread?: ThreadInfo }[],
+  rows: readonly {
+    readonly id?: number;
+    readonly deleted?: boolean;
+    readonly thread?: ThreadInfo;
+  }[],
 ): void {
   const found = rows.flatMap((row) => (row.thread === undefined ? [] : [row.thread]));
   if (found.length > 0) withThreadsStore((m) => m.adoptThreadSnapshots(found));
   // A row with no thread has none now: an earlier snapshot's entry for it is stale.
+  // A deleted row never carries one, though its thread lives on.
   const bare = rows.flatMap((row) =>
-    row.thread === undefined && row.id !== undefined ? [row.id] : [],
+    row.thread === undefined && row.id !== undefined && row.deleted !== true ? [row.id] : [],
   );
   // A session that has met no thread holds none, so it never loads the store for this.
   if (bare.length > 0 && threadsStoreInUse()) {
