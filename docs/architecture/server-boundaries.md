@@ -232,7 +232,7 @@ own:
 
 That last condition is a deliberate narrowing, and the reason the check is a
 sub-id rather than a rule of its own. A file that opens its own `sql.DB` and
-never touches `Server/db` (`cmd/smoke/drills.go`) is answering a different
+never touches `Server/db` (`cmd/smoke/drills_restore_inspect.go`) is answering a different
 question and is left alone; the shape that matters here — a handle reached
 through a package field no single file declares — has no per-file evidence
 at all, which is why the inventory's package-wide walk, not this rule, is

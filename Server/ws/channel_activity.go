@@ -344,11 +344,7 @@ func (h *Hub) resolveChannelActivity(ctx context.Context, chID int64, pc *pendin
 		if focused[uid] || uid == pc.latestAuthorID {
 			continue
 		}
-		entries := h.activityUserEntries(uid, chID, pc, mentions, blockers, ch.NSFW && !acked[uid])
-		for i := range entries {
-			entries[i].forum = forumScoped
-		}
-		perUser[uid] = append(perUser[uid], entries...)
+		perUser[uid] = h.activityUserEntries(perUser[uid], uid, chID, pc, mentions, blockers, ch.NSFW && !acked[uid], forumScoped)
 	}
 }
 
@@ -372,10 +368,13 @@ func (h *Hub) threadFollowersOf(ctx context.Context, threadID int64, audience []
 	return slices.DeleteFunc(slices.Clone(audience), func(uid int64) bool { return !following[uid] })
 }
 
+// activityUserEntries appends uid's entries for one channel to dst: the newest message that
+// mentioned them (mentions is newest first), then the latest overall when its id is higher.
 func (h *Hub) activityUserEntries(
-	uid, chID int64, pc *pendingChannel, mentions []activityMention, blockers map[int64]map[int64]bool, withhold bool,
+	dst []channelActivityEntry,
+	uid, chID int64, pc *pendingChannel, mentions []activityMention, blockers map[int64]map[int64]bool, withhold, forum bool,
 ) []channelActivityEntry {
-	var entries []channelActivityEntry
+	mentionID, mentioned := int64(0), false
 	status, haveStatus := "", false
 	for _, m := range mentions {
 		if m.authorID == uid || blockers[m.authorID][uid] {
@@ -386,14 +385,19 @@ func (h *Hub) activityUserEntries(
 		}
 		direct, broad := service.MentionReachSet(m.idSet, m.everyone, m.hereOnly, uid, status)
 		if direct || broad {
-			entries = append(entries, activityEntry(chID, m.msgID, m.authorID, direct, broad, withhold))
+			e := activityEntry(chID, m.msgID, m.authorID, direct, broad, withhold)
+			e.forum = forum
+			dst = append(dst, e)
+			mentionID, mentioned = m.msgID, true
 			break
 		}
 	}
-	if len(entries) == 0 || entries[0].MessageID < pc.latestID {
-		entries = append(entries, activityEntry(chID, pc.latestID, pc.latestAuthorID, false, false, withhold))
+	if !mentioned || mentionID < pc.latestID {
+		e := activityEntry(chID, pc.latestID, pc.latestAuthorID, false, false, withhold)
+		e.forum = forum
+		dst = append(dst, e)
 	}
-	return entries
+	return dst
 }
 
 func activityAcknowledged(ctx context.Context, vis VisibilityReader, chID int64) map[int64]bool {

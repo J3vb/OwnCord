@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { savePref } from "@lib/prefs/preferences";
 import {
   CAMERA_BUDGET_FLOOR,
   budgetedRate,
@@ -94,7 +95,17 @@ describe("publish options under a budget", () => {
     ).toBe(5_000_000);
   });
 
-  it("a share under its layer room goes out as one layer, with room as simulcast", () => {
+  afterEach(() => localStorage.clear());
+
+  it("a share goes out as one layer by default, whatever the room", () => {
+    expect(screenVideoPublishOptions("vp8", "medium", 30, 4_000_000).simulcast).toBe(false);
+    expect(
+      screenVideoPublishOptions("vp8", "medium", 30).screenShareSimulcastLayers,
+    ).toBeUndefined();
+  });
+
+  it("with the backup copy on, a share under its layer room goes out as one layer, with room as simulcast", () => {
+    savePref("screenShareBackupLayer", true);
     const roomy = screenVideoPublishOptions("vp8", "medium", 30, 4_000_000);
     expect(roomy.simulcast).toBe(true);
     expect(roomy.screenShareSimulcastLayers).toHaveLength(1);

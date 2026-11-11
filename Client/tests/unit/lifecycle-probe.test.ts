@@ -17,6 +17,7 @@ import {
   formatBars,
   idleHeapSlope,
   IDLE_HEAP_BAR_SLOPE,
+  settledHeapUsed,
   type LifecycleSample,
 } from "../e2e/support/lifecycle-probe";
 
@@ -419,5 +420,38 @@ describe("idle heap bar", () => {
     expect(idleHeapSlope(leaking)).toBeGreaterThan(IDLE_HEAP_BAR_SLOPE);
     const flat = [idle(15, 4_330_328), idle(20, 4_330_400), idle(25, 4_330_416)];
     expect(idleHeapSlope(flat)).toBeLessThanOrEqual(IDLE_HEAP_BAR_SLOPE);
+  });
+});
+
+describe("settled heap read", () => {
+  const readsOf = (values: number[]) => {
+    const queue = [...values];
+    return { read: () => Promise.resolve(queue.shift()!) };
+  };
+
+  it("keeps the lowest of three reads, so one spiky read is dropped", async () => {
+    const reads = readsOf([7_448_020, 7_190_000, 7_185_000]);
+    let pauses = 0;
+    const heap = await settledHeapUsed(reads.read, () => {
+      pauses++;
+      return Promise.resolve();
+    });
+    expect(heap).toBe(7_185_000);
+    expect(pauses).toBe(2);
+  });
+
+  it("still fails a steady 30 KB per cycle leak, which every read shows", async () => {
+    const leak = 30 * 1024;
+    const samples: LifecycleSample[] = [];
+    for (const cycle of [5, 10, 15, 20, 25, 30]) {
+      const held = 1_000_000 + cycle * leak;
+      const reads = readsOf([held + 200_000, held + 50_000, held]);
+      samples.push(
+        sample(cycle, {
+          heapUsed: await settledHeapUsed(reads.read, () => Promise.resolve()),
+        }),
+      );
+    }
+    expect(bar(evaluateBars(samples), "heapUsed").pass).toBe(false);
   });
 });

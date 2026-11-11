@@ -55,6 +55,7 @@ and only when it changes something a contributor or fork holder must do
 
 - The app now checks each server reply before using it. A reply it cannot read (from a much older or newer server, or a proxy answering in its place) shows "The server sent a reply this version of OwnCord cannot read" instead of half-loading; after a save, it adds that the change may already have been made.
 - Voice: the microphone gate starts closed and keeps its state when you change the sensitivity.
+- Voice: a Medium or High screen share now sends one stream instead of two, which leaves your graphics card more room while gaming. A viewer on a slow connection may see stutters instead of a softer 720p picture; turn on Settings > Voice & Video > **Send a backup copy for slow connections** to send the 720p copy again.
 - Emoji and GIF pickers load the previews you can see first, fetch the next GIF page earlier, and scroll the emoji list more smoothly.
 - In-app dialogs (join with an invite link, rename prompts, new DM picker, nickname, new thread) use the same Save and Cancel buttons as Create Channel.
 - Privacy & Safety shows a failed load the same way in every section: the message in red with Retry beside it.
@@ -135,6 +136,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Under the hood
 
+- The app starts faster: the code for a signed-in session (message, voice and channel events) now loads in the background while the sign-in screen shows, instead of before it.
 - A review of CI job timings with ideas to speed it up (docs only).
 - The Linux Rust test job prefers the official Ubuntu package mirror, after one run spent 28 minutes on a slow one.
 - Tests for the protocol generator's checks on duplicate names and mismatched error codes.

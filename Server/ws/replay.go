@@ -252,7 +252,7 @@ func (h *Hub) reconnectWriteReplay(
 	for _, evt := range events {
 		// Re-check readability live just before each content frame, not from a batch snapshot: a
 		// revoke/unlabel between frames is honoured from the next frame.
-		if contentBearingKinds[extractEventType(evt)] {
+		if frameIsContentBearing(evt) {
 			chID := payloadChannelID(evt)
 			if reconnectFrameReadableRaceHook != nil {
 				reconnectFrameReadableRaceHook(c.userID, chID)
