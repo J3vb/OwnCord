@@ -10,34 +10,29 @@ type voiceStatePayload struct {
 	Username  string `json:"username"`
 	Muted     bool   `json:"muted"`
 	Deafened  bool   `json:"deafened"`
-	// Speaking is always false on the wire: the column is reset on insert and never
-	// updated; LiveKit's ActiveSpeakersChanged is the speaking authority. Kept for
-	// protocol compatibility.
+	// Speaking is always false on the wire: the column is reset on insert and never updated;
+	// LiveKit's ActiveSpeakersChanged is the authority. Kept for protocol compatibility.
 	Speaking    bool `json:"speaking"`
 	Camera      bool `json:"camera"`
 	Screenshare bool `json:"screenshare"`
-	// ServerMuted/ServerDeafened are moderator-imposed. Muted/Deafened are always set
-	// alongside, so a client ignoring these still renders the user silenced; these
-	// let the UI tell a self-mute from one the user may not lift.
+	// ServerMuted/ServerDeafened are moderator-imposed. Muted/Deafened are always set too, so a client
+	// ignoring these still renders the user silenced; these let the UI tell a self-mute from one the user may
+	// not lift.
 	ServerMuted    bool `json:"server_muted"`
 	ServerDeafened bool `json:"server_deafened"`
 }
 
-// voiceMovedPayload tells one client its moderator moved it to another voice
-// channel; it tears down its LiveKit session and re-joins via voice_join.
+// voiceMovedPayload tells one client its moderator moved it to another voice channel; it tears down its
+// LiveKit session and re-joins via voice_join.
 type voiceMovedPayload struct {
 	ToChannelID int64 `json:"to_channel_id"`
-	// Reason says why the server moved the client ("afk" for the idle sweep); omitted
-	// for a moderator move.
-	Reason string `json:"reason,omitempty"`
-	// ByUserID is the moderator who made the move; omitted for the AFK sweep (no actor).
-	ByUserID int64 `json:"by_user_id,omitempty"`
+	// Reason says why the server moved the client ("afk" for the sweep); omitted for a moderator move.
+	Reason   string `json:"reason,omitempty"`
+	ByUserID int64  `json:"by_user_id,omitempty"`
 }
 
-// voiceMovedReasonAFK is voice_moved's reason for a move by the AFK sweep.
 const voiceMovedReasonAFK = "afk"
 
-// voiceDisconnectedPayload tells one client a moderator removed it from voice.
 type voiceDisconnectedPayload struct {
 	ChannelID int64  `json:"channel_id"`
 	Reason    string `json:"reason"`
@@ -48,9 +43,8 @@ type voiceConfigPayload struct {
 	Quality   string `json:"quality"`
 	Bitrate   int    `json:"bitrate"`
 	MaxUsers  int    `json:"max_users"`
-	// ThresholdMode, MixingThreshold and TopSpeakers are reserved: shipped on every
-	// frame but never read by the client, since LiveKit's ActiveSpeakersChanged is
-	// authoritative. Kept for protocol compatibility; do not build on them without a reader.
+	// ThresholdMode, MixingThreshold and TopSpeakers are reserved: shipped on every frame but
+	// never read (ActiveSpeakersChanged is authoritative). Kept for protocol compatibility.
 	ThresholdMode   string `json:"threshold_mode"`
 	MixingThreshold int    `json:"mixing_threshold"`
 	TopSpeakers     int    `json:"top_speakers"`
@@ -64,26 +58,20 @@ type voiceTokenPayload struct {
 	IsKeyHolder bool   `json:"is_key_holder"`
 }
 
-// voiceE2EEAnnounceBroadcast is the server-to-client relay with user_id added.
-// Signature is the sender's identity-key signature over the ephemeral key, relayed
-// verbatim and omitted for legacy announces.
+// voiceE2EEAnnounceBroadcast is the server-to-client relay with user_id added. Signature is the sender's
+// identity-key signature over the ephemeral key, relayed verbatim, omitted for legacy announces.
 type voiceE2EEAnnounceBroadcast struct {
-	UserID    int64  `json:"user_id"`
-	PublicKey string `json:"public_key"`
-	Signature string `json:"signature,omitempty"`
-	// VideoDecode is the sender's sanitized decodable video codec list.
+	UserID      int64    `json:"user_id"`
+	PublicKey   string   `json:"public_key"`
+	Signature   string   `json:"signature,omitempty"`
 	VideoDecode []string `json:"video_decode,omitempty"`
-	// IdentityPublicKey is the announcing connection's device identity key, omitted
-	// when none was sent. Peers verify Signature against it when present, else the
-	// member's published key.
+	// IdentityPublicKey is the announcing connection's device identity key, omitted when none was sent. Peers
+	// verify Signature against it, else the member's published key.
 	IdentityPublicKey string `json:"identity_public_key,omitempty"`
-	// KeySlots is the sender's key_slots flag, omitted when false.
-	KeySlots bool `json:"key_slots,omitempty"`
-	// BoundOffers is the sender's bound_offers flag, omitted when false.
-	BoundOffers bool `json:"bound_offers,omitempty"`
+	KeySlots          bool   `json:"key_slots,omitempty"`
+	BoundOffers       bool   `json:"bound_offers,omitempty"`
 }
 
-// voiceE2EEOfferRelay is the server-to-client relay with from_user_id.
 type voiceE2EEOfferRelay struct {
 	FromUserID   int64  `json:"from_user_id"`
 	EncryptedKey string `json:"encrypted_key"`
@@ -114,8 +102,8 @@ func buildVoiceState(state db.VoiceState) []byte {
 	})
 }
 
-// buildVoiceMoved constructs voice_moved. reason is "" for a moderator move and
-// "afk" for the sweep; byUserID is the moderator, 0 (omitted) for the sweep.
+// buildVoiceMoved constructs voice_moved. reason is "" for a moderator move and "afk" for the sweep; byUserID
+// is 0 (omitted) for the sweep.
 func buildVoiceMoved(toChannelID int64, reason string, byUserID int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeVoiceMoved,
@@ -123,7 +111,6 @@ func buildVoiceMoved(toChannelID int64, reason string, byUserID int64) []byte {
 	})
 }
 
-// buildVoiceDisconnected is for the client a moderator removed from voice.
 func buildVoiceDisconnected(channelID int64, reason string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeVoiceDisconnected,
@@ -146,11 +133,9 @@ func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int
 	})
 }
 
-// buildVoiceToken constructs voice_token. url is the proxy path ("/livekit");
-// direct_url is the raw LiveKit URL for localhost clients. directURL is the
-// server's own dial address, so it is sent only when its host is loopback:
-// anything else (a docker service name, LiveKit Cloud) may not resolve on the
-// client, which then tunnels.
+// buildVoiceToken constructs voice_token. url is the proxy path ("/livekit"); direct_url is
+// the raw LiveKit URL for localhost clients, sent only when its host is loopback: anything
+// else (a docker service name, LiveKit Cloud) may not resolve on the client, which tunnels.
 func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string, isKeyHolder bool) []byte { //nolint:unparam // kept configurable for proxy path flexibility
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceToken,
@@ -164,8 +149,6 @@ func buildVoiceToken(channelID int64, token string, proxyPath string, directURL 
 	})
 }
 
-// buildVoiceE2EEAnnounce constructs a voice_e2ee_announce relay; an empty
-// signature or video decode list is omitted.
 func buildVoiceE2EEAnnounce(userID int64, a e2eeAnnounce) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceE2EEAnnounceBC,

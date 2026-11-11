@@ -12,9 +12,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// buildAuthOK constructs the auth_ok message. replaySource records the
-// reconnection tier: "none" (fresh or full re-sync), "buffer" (ring buffer) or
-// "db" (persistent EventStore).
+// buildAuthOK constructs the auth_ok message. replaySource is the reconnect tier: "none",
+// "buffer" or "db".
 func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, roleIDs []int64, replaySource string) []byte {
 	var avatarVal any
 	if user.Avatar != nil {
@@ -23,8 +22,8 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 
 	serverName, motd := h.getCachedSettings(ctx)
 
-	// Only the user's own auth_ok carries the expiry instant; an expired status the
-	// expirer has not cleared yet is not handed back.
+	// Only the user's own auth_ok carries the expiry; an expired status the expirer has not cleared is not
+	// handed back.
 	customStatus, expiresAt := storedCustomStatus(user.CustomStatus, user.CustomStatusExpiresAt, time.Now())
 	var expiresAtVal any
 	if expiresAt != "" {
@@ -46,44 +45,33 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 				"banner_color":             user.BannerColor,
 				"custom_status":            customStatus,
 				"custom_status_expires_at": expiresAtVal,
-				// Only their own auth_ok carries the true status (invisible included) so the
-				// picker renders what they chose; every other client is told offline.
+				// Only their own auth_ok carries the true status (invisible included); everyone else sees
+				// offline.
 				"status": user.Status,
 			},
 			"server_name":   serverName,
 			"motd":          motd,
 			"replay_source": replaySource,
 			"upload_policy": h.cachedUploadPolicy(ctx),
-			// The runtime game activity switch. A resume gets no ready and the unsequenced
-			// game_activity_policy frame is not replayed, so every auth_ok restores it.
+			// A resume gets no ready and game_activity_policy is unsequenced, so every auth_ok restores it.
 			"game_activity_policy": gameActivityPolicyPayload{Enabled: h.settings.gameActivity.on.Load()},
-			// The video upload cap, restored on every connect and resume for the same reason.
-			"video_bitrate_cap": videoBitrateCapPayload{MaxVideoBitrate: h.videoBitrateCap()},
+			"video_bitrate_cap":    videoBitrateCapPayload{MaxVideoBitrate: h.videoBitrateCap()},
 		},
 	})
 }
 
-// presentableMembers rewrites each member's status into what viewerID may see.
-// All rules live here so no payload builder can implement only one:
-//
-//  1. A member with no live connection is offline whatever the row says:
-//     users.status keeps a chosen idle/dnd/invisible across a disconnect so the
-//     next connect can honour it.
-//  2. A connected member shows the status their connection last stamped, never the
-//     row's: members comes from the shared read (readyMembers), which may predate
-//     that write because users.status does not move the member generation. A
-//     connection that has not stamped yet shows offline (its connect presence is
-//     announced after the stamp, so the viewer converges). The live custom status
-//     is a second guard: if the connection stamped a presence with none, the row's
-//     text is stale (the expirer sends no null frame because the live text is
-//     already nil), so it is blanked, as is one past its expiry.
-//  3. An invisible member is offline to everyone but themselves
-//     (db.StatusForViewer).
-//
-// It yields members[i] as presented, changing only Status and CustomStatus (the
-// latter only to nil: writeReadyMembers splices exactly those into each cached
-// encoding). members is shared with other ready payloads, so each element is
-// copied, never changed in place.
+// presentableMembers rewrites each member's status into what viewerID may see; all rules
+// live here so no builder can implement only one:
+// 1. A member with no live connection is offline whatever the row says (users.status keeps
+// idle/dnd/invisible across a disconnect).
+// 2. A connected member shows the status their connection last stamped, not the row's:
+// members (readyMembers) may predate that write. A connection that has not stamped shows
+// offline (its presence follows the stamp). A stamped presence with no custom status blanks
+// the row's text (the expirer sends no null frame), as does one past its expiry.
+// 3. An invisible member is offline to everyone but themselves (db.StatusForViewer).
+// It changes only Status and CustomStatus (the latter only to nil: writeReadyMembers splices
+// those into each cached encoding). members is shared with other payloads, so each element
+// is copied, never changed in place.
 func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) iter.Seq2[int, db.MemberSummary] {
 	live := h.livePresences()
 	now := time.Now()
@@ -93,7 +81,6 @@ func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) ite
 				m.Status = lp.status
 				m.Mobile = lp.mobile
 				if visibleCustomStatus(lp.customStatus, lp.customStatusExpiresAt, now) == nil {
-					// Only ever to nil (the splice contract); m is this iteration's copy.
 					m.CustomStatus = nil
 				}
 			} else {
@@ -107,18 +94,17 @@ func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) ite
 	}
 }
 
-// presentableDMChannels applies presentableMembers' rules to a DM list's recipient
-// statuses so dm_channels cannot disagree with the members array. Both Recipient
-// (legacy) and every Recipients entry are rewritten, since a 1:1 DM's Recipient is
-// a copy of Recipients[0], not a shared reference.
+// presentableDMChannels applies presentableMembers' rules to DM recipient statuses so
+// dm_channels cannot disagree with members. Both Recipient and every Recipients entry are
+// rewritten: Recipient is a copy of Recipients[0], not a shared reference.
 func (h *Hub) presentableDMChannels(dmChannels []db.DMChannelInfo, viewerID int64) []db.DMChannelInfo {
 	live := h.livePresences()
 	dmChannels = presentDMStatuses(dmChannels, viewerID, func(id int64) string { return live[id].status })
 	return presentDMMobile(dmChannels, func(id int64) bool { return live[id].mobile })
 }
 
-// presentDMMobile sets each recipient's phone flag from liveMobile, false for one
-// who reads as offline. Run after presentDMStatuses, whose statuses it reads.
+// presentDMMobile sets each recipient's phone flag from liveMobile (false when offline); run after
+// presentDMStatuses.
 func presentDMMobile(dmChannels []db.DMChannelInfo, liveMobile func(userID int64) bool) []db.DMChannelInfo {
 	for i := range dmChannels {
 		ch := &dmChannels[i]
@@ -131,8 +117,7 @@ func presentDMMobile(dmChannels []db.DMChannelInfo, liveMobile func(userID int64
 	return dmChannels
 }
 
-// presentDMStatuses is presentableDMChannels over any live-status lookup ("" for
-// no stamped connection), for a caller presenting a single DM.
+// presentDMStatuses is presentableDMChannels over any live-status lookup ("" for no stamped connection).
 func presentDMStatuses(dmChannels []db.DMChannelInfo, viewerID int64, liveStatus func(userID int64) string) []db.DMChannelInfo {
 	status := func(id int64) string {
 		if s := liveStatus(id); s != "" {
@@ -153,7 +138,6 @@ func presentDMStatuses(dmChannels []db.DMChannelInfo, viewerID int64, liveStatus
 	return dmChannels
 }
 
-// channelRefs maps db channels to the checker's db-agnostic ChannelRef.
 func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	refs := make([]permissions.ChannelRef, len(channels))
 	for i := range channels {
@@ -162,10 +146,9 @@ func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	return refs
 }
 
-// readyAffordances resolves one ready channel's subject from the member's grants
-// (OR of held roles, each role's override in that channel, and the member layer)
-// and the caller's timeout verdict (resolved once per payload, administrators
-// exempt), then asks affordancesFor. Zero grants fail closed.
+// readyAffordances resolves one ready channel's subject from the member's grants and the
+// caller's timeout verdict (resolved once per payload, administrators exempt), then asks
+// affordancesFor. Zero grants fail closed.
 func readyAffordances(grants permissions.MemberGrants, ch *db.Channel, timedOut bool) channelAffordances {
 	sub := grants.Subject(ch.AuthorityID())
 	sub.Channel = channelRef(ch)
@@ -173,28 +156,24 @@ func readyAffordances(grants permissions.MemberGrants, ch *db.Channel, timedOut 
 	return affordancesFor(sub)
 }
 
-// channelCanSend is the ready payload's can_send verdict; it delegates to affordancesFor.
 func channelCanSend(grants permissions.MemberGrants, chanType string, timedOut bool) bool {
 	return readyAffordances(grants, &db.Channel{Type: chanType}, timedOut).CanSend
 }
 
-// channelCanModerateVoice is the ready payload's can_moderate_voice verdict; it delegates to affordancesFor.
 func channelCanModerateVoice(grants permissions.MemberGrants, chanType string) bool {
 	return readyAffordances(grants, &db.Channel{Type: chanType}, false).CanModerateVoice
 }
 
-// channelRef maps one db channel to the predicates' db-agnostic ChannelRef.
 func channelRef(ch *db.Channel) permissions.ChannelRef {
 	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW,
 		AuthorityID: ch.Thread.ParentID, ThreadLocked: ch.Thread.Locked}
 }
 
-// readyVisibleChannels resolves the channels the user may see for the ready
-// payload and returns the member grants it fetched so buildReady can reuse them
-// for can_send. role is the member's effective role (top identity, OR of masks).
+// readyVisibleChannels resolves the channels the user may see for ready and returns the
+// grants it fetched so buildReady can reuse them for can_send.
 func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, channels []db.Channel) ([]db.Channel, permissions.MemberGrants, error) {
-	// Filter by READ_MESSAGES through the shared permissions.Checker predicate. DMs
-	// are excluded by the checker and delivered via dm_channels.
+	// Filter by READ_MESSAGES through permissions.Checker; DMs are excluded there and delivered via
+	// dm_channels.
 	var grants permissions.MemberGrants
 	if role != nil {
 		grants.Perms = role.Permissions
@@ -222,12 +201,11 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 	return visibleChannels, grants, nil
 }
 
-// readyThreads is ready.threads: the viewer's followed open threads whose parent is
-// in visibleChannels (an NSFW parent only once acknowledged), newest activity
-// first, capped at service.MaxFollowedThreads. A follow row for an unreadable
-// parent stays in the table and is left out, so regaining the parent brings the
-// thread back. nil (key omitted) when there is no thread service or the read
-// fails, so the client keeps what it had instead of being told it follows nothing.
+// readyThreads is ready.threads: the viewer's followed open threads whose parent is in
+// visibleChannels (NSFW parent only once acknowledged), newest first, capped at
+// service.MaxFollowedThreads. A follow row for an unreadable parent is left out but kept.
+// nil (key omitted) when there is no thread service or the read fails, so the client keeps
+// what it had.
 func (h *Hub) readyThreads(ctx context.Context, userID int64, visibleChannels []db.Channel, nsfwAck map[int64]bool) *[]readyThreadPayload {
 	svc := h.threadHub.svc
 	if svc == nil {
@@ -235,8 +213,7 @@ func (h *Hub) readyThreads(ctx context.Context, userID int64, visibleChannels []
 	}
 	readable := make(map[int64]struct{}, len(visibleChannels))
 	for i := range visibleChannels {
-		// A thread's name discloses its starter, so an unacknowledged NSFW parent lists
-		// none of its threads, as thread_changed withholds them.
+		// A thread's name discloses its starter, so an unacknowledged NSFW parent lists none of its threads.
 		if visibleChannels[i].NSFW && !nsfwAck[visibleChannels[i].ID] {
 			continue
 		}
@@ -258,25 +235,20 @@ func (h *Hub) readyThreads(ctx context.Context, userID int64, visibleChannels []
 	return &out
 }
 
-// readyDMChannels loads the user's open DM channels and applies the same presence
-// rule presentableMembers uses.
 func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader, userID int64) ([]db.DMChannelInfo, error) {
 	dmChannels, err := database.GetUserDMChannels(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady GetUserDMChannels: %w", err)
 	}
-	// GetUserDMChannels reads users.status, which keeps a chosen idle/dnd across a
-	// disconnect and trails a connect by the batched stamp; overlay the live status.
+	// GetUserDMChannels reads users.status, which trails a connect by the batched stamp; overlay the live
+	// status.
 	dmChannels = h.presentableDMChannels(dmChannels, userID)
 	return dmChannels, nil
 }
 
-// readyVoiceStates gathers the voice states the ready payload may expose to this
-// user. A collect failure is non-fatal.
 func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader, visibleChannels []db.Channel, dmChannels []db.DMChannelInfo, userID int64) []db.VoiceState {
-	// Filter to visible channels plus the user's open DMs, like computeAllowedChannels
-	// does for replay; otherwise a DM voice call's rows are unreachable
-	// (VisibleChannelIDs skips DMs).
+	// Filter to visible channels plus the user's open DMs, as computeAllowedChannels does for
+	// replay; VisibleChannelIDs skips DMs.
 	allVoiceStates, err := database.GetAllVoiceStates(ctx)
 	if err != nil {
 		slog.Warn("buildReady GetAllVoiceStates", "err", err)
@@ -289,10 +261,8 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader
 	for i := range dmChannels {
 		visibleSet[dmChannels[i].ChannelID] = struct{}{}
 	}
-	// The caller's own live voice room can never leak, so seed it even if it fell
-	// outside both sets (READ_MESSAGES revoked mid-call, or a DM call after the DM
-	// closed: CloseDM removes dm_open_state but does no voice eviction). Mirrors
-	// liveVoiceEventsSince on the replay tier.
+	// The caller's own live voice room can never leak, so seed it even if outside both sets
+	// (READ_MESSAGES revoked mid-call, or a DM closed mid-call: CloseDM does no voice eviction).
 	for i := range allVoiceStates {
 		if allVoiceStates[i].UserID == userID {
 			visibleSet[allVoiceStates[i].ChannelID] = struct{}{}
@@ -307,10 +277,9 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader
 	return voiceStates
 }
 
-// readyNSFWAcknowledgements resolves userID's acknowledgement for every labelled
-// channel in visibleChannels (the per-channel nsfw_acknowledged field) from one
-// read of the user's acknowledgements, skipped when no visible channel is
-// labelled. A failed read reports every labelled channel as unacknowledged.
+// readyNSFWAcknowledgements resolves userID's acknowledgement for every labelled channel in
+// visibleChannels from one read, skipped when none is labelled. A failed read reports all
+// as unacknowledged.
 func readyNSFWAcknowledgements(ctx context.Context, database VisibilityReader, userID int64, visibleChannels []db.Channel) map[int64]bool {
 	var acked map[int64]bool
 	var ackMap map[int64]bool
@@ -332,9 +301,8 @@ func readyNSFWAcknowledgements(ctx context.Context, database VisibilityReader, u
 	return ackMap
 }
 
-// readReady reads everything the ready message carries (see docs/protocol.md).
-// Channels include per-user unread_count and last_message_id plus the
-// channelPayloadFrom fields; archived is the one stored field not shipped.
+// readReady reads everything the ready message carries (see docs/protocol.md); archived is
+// the one stored channel field not shipped.
 func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, feat clientFeatures) (*readyFields, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
@@ -360,11 +328,9 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		return nil, fmt.Errorf("buildReady GetChannelUnreadCounts: %w", err)
 	}
 
-	// Resolve the current timeout verdict the same way (subjectFor) as
-	// refreshChannelVisibilityAffordances, or a just-timed-out user's fresh-connect
-	// ready would ship can_send: true until their next send bounces. Channel 0 is
-	// fine: only TimedOut is consulted and subjectFor skips administrators. A lookup
-	// failure fails the handshake closed.
+	// Resolve the timeout verdict as refreshChannelVisibilityAffordances does (subjectFor), or
+	// a just-timed-out user's ready would ship can_send: true. Channel 0 is fine: only TimedOut
+	// is consulted. A lookup failure fails the handshake closed.
 	sub, err := h.subjectFor(ctx, userID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady subjectFor: %w", err)
@@ -381,13 +347,11 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	}
 
 	ackMap := readyNSFWAcknowledgements(ctx, database, userID, visibleChannels)
-	// The lock is cosmetic: a failed read must not fail ready.
 	privacy := h.privacySnapshot(ctx)
 	channelPayloads := readyChannelPayloads(feat.filterChannels(visibleChannels), grants, unreadMap, ackMap, sub.TimedOut, privacy)
 
 	// Hoisted above the voice-state filter so DM channel IDs can seed visibleSet:
-	// permissions.Checker deliberately skips DMs (membership-based visibility), so
-	// otherwise a DM voice call's rows would never reach ready.
+	// permissions.Checker skips DMs, so a DM call's rows would never reach ready.
 	dmChannels, err := h.readyDMChannels(ctx, database, userID)
 	if err != nil {
 		return nil, err
@@ -431,8 +395,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	}, nil
 }
 
-// roleIDsOrEmpty is ids as a non-nil slice, so auth_ok.user.role_ids is always
-// an array.
+// roleIDsOrEmpty is ids as a non-nil slice so auth_ok.user.role_ids is always an array.
 func roleIDsOrEmpty(ids []int64) []int64 {
 	if ids == nil {
 		return []int64{}
@@ -440,8 +403,6 @@ func roleIDsOrEmpty(ids []int64) []int64 {
 	return ids
 }
 
-// sameRoleSet reports whether a and b name the same roles, whatever their
-// order (a position change reorders a member's roles without changing them).
 func sameRoleSet(a, b []int64) bool {
 	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
 }

@@ -183,6 +183,8 @@ In Go, an exported name gets a doc comment of one sentence that says what it is 
 
 A comment says the reason in plain words. It never cites a plan, work package, ledger id, pull request or review round (`WP 7.4b`, `B7-15c`, `OC-0395`, `#2805`, "Codex review round 2"): a reader of the code does not have those documents. When the history matters, link the doc path. `scripts/checks/check-comment-ids.mjs` counts such ids per file in production TypeScript, Go and Rust and holds them in `scripts/checks/comment-id-baseline.json` as a shrink-only ratchet: a file may not gain one, and a file that lost some has its row lowered with `node scripts/checks/check-comment-ids.mjs --update` (then lower `TOTAL_CAP` to the total it prints). `--list` prints every hit with its line. The same rule holds for client test titles (the first argument of `it`, `test`, `describe` and `bench` in `*.test.ts` and `*.spec.ts`): a title says the behaviour, not the ticket.
 
+Go comments are measured, too. `Server/comment_share_test.go` counts the non-blank lines of production Go that are `//` comments (directives and generated files excluded) and holds the whole server at 16 % or less and each package of 200 lines or more at 15 % or less. A short list of packages (`ws`, `auth`, `permissions`, `safefetch`, `syncutil`, `netclass`, `invariants` and a few that sat just above the line) has its own ceiling, because lock order and threat reasoning live there. Ceilings only go down. A failing check means a comment says what the code already says: shorten or drop it, never the reason.
+
 ## Commits and PRs
 
 - Branch from `dev`; `dev` is the integration branch and all contributions target it; `main` carries releases only. Branch names: `feature/<name>`, `fix/<name>`, `docs/<name>`.

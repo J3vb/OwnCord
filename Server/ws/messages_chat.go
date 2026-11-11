@@ -20,66 +20,52 @@ type chatMessagePayload struct {
 	Attachments     []map[string]any  `json:"attachments"`
 	Reactions       []any             `json:"reactions"`
 	Pinned          bool              `json:"pinned"`
-	// Mentions carries the server-resolved user ids; MentionsEveryone reports
-	// an @everyone/@here that cleared MENTION_EVERYONE. Clients highlight from
-	// these instead of re-parsing the content.
+	// Mentions carries the server-resolved user ids; MentionsEveryone reports an @everyone/@here
+	// that cleared MENTION_EVERYONE. Clients highlight from these, not by re-parsing content.
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
-	// MentionRoles lists the roles whose <@&id> token cleared the role-mention
-	// gate (mentionable, or MENTION_EVERYONE). A client counts a role mention
-	// only when the server lists the role here. Always present, empty for none.
+	// MentionRoles lists the roles whose <@&id> token cleared the role-mention gate. Always
+	// present, empty for none; a client counts a role mention only when listed here.
 	MentionRoles []int64 `json:"mention_roles"`
-	// MentionsHere reports that MentionsEveryone came from @here rather than @everyone
-	// (never both). Mention fan-out (service/mentions.go) skips the mention-count bump
-	// for an @here reader with no live connection, so a client replaying this frame
-	// must not raise a badge the server never counted.
+	// MentionsHere reports that MentionsEveryone came from @here (never both). Fan-out skips
+	// the mention-count bump for an @here reader with no live connection, so a client replaying
+	// this frame must not raise a badge the server never counted.
 	MentionsHere bool `json:"mentions_here"`
-	// ReferencedMessage is the reply parent's snippet (null when not a reply,
-	// or the parent is unavailable). A deleted parent is redacted to
-	// {id, deleted: true}. An older server omits the field.
+	// ReferencedMessage is the reply parent's snippet (null when not a reply or unavailable); a deleted
+	// parent is redacted to {id, deleted: true}.
 	ReferencedMessage *service.ReferencedMessage `json:"referenced_message"`
-	// Kind and Call are set only on a call log row and omitted for an
-	// ordinary message. See callBlock.
-	Kind string     `json:"kind,omitempty"`
-	Call *callBlock `json:"call,omitempty"`
-	// GroupEvent is set only on a group DM row, shaped like db.GroupEventInfo.
+	// Kind and Call are set only on a call log row (see callBlock).
+	Kind       string           `json:"kind,omitempty"`
+	Call       *callBlock       `json:"call,omitempty"`
 	GroupEvent *groupEventBlock `json:"group_event,omitempty"`
-	// Forward is set only on a forwarded message, shaped like db.ForwardInfo; static, so
-	// it replays as is.
+	// Forward is set only on a forwarded message; static, so it replays as is.
 	Forward *service.ForwardInfo `json:"forward,omitempty"`
-	// Poll is set only on a poll message, shaped like db.PollInfo. The counts are those
-	// at creation (zero), so a replayed frame must not roll a newer count back (clients
-	// keep the higher results.version).
+	// Poll is set only on a poll message. Counts are those at creation (zero), so a replayed
+	// frame must not roll a newer count back (clients keep the higher results.version).
 	Poll *service.PollInfo `json:"poll,omitempty"`
-	// Sticker is set only on a sticker message, shaped like db.MessageStickerInfo.
-	// Static, so it replays as is; history reads a deleted sticker back with a null id
-	// and url.
+	// Sticker is set only on a sticker message; static, so it replays as is. History reads a deleted sticker
+	// back with a null id and url.
 	Sticker *service.MessageStickerInfo `json:"sticker,omitempty"`
-	// Thread is the starter message's thread (db.ThreadInfo). A just-sent message has
-	// none, so no live send sets it; thread_changed carries a thread that appears
-	// later. The field gives a frame built from a stored row the same shape as history.
+	// Thread is the starter message's thread. A just-sent message has none (thread_changed
+	// carries a thread that appears later); it gives a stored-row frame the same shape as history.
 	Thread *service.ThreadInfo `json:"thread,omitempty"`
 }
 
-// groupEventBlock is the group_event object of a group DM row. Add and remove
-// set TargetUserID, rename sets Name ("" means removed), icon sets IconRemoved
-// and leave sets none, so it encodes as {}.
+// groupEventBlock is the group_event object of a group DM row. Add/remove set TargetUserID,
+// rename sets Name ("" means removed), icon sets IconRemoved, leave sets none ({}).
 type groupEventBlock struct {
 	TargetUserID int64   `json:"target_user_id,omitempty"`
 	Name         *string `json:"name,omitempty"`
 	IconRemoved  *bool   `json:"icon_removed,omitempty"`
 }
 
-// callBlock is the call object of a call log row: the same shape as the
-// history payload's db.CallInfo. EndedAt is null while the call is live.
+// callBlock is the call object of a call log row, shaped like db.CallInfo. EndedAt is null while live.
 type callBlock struct {
 	StartedAt    string  `json:"started_at"`
 	EndedAt      *string `json:"ended_at"`
 	Participants []int64 `json:"participants"`
 }
 
-// chatMessageArgs is the input to buildChatMessage, a struct because the payload
-// outgrew positional arguments.
 type chatMessageArgs struct {
 	ClientMessageID   string
 	MsgID             int64
@@ -98,21 +84,16 @@ type chatMessageArgs struct {
 	MentionsEveryone  bool
 	MentionsHere      bool
 	ReferencedMessage *service.ReferencedMessage
-	// Kind and Call are set only for a call log row.
-	Kind string
-	Call *callBlock
-	// GroupEvent is set only for a group DM row.
-	GroupEvent *groupEventBlock
-	// Forward is set only for a forwarded message.
-	Forward *service.ForwardInfo
-	// Poll is set only for a poll message.
-	Poll *service.PollInfo
-	// Sticker is set only for a sticker message.
-	Sticker *service.MessageStickerInfo
+	Kind              string
+	Call              *callBlock
+	GroupEvent        *groupEventBlock
+	Forward           *service.ForwardInfo
+	Poll              *service.PollInfo
+	Sticker           *service.MessageStickerInfo
 }
 
-// buildChatMessage constructs a chat_message broadcast envelope, with the role in
-// the user object and an empty reactions array to match the REST API.
+// buildChatMessage constructs a chat_message envelope, with the role in the user object and
+// an empty reactions array to match the REST API.
 func buildChatMessage(a chatMessageArgs) []byte {
 	attachments := a.Attachments
 	if attachments == nil {
@@ -162,11 +143,9 @@ func buildChatMessage(a chatMessageArgs) []byte {
 
 var referencedMessageKey = []byte(`"referenced_message":{`)
 
-// replayCopy returns the bytes kept for replay (ring buffer and events table).
-// A reply frame's parent snippet is live-only: replay can run after the parent
-// was deleted, so the stored copy carries referenced_message null and the
-// client falls back to the unknown-parent bar. Frames without a snippet are
-// returned as is.
+// replayCopy returns the bytes kept for replay. A reply's parent snippet is live-only
+// (replay can run after the parent was deleted), so the stored copy carries
+// referenced_message null. Frames without a snippet are returned as is.
 func replayCopy(frame []byte) []byte {
 	if !bytes.Contains(frame, referencedMessageKey) {
 		return frame
@@ -192,21 +171,18 @@ func replayCopy(frame []byte) []byte {
 	return out
 }
 
-// replaySplice is a reply frame's stored copy computed without its seq: the
-// bytes before and after the point where json.Marshal of the envelope map
-// would place the "seq" key (envelope keys sort, so "seq" lands between
-// "payload" and "type"). It exists so the JSON round-trips of replayCopy run
-// before seqMu is taken; under the lock only the seq digits are spliced in.
-// A nil *replaySplice means the frame needs no stripping.
+// replaySplice is a reply frame's stored copy computed without its seq: the bytes before
+// and after where json.Marshal of the envelope would place "seq" (keys sort, so between
+// "payload" and "type"). It lets replayCopy's JSON round-trips run before seqMu is taken;
+// under the lock only the seq digits are spliced in. nil means no stripping is needed.
 type replaySplice struct {
 	prefix []byte // `{"payload":...` — no trailing comma
 	suffix []byte // `"type":...}` — no leading comma
 }
 
-// newReplaySplice does replayCopy's work for a not-yet-sequenced msg. It
-// returns nil when msg carries no snippet, is not a sequenceable object, or
-// cannot be parsed — in every such case the stored copy is the wrapped frame
-// itself (or replayCopy of it, see storedCopy).
+// newReplaySplice does replayCopy's work for a not-yet-sequenced msg. nil when msg has no
+// snippet, is not a sequenceable object, or cannot be parsed (the stored copy is then the
+// wrapped frame or replayCopy of it).
 func newReplaySplice(msg []byte) *replaySplice {
 	if !sequenceable(msg) || !bytes.Contains(msg, referencedMessageKey) {
 		return nil
@@ -248,14 +224,12 @@ func newReplaySplice(msg []byte) *replaySplice {
 	return &replaySplice{prefix: bb[:len(bb)-1], suffix: ab[1:]}
 }
 
-// storedCopy returns the replay bytes for wrapped (msg stamped with seq),
-// identical to replayCopy(wrapped). rs is newReplaySplice(msg), computed
-// before the sequencing lock. It does no JSON work on the splice path.
+// storedCopy returns the replay bytes for wrapped (msg stamped with seq), identical to
+// replayCopy(wrapped); rs is newReplaySplice(msg), computed before the sequencing lock.
 func storedCopy(rs *replaySplice, msg, wrapped []byte, seq uint64) []byte {
 	if rs == nil {
 		if sequenceable(msg) {
-			// wrapped is msg plus a seq; replayCopy would have found
-			// nothing to strip or failed to parse, and returned it as is.
+			// wrapped is msg plus a seq; replayCopy would have found nothing to strip.
 			if !bytes.Contains(msg, referencedMessageKey) {
 				return wrapped
 			}
@@ -276,26 +250,22 @@ func storedCopy(rs *replaySplice, msg, wrapped []byte, seq uint64) []byte {
 }
 
 type chatSendOKPayload struct {
-	ClientMessageID string `json:"client_message_id,omitempty"`
-	Deduplicated    bool   `json:"deduplicated,omitempty"`
-	MessageID       int64  `json:"message_id"`
-	Timestamp       string `json:"timestamp"`
-	// SkippedAttachmentIDs are requested uploads the send did not attach; absent when all were attached.
+	ClientMessageID      string   `json:"client_message_id,omitempty"`
+	Deduplicated         bool     `json:"deduplicated,omitempty"`
+	MessageID            int64    `json:"message_id"`
+	Timestamp            string   `json:"timestamp"`
 	SkippedAttachmentIDs []string `json:"skipped_attachment_ids,omitempty"`
 }
 
 type chatEditedPayload struct {
-	MessageID int64  `json:"message_id"`
-	ChannelID int64  `json:"channel_id"`
-	Content   string `json:"content"`
-	EditedAt  string `json:"edited_at"`
-	// Mentions/MentionsEveryone are re-resolved from the edited content.
+	MessageID        int64   `json:"message_id"`
+	ChannelID        int64   `json:"channel_id"`
+	Content          string  `json:"content"`
+	EditedAt         string  `json:"edited_at"`
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
-	// MentionRoles: see chatMessagePayload.MentionRoles.
-	MentionRoles []int64 `json:"mention_roles"`
-	// MentionsHere: see chatMessagePayload.MentionsHere.
-	MentionsHere bool `json:"mentions_here"`
+	MentionRoles     []int64 `json:"mention_roles"`
+	MentionsHere     bool    `json:"mentions_here"`
 }
 
 type chatDeletedPayload struct {
@@ -359,7 +329,6 @@ func buildChatDeleted(msgID, channelID int64) []byte {
 	})
 }
 
-// buildChatBulkDeleted emits ids as [] not null when nothing was purged.
 func buildChatBulkDeleted(channelID int64, ids []int64) []byte {
 	if ids == nil {
 		ids = []int64{}

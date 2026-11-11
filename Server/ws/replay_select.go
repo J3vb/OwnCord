@@ -8,10 +8,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// reconnectSelectReplay picks the tier that serves this resume (the ring buffer if
-// it covers lastSeq, else the cold-tier EventStore) and returns the events, the
-// tier name and, cold tier only, the persisted rows plus their highest seq for
-// reconnectRegister's re-read. Nil events means neither tier can replay.
+// reconnectSelectReplay picks the tier that serves this resume (ring buffer if it covers
+// lastSeq, else the cold-tier EventStore) and returns the events, the tier name and, cold
+// tier only, the persisted rows plus their highest seq for reconnectRegister's re-read. Nil
+// events means neither tier can replay.
 func (h *Hub) reconnectSelectReplay(
 	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 ) ([][]byte, string, [][]byte, uint64) {
@@ -26,7 +26,6 @@ func (h *Hub) reconnectSelectReplay(
 		return events, replaySource, persistedTail, maxPersistedSeq
 	}
 	h.noteRingMiss(lastSeq)
-	// Try cold-tier replay from the EventStore before forcing a full ready.
 	if esp := h.events.eventStore.Load(); esp != nil {
 		es := *esp
 		channelIDs := make([]int64, 0, len(allowedChannelIDs))
@@ -40,19 +39,17 @@ func (h *Hub) reconnectSelectReplay(
 			slog.Warn("ws handleReconnect: cold-tier replay query failed",
 				"user_id", c.userID, "err", dbErr)
 		case len(persisted) >= coldCap:
-			// The query is ORDER BY seq ASC LIMIT maxColdReplay, so a full result means the
-			// gap exceeds the cap and the newest events were dropped. Replaying it would look
-			// like a complete resume (the client tracks only max(seq)) and silently lose
-			// state events REST history never repairs. Leave events nil to force a full ready.
+			// The query is ORDER BY seq ASC LIMIT maxColdReplay, so a full result means the gap exceeds
+			// the cap and the newest events were dropped. Replaying it would look like a complete
+			// resume (the client tracks only max(seq)) and silently lose state events REST never
+			// repairs: leave events nil to force a full ready.
 			slog.Warn("ws handleReconnect: cold-tier replay hit the row cap, forcing full ready",
 				"user_id", c.userID, "last_seq", lastSeq, "cap", coldCap)
 		case len(persisted) > 0:
-			// Retention pruning deletes purely by created_at with no seq-floor coordination,
-			// so this channel-filtered result can be a surviving suffix after the events
-			// between lastSeq and persisted[0] were pruned, which would present a hole as a
-			// complete resume. Probe the store's oldest surviving seq unfiltered: a
-			// contiguity check on persisted itself cannot work since a sparse per-channel
-			// result is legitimately non-contiguous.
+			// Retention pruning deletes by created_at with no seq-floor coordination, so this
+			// channel-filtered result can be a surviving suffix that presents a hole as a complete
+			// resume. Probe the store's oldest surviving seq unfiltered: a contiguity check on persisted
+			// cannot work since a sparse per-channel result is legitimately non-contiguous.
 			oldest, oldestErr := es.GetEventsSince(ctx, 0, 1)
 			switch {
 			case oldestErr != nil:
@@ -77,17 +74,16 @@ func (h *Hub) reconnectSelectReplay(
 	return events, replaySource, persistedTail, maxPersistedSeq
 }
 
-// reconnectVetColdTail turns a cold-tier result into a replayable tail, or nil
-// when it cannot be trusted: the range must have no interior gap and the ring
-// buffer must cover everything newer than its last row. The returned seq is the
-// highest in persisted.
+// reconnectVetColdTail turns a cold-tier result into a replayable tail, or nil when it
+// cannot be trusted: no interior gap, and the ring buffer must cover everything newer than
+// its last row. The returned seq is the highest in persisted.
 func (h *Hub) reconnectVetColdTail(
 	ctx context.Context, c *Client, es EventStore, lastSeq uint64,
 	persisted []db.PersistedEvent, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 ) ([][]byte, uint64) {
-	// A content-bearing row for an allowed but unreadable (labelled, unacknowledged)
-	// channel is dropped, the same rule EventsSinceFilteredContent applies to the
-	// ring buffer. Checked against the row's stored EventType/ChannelID, not its payload.
+	// A content-bearing row for an allowed but unreadable (labelled, unacknowledged) channel is
+	// dropped, as EventsSinceFilteredContent does for the ring buffer. Checked against the
+	// row's stored EventType/ChannelID, not its payload.
 	persistedTail := make([][]byte, 0, len(persisted))
 	for _, p := range persisted {
 		if contentBearingKinds[p.EventType] && !nsfwReadableChannelIDs[p.ChannelID] {
@@ -97,12 +93,11 @@ func (h *Hub) reconnectVetColdTail(
 	}
 	maxPersistedSeq := uint64(persisted[len(persisted)-1].Seq) //nolint:gosec // seq is a counter bounded well below MaxInt64
 
-	// persisted is channel-filtered, so a hole in a channel outside
-	// allowedChannelIDs would slip past a contiguity check on it, and EventPersister
-	// can lose a row outright (full queue drops silently in Enqueue; a per-row insert
-	// failure in a batch flush is only logged). Count the unfiltered range
-	// (lastSeq, maxPersistedSeq] and require every seq present; seq is the primary
-	// key so the count can only come up short.
+	// persisted is channel-filtered, so a hole in a channel outside allowedChannelIDs would slip
+	// past a contiguity check on it, and EventPersister can lose a row (a full queue drops
+	// silently; a per-row batch insert failure is only logged). Count the unfiltered range
+	// (lastSeq, maxPersistedSeq] and require every seq present; seq is the primary key so the
+	// count can only come up short.
 	expectedCount := maxPersistedSeq - lastSeq
 	switch gapCount, gapErr := es.CountEventsInRange(ctx, int64(lastSeq), int64(maxPersistedSeq)); { //nolint:gosec // bounded well below MaxInt64
 	case gapErr != nil:
@@ -117,16 +112,14 @@ func (h *Hub) reconnectVetColdTail(
 	}
 
 	if persistedTail != nil {
-		// EventPersister flushes asynchronously, so cold rows can lag the live seq and
-		// newer events sit only in the ring buffer. Confirm the buffer covers everything
-		// above the newest persisted row; a hole must force a full ready, not a replay
-		// with a silent gap at its end. (The authoritative re-read is atomic with
-		// registerNow.)
+		// EventPersister flushes asynchronously, so newer events may sit only in the ring buffer. Confirm the
+		// buffer covers everything above the newest persisted row; a hole must force a full ready, not a
+		// replay with a silent gap at its end (the authoritative re-read is atomic with registerNow).
 		switch tail := h.ReplayBuffer().EventsSinceFilteredContent(maxPersistedSeq, allowedChannelIDs, nsfwReadableChannelIDs); {
 		case tail != nil:
 		case atomic.LoadUint64(&h.seq) == maxPersistedSeq:
-			// Post-restart empty buffer with the hub seq seeded from the store max: nothing
-			// was broadcast after the last persisted row.
+			// Post-restart empty buffer with the hub seq seeded from the store max: nothing was broadcast
+			// after the last persisted row.
 		default:
 			slog.Warn("ws handleReconnect: ring buffer cannot cover the post-flush tail, forcing full ready",
 				"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)

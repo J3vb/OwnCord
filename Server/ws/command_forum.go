@@ -8,8 +8,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ForumPostCreateCmd represents a forum_post_create message: a post
-// titled Name with its opening message, in forum ChannelID.
+// ForumPostCreateCmd represents a forum_post_create message: a post titled Name with its opening
+// message, in forum ChannelID.
 type ForumPostCreateCmd struct {
 	userID          int64
 	ReqID           string
@@ -25,14 +25,12 @@ func (c ForumPostCreateCmd) Type() string          { return MsgTypeForumPostCrea
 func (c ForumPostCreateCmd) UserID() int64         { return c.userID }
 func (c ForumPostCreateCmd) Attachments() []string { return slices.Clone(c.attachments) }
 
-// maxForumPostTagIDs bounds the tag list a frame may carry before the service
-// applies the real limit (db.MaxPostTags), so a hostile list costs nothing.
+// maxForumPostTagIDs bounds the frame's tag list before the service applies
+// db.MaxPostTags, so a hostile list costs nothing.
 const maxForumPostTagIDs = 32
 
-// parseForumPostCreate is the forum_post_create entry of commandConstructors.
-// The attachment ids follow chat_send's rules: upload ids, at most 10, each
-// bounded in length. client_message_id is required; the service validates its
-// shape.
+// parseForumPostCreate is the forum_post_create entry of commandConstructors;
+// attachment ids follow chat_send's rules and client_message_id is required.
 func parseForumPostCreate(userID int64, reqID string, raw json.RawMessage) (Command, error) {
 	var p struct {
 		ClientMessageID string      `json:"client_message_id"`
@@ -70,20 +68,17 @@ func parseForumPostCreate(userID int64, reqID string, raw json.RawMessage) (Comm
 }
 
 type forumPostCreateOKPayload struct {
-	// Thread is absent on a retry answered for a caller who can no longer see
-	// the forum.
+	// Thread is absent on a retry answered for a caller who can no longer see the
+	// forum.
 	Thread          *service.ThreadInfo `json:"thread,omitempty"`
 	MessageID       int64               `json:"message_id"`
 	ClientMessageID string              `json:"client_message_id"`
 	Deduplicated    bool                `json:"deduplicated"`
-	// SkippedAttachmentIDs are requested uploads the post did not attach, as in
-	// chat_send_ok; absent when every one was attached.
+	// SkippedAttachmentIDs are requested uploads not attached, as in
+	// chat_send_ok.
 	SkippedAttachmentIDs []string `json:"skipped_attachment_ids,omitempty"`
 }
 
-// buildForumPostCreateOK answers a forum_post_create to its sender with the
-// post as it stands. deduplicated is true when a retry was answered from the
-// receipt and nothing new was posted.
 func buildForumPostCreateOK(requestID string, t *service.ThreadInfo, msgID int64, clientMessageID string, duplicate bool, skipped []string) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeForumPostCreateOK,
