@@ -28,8 +28,8 @@ var FS embed.FS
 
 // Order is every migration reversal, newest first — the order to run them in.
 var Order = []string{
-	"090_attachment_lookup_indexes.down.sql",
 	"091_channel_retention_swept.down.sql",
+	"090_attachment_lookup_indexes.down.sql",
 	"089_messages_live_index.down.sql",
 	"088_user_storage_quota.down.sql",
 	"087_discord_import.down.sql",

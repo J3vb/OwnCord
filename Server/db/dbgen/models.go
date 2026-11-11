@@ -140,6 +140,12 @@ type ChannelRetention struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
+type ChannelRetentionSwept struct {
+	ChannelID int64  `json:"channelId"`
+	Cutoff    string `json:"cutoff"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
 type ChannelUserOverride struct {
 	ChannelID int64 `json:"channelId"`
 	UserID    int64 `json:"userId"`

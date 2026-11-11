@@ -62,9 +62,8 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 		}
 		if !exhausted {
 			rep.Budgeted = true
-		} else if err := s.st.RecordRetentionSwept(ctx, w.ChannelID, cutoff); err != nil {
-			sweepErr = err
-			break
+		} else {
+			s.noteSwept(ctx, w.ChannelID, cutoff)
 		}
 	}
 	rep.Channels = run.channels
@@ -94,6 +93,14 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 		return rep, sweepErr
 	}
 	return rep, fileErr
+}
+
+// noteSwept records that a channel's sweep finished to cutoff. A failed record only
+// means the start-up replay runs again for the channel, so it is logged and the caller goes on.
+func (s *RetentionService) noteSwept(ctx context.Context, channelID int64, cutoff time.Time) {
+	if err := s.st.RecordRetentionSwept(ctx, channelID, cutoff); err != nil {
+		slog.Warn("retention: recording the swept cutoff failed, the start-up replay will run again", "channel_id", channelID, "err", err)
+	}
 }
 
 // sweepRun is the state one retention run accumulates across batches: budget left, the run row (runID is 0
@@ -292,9 +299,7 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 				return total, sweepErr
 			}
 			if exhausted {
-				if err := s.st.RecordRetentionSwept(ctx, channelID, t); err != nil {
-					return total, fmt.Errorf("record retention swept cutoff for channel %d: %w", channelID, err)
-				}
+				s.noteSwept(ctx, channelID, t)
 				return total, nil
 			}
 		}
