@@ -247,6 +247,7 @@ export const shards = {
   ],
   "transport-auth-3": [
     "src/features/connection/connectBranding.ts",
+    "src/features/connection/ocLogo.ts",
     "src/features/profiles/openUserProfilePopup.ts",
     "src/lib/apiShared.ts",
     "src/lib/net/hostNormalize.ts",
