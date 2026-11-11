@@ -16,7 +16,9 @@ import {
   updateDmParticipant,
   type DmUser,
 } from "../../stores/dm.store";
+import { authStore } from "../../stores/auth.store";
 import { type ReadyActivity, type ReadyListening } from "../../lib/types";
+import { noteServerStatus, statusAccount } from "../../lib/presence/serverStatus";
 import { applyGameActivityPolicy, gameActivityPolicyIsOff } from "../../lib/net/serverCapabilities";
 import type { Payload } from "../connection/dispatchContext";
 
@@ -79,7 +81,13 @@ function applyGameActivityList(
   }
 }
 
+/** A presence frame naming this user is the server saying what it holds for the account. */
+function noteOwnStatus(userId: number, status: string): void {
+  if (userId === authStore.getState().user?.id) noteServerStatus(statusAccount(userId), status);
+}
+
 export function handlePresence(payload: Payload<"presence">): void {
+  noteOwnStatus(payload.user_id, payload.status);
   // custom_status is passed through verbatim, undefined included: the
   // store treats "field absent" as "leave the text alone", which is what
   // an older server's presence event means.
@@ -118,6 +126,7 @@ export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
     ? payload.updates.map((u) => ({ ...u, activity: null, listening: null }))
     : payload.updates;
   applyPresenceBatch(updates, full);
+  for (const u of updates) noteOwnStatus(u.user_id, u.status);
   // Only DM partners need the dmStore copy (see handlePresence); a full
   // snapshot takes a partner it leaves out offline.
   const statuses = new Map(updates.map((u) => [u.user_id, u.status]));

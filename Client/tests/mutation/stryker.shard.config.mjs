@@ -471,6 +471,8 @@ export const shards = {
     "src/lib/prefs/channelMuteExpiry.ts",
     "src/lib/prefs/notificationLevel.ts",
     "src/lib/presence/latency.ts",
+    "src/lib/presence/serverStatus.ts",
+    "src/lib/presence/statusAgreement.ts",
     "src/lib/presence/userStatus.ts",
     "src/lib/text/formatting.ts",
   ],
@@ -518,6 +520,8 @@ export const shards = {
   ],
   "stores-1": [
     "src/features/channels/categoryActions.ts",
+    "src/features/messaging/loadJournal.ts",
+    "src/features/messaging/loadJournalReplay.ts",
     "src/features/messaging/readingAnchor.ts",
     "src/features/panes/paneResize.ts",
     "src/features/profiles/userNotes.ts",

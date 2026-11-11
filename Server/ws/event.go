@@ -393,6 +393,9 @@ type CallSignalEvent struct {
 	eventType    string
 	targetUserID int64
 	payload      []byte
+	// ownDevices narrows delivery to the target's sockets that declared
+	// call_sync: the sender's own other devices.
+	ownDevices bool
 }
 
 func (e CallSignalEvent) EventType() string            { return e.eventType }

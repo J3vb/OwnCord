@@ -111,6 +111,10 @@ and only when it changes something a contributor or fork holder must do
 - A thread whose history could not be reloaded after a reconnect now tells you and offers Jump to present, instead of silently showing a gap in the replies.
 - A thread reply that failed to send can still be retried after you close and reopen the thread; Retry used to do nothing.
 - A thread or forum post that lost its newest replies (after a failed load, or after scrolling back through hundreds of replies) now recovers: Jump to present reloads the newest replies, scrolling to the bottom loads newer ones, and new replies from others appear again.
+- After saving your profile, the display name and About fields now show what the server stored when it cleaned the text, and Settings no longer asks to discard changes you already saved.
+- A status chosen on one device (Do Not Disturb, Invisible, Online) is now adopted by your other signed-in devices. They used to put their own older status back when they reconnected, started or came back from idle.
+- A message edited, deleted or pinned just as you opened (or came back to) a channel no longer shows its old state until you leave and return; the change is kept when the message list finishes loading.
+- A direct-message call you answered or declined on one device no longer keeps ringing on your other signed-in devices or ends there as a missed call. Ringing again from inside a call you are already in no longer rings your other devices either.
 - Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
 - Linux: switching audio devices or muting and unmuting no longer makes other voice controls wait.
 - Linux: stopping a camera or screen share no longer makes other voice controls wait, and starting the camera again right after waits for the old one to close.
