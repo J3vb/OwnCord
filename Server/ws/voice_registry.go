@@ -20,7 +20,7 @@ package ws
 // removals are scoped by identity and join token and run after unlock or on
 // removeLiveKitParticipantAsync. A goroutine holds at most one user's lock and never
 // takes it while holding any lock to its right. The hub dispatch goroutine never
-// takes it. A path holding voiceHub.mod never calls a membership path.
+// takes it. A path that holds voiceHub.mod without this lock never takes it.
 // voiceSlot.voiceMu, voiceGrace.mu and the voicestate rejoin and reconcile locks are leaves: no I/O, no
 // other lock. voiceHub.mod is described in voicestate/userlocks.go.
 

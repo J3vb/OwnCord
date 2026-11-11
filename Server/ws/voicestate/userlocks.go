@@ -16,8 +16,8 @@ import (
 //     produced. It is held across a LiveKit RPC.
 //   - voiceRegistry.voiceMember serializes every change to a user's voice
 //     membership. The lock order for both is in ws/lock_order.go. hubVoice.mod
-//     comes right after voiceMember, and a path holding hubVoice.mod never calls a
-//     membership path.
+//     comes right after voiceMember: a membership path may take it, and then waits
+//     for a moderation call in flight; a hubVoice.mod holder never takes voiceMember.
 //
 // R is the rank the instance's entries carry (ws/lock_order.go): voiceMember and
 // hubVoice.mod are the same type with different ranks, so the deadlock build

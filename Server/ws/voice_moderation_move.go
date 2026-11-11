@@ -58,7 +58,8 @@ func evictForMove(ctx context.Context, mod VoiceModerator, targetID, channelID i
 // in between where it would be lost with the row.
 //
 // It reports false, with nothing stashed, when the target has no
-// connection on this node or has left channelID. A target whose connection is
+// connection on this node or has left channelID, and when the flags cannot be
+// read: a move that guessed "none" would lift a mute. A target whose connection is
 // parked in the grace window has no live connection to hold the stash, so the
 // move is kept for the parking session instead (parkedModMove): its resume
 // collects the flags and the voice_moved frame and re-joins the destination.
@@ -67,7 +68,10 @@ func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64
 	defer txn.end()
 	unlockMod := h.voiceHub.mod.Lock(userID)
 	defer unlockMod()
-	flags := h.modFlagsInChannel(ctx, userID, channelID)
+	flags, ok := h.modFlagsInChannel(ctx, userID, channelID)
+	if !ok {
+		return false
+	}
 	c := h.voiceClient(userID)
 	if c == nil {
 		h.noteModeratorExit(userID, nil)
@@ -86,22 +90,22 @@ func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64
 }
 
 // modFlagsInChannel reads the moderator mute/deafen on userID's row when that
-// row is in channelID, and no flags otherwise or when the read fails. The
-// caller holds the user's moderation lock, so the answer stays true until it
-// releases it.
-func (h *Hub) modFlagsInChannel(ctx context.Context, userID, channelID int64) modFlagStash {
+// row is in channelID, and no flags when it is elsewhere or gone. ok is false
+// when the read failed and the flags are unknown. The caller holds the user's
+// moderation lock, so the answer stays true until it releases it.
+func (h *Hub) modFlagsInChannel(ctx context.Context, userID, channelID int64) (flags modFlagStash, ok bool) {
 	if h.voice == nil {
-		return modFlagStash{}
+		return modFlagStash{}, true
 	}
 	state, err := h.voice.State(ctx, userID)
 	if err != nil {
-		slog.Warn("voice move: could not read the moderator flags to carry", "user_id", userID, "channel_id", channelID, "err", err)
-		return modFlagStash{}
+		slog.Warn("voice move: could not read the moderator flags, move refused", "user_id", userID, "channel_id", channelID, "err", err)
+		return modFlagStash{}, false
 	}
 	if state == nil || state.ChannelID != channelID {
-		return modFlagStash{}
+		return modFlagStash{}, true
 	}
-	return modFlagStash{muted: state.ServerMuted, deafened: state.ServerDeafened, mutedBy: state.ServerMutedBy}
+	return modFlagStash{muted: state.ServerMuted, deafened: state.ServerDeafened, mutedBy: state.ServerMutedBy}, true
 }
 
 // modFlagStash is the moderator mute/deafen an eviction carries to the

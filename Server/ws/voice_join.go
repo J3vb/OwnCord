@@ -67,7 +67,8 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 	}
 	leaveDone := time.Now()
 
-	state, ok := h.voiceJoinPersist(fctx, ctx, txn, c, capacity, channelID, reqID)
+	state, ok := h.voiceJoinPersistWithModFlags(fctx, ctx, txn, c, capacity, channelID, reqID,
+		modFlagStash{muted: wasServerMuted, deafened: wasServerDeafened, mutedBy: wasServerMutedBy})
 	if !ok {
 		// voiceJoinLeaveCurrent already took the moderator mute/deafen stash off the
 		// client (or read it off the row it deleted) and nothing was persisted for
@@ -76,8 +77,6 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 		h.announceUnconfirmedMoveLeave(ctx, c, unannounced)
 		return
 	}
-
-	state = h.voiceJoinRestoreModFlags(ctx, c, channelID, state, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 	persistDone := time.Now()
 
 	granted, tokenRolledBack := h.voiceJoinGrantToken(ctx, txn, c, channelID, ch.AFK, state, reqID)
@@ -300,17 +299,19 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 // happen under the moderation lock every mute and unmute writes under, so one
 // that races the switch lands before the read (and is carried to the new
 // channel) or after the delete (and is told the member has left), never in
-// between where it would be lost with the row. left is false when the read ran
-// out of time: the error frame is sent and nothing was torn down.
+// between where it would be lost with the row. left is false when the read
+// failed or ran out of time: the flags are unknown, so the error frame is sent
+// and nothing was torn down.
 func (h *Hub) leaveForSwitch(fctx, ctx context.Context, txn *voiceTxn, c *Client, reqID string) (flags modFlagStash, left bool) {
 	unlockMod := h.voiceHub.mod.Lock(c.userID)
 	defer unlockMod()
 	prevState, prevErr := h.voice.State(fctx, c.userID)
-	if commandDeadlineExceeded(fctx, prevErr) {
+	if prevErr != nil {
+		slog.Warn("voice switch: could not read the moderator flags, switch refused", "user_id", c.userID, "err", prevErr)
 		voiceJoinFail(fctx, c, reqID, prevErr, ErrCodeInternal, "voice channel switch failed — please try again")
 		return modFlagStash{}, false
 	}
-	if prevErr == nil && prevState != nil {
+	if prevState != nil {
 		flags = modFlagStash{muted: prevState.ServerMuted, deafened: prevState.ServerDeafened, mutedBy: prevState.ServerMutedBy}
 	}
 	h.handleVoiceLeave(ctx, txn, c, voiceLeaveReasonSwitch)

@@ -71,8 +71,9 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 // connection or, when from is nil, on the parked session. The read and the
 // leave share one hold of the moderation lock every mute and unmute writes
 // under, so one that races the move is carried to the new device or told the
-// member has left, never lost with the old row. left is false when the read ran
-// out of time: the error frame is sent and nothing was torn down.
+// member has left, never lost with the old row. left is false when the read
+// failed or ran out of time: the flags are unknown, so the error frame is sent
+// and nothing was torn down.
 func (h *Hub) leaveForCallMove(fctx, ctx context.Context, txn *voiceTxn, c, from *Client, channelID int64, reqID string) (flags modFlagStash, unannounced int64, left bool) {
 	unlockMod := h.voiceHub.mod.Lock(c.userID)
 	defer unlockMod()
@@ -80,11 +81,12 @@ func (h *Hub) leaveForCallMove(fctx, ctx context.Context, txn *voiceTxn, c, from
 	// follows a channel switch: read it off the row about to be deleted, or off
 	// the old connection's stash when the row is already gone.
 	prev, prevErr := h.voice.State(fctx, c.userID)
-	if commandDeadlineExceeded(fctx, prevErr) {
+	if prevErr != nil {
+		slog.Warn("voice call move: could not read the moderator flags, move refused", "user_id", c.userID, "err", prevErr)
 		voiceJoinFail(fctx, c, reqID, prevErr, ErrCodeInternal, "voice channel switch failed — please try again")
 		return modFlagStash{}, 0, false
 	}
-	if prevErr == nil && prev != nil {
+	if prev != nil {
 		flags = modFlagStash{muted: prev.ServerMuted, deafened: prev.ServerDeafened, mutedBy: prev.ServerMutedBy}
 	}
 	if from != nil {

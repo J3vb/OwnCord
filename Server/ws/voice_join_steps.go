@@ -39,6 +39,25 @@ func (h *Hub) voiceJoinPersist(fctx, ctx context.Context, txn *voiceTxn, c *Clie
 	return state, true
 }
 
+// voiceJoinPersistWithModFlags commits the join and re-applies the moderator
+// mute/deafen that predates it. With flags to re-apply, the insert and the
+// restore share one hold of the moderation lock every mute and unmute writes
+// under: a moderator's change lands before the row exists (and is told the
+// member is not there) or after the row carries the flags, never between the
+// two where the restore would overwrite it. A join with nothing to re-apply
+// takes no extra lock. Returns false once the error frame has been sent.
+func (h *Hub) voiceJoinPersistWithModFlags(fctx, ctx context.Context, txn *voiceTxn, c *Client, capacity int, channelID int64, reqID string, flags modFlagStash) (*db.VoiceState, bool) {
+	if flags.muted || flags.deafened {
+		unlockMod := h.voiceHub.mod.Lock(c.userID)
+		defer unlockMod()
+	}
+	state, ok := h.voiceJoinPersist(fctx, ctx, txn, c, capacity, channelID, reqID)
+	if !ok {
+		return nil, false
+	}
+	return h.voiceJoinRestoreModFlags(ctx, c, channelID, state, flags.muted, flags.deafened, flags.mutedBy), true
+}
+
 // voiceJoinRestoreModFlags re-applies a moderator mute/deafen that predates a
 // channel switch and returns the state to broadcast (the re-read row if restored,
 // else the original). No SFU mute accompanies it: MuteParticipant resolves the
