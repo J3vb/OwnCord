@@ -82,11 +82,15 @@ vi.mock("@lib/dispatcher", () => ({
 
 vi.mock("../../src/app/sessionDispatcher", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../src/app/sessionDispatcher")>();
-  return { ...real, loadDispatcher: vi.fn(real.loadDispatcher) };
+  return {
+    ...real,
+    loadDispatcher: vi.fn(real.loadDispatcher),
+    loadedDispatcher: vi.fn(real.loadedDispatcher),
+  };
 });
 
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
-import { loadDispatcher } from "../../src/app/sessionDispatcher";
+import { loadDispatcher, loadedDispatcher } from "../../src/app/sessionDispatcher";
 import { createApiClient } from "@lib/api";
 import { createWsClient, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { authStore, clearAuth, setAuth } from "@stores/auth.store";
@@ -159,6 +163,7 @@ describe("start and abandon", () => {
   });
 
   it("records the connect target, then wires the dispatcher before it dials", async () => {
+    vi.mocked(loadedDispatcher).mockReturnValueOnce(null);
     const connect = vi.spyOn(ws, "connect");
     startSession("a.example:8443", "tok-a", "casey");
     expect(sessionTarget()).toEqual({ host: "a.example:8443", token: "tok-a" });
@@ -172,7 +177,17 @@ describe("start and abandon", () => {
     connect.mockRestore();
   });
 
+  it("wires and dials in the same task once the dispatcher has loaded", async () => {
+    await loadDispatcher();
+    const connect = vi.spyOn(ws, "connect");
+    startSession("a.example:8443", "tok-a", "casey");
+    expect(dispatcherSeq).toBe(1);
+    expect(connect).toHaveBeenCalledTimes(1);
+    connect.mockRestore();
+  });
+
   it("an attempt abandoned while the dispatcher loads never wires or dials", async () => {
+    vi.mocked(loadedDispatcher).mockReturnValueOnce(null);
     const connect = vi.spyOn(ws, "connect");
     startSession("a.example:8443", "tok-a", "casey");
     api.endSession();
@@ -240,6 +255,7 @@ describe("a second startSession while an attempt is in flight", () => {
 
 describe("a same-host, same-token re-entry", () => {
   it("drops the first attempt's listeners and keeps a single overlay", async () => {
+    vi.mocked(loadedDispatcher).mockReturnValueOnce(null).mockReturnValueOnce(null);
     const connect = vi.spyOn(ws, "connect");
     startSession("a.example:8443", "tok-a", "casey");
     startSession("a.example:8443", "tok-a", "casey");
@@ -252,10 +268,21 @@ describe("a same-host, same-token re-entry", () => {
     expect(overlays).toHaveLength(1);
     expect(overlays.filter((o) => !o.destroyed)).toHaveLength(1);
   });
+
+  it("with the dispatcher loaded, the second attempt unwires the first before it wires", async () => {
+    await loadDispatcher();
+    startSession("a.example:8443", "tok-a", "casey");
+    startSession("a.example:8443", "tok-a", "casey");
+    expect(events).toContain("dispatcher-1-unsub");
+    expect(dispatcherSeq).toBe(2);
+    await authOk();
+    expect(overlays.filter((o) => !o.destroyed)).toHaveLength(1);
+  });
 });
 
 describe("the dispatcher chunk fails to load", () => {
   it("ends the sign-in on the form without dialing or running the offline wait", async () => {
+    vi.mocked(loadedDispatcher).mockReturnValueOnce(null);
     vi.mocked(loadDispatcher).mockRejectedValueOnce(new Error("chunk fetch failed"));
     const connect = vi.spyOn(ws, "connect");
     const onTimeout = vi.fn();

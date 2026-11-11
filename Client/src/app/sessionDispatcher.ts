@@ -7,14 +7,23 @@ import { createLogger } from "@lib/logger";
 
 const log = createLogger("sessionDispatcher");
 
-type DispatcherModule = typeof import("@lib/dispatcher");
+export type DispatcherModule = typeof import("@lib/dispatcher");
 
 let pending: Promise<DispatcherModule> | null = null;
+let loaded: DispatcherModule | null = null;
 
-/** The dispatcher module, loaded once. A failed load is forgotten, so the next sign-in retries it. */
+/** The dispatcher module when it has finished loading, else null. */
+export function loadedDispatcher(): DispatcherModule | null {
+  return loaded;
+}
+
+/** The dispatcher module, loaded once. A failed load is forgotten, so the next sign-in tries again. */
 export function loadDispatcher(): Promise<DispatcherModule> {
   if (pending === null) {
-    const attempt = import("@lib/dispatcher");
+    const attempt = import("@lib/dispatcher").then((dispatcher) => {
+      loaded = dispatcher;
+      return dispatcher;
+    });
     pending = attempt;
     attempt.catch(() => {
       if (pending === attempt) pending = null;
@@ -23,7 +32,7 @@ export function loadDispatcher(): Promise<DispatcherModule> {
   return pending;
 }
 
-/** Starts the download early. A failure here is only logged: the sign-in that needs it retries and reports it. */
+/** Starts the download early. A failure here is only logged: the sign-in that needs it tries again and reports it. */
 export function prefetchDispatcher(): void {
   loadDispatcher().catch((err: unknown) => {
     log.warn("Session code prefetch failed; sign-in will retry", { error: String(err) });

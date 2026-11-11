@@ -104,10 +104,9 @@ export type DispatcherCleanup = () => void;
  * ws client's internal state machine onto the 3-state status, and records
  * whether a dial has failed in the current outage. That fact holds across the
  * backoff's later dials and clears only on a connection or a fresh connect
- * from a stopped socket (sign-in, server switch, "Use here"). Wired once,
- * when this module first loads for a sign-in (app/session.ts), and kept for the
- * app's lifetime — deliberately separate from wireDispatcher, whose listeners
- * are torn down per connection.
+ * from a stopped socket (sign-in, server switch, "Use here"). Wired once, on
+ * this module's first load (app/session.ts), for the app's lifetime: apart from
+ * wireDispatcher, whose listeners are torn down per connection.
  */
 export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () => void {
   let prev: ConnectionState = "disconnected";

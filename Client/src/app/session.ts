@@ -20,7 +20,8 @@ import {
   PREAUTH_CONNECT_TIMEOUT_MS,
   type WsClient,
 } from "@lib/ws";
-import { loadDispatcher, prefetchDispatcher } from "./sessionDispatcher";
+import { loadDispatcher, loadedDispatcher, prefetchDispatcher } from "./sessionDispatcher";
+import type { DispatcherModule } from "./sessionDispatcher";
 import { startReadyDeadline } from "./readyDeadline";
 import { setIdentityKeyProvider } from "@lib/ws";
 import { setLastChannelHost } from "@lib/prefs/lastChannel";
@@ -46,13 +47,11 @@ let currentPage: () => PageId;
 let navigate: (page: PageId) => void;
 
 let dispatcherCleanup: (() => void) | null = null;
-// The single writer for the UX-facing connection status (docs/architecture/ux
-// §3), wired once for the app's lifetime from the first dispatcher load: the
-// status only moves once a socket dials, and nothing dials before that load.
+// The UX connection status writer (docs/architecture/ux §3), wired once from
+// the first dispatcher load: nothing dials before it, so no transition is missed.
 let connectionStatusWired = false;
 // Bumped by every startSession and abandonInFlight: a same-host, same-token
-// re-entry keeps the API session scope, so the scope alone cannot tell the
-// attempt still waiting on the dispatcher chunk that it was superseded.
+// re-entry keeps the API scope, which alone cannot tell a waiting attempt it lost.
 let attemptSeq = 0;
 // Tears down the session-scoped WS listeners registered in startSession
 // (user_update, onStateChange, ready). dispatcherCleanup only clears
@@ -188,8 +187,7 @@ export function startSession(
     (await import("@lib/net/identity")).getDeviceIdentityPublicKey(identityHost),
   );
   owner.addCleanup(() => setIdentityKeyProvider(null));
-  // The dispatcher is wired once its chunk loads (end of this function); its
-  // teardown keeps this place in the scope's cleanup order.
+  // The dispatcher is wired at the end; its teardown keeps this cleanup slot.
   const attempt = ++attemptSeq;
   const stillOwns = (): boolean => attempt === attemptSeq && owner.isCurrent();
   let attemptUnwire: (() => void) | null = null;
@@ -395,24 +393,31 @@ export function startSession(
   owner.addCleanup(sessionCleanup);
 
   // Dial only once the handlers are wired, and only if this attempt still owns the session.
-  loadDispatcher().then(
-    ({ wireDispatcher, wireConnectionStatus }) => {
-      if (!connectionStatusWired) {
-        connectionStatusWired = true;
-        void wireConnectionStatus(ws);
-      }
-      if (!stillOwns()) return;
-      attemptUnwire = wireDispatcher(ws, api);
-      dispatcherCleanup = attemptUnwire;
-      ws.connect({ host, token });
-      log.info("Dispatcher wired, connecting WS");
-    },
-    (err: unknown) => {
+  const wireAndDial = ({ wireDispatcher, wireConnectionStatus }: DispatcherModule): void => {
+    if (!connectionStatusWired) {
+      connectionStatusWired = true;
+      void wireConnectionStatus(ws);
+    }
+    if (!stillOwns()) return;
+    attemptUnwire = wireDispatcher(ws, api);
+    dispatcherCleanup = attemptUnwire;
+    ws.connect({ host, token });
+    log.info("Dispatcher wired, connecting WS");
+  };
+  // Already loaded (nearly always, after the boot prefetch): wire and dial in
+  // this task, so a server switch replaces the old socket at once.
+  const loaded = loadedDispatcher();
+  if (loaded !== null) {
+    wireAndDial(loaded);
+    return;
+  }
+  loadDispatcher()
+    .then(wireAndDial)
+    .catch((err: unknown) => {
       if (!stillOwns()) return;
       log.error("Session code failed to load", { error: String(err) });
       endPreauth(connectText("session.codeLoadFailed"), false);
-    },
-  );
+    });
 }
 
 /** Ends a session that got past sign-in, keeping the stored sign-in, and says why on the form. */

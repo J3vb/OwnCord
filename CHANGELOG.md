@@ -131,6 +131,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Under the hood
 
+- The app starts faster: the code for a signed-in session (message, voice and channel events) now loads in the background while the sign-in screen shows, instead of before it.
 - A review of CI job timings with ideas to speed it up (docs only).
 - The Linux Rust test job prefers the official Ubuntu package mirror, after one run spent 28 minutes on a slow one.
 - Tests for the protocol generator's checks on duplicate names and mismatched error codes.

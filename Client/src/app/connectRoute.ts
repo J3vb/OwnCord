@@ -271,8 +271,8 @@ export function renderConnect(
         deactivatePendingMessages();
         api.endSession();
         // The overlay carrying this Cancel button goes up when the session
-        // is in flight (startSession has called ws.connect and registered
-        // listeners): tear it down the same way the logout path does. It
+        // is in flight (startSession has registered listeners, and dials once
+        // the dispatcher is wired): tear it down the same way the logout path does. It
         // also shows while a saved sign-in is still being checked; then
         // nothing is in flight yet, and ending the API session above drops
         // the pending answer.
