@@ -11,23 +11,13 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// ValidateUsername checks that a (pre-trimmed) username meets naming rules:
-//   - Length 2-32 runes (after trim)
-//   - Only printable characters (no control chars, no zero-width chars)
-//   - Not inside the "[deleted-…]" / "[denied-…]" / "[imported…]" namespaces reserved for anonymised rows and the hidden import account
-//
-// Returns a descriptive error on failure, nil on success.
+// ValidateUsername checks length (2-32 runes after trim), printable characters
+// only, and the reserved "[deleted-…]" / "[denied-…]" / "[imported…]" names.
 func ValidateUsername(username string) error {
 	username = strings.TrimSpace(username)
-	// Account deletion once anonymised the row by renaming it to
-	// "[deleted-<id>]" (random suffixes on collision), and older databases still
-	// hold such rows. users.username is UNIQUE COLLATE NOCASE, so the whole
-	// namespace stays reserved rather than letting a registration impersonate a
-	// deleted account's marker. Erasure (db.EraseAccount) deletes the row.
-	// "[denied-<id>]" is the same shape for a refused approval-mode application
-	// (db.DenyPendingUser), reserved for the same reason.
-	// "[imported]" (and "[imported-…]") is the hidden account that owns imported
-	// Discord history; a registration must not take its name first.
+	// Older databases still hold "[deleted-<id>]" rows, and "[denied-<id>]" marks a
+	// refused application; the namespaces stay reserved so a registration cannot
+	// impersonate them. "[imported…]" is the hidden account owning imported history.
 	if lower := strings.ToLower(username); strings.HasSuffix(lower, "]") &&
 		(strings.HasPrefix(lower, "[deleted-") || strings.HasPrefix(lower, "[denied-") || strings.HasPrefix(lower, "[imported")) {
 		return fmt.Errorf("username is reserved")
@@ -51,9 +41,8 @@ func ValidateUsername(username string) error {
 	return nil
 }
 
-// ExtractBearerToken parses the "Authorization: Bearer <token>" header from r
-// and returns the token and true. Returns "", false if the header is absent,
-// uses a scheme other than "bearer" (case-insensitive), or has an empty token.
+// ExtractBearerToken returns the token from the "Authorization: Bearer" header,
+// or "", false if it is absent, another scheme, or empty. The scheme is matched case-insensitively.
 func ExtractBearerToken(r *http.Request) (string, bool) {
 	header := r.Header.Get("Authorization")
 	if header == "" {
@@ -66,35 +55,28 @@ func ExtractBearerToken(r *http.Request) (string, bool) {
 	return strings.TrimSpace(parts[1]), true
 }
 
-// IsEffectivelyBanned reports whether u is currently banned, accounting for
-// temporary ban expiry: u.Banned is true and u.BanExpires is nil (permanent) or
-// in the future. A nil u returns false; an unparseable BanExpires is treated as
-// an active ban (fail-safe: keep the user blocked).
+// IsEffectivelyBanned reports whether u is banned and any expiry is still in
+// the future. A nil u is false; an unparseable BanExpires counts as an active
+// ban (fail-safe).
 func IsEffectivelyBanned(u *db.User) bool {
 	if u == nil || !u.Banned {
 		return false
 	}
-	// Permanent ban — no expiry set.
 	if u.BanExpires == nil {
 		return true
 	}
-	// Temporary ban — parse the expiry and compare to now.
 	t, ok := dbtime.Parse(*u.BanExpires)
 	if !ok {
-		// Unparseable expiry — fail-safe: treat as still banned.
 		return true
 	}
-	// Ban is still active if expiry is in the future.
 	return time.Now().UTC().Before(t.UTC())
 }
 
-// IsSessionExpired reports whether the expiresAt timestamp string represents a
-// time in the past, in either stored layout (dbtime.Parse). Any string that
-// cannot be parsed is treated as expired for safety.
+// IsSessionExpired reports whether expiresAt is in the past in either stored
+// layout; an unparseable value is expired, for safety.
 func IsSessionExpired(expiresAt string) bool {
 	t, ok := dbtime.Parse(expiresAt)
 	if !ok {
-		// Unparseable expiry — treat as expired for safety.
 		return true
 	}
 	return time.Now().UTC().After(t.UTC())

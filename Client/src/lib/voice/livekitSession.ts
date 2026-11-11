@@ -1,8 +1,8 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
-import type { Room } from "livekit-client";
 import { voiceStore, setVoiceStatus, onPttPollingLiveChange } from "@stores/voice.store";
 import { installLivekitLogging } from "@lib/voice/livekitDiagnostics";
 import { LiveKitSession } from "../../features/voice/voiceSession";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 export { LiveKitSession } from "../../features/voice/voiceSession";
 
 // Re-export StreamQuality so existing consumers don't break
@@ -120,6 +120,6 @@ export function isVoiceSessionActive(): boolean {
   return session.hasActiveSession();
 }
 
-export function getRoomForStats(): Room | null {
+export function getRoomForStats(): VoiceRoom | null {
   return session.getRoom();
 }

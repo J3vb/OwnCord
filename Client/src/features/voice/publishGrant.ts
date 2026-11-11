@@ -1,12 +1,13 @@
 // SFU publish-grant checks and the mute fallback announcement, split from
 // mediaControl.ts. Both are whole synchronous helpers.
-import { Track, type Room } from "livekit-client";
+import { Track } from "livekit-client";
 import type { WsClient } from "../../lib/ws";
 import { setShareDenied } from "../../stores/voice.store";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 /** Whether the SFU grant lets this room publish `source`; an empty source
  *  list means every source. */
-export function publishAllowed(room: Room, source: Track.Source): boolean {
+export function publishAllowed(room: VoiceRoom, source: Track.Source): boolean {
   const permissions = room.localParticipant.permissions;
   return (
     permissions === undefined ||
@@ -17,7 +18,7 @@ export function publishAllowed(room: Room, source: Track.Source): boolean {
 }
 
 /** Mirror the grant's screen-share permission into the store for the share buttons. */
-export function syncShareGrant(room: Room): void {
+export function syncShareGrant(room: VoiceRoom): void {
   setShareDenied(!publishAllowed(room, Track.Source.ScreenShare));
 }
 

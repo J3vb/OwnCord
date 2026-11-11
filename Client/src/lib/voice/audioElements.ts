@@ -6,7 +6,6 @@
 import {
   RoomEvent,
   Track,
-  type Room,
   type RemoteTrack,
   type RemoteTrackPublication,
   type RemoteParticipant,
@@ -32,6 +31,7 @@ import {
   detachScreenshareAudio,
 } from "./audioTrackElements";
 import { ScreenshareAudioState } from "./audioScreenshareState";
+import type { VoiceRemoteParticipant, VoiceRoom } from "@lib/voice/voiceRoom";
 
 export { setAudioVolumeHost } from "./audioVolumePrefs";
 
@@ -53,12 +53,12 @@ interface MicGraph {
 type SinkableContext = AudioContext & { setSinkId?: (sinkId: string) => Promise<void> };
 
 /** The native room plays voice in its own mixer, which takes gains above 1. */
-function hasNativePlayout(room: Room | null): boolean {
+function hasNativePlayout(room: VoiceRoom | null): boolean {
   return room !== null && "nativePlayout" in room;
 }
 
 export class AudioElements extends ScreenshareAudioState {
-  private room: Room | null = null;
+  private room: VoiceRoom | null = null;
 
   /** Shared by the gain nodes of boosted voice tracks. Created the first time
    *  a gain above 1 is needed in a web room and closed on leave, so a call
@@ -91,7 +91,7 @@ export class AudioElements extends ScreenshareAudioState {
     this.outputVolumeMultiplier = clampPercent(loadPref<number>("outputVolume", 100)) / 100;
   }
 
-  setRoom(room: Room | null): void {
+  setRoom(room: VoiceRoom | null): void {
     if (room === this.room) return;
     this.room = room;
     if (room === null || hasNativePlayout(room)) {
@@ -253,7 +253,7 @@ export class AudioElements extends ScreenshareAudioState {
    *  as is. On the web the element plays it up to 1, where LiveKit's
    *  setVolume must never see more; above 1 every one of their tracks moves
    *  to a gain node, or stays on its element at 1 while no context runs. */
-  private applyUserGain(participant: RemoteParticipant, gain: number): void {
+  private applyUserGain(participant: VoiceRemoteParticipant, gain: number): void {
     if (hasNativePlayout(this.room)) {
       participant.setVolume(gain);
       return;
@@ -423,7 +423,7 @@ export class AudioElements extends ScreenshareAudioState {
 
   /** The gain a participant's voice plays at right now (diagnostics): their
    *  gain node's when they have one, else LiveKit's element volume. */
-  getPlayingVolume(participant: RemoteParticipant): number {
+  getPlayingVolume(participant: VoiceRemoteParticipant): number {
     const userId = parseUserId(participant.identity);
     for (const graph of this.micGraphs.values()) {
       if (graph.userId === userId) return graph.gain.gain.value;

@@ -11,14 +11,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// handleUploadBanner processes POST /api/v1/users/me/banner (multipart: `file`).
-//
-// It is the avatar upload with the banner limits: the bytes land in the
-// attachments table with no channel, and users.banner_id names the attachment.
-// The file is public exactly while banner_id names it (service/upload.go,
-// UploadService.isLiveBanner), and the orphan sweep reclaims it once replaced.
-// PATCH /users/me never accepts a banner id or URL, so an image can only come
-// from an upload to this server.
+// handleUploadBanner processes POST /api/v1/users/me/banner (multipart: `file`): the avatar upload with the
+// banner limits. The bytes land in attachments with no channel and users.banner_id names them; the file is
+// public exactly while banner_id names it (UploadService.isLiveBanner), and the orphan sweep reclaims it
+// once replaced. PATCH /users/me never accepts a banner id or URL.
 func handleUploadBanner(
 	svc *service.Services,
 	store FileStore,

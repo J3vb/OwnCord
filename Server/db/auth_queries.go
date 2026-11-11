@@ -23,10 +23,9 @@ func (d *DB) CreateUser(ctx context.Context, username, passwordHash string, role
 	return res.LastInsertId()
 }
 
-// The durable first-run gate. SetupCompletedKey is written in the same
-// transaction as the first owner and never cleared by the server; an operator
-// re-opens the wizard by setting it to SetupOpen (docs/security.md, "First-run
-// setup"). Any other value counts as closed, since this gates an
+// The durable first-run gate. SetupCompletedKey is written with the first owner and
+// never cleared by the server; an operator re-opens the wizard by setting it to
+// SetupOpen (docs/security.md). Any other value counts as closed, since this gates an
 // unauthenticated endpoint.
 const (
 	SetupCompletedKey = "setup_completed"
@@ -34,11 +33,10 @@ const (
 	SetupClosed       = "1"
 )
 
-// CloseSetupGate records that this installation has been set up, whatever the
-// users table says. The erasure markers call it at start-up: a marker lives
-// outside the database a restore overwrites, and a backup taken before the
-// first owner rolls both the users table and the flag back, which would
-// reopen the unauthenticated setup endpoint. Idempotent.
+// CloseSetupGate records that this installation has been set up, whatever the users
+// table says. The erasure markers call it at start-up: a backup from before the first
+// owner rolls back both the users table and the flag, which would reopen the
+// unauthenticated setup endpoint. Idempotent.
 func (d *DB) CloseSetupGate(ctx context.Context) error {
 	if _, err := d.writer.ExecContext(ctx,
 		`INSERT INTO settings (key, value) VALUES (?1, ?2)
@@ -49,9 +47,8 @@ func (d *DB) CloseSetupGate(ctx context.Context) error {
 	return nil
 }
 
-// CreateOwnerIfEmpty checks that no users exist and inserts the first owner in
-// one transaction, closing the TOCTOU race in the setup endpoint. It returns
-// ErrConflict if any user exists.
+// CreateOwnerIfEmpty inserts the first owner if no users exist, in one transaction
+// (ErrConflict otherwise), closing the setup TOCTOU race.
 func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -59,19 +56,15 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// The durable gate: setup_completed is set by the first owner's creation and
-	// never cleared by the server, so an emptied users table (an erasure, or a
-	// marker replay past the last-admin guard) cannot reopen the unauthenticated
-	// setup endpoint. It is read inside this transaction like the count, so two
-	// concurrent requests cannot both pass.
-	//
-	// Only SetupOpen lets the count decide; any other value is corruption or a
-	// guess at the schema and refuses. A missing row is the exception, being what
-	// a pre-migration database looks like.
+	// The durable gate: setup_completed is never cleared by the server, so an
+	// emptied users table (an erasure, or a marker replay past the last-admin
+	// guard) cannot reopen the unauthenticated setup endpoint. It is read inside
+	// this transaction like the count, so two requests cannot both pass. Only
+	// SetupOpen lets the count decide; any other value refuses. A missing row is a
+	// pre-migration database.
 	var completed string
 	switch err := tx.QueryRow(`SELECT value FROM settings WHERE key = ?`, SetupCompletedKey).Scan(&completed); {
 	case errors.Is(err, sql.ErrNoRows):
-		// A database from before the migration: the count is the gate.
 	case err != nil:
 		return 0, fmt.Errorf("CreateOwnerIfEmpty setup flag: %w", err)
 	case completed != SetupOpen:
@@ -99,7 +92,6 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 		return 0, fmt.Errorf("CreateOwnerIfEmpty last_id: %w", err)
 	}
 
-	// Setup closes at this commit, in the same transaction as the owner.
 	if _, err := tx.Exec(
 		`INSERT INTO settings (key, value) VALUES (?1, ?2)
 		 ON CONFLICT(key) DO UPDATE SET value = ?2`, SetupCompletedKey, SetupClosed); err != nil {
@@ -112,10 +104,9 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	return uid, nil
 }
 
-// CreateUserWithInvite consumes an invite, creates the user and inserts the
-// first session in one transaction, so a failure leaves no half-registered
-// account and does not burn the invite. sessionTokenHash must already be
-// hashed. No session-cap eviction is needed: the user has no sessions yet.
+// CreateUserWithInvite consumes an invite, creates the user and inserts the first
+// session in one transaction, so a failure leaves no half-registered account and does
+// not burn the invite. sessionTokenHash must already be hashed.
 func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -152,9 +143,8 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite last insert id: %w", err)
 	}
-	// The redemption record commits with the account and the invite's use_count,
-	// so a leaked invite can be traced to its redeemer; a failure rolls back the
-	// whole registration.
+	// The redemption record commits with the account and the invite's use_count, so
+	// a leaked invite can be traced to its redeemer.
 	if err := d.q.WithTx(tx).CreateInviteRedemption(ctx, dbgen.CreateInviteRedemptionParams{
 		UserID: &uid,
 		Code:   inviteCode,
@@ -170,9 +160,8 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 	return uid, nil
 }
 
-// CreateUserWithSession creates the account and its first session in one
-// transaction (open-mode registration, no invite consumed); a failure leaves
-// no half-registered account. sessionTokenHash must already be hashed.
+// CreateUserWithSession creates the account and first session in one transaction;
+// sessionTokenHash must be hashed.
 func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -200,8 +189,7 @@ func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash s
 	return uid, nil
 }
 
-// GetUserByUsername returns the user with the given username (case-insensitive),
-// or nil if not found.
+// GetUserByUsername returns the user (case-insensitive), or nil.
 func (d *DB) GetUserByUsername(ctx context.Context, username string) (*User, error) {
 	u, err := d.q.GetUserByUsername(ctx, username)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -268,9 +256,7 @@ func (d *DB) ListUserTOTPSecrets(ctx context.Context) ([]UserTOTPSecret, error) 
 	return out, nil
 }
 
-// ReplaceUserTOTPSecret swaps a user's stored TOTP secret from old to next and
-// reports whether it did: false means the row no longer holds old (a
-// concurrent enable or disable won), and nothing was written.
+// ReplaceUserTOTPSecret swaps a secret from old to next; false means a concurrent change won.
 func (d *DB) ReplaceUserTOTPSecret(ctx context.Context, userID int64, old, next string) (bool, error) {
 	n, err := d.q.ReplaceUserTOTPSecret(ctx, dbgen.ReplaceUserTOTPSecretParams{
 		NewSecret: &next,
@@ -283,8 +269,8 @@ func (d *DB) ReplaceUserTOTPSecret(ctx context.Context, userID int64, old, next 
 	return n == 1, nil
 }
 
-// UpdateUserIdentityKey sets or clears the E2EE identity public key. Last
-// write wins; the service audits key changes so peers can detect a rotation.
+// UpdateUserIdentityKey sets or clears the E2EE identity key; last write wins (the
+// service audits changes).
 func (d *DB) UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error {
 	if err := d.q.UpdateUserIdentityKey(ctx, dbgen.UpdateUserIdentityKeyParams{
 		IdentityPublicKey: key,
@@ -295,10 +281,7 @@ func (d *DB) UpdateUserIdentityKey(ctx context.Context, id int64, key *string) e
 	return nil
 }
 
-// ResetAllUserStatuses clears the "online" status left by a previous run or
-// crash, at startup. Chosen statuses (idle/dnd/invisible) stay: they are what
-// the user picked, and the read path already shows a user with no connection
-// as offline.
+// ResetAllUserStatuses clears the "online" status a crash left at startup; chosen statuses stay.
 func (d *DB) ResetAllUserStatuses(ctx context.Context) error {
 	if err := d.q.ResetAllUserStatuses(ctx); err != nil {
 		return fmt.Errorf("ResetAllUserStatuses: %w", err)
@@ -306,8 +289,7 @@ func (d *DB) ResetAllUserStatuses(ctx context.Context) error {
 	return nil
 }
 
-// BanUser marks a user as banned with an optional expiry. Pass nil for a
-// permanent ban.
+// BanUser marks a user banned with an optional expiry; nil is permanent.
 func (d *DB) BanUser(ctx context.Context, id int64, reason string, expires *time.Time) error {
 	var expiresStr *string
 	if expires != nil {
@@ -333,10 +315,8 @@ func (d *DB) UnbanUser(ctx context.Context, id int64) error {
 	return nil
 }
 
-// FormatMemberCreatedAt renders a users.created_at value (SQLite's
-// datetime('now') text, "2006-01-02 15:04:05", or an RFC 3339 instant) in the
-// member wire layout, so member_join and ready.members[] agree. A value it
-// cannot parse is returned unchanged.
+// FormatMemberCreatedAt renders a users.created_at value in the member wire layout so
+// member_join and ready.members[] agree; an unparseable value is returned unchanged.
 func FormatMemberCreatedAt(raw string) string {
 	if t, ok := dbtime.Parse(raw); ok {
 		return t.Format(dbtime.ISOLayout)
@@ -347,9 +327,8 @@ func FormatMemberCreatedAt(raw string) string {
 	return raw
 }
 
-// MemberGeneration returns a counter that SQLite triggers bump, in the same
-// commit, on every write that can change ListMembers' result except a
-// users.status change. Equal generations mean no such write committed between.
+// MemberGeneration returns a counter SQLite triggers bump in the same commit on every
+// write that can change ListMembers' result except a users.status change.
 func (d *DB) MemberGeneration(ctx context.Context) (int64, error) {
 	gen, err := d.q.GetMemberGeneration(ctx)
 	if err != nil {
@@ -358,10 +337,9 @@ func (d *DB) MemberGeneration(ctx context.Context) (int64, error) {
 	return gen, nil
 }
 
-// NextMemberBanLapse returns when the earliest temporary ban ListMembers still
-// hides lapses, as "2006-01-02T15:04:05Z"-shaped text ListMembers compares
-// against SQLite's clock, or "" when none is pending. A lapse changes the
-// result without a write, so it bumps no generation.
+// NextMemberBanLapse returns when the earliest temporary ban ListMembers hides lapses,
+// in the text form ListMembers compares, or "" when none. A lapse changes the result
+// without a write, so it bumps no generation.
 func (d *DB) NextMemberBanLapse(ctx context.Context) (string, error) {
 	at, err := d.q.NextMemberBanLapse(ctx)
 	if err != nil {

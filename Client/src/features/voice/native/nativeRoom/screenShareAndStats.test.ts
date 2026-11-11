@@ -554,7 +554,7 @@ describe("NativeRoom stats", () => {
     host.getStats = () => Promise.resolve(sample());
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
-    const poller = createConnectionStatsPoller(() => room as never);
+    const poller = createConnectionStatsPoller(() => room);
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
     const stats = poller.getStats();
@@ -637,7 +637,7 @@ describe("NativeRoom stats", () => {
     host.getStats = () => Promise.resolve(null);
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
-    const poller = createConnectionStatsPoller(() => room as never);
+    const poller = createConnectionStatsPoller(() => room);
     const updates = vi.fn();
     poller.onUpdate(updates);
     poller.start();

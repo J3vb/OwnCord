@@ -29,6 +29,11 @@ import {
 import { voiceText } from "../../i18n/voice";
 import { createSpeakerTracker } from "./roomSpeakers";
 import type { RoomEventDeps, RoomEventHandlers } from "./roomEventTypes";
+import type {
+  VoiceRemoteParticipant,
+  VoiceRemotePublication,
+  VoiceRoom,
+} from "@lib/voice/voiceRoom";
 
 const log = createLogger("roomEventHandlers");
 
@@ -58,7 +63,7 @@ const DECRYPT_QUIET_MS = 65_000;
  *  can arrive over WS after the SFU dropped and livekit-client is already
  *  retrying on its own; that room reads "reconnecting" until
  *  RoomEvent.Reconnected clears it (handleSdkReconnected). */
-export function setJoinedVoiceStatus(room: import("livekit-client").Room): void {
+export function setJoinedVoiceStatus(room: VoiceRoom): void {
   setVoiceStatus(
     room.state === "reconnecting" || room.state === "signalReconnecting"
       ? "reconnecting"
@@ -80,7 +85,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   let degradedBy: "decrypt" | "other" | null = null;
   let decryptQuietTimer: ReturnType<typeof setTimeout> | null = null;
   let stallTimer: ReturnType<typeof setTimeout> | null = null;
-  let stallRoom: import("livekit-client").Room | null = null;
+  let stallRoom: VoiceRoom | null = null;
   /** Room key installs so far. A decrypt streak continues only while this is
    *  unchanged, so event order never rests on clock resolution. */
   let keyInstalls = 0;
@@ -124,8 +129,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   /** A remote publication without E2EE stays unsubscribed and marks the call
    *  not secured until the session ends. */
   function refuseUnencrypted(
-    publication: RemoteTrackPublication,
-    participant: RemoteParticipant,
+    publication: VoiceRemotePublication,
+    participant: VoiceRemoteParticipant,
   ): void {
     publication.setSubscribed(false);
     clearDecryptQuietTimer();
@@ -218,8 +223,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    *  share (and its audio) only once the viewer watches it, and until then
    *  its tile offers Watch. */
   const handleTrackPublished = (
-    publication: RemoteTrackPublication,
-    participant: RemoteParticipant,
+    publication: VoiceRemotePublication,
+    participant: VoiceRemoteParticipant,
   ): void => {
     if (isUnencryptedPublication(publication)) {
       refuseUnencrypted(publication, participant);
@@ -251,7 +256,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     );
   };
 
-  const handleConnected = (room: import("livekit-client").Room): void => {
+  const handleConnected = (room: VoiceRoom): void => {
     for (const participant of room.remoteParticipants.values()) {
       for (const publication of participant.trackPublications.values()) {
         handleTrackPublished(publication, participant);
@@ -354,7 +359,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     }
   }
 
-  function armStallTimer(room: import("livekit-client").Room): void {
+  function armStallTimer(room: VoiceRoom): void {
     if (stallTimer !== null && stallRoom === room) return;
     clearStallTimer();
     stallRoom = room;

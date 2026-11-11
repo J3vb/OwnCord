@@ -11,27 +11,21 @@ import (
 	"time"
 )
 
-// linkFile is os.Link, a variable so a test can make the hard link fail and
-// reach the copy fallback, which no ordinary temporary directory refuses.
+// linkFile is os.Link, a variable so tests can force the copy fallback.
 var linkFile = os.Link
 
-// chtimesFile is os.Chtimes, a variable so a test can make stamping a fresh
-// hard link fail and reach the copy fallback.
+// chtimesFile is os.Chtimes, a variable so tests can force the copy fallback.
 var chtimesFile = os.Chtimes
 
-// ErrCloneExists reports that the destination name is already taken. Clone
-// never overwrites: a forwarded attachment gets a fresh uuid, so a collision
-// means a caller bug, not something to paper over.
+// ErrCloneExists reports that dst already exists. Clone never overwrites: a
+// forwarded attachment gets a fresh uuid, so a collision is a caller bug.
 var ErrCloneExists = errors.New("storage clone destination exists")
 
-// Clone makes the stored file named dst a second name for the bytes of src,
-// for a forwarded attachment: the forward owns its own file, so deleting either
-// message never takes the other's bytes with it.
-//
-// It hard-links first (no extra disk) and falls back to a ctx-aware stream
-// copy where the filesystem refuses a link. The bytes were validated when src
-// was saved, so no magic-byte check runs again. A missing src is
-// fs.ErrNotExist. Any failure leaves no dst behind.
+// Clone makes dst a second name for src's bytes, for a forwarded attachment: the
+// forward owns its own file, so deleting either message never takes the other's
+// bytes. It hard-links first and falls back to a ctx-aware copy where links are
+// refused. The bytes were validated when src was saved, so no magic-byte check
+// runs again. A missing src is fs.ErrNotExist; any failure leaves no dst behind.
 func (s *Storage) Clone(ctx context.Context, src, dst string) error {
 	if err := sanitizeFilename(src); err != nil {
 		return err
@@ -52,12 +46,9 @@ func (s *Storage) Clone(ctx context.Context, src, dst string) error {
 	}
 	linkErr := linkFile(srcPath, dstPath)
 	if linkErr == nil {
-		// A hard link shares the source's inode and so its old modification
-		// time: storage reconciliation would see the new name as an old file
-		// with no row in the moment before the caller inserts it, and could
-		// delete it. Stamping the inode now keeps the new name inside the
-		// reconciliation grace window (the source's stamp moves with it,
-		// which only delays its own reconciliation).
+		// A hard link shares the source's old mtime, so reconciliation could see the
+		// new name as an old file with no row before the caller inserts it and delete
+		// it; stamping the inode now keeps it inside the grace window.
 		now := time.Now()
 		chErr := chtimesFile(dstPath, now, now)
 		if chErr == nil {
@@ -77,8 +68,7 @@ func (s *Storage) Clone(ctx context.Context, src, dst string) error {
 	return s.copyFile(ctx, srcPath, dstPath, linkErr)
 }
 
-// copyFile is Clone's fallback when a hard link is refused. linkErr is only
-// logged; the copy decides the outcome.
+// copyFile is Clone's fallback when a hard link is refused; linkErr is only logged.
 func (s *Storage) copyFile(ctx context.Context, srcPath, dstPath string, linkErr error) (err error) {
 	slog.Debug("storage: hard link refused, copying instead", "err", linkErr)
 	in, err := os.Open(srcPath)
@@ -86,7 +76,6 @@ func (s *Storage) copyFile(ctx context.Context, srcPath, dstPath string, linkErr
 		return fmt.Errorf("opening clone source: %w", err)
 	}
 	defer func() { _ = in.Close() }()
-	// O_EXCL: never write through an existing name.
 	out, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
@@ -94,8 +83,7 @@ func (s *Storage) copyFile(ctx context.Context, srcPath, dstPath string, linkErr
 		}
 		return fmt.Errorf("creating clone: %w: %w", ErrIO, err)
 	}
-	// Any failure after the create removes the partial file: the orphan sweep
-	// is row-driven, so a file with no row is never reclaimed.
+	// Remove the partial file on failure: the orphan sweep is row-driven and never reclaims a file with no row.
 	success := false
 	defer func() {
 		closeErr := out.Close()
@@ -122,7 +110,6 @@ func (s *Storage) copyFile(ctx context.Context, srcPath, dstPath string, linkErr
 	return nil
 }
 
-// ctxReader stops a copy between reads once ctx is done.
 type ctxReader struct {
 	ctx context.Context
 	r   io.Reader
@@ -132,7 +119,6 @@ func (c ctxReader) Read(p []byte) (int, error) {
 	if err := c.ctx.Err(); err != nil {
 		return 0, fmt.Errorf("copy interrupted: %w", err)
 	}
-	// io.Copy compares against io.EOF directly, so the reader's error passes
-	// through unwrapped.
+	// io.Copy compares against io.EOF directly, so the error passes through unwrapped.
 	return c.r.Read(p)
 }

@@ -16,29 +16,24 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// File links let a <video> element stream an attachment with Range requests
-// without an Authorization header, which a media element cannot send: a client
-// asks with POST /api/v1/files/{id}/link and opens the returned path.
-// A link is multi-use until it expires (a player makes many Range requests),
-// bound to one file id and to the credential hash that asked. Every use
-// re-resolves that credential through resolvePrincipal and re-runs the file
-// access rule, so signing out, a ban, an expired session or a lost channel role
-// voids it at once. The token is never logged.
+// File links let a <video> element stream an attachment with Range requests without an Authorization
+// header: a client asks with POST /api/v1/files/{id}/link and opens the returned path. A link is multi-use
+// until it expires, bound to one file id and the credential hash that asked. Every use re-resolves that
+// credential through resolvePrincipal and re-runs the file access rule, so signing out, a ban or a lost
+// channel role voids it at once. The token is never logged.
 
 var fileLinkTTL = time.Hour
 
-// fileLinkMaxEntries bounds the link map; past it the soonest-expiring link is
-// dropped so a flood of mints cannot grow memory without limit.
+// fileLinkMaxEntries bounds the link map; past it the soonest-expiring link is dropped so a flood of mints
+// cannot grow memory.
 const fileLinkMaxEntries = 10000
 
 const fileLinkMaxPerCredential = 64
 
-// fileLinkRateLimitPerMinute is the per-user cap on link requests; generous
-// because a page of videos mints one each.
+// Per-user cap on link requests; generous because a page of videos mints one each.
 const fileLinkRateLimitPerMinute = 600
 
-// fileLinkReuseMargin is the life a kept link must have left to be handed out
-// again to the same credential for the same file.
+// Life a kept link must have left to be handed out again to the same credential for the same file.
 const fileLinkReuseMargin = 10 * time.Minute
 
 const fileLinkQueryParam = "link"
@@ -53,8 +48,7 @@ type fileLink struct {
 	expires time.Time
 }
 
-// fileLinks holds the outstanding links. It is process-local: a restart voids
-// every link, the safe direction.
+// fileLinks holds the outstanding links, process-local: a restart voids every link, the safe direction.
 type fileLinks struct {
 	mu     syncutil.Mutex
 	tokens map[string]fileLink
@@ -70,10 +64,8 @@ func newFileLinks() *fileLinks {
 	}
 }
 
-// issue returns a token for (fileID, tokenHash) and its expiry. The same
-// credential asking again gets its existing link while it has
-// fileLinkReuseMargin left, so one viewer re-rendering a message cannot fill the
-// map.
+// issue returns a token for (fileID, tokenHash) and its expiry. The same credential asking again gets its
+// existing link while it has fileLinkReuseMargin left, so a re-rendering viewer cannot fill the map.
 func (s *fileLinks) issue(fileID, tokenHash string) (string, time.Time, error) {
 	key := fileLinkKey{fileID: fileID, tokenHash: tokenHash}
 	s.mu.Lock()
@@ -89,8 +81,8 @@ func (s *fileLinks) issue(fileID, tokenHash string) (string, time.Time, error) {
 			s.dropLocked(tok)
 		}
 	}
-	// One credential holds at most fileLinkMaxPerCredential links; past it
-	// that credential's own soonest-expiring link goes first.
+	// One credential holds at most fileLinkMaxPerCredential links; past it its own soonest-expiring link goes
+	// first.
 	for s.countLocked(tokenHash) >= fileLinkMaxPerCredential {
 		s.dropLocked(s.soonestLocked(tokenHash))
 	}
@@ -103,8 +95,8 @@ func (s *fileLinks) issue(fileID, tokenHash string) (string, time.Time, error) {
 	}
 	tok := hex.EncodeToString(b)
 	expires := now.Add(fileLinkTTL)
-	// A replaced link is left to expire (the sweep bounds it): a player that
-	// was handed it a moment ago keeps working.
+	// A replaced link is left to expire (the sweep bounds it) so a player handed it a moment ago keeps
+	// working.
 	s.tokens[tok] = fileLink{key: key, expires: expires}
 	s.byKey[key] = tok
 	return tok, expires, nil
@@ -120,8 +112,7 @@ func (s *fileLinks) countLocked(tokenHash string) int {
 	return n
 }
 
-// soonestLocked is the soonest-expiring token of tokenHash, or of everyone when
-// tokenHash is empty. s.mu must be held.
+// soonestLocked is the soonest-expiring token of tokenHash, or of everyone when empty; s.mu must be held.
 func (s *fileLinks) soonestLocked(tokenHash string) string {
 	var soonest string
 	var soonestExp time.Time
@@ -147,8 +138,8 @@ func (s *fileLinks) dropLocked(tok string) {
 	}
 }
 
-// lookup returns the credential hash a token was minted for when it is
-// unexpired and names fileID. An expired token is removed.
+// lookup returns the credential hash a token was minted for when unexpired and naming fileID; an expired
+// token is removed.
 func (s *fileLinks) lookup(token, fileID string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -177,9 +168,8 @@ type fileLinkResponse struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-// handleIssueFileLink answers POST /api/v1/files/{id}/link with a link under
-// exactly the download's access rule. It runs behind AuthMiddleware, so the link
-// is bound to the bearer credential used.
+// handleIssueFileLink answers POST /api/v1/files/{id}/link under exactly the download's access rule; the
+// link is bound to the bearer credential used.
 func handleIssueFileLink(uploads *service.UploadService, links *fileLinks, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -213,12 +203,10 @@ func handleIssueFileLink(uploads *service.UploadService, links *fileLinks, limit
 	}
 }
 
-// fileLinkAuth is the authentication for GET /api/v1/files/{id}. A request
-// with an Authorization header, or without a link, is AuthMiddleware's as
-// before. Otherwise the link must exist, be unexpired and name this file; the
-// credential it was minted for is then re-resolved through resolvePrincipal.
-// Every refusal is the same 403, so a probe learns nothing about which part
-// failed. A database outage is the one exception: 503, as on the bearer path.
+// fileLinkAuth authenticates GET /api/v1/files/{id}: a request with an Authorization header, or without a
+// link, is AuthMiddleware's. Otherwise the link must be live and name this file, and its credential is
+// re-resolved through resolvePrincipal. Every refusal is the same 403 so a probe learns nothing; a database
+// outage is 503.
 func fileLinkAuth(sessions *service.SessionService, links *fileLinks) func(http.Handler) http.Handler {
 	bearer := AuthMiddleware(sessions)
 	touches := &touchThrottle{seen: make(map[string]time.Time)}

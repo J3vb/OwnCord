@@ -2,12 +2,12 @@
 // `LiveKitSession` facade, which layers each concern on top of this one. The
 // state machine has a single writer (`setState`); every other layer reads it
 // through the accessors here.
-import type { Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { voiceStore } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import type { SessionState } from "./sessionState";
 import type { LostMedia } from "./mediaLostNotice";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("livekitSession");
 
@@ -48,7 +48,7 @@ export abstract class SessionCore {
   protected serverHost: string | null = null;
 
   /** An explicit unmute waiting for this room's SFU publishing grant. */
-  protected pendingMicrophoneRoom: Room | null = null;
+  protected pendingMicrophoneRoom: VoiceRoom | null = null;
 
   /** What teardownForReconnect stopped, restored once the reconnect (or its
    *  rejoin) lands. Cleared by leaveVoice, so a give-up restores nothing. */
@@ -88,7 +88,7 @@ export abstract class SessionCore {
   // --- Typed state accessors (replace scattered field reads) ---
 
   /** Room from state, or null when idle/connecting/reconnecting. */
-  protected get _room(): Room | null {
+  protected get _room(): VoiceRoom | null {
     return this._state.type === "connected" ? this._state.room : null;
   }
 
@@ -159,7 +159,7 @@ export abstract class SessionCore {
     return this._state.type === "reconnecting";
   }
 
-  getRoom(): Room | null {
+  getRoom(): VoiceRoom | null {
     return this._room;
   }
 

@@ -10,7 +10,7 @@
 // and URLs) and sessionReconnect (the reconnect handling). The modules they
 // delegate to are constructed here, with the hosts that give each its view of
 // the session.
-import { type Room, Track } from "livekit-client";
+import { Track } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { restateSelfVoiceState, isPttPollingLive, setLocalGateSpeaking } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
@@ -33,6 +33,7 @@ import { nativeCounters } from "./native/counters";
 import { speechDetectionOf } from "./sileroDetection";
 import { desktop } from "../../platform/desktop";
 import { SessionReconnect } from "./sessionReconnect";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("livekitSession");
 
@@ -144,13 +145,13 @@ export class LiveKitSession extends SessionReconnect {
 
   // --- Room lifecycle (delegated to RoomLifecycle) ---
 
-  protected async createRoom(channelId?: number): Promise<Room> {
+  protected async createRoom(channelId?: number): Promise<VoiceRoom> {
     this.startShareDiagnostics();
     return this._lifecycle.createRoom(channelId);
   }
 
   /** Update all extracted modules with a room reference. See RoomLifecycle. */
-  protected syncModuleRooms(room: Room | null = this._room): void {
+  protected syncModuleRooms(room: VoiceRoom | null = this._room): void {
     this._lifecycle.syncModuleRooms(room);
   }
 
@@ -220,7 +221,7 @@ export class LiveKitSession extends SessionReconnect {
     else this._lostOnReconnect = null;
   }
 
-  protected sweepPublications(room: Room): void {
+  protected sweepPublications(room: VoiceRoom): void {
     this._eventHandlers.handleConnected(room);
     this._remoteTracks.dropUnpublishedWatches();
     this._remoteTracks.removeUnpublishedTiles();

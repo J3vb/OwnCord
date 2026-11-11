@@ -1,7 +1,5 @@
-// Declared application metrics. Instruments are constructed lazily against the
-// global Provider so callers need not thread a Meter through constructors.
-// Hot-path callers should cache the returned instrument in a struct field:
-// these helpers take a sync.RWMutex to read the global provider.
+// Declared application metrics, built lazily against the global Provider.
+// Hot-path callers should cache the instrument: these helpers take a RWMutex.
 
 package telemetry
 
@@ -16,9 +14,7 @@ const (
 	scopeVoice   = "github.com/J3vb/OwnCord/Server/voice"
 )
 
-// AppMetrics is the canonical bundle of meters used across the server. Build
-// it once at startup with NewAppMetrics() and stash it on the relevant
-// long-lived structs (Hub, services, etc).
+// AppMetrics is the bundle of meters used across the server; build it once with NewAppMetrics().
 type AppMetrics struct {
 	WSMessagesTotal        Counter
 	WSActiveConnections    Gauge
@@ -37,21 +33,17 @@ var (
 	appMetricsInst atomic.Pointer[AppMetrics]
 )
 
-// NewAppMetrics returns a process-wide AppMetrics, lazily constructed against
-// the current global provider. Repeated calls return the same instance until
-// resetAppMetricsForInit() is called (Init does so after swapping the global
-// provider, so instruments re-bind).
-//
-// The steady-state path is a single atomic load, because service-method defers
-// call this per request. A plain sync.Once cannot be re-armed by
-// resetAppMetricsForInit, hence the pointer + construction mutex.
+// NewAppMetrics returns the process-wide AppMetrics, bound to the current
+// global provider; it is the same instance until resetAppMetricsForInit (Init
+// calls it after swapping providers). The steady state is one atomic load
+// because service-method defers call it per request; a sync.Once cannot be
+// re-armed, hence the pointer plus construction mutex.
 func NewAppMetrics() *AppMetrics {
 	if m := appMetricsInst.Load(); m != nil {
 		return m
 	}
 	appMetricsMu.Lock()
 	defer appMetricsMu.Unlock()
-	// Re-check under the lock: another caller may have built it first.
 	if m := appMetricsInst.Load(); m != nil {
 		return m
 	}
@@ -74,10 +66,8 @@ func NewAppMetrics() *AppMetrics {
 	return m
 }
 
-// resetAppMetricsForInit drops the cached AppMetrics bundle so the next
-// NewAppMetrics() call re-binds instruments against whatever provider is now
-// global. The real OTel Init uses this to migrate from the no-op provider
-// installed by the package-level init() to the SDK-backed one.
+// resetAppMetricsForInit drops the cached bundle so the next NewAppMetrics
+// re-binds to the now-global provider (the real Init migrates off the no-op one).
 func resetAppMetricsForInit() { //nolint:unused // called by otel-tagged build only
 	appMetricsMu.Lock()
 	defer appMetricsMu.Unlock()

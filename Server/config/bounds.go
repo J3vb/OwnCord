@@ -5,31 +5,23 @@ import (
 	"math"
 )
 
-// boundedKey is one integer key with a legal range. Out-of-range values are
-// clamped and warned about, never rejected: Load is warn-only so a warning
-// cannot brick a working install, and the clamp is the nearest thing to what the
-// operator wrote.
+// boundedKey is one integer key with a legal range. Out-of-range values are clamped and warned about, never
+// rejected, so a warning cannot brick a working install.
 type boundedKey struct {
 	key      string
 	ptr      *int
 	min, max int
-	// def is what a value BELOW min becomes: the compiled default, not the
-	// minimum. A negative headroom clamped to 0 would silently turn the
-	// floor off, which fails open; falling back to the default fails safe,
-	// and an operator who wants the floor off writes 0 explicitly.
+	// What a value BELOW min becomes: the compiled default, not the minimum. Clamping a negative headroom to
+	// 0 would silently turn the floor off (fail open); an operator who wants it off writes 0.
 	def int
-	// meaning names what the fallback stands for, so the warning says what
-	// happened to the operator's intent ("0 means unlimited").
+	// Names what the fallback stands for, so the warning says what happened to the operator's intent.
 	meaning string
-	// highToDef sends a value ABOVE max to def as well, for a key where the
-	// max is no nearer the operator's intent than any other value (a port).
+	// Sends a value ABOVE max to def too, for a key where max is no nearer the operator's intent (a port).
 	highToDef bool
 }
 
-// boundedKeys is the one place a bounded key states its range; a new ranged
-// integer key adds a row here, not a clamp in its consumer, so the warnings read
-// the same. Bounds are on the MiB values as written; maxMiB keeps the byte
-// helpers' shift by 20 inside int64.
+// boundedKeys is the one place a bounded key states its range; a new ranged key adds a row here, not a
+// clamp in its consumer. Bounds are on the MiB values as written; maxMiB keeps the byte shift inside int64.
 func boundedKeys(cfg *Config) []boundedKey {
 	const maxMiB = math.MaxInt64 >> 20
 	def := defaults()
@@ -57,9 +49,6 @@ func boundedKeys(cfg *Config) []boundedKey {
 	}
 }
 
-// applyBounds brings every bounded key into its range, warning by key name:
-// below the minimum falls back to the default, above the maximum clamps
-// (or falls back to the default too, for a highToDef key).
 func applyBounds(cfg *Config) {
 	for _, b := range boundedKeys(cfg) {
 		v := *b.ptr

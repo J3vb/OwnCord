@@ -37,9 +37,9 @@ func (d *DB) PurgeChannelMessages(ctx context.Context, channelID, before int64, 
 	return ids, nil
 }
 
-// PurgeChannelMessagesWithAction is PurgeChannelMessages plus one removal
-// ledger row per purge (not per message) in the same transaction, so a failure
-// recording it rolls the purge back. reportID links a report-linked removal.
+// PurgeChannelMessagesWithAction is PurgeChannelMessages plus one removal ledger row
+// per purge in the same transaction, so a failure recording it rolls the purge back.
+// reportID links a report-linked removal.
 func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error) {
 	if limit < 1 {
 		return []int64{}, nil
@@ -70,8 +70,6 @@ func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, befo
 	return ids, nil
 }
 
-// purgeChannelMessagesTx is PurgeChannelMessages' body on an open tx, so
-// callers can extend the same transaction.
 func purgeChannelMessagesTx(ctx context.Context, tx *sql.Tx, channelID, before int64, limit int) ([]int64, error) {
 	sel := `SELECT id FROM messages WHERE channel_id = ? AND deleted = 0 AND kind IN (0, 7, 8) ORDER BY id DESC LIMIT ?`
 	args := []any{channelID, limit}

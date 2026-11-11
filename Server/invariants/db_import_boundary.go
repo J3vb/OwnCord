@@ -6,15 +6,12 @@ import (
 	"strings"
 )
 
-// dbImportBoundaryID is the rule's stable id (a const for the same
-// initialization-cycle reason as syncutilLocksID).
+// dbImportBoundaryID is the rule's stable id (a const to avoid an initialization cycle).
 const dbImportBoundaryID = "db-import-boundary"
 
-// dbHandleOwnerID is the sub-id checkDBImportBoundary reports for raw-handle
-// use, as opposed to a bare import. A sub-id rather than a second rule: the
-// registry keys allow comments on what a rule emits (see checkSourceWith), so
-// one entry, one document and one allowlist cover both halves — and
-// //invariant:allow must name db-handle-owner to suppress this half.
+// dbHandleOwnerID is the sub-id reported for raw-handle use rather than a bare
+// import. A sub-id, not a second rule, so one entry and allowlist cover both
+// halves; //invariant:allow must name db-handle-owner to suppress this half.
 const dbHandleOwnerID = "db-handle-owner"
 
 // dbImportPath is the persistence package every rule here is about.
@@ -40,40 +37,31 @@ const DispositionBoundary = "boundary"
 //
 // docs/architecture/server-boundaries.md is generated from this map by
 // `go run ./cmd/dbinventory`; edit here, then regenerate.
-// Calls and Hands exist because an import is not the access: the handle
-// is stored on Hub.db and on App.database, so a file in either package can use
-// it without importing db at all. Both are exact multisets in the
-// AuthzResidueEntry.Calls sense — measured by cmd/dbinventory against the tree,
-// compared here, and only ever edited deliberately.
+// Calls and Hands exist because an import is not the access: the handle is
+// stored on Hub.db and App.database, so a file in either package can use it
+// without importing db. Both are exact multisets in the AuthzResidueEntry.Calls
+// sense, measured by cmd/dbinventory and edited only deliberately.
 type DBImportEntry struct {
 	Disposition string
 	Family      string
 	Note        string
 	// Calls is the exact multiset of *db.DB method calls the file may make
-	// (method name → count), including the raw accessors SQLDb, SQLReaderDB
-	// and BeginTx and the ExecContext/QueryContext/QueryRowContext wrappers.
-	// A boundary row that measures anything else — one more call, one fewer,
-	// a different method — fails the document gate with the two multisets
-	// printed side by side. adapter, move and remove rows pin nothing and must
-	// measure nothing: that is what their disposition claims.
+	// (method name to count), including the raw accessors and the
+	// ExecContext/QueryContext/QueryRowContext wrappers. A boundary row that
+	// measures anything else fails the document gate; adapter, move and remove
+	// rows pin nothing and must measure nothing.
 	Calls calls
-	// Hands is the exact multiset of the places the file passes the bare
-	// handle to (callee or assignment target → count): the composition root's
-	// wiring, and anywhere else the handle is read out of its carrier and
-	// given away. A hand-off is a handle use — the callee's parameter type, or
-	// the field the assignment stores it into, is the owner it names — so a
-	// new one is a reviewable edit here rather than a side effect. A hand-off
-	// into a field renders as that field's path (`c.Store`), which is as much
-	// of the owner as a call's callee name is.
+	// Hands is the exact multiset of places the file passes the bare handle to
+	// (callee or assignment target to count). A hand-off is a handle use, so a
+	// new one is a reviewable edit here; a hand-off into a field renders as the
+	// field's path (`c.Store`).
 	Hands calls
 }
 
 // DBImportAllow is the inventory. A production file outside db/ and service/
 // that imports db and is not listed here fails db-import-boundary; a listed
-// file that stops importing db fails TestDBImportAllowIsLive. Rows were
-// deleted as families moved — the list only shrinks, and every row left
-// is an adapter (db types, no persistence call) or a boundary that
-// legitimately owns a handle.
+// file that stops importing db fails TestDBImportAllowIsLive. The list only
+// shrinks, and every row left is an adapter or a boundary that owns a handle.
 var DBImportAllow = map[string]DBImportEntry{
 	// ── admin ─────────────────────────────────────────────────────────────
 	"admin/admin.go":                     {Disposition: "boundary", Note: "holds the handle for the admin mux; no calls"},
@@ -117,17 +105,14 @@ var DBImportAllow = map[string]DBImportEntry{
 	"auth/helpers.go": {Disposition: "adapter", Note: "db.User type in a helper signature"},
 	"auth/resolve.go": {Disposition: "adapter", Note: "Session/APIToken/Role/User types; resolution is injected"},
 	// ── composition roots and tools ───────────────────────────────────────
-	// The process composition root is internal/app, not main.go: internal/app
-	// owns the handle from open to close, and main.go does not import db.
+	// The composition root is internal/app: it owns the handle from open to close.
 	"internal/app/app.go":      {Disposition: "boundary", Note: "the App holds the handle for its lifetime; no calls"},
 	"internal/app/database.go": {Disposition: "boundary", Note: "opens the handle, migrates, clears stale state at boot, and writes the pre-migration safety copy and the staged-restore audit row", Calls: calls{"BackupToSafe": 1, "ClearAllVoiceStates": 1, "FailInterruptedImports": 1, "LogAudit": 1, "ResetAllUserStatuses": 1, "SetBackupDiskReserve": 1}},
 	"internal/app/erasure.go":  {Disposition: "boundary", Note: "opens the deletion-marker file and replays it against the handle before anything serves (B4-10)", Calls: calls{"CheckpointErasureWAL": 1, "Close": 2}, Hands: calls{"service.NewErasureService": 1, "service.NewRetentionService": 1}},
 	"internal/app/hub.go":      {Disposition: "boundary", Note: "hands the handle to the hub and the service layer it builds", Hands: calls{"auth.NewPersistentRateLimiter": 1, "service.New": 1, "service.NewAuthService": 1, "service.PoolStatsSources": 1, "service.WriterWaitSource": 1, "ws.DBReaders": 1, "ws.HubOptions": 1}},
-	// No import of its own — the start/stop sequence opens the handle
-	// through openDatabase (the package's own constructor, not db.Open*),
-	// registers its Close and wires it into everything, all of which is handle
-	// use the import-only gate could not see. The Hands multiset is that
-	// wiring, one entry per step; the pinned Close is the close step.
+	// No import of its own: the start/stop sequence opens the handle through
+	// openDatabase and wires it everywhere, which the import-only gate cannot
+	// see. Hands is that wiring; the pinned Close is the close step.
 	"internal/app/lifecycle.go":   {Disposition: "boundary", Note: "the start and stop sequence hands App.database to every step that needs it, and registers the close that releases it", Calls: calls{"Close": 1, "StartOptimizer": 1}, Hands: calls{"StartRuntime": 1, "api.NewRouter": 1, "initDatabase": 1, "initPlugins": 1, "newAuditWriter": 1, "openMarkers": 1, "recordRestoreResult": 1, "service.NewPushDispatcher": 1, "startEventPersister": 1, "startMaintenanceLoop": 1}},
 	"internal/app/maintenance.go": {Disposition: "boundary", Note: "periodic worker: expired sessions, backups, orphan attachments", Calls: calls{"CleanupExpiredSecondFactorState": 1, "DeleteExpiredMessageDeliveryReceipts": 1, "DeleteExpiredSessions": 1, "DeleteOrphanedAttachmentsBefore": 1, "FindOrphanedVoiceMutes": 1, "RetireModerationActions": 1}, Hands: calls{"admin.MaintainBackups": 1}},
 	"internal/app/persistence.go": {Disposition: "boundary", Note: "event persister, audit writer and the boot seq seed own the handle", Calls: calls{"GetMaxEventSeq": 1, "GetSetting": 1, "SetAuditWriter": 1, "SetSetting": 1, "StoreWSSeqFloorSidecar": 1, "WSSeqFloorSidecar": 1}, Hands: calls{"ws.NewEventPersister": 1, "ws.StartEventPruner": 1}},
@@ -150,19 +135,15 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/handlers_chat.go":       {Disposition: "adapter", Note: "pure NewDMChannelInfo helper"},
 	"ws/permission_notifier.go": {Disposition: "adapter", Note: "service.PermissionChangeNotifier adapter; db.Channel in a signature only"},
 	"ws/hub.go":                 {Disposition: "boundary", Note: "Hub state holds the handle the families read through; no calls"},
-	// No import of its own — the replay purge reaches Hub.db directly,
-	// and deliberately. purgeReplay installs the
-	// tombstones and drops the ring's copies under seqMu, releases it, flushes
-	// the persister and only then deletes the persisted rows, all under the
-	// purge lock that cold-tier reads wait on, so no frame naming the purged
-	// ids is sequenced after the tombstones and the delete
-	// no longer holds up live delivery.
+	// No import of its own: the replay purge reaches Hub.db directly, on purpose.
+	// purgeReplay installs tombstones and drops the ring's copies under seqMu,
+	// flushes the persister, and only then deletes the persisted rows under the
+	// purge lock, so no frame naming purged ids is sequenced after the tombstones.
 	// Routing the delete through the EventStore seam would not be a pure
-	// refactor: h.events.eventStore is set only when event persistence is enabled,
-	// while h.db is set whenever a database exists, so a purge gated on the
-	// seam would skip rows a previous enabled boot persisted — an erasure
-	// regression. The two calls stay direct and are pinned here instead, so
-	// moving one is a visible edit to this row rather than a side effect.
+	// refactor: h.events.eventStore is set only when event persistence is
+	// enabled, while h.db is set whenever a database exists, so a gated purge
+	// would skip rows a previous boot persisted (an erasure regression). The two
+	// calls stay direct and pinned here.
 	"ws/hub_events.go":                 {Disposition: "boundary", Note: "replay purge: tombstones and ring drop under seqMu, persisted-row delete after it under the purge lock (2A-7); the delete is never gated on the persistence seam being wired", Calls: calls{"DeleteEventsForMessages": 1, "DeleteEventsForUser": 1}},
 	"ws/hub_options.go":                {Disposition: "boundary", Note: "construction validates and stores the handle, and gives it to the permission checker; no calls of its own", Hands: calls{"permissions.NewChecker": 1}},
 	"ws/hub_broadcast.go":              {Disposition: "adapter", Note: "member payloads read through the MemberPayloadReader seam; db types + pure BroadcastStatus"},
@@ -195,9 +176,7 @@ var DBImportAllow = map[string]DBImportEntry{
 }
 
 // dbImportBoundary fails on any production file above the domain layer that
-// imports db without an inventory row. db/ and service/ are the layers that
-// may import it; everything else must be in DBImportAllow, which is the boundary
-// inventory (docs/architecture/server-boundaries.md is generated from it).
+// imports db without an inventory row; db/ and service/ may import it freely.
 var dbImportBoundary = Rule{
 	ID:    dbImportBoundaryID,
 	Scope: nil, // every directory; the layers that may import are excluded in Check
@@ -232,28 +211,23 @@ func checkDBImportBoundary(f *ast.File, fset *token.FileSet, rel string) []Viola
 	return out
 }
 
-// rawHandleTypes are the database/sql types a *db.DB hands out: the pools
-// behind SQLDb/SQLReaderDB and the transaction BeginTx returns. Threading one
-// of them through a file is owning a handle by another name.
+// rawHandleTypes are the database/sql types a *db.DB hands out; threading one
+// through a file is owning a handle by another name.
 var rawHandleTypes = map[string]bool{"DB": true, "Tx": true, "Conn": true}
 
 // checkRawHandleOwner is the half of db-import-boundary that looks at use
-// rather than imports, for a file that is not a boundary row. It takes only
-// what a single file can prove without type information, which is deliberately
-// narrow: the handle is usually reached through a package field (h.db) that no
-// single file declares, and that shape is caught by cmd/dbinventory's
-// package-wide walk instead, where it becomes a row rather than a violation.
+// rather than imports, for a file that is not a boundary row. It claims only
+// what one file proves without type information: a handle reached through a
+// package field (h.db) is caught by cmd/dbinventory's package-wide walk, where
+// it becomes a row rather than a violation.
 //
 // What one file does prove:
 //
-//   - SQLDb() and SQLReaderDB() name nothing else in this tree — they are
-//     *db.DB's raw-pool accessors, whatever the receiver is spelled as;
-//   - BeginTx() on a value this file declares *db.DB — by name or as the
-//     struct field its own type declaration introduces — opens a transaction
-//     the file then owns;
+//   - SQLDb() and SQLReaderDB() name nothing else in this tree;
+//   - BeginTx() on a value this file declares *db.DB, by name or as a struct
+//     field, opens a transaction the file then owns;
 //   - a *sql.DB, *sql.Tx or *sql.Conn in a file that also imports db is that
-//     handle escaping into database/sql. A file that opens its own sql.DB and
-//     never touches Server/db is a different question, and not this one.
+//     handle escaping into database/sql.
 func checkRawHandleOwner(f *ast.File, fset *token.FileSet, rel string) []Violation {
 	var out []Violation
 	alias := DBHandleAlias(f)
@@ -281,13 +255,9 @@ func checkRawHandleOwner(f *ast.File, fset *token.FileSet, rel string) []Violati
 			case "SQLDb", "SQLReaderDB":
 				add(sel.Sel.Pos(), "calls "+sel.Sel.Name+"(), the raw database/sql pool behind the db handle")
 			case "BeginTx":
-				// The receiver names the handle either directly
-				// (database.BeginTx) or as a field this file declares
-				// (a.database.BeginTx) — DBHandleVars carries both, because a
-				// struct field typed *db.DB is a *db.DB declaration like any
-				// other. A field declared in another file is not this rule's
-				// shape: no single file declares it, and cmd/dbinventory's
-				// package-wide walk is what catches that one.
+				// The receiver names the handle directly (database.BeginTx) or as a
+				// field this file declares (a.database.BeginTx); a field declared in
+				// another file is caught by cmd/dbinventory's package-wide walk.
 				var recv string
 				switch r := sel.X.(type) {
 				case *ast.Ident:

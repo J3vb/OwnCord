@@ -8,19 +8,14 @@ import (
 // pushVAPIDKeyBytes is the P-256 private scalar length.
 const pushVAPIDKeyBytes = 32
 
-// LoadOrGeneratePushVAPIDKey returns the P-256 private key the server signs
-// Web Push VAPID JWTs with. It checks the OWNCORD_PUSH_VAPID_KEY environment
-// variable (hex, 32 bytes), then dataDir/push_vapid.key, and generates a key
-// into that file only on a confirmed absence: a read error must not silently
-// replace a key every subscription's vapid_key_id is checked against.
+// LoadOrGeneratePushVAPIDKey returns the P-256 key the server signs Web Push
+// VAPID JWTs with. It checks OWNCORD_PUSH_VAPID_KEY (hex), then
+// dataDir/push_vapid.key, and generates only on a confirmed absence: a read
+// error must not replace a key every subscription is checked against.
 //
-// Rotation is an operator action (replace the file or env var, then restart):
-// a push_subscriptions row whose key id no longer matches the running key is
-// invisible to List and removed by the sweep.
-//
-// The generate branch loops until the bytes decode (keyFileSpec.valid), since
-// crypto/ecdh refuses the ~2^-32 of scalars outside the curve order. A value
-// from the env or file that fails to decode is not retried; it is an error.
+// Rotation is an operator action: a subscription whose key id no longer matches
+// is invisible to List and removed by the sweep. Generation loops until the
+// bytes decode; an env or file value that fails to decode is an error.
 func LoadOrGeneratePushVAPIDKey(dataDir string) (*ecdh.PrivateKey, error) {
 	raw, err := loadOrGenerateKeyFile(keyFileSpec{
 		env:       "OWNCORD_PUSH_VAPID_KEY",

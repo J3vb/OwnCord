@@ -2,11 +2,11 @@
 // split from joinOrchestration.ts. Every helper is a whole synchronous step
 // that reads the session only through JoinHost; the awaits and the ownership
 // checks that guard them stay in JoinOrchestration.
-import type { Room } from "livekit-client";
 import { createLogger } from "../../lib/logger";
 import type { PendingVoiceJoin, SessionState } from "./sessionState";
 import { detachRoom, releaseRoom } from "./releaseRoom";
 import type { JoinHost } from "./joinHost";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 // Same logger tag as before the extraction, so the join log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -22,7 +22,7 @@ export interface JoinRequest {
 /** Helper to check state is "connected" for this exact room and channel, reading
  *  through a method call so TS control-flow narrowing cannot cache the result.
  *  Used in connectAndSetup() checkpoints after setState() transitions. */
-export function isStateConnected(host: JoinHost, channelId: number, room: Room): boolean {
+export function isStateConnected(host: JoinHost, channelId: number, room: VoiceRoom): boolean {
   const s: SessionState = host.getState();
   return s.type === "connected" && s.channelId === channelId && s.room === room;
 }
@@ -64,13 +64,13 @@ export function currentGeneration(host: JoinHost): number | "n/a" {
  *  null the modules out from under a newer attempt that already ran its own
  *  wiring but has not yet reached "connected" (it never re-wires after that
  *  point). */
-export function disconnectSupersededLocalRoom(host: JoinHost, localRoom: Room): void {
+export function disconnectSupersededLocalRoom(host: JoinHost, localRoom: VoiceRoom): void {
   releaseRoom(localRoom).catch((err) => log.debug("Failed to disconnect superseded room", err));
   if (host.getState().type === "idle") host.syncModuleRooms();
 }
 
 /** Drop the room of an attempt a checkpoint found superseded. */
-export function dropSuperseded(host: JoinHost, localRoom: Room): "superseded" {
+export function dropSuperseded(host: JoinHost, localRoom: VoiceRoom): "superseded" {
   disconnectSupersededLocalRoom(host, localRoom);
   return "superseded";
 }
@@ -100,7 +100,7 @@ export function clearForNewAttempt(host: JoinHost): void {
 }
 
 /** Point the extracted modules at the room this attempt is building. */
-export function wireModules(host: JoinHost, room: Room): void {
+export function wireModules(host: JoinHost, room: VoiceRoom): void {
   host.getAudioPipeline().setRoom(room);
   host.getAudioElements().setRoom(room);
   host.getDeviceManager().setRoom(room);
@@ -137,7 +137,7 @@ function queuedDifferentJoin(
 /** A different join queued while this attempt connected: drop this
  *  attempt's room and unwire the modules, so the drain runs the queued
  *  one. True when it did. */
-export function discardForQueuedJoin(host: JoinHost, room: Room, join: JoinRequest): boolean {
+export function discardForQueuedJoin(host: JoinHost, room: VoiceRoom, join: JoinRequest): boolean {
   const { token, url, channelId, directUrl } = join;
   const queuedJoin = queuedDifferentJoin(host, token, url, channelId, directUrl);
   if (queuedJoin === null) return false;

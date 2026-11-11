@@ -34,24 +34,17 @@ func (m *MarkerStore) Markers(ctx context.Context) ([]DeletionMarker, error) {
 
 // ReplayReport is what one replay pass did.
 type ReplayReport struct {
-	// Erased counts accounts a marker — recorded, or still pending — found
-	// present and erased; a pending one is recorded by it.
-	Erased int
-	// Confirmed counts pending markers whose account was already gone (the
-	// erasure had committed before a crash) and are now recorded.
+	Erased    int
 	Confirmed int
 }
 
-// ReplayAccounts applies the account markers to the main database: every
-// account whose id hashes to a marker is erased again through erase (after a
-// restore, the resurrected subject). A pending marker whose account is present
-// is applied like a recorded one and becomes recorded: whether its transaction
-// committed cannot be read off a database a restore reverts, the request was
-// authorised before the marker was written, and "done then undone by a
-// restore" and "never done" end the same way. A pending marker whose account
-// is gone is confirmed. erase must be the full erasure (ReplayEraseAccount
-// plus the file half), given the marker's token so audit rows unlink to it,
-// and must not apply the last-admin guard.
+// ReplayAccounts applies the account markers to the main database: every account whose
+// id hashes to a marker is erased again through erase. A pending marker whose account
+// is present is applied like a recorded one and becomes recorded: whether its
+// transaction committed cannot be read off a restored database, and "done then undone"
+// and "never done" end the same way. A pending marker whose account is gone is
+// confirmed. erase must be the full erasure (ReplayEraseAccount plus the file half),
+// given the marker's token, without the last-admin guard.
 func (m *MarkerStore) ReplayAccounts(ctx context.Context, users UserIDLister, erase func(ctx context.Context, userID int64, token string) error) (ReplayReport, error) {
 	var rep ReplayReport
 	markers, err := m.Markers(ctx)
@@ -108,10 +101,8 @@ func (m *MarkerStore) ReplayAccounts(ctx context.Context, users UserIDLister, er
 	return rep, nil
 }
 
-// HasAccountMarkers reports whether the file holds any account marker. One
-// proves the installation was set up and an account erased, and it survives a
-// restore of a backup taken before the first owner existed
-// (ErasureService.ReplayMarkers).
+// HasAccountMarkers reports whether any account marker exists: proof of setup that
+// survives restoring a pre-first-owner backup.
 func (m *MarkerStore) HasAccountMarkers(ctx context.Context) (bool, error) {
 	var one int
 	err := m.sqlDB.QueryRowContext(ctx,
@@ -125,8 +116,8 @@ func (m *MarkerStore) HasAccountMarkers(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// MessagesToken is the unlinkable name of a channel's retention marker:
-// hex of HMAC-SHA256(key, "messages:" || decimal channel id).
+// MessagesToken is a channel's retention-marker name: hex HMAC-SHA256(key, "messages:"
+// || channel id).
 func (m *MarkerStore) MessagesToken(channelID int64) string {
 	mac := hmac.New(sha256.New, m.key)
 	mac.Write([]byte("messages:"))
@@ -135,11 +126,10 @@ func (m *MarkerStore) MessagesToken(channelID int64) string {
 }
 
 // RecordMessagesSweep records that retention removed everything older than
-// cutoff in channelID: one marker per channel, its cutoff only moving forward,
-// so restoring an older backup re-sweeps to the newest cutoff. cutoff is in
-// SQLite's UTC layout. The channels sequence is recorded as a floor
-// (channelsSeq is DB.SequenceValue for channels) so a restore cannot hand the
-// channel's id, and this marker, to a new channel.
+// cutoff (SQLite UTC layout) in channelID: one marker per channel, its cutoff
+// only moving forward, so an older backup re-sweeps to the newest cutoff. The
+// channels sequence is recorded as a floor so a restore cannot hand this
+// channel's id, and marker, to a new channel.
 func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, cutoff string, channelsSeq int64) error {
 	tx, err := m.sqlDB.BeginTx(ctx, nil)
 	if err != nil {
@@ -162,10 +152,8 @@ func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, 
 	return nil
 }
 
-// ReplayMessages re-applies every messages marker: sweep removes everything in
-// the channel older than the cutoff (the retention sweep, pinned exempt) and
-// returns how many rows went. A marker for a vanished channel is skipped. It
-// returns the total removed.
+// ReplayMessages re-applies every messages marker: sweep removes everything in the
+// channel older than the cutoff (pinned exempt). Returns the total removed.
 func (m *MarkerStore) ReplayMessages(ctx context.Context, sweep func(ctx context.Context, channelID int64, cutoff string) (int, error)) (int, error) {
 	markers, err := m.Markers(ctx)
 	if err != nil {

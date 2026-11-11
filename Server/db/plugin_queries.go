@@ -140,7 +140,6 @@ func (d *DB) PluginKVScan(ctx context.Context, pluginID int64, prefix string, li
 	return out, rows.Err()
 }
 
-// rowScanner is satisfied by *sql.Row and *sql.Rows.
 type rowScanner interface {
 	Scan(dest ...any) error
 }

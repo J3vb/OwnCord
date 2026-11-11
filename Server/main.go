@@ -14,14 +14,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/logctx"
 )
 
-// version is overridden at build time via -ldflags "-X main.version=1.0.0".
-// It stays in package main because that is the symbol the Makefile,
-// release.yml and the Dockerfile name; app.Deps carries it into the process.
+// version is set via -ldflags "-X main.version=1.0.0"; it stays in package main because the
+// Makefile, release.yml and the Dockerfile name that symbol. app.Deps carries it onward.
 var version = "dev"
 
-// usageText is what `--help` prints. It lists the subcommands main dispatches
-// before starting the server, so an operator can find them without reading the
-// source.
+// usageText is what `--help` prints: the subcommands main dispatches before starting the server.
 const usageText = `OwnCord chat server
 
 Usage:
@@ -42,9 +39,8 @@ Usage:
                              "chatserver config" for its own usage).
 `
 
-// infoOutput returns the text `args[0]` asks for and true when it is an
-// informational flag, or "" and false otherwise. Kept out of main so the
-// dispatch is testable without a subprocess.
+// infoOutput returns the text args[0] asks for and true if it is an informational flag. Kept out
+// of main so dispatch is testable without a subprocess.
 func infoOutput(args []string) (string, bool) {
 	if len(args) == 0 {
 		return "", false
@@ -59,61 +55,45 @@ func infoOutput(args []string) (string, bool) {
 }
 
 func main() {
-	// `--version`/`--help` print and exit before any server or logging setup;
-	// otherwise config.Load would write a config.yaml into the cwd as a side
-	// effect of asking what a build is.
+	// `--version`/`--help` exit before any setup, else config.Load would write a config.yaml into the cwd.
 	if out, ok := infoOutput(os.Args[1:]); ok {
 		fmt.Print(out)
 		return
 	}
 
-	// `server healthcheck` probes the running instance's /health and exits
-	// 0/1, for container healthchecks: the distroless image has no shell or
-	// curl, so the binary is its own probe.
+	// `server healthcheck` probes /health and exits 0/1; the distroless image has no shell or curl.
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(app.RunHealthcheckCLI())
 	}
-	// `server token ...` is a direct-to-DB CLI (mint/list/revoke API tokens) —
-	// handled before any server/logging setup so it stays quiet and standalone.
+	// `server token ...` is a direct-to-DB CLI, handled before server/logging setup to stay quiet.
 	if len(os.Args) > 1 && os.Args[1] == "token" {
 		os.Exit(runTokenCLI(os.Args[2:]))
 	}
-	// `server restore <file>` is the offline counterpart to the admin restore
-	// endpoint. Handled before logging setup so it stays quiet and standalone;
-	// it takes the database's process lock so a running server stops it.
+	// `server restore <file>` is the offline counterpart of the admin restore endpoint; it takes the
+	// database's process lock so a running server stops it. Handled before logging setup.
 	if len(os.Args) > 1 && os.Args[1] == "restore" {
 		os.Exit(runRestoreCLI(config.DefaultPath, os.Args[2:]))
 	}
-	// `server config reset-overrides` drops settings saved from the admin
-	// panel while the server is stopped. Handled before logging
-	// setup for the same reason, and it takes the same process lock.
+	// `server config reset-overrides` drops panel-saved settings while the server is stopped. Handled
+	// before logging setup, and takes the same process lock.
 	if len(os.Args) > 1 && os.Args[1] == "config" {
 		os.Exit(runConfigCLI(config.DefaultPath, os.Args[2:]))
 	}
 
-	// Create ring buffer for admin log viewer, then build a multi-handler
-	// that tees log records to both stdout and the ring buffer.
+	// Ring buffer for the admin log viewer, teed with stdout.
 	logBuf := admin.NewRingBuffer(10000)
-	// levelVar controls both handlers' thresholds. It starts at INFO so
-	// early-startup logs are captured, then app.LoadConfig adjusts it once
-	// config.yaml / OWNCORD_LOGGING_LEVEL is loaded. The ring buffer shares it
-	// rather than hard-wiring DEBUG, so every gated Debug call becomes a no-op
-	// instead of formatting a ring entry.
+	// levelVar gates both handlers. It starts at INFO so early logs are captured, then app.LoadConfig
+	// adjusts it; the ring shares it so gated Debug calls are no-ops instead of formatting an entry.
 	levelVar := new(slog.LevelVar)
 	stdoutHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: levelVar})
 	multiHandler := admin.NewMultiHandler(stdoutHandler, logBuf, levelVar)
-	// logctx enriches records logged with a request/trace context (the
-	// ...Context slog variants) with req_id and, under -tags otel, trace_id.
+	// logctx adds req_id and, under -tags otel, trace_id to records logged with a context.
 	log := slog.New(logctx.New(multiHandler))
 	slog.SetDefault(log)
 
-	// The restart coordinator carries a self-restart request (update apply,
-	// backup restore, setup wizard) across the lifecycle's teardown (see
-	// internal/app/restart.go); the handoff below is the last thing this
-	// process does. The backstop closure fires only if a requested restart's
-	// drain wedges past RestartBackstopDelay: it performs the handoff without
-	// staying behind for the replacement and force-exits, releasing whatever
-	// the wedged teardown holds.
+	// The restart coordinator carries a self-restart request across teardown (internal/app/restart.go);
+	// the handoff below is this process's last act. The backstop fires only if the drain wedges past
+	// RestartBackstopDelay: it hands off without waiting and force-exits, releasing what teardown holds.
 	var rc *app.RestartCoordinator
 	rc = app.NewRestartCoordinator(app.RestartBackstopDelay, func() {
 		slog.Error("restart backstop fired — teardown exceeded its budget, exiting for handoff")
@@ -129,10 +109,9 @@ func main() {
 		log.Error("server exited with error", "error", err)
 	}
 
-	// Perform the handoff even when the lifecycle returned an error: a restart
-	// is requested only after a committed binary swap or a restore that closed
-	// the database, so not restarting is worse. A process that stayed behind
-	// for its replacement exits with the replacement's code.
+	// Hand off even if the lifecycle errored: a restart is requested only after a committed binary swap
+	// or a restore that closed the database, so not restarting is worse. A waiter exits with the
+	// replacement's code.
 	if code, waited := rc.PerformHandoff(log); waited {
 		os.Exit(code)
 	}
@@ -142,10 +121,8 @@ func main() {
 	}
 }
 
-// runServer is the whole server lifecycle: load the configuration main's log
-// sinks and restart coordinator are wired against, build the App around it,
-// and run until it stops and has closed every stage it started. Split out of
-// main() only so the restart handoff above runs on every return path.
+// runServer is the whole server lifecycle: load config, build the App, run until every stage is
+// closed. Split from main() so the restart handoff runs on every return path.
 func runServer(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc *app.RestartCoordinator) error {
 	cfg, baseLevel, err := app.LoadConfig(log, levelVar, rc)
 	if err != nil {

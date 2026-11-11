@@ -1,6 +1,6 @@
 // `x as unknown as T` tells the compiler nothing about x: it skips every check
-// a plain `as` still makes. Production code may not add one. The list below
-// holds the only one left and may only shrink; a stale entry fails too.
+// a plain `as` still makes. Production code may not have one: the list below
+// is empty, and a new entry is not the way to add one.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -8,13 +8,7 @@ import { isInstrumented, withoutSandboxHeader } from "../helpers/instrumented";
 
 const srcDir = path.resolve(__dirname, "../../src");
 
-/**
- * NativeRoom is the Linux stand-in for livekit's Room and implements only the
- * slice of it the voice modules call; they still type the room as Room.
- */
-const allowed: Record<string, number> = {
-  "features/voice/roomLifecycle.ts": 1,
-};
+const allowed: Record<string, number> = {};
 
 const DOUBLE_CAST = /\bas\s+unknown\s+as\b/g;
 

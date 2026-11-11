@@ -16,7 +16,7 @@
  * track is never touched.
  */
 
-import { RoomEvent, type LocalVideoTrack, type Room } from "livekit-client";
+import { RoomEvent, type LocalVideoTrack } from "livekit-client";
 import { createLogger } from "../../lib/logger";
 import { voiceStore } from "../../stores/voice.store";
 import { setSenderTop, recordSenderLayers } from "../../lib/voice/senderLayers";
@@ -31,6 +31,7 @@ import { onVideoBitrateCap } from "./videoBitrateCap";
 import { liveVideoBudget } from "./videoBudgetNow";
 import type { ShareSenderSample } from "./shareSenderStats";
 import type { CameraTrackState, ScreenTrackState } from "./videoTrackState";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("videoCapFollow");
 
@@ -48,12 +49,12 @@ export interface NativeBitrateRoom {
   setVideoBitrate(kind: Kind, track: object, maxBitrate: number): Promise<void>;
 }
 
-function isNativeBitrateRoom(room: Room | null): room is Room & NativeBitrateRoom {
+function isNativeBitrateRoom(room: VoiceRoom | null): room is VoiceRoom & NativeBitrateRoom {
   return typeof (room as Partial<NativeBitrateRoom> | null)?.setVideoBitrate === "function";
 }
 
 export interface VideoCapHost {
-  readonly getRoom: () => Room | null;
+  readonly getRoom: () => VoiceRoom | null;
   readonly getCameraState: () => CameraTrackState;
   readonly getScreenState: () => ScreenTrackState;
 }
@@ -132,7 +133,12 @@ async function setWebTop(kind: Kind, track: LocalVideoTrack, top: number): Promi
 }
 
 /** Set `top` on a live track: the host for a native room, else its sender. */
-async function applyTop(room: Room | null, kind: Kind, track: object, top: number): Promise<void> {
+async function applyTop(
+  room: VoiceRoom | null,
+  kind: Kind,
+  track: object,
+  top: number,
+): Promise<void> {
   if (isNativeBitrateRoom(room)) {
     await room.setVideoBitrate(kind, track, top);
     return;
@@ -184,7 +190,7 @@ export async function clampPublishedVideo(
 export class VideoCapFollower {
   private unsubscribes: Array<() => void> = [];
   /** The room whose reconnects are watched, and how to stop watching. */
-  private watched: { room: Room; off: () => void } | null = null;
+  private watched: { room: VoiceRoom; off: () => void } | null = null;
   private slots: Record<Kind, Slot> = { camera: newSlot(), screen: newSlot() };
   /** Bumped by `stop`: a run that began before it leaves everything alone. */
   private epoch = 0;

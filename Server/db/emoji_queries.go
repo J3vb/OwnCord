@@ -9,9 +9,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// GetEmoji returns the emoji with the given id, or (nil, nil) when no such row
-// exists. A missing row is not an error: DELETE races and stale client ids are
-// ordinary, and the caller turns the nil into a 404.
+// GetEmoji returns the emoji with the given id, or (nil, nil) when no such row exists:
+// DELETE races and stale client ids are ordinary, and the caller turns the nil into a
+// 404.
 func (d *DB) GetEmoji(ctx context.Context, id int64) (*Emoji, error) {
 	row, err := d.q.GetEmojiByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -30,9 +30,9 @@ func (d *DB) GetEmoji(ctx context.Context, id int64) (*Emoji, error) {
 	}, nil
 }
 
-// GetEmojiByShortcode returns the emoji owning `shortcode`, or (nil, nil).
-// Shortcodes are stored lowercase, so the caller must normalize before calling
-// -- this is the uniqueness check behind CreateEmoji.
+// GetEmojiByShortcode returns the emoji owning shortcode, or (nil, nil). Shortcodes
+// are stored lowercase, so the caller must normalize first; this is the uniqueness
+// check behind CreateEmoji.
 func (d *DB) GetEmojiByShortcode(ctx context.Context, shortcode string) (*Emoji, error) {
 	row, err := d.q.GetEmojiByShortcode(ctx, shortcode)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -71,9 +71,9 @@ func (d *DB) ListEmoji(ctx context.Context) ([]*Emoji, error) {
 	return out, nil
 }
 
-// CreateEmoji inserts a custom emoji and returns the stored row. storedAs is
-// the storage-layer UUID the bytes were written under; mimeType is the type
-// sniffed from those bytes, never a client-supplied header.
+// CreateEmoji inserts a custom emoji and returns the stored row. storedAs is the
+// storage-layer UUID; mimeType is sniffed from the bytes, never a client-supplied
+// header.
 func (d *DB) CreateEmoji(ctx context.Context, shortcode, storedAs, mimeType string, uploadedBy int64) (*Emoji, error) {
 	row, err := d.q.CreateEmoji(ctx, dbgen.CreateEmojiParams{
 		Shortcode:  shortcode,
@@ -94,9 +94,8 @@ func (d *DB) CreateEmoji(ctx context.Context, shortcode, storedAs, mimeType stri
 	}, nil
 }
 
-// DeleteEmoji removes the emoji row and reports whether a row was actually
-// deleted, so a concurrent double-delete answers 404 rather than pretending to
-// have removed the same emoji twice.
+// DeleteEmoji removes the emoji row and reports whether a row was deleted, so a
+// concurrent double-delete answers 404.
 func (d *DB) DeleteEmoji(ctx context.Context, id int64) (bool, error) {
 	res, err := d.q.DeleteEmoji(ctx, id)
 	if err != nil {

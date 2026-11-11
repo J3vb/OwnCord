@@ -5,7 +5,6 @@
  */
 
 import {
-  type Room,
   type LocalVideoTrack,
   type LocalTrack,
   type TrackPublishOptions,
@@ -57,6 +56,7 @@ import {
 import { disableScreenshare, stopManualScreenTracks, watchScreenEnded } from "./screenTrackStop";
 import { clampPublishedVideo } from "./videoCapFollow";
 import { liveVideoBudget } from "./videoBudgetNow";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("screenShare");
 
@@ -83,7 +83,7 @@ function acceptSharePick(
  *  (a publish may have landed after the disable's unpublish). */
 function undoSupersededShare(
   state: ScreenTrackState,
-  room: Room,
+  room: VoiceRoom,
   screenTracks: LocalTrack[],
 ): void {
   for (const t of screenTracks) {
@@ -97,7 +97,7 @@ function undoSupersededShare(
  *  share meanwhile has released everything it made. */
 function publishShareAppAudio(
   state: ScreenTrackState,
-  room: Room,
+  room: VoiceRoom,
   screenTracks: LocalTrack[],
   videoTrack: LocalTrack,
   generation: number,
@@ -187,7 +187,7 @@ function announceShare(
 
 function failShareEnable(
   state: ScreenTrackState,
-  room: Room,
+  room: VoiceRoom,
   generation: number,
   deps: VideoTrackDeps,
   err: unknown,
@@ -236,7 +236,7 @@ interface CapturedShare {
 async function captureShare(
   state: ScreenTrackState,
   deps: VideoTrackDeps,
-  room: Room,
+  room: VoiceRoom,
   settings: ShareSettings,
   generation: number,
   ended: { remove?: () => void },
@@ -247,7 +247,8 @@ async function captureShare(
   // WebRTC-less webview): its room's picker-and-capture stands in and sets
   // the capture from the picker's per-share quality.
   const screenTracks = isLinuxDesktop()
-    ? await room.localParticipant.createScreenTracks()
+    ? // The native tracks stand in for LocalTrack, as the camera's do (createCameraTrack).
+      ((await room.localParticipant.createScreenTracks()) as LocalTrack[])
     : await createLocalScreenTracks(captureOptions);
   if ((state.generation ?? 0) !== generation) {
     // A disableScreenshare ran to completion while the OS picker was still
@@ -297,7 +298,7 @@ async function prepareShareCodec(
  *  attempt's tracks are then undone. */
 async function publishShareTracks(
   state: ScreenTrackState,
-  room: Room,
+  room: VoiceRoom,
   screenTracks: LocalTrack[],
   videoOptions: TrackPublishOptions,
   generation: number,
@@ -334,7 +335,7 @@ function wantsAppAudio(
 async function startShare(
   state: ScreenTrackState,
   deps: VideoTrackDeps,
-  room: Room,
+  room: VoiceRoom,
   ws: WsClient,
   settings: ShareSettings,
   generation: number,

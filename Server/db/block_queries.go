@@ -93,9 +93,8 @@ func (d *DB) IsBlocked(ctx context.Context, blockerID, blockedID int64) (bool, e
 	return true, nil
 }
 
-// IsEitherBlocked returns true if either user has blocked the other.
-// Used for DM authorization — if either party has blocked the other,
-// messaging is denied.
+// IsEitherBlocked reports whether either user has blocked the other; DM authorization
+// denies messaging then.
 func (d *DB) IsEitherBlocked(ctx context.Context, userA, userB int64) (bool, error) {
 	_, err := d.q.IsEitherBlocked(ctx, dbgen.IsEitherBlockedParams{
 		BlockerID:   userA,

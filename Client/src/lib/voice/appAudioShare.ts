@@ -13,12 +13,7 @@
  * meanwhile means the capture is stopped again and nothing is published.
  */
 
-import {
-  LocalAudioTrack,
-  type LocalTrack,
-  type Room,
-  type TrackPublishOptions,
-} from "livekit-client";
+import { LocalAudioTrack, type LocalTrack, type TrackPublishOptions } from "livekit-client";
 import { desktop } from "../../platform/desktop";
 import type { AppAudioErrorCode } from "../../platform/contracts/appAudio";
 import { openAppAudio } from "./appAudioTrack";
@@ -26,6 +21,7 @@ import type { ScreenTrackState } from "../../features/voice/screenShare";
 import { createLogger } from "../logger";
 import { showToast } from "../ui/toast";
 import { voiceText } from "../../i18n/voice";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("appAudioShare");
 
@@ -128,7 +124,7 @@ export async function startAppShareAudio(
  */
 export async function publishAppAudio(
   state: ScreenTrackState,
-  room: Room,
+  room: VoiceRoom,
   screenTracks: LocalTrack[],
   video: LocalTrack,
   generation: number,
