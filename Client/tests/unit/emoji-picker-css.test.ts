@@ -14,4 +14,8 @@ describe("emoji picker skip boxes", () => {
     expect(cascadedDeclaration(".ep-scroll", "container-type")).toBeDefined();
     expect(cascadedDeclaration(".ep-grid", "contain-intrinsic-block-size")).toBeDefined();
   });
+
+  it("a grid that is not built yet keeps its final height", () => {
+    expect(cascadedDeclaration(".ep-grid.ep-lazy", "min-height")).toBeDefined();
+  });
 });

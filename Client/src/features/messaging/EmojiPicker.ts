@@ -9,6 +9,7 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { buildCustomEmojiNode } from "./content/customEmoji";
 import { createPickerImages, type PickerImages } from "./pickerImages";
 import { trackPickerCategory } from "./pickerScroll";
+import { createLazyGrids } from "./pickerLazyGrids";
 import { messagingText } from "../../i18n/messaging";
 import { addRecentEmoji, getRecentEmoji } from "./emojiRecent";
 import {
@@ -203,6 +204,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   body.appendChild(scrollArea);
   const images = createPickerImages(scrollArea, signal);
   const refreshCategory = trackPickerCategory(scrollArea, categoryBar, signal);
+  const lazyGrids = createLazyGrids(scrollArea, signal);
   enableRovingNavigation(scrollArea, ".ep-emoji", signal, "grid", GRID_COLUMNS);
 
   // Single delegated listener for the whole grid, registered once at mount
@@ -337,9 +339,9 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
 
     const grid = createElement("div", { class: "ep-grid" });
     grid.style.setProperty("--ep-rows", String(Math.ceil(filtered.length / GRID_COLUMNS)));
-    for (const emoji of filtered) {
-      grid.appendChild(buildEmojiSpan(emoji, images));
-    }
+    lazyGrids.place(grid, filtered.length, () => {
+      for (const emoji of filtered) grid.appendChild(buildEmojiSpan(emoji, images));
+    });
     scrollArea.appendChild(grid);
   }
 
@@ -363,6 +365,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
 
   function renderAllCategories(categories: readonly EmojiCategory[]): void {
     images.clear();
+    lazyGrids.reset();
     for (const child of Array.from(scrollArea.children)) {
       if (child !== failureRow) child.remove();
     }

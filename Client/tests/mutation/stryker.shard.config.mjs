@@ -346,6 +346,7 @@ export const shards = {
   "lib-rest-4": [
     "src/features/developer-mode/developerTools.ts",
     "src/features/messaging/pickerImages.ts",
+    "src/features/messaging/pickerLazyGrids.ts",
     "src/features/share/shareIn.ts",
     "src/lib/disposable.ts",
     "src/lib/dmUnread.ts",

@@ -228,6 +228,11 @@
   content-visibility: auto;
   contain-intrinsic-block-size: auto calc(var(--ep-rows, 1) * ((100cqw - 30px) / 8 + 2px) - 2px);
 }
+/* A grid that is not built yet keeps its final height (same formula, plus the 12 px of
+   padding), so the scrollbar and the cached label positions do not move when it fills. */
+.ep-grid.ep-lazy {
+  min-height: calc(var(--ep-rows, 1) * ((100cqw - 30px) / 8 + 2px) + 10px);
+}
 .ep-emoji {
   width: 100%;
   aspect-ratio: 1;
