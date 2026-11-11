@@ -3813,7 +3813,9 @@ never lands after, and cancels, the new ring.
 Answered with `call_declined` (same payload shape as `call_incoming`) to the
 DM's other participants. It is addressed to all of them rather than to "the
 ringer" because the server does not know who that was — no call state, by
-design — and in a group more than one person may be ringing.
+design — and in a group more than one person may be ringing. The decliner's own
+connections receive it too (`from_user` is their own id), so another signed-in
+device of theirs that is still ringing stops.
 
 A declining client stops its own ring; a ringing client stops on
 `call_declined`, on a `voice_leave` that empties the room, or after a 30 second timeout.

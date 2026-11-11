@@ -297,6 +297,38 @@ func TestCallDecline_ForwardsToOtherParticipants(t *testing.T) {
 	}
 }
 
+func TestCallDecline_ReachesTheDecliners_OtherDevices(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "decline-dev-alice")
+	bob := seedMemberUser(t, database, "decline-dev-bob")
+	chID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	// Two devices of one account are two connections with their own sessions.
+	sendBobFirst := make(chan []byte, 64)
+	cBob := ws.NewTestClientWithTokenHash(hub, bob, "decline-dev-hash-1", chID, sendBobFirst)
+	hub.Register(cBob)
+	sendBobSecond := make(chan []byte, 64)
+	cBob2 := ws.NewTestClientWithTokenHash(hub, bob, "decline-dev-hash-2", chID, sendBobSecond)
+	hub.Register(cBob2)
+	waitRegistered(t, hub, cBob2)
+	_, sendAlice := connectClient(t, hub, alice, chID, 64)
+
+	hub.HandleMessageForTest(cBob, callMsg("call_decline", chID))
+
+	// Bob's second device hears his decline; so does the ringer.
+	env := dmWaitMsgType(sendBobSecond, "call_declined", waitTimeout)
+	if env == nil {
+		t.Fatal("the decliner's other device did not receive call_declined")
+	}
+	payload, _ := env["payload"].(map[string]any)
+	if int64(payload["from_user"].(float64)) != bob.ID {
+		t.Errorf("call_declined carried from_user %v, want %d", payload["from_user"], bob.ID)
+	}
+	if dmWaitMsgType(sendAlice, "call_declined", waitTimeout) == nil {
+		t.Error("the ringer did not receive call_declined")
+	}
+}
+
 func TestCallRing_RateLimited(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	alice := seedOwnerUser(t, database, "ringlimit-alice")
