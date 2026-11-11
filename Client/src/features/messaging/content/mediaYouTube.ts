@@ -11,6 +11,8 @@ import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { admitDerived } from "../../content-consent/external";
 import { externalConsentText } from "../../../i18n/externalConsent";
 import { contentText } from "../../../i18n/content";
+import { dataSaverActive } from "./dataSaver";
+import { renderDeferredMedia } from "./deferredMedia";
 
 /** Bumped on every cache clear so a title that resolves late is dropped. */
 let mediaCacheGeneration = 0;
@@ -82,7 +84,23 @@ void registerSessionReset("media:caches", clearMediaCaches, { phase: "cache" });
 const YOUTUBE_ID_RE = /^[\w-]{1,20}$/;
 
 /** Render a YouTube embed player with title header. */
-export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDivElement {
+export function renderYouTubeEmbed(
+  videoId: string,
+  originalUrl: string,
+  tapped = false,
+): HTMLDivElement {
+  if (!tapped && dataSaverActive()) {
+    const deferred = renderDeferredMedia(originalUrl, () =>
+      renderYouTubeEmbed(videoId, originalUrl, true),
+    );
+    const link = createElement(
+      "a",
+      { href: originalUrl, target: "_blank", rel: "noopener noreferrer" },
+      originalUrl,
+    );
+    deferred.prepend(link);
+    return deferred;
+  }
   // Validate videoId to prevent injection into iframe src / img src.
   if (!YOUTUBE_ID_RE.test(videoId)) {
     const fallback = createElement("div", { class: "msg-embed" });

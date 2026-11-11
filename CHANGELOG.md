@@ -47,6 +47,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Android
+
+- Added Data saver in Text & Images: defer images, GIFs and preview images until tapped on metered connections or on every network.
+
 ### Changed
 
 - The app now checks each server reply before using it. A reply it cannot read (from a much older or newer server, or a proxy answering in its place) shows "The server sent a reply this version of OwnCord cannot read" instead of half-loading; after a save, it adds that the change may already have been made.

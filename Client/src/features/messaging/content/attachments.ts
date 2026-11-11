@@ -6,6 +6,8 @@
 
 import { createElement } from "@lib/dom";
 import { observeMedia } from "./mediaVisibility";
+import { dataSaverActive } from "./dataSaver";
+import { renderDeferredMedia } from "./deferredMedia";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import { isVoiceAttachment, renderVoicePlayer } from "../../voice-messages/player";
 import type { Attachment } from "@lib/types";
@@ -207,7 +209,17 @@ function renderImageAttachment(
   att: Attachment,
   resolvedUrl: string,
   gallery?: LightboxGallery,
+  tapped = false,
 ): HTMLDivElement {
+  if (!tapped && dataSaverActive()) {
+    const deferred = renderDeferredMedia(
+      att.filename,
+      () => renderImageAttachment(att, resolvedUrl, gallery, true),
+      att.size,
+    );
+    deferred.classList.add("msg-image");
+    return deferred;
+  }
   const wrap = createElement("div", { class: "msg-image" });
   // The row shows the server's preview; the lightbox loads the full file.
   const inlineUrl = thumbnailUrl(resolvedUrl, att.mime);
