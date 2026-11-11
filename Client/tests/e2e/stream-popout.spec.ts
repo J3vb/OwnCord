@@ -93,7 +93,9 @@ test.describe("stream pop-out window", () => {
     expect(await findUnnamedControls(popup.locator("body"))).toEqual([]);
     expect(await findUnnamedControls(tile(page))).toEqual([]);
 
-    // Full screen from the window's own control.
+    // Full screen from the window's own control. The window must have focus:
+    // newer Chromium refuses full screen to a popup opened in the background.
+    await popup.bringToFront();
     await popup.locator(".video-popout").hover();
     await popup.locator("[data-popout-control='fullscreen']").click();
     await expect
