@@ -70,6 +70,7 @@ and only when it changes something a contributor or fork holder must do
 - A voice-channel password attempt refused because the whole server is at its limit no longer counts against the member's own attempts.
 - The admin Server configuration page was one long alphabetical list with titles like "Tls" and "Gif". It now has plain titles, a fixed order (Server, TLS, Uploads, Voice, Backup, Logging, Integrations, Advanced), a jump bar and a filter box that stay at the top.
 - The admin Settings and Dashboard no longer tell you to edit config.yaml for settings you can change on the Server configuration page; they link there instead.
+- Voice: the server now makes each voice connection to the voice server itself, for a member who is in the channel at that moment and with the rights they hold then. Nothing changes for members. If you run your own LiveKit server, list only OwnCord's key under `keys:`.
 
 ### Added
 

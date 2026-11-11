@@ -202,9 +202,10 @@ func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimit
 
 	// Proxying LiveKit signalling through OwnCord's HTTPS server avoids mixed-content blocks. AuthMiddleware
 	// is omitted deliberately: signal requests carry a LiveKit JWT (access_token query param or Bearer),
-	// which users only get via the authenticated voice_join flow; rate limiting prevents abuse.
+	// which users only get via the authenticated voice_join flow, and the hub admits each one against
+	// current voice membership before LiveKit sees it; rate limiting prevents abuse.
 	r.With(RateLimitMiddleware(limiter, "livekit_proxy:", livekitProxyRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)).
-		Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
+		Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins, hub.AdmitVoiceSession)))
 }
 
 func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc *service.Services, hub *ws.Hub, windows *metrics.Windows) {

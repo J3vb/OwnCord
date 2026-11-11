@@ -22,7 +22,8 @@ import (
 // client refreshes via voice_token_refresh. Tokens are scoped to one room; the server revokes room
 // access on ban/kick; the polling reconciler (voice_reconcile.go) and the participant_joined
 // webhook remove SFU participants with no voice_states row; CanPublishSources restricts track types
-// per permission.
+// per permission; the signalling proxy admits a session only for a current join and connects with
+// a credential issued at that moment (voice_session_admit.go).
 const tokenTTL = 5 * time.Minute
 
 // LiveKitClient provides token generation and room management via the LiveKit server SDK.
@@ -36,8 +37,8 @@ type LiveKitClient struct {
 	// publish data packets.
 	restrictData bool
 
-	// removed holds identities RemoveParticipant removed, kept removed for tokenTTL by the hub's
-	// watch (voice_removed_watch.go).
+	// removed holds identities RemoveParticipant removed, kept removed for voiceRemovedWatchWindow
+	// by the hub's watch (voice_removed_watch.go).
 	removed removedIdentities
 
 	health liveKitHealthCache
