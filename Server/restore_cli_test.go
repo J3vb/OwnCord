@@ -299,8 +299,23 @@ func TestRestoreCLI_RefusesWithoutSafetyCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code == 0 {
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	code := runRestoreCLI(cfgPath, []string{"--force", backup})
+	os.Stderr = oldStderr
+	_ = w.Close()
+	var said bytes.Buffer
+	_, _ = said.ReadFrom(r)
+
+	if code == 0 {
 		t.Fatal("restore without a safety copy exited 0, want a refusal")
+	}
+	if !strings.Contains(said.String(), "pre-restore safety copy") || !strings.Contains(said.String(), db.ErrBackupNoSpace.Error()) {
+		t.Fatalf("the refusal did not come from the safety copy: %s", said.String())
 	}
 	if !userExists(t, dbPath, "existing-owner") || userExists(t, dbPath, "restored-user") {
 		t.Fatal("the live database was overwritten with no safety copy taken")
