@@ -43,6 +43,15 @@ type Client struct {
 	// so it needs no lock.
 	identityKey string
 	lastSeq     uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	// regGen is the hub's connection generation this registration produced. Written
+	// under hub.mu by addClientLocked, read under it.
+	regGen uint64
+	// resumeReadable is the channel set this connection's replay was filtered by,
+	// nil unless it registered through a replaying resume. Set under hub.seqMu
+	// before the connection is registered and never changed, so a frame whose
+	// audience was resolved before the registration can be handed to it by the
+	// rule its replay used (sendToLateResumes). Read under seqMu.
+	resumeReadable map[int64]bool
 	// authChannelID is the channel the client says it had open at disconnect, sent
 	// with last_seq in the auth frame (0 = none). It closes a resume-only hole:
 	// registerNow copies the channel subscription from the old client entry, but when

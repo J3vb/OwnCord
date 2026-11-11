@@ -200,8 +200,8 @@ func TestDeferredFocus_DoesNotLandAfterDisconnect(t *testing.T) {
 		t.Fatal("setup: the sixth focus should be parked with a drain running")
 	}
 
-	// The read loop ended: its teardown unregisters first and closes the socket's
-	// queues only after the voice leave and presence stamps that follow.
+	// The read loop ended: its teardown unregisters first, and the voice leave
+	// and presence stamps follow.
 	if replaced := hub.unregisterNow(c); replaced {
 		t.Fatal("setup: a plain disconnect, not a replacement")
 	}

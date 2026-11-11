@@ -270,6 +270,7 @@ func (h *Hub) reconnectRegister(
 	if handleReconnectPostCheckPreRegisterRaceHook != nil {
 		handleReconnectPostCheckPreRegisterRaceHook()
 	}
+	c.resumeReadable = allowedChannelIDs
 	h.registerNow(c, allowedChannelIDs, txn)
 	h.observeSeqMuHold(start)
 	h.seqMu.Unlock()
