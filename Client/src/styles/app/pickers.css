@@ -202,6 +202,7 @@
   outline-offset: 1px;
 }
 .ep-scroll {
+  container-type: inline-size;
   position: relative;
   flex: 1;
   min-width: 0;
@@ -220,13 +221,16 @@
   grid-template-columns: repeat(8, 1fr);
   gap: 2px;
   padding: 4px 8px 8px;
+  /* One skip box per category: the 1,900 cells cost more as separate boxes than
+     they save. The height is exact (--ep-rows rows of square cells, 2 px gaps,
+     8 px side padding), so the scrollbar never moves and pickerScroll.ts can
+     keep its cached label positions. */
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto calc(var(--ep-rows, 1) * ((100cqw - 30px) / 8 + 2px) - 2px);
 }
 .ep-emoji {
   width: 100%;
   aspect-ratio: 1;
-  /* Fixed-size cells skip offscreen glyphs without estimating the height of
-     whole categories, which used to shift the scrollbar as they appeared. */
-  content-visibility: auto;
   display: flex;
   align-items: center;
   justify-content: center;

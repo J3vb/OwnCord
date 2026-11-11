@@ -336,6 +336,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     scrollArea.appendChild(label);
 
     const grid = createElement("div", { class: "ep-grid" });
+    grid.style.setProperty("--ep-rows", String(Math.ceil(filtered.length / GRID_COLUMNS)));
     for (const emoji of filtered) {
       grid.appendChild(buildEmojiSpan(emoji, images));
     }

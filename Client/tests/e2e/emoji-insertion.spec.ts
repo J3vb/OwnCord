@@ -51,6 +51,7 @@ test.describe("Emoji Picker — Insert into textarea", () => {
     await last.press("Home");
     await expect(first).toBeFocused();
     await expect(first).toBeInViewport();
+    expect(await area.evaluate((el) => el.scrollHeight)).toBe(height);
     const emoji = await first.getAttribute("data-emoji");
     await first.press("Enter");
     await expect(page.locator("[data-testid='msg-textarea']")).toHaveValue(emoji!);
