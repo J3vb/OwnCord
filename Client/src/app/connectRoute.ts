@@ -18,7 +18,6 @@ import { SessionScope } from "@lib/net/sessionScope";
 import { parseRegistrationMode, retentionNotice } from "@lib/types";
 import type { AuthResponse } from "@lib/types";
 import { bracketBareIPv6Host } from "@lib/ws";
-import { createUpdateNotifier } from "../features/updates/UpdateNotifier";
 import { createConnectPage } from "@pages/ConnectPage";
 import { setUpdateRequiredHost, uiStore } from "@stores/ui.store";
 import type { UpdateRequired } from "@stores/ui.store";
@@ -272,8 +271,8 @@ export function renderConnect(
         deactivatePendingMessages();
         api.endSession();
         // The overlay carrying this Cancel button goes up when the session
-        // is in flight (startSession has called ws.connect and registered
-        // listeners): tear it down the same way the logout path does. It
+        // is in flight (startSession has registered listeners, and dials once
+        // the dispatcher is wired): tear it down the same way the logout path does. It
         // also shows while a saved sign-in is still being checked; then
         // nothing is in flight yet, and ending the API session above drops
         // the pending answer.
@@ -309,13 +308,24 @@ export function renderConnect(
   // before auth_ok, so the isAuthenticated subscriber below does not
   // navigate).
   let updateNotifier: MountableComponent | null = null;
+  let notifierRequest = 0;
   const mountUpdateNotifier = (host: string): void => {
     // A later refusal (another server tried from this same page) replaces
-    // the banner rather than being ignored.
+    // the banner rather than being ignored. The banner is its own chunk: only
+    // the newest request mounts, and never after this page is gone.
     updateNotifier?.destroy?.();
-    const notifier = createUpdateNotifier({ serverUrl: `https://${bracketBareIPv6Host(host)}` });
-    notifier.mount(appEl);
-    updateNotifier = notifier;
+    updateNotifier = null;
+    const request = ++notifierRequest;
+    import("../features/updates/UpdateNotifier")
+      .then(({ createUpdateNotifier }) => {
+        if (request !== notifierRequest || !pageOwner.isCurrent()) return;
+        const notifier = createUpdateNotifier({
+          serverUrl: `https://${bracketBareIPv6Host(host)}`,
+        });
+        notifier.mount(appEl);
+        updateNotifier = notifier;
+      })
+      .catch((err: unknown) => log.warn("Update banner failed to load", { error: String(err) }));
   };
   const offerUpdate = (required: UpdateRequired | null): void => {
     if (!required) return;

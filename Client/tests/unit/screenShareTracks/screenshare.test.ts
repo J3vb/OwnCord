@@ -157,7 +157,22 @@ describe("enableScreenshare", () => {
     expect(audioOpts).not.toHaveProperty("screenShareEncoding");
   });
 
-  it("publishes the default (medium) share as 720p30 with a 720p 15 fps simulcast layer", async () => {
+  it("publishes the default (medium) share as one 720p30 layer", async () => {
+    const { rig, video } = await publishScreenWithAudio();
+
+    const videoOpts = publishedOptions(rig, video);
+    expect(videoOpts).toMatchObject({
+      source: Track.Source.ScreenShare,
+      simulcast: false,
+      screenShareEncoding: { maxBitrate: 3_000_000, maxFramerate: 30 },
+    });
+    expect(videoOpts).not.toHaveProperty("screenShareSimulcastLayers");
+  });
+
+  it("with the backup copy on, publishes the medium share as 720p30 with a 720p 15 fps simulcast layer", async () => {
+    loadPref.mockImplementation((key: string, fallback: unknown) =>
+      key === "screenShareBackupLayer" ? true : fallback,
+    );
     const { rig, video, audio } = await publishScreenWithAudio();
 
     expect(createLocalScreenTracks).toHaveBeenCalledWith(
@@ -179,8 +194,10 @@ describe("enableScreenshare", () => {
     expect(audioOpts).not.toHaveProperty("screenShareSimulcastLayers");
   });
 
-  it("publishes the high share at 1080p with the 720p layer", async () => {
-    loadPref.mockImplementation((key: string) => (key === "screenShareQuality" ? "high" : ""));
+  it("with the backup copy on, publishes the high share at 1080p with the 720p layer", async () => {
+    loadPref.mockImplementation((key: string) =>
+      key === "screenShareQuality" ? "high" : key === "screenShareBackupLayer" ? true : "",
+    );
     const rig = fakeRoom();
     const video = fakeVideoTrack();
     createLocalScreenTracks.mockResolvedValue([video]);

@@ -13,7 +13,6 @@ import { installGlobalGuards } from "./app/globalGuards";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { settleNotificationLevelDefault } from "@lib/prefs/notificationLevel";
 import { createWsClient } from "@lib/ws";
-import { wireConnectionStatus } from "@lib/dispatcher";
 import { markActiveChannelReadOnUnload } from "@lib/readState";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { authStore, clearAuth } from "@stores/auth.store";
@@ -108,11 +107,6 @@ void registerSessionReset(
   },
   { phase: "session" },
 );
-// Single writer for the UX-facing connection status (docs/architecture/ux §3):
-// live controls read ui.store.connectionStatus reactively instead of wiring
-// their own ws.onStateChange. Lifecycle plumbing that needs the exact internal
-// transition (the connected overlay below) stays on ws.onStateChange.
-wireConnectionStatus(ws);
 const profileManager = createProfileManager(createTauriBackend());
 configureRouter(api, ws, appEl, profileManager);
 configureSession(api, ws, appEl, activePageId, navigate);

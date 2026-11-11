@@ -406,6 +406,8 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
+    // The banner is its own chunk.
+    await vi.dynamicImportSettled();
 
     // The notifier checks 3 s after mount (UpdateNotifier.ts mount()).
     await vi.advanceTimersByTimeAsync(3000);

@@ -54,7 +54,7 @@ export const settingsVoiceEntries = {
   "voiceAudio.cameraQuality.source": "Source (1080p max bitrate)",
   "voiceAudio.screenQuality": "Screen Share Quality",
   "voiceAudio.screenQualityDesc":
-    "Medium stays smooth on slower connections; High sends sharper text but needs a fast one. Viewers on a weak connection get a lighter 720p copy. Changes take effect on your next screen share.",
+    "Medium stays smooth on slower connections; High sends sharper text but needs a fast one. Changes take effect on your next screen share.",
   "voiceAudio.screenQuality.low": "Low (720p, 5 fps)",
   "voiceAudio.screenQuality.medium": "Medium (720p)",
   "voiceAudio.screenQuality.high": "High (1080p)",
@@ -62,6 +62,9 @@ export const settingsVoiceEntries = {
   "voiceAudio.screenFps": "Screen Share FPS",
   "voiceAudio.screenFpsDesc":
     "Higher frame rates use more bandwidth and depend on what the capture source and display can deliver. Takes effect the next time you start sharing.",
+  "voiceAudio.screenBackupLayer": "Send a backup copy for slow connections",
+  "voiceAudio.screenBackupLayerDesc":
+    "At Medium and High (up to 60 FPS), also send a lighter 720p copy, so viewers on a weak connection get a softer picture instead of stutters. It costs your computer extra encoding work, which can lower your stream's frame rate while gaming. Takes effect when you next start sharing or change its quality.",
   "voiceAudio.screenFpsWaylandNote": "On a Wayland desktop, screen sharing is limited to 60 FPS.",
   "voiceAudio.fps.30": "30 FPS (default)",
   "voiceAudio.fps.60": "60 FPS",
