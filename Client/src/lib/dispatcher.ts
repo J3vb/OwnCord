@@ -302,7 +302,7 @@ export function wireDispatcher(
       // A refused Mark Unread restores the pointer and says so.
       if (handleMarkUnreadError(payload, id)) return;
       if (handleMessagingError(payload, id)) return;
-      handleVoiceJoinRollback(payload, id);
+      handleVoiceJoinRollback(ws, payload, id);
       if (handleVoicePasswordRefusal(ws, payload, id)) return;
       if (handleVoiceError(payload, id)) return;
       // Every remaining code has no dedicated handler above (not a pending

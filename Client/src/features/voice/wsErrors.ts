@@ -3,14 +3,18 @@
 // dispatcher.ts owns every subscription.
 import { authStore } from "../../stores/auth.store";
 import { voiceStore, leaveVoiceChannel } from "../../stores/voice.store";
+import { uiStore } from "../../stores/ui.store";
 import { showToast } from "../../lib/ui/toast";
 import { noteJoinFailed } from "./joinBackoff";
 import {
+  type JoinAnswerWait,
   joinSequence,
   refusalWasPasswordRetry,
   takeJoinRefusal,
   takeRefusedJoin,
+  takeStrandedMembership,
 } from "./joinRequest";
+import { noteVoiceLeave } from "./leaveOwed";
 import { clearAfkMove } from "./moveHint";
 import { livekitSession, log } from "../connection/dispatchContext";
 import type { DispatchWs, Payload } from "../connection/dispatchContext";
@@ -20,7 +24,11 @@ import { WsErrorCode } from "@lib/protocolTypes";
  * The `error` chain's voice-join rollback. Acts only on the refusal of the
  * join in flight; never consumes the frame.
  */
-export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | undefined): void {
+export function handleVoiceJoinRollback(
+  ws: DispatchWs,
+  payload: Payload<"error">,
+  id: string | undefined,
+): void {
   // The sidebar/widget optimistically writes currentChannelId
   // before the server answers voice_join (VoiceCallbacks.onVoiceJoin,
   // voiceStatus="joining"). A first-time join refusal earns no
@@ -74,12 +82,53 @@ export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | 
       isPasswordCode(payload.code) ||
       (payload.code === WsErrorCode.RATE_LIMITED && refusalWasPasswordRetry(id));
     if (!passwordRefusal) noteJoinFailed();
+    // With no session here the server can still hold a call for this socket:
+    // a join it granted whose token this device let pass (the user had
+    // already clicked on), or the one a refused re-join found in place. A
+    // bare leave gives it back. A join sent while the session module was
+    // still loading owns all of that instead.
+    const stranded = takeStrandedMembership() || payload.code === WsErrorCode.ALREADY_JOINED;
+    const refusedJoin = joinSequence();
     void livekitSession().then(({ isVoiceSessionActive, leaveVoice, failPendingRejoin }) => {
       failPendingRejoin();
       if (isVoiceSessionActive()) void leaveVoice(true);
+      else if (stranded && joinSequence() === refusedJoin) {
+        noteVoiceLeave();
+        ws.send({ type: "voice_leave", payload: {} });
+      }
     });
     leaveVoiceChannel();
   }
+}
+
+/**
+ * The join in flight got neither a voice_token nor a refusal in time (its
+ * frame or its answer was lost with a socket): end it the way the user's own
+ * Disconnect would, so the widget stops reading "Connecting…" and the server
+ * drops whatever it holds for it. `socketConnected` is the chat socket now.
+ */
+export function handleVoiceJoinUnanswered(ws: DispatchWs, socketConnected: boolean): void {
+  clearAfkMove();
+  noteJoinFailed();
+  const lostJoin = joinSequence();
+  void livekitSession().then(({ leaveVoice }) => {
+    // A join sent since owns the session.
+    if (joinSequence() === lostJoin) void leaveVoice(false);
+  });
+  noteVoiceLeave();
+  leaveVoiceChannel();
+  if (socketConnected) ws.send({ type: "voice_leave", payload: {} });
+  showToast(connectText("voice.joinUnanswered"), "error");
+}
+
+/** The wait a join's answer gets on this login's socket. The connection status
+ *  mirrors the socket: "reconnecting" covers every state between connections. */
+export function joinAnswerWaitFor(ws: DispatchWs): JoinAnswerWait {
+  return {
+    socketSettled: () => uiStore.getState().connectionStatus !== "reconnecting",
+    onUnanswered: () =>
+      handleVoiceJoinUnanswered(ws, uiStore.getState().connectionStatus === "connected"),
+  };
 }
 
 export function isPasswordCode(code: string): boolean {

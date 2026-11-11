@@ -19,7 +19,8 @@ import {
 import { showToast } from "../../lib/ui/toast";
 import { takeWatchRefusal } from "../../lib/voice/watchRequest";
 import { applyVideoBitrateCap } from "./videoBitrateCap";
-import { noteJoinSent } from "./joinRequest";
+import { noteJoinAnswered, noteJoinSent, setJoinAnswerWait } from "./joinRequest";
+import { joinAnswerWaitFor } from "./wsErrors";
 import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHint";
 import { settleVoiceLeave } from "./leaveOwed";
 import { channelsStore } from "../../stores/channels.store";
@@ -44,8 +45,15 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   // A self row while this device holds no call is another device's call (one
   // account, one call, one device): the roster is updated, nothing else. This
   // device's own join moves voiceStatus off "idle" before the server's answer.
-  if (voiceStore.getState().voiceStatus === "idle") return;
-  joinVoiceChannel(payload.channel_id);
+  const { voiceStatus, currentChannelId } = voiceStore.getState();
+  if (voiceStatus === "idle") return;
+  // Only into the channel this device asked for. A self row naming another one
+  // is the old call's echo (a mute or camera toggle sent just before a switch)
+  // overtaken by the click: following it would point the store back at the
+  // channel the server is about to take this device out of.
+  if (currentChannelId === null || currentChannelId === payload.channel_id) {
+    joinVoiceChannel(payload.channel_id);
+  }
   // The server's answer to the join that followed an AFK move: only now is
   // the move real, so only now does the user hear why.
   if (takeAfkMove(payload.channel_id)) {
@@ -231,6 +239,7 @@ export function handleVideoBitrateCap(payload: Payload<"video_bitrate_cap">): vo
 }
 
 export function handleVoiceTokenFrame(payload: Payload<"voice_token">): void {
+  noteJoinAnswered(payload.channel_id);
   void livekitSession().then(({ handleVoiceToken }) =>
     handleVoiceToken(
       payload.token,
@@ -324,6 +333,20 @@ export {
   rollbackVideoOnError,
 } from "./wsErrors";
 
+/** The voice_token route also bounds the wait for that token: a join waits for
+ *  its answer only while these routes are wired, on this login's socket. */
+const voiceTokenRoute: WsRoute = {
+  type: S.VOICE_TOKEN,
+  attach: (subscribe, ctx) => {
+    const off = subscribe(S.VOICE_TOKEN, handleVoiceTokenFrame);
+    setJoinAnswerWait(joinAnswerWaitFor(ctx.ws));
+    return () => {
+      off();
+      setJoinAnswerWait(null);
+    };
+  },
+};
+
 // Voice state, moves, tokens and the client-side E2EE key exchange.
 export const wsRoutes: readonly WsRoute[] = [
   route(S.VOICE_STATE, (c) => (p) => handleVoiceState(c.ws, p)),
@@ -332,7 +355,7 @@ export const wsRoutes: readonly WsRoute[] = [
   route(S.VOICE_LEAVE, (c) => (p) => handleVoiceLeave(p, c.clock)),
   route(S.VOICE_CONFIG, () => handleVoiceConfig),
   route(S.VIDEO_BITRATE_CAP, () => handleVideoBitrateCap),
-  route(S.VOICE_TOKEN, () => handleVoiceTokenFrame),
+  voiceTokenRoute,
   route(S.VOICE_E2EE_ANNOUNCE, () => handleVoiceE2eeAnnounce),
   route(S.VOICE_E2EE_OFFER, () => handleVoiceE2eeOffer),
   route(S.VOICE_WATCHING, () => handleVoiceWatching),

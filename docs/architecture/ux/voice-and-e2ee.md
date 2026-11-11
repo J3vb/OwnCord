@@ -345,6 +345,15 @@ channel, and if it would give up (or fail late) before the join is answered it o
 with no `voice_leave` and no "Voice connection lost". The join's token then connects as usual; a refusal
 still ends the old call on the server. If neither arrives within 15 s of the hand-over (counted again
 for a newer click, or while the chat socket is itself reconnecting), the call ends as a give-up does.
+Every `voice_join` has the same bound from the moment it is sent (`features/voice/joinRequest.ts`): with
+neither a `voice_token` nor a refusal after 15 s on a settled chat socket, the join ends like the user's
+own Disconnect, with a `voice_leave` and "Could not join voice: the server did not answer. Try again."
+A server that advertises `voice_messages` echoes the join's id on every refusal, so there an error with
+no id never counts as the join's refusal. When the user clicks faster than the server answers, the
+answers of several joins interleave: a self `voice_state` for a channel other than the one the store
+names is not followed, a `voice_token` for a channel the user already clicked away from is let pass, and
+whenever that leaves this client showing no call (the token arrives with no channel selected, or the
+later join is refused) it sends a bare `voice_leave` so the server does not keep a call nobody sees.
 A drop that only starts after the click leaves the widget on "Connecting…" for the new channel instead of
 "Reconnecting voice…". A reconnect drops your camera and screen
 share (`teardownForReconnect`); once it (or its rejoin) lands, the camera turns back on by itself, under

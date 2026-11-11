@@ -638,7 +638,11 @@ describe("LiveKitSession", () => {
       expect(voice.isVoiceSessionActive()).toBe(true);
       expect(left()).toBe(0);
 
-      handleVoiceJoinRollback({ code: "FORBIDDEN", message: "" }, "join-9");
+      handleVoiceJoinRollback(
+        { send, disconnect: vi.fn() } as never,
+        { code: "FORBIDDEN", message: "" },
+        "join-9",
+      );
       await vi.advanceTimersByTimeAsync(0);
 
       expect(left()).toBe(1);

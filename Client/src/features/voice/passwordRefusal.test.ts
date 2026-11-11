@@ -31,7 +31,7 @@ const ws: DispatchWs = {
 
 /** The error chain's order: rollback first, then the password dialog. */
 function refuse(code: Payload<"error">["code"], id: string | undefined): boolean {
-  handleVoiceJoinRollback(error(code), id);
+  handleVoiceJoinRollback(ws, error(code), id);
   return handleVoicePasswordRefusal(ws, error(code), id);
 }
 
@@ -298,7 +298,7 @@ describe("password dialog on a refused voice_join", () => {
     await openDialog();
     await typeAndSubmit("pw");
 
-    handleVoiceJoinRollback(error("FORBIDDEN"), "join-1");
+    handleVoiceJoinRollback(ws, error("FORBIDDEN"), "join-1");
     handleVoicePasswordRefusal(ws, error("FORBIDDEN"), "join-1");
 
     expect(joinRetryInMs()).toBeGreaterThan(0);

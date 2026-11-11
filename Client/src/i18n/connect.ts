@@ -56,6 +56,7 @@ export const connectText = defineCatalog("connect", {
   "voice.movedGeneric": "You were moved to {channel}",
   "voice.movedChannelFallback": "another voice channel",
   "voice.channelFull": "That voice channel is full",
+  "voice.joinUnanswered": "Could not join voice: the server did not answer. Try again.",
   "voice.videoLimit": "That voice channel has reached its video limit",
 
   "brand.tagline": "Self-hosted chat — Your server, your rules",

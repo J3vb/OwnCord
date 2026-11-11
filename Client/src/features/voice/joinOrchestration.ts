@@ -27,6 +27,7 @@ import {
   setJoinUrlKind,
 } from "../../lib/voice/voiceJoinTrace";
 import { noteJoinSucceeded } from "./joinBackoff";
+import { noteTokenAccepted, noteTokenIgnored } from "./joinRequest";
 import type { JoinHost } from "./joinHost";
 import {
   clearForNewAttempt,
@@ -382,8 +383,14 @@ export class JoinOrchestration {
       log.info("handleVoiceToken: voice_token for a channel we already left — ignoring", {
         channelId,
       });
+      // The server made this socket a member to mint that token. With no call
+      // wanted here at all, give the membership back; a join already sent for
+      // another channel moves it instead.
+      if (voiceStore.getState().currentChannelId === null) this.host.sendVoiceLeave();
+      else noteTokenIgnored();
       return;
     }
+    noteTokenAccepted();
     await this.host.connectAndSetup(token, url, channelId, directUrl, isKeyHolder);
     // Drain pending joins iteratively to avoid unbounded recursion when
     // rapid channel switches queue multiple requests.
