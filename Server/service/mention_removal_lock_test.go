@@ -190,8 +190,19 @@ func TestDeleteMessage_LockWaitHonoursContextAndWritesNothing(t *testing.T) {
 	<-locked
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if _, err := svc.DeleteMessage(ctx, 1, m1); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("DeleteMessage err = %v, want context.DeadlineExceeded", err)
+	// On its own goroutine: a delete that ignored its context would wait for the lock forever.
+	answered := make(chan error, 1)
+	go func() {
+		_, err := svc.DeleteMessage(ctx, 1, m1)
+		answered <- err
+	}()
+	select {
+	case err := <-answered:
+		if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrInternal) {
+			t.Errorf("DeleteMessage err = %v, want an ErrInternal that wraps context.DeadlineExceeded", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("DeleteMessage still waits for the lock after its context ended")
 	}
 	close(release)
 	<-held

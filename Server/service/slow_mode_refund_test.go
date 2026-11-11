@@ -54,7 +54,7 @@ func newSlowModeSendService(t *testing.T) (*MessageService, *deliveryFaultStore)
 
 // A send whose uploads are all unavailable posts nothing, so the member can send
 // again at once, with and without a client message id.
-func TestSendMessage_SlowModeKeptWhenAllAttachmentsUnavailable(t *testing.T) {
+func TestSendMessage_SlowModeTokenReturnedWhenAllAttachmentsUnavailable(t *testing.T) {
 	for _, keyed := range []bool{true, false} {
 		svc, _ := newSlowModeSendService(t)
 		p := slowSendParams(1, 10)
