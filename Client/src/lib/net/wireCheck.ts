@@ -15,7 +15,7 @@
 // The success path allocates nothing: `matches` only returns a boolean. Only
 // when it fails does `locate` walk the same value again to find the field.
 
-import { FRAME_SHAPES, SHAPES, type Shape } from "./wireShapes";
+import type { Shape } from "./wireShapes";
 import type { RestReplyShapes } from "./restReplies";
 
 export interface WireFault {
@@ -254,17 +254,39 @@ export function checkAgainst(table: Table, ref: number, value: unknown): WireFau
 }
 
 /**
+ * The frame table (the exports of wireShapes.ts). It loads with the signed-in
+ * session code, not at startup: app/sessionDispatcher.ts installs it before
+ * the first dial.
+ */
+export interface FrameTable {
+  readonly SHAPES: readonly Shape[];
+  readonly FRAME_SHAPES: Readonly<Record<string, number>>;
+}
+
+let frameTable: FrameTable | null = null;
+
+/** Installs the frame table. Called once per load, before any socket dials. */
+export function installFrameShapes(table: FrameTable): void {
+  frameTable = table;
+}
+
+/** The fault for a frame read before the table is installed. */
+const NO_TABLE: WireFault = { path: "", expected: "a loaded shape table" }; // i18n-exempt: log-only fault text, never rendered
+
+/**
  * Checks the payload of a server frame of wire type `type`. A type the client
- * has no shape for passes: nothing listens for it.
+ * has no shape for passes: nothing listens for it. Without the table every
+ * frame fails, so nothing is let through unchecked.
  */
 export function checkFrame(type: string, payload: unknown): WireFault | null {
-  if (!Object.hasOwn(FRAME_SHAPES, type)) return null;
-  return checkAgainst(SHAPES, FRAME_SHAPES[type] as number, payload);
+  if (frameTable === null) return NO_TABLE;
+  if (!Object.hasOwn(frameTable.FRAME_SHAPES, type)) return null;
+  return checkAgainst(frameTable.SHAPES, frameTable.FRAME_SHAPES[type] as number, payload);
 }
 
 /**
  * The REST table (the exports of restShapes.ts). The caller supplies it so
- * this module, which the frame path loads at startup, never imports it.
+ * this module, which the REST path loads at startup, never imports it.
  */
 export interface RestTable {
   readonly SHAPES: readonly Shape[];

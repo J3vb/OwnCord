@@ -10,7 +10,7 @@ import {
 } from "@lib/ui/inputMode";
 import { migrateVoiceSensitivityScale } from "@lib/voice/gateScale";
 import { setSystemDateLocale } from "@lib/text/timeFormat";
-import { openNotificationTarget } from "@lib/notifications";
+import { openNotificationTarget } from "@lib/notificationDelivery";
 import { initWindowState } from "@lib/prefs/windowState";
 import { saveUserStatus } from "@lib/presence/userStatus";
 import { getActivePresenceSender } from "@lib/presence/presence";
