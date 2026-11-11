@@ -17,7 +17,10 @@ vi.mock("@lib/prefs/preferences", async (importOriginal) => ({
 vi.mock("@lib/logger", () => logMock.loggerMock());
 
 vi.mock("livekit-client", () => ({
-  RoomEvent: { ActiveDeviceChanged: "activeDeviceChanged" },
+  RoomEvent: {
+    ActiveDeviceChanged: "activeDeviceChanged",
+    TrackSubscriptionStatusChanged: "trackSubscriptionStatusChanged",
+  },
   Track: {
     Source: {
       Microphone: "microphone",
@@ -110,9 +113,11 @@ describe("AudioElements", () => {
   function roomWithMicPublication() {
     const mockPub = { source: "microphone", setSubscribed: vi.fn() };
     const mockParticipant = {
+      identity: "user-1",
       audioTrackPublications: new Map([["pub-1", mockPub]]),
     };
     elements.setRoom({
+      on: vi.fn(),
       remoteParticipants: new Map([["user-1", mockParticipant]]),
     } as any);
     return mockPub;
@@ -277,6 +282,7 @@ describe("AudioElements", () => {
         setVolume: vi.fn(),
       };
       const mockRoom = {
+        on: vi.fn(),
         remoteParticipants: new Map([["user-42", mockParticipant]]),
       } as any;
       elements.setRoom(mockRoom);
@@ -605,8 +611,9 @@ describe("AudioElements", () => {
         trackInfo: { encryption: 0 },
       };
       const mockRoom = {
+        on: vi.fn(),
         remoteParticipants: new Map([
-          ["user-1", { audioTrackPublications: new Map([["pub-1", mockPub]]) }],
+          ["user-1", { identity: "user-1", audioTrackPublications: new Map([["pub-1", mockPub]]) }],
         ]),
       } as never;
       elements.setRoom(mockRoom);
@@ -622,12 +629,14 @@ describe("AudioElements", () => {
       const micPub = { source: "microphone", setSubscribed: vi.fn() };
       const streamPub = { source: "screenShareAudio", setSubscribed: vi.fn() };
       const mockParticipant = {
+        identity: "user-1",
         audioTrackPublications: new Map([
           ["pub-mic", micPub],
           ["pub-stream", streamPub],
         ]),
       };
       const mockRoom = {
+        on: vi.fn(),
         remoteParticipants: new Map([["user-1", mockParticipant]]),
       } as any;
       elements.setRoom(mockRoom);
@@ -636,6 +645,130 @@ describe("AudioElements", () => {
 
       expect(micPub.setSubscribed).toHaveBeenCalledWith(false);
       expect(streamPub.setSubscribed).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("stream audio nobody can hear is paused at the server", () => {
+    /** A room where user 42 shares with audio this client is subscribed to,
+     *  plus their microphone. */
+    function roomWithStreamAudio(extra: Record<string, unknown> = {}) {
+      const stream = { source: "screenShareAudio", isSubscribed: true, setEnabled: vi.fn() };
+      const mic = {
+        source: "microphone",
+        isSubscribed: true,
+        setEnabled: vi.fn(),
+        setSubscribed: vi.fn(),
+      };
+      const participant = {
+        identity: "user-42",
+        setVolume: vi.fn(),
+        audioTrackPublications: new Map<string, unknown>([
+          ["pub-stream", stream],
+          ["pub-mic", mic],
+        ]),
+      };
+      elements.setRoom({
+        on: vi.fn(),
+        remoteParticipants: new Map([["user-42", participant]]),
+        ...extra,
+      } as never);
+      return { stream, mic, participant };
+    }
+
+    it("muting the stream's tile pauses its delivery and unmuting resumes it", () => {
+      const { stream, mic } = roomWithStreamAudio();
+
+      elements.muteScreenshareAudio(42, true);
+      expect(stream.setEnabled).toHaveBeenLastCalledWith(false);
+      elements.muteScreenshareAudio(42, false);
+      expect(stream.setEnabled).toHaveBeenLastCalledWith(true);
+      expect(mic.setEnabled).not.toHaveBeenCalled();
+    });
+
+    it("deafen pauses every stream's audio and undeafen resumes only the unmuted ones", () => {
+      const { stream } = roomWithStreamAudio();
+      elements.muteScreenshareAudio(42, true);
+
+      mockVoiceStoreState.localDeafened = true;
+      elements.applyRemoteAudioSubscriptionState(true);
+      expect(stream.setEnabled).toHaveBeenLastCalledWith(false);
+      mockVoiceStoreState.localDeafened = false;
+      elements.applyRemoteAudioSubscriptionState(false);
+      expect(stream.setEnabled).toHaveBeenLastCalledWith(false);
+
+      elements.muteScreenshareAudio(42, false);
+      expect(stream.setEnabled).toHaveBeenLastCalledWith(true);
+    });
+
+    /** A stream publication that keeps livekit's cache: a request equal to
+     *  the cached one is not sent. `sent` is what reached the server. */
+    function cachingStream() {
+      const sent: boolean[] = [];
+      let requestedDisabled: boolean | undefined;
+      const pub = {
+        source: "screenShareAudio",
+        isSubscribed: true,
+        get isEnabled() {
+          return requestedDisabled !== true;
+        },
+        setEnabled(enabled: boolean) {
+          if (requestedDisabled === !enabled) return;
+          requestedDisabled = !enabled;
+          sent.push(enabled);
+        },
+      };
+      return { pub, sent };
+    }
+
+    /** Fire the room's subscription-status event, as a (re)subscribe does. */
+    function subscribedAgain(room: { on: ReturnType<typeof vi.fn> }, pub: unknown): void {
+      const call = room.on.mock.calls.find(([event]) => event === "trackSubscriptionStatusChanged");
+      call![1](pub, "subscribed", { identity: "user-42" });
+    }
+
+    it("a re-watched stream whose tile is muted is paused again on the fresh subscription", () => {
+      const { pub, sent } = cachingStream();
+      const room = { on: vi.fn(), remoteParticipants: new Map() };
+      elements.setRoom(room as never);
+      elements.muteScreenshareAudio(42, true);
+      pub.setEnabled(false);
+      sent.length = 0;
+
+      // Stop watching, then Watch: the server starts the new subscription
+      // delivered, while livekit still caches the pause.
+      subscribedAgain(room, pub);
+
+      expect(sent.at(-1)).toBe(false);
+      expect(sent.length).toBeGreaterThan(0);
+    });
+
+    it("a stream undeafened while unwatched is resumed when watched again", () => {
+      const { pub, sent } = cachingStream();
+      const room = { on: vi.fn(), remoteParticipants: new Map() };
+      elements.setRoom(room as never);
+      pub.setEnabled(false);
+      sent.length = 0;
+
+      subscribedAgain(room, pub);
+
+      expect(sent).toEqual([true]);
+    });
+
+    it("leaves a publication alone while it is not subscribed", () => {
+      const { stream } = roomWithStreamAudio();
+      stream.isSubscribed = false;
+
+      elements.muteScreenshareAudio(42, true);
+
+      expect(stream.setEnabled).not.toHaveBeenCalled();
+    });
+
+    it("leaves the Linux native room's stream audio to the native room", () => {
+      const { stream } = roomWithStreamAudio({ nativePlayout: {} });
+
+      elements.muteScreenshareAudio(42, true);
+
+      expect(stream.setEnabled).not.toHaveBeenCalled();
     });
   });
 
@@ -744,6 +877,7 @@ describe("AudioElements", () => {
       const mockParticipant1 = { identity: "user-10", setVolume: vi.fn() };
       const mockParticipant2 = { identity: "user-20", setVolume: vi.fn() };
       const mockRoom = {
+        on: vi.fn(),
         remoteParticipants: new Map([
           ["user-10", mockParticipant1],
           ["user-20", mockParticipant2],

@@ -55,3 +55,60 @@ test("with the backup copy on, a watched High share also encodes the 720p layer"
   await shareWatchedAtHigh(alice, bob, true);
   await expect.poll(() => liveVideoLayers(alice, 2_000), { timeout: 20_000 }).toBe(2);
 });
+
+/** Bytes of remote audio (the sharer's microphone plus their stream's audio)
+ *  that arrived over `ms`. */
+async function streamAudioBytesOver(page: Page, ms: number): Promise<number> {
+  const read = () =>
+    page.evaluate(async () => {
+      const bytes: number[] = [];
+      for (const peer of window.__ocMedia.peers) {
+        if (peer.connectionState === "closed") continue;
+        for (const receiver of peer.getReceivers()) {
+          if (receiver.track.kind !== "audio") continue;
+          (await receiver.getStats()).forEach((entry) => {
+            if (entry.type === "inbound-rtp") bytes.push(entry.bytesReceived ?? 0);
+          });
+        }
+      }
+      return bytes;
+    });
+  const before = await read();
+  await page.waitForTimeout(ms);
+  const after = await read();
+  return after.reduce((sum, b, i) => sum + Math.max(0, b - (before[i] ?? 0)), 0);
+}
+
+test("muting a watched stream's audio stops it arriving, also after watching it again, and unmuting brings it back", async ({
+  alice,
+  bob,
+}) => {
+  await shareWatchedAtHigh(alice, bob, false);
+  const tile = bob.locator(
+    "[data-testid='video-grid'] .video-cell[data-stream-type='screenshare']",
+  );
+  const both = await streamAudioBytesOver(bob, 3_000);
+  // Only the microphone keeps arriving while the stream's audio is paused at
+  // the server, so the total falls by about the stream's share of it.
+  const paused = () =>
+    expect
+      .poll(() => streamAudioBytesOver(bob, 3_000), { timeout: 15_000 })
+      .toBeLessThan(both * 0.5);
+
+  await tile.hover();
+  await tile.locator(".tile-mute-btn").click();
+  await paused();
+
+  // Stop watching and watch again: the new subscription stays paused.
+  await tile.hover();
+  await tile.locator("[data-tile-control='stop']").click();
+  await tile.locator("[data-tile-control='watch']").click();
+  await expectDecodedMedia(bob, true);
+  await paused();
+
+  await tile.hover();
+  await tile.locator(".tile-mute-btn").click();
+  await expect
+    .poll(() => streamAudioBytesOver(bob, 3_000), { timeout: 15_000 })
+    .toBeGreaterThan(both * 0.8);
+});
