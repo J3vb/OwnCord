@@ -131,7 +131,12 @@ counts):** `089_messages_live_index.sql` adds the index `idx_messages_channel_li
 2026-11-03 (attachment lookups):** `090_attachment_lookup_indexes.sql` adds the indexes
 `idx_attachments_stored_as` and `idx_attachments_uploaded_at` on `attachments` and
 `idx_messages_deleted` on `messages`; like 089 they store no data of their own, so no
-table, column or data class. Other historical
+table, column or data class. **Amended 2026-11-11 (retention sweep record):**
+`091_channel_retention_swept.sql` adds `channel_retention_swept`, one row per channel
+holding the cutoff its retention sweep has reached. It is server bookkeeping with no
+member data, written only by the retention sweep, deleted with the channel, and
+restored with a backup on purpose (an older backup carries its own older cutoff, so
+the start-up replay still runs for it); no new data class. Other historical
 status statements retain their `cbebd37c` baseline.
 **Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
 `poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a
