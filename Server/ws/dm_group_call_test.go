@@ -297,7 +297,7 @@ func TestCallDecline_ForwardsToOtherParticipants(t *testing.T) {
 	}
 }
 
-func TestCallDecline_ReachesTheDecliners_OtherDevices(t *testing.T) {
+func TestCallDecline_ReachesTheDeclinersOtherDevices(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	alice := seedOwnerUser(t, database, "decline-dev-alice")
 	bob := seedMemberUser(t, database, "decline-dev-bob")
