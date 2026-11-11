@@ -125,7 +125,7 @@ const ROUTES = [
     pattern: "/api/v1/moderation/channels/9/forum",
     method: "PUT",
     status: 200,
-    body: { id: 9, name: "feedback", type: "forum" },
+    body: { id: 9, name: "feedback", type: "forum", category: null, position: 0 },
   },
 ];
 
@@ -238,6 +238,7 @@ for (const theme of ["dark", "light"] as const) {
       await page.getByTestId("forum-post-2").click();
       await expect(page.getByTestId("thread-panel")).toBeVisible();
       await expect(page.getByTestId("forum-post-2")).toHaveAttribute("aria-current", "true");
+      await expect(page.locator(".app")).toHaveClass(/app--forum-split/);
       // The reader takes the rest of the row: wider than the list beside it.
       const panel = await page.getByTestId("thread-panel").boundingBox();
       const list = await page.getByTestId("forum-view").boundingBox();

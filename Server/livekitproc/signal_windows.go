@@ -4,8 +4,7 @@ package livekitproc
 
 import "os"
 
-// Windows has no os.Process equivalent of SIGTERM. Terminate the owned
-// process; runLoop still waits for exit before releasing the update handoff.
+// Windows has no SIGTERM equivalent: terminate the process; runLoop still waits for exit.
 func stopLiveKitProcess(process *os.Process) error {
 	return process.Kill()
 }

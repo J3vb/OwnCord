@@ -1,10 +1,8 @@
 package ws
 
-// listening_activity.go: the song a member is listening to, reported with
-// listening_update and shown on presence, presence_batch and ready.listening. Like
-// the game (game_activity.go) it is memory only (livePresence.listening): a
-// disconnect or restart clears it. The per-server switch game_activity_enabled
-// covers both.
+// The song a member is listening to, reported with listening_update and shown on presence,
+// presence_batch and ready.listening. Like the game (game_activity.go) it is memory only, cleared
+// by disconnect or restart; the game_activity_enabled switch covers both.
 
 import (
 	"context"
@@ -17,18 +15,16 @@ import (
 )
 
 const (
-	// listeningRateLimit and listeningRateWindow bound how often a connection
-	// may set (not clear) its song: 1 per 10 s, on its own budget so a song
-	// change never eats the game's or the auto-idle presence_update's.
-	listeningRateLimit  = 1
-	listeningRateWindow = 10 * time.Second
-	// listeningMaxDuration caps duration_ms (0 means unknown).
+	// listeningRateLimit and listeningRateWindow bound how often a connection may set (not clear)
+	// its song: 1 per 10 s, on its own budget so a song change never eats the game's or the auto-
+	// idle presence_update's.
+	listeningRateLimit   = 1
+	listeningRateWindow  = 10 * time.Second
 	listeningMaxDuration = 24 * time.Hour
 )
 
-// listeningActivity is a connection's reported song. Immutable once
-// published: a change swaps in a new value. The json tags are the wire shape,
-// used by the presence payloads and ready.listening alike.
+// listeningActivity is a connection's reported song, immutable once published (a change swaps in a
+// new value); the json tags are the wire shape.
 type listeningActivity struct {
 	Title      string `json:"title"`
 	Artist     string `json:"artist"`
@@ -37,8 +33,6 @@ type listeningActivity struct {
 	DurationMS int64  `json:"duration_ms"` // 0 = unknown
 }
 
-// sameListening reports whether a and b are the same value. It is the
-// applier's guard against re-broadcasting what it already holds.
 func sameListening(a, b *listeningActivity) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -46,25 +40,21 @@ func sameListening(a, b *listeningActivity) bool {
 	return *a == *b
 }
 
-// sameSong reports whether next names the song cur already shows (title,
-// artist and player). A repeat keeps cur's start and duration: a seek moves
-// started_at, and the client re-sends after every reconnect, so comparing
-// them would rebroadcast on every poll.
+// sameSong reports whether next names the song cur shows (title, artist, player). A repeat keeps
+// cur's start and duration: a seek moves started_at and clients re-send after every reconnect, so
+// comparing them would rebroadcast on every poll.
 func sameSong(cur, next *listeningActivity) bool {
 	return cur != nil && next != nil &&
 		cur.Title == next.Title && cur.Artist == next.Artist && cur.Player == next.Player
 }
 
-// listeningChange is Result.SetListening: the song to swap in, nil to clear.
 type listeningChange struct {
 	next *listeningActivity
 }
 
-// ListeningUpdateCmd represents a listening_update message. Clear is set for
-// "listening": null and for a title that is empty after trimming; otherwise
-// the text fields are cleaned, StartedAt is the client's unix milliseconds,
-// not yet clamped (the handler does that against its clock), and DurationMS is
-// already capped.
+// ListeningUpdateCmd sets or clears listening activity. Clear is set for "listening": null and an
+// empty trimmed title; otherwise the text is cleaned, StartedAt is the client's unix ms (clamped by
+// the handler) and DurationMS is capped.
 type ListeningUpdateCmd struct {
 	userID     int64
 	Clear      bool
@@ -78,10 +68,8 @@ type ListeningUpdateCmd struct {
 func (c ListeningUpdateCmd) Type() string  { return MsgTypeListeningUpdate }
 func (c ListeningUpdateCmd) UserID() int64 { return c.userID }
 
-// parseListeningUpdate builds a ListeningUpdateCmd from a listening_update
-// payload. A missing field, a wrong JSON type, a non-integer number, a text
-// that fails the custom status text rules, an empty player or a negative
-// duration is an error (BAD_REQUEST).
+// parseListeningUpdate: a missing field, wrong JSON type, non-integer number, text failing the
+// custom status rules, empty player or negative duration is BAD_REQUEST.
 func parseListeningUpdate(userID int64, _ string, raw json.RawMessage) (Command, error) {
 	var p struct {
 		Listening json.RawMessage `json:"listening"`
@@ -139,28 +127,25 @@ func parseListeningUpdate(userID int64, _ string, raw json.RawMessage) (Command,
 	}, nil
 }
 
-// handleListeningUpdateV2 handles listening_update. Against the song the connection
-// holds (info.Listening): a clear with nothing set and a set naming the song already
-// shown are no-ops (no frame, no budget); a set while the server switch is off is
-// refused before the limiter; a set over budget is RATE_LIMITED; a clear is never
-// limited. The swap and broadcast happen in Hub.applyListening, which knows the live
-// status and whether the connection still owns its user's slot.
+// handleListeningUpdateV2 decides against the held song (info.Listening): a clear with nothing set,
+// or a set naming the shown song, is a no-op (no frame, no budget); a set while the server switch
+// is off is refused before the limiter; a set over budget is RATE_LIMITED; a clear is never
+// limited. Hub.applyListening does the swap and broadcast.
 func handleListeningUpdateV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	u := cmd.(ListeningUpdateCmd)
 
 	if u.Clear {
-		// Privacy: pausing or turning the setting off must hide the song at
-		// once, so a clear skips the limiter.
+		// Privacy: pausing or turning the setting off must hide the song at once, so a clear skips
+		// the limiter.
 		if info.Listening == nil {
 			return Result{}
 		}
 		return Result{SetListening: &listeningChange{}}
 	}
 
-	// The same switch as the game's: refused before the limiter so the refusal
-	// costs no budget; the authoritative check is applyListening's, under
-	// presenceFeed.mu.
+	// The game's switch: refused before the limiter so it costs no budget; applyListening's check
+	// under presenceFeed.mu is authoritative.
 	if d.GameActivityEnabled != nil && !d.GameActivityEnabled() {
 		return Result{Error: ClientError{Code: ErrCodeGameActivityDisabled, Message: "member activity is turned off on this server"}}
 	}
@@ -175,8 +160,8 @@ func handleListeningUpdateV2(ctx context.Context, cmd Command, info ClientInfo, 
 	if sameSong(info.Listening, next) {
 		return Result{}
 	}
-	// Title and artist are the user's own text shown to every member, so a
-	// timeout refuses a set (TIMED_OUT) the way it refuses a game name.
+	// Title and artist are shown to every member, so a timeout refuses a set (TIMED_OUT) like a
+	// game name.
 	if d.ChannelSvc != nil {
 		if err := d.ChannelSvc.CheckActivityAllowed(ctx, info.UserID); err != nil {
 			return serviceErrorToResult(err)
@@ -188,11 +173,8 @@ func handleListeningUpdateV2(ctx context.Context, cmd Command, info ClientInfo, 
 	return Result{SetListening: &listeningChange{next: next}}
 }
 
-// applyListening swaps c's song for next and broadcasts the presence frame
-// that shows it. The ownership, lock-order and switch rules are
-// applyActivity's: it does nothing unless c still holds its user's slot, a set
-// is dropped while the server switch is off (read under presenceFeed.mu), and a
-// clear is always applied.
+// applyListening swaps c's song for next and broadcasts the presence frame, under applyActivity's
+// ownership, lock-order and switch rules.
 func (h *Hub) applyListening(c *Client, next *listeningActivity) {
 	h.presenceFeed.mu.Lock()
 	defer h.presenceFeed.mu.Unlock()
@@ -202,7 +184,7 @@ func (h *Hub) applyListening(c *Client, next *listeningActivity) {
 	h.applyListeningLocked(c, next)
 }
 
-// applyListeningLocked is applyListening's body. The caller holds presenceFeed.mu.
+// applyListeningLocked is applyListening's body; the caller holds presenceFeed.mu.
 func (h *Hub) applyListeningLocked(c *Client, next *listeningActivity) {
 	h.swapActivityLocked(c, func(lp *livePresence) bool {
 		if sameListening(lp.listening, next) {
@@ -213,11 +195,9 @@ func (h *Hub) applyListeningLocked(c *Client, next *listeningActivity) {
 	})
 }
 
-// readyListeningPayload is one entry of ready.listening.
 type readyListeningPayload struct {
 	UserID int64 `json:"user_id"`
 	listeningActivity
 }
 
-// command.go sits at its size ceiling, so the constructor registers itself.
 func init() { commandConstructors[MsgTypeListeningUpdate] = parseListeningUpdate }

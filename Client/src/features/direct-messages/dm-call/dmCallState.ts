@@ -4,7 +4,7 @@ import type { IconName } from "@lib/icons";
 import type { RingState, OutgoingCallState } from "@lib/voice/callRing";
 import type { VoiceState, PeerVerification } from "@stores/voice.store";
 import type { DmChannel } from "@stores/dm.store";
-import type { GridPerson } from "@components/VideoGrid";
+import type { GridPerson } from "../../voice/videoGrid/VideoGrid";
 import type { AvatarRef, ControlRefs, DmCallView } from "../DmCallViewModel";
 import type { DmCallPanelOptions } from "../DmCallPanel";
 import type { TalkSlot } from "../../voice/talkSlot";

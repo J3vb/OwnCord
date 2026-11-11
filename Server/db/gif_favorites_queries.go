@@ -19,9 +19,9 @@ type GIFFavorite struct {
 	Title      string
 }
 
-// AddGIFFavorite saves f for userID. Re-adding an existing URL is a no-op,
-// even at the cap. The count check and the insert share one writer
-// transaction so concurrent adds cannot overshoot the cap.
+// AddGIFFavorite saves f for userID; re-adding an existing URL is a no-op, even at the
+// cap. The count check and insert share one writer transaction so concurrent adds
+// cannot overshoot the cap.
 func (d *DB) AddGIFFavorite(ctx context.Context, userID int64, f GIFFavorite) error {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {

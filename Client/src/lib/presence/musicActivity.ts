@@ -202,46 +202,58 @@ export function startMusicActivity(options: MusicActivityOptions): MusicActivity
     }
   }
 
+  /** One read; a failed one is "unknown". */
+  async function read(): Promise<MediaReading> {
+    try {
+      return await detect(toMediaPrefs(loadMusicPrefs()));
+    } catch {
+      return { state: "unknown" };
+    }
+  }
+
+  /** Send what a finished read found, if it differs from what the server was told. */
+  function applyReading(reading: MediaReading): void {
+    // The host could not say: keep the song the server shows.
+    if (reading.state === "unknown") return;
+    const song = songOf(reading, loadMusicPrefs());
+    if (song !== null && reading.state === "playing")
+      recordSeenPlayer(reading.playerId, song.player);
+    if (song === null) {
+      if (lastSent !== null) transmit(null);
+      return;
+    }
+    // The same title, artist and player is the same shown song, whatever
+    // the position: a seek must not send.
+    if (songKey(song) === lastSent) return;
+    transmit(song);
+  }
+
+  /** A read ended: release the slot, and run the queued rescan if its connection is still current. */
+  function settleRead(mine: number): void {
+    if (scanning === mine) scanning = null;
+    if (rescan && mine === epoch) {
+      rescan = false;
+      void poll();
+    } else if (mine !== epoch) {
+      rescan = false;
+    }
+  }
+
   async function poll(): Promise<void> {
     if (scanning === epoch || !live() || !active()) return;
     const mine = epoch;
     scanning = mine;
     try {
-      let reading: MediaReading;
-      try {
-        reading = await detect(toMediaPrefs(loadMusicPrefs()));
-      } catch {
-        // A failed read is "unknown".
-        reading = { state: "unknown" };
-      }
+      const reading = await read();
       // The connection, the setting or the server may have changed while the
       // read ran; a stale answer is dropped, the next poll asks again.
       if (mine !== epoch || !live() || !active()) return;
       // The choices changed under this read: it knows nothing of them, and the
       // read queued below decides what is sent (one frame, not two).
       if (rescan) return;
-      // The host could not say: keep the song the server shows.
-      if (reading.state === "unknown") return;
-      const song = songOf(reading, loadMusicPrefs());
-      if (song !== null && reading.state === "playing")
-        recordSeenPlayer(reading.playerId, song.player);
-      if (song === null) {
-        if (lastSent === null) return;
-        transmit(null);
-        return;
-      }
-      // The same title, artist and player is the same shown song, whatever
-      // the position: a seek must not send.
-      if (songKey(song) === lastSent) return;
-      transmit(song);
+      applyReading(reading);
     } finally {
-      if (scanning === mine) scanning = null;
-      if (rescan && mine === epoch) {
-        rescan = false;
-        void poll();
-      } else if (mine !== epoch) {
-        rescan = false;
-      }
+      settleRead(mine);
     }
   }
 

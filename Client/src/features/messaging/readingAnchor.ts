@@ -5,18 +5,24 @@
 
 type AnchorLookup = (channelId: number) => number | null;
 
-let lookup: AnchorLookup | null = null;
+// Every mounted list registers, so a second list (a thread panel beside the
+// channel) never evicts the first. Registration order is kept: the newest wins.
+const lookups = new Set<AnchorLookup>();
 
-/** Register the mounted list's lookup. The returned function unregisters it,
- *  unless a newer list has registered since. */
+/** Register the mounted list's lookup. The returned function unregisters only
+ *  this registration. */
 export function registerReadingAnchor(fn: AnchorLookup): () => void {
-  lookup = fn;
+  lookups.add(fn);
   return () => {
-    if (lookup === fn) lookup = null;
+    lookups.delete(fn);
   };
 }
 
-/** The id of the topmost visible message in `channelId`'s mounted list, or null. */
+/** The id of the topmost visible message in `channelId`'s mounted list, or null.
+ *  A list answers null for a channel that is not its own, so the newest list
+ *  that does answer is the one showing `channelId`. */
 export function readingAnchor(channelId: number): number | null {
-  return lookup?.(channelId) ?? null;
+  let found: number | null = null;
+  for (const lookup of lookups) found = lookup(channelId) ?? found;
+  return found;
 }

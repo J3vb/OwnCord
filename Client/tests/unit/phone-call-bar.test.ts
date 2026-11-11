@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePhone } from "../helpers/phoneMedia";
 import { makeDm } from "../helpers/dmHarness";
 import { addVoiceUser } from "../helpers/voiceUsers";
-import { createPhoneCallBar, type PhoneCallBar } from "../../src/components/PhoneCallBar";
+import { createPhoneCallBar, type PhoneCallBar } from "../../src/features/voice/PhoneCallBar";
 import {
   channelsStore,
   resetChannelsStore,

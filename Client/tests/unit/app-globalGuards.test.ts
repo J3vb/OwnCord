@@ -21,7 +21,7 @@ vi.mock("@lib/ui/toast", () => ({ showToast }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() }),
 }));
-vi.mock("@components/MaskedLinkGuard", () => ({ guardMaskedLink }));
+vi.mock("../../src/features/content-consent/MaskedLinkGuard", () => ({ guardMaskedLink }));
 vi.mock("@lib/ui/touchInput", () => ({ installTouchInput }));
 
 import { installGlobalGuards, lockPageZoom } from "../../src/app/globalGuards";
@@ -153,7 +153,7 @@ describe("installGlobalGuards", () => {
 
   it("warns and toasts when the masked-link dialog fails to load", async () => {
     vi.resetModules();
-    vi.doMock("@components/MaskedLinkGuard", () => {
+    vi.doMock("../../src/features/content-consent/MaskedLinkGuard", () => {
       throw new Error("chunk failed");
     });
     const fresh = await import("../../src/app/globalGuards");
@@ -164,7 +164,7 @@ describe("installGlobalGuards", () => {
     );
     expect(showToast).toHaveBeenCalledExactlyOnceWith(connectText("link.openFailed"), "error");
     expect(guardMaskedLink).not.toHaveBeenCalled();
-    vi.doUnmock("@components/MaskedLinkGuard");
+    vi.doUnmock("../../src/features/content-consent/MaskedLinkGuard");
   });
 
   describe("touch input", () => {

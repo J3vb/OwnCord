@@ -171,10 +171,10 @@ func TestNSFW_NewSessionInheritsTheAcknowledgement(t *testing.T) {
 	}
 }
 
-// TestAdminUpdateChannelClearingNSFW_ClearsAcksInTheSameCommit proves the
+// TestAdminUpdateChannel_ClearsAcksInTheSameCommit proves the
 // label-lifecycle rule: unlabelling a channel deletes its acknowledgement
 // rows, and the flag write itself still lands.
-func TestAdminUpdateChannelClearingNSFW_ClearsAcksInTheSameCommit(t *testing.T) {
+func TestAdminUpdateChannel_ClearsAcksInTheSameCommit(t *testing.T) {
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	chID := nsfwChannel(t, database, "was-labelled")
@@ -183,10 +183,10 @@ func TestAdminUpdateChannelClearingNSFW_ClearsAcksInTheSameCommit(t *testing.T) 
 		t.Fatalf("AcknowledgeNSFW: %v", err)
 	}
 
-	if err := database.AdminUpdateChannelClearingNSFW(ctx, chID, db.ChannelUpdate{
+	if err := database.AdminUpdateChannel(ctx, chID, db.ChannelUpdate{
 		Name: "was-labelled", NSFW: false,
 	}); err != nil {
-		t.Fatalf("AdminUpdateChannelClearingNSFW: %v", err)
+		t.Fatalf("AdminUpdateChannel: %v", err)
 	}
 
 	ch, err := database.GetChannel(ctx, chID)

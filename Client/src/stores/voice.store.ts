@@ -29,6 +29,7 @@ import {
   withoutVoiceUser,
   withJoinedChannel,
   withLeftChannel,
+  withSwitchingTo,
   withLocalRing,
   withSpeakers,
 } from "./voiceRoster";
@@ -185,6 +186,11 @@ export function clearChannelVoiceUsers(channelId: number): void {
  *  Only resets joinedAt if the user is joining a different channel (or was not in one). */
 export function joinVoiceChannel(channelId: number): void {
   voiceStore.setState((prev) => withJoinedChannel(prev, channelId, Date.now()));
+}
+
+/** The channel a switch out of a live call waits for (see VoiceState.switchingTo). */
+export function setSwitchingTo(channelId: number | null): void {
+  voiceStore.setState((prev) => withSwitchingTo(prev, channelId));
 }
 
 /** Clear the current voice channel and remove current user from voice users. */

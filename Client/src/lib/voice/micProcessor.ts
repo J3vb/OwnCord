@@ -169,24 +169,35 @@ export function createMicProcessor(): MicProcessor {
     if (entry === null || analyser === null || delay === null || speech === null) return;
     enhanced = wantEnhanced && rnnoise !== null;
     detecting = wantDetect && rnnoise !== null;
-    if (
+    if (routeUnchanged()) return;
+    wired = { rnnoise, enhanced, detecting };
+    wireGraph(entry, analyser, delay, speech);
+  }
+
+  function routeUnchanged(): boolean {
+    return (
       wired !== null &&
       wired.rnnoise === rnnoise &&
       wired.enhanced === enhanced &&
       wired.detecting === detecting
-    ) {
-      return;
-    }
-    wired = { rnnoise, enhanced, detecting };
+    );
+  }
+
+  function wireGraph(
+    entryNode: GainNode,
+    analyserNode: AnalyserNode,
+    delayNode: DelayNode,
+    speechNode: GainNode,
+  ): void {
     resetEntryRoute();
     if (rnnoise !== null) rnnoise.node.disconnect();
     if (rnnoise !== null && (enhanced || detecting)) {
-      entry.connect(rnnoise.node);
-      rnnoise.node.connect(speech, RNNOISE_SPEECH_OUTPUT, 0);
+      entryNode.connect(rnnoise.node);
+      rnnoise.node.connect(speechNode, RNNOISE_SPEECH_OUTPUT, 0);
     }
-    const head = enhanced && rnnoise !== null ? rnnoise.node : entry;
-    head.connect(analyser);
-    head.connect(delay);
+    const head = enhanced && rnnoise !== null ? rnnoise.node : entryNode;
+    head.connect(analyserNode);
+    head.connect(delayNode);
   }
 
   /** Load RNNoise once; later callers share the load. Resolves once it is

@@ -41,7 +41,9 @@ added `native_voice_video_codecs` and `native_voice_unpublish_screen`, and WP
 LP-8b (2026-10-16) added `native_voice_publish_screen_audio` and
 `native_voice_unpublish_screen_audio`, which the webview calls from WP LP-8c on,
 and WP M-12a (2026-10-16) added `native_voice_set_screen_quality`, which the
-webview calls from WP M-12b on, and WP M-11a (2026-10-16) widened the
+webview calls from WP M-12b on, and a later change added
+`native_voice_set_video_bitrate` (a live change of a published video's bitrate,
+with no republish), and WP M-11a (2026-10-16) widened the
 `native_voice_video_codecs` result to `{ h264, vp9, decode }` (no new
 command). The
 three counts below are re-derived from the tree by
@@ -100,22 +102,29 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
-| Distinct `invoke` command names called from `Client/src/`  | 111   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 114   |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 28    |
+| Distinct `invoke` command names called from `Client/src/`  | 114   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 117   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 62    |
 
-The handler count covers the 113 distinct registrations
+The handler count includes the Android-only `is_metered` registration
+(`metered_network.rs`). Its `owncord-metered-network` plugin delivers
+`metered-changed` events through an owned plugin listener. The
+`MeteredNetwork` platform contract reports false outside Android.
+Data saver stores `owncord:settings:dataSaver` as `off` (default), `mobile`,
+or `always`; media renderers read it with the device's current network cost.
+An existing deferred element keeps its own tap requirement through a handover.
+The handler count also covers the existing 115 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
-`#[cfg(feature = "devtools")]`, and the forty-three `native_voice_*` commands
+`#[cfg(feature = "devtools")]`, and the forty-four `native_voice_*` commands
 and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
 files dragged in or copied from the file manager) behind
 `#[cfg(target_os = "linux")]` (`read_staged_file` also on Android, where it
 reads the files another app shared), so a default build (no `devtools`)
-registers 102 on Linux and 57 elsewhere, plus eleven Android-only ones:
+registers 103 on Linux and 58 elsewhere, plus eleven Android-only ones:
 `set_call_service`, `save_file`, `share_file`, `share_text`, `read_staged_file`,
 `take_shared` (`share_in.rs`, the share another app sent to OwnCord) and the
 five notification commands in `android_notifications.rs`. The one environment-detection helper is
@@ -194,6 +203,7 @@ native_voice_set_ptt_gated
 native_voice_set_screen_quality
 native_voice_set_screenshare_volume
 native_voice_set_subscribed
+native_voice_set_video_bitrate
 native_voice_set_video_view
 native_voice_set_voice_gate
 native_voice_set_volume
@@ -223,12 +233,14 @@ ptt_set_key
 ptt_start
 ptt_stop
 read_staged_file
+resume_saved_session
 save_credential
 save_file
 save_identity_key
 save_pending_messages
 save_settings
 set_call_service
+is_metered
 set_gpu_adapter
 set_unread_badge
 set_window_pref
@@ -319,7 +331,7 @@ native surface itself lives only in `platform/desktop/`.
 | HTTP fetch        | `lib/api.ts`, `lib/presence/profiles.ts`, `features/messaging/content/attachments.ts` (server files)  | `plugin-http`                                                                                                                                         | native `fetch` — but CORS becomes a server concern          |
 | External content  | `message-list/{embeds,media,attachments}.ts`, `GifPicker.ts`                                          | `api/core`; 2 invokes (`external_*`)                                                                                                                  | ⚠ no equivalent — a page cannot classify resolved addresses |
 | WebSocket         | `lib/ws.ts`                                                                                           | `api/core`, `api/event`; 4 invokes, 4 event listens                                                                                                   | ⚠ see hard cases                                            |
-| Secret storage    | `lib/net/credentials.ts`, `lib/net/identity.ts`, `lib/pendingMessages.ts`                             | `api/core`; 11 invokes, plus the SDK `isTauri` guard                                                                                                  | ⚠ see hard cases                                            |
+| Secret storage    | `lib/net/credentials.ts`, `lib/net/identity.ts`, `lib/pendingMessages.ts`                             | `api/core`; 12 invokes, plus the SDK `isTauri` guard                                                                                                  | ⚠ see hard cases                                            |
 | Settings          | `lib/presence/profiles.ts`                                                                            | `api/core` (`save_settings`, `get_settings`)                                                                                                          | `localStorage` / IndexedDB                                  |
 | Native proxies    | `lib/net/httpProxy.ts`, `lib/voice/livekitUrlResolver.ts`                                             | `api/core`; 3 invokes                                                                                                                                 | not needed — the proxies exist to work around desktop TLS   |
 | Notifications     | `lib/notifications.ts`, `main.ts`, `pages/MainPage.ts` (for the unread badge)                         | `plugin-notification`, `api/window`, `api/core` (`notify_message`, `clear_call_notification`, `set_unread_badge`), `api/event` (`notification-click`) | Notification API + Page Visibility                          |
@@ -444,7 +456,7 @@ addition to `contracts/`, not just B7-3's:
    `@tauri-apps` and `invoke("` must not appear anywhere under
    `src/platform/`, comments included.
 3. **No production imports, no domain types.** Contracts import nothing from
-   `@lib/*`/`@stores/*`/`@components/*`/`@pages/*`. Small host result types
+   `@lib/*`/`@stores/*`/`@pages/*`. Small host result types
    are re-declared, structurally identical, rather than imported.
 4. **Reuse before inventing.** Where an existing interface already has the
    right shape (`PersistenceBackend`, `PendingMessagePersistence`), the

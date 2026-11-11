@@ -35,7 +35,7 @@ vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
-vi.mock("@components/CertMismatchModal", () => mocks.certMismatchModalMock());
+vi.mock("../../../src/features/connection/CertMismatchModal", () => mocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mocks.netCertReconnectMock());
 vi.mock("@lib/presence/profiles", (importOriginal) => mocks.presenceProfilesMock(importOriginal));
 vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());
@@ -406,6 +406,8 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
+    // The banner is its own chunk.
+    await vi.dynamicImportSettled();
 
     // The notifier checks 3 s after mount (UpdateNotifier.ts mount()).
     await vi.advanceTimersByTimeAsync(3000);

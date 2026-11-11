@@ -7,9 +7,8 @@ import (
 	"fmt"
 )
 
-// SequenceValue returns table's AUTOINCREMENT counter — the largest id the
-// table ever handed out, from sqlite_sequence — or 0 when the table has
-// never had a row.
+// SequenceValue returns table's AUTOINCREMENT counter (largest id ever handed out), or
+// 0 if it never had a row.
 func (d *DB) SequenceValue(ctx context.Context, table string) (int64, error) {
 	var seq int64
 	err := d.reader.QueryRowContext(ctx, `SELECT seq FROM sqlite_sequence WHERE name = ?`, table).Scan(&seq)
@@ -22,15 +21,12 @@ func (d *DB) SequenceValue(ctx context.Context, table string) (int64, error) {
 	return seq, nil
 }
 
-// RaiseSequences moves each named table's AUTOINCREMENT counter up to its
-// floor when it stands below it, so the next insert takes an id above every
-// floor; a counter already past its floor is left alone. The deletion
-// markers record the floors when they are written
-// (MarkerStore.RaiseSequenceFloor) and the erasure-markers start-up stage
-// applies them before the markers are replayed, so a restore that rolled
-// sqlite_sequence back with the rest of the file cannot hand an erased
-// account's id — and with it the marker's token — to a new account.
-// sqlite_sequence accepts ordinary writes.
+// RaiseSequences moves each named table's AUTOINCREMENT counter up to its floor
+// when below it, so the next insert takes an id above every floor; a counter
+// already past is left alone. Deletion markers record the floors
+// (MarkerStore.RaiseSequenceFloor) and the start-up stage applies them before
+// replay, so a restore that rolled sqlite_sequence back cannot hand an erased
+// account's id, and its marker's token, to a new account.
 func (d *DB) RaiseSequences(ctx context.Context, floors map[string]int64) error {
 	if len(floors) == 0 {
 		return nil
@@ -53,9 +49,8 @@ func (d *DB) RaiseSequences(ctx context.Context, floors map[string]int64) error 
 		} else if n == 1 {
 			continue
 		}
-		// No row below the floor: either the counter is already past it, or
-		// the table never had a row and has no counter yet — insert one so
-		// the first insert lands above the floor too.
+		// No row below the floor: the counter is past it, or the table never had a row; insert
+		// one so the first insert lands above the floor.
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO sqlite_sequence (name, seq) SELECT ?1, ?2 WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = ?1)`,
 			table, floor); err != nil {

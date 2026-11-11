@@ -2,17 +2,18 @@
 // Owns the remote-video callbacks the room event handlers fire, and the
 // local/remote video stream lookups the UI polls. The stream implementations
 // stay in screenShare.ts; the room is read from LiveKitSession on every call.
-import { VideoQuality, type Room } from "livekit-client";
+import { VideoQuality } from "livekit-client";
 import {
   getLocalCameraStream as doGetLocalCameraStream,
   getLocalScreenshareStream as doGetLocalScreenshareStream,
   getLocalScreenshareStats as doGetLocalScreenshareStats,
-} from "../../lib/voice/screenShare";
+} from "./screenShare";
 import { parseUserId } from "./sessionState";
 import { isUnencryptedPublication } from "./mediaEncryption";
 import { autoPlayCameras } from "./autoPlayCameras";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
 import type { ShareSenderSample } from "./shareSenderStats";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 /** One receiver sample of a remote video track (getReceiverStats plus
  *  currentBitrate), for a video tile's quality chip. */
@@ -88,7 +89,7 @@ export class RemoteTracks {
   private reportedWatching: readonly number[] = [];
 
   constructor(
-    private readonly getRoom: () => Room | null,
+    private readonly getRoom: () => VoiceRoom | null,
     private readonly autoPlay: () => boolean = autoPlayCameras,
   ) {}
 
@@ -256,7 +257,7 @@ export class RemoteTracks {
     const name = source === "screenshare" ? "screen_share" : source;
     for (const participant of this.getRoom()?.remoteParticipants.values() ?? []) {
       if (parseUserId(participant.identity) !== userId) continue;
-      return participant.getTrackPublication(name as never);
+      return participant.getTrackPublication(name);
     }
     return undefined;
   }

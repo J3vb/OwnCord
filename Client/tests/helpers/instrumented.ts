@@ -8,13 +8,24 @@ export function isInstrumented(text: string): boolean {
 }
 
 const NO_CHECK_HEADER = "// @ts-nocheck\n";
+const LEADING_BLOCK_COMMENT = /^\s*\/\*.*?\*\//s;
 
 /**
- * The sandbox also puts a `// @ts-nocheck` line on top of every file it copies,
- * rewritten or not. Drop it in the nightly run so line counts and file headers
- * read as they do in the original.
+ * The sandbox also puts a `// @ts-nocheck` line in every file it copies,
+ * rewritten or not: on top, or right after a leading block comment, where it
+ * adds a line break too. Drop it in the nightly run so line counts and file
+ * headers read as they do in the original.
  */
 export function withoutSandboxHeader(text: string): string {
   if (process.env.OC_MUTATION_RUN === undefined) return text;
-  return text.startsWith(NO_CHECK_HEADER) ? text.slice(NO_CHECK_HEADER.length) : text;
+  return stripSandboxHeader(text);
+}
+
+/** The header removal itself, without the nightly-run check. */
+export function stripSandboxHeader(text: string): string {
+  if (text.startsWith(NO_CHECK_HEADER)) return text.slice(NO_CHECK_HEADER.length);
+  const comment = LEADING_BLOCK_COMMENT.exec(text)?.[0];
+  const inserted = `\n${NO_CHECK_HEADER}`;
+  if (comment === undefined || !text.startsWith(inserted, comment.length)) return text;
+  return comment + text.slice(comment.length + inserted.length);
 }

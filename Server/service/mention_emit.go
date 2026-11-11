@@ -2,44 +2,38 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // MentionCountNotifier delivers a live mention_count frame to one reader whose
-// read_states.mention_count changed. channelID names the channel and
-// count is the reader's total after the bump.
+// read_states.mention_count changed; count is the reader's total after the bump.
 type MentionCountNotifier interface {
 	NotifyMentionCount(userID, channelID, count int64)
 }
 
-// SetMentionNotifier installs the live unread-badge hook. The ws layer
-// calls this once, in NewHub, with the hub's implementation; passing nil (or
-// never calling it) leaves the hook off.
+// SetMentionNotifier installs the live unread-badge hook; the ws layer calls it once in
+// NewHub. Nil (or never calling it) leaves the hook off.
 func (s *MessageService) SetMentionNotifier(n MentionCountNotifier) {
 	s.mentionNotifier = n
 }
 
-// MentionCountBatcher is an optional extension of MentionCountNotifier. The
-// service resolves a flush's audience through it once, before taking the
-// channel's emit lock, so the per-reader visibility reads stay out of the
-// critical section and only the frame enqueue runs under it.
+// MentionCountBatcher is an optional extension of MentionCountNotifier: the service
+// resolves a flush's audience through it before taking the channel's emit lock, keeping
+// the per-reader visibility reads out of the critical section.
 type MentionCountBatcher interface {
-	// PrepareMentionCounts decides which of userIDs may get a live mention_count
-	// frame for channelID and returns the function that sends one. The sender
-	// takes a reader's connections at call time and checks a reader the
-	// preparation did not cover (a later connection) on its own. Call it on the
-	// goroutine that prepared it, or after a happens-before such as the emit lock.
+	// PrepareMentionCounts decides which of userIDs may get a live mention_count frame for
+	// channelID and returns the sender. The sender takes connections at call time and checks a
+	// reader the preparation missed (a later connection) itself. Call it on the preparing
+	// goroutine or after a happens-before such as the emit lock.
 	PrepareMentionCounts(ctx context.Context, channelID int64, userIDs []int64) func(userID, count int64)
 }
 
-// mentionSendPrep builds a channel's frame sender for a set of candidate readers.
 type mentionSendPrep func(ctx context.Context, channelID int64, userIDs []int64) func(userID, count int64)
 
-// mentionSendPreparer returns how this service prepares badge frames: through the
-// hub's batch resolver when it has one, else one NotifyMentionCount per reader.
-// Nil when no notifier is installed.
 func (s *mentionState) mentionSendPreparer() mentionSendPrep {
 	n := s.mentionNotifier
 	if n == nil {
@@ -53,9 +47,6 @@ func (s *mentionState) mentionSendPreparer() mentionSendPrep {
 	}
 }
 
-// prepareMentionSend is mentionSendPreparer applied; nil with no notifier. It
-// reads the hook at call time, so a notifier installed after SendMessage still
-// receives the frame.
 func (s *mentionState) prepareMentionSend(ctx context.Context, channelID int64, userIDs []int64) func(userID, count int64) {
 	prep := s.mentionSendPreparer()
 	if prep == nil {
@@ -64,19 +55,51 @@ func (s *mentionState) prepareMentionSend(ctx context.Context, channelID int64, 
 	return prep(ctx, channelID, userIDs)
 }
 
-// reverseMentionCounts lowers the mention_count bumps msgIDs made and pushes each
-// admitted reader their new total, holding the channel's emit lock across both
-// the write and the frame. That lock orders the badge frames: the mention
-// worker's coalesced increment holds it across its write and frame, so a reader's
-// last frame carries the latest committed total and a delete inside the coalesce
-// window is never overtaken by an older increment total. The lowered readers are
-// known only after the write, so their visibility is resolved under the lock, once
-// per channel. A failed reversal emits nothing, so a reader keeps the total they
-// have.
+// reverseMentionCounts lowers the bumps msgIDs made and pushes each admitted reader their
+// new total, holding the channel's emit lock across write and frame. That lock orders badge
+// frames (the worker's increment holds it too), so a reader's last frame carries the latest
+// committed total and a delete inside the coalesce window is never overtaken by an older
+// increment. Lowered readers are known only after the write, so visibility is resolved
+// under the lock, once per channel. A failed reversal emits nothing.
 func (s *mentionState) reverseMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) error {
 	mu := s.mentionEmitLocks.forChannel(channelID)
 	mu.Lock()
 	defer mu.Unlock()
+	return s.reverseMentionCountsLocked(ctx, channelID, msgIDs)
+}
+
+// removeAndReverseMentions runs write, which soft-deletes messages in channelID
+// and returns their ids, and reverses those messages' mention badges, all under one
+// hold of the channel's emit lock. A reader's read-pointer move takes the same lock
+// and recomputes the badge without deleted messages, so it must see the removal
+// and its reversal as one step: between them it would count the removal already,
+// and the reversal would then take the same mention a second time. The lock order
+// is the emit lock, then the writer, as in the mention worker's flush.
+//
+// Callers flush queued increments before calling, since that flush takes this lock
+// itself, and call it for one channel at a time: channels share lock stripes, so
+// holding two could deadlock. Waiting for the lock honours ctx and writes nothing
+// when it ends. write's error comes back as err with nothing reversed; a failed
+// reversal comes back as reverseErr, the removal having committed. The reversal
+// runs detached from ctx.
+func (s *mentionState) removeAndReverseMentions(ctx context.Context, channelID int64, write func() ([]int64, error)) (ids []int64, reverseErr, err error) {
+	mu := s.mentionEmitLocks.forChannel(channelID)
+	if lockErr := syncutil.LockContext(ctx, mu); lockErr != nil {
+		// Not a refusal: answered like a store failure, with the context error kept
+		// so a caller can still tell a deadline from a hang-up.
+		return nil, nil, fmt.Errorf("%w: remove messages: %w", ErrInternal, lockErr)
+	}
+	defer mu.Unlock()
+	ids, err = write()
+	if err != nil {
+		return nil, nil, err
+	}
+	return ids, s.reverseMentionCountsLocked(context.WithoutCancel(ctx), channelID, ids), nil
+}
+
+// reverseMentionCountsLocked is reverseMentionCounts for a caller that holds the
+// channel's emit lock.
+func (s *mentionState) reverseMentionCountsLocked(ctx context.Context, channelID int64, msgIDs []int64) error {
 	lowered, err := s.st.DecrementMentionCounts(ctx, channelID, msgIDs)
 	if err != nil {
 		return err
@@ -87,11 +110,9 @@ func (s *mentionState) reverseMentionCounts(ctx context.Context, channelID int64
 	return nil
 }
 
-// emitIncrement writes one channel's coalesced mention increment and pushes its
-// frames, holding the channel's emit lock across both so an increment frame is
-// never overtaken by a later decrement. The audience is resolved before the
-// lock. It is the no-worker fallback; the bounded worker's flush holds the same
-// lock (mentionWorker.emitLocks).
+// emitIncrement writes one channel's coalesced increment and pushes its frames under the
+// emit lock, so it is never overtaken by a later decrement. Audience resolved before the
+// lock. The no-worker fallback; the worker holds the same lock.
 func (s *mentionState) emitIncrement(ctx context.Context, channelID int64, entries []db.MentionBatchEntry) {
 	send := s.prepareMentionSend(ctx, channelID, entryUserIDs(entries))
 	mu := s.mentionEmitLocks.forChannel(channelID)
@@ -105,14 +126,11 @@ func (s *mentionState) emitIncrement(ctx context.Context, channelID int64, entri
 	emitMentionBumped(send, bumped)
 }
 
-// dispatchMentionBadges routes one message's mention-badge job: to the bounded
-// worker when one is running (production), or inline through bg otherwise
-// (tests, and any caller built via NewMessageService directly), so a directly
-// constructed service still has its counts readable right after a send.
+// dispatchMentionBadges routes one message's badge job: to the bounded worker when
+// running (production), else inline through bg (tests, directly constructed services), so
+// counts are readable right after a send.
 func (s *MessageService) dispatchMentionBadges(bgCtx context.Context, job mentionJob) {
 	if w := s.mentionWorkerForSend(); w != nil {
-		// Production: hand the job to the single bounded worker on the caller's
-		// goroutine. Enqueue never blocks, so no goroutine is spawned per send.
 		w.enqueue(job)
 		return
 	}

@@ -13,10 +13,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// RequireAdminAuth is the exported admin gate for surfaces outside this
-// package (api/router.go's plugin admin handler). Those routes stay
-// ADMINISTRATOR-only, so it chains the perimeter check with an explicit
-// ADMINISTRATOR requirement rather than exposing the widened perimeter.
+// RequireAdminAuth is the admin gate for surfaces outside this package (api/router.go's plugin admin
+// handler). Those stay ADMINISTRATOR-only, so it chains the perimeter check with an explicit ADMINISTRATOR
+// requirement rather than expose the widened perimeter.
 func RequireAdminAuth(sessions *service.SessionService) func(http.Handler) http.Handler {
 	perimeter := adminAuthMiddleware(sessions)
 	administrator := requirePerm(permissions.Administrator)
@@ -25,12 +24,10 @@ func RequireAdminAuth(sessions *service.SessionService) func(http.Handler) http.
 	}
 }
 
-// adminAuthMiddleware validates the Bearer token and requires at least one
-// moderation-capable bit (permissions.AdminPerimeter) — not ADMINISTRATOR, so
-// a Moderator role can reach the routes its bits allow. Individual route
-// groups re-check the specific bit they need via requirePerm.
-// On success it stores the *db.User, *db.Role and *db.Session in the request
-// context so downstream handlers can retrieve them without re-querying.
+// adminAuthMiddleware validates the Bearer token and requires one moderation-capable bit
+// (permissions.AdminPerimeter), not ADMINISTRATOR, so a Moderator can reach the routes its bits allow; route
+// groups re-check their bit via requirePerm. It stores *db.User, *db.Role and *db.Session in the context so
+// handlers need no re-query.
 func adminAuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,10 +38,8 @@ func adminAuthMiddleware(sessions *service.SessionService) func(http.Handler) ht
 			}
 
 			hash := auth.HashToken(token)
-			// Resolve the bearer token: login session first, then API token. An
-			// API token inherits its owning user's role, so a token whose user
-			// clears the perimeter authenticates here too and /admin/api/*
-			// works for headless clients.
+			// Resolve the bearer: login session first, then API token. A token inherits its owning user's role, so a
+			// token whose user clears the perimeter works for headless clients.
 			user, role, sess, err := sessions.ResolveBearer(r.Context(), hash)
 			if err != nil {
 				switch {
@@ -57,25 +52,18 @@ func adminAuthMiddleware(sessions *service.SessionService) func(http.Handler) ht
 				case errors.Is(err, auth.ErrTokenNotFound):
 					writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired session")
 				default:
-					// A wrapped DB error, not one of the sentinels above (mirrors
-					// api.AuthMiddleware). A DB outage is not a bad token:
-					// answering 401 here would make the client treat a live,
-					// valid session as expired — the desktop client's doFetch
-					// 401 sink clears auth and deletes the stored credential for
-					// a session that was never revoked. Log it and report the
-					// failure as a server-side fault instead.
+					// A wrapped DB error, not a sentinel (mirrors api.AuthMiddleware). A DB outage is not a bad token: a 401
+					// would make the desktop client's doFetch sink clear auth and delete the stored credential for a session
+					// never revoked. Log it and report a server-side fault.
 					slog.ErrorContext(r.Context(), "admin: token resolution failed", "error", err)
 					writeErr(w, http.StatusServiceUnavailable, httperr.CodeServiceUnavailable, "authentication service temporarily unavailable")
 				}
 				return
 			}
 
-			// F1: reject effectively-banned users before any further processing,
-			// as api.AuthMiddleware does — a ban must revoke admin-panel access
-			// immediately, not only once the session expires. Deliberately placed
-			// AFTER ResolveTokenHash so it also covers the API-token path this
-			// commit introduces; gating only the session branch would let a
-			// banned administrator keep working through a bot token.
+			// Reject effectively-banned users, as api.AuthMiddleware does: a ban must revoke panel access at once, not
+			// at session expiry. Placed AFTER ResolveTokenHash so it covers the API-token path too; gating only the
+			// session branch would let a banned administrator keep working through a bot token.
 			if auth.IsEffectivelyBanned(user) {
 				writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "your account has been suspended")
 				return
@@ -95,9 +83,8 @@ func adminAuthMiddleware(sessions *service.SessionService) func(http.Handler) ht
 	}
 }
 
-// requirePerm gates a route group on a single server-wide permission bit.
-// ADMINISTRATOR bypasses via permissions.HasServerPerm. The role comes from
-// the request context (set by adminAuthMiddleware), so no extra query runs.
+// requirePerm gates a route group on one server-wide permission bit (ADMINISTRATOR bypasses via
+// permissions.HasServerPerm). The role comes from the request context, so no extra query runs.
 func requirePerm(perm int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,14 +103,10 @@ func requirePerm(perm int64) func(http.Handler) http.Handler {
 	}
 }
 
-// ownerOnlyMiddleware wraps a handler to require the Owner role
-// (permissions.IsOwner). It consumes the *db.Role that
-// adminAuthMiddleware resolved and stored in the request context — the same
-// contract as requirePerm, so no second role read runs and no read-fault
-// error mapping exists here at all: an earlier 503 branch died with the query
-// it served, and a test pins the absence (a role read fault now surfaces
-// once, at the perimeter, as its 503). A request that somehow arrives without
-// the context role fails closed as unauthenticated.
+// ownerOnlyMiddleware requires the Owner role (permissions.IsOwner), consuming the *db.Role
+// adminAuthMiddleware stored: no second role read and no read-fault mapping here, so a role read fault
+// surfaces once, at the perimeter, as its 503 (a test pins this). A request without the context role fails
+// closed as unauthenticated.
 func ownerOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		role, ok := r.Context().Value(adminRoleKey).(*db.Role)
@@ -141,9 +124,8 @@ func ownerOnlyMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// gateMiddleware gates next on g. The role is the one adminAuthMiddleware stored in the
-// request context, so no extra query runs; a request that arrives without one
-// fails closed as unauthenticated, like requirePerm and ownerOnlyMiddleware.
+// gateMiddleware gates next on g using the context role, so no extra query runs; a request without one fails
+// closed as unauthenticated, like requirePerm and ownerOnlyMiddleware.
 func gateMiddleware(g routeGate, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		role, ok := r.Context().Value(adminRoleKey).(*db.Role)

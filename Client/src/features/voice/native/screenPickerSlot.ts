@@ -1,13 +1,10 @@
 // The screen-share dialog is a component, so a lower layer may not import it.
 // The UI layer registers the dialog here, the same injection shape
 // as `lib/readState.ts`'s `setMarkReadSender`; the native picker adapter and
-// the web path's quality step (`lib/voice/screenShare.ts`) call it. A leaf module
+// the web path's quality step (`features/voice/screenShare.ts`) call it. A leaf module
 // with no runtime imports of its own, so the UI can import the setter without
 // pulling the native voice tree into its chunk.
-import type {
-  ScreenSharePick,
-  ScreenSharePickerOptions,
-} from "../../../components/ScreenSharePicker";
+import type { ScreenSharePick, ScreenSharePickerOptions } from "../ScreenSharePicker";
 
 /** The dialog itself. Returns null on dismissal. */
 export type ScreenSourcePicker = (

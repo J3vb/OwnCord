@@ -9,19 +9,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// RegistrationMode is the registration_mode setting: who may
-// create an account, and how.
+// RegistrationMode is the registration_mode setting: who may create an account, and how.
 type RegistrationMode string
 
 const (
 	// RegistrationClosed refuses every registration.
 	RegistrationClosed RegistrationMode = "closed"
-	// RegistrationInvite admits an applicant who redeems a valid invite — the
-	// fresh-install default, and what an upgraded server's former
-	// registration_open = 1 maps to.
+	// RegistrationInvite admits an applicant who redeems a valid invite: the fresh-install default, and what a
+	// former registration_open = 1 maps to.
 	RegistrationInvite RegistrationMode = "invite"
-	// RegistrationApproval creates the account locked; an admin approves it in
-	// the admin panel before it can sign in.
+	// RegistrationApproval creates the account locked until an admin approves it.
 	RegistrationApproval RegistrationMode = "approval"
 	// RegistrationOpen admits anyone, no invite needed.
 	RegistrationOpen RegistrationMode = "open"
@@ -32,14 +29,13 @@ const DefaultRegistrationMode = RegistrationInvite
 
 const registrationModeKey = "registration_mode"
 
-// RegistrationModeOf reads the live registration mode with the service's
-// default and fail-closed parsing. Storage errors are returned to the caller.
+// RegistrationModeOf reads the live registration mode with the default and fail-closed parsing; storage
+// errors are returned.
 func RegistrationModeOf(ctx context.Context, st settingGetter) (RegistrationMode, error) {
 	return registrationModeSetting(ctx, st)
 }
 
-// ParseRegistrationMode reads a setting value; ok is false for anything but
-// the four modes.
+// ParseRegistrationMode reads a setting value; ok is false for anything but the four modes.
 func ParseRegistrationMode(v string) (RegistrationMode, bool) {
 	switch m := RegistrationMode(strings.ToLower(strings.TrimSpace(v))); m {
 	case RegistrationClosed, RegistrationInvite, RegistrationApproval, RegistrationOpen:
@@ -48,9 +44,8 @@ func ParseRegistrationMode(v string) (RegistrationMode, bool) {
 	return "", false
 }
 
-// registrationModeSetting reads the live mode. A missing row is the default;
-// an unparseable value fails closed and is logged, since it can only come
-// from a hand-edited database.
+// registrationModeSetting reads the live mode. A missing row is the default; an unparseable value (a
+// hand-edited database) fails closed and is logged.
 func registrationModeSetting(ctx context.Context, st settingGetter) (RegistrationMode, error) {
 	v, err := st.GetSetting(ctx, registrationModeKey)
 	if errors.Is(err, db.ErrNotFound) {

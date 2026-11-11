@@ -1,8 +1,8 @@
 package db
 
-// The stored values of messages.kind. 0 is a message a user wrote, 1 a call
-// log row and 2 to 6 the group DM event rows, 7 a pin row, 8 a welcome row.
-// MessageKindName gives their wire names (protocol enum chat_message.kind).
+// The stored values of messages.kind: 0 user message, 1 call log, 2 to 6 group DM
+// events, 7 pin, 8 welcome. MessageKindName gives the wire names (protocol enum
+// chat_message.kind).
 const (
 	MessageKindUser        int64 = 0
 	MessageKindCall        int64 = 1
@@ -17,8 +17,7 @@ const (
 	MessageKindNameCall = "call"
 )
 
-// MessageKindName is the wire name of a stored kind: "" for an ordinary
-// message (the field is omitted) and for a value this server does not know.
+// MessageKindName is a stored kind's wire name; "" (omitted) for an ordinary or unknown kind.
 func MessageKindName(kind int64) string {
 	switch kind {
 	case MessageKindCall:

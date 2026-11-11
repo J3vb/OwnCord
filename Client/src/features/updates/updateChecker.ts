@@ -1,7 +1,7 @@
 // updateChecker — keeps asking the connected server whether a newer client is
 // on offer while the app runs, instead of only once at startup. A server that
 // updated is noticed through the same question (the client feed it serves is
-// what changed), so a reconnect and a slow interval both route here. UI policy (banner, dismiss) stays in components/UpdateNotifier.
+// what changed), so a reconnect and a slow interval both route here. UI policy (banner, dismiss) stays in UpdateNotifier.
 
 import { Disposable } from "../../lib/disposable";
 import { createLogger } from "../../lib/logger";

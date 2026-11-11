@@ -59,7 +59,6 @@ const NODE_PROCESS_FILES = [
   "tests/unit/artifact-cert-pin.test.ts",
   "tests/unit/artifact-updater-restart.test.ts",
   "tests/unit/artifact-webview2-policy.test.ts",
-  "tests/unit/complexity-baseline.test.ts",
   "tests/unit/layer-baseline.test.ts",
   "tests/unit/lifecycle-probe.test.ts",
   "tests/unit/main/linksAndRecovery.test.ts",
@@ -79,7 +78,6 @@ export default defineConfig({
     alias: {
       "@lib": resolve(import.meta.dirname, "src/lib"),
       "@stores": resolve(import.meta.dirname, "src/stores"),
-      "@components": resolve(import.meta.dirname, "src/components"),
       "@pages": resolve(import.meta.dirname, "src/pages"),
       "@styles": resolve(import.meta.dirname, "src/styles"),
     },

@@ -259,6 +259,10 @@ export function platformDesktopMock() {
           host.calls.push(["stopScreen", args]);
           return Promise.resolve();
         },
+        setVideoBitrate: (...args: unknown[]) => {
+          host.calls.push(["setVideoBitrate", args]);
+          return Promise.resolve();
+        },
         changeCamera: (...args: unknown[]) => {
           host.calls.push(["changeCamera", args]);
           return host.changeCamera();

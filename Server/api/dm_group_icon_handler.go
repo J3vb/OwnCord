@@ -50,25 +50,11 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 		// read runs under a transfer deadline instead.
 		release := transferBody(w, r, avatarMaxBodySize)
 		defer release()
-		if err := r.ParseMultipartForm(avatarMultipartMemoryLimit); err != nil {
-			if writeTransferTimedOut(w, err, "group icon upload") {
-				return
-			}
-			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
-			return
-		}
-		file, header, err := r.FormFile("file")
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "missing file field")
-			return
-		}
-		defer file.Close() //nolint:errcheck
-
-		raw, mimeType, width, height, ok := readProfileImage(w, file, groupIconImageLimits)
+		raw, filename, mimeType, width, height, ok := readProfileImageForm(w, r, avatarMultipartMemoryLimit, "group icon upload", groupIconImageLimits)
 		if !ok {
 			return
 		}
-		fileID, written, ok := avatarStoreAndRecord(r.Context(), w, svc, store, user.ID, sanitizeUploadFilename(header.Filename), raw, mimeType, "avatar", width, height)
+		fileID, written, ok := avatarStoreAndRecord(r.Context(), w, svc, store, user.ID, filename, raw, mimeType, "avatar", width, height)
 		if !ok {
 			return
 		}

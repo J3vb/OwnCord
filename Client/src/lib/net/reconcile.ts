@@ -109,6 +109,91 @@ interface Visit {
   reused: boolean;
 }
 
+/** Where focus sat in a container before a pass, so it can be put back after. */
+interface FocusSnapshot {
+  active: Element | null;
+  focusedKey: string | undefined;
+  /** Keys of the nested rows between the focused element and its row, outermost first. */
+  innerPath: string[];
+  activeIsRow: boolean;
+}
+
+function snapshotFocus(container: Element): FocusSnapshot {
+  const active = document.activeElement;
+  let holder = active;
+  while (holder !== null && holder.parentElement !== container) holder = holder.parentElement;
+  const focusedKey = holder === null ? undefined : META.get(holder)?.key;
+  // Read from META now: a stored path would go stale when a nested row moves
+  // to another parent.
+  const innerPath: string[] = [];
+  for (let n = holder === null ? null : active; n !== null && n !== holder; n = n.parentElement) {
+    const k = META.get(n)?.key;
+    if (k !== undefined) innerPath.unshift(k);
+  }
+  const activeIsRow = active !== null && active !== holder && META.has(active);
+  return { active, focusedKey, innerPath, activeIsRow };
+}
+
+/** The container's tracked children by key. */
+function indexExisting(container: Element): Map<string, Element> {
+  const existing = new Map<string, Element>();
+  for (const child of Array.from(container.children)) {
+    const meta = META.get(child);
+    if (meta !== undefined) existing.set(meta.key, child);
+  }
+  return existing;
+}
+
+/**
+ * Move as few nodes as possible: the kept rows already in relative order (a
+ * longest increasing subsequence of their old positions) stay put, and only
+ * new rows and the rows outside that run are inserted. One logical move is
+ * one DOM move, and a focused row is not touched unless it is the one moving.
+ */
+function placeRows(container: Element, wanted: readonly Element[]): void {
+  const oldIndex = new Map<Element, number>();
+  Array.from(container.children).forEach((child, i) => oldIndex.set(child, i));
+  const stay = longestIncreasingRun(wanted.map((el) => oldIndex.get(el) ?? -1));
+  let anchor: Element | null = null;
+  for (let i = wanted.length - 1; i >= 0; i--) {
+    const el = wanted[i]!;
+    if (!stay.has(i)) container.insertBefore(el, anchor);
+    anchor = el;
+  }
+}
+
+/** Put focus back on a replaced row's counterpart, following nested keys as deep as they still match. */
+function refocusReplacement(snap: FocusSnapshot, active: Element, next: Element): void {
+  const same = (el: Element): boolean =>
+    el.tagName === active.tagName &&
+    el.classList[0] === active.classList[0] &&
+    el.getAttribute("data-testid") === active.getAttribute("data-testid");
+  let base: Element = next;
+  let matched = 0;
+  for (const k of snap.innerPath) {
+    const inner = nestedRow(base, k);
+    if (inner === undefined) break;
+    base = inner;
+    matched++;
+  }
+  const target =
+    matched === snap.innerPath.length && snap.activeIsRow
+      ? base
+      : [base, ...base.querySelectorAll("*")].find(same);
+  (target as HTMLElement | undefined)?.focus();
+}
+
+function restoreFocus(snap: FocusSnapshot, wanted: readonly Element[]): void {
+  const { active, focusedKey } = snap;
+  if (active === null || focusedKey === undefined || document.activeElement === active) return;
+  if (active.isConnected) {
+    (active as HTMLElement).focus();
+    return;
+  }
+  const next = wanted.find((el) => META.get(el)!.key === focusedKey);
+  if (next !== undefined) refocusReplacement(snap, active, next);
+}
+
 /**
  * The shared pass under both entry points: look rows up by key, let `visit`
  * decide reuse or build per item, drop the gone ones, then move as few nodes
@@ -121,24 +206,8 @@ function reconcileKeyed<T>(
   visit: (item: T, k: string, current: Element | undefined) => Visit,
   dispose: ((el: Element) => void) | undefined,
 ): number {
-  const existing = new Map<string, Element>();
-  for (const child of Array.from(container.children)) {
-    const meta = META.get(child);
-    if (meta !== undefined) existing.set(meta.key, child);
-  }
-  const active = document.activeElement;
-  let holder = active;
-  while (holder !== null && holder.parentElement !== container) holder = holder.parentElement;
-  const focusedKey = holder === null ? undefined : META.get(holder)?.key;
-  // The keys of the nested rows between the focused element and its row,
-  // outermost first, read from META now: a stored path would go stale when a
-  // nested row moves to another parent.
-  const innerPath: string[] = [];
-  for (let n = holder === null ? null : active; n !== null && n !== holder; n = n.parentElement) {
-    const k = META.get(n)?.key;
-    if (k !== undefined) innerPath.unshift(k);
-  }
-  const activeIsRow = active !== null && active !== holder && META.has(active);
+  const existing = indexExisting(container);
+  const snap = snapshotFocus(container);
 
   const wanted: Element[] = [];
   let built = 0;
@@ -157,47 +226,8 @@ function reconcileKeyed<T>(
     dispose?.(el);
     el.remove();
   }
-  // Move as few nodes as possible: the kept rows already in relative order (a
-  // longest increasing subsequence of their old positions) stay put, and only
-  // new rows and the rows outside that run are inserted. One logical move is
-  // one DOM move, and a focused row is not touched unless it is the one moving.
-  const oldIndex = new Map<Element, number>();
-  Array.from(container.children).forEach((child, i) => oldIndex.set(child, i));
-  const stay = longestIncreasingRun(wanted.map((el) => oldIndex.get(el) ?? -1));
-  let anchor: Element | null = null;
-  for (let i = wanted.length - 1; i >= 0; i--) {
-    const el = wanted[i]!;
-    if (!stay.has(i)) container.insertBefore(el, anchor);
-    anchor = el;
-  }
-  if (active === null || focusedKey === undefined || document.activeElement === active) {
-    return built;
-  }
-  if (active.isConnected) {
-    (active as HTMLElement).focus();
-  } else {
-    const next = wanted.find((el) => META.get(el)!.key === focusedKey);
-    const same = (el: Element): boolean =>
-      el.tagName === active.tagName &&
-      el.classList[0] === active.classList[0] &&
-      el.getAttribute("data-testid") === active.getAttribute("data-testid");
-    if (next !== undefined) {
-      // Follow the nested keys as deep as they still match.
-      let base: Element = next;
-      let matched = 0;
-      for (const k of innerPath) {
-        const inner = nestedRow(base, k);
-        if (inner === undefined) break;
-        base = inner;
-        matched++;
-      }
-      const target =
-        matched === innerPath.length && activeIsRow
-          ? base
-          : [base, ...base.querySelectorAll("*")].find(same);
-      (target as HTMLElement | undefined)?.focus();
-    }
-  }
+  placeRows(container, wanted);
+  restoreFocus(snap, wanted);
   return built;
 }
 

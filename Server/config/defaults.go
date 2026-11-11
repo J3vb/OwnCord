@@ -218,6 +218,9 @@ voice:
   # udp_port: 0                    # carry all WebRTC media on ONE UDP port (e.g. 7882) instead of
   #                                # the 50000-60000 range — forward just that one port. 0 = range
   # quality: "medium"              # low | medium | high
+  # restrict_data_publishing: false  # issue voice grants without the right to send data packets
+  #                                # through the media server (OwnCord features use none);
+  #                                # applies from the next start
 
 # github:
 #   token: ""  # optional: GitHub API token for higher rate limits (5000 req/hr vs 60)

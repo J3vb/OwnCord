@@ -104,8 +104,8 @@ export type DispatcherCleanup = () => void;
  * ws client's internal state machine onto the 3-state status, and records
  * whether a dial has failed in the current outage. That fact holds across the
  * backoff's later dials and clears only on a connection or a fresh connect
- * from a stopped socket (sign-in, server switch, "Use here"). Wired once at
- * startup and kept for the app's lifetime — deliberately separate from
+ * from a stopped socket (sign-in, server switch, "Use here"). Wired once, on
+ * this module's first load (app/session.ts), for the app's lifetime: apart from
  * wireDispatcher, whose listeners are torn down per connection.
  */
 export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () => void {
@@ -176,12 +176,12 @@ export function wireDispatcher(
       // thread_focus is not carried across a connection: say it again, and
       // refetch the open panel's history (it missed frames while down).
       resumeThreadFocus(ws, api);
-      // A resumed connection gets no ready, so refetch Message Requests here;
-      // a full flow ("none") refetches them from ready instead.
+      // A resume gets no ready (a full flow, "none", refetches these from ready), and
+      // these changes are not replayed: refetch them so one missed while down shows.
+      // (sticker_update is unsequenced; a block or unblock may come from another device.)
       if (payload.replay_source === "buffer" || payload.replay_source === "db") {
         applyReadyDmRequests(api);
-        // sticker_update is unsequenced and not replayed, and a resume gets no
-        // ready: refetch the set so a change missed while down is recovered.
+        applyReadyBlocks(api, "resume");
         applyReadyStickers(api);
       }
     }),
@@ -302,7 +302,7 @@ export function wireDispatcher(
       // A refused Mark Unread restores the pointer and says so.
       if (handleMarkUnreadError(payload, id)) return;
       if (handleMessagingError(payload, id)) return;
-      handleVoiceJoinRollback(payload, id);
+      handleVoiceJoinRollback(ws, payload, id);
       if (handleVoicePasswordRefusal(ws, payload, id)) return;
       if (handleVoiceError(payload, id)) return;
       // Every remaining code has no dedicated handler above (not a pending

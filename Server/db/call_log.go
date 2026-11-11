@@ -8,8 +8,8 @@ import (
 )
 
 // CallLogParams describes the call log row CreateCallLog writes. StartedAt and
-// LastSeenAt use the messages.timestamp layout ("2006-01-02 15:04:05", UTC).
-// Content is the fallback text that only old clients show.
+// LastSeenAt use the messages.timestamp layout (UTC). Content is the fallback text
+// only old clients show.
 type CallLogParams struct {
 	ChannelID      int64
 	AuthorID       int64
@@ -70,9 +70,9 @@ func (d *DB) CreateCallLog(ctx context.Context, p CallLogParams) (*CallLogRow, e
 	return out, nil
 }
 
-// EndCall closes a live call at endedAt and rewrites the fallback content, in
-// one transaction. It reports whether this call ended it: a second end finds
-// no live row, changes nothing and returns false.
+// EndCall closes a live call at endedAt and rewrites the fallback content, in one
+// transaction. It reports whether this call ended it: a second end changes nothing and
+// returns false.
 func (d *DB) EndCall(ctx context.Context, messageID int64, endedAt, content string) (bool, error) {
 	ended := false
 	err := d.inWriteTx(ctx, "EndCall", func(q *dbgen.Queries) error {
@@ -99,9 +99,6 @@ func (d *DB) EndCall(ctx context.Context, messageID int64, endedAt, content stri
 	return ended, nil
 }
 
-// attachCalls fills Kind and Call on every call log row in msgs with one
-// batched read of the call rows and one of the participants. Rows of other
-// kinds are untouched, and a page with no call rows costs no query.
 func (d *DB) attachCalls(ctx context.Context, msgs []MessageAPIResponse) error {
 	var ids []int64
 	idx := make(map[int64]int)

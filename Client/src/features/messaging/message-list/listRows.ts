@@ -21,6 +21,7 @@ import {
   userRoleColorVar,
 } from "@lib/text/formatting";
 import { idMentionsEnabled } from "@lib/net/serverCapabilities";
+import { carryActionsBar } from "./messageActionBar";
 import type { ListState, ListApi } from "./listState";
 
 export function createListRows(st: ListState, api: ListApi) {
@@ -186,6 +187,7 @@ export function createListRows(st: ListState, api: ListApi) {
     if (old === undefined || !(old instanceof HTMLElement)) return;
     const edge = api.edgeOf(old);
     const fresh = api.renderVirtualItem(st.virtualItems[idx]!);
+    carryActionsBar(old, fresh);
     st.contentContainer.replaceChild(fresh, old);
     api.releaseRow(old);
     api.measureRendered();

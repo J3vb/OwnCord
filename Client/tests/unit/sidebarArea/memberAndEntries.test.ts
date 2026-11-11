@@ -17,8 +17,8 @@ import { authStore, type AuthState } from "../../../src/stores/auth.store";
 import { Permission } from "../../../src/lib/types";
 import { createChannelSidebar } from "../../../src/features/channels/ChannelSidebar";
 import { createMemberList } from "../../../src/features/members/MemberList";
-import { createCreateChannelModal } from "@components/CreateChannelModal";
-import "../../../src/pages/main-page/MemberPickerModal";
+import { createCreateChannelModal } from "../../../src/features/channels/CreateChannelModal";
+import "../../../src/features/direct-messages/MemberPickerModal";
 import { openBanDialogFor } from "../../helpers/banDialog";
 import {
   MockedFn,
@@ -42,15 +42,17 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 vi.mock("../../../src/features/channels/ChannelSidebar", () => mocks.channelSidebarMock());
-vi.mock("@components/DmSidebar", () => mocks.dmSidebarMock());
+vi.mock("../../../src/features/direct-messages/DmSidebar", () => mocks.dmSidebarMock());
 vi.mock("../../../src/features/members/MemberList", () => mocks.memberListMock());
-vi.mock("@components/UserBar", () => mocks.userBarMock());
-vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
-vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
-vi.mock("@components/CreateChannelModal", () => mocks.createChannelModalMock());
+vi.mock("../../../src/features/voice/UserBar", () => mocks.userBarMock());
+vi.mock("../../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock());
+vi.mock("../../../src/features/navigation/QuickSwitchOverlay", () =>
+  mocks.quickSwitchOverlayMock(),
+);
+vi.mock("../../../src/features/channels/CreateChannelModal", () => mocks.createChannelModalMock());
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
-vi.mock("@components/EditChannelModal", () => mocks.editChannelModalMock());
-vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
+vi.mock("../../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());
+vi.mock("../../../src/features/channels/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 vi.mock("../../../src/pages/main-page/VoiceCallbacks", () => mocks.pageVoiceCallbacksMock());
 vi.mock("../../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayManagersMock());
 

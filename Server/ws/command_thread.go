@@ -7,11 +7,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// The thread commands: thread_create, thread_update, thread_delete
-// and thread_focus, with the frames the server answers and announces.
+// The thread commands (thread_create, thread_update, thread_delete, thread_focus)
+// with the frames the server answers and announces.
 
-// ThreadCreateCmd represents a thread_create message: start a thread on
-// message MessageID of text channel ChannelID.
+// ThreadCreateCmd represents a thread_create message: start a thread on message MessageID of text
+// channel ChannelID.
 type ThreadCreateCmd struct {
 	userID             int64
 	ChannelID          int64
@@ -23,7 +23,7 @@ type ThreadCreateCmd struct {
 func (c ThreadCreateCmd) Type() string  { return MsgTypeThreadCreate }
 func (c ThreadCreateCmd) UserID() int64 { return c.userID }
 
-// ThreadUpdateCmd represents a thread_update message; a nil field is unchanged.
+// ThreadUpdateCmd edits a thread; a nil field is unchanged.
 type ThreadUpdateCmd struct {
 	userID             int64
 	ThreadID           int64
@@ -47,8 +47,8 @@ type ThreadDeleteCmd struct {
 func (c ThreadDeleteCmd) Type() string  { return MsgTypeThreadDelete }
 func (c ThreadDeleteCmd) UserID() int64 { return c.userID }
 
-// ThreadFocusCmd represents a thread_focus message: the thread open beside the
-// focused channel. ThreadID 0 (a null thread_id) closes the slot.
+// ThreadFocusCmd is the thread open beside the focused channel; ThreadID 0 closes
+// the slot.
 type ThreadFocusCmd struct {
 	userID   int64
 	ThreadID int64
@@ -57,8 +57,7 @@ type ThreadFocusCmd struct {
 func (c ThreadFocusCmd) Type() string  { return MsgTypeThreadFocus }
 func (c ThreadFocusCmd) UserID() int64 { return c.userID }
 
-// ThreadFollowCmd represents a thread_follow message: follow (Follow true) or
-// unfollow a thread.
+// ThreadFollowCmd represents a thread_follow message: follow (Follow true) or unfollow a thread.
 type ThreadFollowCmd struct {
 	userID   int64
 	ThreadID int64
@@ -167,22 +166,18 @@ func parseThreadFollow(userID int64, _ string, raw json.RawMessage) (Command, er
 	return ThreadFollowCmd{userID: userID, ThreadID: id, Follow: *p.Follow}, nil
 }
 
-// buildThreadCreateOK answers a thread_create to its sender.
 func buildThreadCreateOK(requestID string, t *service.ThreadInfo) []byte {
 	return buildJSON(wsMsg{Type: MsgTypeThreadCreateOK, ID: requestID, Payload: struct {
 		Thread *service.ThreadInfo `json:"thread"`
 	}{t}})
 }
 
-// buildThreadUpdateOK answers a thread_update to its sender.
 func buildThreadUpdateOK(requestID string, threadID int64) []byte {
 	return buildJSON(wsMsg{Type: MsgTypeThreadUpdateOK, ID: requestID, Payload: struct {
 		ThreadID int64 `json:"thread_id"`
 	}{threadID}})
 }
 
-// buildThreadFollowOK answers a thread_follow to its sender with the state it
-// left the follow in.
 func buildThreadFollowOK(requestID string, threadID int64, following bool) []byte {
 	return buildJSON(wsMsg{Type: MsgTypeThreadFollowOK, ID: requestID, Payload: struct {
 		ThreadID  int64 `json:"thread_id"`
@@ -190,9 +185,6 @@ func buildThreadFollowOK(requestID string, threadID int64, following bool) []byt
 	}{threadID, following}})
 }
 
-// buildThreadFollowUpdate is the thread_follow_update frame: one user's follow
-// of a thread, with the thread when they follow it. Never authoritative: ready
-// is.
 func buildThreadFollowUpdate(threadID int64, following bool, t *service.ThreadInfo) []byte {
 	return buildJSON(wsMsg{Type: MsgTypeThreadFollowUpdate, Payload: struct {
 		ThreadID  int64               `json:"thread_id"`
@@ -201,14 +193,12 @@ func buildThreadFollowUpdate(threadID int64, following bool, t *service.ThreadIn
 	}{threadID, following, t}})
 }
 
-// buildThreadChanged is the thread_changed frame: the thread's absolute state.
 func buildThreadChanged(t *service.ThreadInfo) []byte {
 	return buildJSON(wsMsg{Type: MsgTypeThreadChanged, Payload: struct {
 		Thread *service.ThreadInfo `json:"thread"`
 	}{t}})
 }
 
-// buildThreadDeleted is the thread_deleted frame, sequenced on the parent.
 func buildThreadDeleted(parentID, threadID int64) []byte {
 	return buildJSON(wsMsg{Type: MsgTypeThreadDeleted, Payload: struct {
 		ChannelID int64 `json:"channel_id"`
@@ -217,7 +207,7 @@ func buildThreadDeleted(parentID, threadID int64) []byte {
 }
 
 // buildThreadErrorMsg is an error frame that also names a thread (THREAD_EXISTS
-// carries the thread that already has the message).
+// carries the one that already has the message).
 func buildThreadErrorMsg(ce ClientError, reqID string) []byte {
 	msg := map[string]any{
 		"type": MsgTypeError,

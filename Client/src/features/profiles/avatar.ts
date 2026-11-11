@@ -27,6 +27,7 @@ import { avatarInitial, resolveDisplayName, type AvatarSubject } from "@lib/ui/a
 import { animatedStill, bindAnimatedImage, type AnimationMode } from "@lib/ui/animatedStill";
 import {
   fetchImageAsObjectUrl,
+  hasCachedImage,
   isSafeUrl,
   cachedImageBytes,
   recoverEvictedImage,
@@ -140,46 +141,95 @@ function enqueueFetch(job: () => Promise<unknown>): void {
   pumpFetchQueue();
 }
 
-const visibilityCallbacks = new Map<Element, () => void>();
+interface VisibilityWaiter {
+  readonly start: () => void;
+  /** The picture is in memory, so it shows at once even while a list flies. */
+  readonly cached: () => boolean;
+}
+
+const visibilityCallbacks = new Map<Element, VisibilityWaiter>();
 let visibilityObserver: IntersectionObserver | null = null;
+
+/** A list that moves more than its own height within this time is flying:
+ *  a row would be on screen for less than that. */
+const FLYING_WINDOW_MS = 150;
+/** How long after its last flying frame a list counts as still flying. */
+const FLYING_SETTLE_MS = 100;
+
+let flyingTimer: ReturnType<typeof setTimeout> | null = null;
+/** Rows seen in view while a list was flying; started when it settles, dropped
+ *  when they leave the view first. */
+const flyingWaiters = new Set<Element>();
+
+function dropWaiter(observer: IntersectionObserver, target: Element): void {
+  visibilityCallbacks.delete(target);
+  flyingWaiters.delete(target);
+  observer.unobserve(target);
+}
+
+function settleFlying(): void {
+  flyingTimer = null;
+  const observer = visibilityObserver;
+  for (const target of flyingWaiters) {
+    flyingWaiters.delete(target);
+    const waiter = visibilityCallbacks.get(target);
+    if (waiter === undefined || observer === null) continue;
+    dropWaiter(observer, target);
+    if (target.isConnected) waiter.start();
+  }
+}
+
+/**
+ * A scrolling list reports each frame: `distancePx` moved in `elapsedMs`, with
+ * a view `viewportPx` tall. While it flies, rows coming into view wait instead
+ * of downloading their picture, and start together `FLYING_SETTLE_MS` after the
+ * list slows down. Below that speed nothing changes.
+ */
+export function reportListScroll(distancePx: number, elapsedMs: number, viewportPx: number): void {
+  if (!(elapsedMs > 0) || !(viewportPx > 0)) return;
+  if (Math.abs(distancePx) * FLYING_WINDOW_MS <= viewportPx * elapsedMs) return;
+  if (flyingTimer !== null) clearTimeout(flyingTimer);
+  flyingTimer = setTimeout(settleFlying, FLYING_SETTLE_MS);
+}
 
 function onVisibility(entries: IntersectionObserverEntry[]): void {
   const observer = visibilityObserver;
   if (observer === null) return;
   for (const entry of entries) {
-    const start = visibilityCallbacks.get(entry.target);
-    if (start === undefined) continue;
+    const waiter = visibilityCallbacks.get(entry.target);
+    if (waiter === undefined) continue;
     if (!entry.target.isConnected) {
-      visibilityCallbacks.delete(entry.target);
-      observer.unobserve(entry.target);
+      dropWaiter(observer, entry.target);
     } else if (entry.isIntersecting) {
-      visibilityCallbacks.delete(entry.target);
-      observer.unobserve(entry.target);
-      start();
+      if (flyingTimer !== null && !waiter.cached()) {
+        flyingWaiters.add(entry.target);
+        continue;
+      }
+      dropWaiter(observer, entry.target);
+      waiter.start();
+    } else {
+      flyingWaiters.delete(entry.target);
     }
   }
   // A row removed while off-screen never reports again; drop it here so the
   // observer does not pin the detached tree.
   for (const target of visibilityCallbacks.keys()) {
-    if (!target.isConnected) {
-      visibilityCallbacks.delete(target);
-      observer.unobserve(target);
-    }
+    if (!target.isConnected) dropWaiter(observer, target);
   }
 }
 
 /** Call `start` once, when `target` is first near the viewport. Without
  *  IntersectionObserver (jsdom, old webviews) it runs right away, after a
  *  microtask so the caller has attached the element first. */
-function whenVisible(target: Element, start: () => void): void {
+function whenVisible(target: Element, waiter: VisibilityWaiter): void {
   if (typeof IntersectionObserver === "undefined") {
-    queueMicrotask(start);
+    queueMicrotask(waiter.start);
     return;
   }
   visibilityObserver ??= new IntersectionObserver(onVisibility, {
     rootMargin: VISIBILITY_ROOT_MARGIN,
   });
-  visibilityCallbacks.set(target, start);
+  visibilityCallbacks.set(target, waiter);
   visibilityObserver.observe(target);
 }
 
@@ -289,12 +339,15 @@ export function createAvatarElement(
     return wrapper;
   }
 
-  whenVisible(wrapper, () => {
-    enqueueFetch(() => {
-      // Queued behind the cap, the row may be gone by the time it is its turn.
-      if (!wrapper.isConnected) return Promise.resolve();
-      return fetchImageAsObjectUrl(resolved).then(swapInImage);
-    });
+  whenVisible(wrapper, {
+    cached: () => hasCachedImage(resolved),
+    start: () => {
+      enqueueFetch(() => {
+        // Queued behind the cap, the row may be gone by the time it is its turn.
+        if (!wrapper.isConnected) return Promise.resolve();
+        return fetchImageAsObjectUrl(resolved).then(swapInImage);
+      });
+    },
   });
 
   return wrapper;

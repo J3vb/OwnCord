@@ -16,6 +16,13 @@ import { setOwnedTimeout } from "@lib/dom";
 import { loadPref } from "@lib/prefs/preferences";
 import { publicAssetUrl } from "@lib/media/publicAssets";
 import { clipFilename, pickRecorderMime } from "./mime";
+import {
+  audioConstraints,
+  errorName,
+  linuxMicDeviceId,
+  openErrorKind,
+  resolveGetUserMedia,
+} from "./recorderDevices";
 import { encodeWaveform, reducePeaks, WAVEFORM_BARS } from "./waveform";
 import { encodeWav } from "./wav";
 import { isLinuxDesktop } from "../voice/native/platform";
@@ -86,29 +93,21 @@ export interface VoiceRecorder {
   readonly state: "idle" | "starting" | "recording" | "stopping" | "done";
 }
 
-/** The device picked in Voice & Audio settings, on Linux. The saved id there
- *  is the native audio host's, which the webview does not know, so it is
- *  looked up again by the device's name. */
-async function linuxMicDeviceId(): Promise<string> {
-  const saved = loadPref<string>("audioInputDevice", "");
-  if (saved === "") return "";
-  const { webviewMicId } = await import("./linuxMic");
-  return webviewMicId(saved);
+/** The context and recorder constructors to use: the env's, else the browser's. */
+function resolveCtors(env: RecorderEnv): {
+  AudioCtor: typeof AudioContext | undefined;
+  RecorderCtor: typeof MediaRecorder | undefined;
+} {
+  const AudioCtor =
+    env.AudioContext ?? (typeof AudioContext === "undefined" ? undefined : AudioContext);
+  let RecorderCtor: typeof MediaRecorder | undefined;
+  if ("MediaRecorder" in env) RecorderCtor = env.MediaRecorder;
+  else RecorderCtor = typeof MediaRecorder === "undefined" ? undefined : MediaRecorder;
+  return { AudioCtor, RecorderCtor };
 }
 
-/** The microphone request: `deviceId`, or the system default when "". */
-function audioConstraints(deviceId: string): MediaStreamConstraints {
-  return {
-    audio: {
-      echoCancellation: loadPref("echoCancellation", true),
-      noiseSuppression: loadPref("noiseSuppression", true),
-      ...(deviceId === "" ? {} : { deviceId: { exact: deviceId } }),
-    },
-  };
-}
-
-function errorName(err: unknown): string {
-  return typeof err === "object" && err !== null && "name" in err ? String(err.name) : "";
+function asRecordError(err: unknown): VoiceRecordError {
+  return err instanceof VoiceRecordError ? err : new VoiceRecordError("failed");
 }
 
 export function createVoiceRecorder(options: VoiceRecorderOptions = {}): VoiceRecorder {
@@ -202,11 +201,7 @@ export function createVoiceRecorder(options: VoiceRecorderOptions = {}): VoiceRe
   }
 
   async function openStream(): Promise<MediaStream> {
-    const getUserMedia =
-      env.getUserMedia ??
-      (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia !== undefined
-        ? (c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c)
-        : undefined);
+    const getUserMedia = resolveGetUserMedia(env.getUserMedia);
     if (getUserMedia === undefined) throw new VoiceRecordError("unsupported");
     const lookup = env.micDeviceId ?? (isLinuxDesktop() ? linuxMicDeviceId : null);
     const deviceId =
@@ -215,30 +210,14 @@ export function createVoiceRecorder(options: VoiceRecorderOptions = {}): VoiceRe
     try {
       return await getUserMedia(audioConstraints(deviceId));
     } catch (err) {
-      const name = errorName(err);
-      if (name === "NotAllowedError" || name === "SecurityError") {
-        throw new VoiceRecordError("denied");
-      }
-      // The picked device is unplugged: the system default still works.
-      if (name === "OverconstrainedError" || name === "NotFoundError") {
-        if (deviceId !== "") {
-          try {
-            return await getUserMedia(audioConstraints(""));
-          } catch (retry) {
-            const retryName = errorName(retry);
-            if (retryName === "NotAllowedError" || retryName === "SecurityError") {
-              throw new VoiceRecordError("denied");
-            }
-            throw new VoiceRecordError(
-              retryName === "NotFoundError" || retryName === "OverconstrainedError"
-                ? "no-device"
-                : "failed",
-            );
-          }
-        }
-        throw new VoiceRecordError("no-device");
-      }
-      throw new VoiceRecordError("failed");
+      const kind = openErrorKind(errorName(err));
+      if (kind !== "no-device" || deviceId === "") throw new VoiceRecordError(kind);
+    }
+    // The picked device is unplugged: the system default still works.
+    try {
+      return await getUserMedia(audioConstraints(""));
+    } catch (retry) {
+      throw new VoiceRecordError(openErrorKind(errorName(retry)));
     }
   }
 
@@ -306,49 +285,24 @@ export function createVoiceRecorder(options: VoiceRecorderOptions = {}): VoiceRe
       throw new VoiceRecordError("cancelled");
     }
     try {
-      const AudioCtor =
-        env.AudioContext ?? (typeof AudioContext === "undefined" ? undefined : AudioContext);
-      const RecorderCtor =
-        "MediaRecorder" in env
-          ? env.MediaRecorder
-          : typeof MediaRecorder === "undefined"
-            ? undefined
-            : MediaRecorder;
+      const { AudioCtor, RecorderCtor } = resolveCtors(env);
       mime = pickRecorderMime(RecorderCtor) ?? "";
       let source: MediaStreamAudioSourceNode | null = null;
       if (AudioCtor !== undefined) {
         try {
           ctx = new AudioCtor();
           await ctx.resume().catch(() => {});
-          source = ctx.createMediaStreamSource(opened);
-          analyser = ctx.createAnalyser();
-          analyser.fftSize = 1024;
-          source.connect(analyser);
+          source = attachMeter(ctx, opened);
         } catch {
           // No level metering: MediaRecorder can still record (flat waveform);
           // the PCM fallback needs the context and fails below.
           source = null;
           analyser = null;
-          const broken = ctx;
-          ctx = null;
-          try {
-            void broken?.close().catch(() => {});
-          } catch {
-            // Already closed.
-          }
+          closeBrokenContext();
         }
       }
       if (mime !== "" && RecorderCtor !== undefined) {
-        const rec = new RecorderCtor(opened, { mimeType: mime });
-        rec.addEventListener(
-          "dataavailable",
-          (e: BlobEvent): void => {
-            if (e.data.size > 0) chunks.push(e.data);
-          },
-          { signal: owner.signal },
-        );
-        recorder = rec;
-        rec.start(1000);
+        startMediaRecorder(RecorderCtor, opened);
       } else {
         mime = "audio/wav";
         if (ctx === null || source === null) throw new VoiceRecordError("unsupported");
@@ -359,23 +313,13 @@ export function createVoiceRecorder(options: VoiceRecorderOptions = {}): VoiceRe
     } catch (err) {
       release();
       state = "done";
-      throw err instanceof VoiceRecordError ? err : new VoiceRecordError("failed");
+      throw asRecordError(err);
     }
     if ((state as VoiceRecorder["state"]) !== "starting") {
       release();
       throw new VoiceRecordError("cancelled");
     }
-    for (const track of opened.getTracks()) {
-      track.addEventListener(
-        "ended",
-        () => {
-          if (state !== "recording") return;
-          cancel();
-          options.onDeviceLost?.();
-        },
-        { signal: owner.signal },
-      );
-    }
+    watchTracks(opened);
     state = "recording";
     startedAt = now();
     setOwnedTimeout(owner.signal, tick, LEVEL_INTERVAL_MS);
@@ -387,6 +331,53 @@ export function createVoiceRecorder(options: VoiceRecorderOptions = {}): VoiceRe
       },
       MAX_DURATION_MS,
     );
+  }
+
+  /** Connect the level analyser to the stream; the source node feeds the PCM path too. */
+  function attachMeter(audio: AudioContext, opened: MediaStream): MediaStreamAudioSourceNode {
+    const source = audio.createMediaStreamSource(opened);
+    analyser = audio.createAnalyser();
+    analyser.fftSize = 1024;
+    source.connect(analyser);
+    return source;
+  }
+
+  function closeBrokenContext(): void {
+    const broken = ctx;
+    ctx = null;
+    try {
+      void broken?.close().catch(() => {});
+    } catch {
+      // Already closed.
+    }
+  }
+
+  function startMediaRecorder(RecorderCtor: typeof MediaRecorder, opened: MediaStream): void {
+    const rec = new RecorderCtor(opened, { mimeType: mime });
+    rec.addEventListener(
+      "dataavailable",
+      (e: BlobEvent): void => {
+        if (e.data.size > 0) chunks.push(e.data);
+      },
+      { signal: owner.signal },
+    );
+    recorder = rec;
+    rec.start(1000);
+  }
+
+  /** The microphone going away mid-recording drops the clip and tells the owner. */
+  function watchTracks(opened: MediaStream): void {
+    for (const track of opened.getTracks()) {
+      track.addEventListener(
+        "ended",
+        () => {
+          if (state !== "recording") return;
+          cancel();
+          options.onDeviceLost?.();
+        },
+        { signal: owner.signal },
+      );
+    }
   }
 
   function finish(durationMs: number, blob: Blob): VoiceClip | null {

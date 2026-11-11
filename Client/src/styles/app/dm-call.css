@@ -395,7 +395,7 @@ button.dcp-verify:focus-visible {
 .dcp-video .video-grid {
   background: transparent;
 }
-/* An avatar tile's avatar shrinks with the tile (the filmstrip is 90px). */
+/* An avatar tile's avatar shrinks with the tile (the participant strip is 96px). */
 .video-cell--avatar .dcp-avatar--lg {
   width: min(80px, 55%);
   height: auto;

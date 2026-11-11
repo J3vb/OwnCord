@@ -76,6 +76,13 @@ func (f *faultRetentionStore) ListUnfinishedRetentionRuns(ctx context.Context) (
 	return f.RetentionStore.ListUnfinishedRetentionRuns(ctx)
 }
 
+func (f *faultRetentionStore) RecordRetentionSwept(ctx context.Context, channelID int64, sweep string) error {
+	if f.fail["record-swept"] {
+		return errRetentionStore
+	}
+	return f.RetentionStore.RecordRetentionSwept(ctx, channelID, sweep)
+}
+
 type retentionFixture struct {
 	database *db.DB
 	store    *faultRetentionStore
@@ -173,6 +180,30 @@ func TestRetentionTickSweepsWhenRunJournalFails(t *testing.T) {
 	rep, err := f.svc.Tick(ctx)
 	if err != nil || rep.Messages != 1 {
 		t.Fatalf("Tick = %+v, %v; want the one expired message swept", rep, err)
+	}
+}
+
+// A finished sweep that cannot be recorded costs only a repeat of the start-up
+// replay: the tick still sweeps every later channel and reports no error, and
+// start-up is not refused.
+func TestRetentionRecordFailureDoesNotStopLaterChannelsOrStartUp(t *testing.T) {
+	ctx := context.Background()
+	f := newRetentionFixture(t)
+	f.store.fail["record-swept"] = true
+	second, _ := seedRetentionChannel(t, f.database, "fault-chan-2", f.owner, t.TempDir(), 1)
+	mustDo(t, "SetChannelRetention", f.database.SetChannelRetention(ctx, second, 7, f.owner))
+
+	rep, err := f.svc.Tick(ctx)
+	if err != nil || rep.Channels != 2 || rep.Messages != 2 {
+		t.Fatalf("Tick = %+v, %v; want both channels swept and no error", rep, err)
+	}
+	for _, id := range []int64{f.channel, second} {
+		if got := countMessages(t, f.database, id); got != 1 {
+			t.Errorf("channel %d has %d messages after the tick, want only the fresh one", id, got)
+		}
+	}
+	if _, err := f.svc.ReplayMarkers(ctx); err != nil {
+		t.Fatalf("ReplayMarkers with a failing swept record = %v, want start-up not refused", err)
 	}
 }
 

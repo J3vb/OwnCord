@@ -7,14 +7,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws/hubstats"
 )
 
-// The Prometheus exposition of GET /api/v1/metrics/prometheus. It is
-// hand-written (metrics.PromText) so the default build, which no release or
-// image compiles with -tags otel, carries no prometheus client library. The
-// figures come from the same collectMetrics call as the JSON, converted to base
-// units: milliseconds become seconds and megabytes become bytes. The windowed
-// deltas and the p50/p95/p99 summaries are not exported, because rate() and
-// histogram_quantile() derive them; the windowed maxima are, because no query
-// can (owncord_latency_max_seconds).
+// The Prometheus exposition of GET /api/v1/metrics/prometheus, hand-written (metrics.PromText) so the default
+// build carries no prometheus client library. Figures come from the same collectMetrics call as the JSON,
+// in base units. Windowed deltas and p50/p95/p99 are not exported (rate() and histogram_quantile() derive
+// them); windowed maxima are, because no query can (owncord_latency_max_seconds).
 
 // promVoicePhases are the voice_join_ms phases, in the order the JSON lists
 // them; they are the "phase" label values of owncord_voice_join_seconds and the

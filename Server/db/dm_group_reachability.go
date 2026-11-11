@@ -39,7 +39,6 @@ func groupReachabilityArgs(actorID int64, targets []int64) []any {
 	return args
 }
 
-// rowQuerier is the one read both a transaction and the reader pool offer.
 type rowQuerier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }

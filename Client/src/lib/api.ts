@@ -6,6 +6,7 @@ import { ensureHttpProxy } from "./net/httpProxy";
 import { isValidHost } from "./net/hostValidation";
 import { createAccountApi } from "./apiAccount";
 import { createAdminApi } from "./apiAdmin";
+import { createModerationApi } from "./apiModeration";
 import { createChannelsApi } from "./apiChannels";
 import { createDmsApi } from "./apiDms";
 import type { ApiTransport } from "./apiShared";
@@ -15,21 +16,20 @@ import {
   nsfwContentBlocked,
 } from "../features/content-consent/nsfw";
 import { setNsfwAcknowledged } from "../stores/channels.store";
-import { connectText } from "../i18n/connect";
 import type { ApiError } from "./types";
+import type { RestReplyShapes } from "./net/restReplies";
+import { readReply } from "./apiReply";
 import {
   type ApiClientConfig,
   ApiClientError,
-  httpError,
-  isNotJsonError,
   log,
   type OnUnauthorized,
-  parseRetryAfterMs,
   type RequestOptions,
-  TransportError,
 } from "./apiShared";
+import { bodyReadFailure, buildRequestInit, failedReply, transportFailure } from "./apiFetchParts";
 export {
   TLS_CERT_CODE,
+  REPLY_SHAPE_CODE,
   ApiClientError,
   TransportError,
   httpError,
@@ -106,7 +106,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
   // Every path (including multipart, admin and TOTP) uses the same ownership
   // checks through response-body consumption. Native cancellation is best-effort;
   // SessionScope also rejects completions that arrive after a session switch.
-  async function doFetch<T>(
+  async function doFetch<K extends keyof RestReplyShapes>(
+    reply: K,
     label: string,
     prefix: string,
     method: string,
@@ -114,7 +115,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     body?: unknown,
     signal?: AbortSignal,
     opts?: RequestOptions,
-  ): Promise<T> {
+  ): Promise<RestReplyShapes[K]> {
     const snapshot = config;
     // A detached request is owned by its caller's signal alone, so ending the
     // session it was sent from does not cancel it.
@@ -130,40 +131,15 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       opts?.timeoutMs === undefined ? undefined : setTimeout(() => owner.dispose(), opts.timeoutMs);
     try {
       owner.assertCurrent();
-      const headers: Record<string, string> = {};
-      if (!opts?.multipart) headers["Content-Type"] = "application/json";
-      const token = opts?.token ?? snapshot.token;
-      // i18n-exempt: wire header value, never rendered
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      const init: RequestInit = { method, headers, signal: transport.signal };
-      if (body !== undefined)
-        init.body = opts?.multipart ? (body as FormData) : JSON.stringify(body);
-      // Subscribe before the request goes out (the proxy can emit as soon as
-      // the body starts moving) and let the request scope unsubscribe it.
-      if (opts?.onUploadProgress !== undefined) {
-        // The Rust proxy echoes this id back in its upload-progress events, so
-        // the caller can tell its own upload's ticks from any other in flight.
-        const id = crypto.randomUUID();
-        headers["X-Upload-Id"] = id;
-        const onProgress = opts.onUploadProgress;
-        const unsubscribe = desktop.http.onUploadProgress((p) => {
-          if (p.id === id) {
-            // A 0–1 fraction; the native <progress> renders and announces it.
-            onProgress(p.total > 0 ? Math.min(1, Math.max(0, p.sent / p.total)) : 0);
-          }
-        });
-        owner.addCleanup(unsubscribe);
-      }
+      const init = buildRequestInit(owner, method, body, opts, snapshot.token, transport.signal);
       let origin: string;
       try {
         origin = await owner.run(ensureHttpProxy(snapshot.host));
       } catch (proxyErr) {
         owner.assertCurrent();
         // start_http_proxy rejects with a bare string; type it like a failed fetch.
-        log.error(`${label} proxy start failed`, { method, path, error: String(proxyErr) });
-        throw new TransportError(proxyErr instanceof Error ? proxyErr.message : String(proxyErr), {
-          cause: proxyErr,
-        });
+        // i18n-exempt: log text, never rendered
+        throw transportFailure(label, "proxy start", method, path, proxyErr);
       }
       owner.assertCurrent();
       log.debug(`${label} →`, { method, path });
@@ -172,87 +148,65 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         res = await owner.run(desktop.http.fetch(`${origin}${prefix}${path}`, init));
       } catch (fetchErr) {
         owner.assertCurrent();
-        // The raw detail stays in the log; the caller gets a typed error so
-        // display copy can be friendly.
-        log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
-        throw new TransportError(fetchErr instanceof Error ? fetchErr.message : String(fetchErr), {
-          cause: fetchErr,
-        });
+        throw transportFailure(label, "fetch", method, path, fetchErr);
       }
       owner.assertCurrent();
       log.debug(`${label} ←`, { method, path, status: res.status });
       if (!res.ok) {
         const err = await owner.run(parseError(res)).finally(releaseTransport);
         owner.assertCurrent();
-        if (res.status === 401 && !opts?.skipUnauthorized) {
-          // Parse first: the session can change while the error body is arriving.
-          // This callback is allowed to synchronously dispose the current session.
-          onUnauthorized?.();
-        }
-        log.warn(`${label} error`, {
-          method,
-          path,
-          status: res.status,
-          code: err.error,
-          message: err.message,
-          reqId: res.headers.get("x-request-id") ?? undefined,
-        });
-        throw httpError(res.status, err.error, err.message, parseRetryAfterMs(res));
+        throw failedReply(label, method, path, res, err, opts, onUnauthorized);
       }
       if (res.status === 204) {
         releaseTransport();
-        return undefined as T;
+        return undefined as RestReplyShapes[K];
       }
-      let data: T;
+      let data: unknown;
       try {
-        data = await owner.run(res.json() as Promise<T>).finally(releaseTransport);
+        data = await owner.run(res.json() as Promise<unknown>).finally(releaseTransport);
       } catch (jsonErr) {
         owner.assertCurrent();
-        // A 2xx that is not JSON (a proxy's web page in front of the API): the
-        // webview's parse error says nothing a user can act on.
-        if (!isNotJsonError(jsonErr)) throw jsonErr;
-        log.warn(`${label} response is not JSON`, {
-          method,
-          path,
-          status: res.status,
-          contentType: res.headers.get("content-type") ?? undefined,
-        });
-        throw new ApiClientError(res.status, "NOT_JSON", connectText("error.notJson"));
+        throw bodyReadFailure(label, method, path, res, jsonErr);
       }
       owner.assertCurrent();
-      return data;
+      const checked = await owner.run(readReply(reply, data, { method, path, status: res.status }));
+      owner.assertCurrent();
+      return checked;
     } finally {
       clearTimeout(timer);
       owner.dispose();
     }
   }
 
-  function request<T>(
+  function request<K extends keyof RestReplyShapes>(
+    reply: K,
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
     opts?: RequestOptions,
-  ): Promise<T> {
-    return doFetch<T>("API", "/api/v1", method, path, body, signal, opts);
+  ): Promise<RestReplyShapes[K]> {
+    return doFetch(reply, "API", "/api/v1", method, path, body, signal, opts);
   }
 
-  function channelRequest<T>(
+  function channelRequest<K extends keyof RestReplyShapes>(
+    reply: K,
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-  ): Promise<T> {
-    return request<T>(method, `/moderation/channels${path}`, body, signal);
+  ): Promise<RestReplyShapes[K]> {
+    return request(reply, method, `/moderation/channels${path}`, body, signal);
   }
 
-  function memberRequest<T>(
+  function memberRequest<K extends keyof RestReplyShapes>(
+    reply: K,
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-  ): Promise<T> {
-    return request<T>(method, `/moderation/members${path}`, body, signal);
+  ): Promise<RestReplyShapes[K]> {
+    return request(reply, method, `/moderation/members${path}`, body, signal);
   }
 
   // oxlint-disable-next-line consistent-function-scoping -- co-located with doFetch for encapsulation
@@ -329,6 +283,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return { ...config, token: config.token ? "[redacted]" : undefined };
     },
     ...createAccountApi(t),
+    ...createModerationApi(t),
     ...createChannelsApi(t),
     ...createDmsApi(t),
     ...createAdminApi(t),

@@ -4,6 +4,8 @@ mod android_notifications;
 #[cfg(target_os = "android")]
 mod call_service;
 mod commands;
+#[cfg(target_os = "android")]
+mod metered_network;
 // Test-only: gates over tauri.conf.json and the source text itself.
 #[cfg(test)]
 mod config_gates;
@@ -232,6 +234,7 @@ pub fn run() {
     let builder = builder
         .plugin(update_commands::android::init())
         .plugin(call_service::init())
+        .plugin(metered_network::init())
         .plugin(exit_info::init())
         .plugin(files::init())
         .plugin(share_in::init())
@@ -305,6 +308,7 @@ pub fn run() {
             credentials::save_credential,
             credentials::load_credential,
             credentials::login_with_saved_password,
+            credentials::session_resume::resume_saved_session,
             credentials::delete_credential,
             credentials::save_identity_key,
             credentials::load_identity_key,
@@ -319,6 +323,8 @@ pub fn run() {
             update_commands::android::download_and_install_update,
             #[cfg(target_os = "android")]
             call_service::set_call_service,
+            #[cfg(target_os = "android")]
+            metered_network::is_metered,
             #[cfg(target_os = "android")]
             android_notifications::android_notification_channels,
             #[cfg(target_os = "android")]
@@ -457,6 +463,8 @@ pub fn run() {
             native_voice::native_voice_change_screen,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_screen_quality,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_video_bitrate,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])

@@ -58,7 +58,7 @@
 .video-grid__view[aria-pressed="false"] {
   opacity: 0.55;
 }
-/* Room below the tiles (and the focus strip) for the call view's control bar.
+/* Room below the tiles for the call view's control bar.
    Too narrow for both in one row (VIEWS_ABOVE_PX in gridShared.ts), the
    toggles stack above it and the tiles make room for them. */
 .video-grid--call {
@@ -70,9 +70,94 @@
 .video-grid--views-above .video-grid__views {
   bottom: 60px;
 }
-.video-grid .video-cell[hidden],
-.video-focus-strip[hidden] {
+.video-grid .video-cell[hidden] {
   display: none;
+}
+
+/* Grid layout: the packer sets each tile's left, top, width and height. */
+.video-grid--packed > .video-cell {
+  position: absolute;
+  transition:
+    left 0.15s,
+    top 0.15s,
+    width 0.15s,
+    height 0.15s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .video-grid--packed > .video-cell {
+    transition: none;
+  }
+}
+/* With the tiles out of the flow, the exit control keeps its corner. */
+.video-grid--packed > .video-grid__exit {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+}
+.video-grid .video-cell.video-cell--no-room {
+  display: none;
+}
+
+/* Participant strip: the people without video while a video tile is packed.
+   JS places it (left, top, width, height); its tiles keep a fixed size and
+   the strip scrolls rather than shrink them. */
+.video-people-strip {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  background: var(--bg-tertiary);
+}
+.video-people-strip[hidden] {
+  display: none;
+}
+.video-people-strip--side {
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.video-people-strip .video-cell {
+  flex: 0 0 auto;
+  width: 120px;
+  /* Leaves room under the cells for a scrollbar that takes layout space. */
+  height: 76px;
+  min-width: 120px;
+  min-height: 76px;
+}
+.video-people-strip--side .video-cell {
+  width: auto;
+  min-width: 0;
+  height: 56px;
+  min-height: 56px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding-inline: 8px;
+}
+.video-people-strip--side .video-cell > :first-child {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  font-size: var(--font-size-sm);
+}
+.video-people-strip--side .video-username {
+  position: static;
+  flex: 1;
+  min-width: 0;
+}
+.video-people-strip .video-username {
+  bottom: 4px;
+  left: 4px;
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .video-cell {
@@ -193,10 +278,6 @@ video[hidden] + .video-surface {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.video-cell.focused .video-label {
-  top: 8px;
-  bottom: auto;
-}
 .video-live {
   flex-shrink: 0;
   padding: 1px 5px;
@@ -267,6 +348,42 @@ video[hidden] + .video-surface {
 .video-cell.focused .video-tile-nav,
 .video-cell.focused .video-tile-overlay {
   opacity: 1;
+}
+.video-tile-arrange {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.video-tile-arrange[hidden] {
+  display: none;
+}
+.video-tile-arrange__sizes {
+  display: flex;
+  gap: 2px;
+}
+.video-cell:hover .video-tile-arrange,
+.video-cell:focus-within .video-tile-arrange {
+  opacity: 1;
+}
+/* A touch screen wider than the phone layout has no hover: always show them. */
+@media (hover: none) {
+  .video-tile-arrange {
+    opacity: 1;
+  }
+}
+.video-tile-arrange .video-tile-btn[aria-checked="true"],
+.video-tile-arrange .video-tile-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.video-cell:fullscreen .video-tile-arrange,
+.video-cell--theatre .video-tile-arrange {
+  display: none;
 }
 .video-tile-btn {
   display: inline-flex;
@@ -467,21 +584,17 @@ video[hidden] + .video-surface {
 .video-cell--stopped .video-self-cover {
   display: none;
 }
-/* Filmstrip thumbs keep only the name and the LIVE badge. */
-.video-focus-strip .video-tile-nav,
-.video-focus-strip .video-tile-overlay,
-.video-focus-strip .video-self-detail,
-.video-focus-strip .video-self-stats,
-.video-focus-strip .video-self-actions {
-  display: none;
-}
 
 /* ── Full screen, pop-out and stream info (PR 4) ── */
 /* The theatre fallback: the tile fills the window when the full-screen API
    is refused (the window itself goes full screen alongside). */
 .video-cell--theatre {
-  position: fixed;
+  /* Over the packed grid's absolute position and inline left and top. */
+  position: fixed !important;
   inset: 0;
+  left: 0 !important;
+  top: 0 !important;
+  transition: none;
   z-index: 1000;
   width: 100% !important;
   height: 100% !important;
@@ -491,6 +604,8 @@ video[hidden] + .video-surface {
   z-index: 1001;
 }
 .video-cell:fullscreen {
+  width: 100% !important;
+  height: 100% !important;
   border-radius: 0;
 }
 .video-cell:fullscreen .video-tile-nav,
@@ -659,49 +774,6 @@ video[hidden] + .video-surface {
   background: var(--on-fill);
   border: none;
   cursor: pointer;
-}
-
-/* ── Video focus mode layout ── */
-.video-grid.focus-mode {
-  flex-wrap: nowrap;
-  flex-direction: column;
-}
-.video-focus-main {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 0;
-  padding: 4px;
-  overflow: hidden;
-}
-.video-focus-main .video-cell {
-  width: 100%;
-  height: 100%;
-}
-.video-focus-strip {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  overflow-x: auto;
-  flex-shrink: 0;
-  height: 90px;
-  background: var(--bg-tertiary);
-}
-.video-focus-strip .video-cell {
-  width: 120px;
-  min-width: 120px;
-  height: 100%;
-  cursor: pointer;
-  border: 2px solid transparent;
-  border-radius: var(--radius-sm);
-}
-.video-focus-strip .video-cell video,
-.video-focus-strip .video-cell .video-surface {
-  object-fit: cover;
-}
-.video-focus-strip .video-cell:hover {
-  border-color: var(--accent);
 }
 
 /* ── The call view on a phone ── */

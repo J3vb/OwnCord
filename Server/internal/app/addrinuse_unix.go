@@ -7,8 +7,7 @@ import (
 	"syscall"
 )
 
-// errnoIsAddrInUse unwraps err (net.OpError → os.SyscallError → Errno) and
-// compares against EADDRINUSE.
+// errnoIsAddrInUse reports whether err wraps EADDRINUSE.
 func errnoIsAddrInUse(err error) bool {
 	return errors.Is(err, syscall.EADDRINUSE)
 }

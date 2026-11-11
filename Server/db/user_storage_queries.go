@@ -9,20 +9,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// The per-user upload byte counter (migration 044). The attachments
-// rows — avatars included, they are attachments — are the truth; this table is
-// the cached aggregate the upload path admits against, charged before every
-// store write and recounted on the maintenance tick. Emoji are a deliberate,
-// bounded exclusion and not part of this counter: see migration 044. See
-// service.UploadService.Reserve for the ordering that keeps it safe under
-// concurrency and restart.
+// The per-user upload byte counter (migration 044). The attachments rows
+// (avatars included) are the truth; this table is the cached aggregate the
+// upload path admits against, charged before every store write and recounted on
+// the maintenance tick. Emoji are a deliberate exclusion (migration 044). See
+// service.UploadService.Reserve for the ordering that keeps it safe.
 
-// ChargeUserStorage adds bytes to userID's counter if the result stays within
-// quota, creating the counter row on first use. It reports whether the charge
-// was admitted. quota <= 0 means unlimited: the counter is still maintained,
-// so a quota set later starts from a live number. The guard and the increment
-// are one UPDATE, so of N concurrent charges racing the last byte exactly
-// those that fit are admitted.
+// ChargeUserStorage adds bytes to userID's counter if the result stays within quota,
+// creating the row on first use, and reports whether it was admitted. quota <= 0 is
+// unlimited (the counter is still kept). Guard and increment are one UPDATE, so of N
+// racing charges exactly those that fit are admitted.
 func (d *DB) ChargeUserStorage(ctx context.Context, userID, bytes, quota int64) (bool, error) {
 	if err := d.q.EnsureUserStorage(ctx, userID); err != nil {
 		return false, fmt.Errorf("ChargeUserStorage ensure: %w", err)
@@ -60,8 +56,7 @@ func (d *DB) UserStorageUsed(ctx context.Context, userID int64) (int64, error) {
 	return n, nil
 }
 
-// ListUserStorageIDs lists every user with a counter row, in id order — the
-// recount's worklist.
+// ListUserStorageIDs lists every user with a counter row, in id order: the recount's worklist.
 func (d *DB) ListUserStorageIDs(ctx context.Context) ([]int64, error) {
 	ids, err := d.q.ListUserStorageIDs(ctx)
 	if err != nil {
@@ -70,11 +65,9 @@ func (d *DB) ListUserStorageIDs(ctx context.Context) ([]int64, error) {
 	return ids, nil
 }
 
-// RecountUserStorage sets userID's counter to the truth: the sum of the
-// attachments rows that name the user, avatars included. Emoji are not part
-// of this counter, so the SQL it wraps sums the attachments table alone. One
-// statement per user, so a sweep interrupted between users leaves every
-// finished user exact.
+// RecountUserStorage sets userID's counter to the sum of the attachments rows naming
+// the user, avatars included, emoji not; one statement per user, so an interrupted
+// sweep leaves every finished user exact.
 func (d *DB) RecountUserStorage(ctx context.Context, userID int64) error {
 	if err := d.q.RecountUserStorage(ctx, userID); err != nil {
 		return fmt.Errorf("RecountUserStorage: %w", err)
@@ -82,14 +75,10 @@ func (d *DB) RecountUserStorage(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// TotalAttachmentBytes is the operator's storage figure on the metrics
-// surface: every attachments row, legacy rows with a NULL uploader_id
-// included, so it is a total rather than a sum of the per-user counters.
-// Emoji (bounded, uncounted — see migration 044) are not in it.
-//
-// The sum is cached for statsCacheTTL: a scraper polling every few seconds
-// would otherwise re-aggregate the whole table each time. A failed
-// query is not cached.
+// TotalAttachmentBytes is the metrics storage figure: every attachments row, legacy
+// NULL uploader_id included (a total, not a sum of counters; emoji are not in it).
+// Cached for statsCacheTTL so a fast scraper does not re-aggregate; a failed query is
+// not cached.
 func (d *DB) TotalAttachmentBytes(ctx context.Context) (int64, error) {
 	return d.attachmentBytesCache.Get(statsCacheTTL, func() (int64, error) {
 		n, err := d.q.TotalAttachmentBytes(ctx)

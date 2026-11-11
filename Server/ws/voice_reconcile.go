@@ -1,37 +1,25 @@
 package ws
 
-// voice_reconcile.go: the polling reconciler.
-//
-// No shipped configuration makes the companion LiveKit send webhooks, so
-// participant_left never arrives and nothing removes a membership whose SFU
-// participant died with the media path (a severed UDP flow). The voice_states row
-// and the client's voiceChID still name the channel, so sweepStaleVoiceStates,
-// which compares the row against the client and not the SFU, never sees it. Ghosts
-// hold slots, and a ghost key holder stalls every new joiner's key exchange.
-//
-// Once a tick it calls ListParticipants for every room that has a row or that the
-// SFU has open and reconciles the SFU's participant set against the DB, on the
-// startSweep pattern and never on the dispatch goroutine (ListParticipants is a
-// network round trip).
-//
-// False positives are avoided: a participant absent on one tick is only a
-// candidate (the media path can blip, and an in-flight join has not reached the SFU
-// yet), so it is reaped on the SECOND consecutive miss. A transient
-// ListParticipants failure skips the room rather than reading "no participants" as
-// all-ghosts.
+// voice_reconcile.go: the polling reconciler. No shipped configuration makes the companion
+// LiveKit send webhooks, so participant_left never arrives and nothing removes a membership
+// whose SFU participant died with the media path. The row and the client's voiceChID still
+// name the channel, so sweepStaleVoiceStates (row vs client, not SFU) never sees it; ghosts
+// hold slots and a ghost key holder stalls every joiner's key exchange. Once a tick it calls
+// ListParticipants for every room with a row or open at the SFU and reconciles against the
+// DB, via startSweep and never on the dispatch goroutine (a network round trip). A
+// participant absent on one tick is only a candidate (a media blip, or an in-flight join not
+// yet at the SFU): it is reaped on the SECOND consecutive miss. A failed ListParticipants
+// skips the room rather than reading "no participants" as all-ghosts.
 
 import (
 	"context"
 	"log/slog"
 )
 
-// voiceReconcileGraceTicks is how many consecutive ticks a participant may be absent
-// from the SFU before its membership is reaped; two ticks tolerate a media blip or an
-// in-flight join.
+// voiceReconcileGraceTicks is how many consecutive ticks a participant may be absent from
+// the SFU before reaping; two tolerate a media blip or an in-flight join.
 const voiceReconcileGraceTicks = 2
 
-// reconcileVoiceMembership is the polling reconciler's entry point, run from
-// the hub's voice-reconcile ticker through startSweep.
 func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 	if h.livekit == nil || h.voice == nil {
 		return
@@ -41,9 +29,8 @@ func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 		slog.Warn("voice reconcile: AllStates failed", "err", err)
 		return
 	}
-	// voiceMembership is the slice of a row the reconciler needs (the two fields that
-	// build the SFU identity). Local so this file does not import db (the DBImportAllow
-	// inventory only shrinks); the read goes through the VoiceStore seam (readers.go).
+	// voiceMembership is the two row fields that build the SFU identity. Local so this file
+	// does not import db (the DBImportAllow inventory only shrinks); reads go through VoiceStore.
 	type voiceMembership struct {
 		userID   int64
 		joinedAt string
@@ -56,9 +43,9 @@ func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 		live[id] = struct{}{}
 	}
 	h.voiceHub.reconcile.Prune(live)
-	// Also visit rooms no row names: a sole member removed from voice leaves a room
-	// with no rows, and a participant there (a replayed, still-valid token) is an
-	// orphan too. A failure only narrows this tick to rooms with rows.
+	// Also visit rooms no row names: a sole member removed from voice leaves a room with no
+	// rows, and a participant there (a replayed token) is an orphan too. A failure only narrows
+	// this tick to rooms with rows.
 	roomIDs, err := h.livekit.ListRoomChannelIDs(ctx)
 	if err != nil {
 		slog.Warn("voice reconcile: ListRooms failed, checking rooms with rows only", "err", err)
@@ -75,8 +62,8 @@ func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 		}
 		identities, listErr := h.livekit.ListParticipants(ctx, channelID)
 		if listErr != nil {
-			// A transient failure is not "the room is empty": reaping on it would remove every
-			// member of the room next tick. Skip the room; the next tick retries.
+			// A transient failure is not "the room is empty": reaping on it would remove every member next
+			// tick.
 			slog.Warn("voice reconcile: ListParticipants failed, skipping room",
 				"err", listErr, "channel_id", channelID)
 			continue
@@ -86,7 +73,6 @@ func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 			present[id] = struct{}{}
 		}
 
-		// Reap memberships whose SFU participant is gone, after the grace.
 		expected := make(map[string]struct{}, len(roomRows))
 		for _, row := range roomRows {
 			if ctx.Err() != nil {
@@ -108,10 +94,9 @@ func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 	}
 }
 
-// reconcileRemoveOrphans removes SFU participants that no voice_states row names: an
-// identity for a user with no row, or from a superseded join instance whose row now
-// carries a newer token. The snapshot predates this room's list, so each
-// candidate's row is re-read first: a join committed since then is live.
+// reconcileRemoveOrphans removes SFU participants no voice_states row names (no row, or a
+// superseded join instance with a newer token). The snapshot predates this room's list, so
+// each candidate's row is re-read first: a join committed since is live.
 func (h *Hub) reconcileRemoveOrphans(ctx context.Context, channelID int64, identities []string, expected map[string]struct{}) {
 	for _, id := range identities {
 		if _, ok := expected[id]; ok {
@@ -119,8 +104,8 @@ func (h *Hub) reconcileRemoveOrphans(ctx context.Context, channelID int64, ident
 		}
 		userID, token, parseErr := parseParticipantIdentity(id)
 		if parseErr != nil {
-			// Not an OwnCord identity (a room agent, or a future
-			// participant kind): never remove what we cannot attribute.
+			// Not an OwnCord identity (room agent, future participant kind): never remove what we cannot
+			// attribute.
 			slog.Warn("voice reconcile: leaving unparseable SFU identity",
 				"identity", id, "channel_id", channelID)
 			continue
@@ -144,11 +129,10 @@ func (h *Hub) reconcileRemoveOrphans(ctx context.Context, channelID int64, ident
 	}
 }
 
-// reconcileReap removes one membership whose SFU participant is confirmed gone. A
-// live client holding exactly this join instance is cleared (continuing to show it
-// in voice would be the ghost this reconciler ends), then the shared leave tail
-// deletes the row, broadcasts voice_leave with the leaver included, and re-elects
-// the key holder.
+// reconcileReap removes one membership whose SFU participant is confirmed gone. A live
+// client holding exactly this join instance is cleared (showing it in voice would be the
+// ghost), then the shared leave tail deletes the row, broadcasts voice_leave with the
+// leaver included, and re-elects the key holder.
 func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, joinedAt string) {
 	txn := h.begin(userID)
 	defer txn.end()
@@ -165,9 +149,8 @@ func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, 
 		h.finishVoiceLeave(tailCtx, txn, reaped, channelID, joinedAt, voiceLeaveReasonReconciled)
 		return
 	}
-	// No client holds this exact instance (it left, reconnected, or moved). Delete the
-	// row if it still matches, then broadcast the leave for any bystander and re-elect
-	// the key holder, as the webhook's stale-row cleanup does.
+	// No client holds this exact instance (left, reconnected or moved): delete the row if it still matches,
+	// then broadcast the leave for bystanders and re-elect, as the webhook's stale-row cleanup does.
 	deleted, err := txn.deleteRow(ctx, channelID, joinedAt)
 	if err != nil {
 		slog.Error("voice reconcile: LeaveIfMatch failed", "err", err,

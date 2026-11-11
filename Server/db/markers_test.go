@@ -211,6 +211,7 @@ func TestMarkerStore_MessagesMarkersMoveForwardAndReplay(t *testing.T) {
 	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-02 00:00:00", 0); err != nil {
 		t.Fatal(err)
 	}
+	second, _ := m.MessagesSweepID(ctx, 5)
 	// An older cutoff never moves the marker back.
 	if err := m.RecordMessagesSweep(ctx, 5, "2026-08-01 00:00:00", 0); err != nil {
 		t.Fatal(err)
@@ -218,6 +219,13 @@ func TestMarkerStore_MessagesMarkersMoveForwardAndReplay(t *testing.T) {
 	markers, _ := m.Markers(ctx)
 	if len(markers) != 1 || markers[0].Scope != MarkerScopeMessages || *markers[0].ChannelID != 5 || *markers[0].Cutoff != "2026-09-02 00:00:00" {
 		t.Fatalf("markers = %+v", markers)
+	}
+	// Every recorded sweep gets its own id, the one that left the cutoff alone too.
+	if third, err := m.MessagesSweepID(ctx, 5); err != nil || third == "" || third == second || markers[0].SweepID != third {
+		t.Fatalf("MessagesSweepID = %q, %v (before it %q, marker %q); want a new id", third, err, second, markers[0].SweepID)
+	}
+	if id, err := m.MessagesSweepID(ctx, 6); err != nil || id != "" {
+		t.Fatalf("MessagesSweepID for a channel with no marker = %q, %v; want none", id, err)
 	}
 	calls := map[int64]string{}
 	n, err := m.ReplayMessages(ctx, func(_ context.Context, ch int64, cutoff string) (int, error) {
@@ -248,5 +256,50 @@ func TestMarkerStore_MessagesMarkersMoveForwardAndReplay(t *testing.T) {
 		if mk.Scope == MarkerScopeMessages && mk.Replays != 1 {
 			t.Errorf("an idle replay counted: %+v", mk)
 		}
+	}
+}
+
+// A marker file written before sweeps were named is brought up to date on
+// open: its markers start with no sweep id and get one at the next sweep.
+func TestMarkerStore_OlderFileGainsTheSweepID(t *testing.T) {
+	ctx := context.Background()
+	key := testMarkerKey(9)
+	path := filepath.Join(t.TempDir(), "erasure", "markers.sqlite")
+	m, err := OpenMarkerStore(path, key)
+	if err != nil {
+		t.Fatalf("OpenMarkerStore: %v", err)
+	}
+	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-01 00:00:00", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.sqlDB.ExecContext(ctx, `ALTER TABLE deletion_markers DROP COLUMN sweep_id`); err != nil {
+		t.Fatalf("building the older file: %v", err)
+	}
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		m, err = OpenMarkerStore(path, key)
+		if err != nil {
+			t.Fatalf("OpenMarkerStore on the older file: %v", err)
+		}
+		if err := m.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m, err = OpenMarkerStore(path, key)
+	if err != nil {
+		t.Fatalf("OpenMarkerStore: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	if id, err := m.MessagesSweepID(ctx, 5); err != nil || id != "" {
+		t.Fatalf("MessagesSweepID on the older marker = %q, %v; want none", id, err)
+	}
+	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-01 00:00:00", 0); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := m.MessagesSweepID(ctx, 5); err != nil || id == "" {
+		t.Fatalf("MessagesSweepID after the next sweep = %q, %v; want an id", id, err)
 	}
 }

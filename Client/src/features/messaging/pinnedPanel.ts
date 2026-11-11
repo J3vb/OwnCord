@@ -7,7 +7,7 @@ import { createLogger } from "@lib/logger";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
 import { createAsyncOverlayController } from "@lib/ui/asyncOverlay";
 import type { ImportedAuthor } from "@lib/types";
-import type { PinnedMessage } from "@components/PinnedMessages";
+import type { PinnedMessage } from "./PinnedMessages";
 import { showToast } from "@lib/ui/toast";
 import { channelsStore } from "@stores/channels.store";
 import { messagesStore, setMessagePinned } from "@stores/messages.store";
@@ -20,10 +20,7 @@ import { shellText } from "../../i18n/shell";
 
 const log = createLogger("overlays");
 
-const pinnedMessagesScreen = createLazyScreen(
-  "pinned-messages",
-  () => import("@components/PinnedMessages"),
-);
+const pinnedMessagesScreen = createLazyScreen("pinned-messages", () => import("./PinnedMessages"));
 
 /** Quiet period before an open pinned panel refetches after a pin change. */
 const PIN_REFETCH_DEBOUNCE_MS = 250;
@@ -42,7 +39,7 @@ export function mapToPinnedMessage(msg: {
   readonly user: {
     readonly id: number;
     readonly username: string;
-    readonly avatar: string | null;
+    readonly avatar?: string | null;
     readonly display_name?: string | null;
   };
   readonly content: string;
@@ -109,7 +106,7 @@ export function createPinnedPanelController(opts: {
 
   const controller = createAsyncOverlayController<{
     readonly resp: Awaited<ReturnType<ApiClient["getPins"]>>;
-    readonly screen: typeof import("@components/PinnedMessages");
+    readonly screen: typeof import("./PinnedMessages");
   }>({
     getRoot: opts.getRoot,
     canOpen: () => {

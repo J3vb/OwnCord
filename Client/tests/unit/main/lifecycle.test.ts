@@ -11,7 +11,10 @@ import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/presence/userStatus";
 import { createMainPage } from "@pages/MainPage";
-import { createCertFirstUseModal, createCertMismatchModal } from "@components/CertMismatchModal";
+import {
+  createCertFirstUseModal,
+  createCertMismatchModal,
+} from "../../../src/features/connection/CertMismatchModal";
 import { reconnectAfterCertAccept } from "@lib/net/certReconnect";
 import { setActivePresenceSender, type PresenceSender } from "@lib/presence/presence";
 import { startupInvokes } from "../../helpers/mainMocks";
@@ -36,7 +39,7 @@ vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
-vi.mock("@components/CertMismatchModal", () => mocks.certMismatchModalMock());
+vi.mock("../../../src/features/connection/CertMismatchModal", () => mocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mocks.netCertReconnectMock());
 vi.mock("@lib/presence/profiles", (importOriginal) => mocks.presenceProfilesMock(importOriginal));
 vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());

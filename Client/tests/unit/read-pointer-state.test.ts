@@ -27,6 +27,7 @@ import {
   setLiveTailInView,
   noteAwayUnread,
   setMarkReadSender,
+  wouldRaiseSeen,
   writeReadPointer,
 } from "@lib/readState";
 import {
@@ -129,6 +130,16 @@ describe("capability off: today's behaviour", () => {
 });
 
 describe("capability on: marks only what was seen", () => {
+  it("wouldRaiseSeen is true only for an id above the highest seen", () => {
+    setChannels([channel(1, 0, 5)]);
+    expect(wouldRaiseSeen(1, 1)).toBe(true);
+    noteMessageSeen(1, 8);
+    expect(wouldRaiseSeen(1, 8)).toBe(false);
+    expect(wouldRaiseSeen(1, 7)).toBe(false);
+    expect(wouldRaiseSeen(1, 9)).toBe(true);
+    expect(wouldRaiseSeen(2, 1)).toBe(true);
+  });
+
   it("leaving sends mark_read with the highest seen id and moves the pointer forward", () => {
     setChannels([channel(1, 0, 5)]);
     setActiveChannel(1);

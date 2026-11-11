@@ -12,8 +12,11 @@ vi.mock("../../src/features/messaging/content/attachments", () =>
   avatarAttachmentsMock(fetchImageAsObjectUrl),
 );
 
-import { createDmProfileSidebar } from "../../src/components/DmProfileSidebar";
-import type { DmProfileData, DmProfileSidebarOptions } from "../../src/components/DmProfileSidebar";
+import { createDmProfileSidebar } from "../../src/features/direct-messages/DmProfileSidebar";
+import type {
+  DmProfileData,
+  DmProfileSidebarOptions,
+} from "../../src/features/direct-messages/DmProfileSidebar";
 import { resetBlocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
 
 const makeUser = (overrides: Partial<DmProfileData> = {}): DmProfileData => ({

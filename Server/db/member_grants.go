@@ -7,19 +7,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// GetMemberGrants returns everything the permission formula needs about one
-// member across every channel: the OR of their roles' masks, the per-channel
-// overrides, and, where the member holds two or more roles and at least one has
-// an override, the per-role breakdown. It is the single fetch behind every
-// "what can this member do here" site, so the role and user layers cannot be
-// loaded by one site and forgotten by another. Three batch reads, never per
-// channel. A member with no role yields zero grants.
-//
-// Composition (permissions.MemberChannelPerms): each held role is resolved with
-// its own override, the results are OR'd, then the member layer applies. A
-// one-role member, or a channel where no held role has an override, is
-// described by Overrides alone.
-// described by Overrides alone, exactly as before several roles existed.
+// GetMemberGrants returns everything the permission formula needs about one member
+// across every channel: the OR of their roles' masks, the per-channel overrides, and,
+// where the member holds two or more roles and at least one has an override, the
+// per-role breakdown. It is the single fetch behind every "what can this member do
+// here" site, so no site can load the role layer and forget the user layer. Three
+// batch reads, never per channel; a member with no role yields zero grants.
+// Composition (permissions.MemberChannelPerms): each held role is resolved with its
+// own override, the results are OR'd, then the member layer applies. A one-role
+// member, or a channel where no held role has an override, is described by Overrides
+// alone.
 func (d *DB) GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error) {
 	roles, err := d.q.ListUserRoles(ctx, userID)
 	if err != nil {

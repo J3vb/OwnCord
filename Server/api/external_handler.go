@@ -1,15 +1,8 @@
-// external_handler.go — the browser client's external-content broker routes.
-//
-// The desktop app fetches link previews and outside images in its own native
-// broker. A browser tab has none, so with the browser client hosted the
-// server fetches them for it (Server/externalcontent), the way Discord's media
-// proxy does: the viewer's browser never contacts a host a message author
-// chose. The routes exist only when server.browser_client_enabled is on.
-//
-// A refusal is a normal broker answer, not an HTTP error: both routes answer
-// 200 with {"ok":false,"failure":"<name>"} for one, using the failure names of
-// Client/src/platform/contracts/externalContent.ts. A preview succeeds as
-// {"ok":true,"value":{...}}; an image succeeds as its bytes.
+// external_handler.go is the browser client's external-content broker. A browser tab has no native broker, so
+// with the browser client hosted the server fetches link previews and outside images for it
+// (Server/externalcontent), so the viewer's browser never contacts a host a message author chose.
+// A refusal is a normal broker answer: both routes answer 200 with {"ok":false,"failure":"<name>"} using
+// the names in Client/src/platform/contracts/externalContent.ts.
 
 package api
 
@@ -53,9 +46,8 @@ func mountExternalContent(r chi.Router, cfg *config.Config, sessions *service.Se
 	MountExternalContentRoutes(r, sessions, limiter, cfg, newExternalBroker())
 }
 
-// MountExternalContentRoutes registers the authenticated broker endpoints.
-// They share one per-IP bucket, looser than the GIF search's: a GIF picker
-// page or a busy channel asks for a few dozen images at once.
+// MountExternalContentRoutes registers the authenticated broker endpoints on one per-IP bucket, looser than
+// the GIF search's.
 func MountExternalContentRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config, broker *externalcontent.Broker) {
 	r.Route("/api/v1/external", func(r chi.Router) {
 		r.Use(AuthMiddleware(sessions))

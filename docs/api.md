@@ -5575,7 +5575,8 @@ A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
 `upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
-`voice_owner_movable`, `game_activity_enabled`, `welcome_channel_id`.
+`voice_owner_movable`, `game_activity_enabled`, `welcome_channel_id`,
+`voice_max_video_kbps`, `server_upload_mbps`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -5615,6 +5616,22 @@ is not owner-only: `MANAGE_SERVER` may change it. A save hands the value to the
 running hub, which clears every shown game and song when it is `false` and sends the
 [`game_activity_policy`](protocol.md#game_activity_policy-server---client-broadcast)
 frame to every connected client; an unreadable row at start-up counts as `false`.
+
+`voice_max_video_kbps` is the most video one person may send, camera and screen
+share together, in kbit/s: `0` (the default while no row exists) for no limit,
+otherwise `300` to `50000`; anything else is refused with `400`. `MANAGE_SERVER`
+may change it. LiveKit cannot cap one publisher, so the server only states the
+cap and OwnCord clients keep their video under it. A save hands the value to the
+running hub, which sends the
+[`video_bitrate_cap`](protocol.md#video_bitrate_cap-server---client-broadcast)
+frame to every connected client, so streams already live follow it; an
+unreadable row at start-up counts as no limit.
+
+`server_upload_mbps` is the server's own upload speed in Mbit/s, typed by the
+admin: `0` (or no row) for not set, otherwise `1` to `100000`; anything else is
+refused with `400`. `MANAGE_SERVER` may change it. Only the admin panel reads
+it, to show roughly how many people can watch one stream at once under the
+video cap; nothing is sent to clients.
 
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change

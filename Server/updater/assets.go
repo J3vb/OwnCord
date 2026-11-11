@@ -17,30 +17,18 @@ type ClientAssets struct {
 	SignatureURL string
 }
 
-// textAssetCacheEntry caches a small text asset (e.g. a client update .sig
-// file) so repeated requests are served from memory.
 type textAssetCacheEntry struct {
 	content string
-	// err caches a failed fetch so an upstream outage is not re-dialled on
-	// every request. Cached errors expire after errorCacheTTL, successes
-	// after cacheTTL.
+	// err caches a failed fetch for errorCacheTTL so an outage is not re-dialled per request.
 	err    error
 	expiry time.Time
 }
 
-// clientAssetSuffixByTarget maps a Tauri updater target
-// ("{os}-{arch}-{installer}") to the release asset suffix for that platform's
-// updater artifact; the signature asset is the same suffix plus ".sig".
-// Targets without a published updater artifact are absent.
-//
-// The linux-*-deb entries point at the signed .deb itself. A deb target is
-// answered only for clients that opt in (see api/client_update.go debOptIn); a
-// client that does not gets 204 before this map is consulted, because it cannot
-// install a .deb and serving it would turn an honest banner into a failing
-// install.
-//
-// The Android entry is the signed APK itself. The app downloads it, checks the
-// .sig and hands the file to Android's package installer.
+// clientAssetSuffixByTarget maps a Tauri target ("{os}-{arch}-{installer}") to
+// its updater artifact suffix; the signature is the suffix plus ".sig". The
+// linux-*-deb entries are served only to clients that opt in (api/client_update.go
+// debOptIn); others get 204 first, since they cannot install a .deb. The Android
+// entry is the signed APK, which the app verifies and hands to the package installer.
 var clientAssetSuffixByTarget = map[string]string{
 	"windows-x86_64-nsis":    "_x64-setup.nsis.zip",
 	"windows-aarch64-nsis":   "_arm64-setup.nsis.zip",
@@ -51,9 +39,8 @@ var clientAssetSuffixByTarget = map[string]string{
 	"android-aarch64-apk":    "_arm64.apk",
 }
 
-// FindClientAssets scans the cached release assets for the client updater
-// artifact and its signature matching the given Tauri updater target
-// (e.g. "windows-x86_64-nsis"). Unknown targets return empty ClientAssets.
+// FindClientAssets returns the cached release's updater artifact and signature
+// for a Tauri target (e.g. "windows-x86_64-nsis"); unknown targets return empty ClientAssets.
 func (u *Updater) FindClientAssets(target string) ClientAssets {
 	suffix, ok := clientAssetSuffixByTarget[target]
 	if !ok {
@@ -79,8 +66,7 @@ func (u *Updater) FindClientAssets(target string) ClientAssets {
 	return ca
 }
 
-// FetchTextAsset downloads a small text asset (e.g. a .sig file) and returns
-// its content as a string.
+// FetchTextAsset downloads a small text asset (e.g. a .sig file).
 func (u *Updater) FetchTextAsset(ctx context.Context, url string) (string, error) {
 	data, err := u.fetchBody(ctx, url)
 	if err != nil {
@@ -89,23 +75,17 @@ func (u *Updater) FetchTextAsset(ctx context.Context, url string) (string, error
 	return string(data), nil
 }
 
-// FetchTextAssetCached is FetchTextAsset with an in-memory cache keyed by URL,
-// using the release cache's cacheTTL. It lets unauthenticated callers (the
-// rate-limited client-update endpoint) be served from memory instead of
-// triggering an outbound fetch per request.
+// FetchTextAssetCached is FetchTextAsset cached by URL for cacheTTL, so the
+// rate-limited unauthenticated client-update endpoint does no outbound fetch per request.
 func (u *Updater) FetchTextAssetCached(ctx context.Context, url string) (string, error) {
 	if entry, ok := u.lookupTextAsset(url, time.Now()); ok {
 		return entry.content, entry.err
 	}
 
-	// Coalesce concurrent misses: when the TTL expires under load, every caller
-	// would otherwise issue its own fetch. One flight per URL runs and the rest
-	// wait on its result. The flight is detached from the leader's ctx (see
-	// detachFetch) so a leader that aborts its request cannot fail its
-	// followers or cache its own context.Canceled.
+	// Coalesce concurrent misses into one flight per URL, detached from the
+	// leader's ctx so an aborted leader cannot fail followers or cache context.Canceled.
 	v, err, _ := u.textAssetSF.Do(url, func() (any, error) {
 		now := time.Now()
-		// Re-check: another flight may have filled the cache while we queued.
 		if entry, ok := u.lookupTextAsset(url, now); ok {
 			return entry.content, entry.err
 		}
@@ -121,8 +101,7 @@ func (u *Updater) FetchTextAssetCached(ctx context.Context, url string) (string,
 	return v.(string), nil
 }
 
-// lookupTextAsset returns a live cache entry for url, if one exists. A cached
-// entry may hold either content or an error; both are honoured until expiry.
+// lookupTextAsset returns a live cache entry (content or error) for url.
 func (u *Updater) lookupTextAsset(url string, now time.Time) (textAssetCacheEntry, bool) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -133,16 +112,15 @@ func (u *Updater) lookupTextAsset(url string, now time.Time) (textAssetCacheEntr
 	return entry, true
 }
 
-// storeTextAsset records the outcome of a fetch, caching failures briefly so an
-// upstream outage does not trigger an outbound request per caller.
+// storeTextAsset records a fetch outcome; failures are cached briefly so an outage is not re-fetched per
+// caller.
 func (u *Updater) storeTextAsset(url, content string, err error, now time.Time) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if u.textAssetCache == nil {
 		u.textAssetCache = make(map[string]textAssetCacheEntry)
 	}
-	// Drop superseded keys: asset URLs carry a version, so without this the map
-	// grows by one entry per release for the lifetime of the process.
+	// Drop superseded keys: asset URLs carry a version, so the map would grow per release.
 	for k, e := range u.textAssetCache {
 		if !now.Before(e.expiry) {
 			delete(u.textAssetCache, k)
@@ -167,7 +145,6 @@ func assetFilenameFromURL(rawURL string) (string, error) {
 	return filename, nil
 }
 
-// isGitHubHost reports whether the given URL points to a GitHub domain.
 func isGitHubHost(rawURL string) bool {
 	u, err := neturl.Parse(rawURL)
 	if err != nil {
@@ -179,9 +156,9 @@ func isGitHubHost(rawURL string) bool {
 		strings.HasSuffix(host, ".githubusercontent.com")
 }
 
-// trustedURL reports whether rawURL may be fetched and carry the GitHub
-// token: an https GitHub host, or the test base URL. Asset URLs come from the
-// release JSON, so every fetch and every redirect hop must pass it.
+// trustedURL reports whether rawURL may be fetched and carry the GitHub token:
+// an https GitHub host or the test base URL. Asset URLs come from release JSON,
+// so every fetch and redirect hop must pass it.
 func (u *Updater) trustedURL(rawURL string) bool {
 	if u.baseURL != "" && (rawURL == u.baseURL || strings.HasPrefix(rawURL, strings.TrimSuffix(u.baseURL, "/")+"/")) {
 		return true
@@ -190,7 +167,6 @@ func (u *Updater) trustedURL(rawURL string) bool {
 	return err == nil && parsed.Scheme == "https" && isGitHubHost(rawURL)
 }
 
-// fetchBody performs a GET request and returns the response body as bytes.
 func (u *Updater) fetchBody(ctx context.Context, url string) ([]byte, error) {
 	if !u.trustedURL(url) {
 		return nil, fmt.Errorf("refusing to fetch %s: not a GitHub release host", url)
@@ -213,7 +189,6 @@ func (u *Updater) fetchBody(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, url)
 	}
 
-	// Cap reads at 1 MiB — checksum and signature files are tiny text;
-	// this prevents a malicious or corrupted release asset from exhausting memory.
+	// Cap reads at 1 MiB: checksum and signature files are tiny text.
 	return io.ReadAll(io.LimitReader(resp.Body, maxFetchBytes))
 }

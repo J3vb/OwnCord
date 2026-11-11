@@ -8,14 +8,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// SlowRoutes keeps the last hour of request times per route pattern, for the
-// admin Dashboard's slow requests card. Each route has twelve five-minute
-// slots in a ring; a slot whose period has passed is cleared by the next
-// write or skipped by the next read, so nothing runs in the background.
-//
-// The key is the router's pattern (GET /api/v1/channels/{id}/messages), never
-// the raw path, so ids and tokens never reach the card, and the set of keys is
-// bounded by the routes the server mounts. maxSlowRoutes is a backstop.
+// SlowRoutes keeps the last hour of request times per route pattern for the
+// admin slow-requests card: twelve five-minute slots in a ring, cleared lazily
+// by the next write or skipped by the next read. The key is the router's
+// pattern, never the raw path, so ids and tokens never reach the card;
+// maxSlowRoutes is a backstop on the key set.
 
 const (
 	// SlowRouteSlot is one slot's length; SlowRouteWindow is what the card reads.
@@ -25,8 +22,8 @@ const (
 	maxSlowRoutes   = 512
 )
 
-// RouteTiming is one route's figures over the window. P50 and P95 are bucket
-// upper bounds capped at Max, like Summary; Max is exact.
+// RouteTiming is one route's figures over the window; P50 and P95 are bucket upper bounds capped at Max,
+// which is exact.
 type RouteTiming struct {
 	Method string  `json:"method"`
 	Route  string  `json:"route"`
@@ -43,25 +40,24 @@ type routeSlot struct {
 	maxMicros uint64
 }
 
-// routeRing is one route's slots. mu is a leaf lock held only for arithmetic,
-// so a request pays one uncontended lock per route it hits; a slot reset has
-// to clear several fields together, which atomics alone cannot do in one step.
+// routeRing is one route's slots. mu is a leaf lock held only for arithmetic;
+// a slot reset clears several fields at once, which atomics alone cannot do.
 type routeRing struct {
 	mu    syncutil.Mutex
 	slots [slowRouteSlots]routeSlot
 }
 
-// SlowRoutes is safe for concurrent use. Build it with NewSlowRoutes.
+// SlowRoutes is safe for concurrent use.
 type SlowRoutes struct {
 	now func() time.Time
 
-	// mu guards routes (the map, not the rings). Leaf lock, taken before a
-	// ring's own lock and released before the ring is written.
+	// mu guards the routes map, not the rings: leaf lock, taken before a ring's lock and released before the
+	// ring is written.
 	mu     syncutil.RWMutex
 	routes map[string]*routeRing
 }
 
-// NewSlowRoutes returns an empty tracker. now is time.Now outside tests.
+// NewSlowRoutes returns an empty tracker.
 func NewSlowRoutes(now func() time.Time) *SlowRoutes {
 	return &SlowRoutes{now: now, routes: make(map[string]*routeRing)}
 }
@@ -70,8 +66,8 @@ func slowRouteKey(method, pattern string) string { return method + " " + pattern
 
 func slowRoutePeriod(t time.Time) int64 { return t.Unix() / int64(SlowRouteSlot/time.Second) }
 
-// Observe records one request. A nil tracker and an empty pattern (a request
-// no route matched) are ignored. Allocation-free once the route is known.
+// Observe records one request; a nil tracker or empty pattern (no route matched) is ignored. Allocation-free
+// once the route is known.
 func (s *SlowRoutes) Observe(method, pattern string, d time.Duration) {
 	if s == nil || pattern == "" {
 		return
@@ -101,7 +97,6 @@ func (s *SlowRoutes) Observe(method, pattern string, d time.Duration) {
 	ring.mu.Unlock()
 }
 
-// ring returns the route's ring, creating it while under maxSlowRoutes.
 func (s *SlowRoutes) ring(method, pattern string) *routeRing {
 	key := slowRouteKey(method, pattern)
 	s.mu.RLock()
@@ -123,10 +118,9 @@ func (s *SlowRoutes) ring(method, pattern string) *routeRing {
 	return ring
 }
 
-// Slowest returns up to n routes seen in the last SlowRouteWindow, slowest
-// first: by P95, then Max, then route name so equal figures keep a stable
-// order. Each route is read under its own lock, so its figures are one
-// consistent copy even while requests and a slot rollover race the read.
+// Slowest returns up to n routes seen in the window, by P95, then Max, then
+// name for a stable order. Each route is read under its own lock, so its
+// figures are one consistent copy.
 func (s *SlowRoutes) Slowest(n int) []RouteTiming {
 	out := []RouteTiming{}
 	if s == nil || n <= 0 {

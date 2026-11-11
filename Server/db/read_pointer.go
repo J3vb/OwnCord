@@ -11,65 +11,54 @@ import (
 type ReadPointerOp int
 
 const (
-	// ReadAtLatest moves the pointer to the channel's newest live message and
-	// clears the badge, the same result as MarkChannelReadAtLatest. It never
+	// ReadAtLatest moves the pointer to the channel's newest live message and clears the badge; it never
 	// moves the pointer backward.
 	ReadAtLatest ReadPointerOp = iota + 1
-	// ReadUpTo moves the pointer forward to a message id, clamped to the
-	// channel's newest message. A pointer already past it is left alone.
+	// ReadUpTo moves the pointer forward to a message id, clamped to the channel's newest;
+	// a pointer already past it is left alone.
 	ReadUpTo
-	// MarkUnread moves the pointer to the message just before a live message of
-	// the channel. It may move either way.
+	// MarkUnread moves the pointer to the message just before a live message of the channel; it may move
+	// either way.
 	MarkUnread
 )
 
-// ReadPointer is the read state MoveReadPointer leaves behind, the payload of
-// the read_state frame.
+// ReadPointer is the read state MoveReadPointer leaves behind, the read_state frame payload.
 type ReadPointer struct {
-	// LastReadMessageID is read_states.last_message_id after the move.
 	LastReadMessageID int64
-	// UnreadCount is the live messages after the pointer, capped at
-	// ReadPointerUnreadCap like the count ready sends.
-	UnreadCount int64
-	// MentionCount is read_states.mention_count after the move.
-	MentionCount int64
+	UnreadCount       int64
+	MentionCount      int64
 }
 
-// ReadPointerUnreadCap bounds ReadPointer.UnreadCount, matching the cap on the
-// unread count in the ready payload.
+// ReadPointerUnreadCap bounds ReadPointer.UnreadCount, matching the ready payload's cap.
 const ReadPointerUnreadCap = 100
 
-// channelMaxAnySQL is the newest message id of a channel, deleted or not
-// (idx_messages_channel).
 const channelMaxAnySQL = `SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ?`
 
-// channelMaxLiveSQL is the newest live message id of a channel
-// (idx_messages_channel_live).
 const channelMaxLiveSQL = `SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ? AND deleted = 0`
 
 // MoveReadPointer is the one place a reader's pointer moves to anything but
 // "everything": it reads the mention receipts, updates read_states (pointer and
 // a recomputed mention_count) and reads the unread count in a single writer
-// transaction. The writer pool is one connection, so the move is atomic
-// against every mention increment and decrement. The caller (MessageService)
-// holds the channel's mention emit lock across the call and the frame it sends.
+// transaction, so the move is atomic against every mention increment and
+// decrement. The caller (MessageService) holds the channel's mention emit lock
+// across the call and the frame it sends.
 //
-// Rules, with R(p) the live receipts after p from authors the user does not
-// block:
+// Rules, with R(p) the live receipts after p from authors the user does not block:
+// ReadAtLatest: pointer MAX(old, newest live), count 0.
+// ReadUpTo:     pointer MAX(old, MIN(messageID, newest any)). If it moved,
 //
-//	ReadAtLatest: pointer MAX(old, newest live), count 0.
-//	ReadUpTo:     pointer MAX(old, MIN(messageID, newest any)). If it moved,
-//	              count MIN(old, R(new)), otherwise unchanged.
-//	MarkUnread:   pointer = largest id below messageID (0 if none). Moving
-//	              back count MAX(old, R(new)), forward MIN(old, R(new)), same
-//	              unchanged. messageID must be a live message of the channel,
-//	              otherwise ErrNotFound and nothing changes.
+//	count MIN(old, R(new)), otherwise unchanged.
 //
-// A forward move never raises a badge and a backward move never lowers one.
-// A mention increment still waiting for its flush finds last_message_id below
-// its message, adds one and writes its receipt after this commit, so it is
-// counted once: this recompute cannot see it, because its receipt does not
-// exist yet.
+// MarkUnread:   pointer = largest id below messageID (0 if none). Moving
+//
+//	back count MAX(old, R(new)), forward MIN(old, R(new)), same
+//	unchanged. messageID must be a live message of the channel,
+//	otherwise ErrNotFound and nothing changes.
+//
+// A forward move never raises a badge and a backward move never lowers one. A
+// mention increment still waiting for its flush finds last_message_id below its
+// message, adds one and writes its receipt after this commit, so it is counted
+// once: this recompute cannot see it.
 func (d *DB) MoveReadPointer(ctx context.Context, userID, channelID int64, op ReadPointerOp, messageID int64) (ReadPointer, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -77,15 +66,14 @@ func (d *DB) MoveReadPointer(ctx context.Context, userID, channelID int64, op Re
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Every statement below is a QueryRow or Exec, so no rows cursor is ever
-	// open while the next statement runs on the single writer connection.
+	// Only QueryRow or Exec here, so no rows cursor is open while the next statement runs
+	// on the one writer connection.
 	oldPtr, oldCount, found, err := readStateInTx(ctx, tx, userID, channelID)
 	if err != nil {
 		return ReadPointer{}, err
 	}
-	// Two reads, each a single seek to the end of its index. One combined
-	// MAX(CASE ...) walks every message of the channel to check its deleted
-	// flag, and does so while holding the writer.
+	// Two index-end seeks; one combined MAX(CASE ...) walks every message of the channel
+	// while holding the writer.
 	var maxAny, maxLive int64
 	if err := tx.QueryRowContext(ctx, channelMaxAnySQL, channelID).Scan(&maxAny); err != nil {
 		return ReadPointer{}, fmt.Errorf("MoveReadPointer newest message: %w", err)
@@ -99,8 +87,6 @@ func (d *DB) MoveReadPointer(ctx context.Context, userID, channelID int64, op Re
 		return ReadPointer{}, err
 	}
 
-	// Skip a write that would store what is already there; a missing row is
-	// always written so the pointer exists afterwards.
 	if !found || newPtr != oldPtr || newCount != oldCount {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count)
@@ -126,7 +112,6 @@ func (d *DB) MoveReadPointer(ctx context.Context, userID, channelID int64, op Re
 	return ReadPointer{LastReadMessageID: newPtr, UnreadCount: unread, MentionCount: newCount}, nil
 }
 
-// readStateInTx reads the caller's row inside tx; found is false for none.
 func readStateInTx(ctx context.Context, tx *sql.Tx, userID, channelID int64) (ptr, count int64, found bool, err error) {
 	switch qErr := tx.QueryRowContext(ctx,
 		`SELECT last_message_id, mention_count FROM read_states WHERE user_id = ? AND channel_id = ?`,
@@ -139,8 +124,8 @@ func readStateInTx(ctx context.Context, tx *sql.Tx, userID, channelID int64) (pt
 	return ptr, count, true, nil
 }
 
-// receiptsAfter is R(p): the live mention receipts after p that the user's
-// current blocks do not exclude.
+// receiptsAfter is R(p): the live mention receipts after p that the user's current
+// blocks do not exclude.
 func receiptsAfter(ctx context.Context, tx *sql.Tx, userID, channelID, ptr int64) (int64, error) {
 	var n int64
 	if err := tx.QueryRowContext(ctx,
@@ -156,9 +141,8 @@ func receiptsAfter(ctx context.Context, tx *sql.Tx, userID, channelID, ptr int64
 	return n, nil
 }
 
-// nextReadPointer applies op's rules (see MoveReadPointer) to the stored
-// pointer and count and returns the new pair. It reads inside tx and writes
-// nothing.
+// nextReadPointer applies op's rules to the stored pointer and count and returns the
+// new pair; it reads inside tx and writes nothing.
 func nextReadPointer(ctx context.Context, tx *sql.Tx, userID, channelID int64, op ReadPointerOp, messageID, oldPtr, oldCount, maxAny, maxLive int64) (newPtr, newCount int64, err error) {
 	switch op {
 	case ReadAtLatest:

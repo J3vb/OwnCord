@@ -9,31 +9,25 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── AFK channel ──────────────────────────────────────────────────
-
-// AFKStore is the persistence slice behind ChannelService.SetAFKChannel.
-// SetAFKChannel reads the old flag, clears it and sets the new one in one
-// transaction and returns the previously flagged channel id (nil for none).
+// AFKStore is the persistence slice behind SetAFKChannel, which reads the old flag, clears
+// it and sets the new one in one transaction and returns the previously flagged id (nil for none).
 type AFKStore interface {
 	GetAFKChannel(ctx context.Context) (*db.Channel, error)
 	SetAFKChannel(ctx context.Context, channelID *int64) (*int64, error)
 }
 
-// AFKChange is the committed outcome of SetAFKChannel: the channel that lost
-// the flag and the one that gained it. Either may be nil, and both are nil
-// when nothing changed. The caller broadcasts channel_update for each.
+// AFKChange is the committed outcome of SetAFKChannel: the channel that lost the flag and
+// the one that gained it. Either may be nil, both when nothing changed. The caller broadcasts channel_update
+// for each.
 type AFKChange struct {
 	Previous *db.Channel
 	Current  *db.Channel
 }
 
-// SetAFKChannel flags channelID as the server's AFK channel, or clears the
-// flag when channelID is nil. Only a live voice channel qualifies: text,
-// announcement and archived channels answer ErrBadRequest, and a missing or
-// DM channel answers ErrNotFound. The clear of the old flag and the set of the
-// new one are one transaction, audited as afk_channel_change. The rows handed
-// back are re-read on an uncancellable tail, because the flag has committed
-// and the caller must still be able to tell connected clients.
+// SetAFKChannel flags channelID as the AFK channel, or clears it when nil. Only a live
+// voice channel qualifies (text, announcement, archived: ErrBadRequest; missing or DM:
+// ErrNotFound). Clear and set are one transaction, audited as afk_channel_change; rows
+// are re-read on an uncancellable tail so clients can still be told.
 func (s *ChannelService) SetAFKChannel(ctx context.Context, actorID int64, channelID *int64) (AFKChange, error) {
 	if s.afk == nil {
 		return AFKChange{}, fmt.Errorf("%w: afk channel storage unavailable", ErrInternal)

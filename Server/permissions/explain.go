@@ -2,9 +2,8 @@ package permissions
 
 import "fmt"
 
-// Action names one canonical predicate an administrator can ask about for a
-// member in a channel. The explanation runs the predicate itself —
-// there is no second rule engine here, only a trace of the bits it consulted.
+// Action names one canonical predicate an administrator can ask about. Explain
+// runs the predicate itself; there is no second rule engine.
 type Action string
 
 const (
@@ -23,8 +22,7 @@ var Actions = []Action{
 	ActionAddReaction, ActionJoinVoice, ActionModerateVoice, ActionMoveVoice,
 }
 
-// actionPredicate maps an Action to its predicate and the bits that
-// predicate consults, so the trace names exactly the bits the decision read.
+// actionPredicate maps an Action to its predicate and the bits it consults.
 func actionPredicate(a Action, s Subject) (func(Subject) error, int64, bool) {
 	switch a {
 	case ActionViewChannel:
@@ -52,14 +50,9 @@ func actionPredicate(a Action, s Subject) (func(Subject) error, int64, bool) {
 	return nil, 0, false
 }
 
-// BitRule is how one permission bit resolved through the layers:
-// the base role, the channel's role override, then its member override.
-// A layer is "allow", "deny" or "" (no opinion); within a layer allow wins.
-//
-// A member holding several roles with an override in the channel gets one
-// RoleBitRule per held role in Decision.RoleBits (each role resolved with its
-// own override, then OR'd); Base is then the OR of the held masks and
-// RoleOverride is empty.
+// BitRule is how one bit resolved through base role, role override and member
+// override ("allow", "deny" or ""). For a multi-role member with an override,
+// RoleOverride is empty and Decision.RoleBits carries the per-role rows.
 type BitRule struct {
 	Bit          string `json:"bit"`
 	Base         bool   `json:"base"`
@@ -68,9 +61,8 @@ type BitRule struct {
 	Effective    bool   `json:"effective"`
 }
 
-// RoleBitRule is one held role's resolution of one bit: whether the role's mask
-// has it, the role's own channel override, and the role-layer result
-// ((base & ^deny) | allow) that is OR'd with the other held roles.
+// RoleBitRule is one held role's resolution of one bit; Effective is the
+// role-layer result that is OR'd with the other held roles.
 type RoleBitRule struct {
 	Bit          string `json:"bit"`
 	RoleID       int64  `json:"role_id"`
@@ -79,18 +71,15 @@ type RoleBitRule struct {
 	Effective    bool   `json:"effective"`
 }
 
-// Decision is the verdict of one action's predicate for a Subject, with the
-// bit trace that fed it. Reason is the predicate's own error text when denied.
-// An Administrator's decision carries no trace: no bit or layer is consulted.
+// Decision is one action's verdict with its bit trace; an Administrator's has none.
 type Decision struct {
 	Action              Action    `json:"action"`
 	Allowed             bool      `json:"allowed"`
 	Reason              string    `json:"reason,omitempty"`
 	AdministratorBypass bool      `json:"administrator_bypass"`
 	Bits                []BitRule `json:"bits,omitempty"`
-	// RoleBits is the per-held-role breakdown of Bits, one row per (bit, held
-	// role). Present only for a member holding two or more roles with an
-	// override in the channel.
+	// RoleBits is the per-role breakdown of Bits; present only for a multi-role
+	// member with an override in the channel.
 	RoleBits []RoleBitRule `json:"role_bits,omitempty"`
 }
 
@@ -104,8 +93,8 @@ func layerState(allow, deny, bit int64) string {
 	return ""
 }
 
-// Explain runs a's canonical predicate against s and traces the bits it
-// consulted. An unknown action is an error, never a denial.
+// Explain runs a's predicate against s and traces the bits it consulted. An
+// unknown action is an error, never a denial.
 func Explain(a Action, s Subject) (Decision, error) {
 	pred, bits, ok := actionPredicate(a, s)
 	if !ok {

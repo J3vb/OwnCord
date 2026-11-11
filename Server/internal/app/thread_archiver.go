@@ -6,14 +6,11 @@ import (
 	"time"
 )
 
-// threadArchiverJoinBudget bounds the close step's wait for the archiver loop.
 const threadArchiverJoinBudget = 5 * time.Second
 
 // startThreadArchiver runs one synchronous sweep so threads that came due while
-// the server was down are archived before the http stage opens the listener,
-// then runs the archiver loop on the background context (ws.NewHub installs the
-// hub as notifier). Its close step cancels and joins it within
-// threadArchiverJoinBudget.
+// the server was down are archived before the listener opens, then runs the
+// loop on bgCtx, joined within threadArchiverJoinBudget.
 func (a *App) startThreadArchiver() error {
 	svc := a.runtime.Services
 	if svc == nil || svc.ThreadArchiver == nil {
@@ -21,7 +18,6 @@ func (a *App) startThreadArchiver() error {
 	}
 	archiver := svc.ThreadArchiver
 	if err := archiver.Sweep(a.bgCtx); err != nil {
-		// Not fatal: the loop's first pass retries.
 		a.log.Warn("thread-archiver: boot sweep failed", "err", err)
 	}
 	ctx, cancel := context.WithCancel(a.bgCtx)

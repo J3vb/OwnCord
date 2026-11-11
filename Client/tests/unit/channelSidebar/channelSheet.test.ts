@@ -293,4 +293,77 @@ describe("channel menu as a bottom sheet on a phone", () => {
       ]);
     });
   });
+  describe("rows and their order", () => {
+    const access = { manageChannels: true, manageMessages: true, manageInvites: true };
+    /** The first page's rows, one array per card (a separator starts the next). */
+    const cardIds = (): string[][] =>
+      [...(sheet()?.querySelectorAll(".msg-sheet-section") ?? [])].map((card) =>
+        [...card.querySelectorAll<HTMLElement>("[data-testid]")].map(
+          (el) => el.dataset.testid ?? "",
+        ),
+      );
+
+    it("lays out a text channel's rows, with the management rows in a card of their own", async () => {
+      const a = channel({ id: 1, name: "a" });
+      await longPress(a, [vi.fn(), vi.fn(), undefined, [a], vi.fn(), vi.fn(), access]);
+      expect(cardIds()).toEqual([
+        [
+          "ctx-mark-read",
+          "ctx-mute-channel",
+          "ctx-notify-settings",
+          "ctx-copy-channel-link",
+          "ctx-invite-people",
+          "ctx-move-up",
+          "ctx-move-down",
+        ],
+        ["ctx-edit-channel", "ctx-delete-channel"],
+      ]);
+    });
+
+    it("offers a voice channel Open Chat and not the read state, mute or link", async () => {
+      const voice = channel({ id: 3, type: "voice" });
+      await longPress(voice);
+      expect(cardIds()).toEqual([["ctx-open-chat"]]);
+    });
+
+    it("joins no separator when only management rows are offered", async () => {
+      await longPress(channel({ id: 3, type: "voice" }), [
+        vi.fn(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        access,
+      ]);
+      expect(cardIds()).toEqual([["ctx-open-chat"], ["ctx-edit-channel"]]);
+    });
+
+    it("runs Invite People, Edit and Move Up from their rows", async () => {
+      const a = channel({ id: 1, name: "a", position: 0 });
+      const b = channel({ id: 2, name: "b", position: 1 });
+      channelsStore.setState((prev) => ({
+        ...prev,
+        channels: new Map([
+          [1, a],
+          [2, b],
+        ]),
+      }));
+      const onInvite = vi.fn();
+      const onEdit = vi.fn();
+      const onReorder = vi.fn();
+      const extra = [onEdit, undefined, undefined, [a, b], onReorder, onInvite, access] as const;
+      for (const testId of ["ctx-invite-people", "ctx-edit-channel", "ctx-move-up"]) {
+        await longPress(b, [...extra]);
+        row(testId)!.click();
+        expect(sheet()).toBeNull();
+      }
+      expect(onInvite).toHaveBeenCalledWith(b);
+      expect(onEdit).toHaveBeenCalledWith(b);
+      expect(onReorder).toHaveBeenCalledWith([
+        { channelId: 2, newPosition: 0, previousPosition: 1 },
+        { channelId: 1, newPosition: 1, previousPosition: 0 },
+      ]);
+    });
+  });
 });

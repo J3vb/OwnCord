@@ -53,4 +53,20 @@ describe("readingAnchor", () => {
     register(() => 2);
     expect(readingAnchor(1)).toBe(2);
   });
+
+  it("keeps a channel's anchor while a list for another channel is mounted and gone again", () => {
+    register((channelId) => (channelId === 1 ? 11 : null));
+    const offThread = register((channelId) => (channelId === 91 ? 99 : null));
+    expect(readingAnchor(1)).toBe(11);
+    expect(readingAnchor(91)).toBe(99);
+    offThread();
+    expect(readingAnchor(1)).toBe(11);
+    expect(readingAnchor(91)).toBeNull();
+  });
+
+  it("falls back to an older list when the newest has no answer for the channel", () => {
+    register(() => 3);
+    register(() => null);
+    expect(readingAnchor(1)).toBe(3);
+  });
 });

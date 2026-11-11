@@ -16,8 +16,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/internal/archivebin"
 )
 
-// ValidateDownloadURL ensures the URL points to an expected GitHub release
-// asset for this repository.
+// ValidateDownloadURL ensures url is an expected release asset of this repository.
 func (u *Updater) ValidateDownloadURL(url string) error {
 	prefix := fmt.Sprintf("https://github.com/%s/%s/releases/download/", u.repoOwner, u.repoName)
 	if !strings.HasPrefix(url, prefix) {
@@ -26,18 +25,12 @@ func (u *Updater) ValidateDownloadURL(url string) error {
 	return nil
 }
 
-// DownloadAndVerify downloads the release artifact from downloadURL, fetches
-// the checksum file, the detached binary signature and a signed release
-// manifest, and verifies the asset against both the release version and the
-// pinned signing key. On Windows the asset is a single executable; on Linux a
-// tar.gz containing a "chatserver" binary, extracted to destPath. On
-// verification failure the downloaded file is removed.
-//
-// It returns the hex SHA256 of the staged binary at destPath, derived from the
-// signed manifest (on Linux, computed over the extracted bytes of the
-// manifest-verified archive). Callers that later execute the staged file must
-// re-verify it against this hash through an open handle (OpenVerifiedBinary),
-// never by path.
+// DownloadAndVerify downloads the release artifact (a Windows executable or a
+// Linux tar.gz holding "chatserver", extracted to destPath) and verifies it
+// against the checksum file, the detached signature, and the signed manifest's
+// version and pinned key; on failure the file is removed. It returns the hex
+// SHA256 of the staged binary at destPath. Callers that later execute the file
+// must re-verify it against that hash through an open handle (OpenVerifiedBinary), never by path.
 func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, destPath string) (string, error) {
 	if err := u.ValidateDownloadURL(downloadURL); err != nil {
 		return "", err
@@ -45,8 +38,7 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, download
 	if err := u.ValidateDownloadURL(checksumURL); err != nil {
 		return "", fmt.Errorf("validating checksum URL: %w", err)
 	}
-	// The detached signature is consumed only by the Windows verify path;
-	// Linux integrity comes from the signed manifest + checksum.
+	// The detached signature is Windows-only; Linux integrity comes from the signed manifest + checksum.
 	needSignature := runtime.GOOS == "windows"
 	if needSignature {
 		if err := u.ValidateDownloadURL(signatureURL); err != nil {
@@ -100,9 +92,8 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, download
 		return "", fmt.Errorf("release manifest checksum mismatch for %s", assetFilename)
 	}
 
-	// Clear a stale staged binary from a previous aborted attempt. Staging is
-	// O_EXCL, so anything recreated at this path afterwards fails the download
-	// instead of being written through (TOCTOU).
+	// Clear a stale staged binary; staging is O_EXCL, so a file recreated here
+	// afterwards fails the download instead of being written through (TOCTOU).
 	_ = os.Remove(destPath)
 
 	goos := runtime.GOOS
@@ -126,14 +117,11 @@ func (u *Updater) downloadWindowsBinaryAndVerify(ctx context.Context, downloadUR
 		return "", err
 	}
 
-	// Verify hash.
 	if err := u.VerifyChecksum(destPath, expectedHash); err != nil {
-		// Remove the invalid file.
 		_ = os.Remove(destPath)
 		return "", err
 	}
-	// The asset is the binary itself, so the manifest-bound hash is the
-	// staged binary's trusted hash.
+	// The asset is the binary, so the manifest-bound hash is its trusted hash.
 	return expectedHash, nil
 }
 
@@ -146,9 +134,8 @@ func (u *Updater) downloadLinuxTarballAndVerify(ctx context.Context, downloadURL
 		return "", fmt.Errorf("downloading archive: %w", err)
 	}
 
-	// Open the archive once and do both the checksum and the extraction
-	// through this one handle, so the bytes verified are the bytes extracted
-	// even if the path is swapped in between (TOCTOU).
+	// Checksum and extract through one handle so the verified bytes are the
+	// extracted bytes even if the path is swapped (TOCTOU).
 	f, err := os.Open(tarPath)
 	if err != nil {
 		return "", fmt.Errorf("opening archive: %w", err)
@@ -177,15 +164,13 @@ func (u *Updater) downloadLinuxTarballAndVerify(ctx context.Context, downloadURL
 	return binaryHash, nil
 }
 
-// maxChatserverBytes bounds the staged server binary. Release builds are a
-// few tens of MiB; the cap only stops a damaged archive from filling the disk.
+// maxChatserverBytes bounds the staged binary; it only stops a damaged archive filling the disk.
 const maxChatserverBytes = 512 << 20
 
-// extractChatserverFromTarGz extracts the "chatserver" entry from a tar.gz
-// stream to destPath and returns the hex SHA256 of the bytes it wrote, so the
-// caller gets a trusted hash of the staged binary without a path re-read.
-// destPath is created O_EXCL: a pre-existing file (attacker-planted staging
-// path) fails the extraction instead of being written through.
+// extractChatserverFromTarGz extracts the "chatserver" entry to destPath and
+// returns the SHA256 of the bytes written, so no path re-read is needed.
+// destPath is created O_EXCL so an attacker-planted staging file fails instead
+// of being written through.
 func extractChatserverFromTarGz(r io.Reader, destPath string) (string, error) {
 	sum, err := archivebin.FromTarGz(r, destPath, isChatserverEntry, maxChatserverBytes)
 	if err != nil {
@@ -196,12 +181,9 @@ func extractChatserverFromTarGz(r io.Reader, destPath string) (string, error) {
 
 func isChatserverEntry(name string) bool { return filepath.Base(name) == "chatserver" }
 
-// serverDownloadAssetName returns the GitHub release asset file name for the
-// server binary on the given GOOS/GOARCH. Only the four published pairs
-// resolve; any other combination returns "" so the caller treats the update as
-// unavailable rather than installing a foreign-arch binary. Pairs are matched
-// whole, never by architecture or OS alone, so adding an asset cannot widen an
-// unrelated one.
+// serverDownloadAssetName returns the release asset name for a GOOS/GOARCH, or
+// "" for anything but the four published pairs so a foreign-arch binary is never
+// installed. Pairs match whole, so adding an asset cannot widen an unrelated one.
 func serverDownloadAssetName(goos, goarch string) string {
 	switch {
 	case goos == "windows" && goarch == "amd64":
@@ -217,9 +199,8 @@ func serverDownloadAssetName(goos, goarch string) string {
 	}
 }
 
-// serverSignatureAssetName returns the detached-signature asset paired with
-// serverDownloadAssetName's result, or "" where none is published. It is
-// Windows-only; see hasRequiredServerAssetsFor.
+// serverSignatureAssetName returns the Windows-only detached-signature asset
+// paired with serverDownloadAssetName's result, or "" (see hasRequiredServerAssetsFor).
 func serverSignatureAssetName(goos, goarch string) string {
 	if goos != "windows" {
 		return ""
@@ -231,7 +212,6 @@ func serverSignatureAssetName(goos, goarch string) string {
 	return binary + ".sig"
 }
 
-// downloadFile downloads the content at url and writes it to destPath.
 func (u *Updater) downloadFile(parent context.Context, url, destPath string) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -252,16 +232,13 @@ func (u *Updater) downloadFile(parent context.Context, url, destPath string) err
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, url)
 	}
-	// From here the body is read under the stall watchdog: it cancels ctx if
-	// no bytes arrive for the stall timeout. The caller's own deadline still
-	// bounds the whole download.
+	// The body is read under the stall watchdog; the caller's deadline still bounds the download.
 	stall := newStallReader(cancel, resp.Body, u.stallTimeout())
 	defer stall.stop()
 	body := io.Reader(stall)
 
-	// O_EXCL: staging paths are predictable (exe + ".new"), so refuse to
-	// write through a pre-created file or symlink (TOCTOU). Callers remove
-	// stale staged files before downloading.
+	// O_EXCL: staging paths are predictable, so refuse to write through a
+	// pre-created file or symlink (TOCTOU).
 	f, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("creating destination file: %w", err)
@@ -273,8 +250,7 @@ func (u *Updater) downloadFile(parent context.Context, url, destPath string) err
 		}
 	}()
 
-	// Cap download at 500 MiB to prevent unbounded disk usage from a
-	// malicious or corrupted release asset.
+	// Cap the download at 500 MiB against a malicious or corrupted asset.
 	const maxBinarySize = 500 * 1024 * 1024
 	limitedReader := io.LimitReader(body, maxBinarySize)
 
@@ -288,7 +264,6 @@ func (u *Updater) downloadFile(parent context.Context, url, destPath string) err
 		}
 		return fmt.Errorf("writing downloaded file: %w", err)
 	}
-	// Probe for one more byte to detect if the file exceeds the limit.
 	if n == maxBinarySize {
 		var probe [1]byte
 		if extra, _ := body.Read(probe[:]); extra > 0 {
@@ -299,8 +274,7 @@ func (u *Updater) downloadFile(parent context.Context, url, destPath string) err
 		}
 	}
 
-	// Explicitly close and check the error so a disk-full flush failure is
-	// not silently swallowed, which would leave a corrupt file on disk.
+	// Check Close so a disk-full flush failure does not leave a silently corrupt file.
 	if err := f.Close(); err != nil {
 		closed = true
 		_ = os.Remove(destPath)
@@ -310,16 +284,13 @@ func (u *Updater) downloadFile(parent context.Context, url, destPath string) err
 	return nil
 }
 
-// errDownloadStalled reports a download abandoned because no bytes arrived
-// within the stall timeout.
+// errDownloadStalled reports a download abandoned after the stall timeout.
 var errDownloadStalled = errors.New("download stalled: no data received")
 
-// downloadHTTPClient returns the client for the large release asset: the
-// metadata client minus its whole-exchange Timeout (which net/http applies to
-// reading the body and would cut any slow download). It keeps the Transport
-// (connect and response-header timeouts) and CheckRedirect (release-host check
-// on every hop); the body is bounded by the caller's deadline and the stall
-// watchdog.
+// downloadHTTPClient is the metadata client minus its whole-exchange Timeout,
+// which net/http applies to the body and would cut a slow download. It keeps
+// the Transport and release-host CheckRedirect; the caller's deadline and the
+// stall watchdog bound the body.
 func (u *Updater) downloadHTTPClient() *http.Client {
 	c := *u.httpClient
 	c.Timeout = 0
@@ -333,8 +304,7 @@ func (u *Updater) stallTimeout() time.Duration {
 	return defaultDownloadStallTimeout
 }
 
-// stallReader cancels the download context when no bytes arrive for d. The
-// timer is re-armed after every read that returns data.
+// stallReader cancels the download context when no bytes arrive for d.
 type stallReader struct {
 	r       io.Reader
 	timer   *time.Timer

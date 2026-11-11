@@ -10,20 +10,14 @@ import (
 	"time"
 )
 
-// pprofAddr is the pprof listener's loopback address; a variable only so tests
-// can bind a free port.
+// pprofAddr is the pprof listener's loopback address; a var so tests can bind a
+// free port.
 var pprofAddr = "127.0.0.1:6060"
 
-// startPprof starts the opt-in pprof listener. It is off by default, on its own
-// loopback socket, and never mounted on the main router: a profiling endpoint
-// exposes heap contents and can burn CPU, so the operator must ask for it and
-// reach the host to use it. The address is fixed to loopback so enabling it
-// can never expose the profiler off-host.
-//
-// Enabling it also turns on the block and mutex samplers, since a CPU profile
-// cannot see contention on the single SQLite writer; the rates are
-// operator-overridable and set only here, so a disabled profiler leaves the
-// zero-overhead defaults.
+// startPprof starts the opt-in pprof listener, off by default, on its own
+// loopback socket and never on the main router: a profiling endpoint exposes
+// heap contents and can burn CPU, so enabling it can never expose the profiler
+// off-host.
 func (a *App) startPprof() error {
 	if !a.cfg.Server.PprofEnabled {
 		return nil
@@ -42,8 +36,6 @@ func (a *App) startPprof() error {
 	}
 	a.pprofSrv = srv
 	a.onClose("pprof", func(ctx context.Context) error {
-		// Shutdown stops accepting and drains an active profile request; one
-		// held past the budget is cut by the deadline.
 		_ = srv.Shutdown(ctx)
 		return nil
 	})

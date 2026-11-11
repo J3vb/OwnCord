@@ -1,6 +1,6 @@
 // ARCH-06: the client dependency direction is one-way — `lib/`, `stores/`,
 // `features/` and `platform/` are lower layers and must not import the UI
-// (`components/`, `pages/`). When they did, a `lib/` module pulled a component
+// (`pages/`; `components/` no longer exists). When they did, a `lib/` module pulled a UI
 // file (and whatever it statically reaches) into the startup closure, and a
 // store writer could live in `pages/` where the single-writer rule cannot see
 // it. `SidebarDmHelpers`' DM mutator and `features/settings/helpers`'
@@ -23,12 +23,11 @@ const srcDir = path.join(clientRoot, "src");
 // Lower layers that must not statically reach the UI layer at runtime.
 const LOWER_LAYERS = new Set(["lib", "stores", "features", "platform"]);
 // The UI layer they must not import.
-const UI_LAYERS = new Set(["components", "pages"]);
+const UI_LAYERS = new Set(["pages"]);
 
 const ALIASES: Record<string, string> = {
   "@lib/": "src/lib/",
   "@stores/": "src/stores/",
-  "@components/": "src/components/",
   "@pages/": "src/pages/",
 };
 

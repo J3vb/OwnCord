@@ -23,6 +23,7 @@ export const shellText = defineCatalog("shell", {
   "common.online": "{count} online",
 
   "member.copyId": "Copy User ID",
+  "member.nicknameFailed": "Could not change the nickname. Try again.",
   "member.profile": "Profile",
   "member.mention": "Mention",
   "member.mentionUnavailable": "Open a text channel to mention someone",

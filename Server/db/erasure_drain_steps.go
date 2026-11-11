@@ -8,27 +8,21 @@ import (
 )
 
 // erasureDrainSteps are the bulky per-user tables, drained before the finish
-// stage in the order erasureStatements deletes them. Anything not listed is
-// small by construction and goes in the finish transaction.
-//
-// Indexed predicates delete through "rowid IN (SELECT ... LIMIT n)" on the
-// index that serves the predicate (idx_message_mentions_user, the
-// message_delivery_receipts and mention_receipts primary keys,
-// idx_attachments_uploader, idx_messages_user). Tables with no index on the
-// user column are walked in key windows instead: reactions and events.
+// stage in the order erasureStatements deletes them; anything unlisted is small
+// and goes in the finish transaction. Indexed predicates delete through
+// "rowid IN (SELECT ... LIMIT n)" on the serving index; tables with no index on
+// the user column (reactions, events) are walked in key windows.
 var erasureDrainSteps = []drainStep{
 	limitStep("message_mentions",
 		`DELETE FROM message_mentions WHERE rowid IN (SELECT rowid FROM message_mentions WHERE mentioned_user_id = ?1 LIMIT ?2)`),
 	limitStep("message_delivery_receipts",
 		`DELETE FROM message_delivery_receipts WHERE rowid IN (SELECT rowid FROM message_delivery_receipts WHERE user_id = ?1 LIMIT ?2)`),
-	// mention_receipts is WITHOUT ROWID, so the chunk is named by its primary key.
 	limitStep("mention_receipts",
 		`DELETE FROM mention_receipts WHERE (user_id, channel_id, message_id) IN
 		   (SELECT user_id, channel_id, message_id FROM mention_receipts WHERE user_id = ?1 LIMIT ?2)`),
 	// poll_votes is WITHOUT ROWID, so the chunk is named by its primary key. The
-	// polls the chunk's votes belong to get their version bumped in the same
-	// transaction as the delete, so no reader sees the old counts at a newer
-	// version.
+	// polls it touches get their version bumped in the same transaction as the
+	// delete, so no reader sees old counts at a newer version.
 	pollVotesStep(),
 	{label: "attachments uploaded", run: drainUploadedAttachments},
 	{label: "messages", run: drainMessages},
@@ -36,8 +30,6 @@ var erasureDrainSteps = []drainStep{
 	windowStep("events", "events", "seq", EventNamesUserPredicate),
 }
 
-// limitStep deletes at most erasureChunk rows with query (?1 the user id, ?2
-// the limit); a chunk that deleted fewer than the limit was the last.
 func limitStep(label, query string) drainStep {
 	return drainStep{label: label, run: func(ctx context.Context, tx *sql.Tx, userID, _ int64) (drainResult, error) {
 		res, err := tx.ExecContext(ctx, query, userID, erasureChunk)
@@ -52,14 +44,11 @@ func limitStep(label, query string) drainStep {
 	}}
 }
 
-// pollVotesChunk names one chunk of the subject's votes by primary key, in key
-// order so the bump and the delete in one transaction see the same rows.
+// pollVotesChunk names one chunk of the subject's votes by primary key, in key order
+// so the bump and the delete see the same rows.
 const pollVotesChunk = `SELECT message_id, user_id, answer_id FROM poll_votes WHERE user_id = ?1
 		   ORDER BY message_id, user_id, answer_id LIMIT ?2`
 
-// pollVotesStep deletes a chunk of the subject's poll votes. Before it does,
-// it bumps polls.version for each poll the chunk touches, so a
-// client refetch sees counts fresher than any copy it holds.
 func pollVotesStep() drainStep {
 	bump := `UPDATE polls SET version = version + 1 WHERE message_id IN
 		   (SELECT message_id FROM poll_votes WHERE (message_id, user_id, answer_id) IN (` + pollVotesChunk + `))`
@@ -80,12 +69,10 @@ func pollVotesStep() drainStep {
 	}}
 }
 
-// windowStep walks table by key column in windows of erasureScanWindow real
-// keys, deleting the rows predicate (bound to the user id as ?1) matches in
-// each. The cursor is the first key of the next window, so gaps left by
-// earlier deletes cost nothing.
+// windowStep walks table by key in windows of erasureScanWindow real keys, deleting
+// the rows predicate (?1 the user id) matches; the cursor is the next window's first
+// key.
 func windowStep(label, table, key, predicate string) drainStep {
-	// The identifiers are package constants above; only values are bound.
 	span := "SELECT COALESCE(MAX(" + key + "), 0) FROM (SELECT " + key + " FROM " + table +
 		" WHERE " + key + " >= ?1 ORDER BY " + key + " LIMIT ?2)"
 	del := "DELETE FROM " + table + " WHERE " + key + " >= ?2 AND " + key + " <= ?3 AND (" + predicate + ")" //nolint:gosec // G202: identifiers and predicate are package constants
@@ -104,9 +91,8 @@ func windowStep(label, table, key, predicate string) drainStep {
 	}}
 }
 
-// drainUploadedAttachments removes attachments the subject uploaded (the
-// avatar is one) and returns their stored names. Those on the subject's own
-// messages are taken with the messages below.
+// drainUploadedAttachments removes attachments the subject uploaded (the avatar
+// is one) and returns their stored names; those on their messages go with drainMessages.
 func drainUploadedAttachments(ctx context.Context, tx *sql.Tx, userID, _ int64) (drainResult, error) {
 	rows, err := tx.QueryContext(ctx,
 		`DELETE FROM attachments WHERE id IN (SELECT id FROM attachments WHERE uploader_id = ?1 LIMIT ?2) RETURNING stored_as`,
@@ -129,11 +115,8 @@ func drainUploadedAttachments(ctx context.Context, tx *sql.Tx, userID, _ int64) 
 	return drainResult{done: len(files) < erasureChunk, files: files}, nil
 }
 
-// drainMessages removes up to erasureChunk of the subject's messages in
-// retention's order (SweepRetention): reverse the mention badges those
-// messages raised, collect and delete their attachments, delete the messages.
-// The attachment names are appended to the job by the caller in the same
-// transaction.
+// drainMessages removes up to erasureChunk of the subject's messages in retention's
+// order (reverse badges, delete attachments, delete messages); the caller journals the names.
 func drainMessages(ctx context.Context, tx *sql.Tx, userID, _ int64) (drainResult, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM messages WHERE user_id = ?1 ORDER BY id LIMIT ?2`, userID, erasureChunk)
 	if err != nil {
@@ -169,16 +152,9 @@ func drainMessages(ctx context.Context, tx *sql.Tx, userID, _ int64) (drainResul
 	return drainResult{done: len(ids) < erasureChunk, files: files}, nil
 }
 
-// erasureReverseMentionCountsFor is erasureReverseMentionCounts for an
-// explicit set of the subject's messages, across channels
-// (reverseMentionCountsForMessages is per channel and cannot be reused). The
-// decrements are computed from the message ids outward, so the cost follows
-// the chunk and not the size of read_states; the guards are the same as the
-// whole-account statement's — counted per mention_receipts, undeleted, past the reader's last_message_id,
-// not from an author the reader blocked.
+// erasureReverseMentionCountsFor is erasureReverseMentionCounts for an explicit
+// message set across channels, computed from the ids outward so cost follows the chunk.
 func erasureReverseMentionCountsFor(ctx context.Context, tx *sql.Tx, in string, args []any) error {
-	// The placeholder list is spliced by Replace and holds "?" markers only;
-	// every id is bound below.
 	query := strings.Replace(`WITH dec AS (
 		SELECT r.user_id AS uid, r.channel_id AS cid, COUNT(*) AS n
 		  FROM messages m

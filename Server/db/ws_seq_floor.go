@@ -13,34 +13,29 @@ import (
 )
 
 // The WebSocket sequence floor is also kept in a sidecar file beside the
-// database, outside every backup and every restore. The copy in the settings
-// table is overwritten when an admin restores a backup, which rewinds it to
-// the value the backup captured; the sidecar is not, so the next boot can
-// take the larger of the two and reserve its seq block above anything the
-// pre-restore server handed out.
+// database, outside every backup and restore. The settings-table copy is
+// rewound when an admin restores a backup; the sidecar is not, so the next boot
+// takes the larger and reserves its seq block above anything the pre-restore server handed out.
 
 const wsSeqFloorSuffix = ".ws-seq-floor"
 
-// WSSeqFloorSettingKey is the settings-table key the boot-time seq floor is
-// persisted under; the restore paths read it from the live database.
+// WSSeqFloorSettingKey is the settings key the boot-time seq floor is persisted under;
+// restore paths read it from the live database.
 const WSSeqFloorSettingKey = "ws_seq_floor"
 
-// WSSeqFloorReserve is the block every boot reserves above the stored floor.
-// It only has to exceed what one boot could emit before its next
-// restart.
+// WSSeqFloorReserve is the block every boot reserves above the stored floor; it only
+// has to exceed what one boot could emit before its next restart.
 const WSSeqFloorReserve = 1_000_000_000
 
-// MaxWSSeqFloor is the largest floor that is stored or accepted: 2^53, the
-// last point where every seq is still exactly representable in a JSON number.
-// A boot that would reserve past it stores MaxWSSeqFloor instead, so the floor
-// saturates and is never rejected or moved down by the next boot.
+// MaxWSSeqFloor is the largest floor stored or accepted: 2^53, the last point where
+// every seq is exactly representable in a JSON number. A boot that would reserve past
+// it stores MaxWSSeqFloor, so the floor saturates.
 const MaxWSSeqFloor uint64 = 1 << 53
 
-// WSSeqFloorSidecar reads the sequence floor recorded beside the database.
-// ok is false for an in-memory database, a missing file, or a file that does
-// not hold exactly one canonical uint64 — callers fall back to the settings
-// table and boot is never blocked. A damaged file is reported in err so the
-// caller can log it.
+// WSSeqFloorSidecar reads the sequence floor recorded beside the database. ok is false
+// for an in-memory database, a missing file, or one not holding exactly one canonical
+// uint64; callers fall back to the settings table. A damaged file is reported in err
+// for logging.
 func (d *DB) WSSeqFloorSidecar() (floor uint64, ok bool, err error) {
 	return readWSSeqFloorFile(d.wsSeqFloorPath())
 }
@@ -69,10 +64,8 @@ func readWSSeqFloorFile(path string) (floor uint64, ok bool, err error) {
 	return parsed, true, nil
 }
 
-// StoreWSSeqFloorSidecar records floor beside the database with a
-// write-temp, fsync, rename sequence, so a crash leaves either the previous
-// value or the new one and never a partial file. It is a no-op for an
-// in-memory database.
+// StoreWSSeqFloorSidecar records floor with write-temp, fsync, rename, so a crash
+// leaves the previous or new value, never a partial file. No-op in memory.
 func (d *DB) StoreWSSeqFloorSidecar(floor uint64) error {
 	return writeWSSeqFloorFile(d.wsSeqFloorPath(), floor)
 }
@@ -112,8 +105,8 @@ func (d *DB) wsSeqFloorPath() string {
 	return base + wsSeqFloorSuffix
 }
 
-// wsSeqFloorPathFor is the sidecar path for the database at dbPath, resolved
-// the way walFilePath is so a live handle and a path-based caller agree.
+// wsSeqFloorPathFor is the sidecar path for dbPath, resolved as walFilePath is so a
+// live handle and a path-based caller agree.
 func wsSeqFloorPathFor(dbPath string) string {
 	p, err := dbFilePath(dbPath)
 	if err != nil {
@@ -125,19 +118,18 @@ func wsSeqFloorPathFor(dbPath string) string {
 	return p + wsSeqFloorSuffix
 }
 
-// ErrWSSeqFloorNotStored means CarryWSSeqFloorForRestore found a floor to keep
-// but could not write it beside the database, so a restore must not go on.
+// ErrWSSeqFloorNotStored means CarryWSSeqFloorForRestore found a floor to keep but
+// could not write it beside the database, so a restore must not go on.
 var ErrWSSeqFloorNotStored = errors.New("ws seq floor sidecar not stored")
 
 // CarryWSSeqFloorForRestore must run after the live database is closed and
 // before a backup is copied over it. It folds the live settings.ws_seq_floor
-// into the sidecar (keeping the larger of the two), so a restore that rewinds
-// the settings row cannot make the next boot reuse a block the pre-restore
-// server already handed out. This also covers an install whose sidecar has
-// never been written. When the live database is missing or unreadable only
-// the existing sidecar protects the next boot, and that error is for the
-// caller to log. A floor that cannot be written wraps ErrWSSeqFloorNotStored,
-// and the caller must refuse the restore.
+// into the sidecar (keeping the larger), so a restore that rewinds the settings
+// row cannot make the next boot reuse a block the pre-restore server handed out;
+// this also covers an install whose sidecar was never written. When the live
+// database is missing or unreadable only the existing sidecar protects the next
+// boot; that error is for the caller to log. A floor that cannot be written wraps
+// ErrWSSeqFloorNotStored and the caller must refuse the restore.
 func CarryWSSeqFloorForRestore(ctx context.Context, dbPath string) error {
 	path := wsSeqFloorPathFor(dbPath)
 	if path == "" {

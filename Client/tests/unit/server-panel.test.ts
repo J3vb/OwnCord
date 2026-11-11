@@ -299,7 +299,6 @@ describe("ServerPanel", () => {
       const onCredentialLoaded = vi.fn();
       vi.mocked(loadCredential).mockResolvedValueOnce({
         username: "saveduser",
-        token: "tok",
         hasPassword: false,
       });
 

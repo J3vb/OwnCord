@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import { createSearchOverlay } from "../../src/components/SearchOverlay";
-import type { SearchOverlayOptions } from "../../src/components/SearchOverlay";
+import { createSearchOverlay } from "../../src/features/navigation/SearchOverlay";
+import type { SearchOverlayOptions } from "../../src/features/navigation/SearchOverlay";
 import type { SearchResultItem } from "../../src/lib/types";
 import { setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";

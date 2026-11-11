@@ -16,9 +16,8 @@ type PersistedEvent struct {
 	CreatedAt time.Time
 }
 
-// PluginRow represents a row in the plugins table (Phase C Step 9).
-// The JSON tags are part of the admin plugin API surface (GET
-// /api/v1/admin/plugins), which the admin panel renders.
+// PluginRow represents a row in the plugins table. The JSON tags are part of the admin
+// plugin API (GET /api/v1/admin/plugins).
 type PluginRow struct {
 	ID           int64     `json:"id"`
 	Name         string    `json:"name"`

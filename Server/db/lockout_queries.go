@@ -15,8 +15,7 @@ func (d *DB) UpsertLockout(ctx context.Context, key string, expiresAt time.Time)
 	})
 }
 
-// LoadActiveLockouts returns all lockouts that have not yet expired as
-// parallel slices of keys and expiry times.
+// LoadActiveLockouts returns unexpired lockouts as parallel key and expiry slices.
 func (d *DB) LoadActiveLockouts(ctx context.Context) (keys []string, expiresAt []time.Time, err error) {
 	rows, err := d.q.LoadActiveLockouts(ctx, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {

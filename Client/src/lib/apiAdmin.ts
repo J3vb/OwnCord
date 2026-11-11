@@ -33,7 +33,7 @@ export function createAdminApi(t: ApiTransport) {
       },
       signal?: AbortSignal,
     ): Promise<ChannelResponse> {
-      return t.channelRequest<ChannelResponse>("POST", "", data, signal);
+      return t.channelRequest("ChannelResponse", "POST", "", data, signal);
     },
 
     adminUpdateChannel(
@@ -71,7 +71,7 @@ export function createAdminApi(t: ApiTransport) {
       },
       signal?: AbortSignal,
     ): Promise<ChannelResponse> {
-      return t.channelRequest<ChannelResponse>("PATCH", `/${id}`, data, signal);
+      return t.channelRequest("ChannelResponse", "PATCH", `/${id}`, data, signal);
     },
 
     /**
@@ -84,11 +84,11 @@ export function createAdminApi(t: ApiTransport) {
       data: ForumSettingsBody,
       signal?: AbortSignal,
     ): Promise<ChannelResponse> {
-      return t.channelRequest<ChannelResponse>("PUT", `/${id}/forum`, data, signal);
+      return t.channelRequest("ChannelResponse", "PUT", `/${id}/forum`, data, signal);
     },
 
     adminDeleteChannel(id: number, signal?: AbortSignal): Promise<void> {
-      return t.channelRequest<void>("DELETE", `/${id}`, undefined, signal);
+      return t.channelRequest("NoBody", "DELETE", `/${id}`, undefined, signal);
     },
 
     // ── Admin: Channel categories ──────────────────
@@ -97,17 +97,17 @@ export function createAdminApi(t: ApiTransport) {
 
     /** Create a category, appended last. 409 CATEGORY_NAME_TAKEN on a duplicate name. */
     adminCreateCategory(name: string, signal?: AbortSignal): Promise<ChannelCategory> {
-      return t.channelRequest<ChannelCategory>("POST", "/categories", { name }, signal);
+      return t.channelRequest("ChannelCategory", "POST", "/categories", { name }, signal);
     },
 
     /** Rename a category: every channel in it follows. 409 CATEGORY_NAME_TAKEN, 404 when gone. */
     adminRenameCategory(id: number, name: string, signal?: AbortSignal): Promise<ChannelCategory> {
-      return t.channelRequest<ChannelCategory>("PATCH", `/categories/${id}`, { name }, signal);
+      return t.channelRequest("ChannelCategory", "PATCH", `/categories/${id}`, { name }, signal);
     },
 
     /** Delete a category. Its channels are not deleted: they become uncategorized. */
     adminDeleteCategory(id: number, signal?: AbortSignal): Promise<void> {
-      return t.channelRequest<void>("DELETE", `/categories/${id}`, undefined, signal);
+      return t.channelRequest("NoBody", "DELETE", `/categories/${id}`, undefined, signal);
     },
 
     /**
@@ -119,12 +119,7 @@ export function createAdminApi(t: ApiTransport) {
       ids: readonly number[],
       signal?: AbortSignal,
     ): Promise<readonly ChannelCategory[]> {
-      return t.channelRequest<readonly ChannelCategory[]>(
-        "PUT",
-        "/categories/order",
-        { ids },
-        signal,
-      );
+      return t.channelRequest("ChannelCategoryList", "PUT", "/categories/order", { ids }, signal);
     },
 
     // ── Members (moderation) ────────────────────────────────
@@ -133,7 +128,7 @@ export function createAdminApi(t: ApiTransport) {
     // same handlers and rank checks on both (admin.NewMemberAPI).
 
     adminKickMember(userId: number, signal?: AbortSignal): Promise<void> {
-      return t.memberRequest<void>("DELETE", `/${userId}/sessions`, undefined, signal);
+      return t.memberRequest("NoBody", "DELETE", `/${userId}/sessions`, undefined, signal);
     },
 
     /**
@@ -149,7 +144,8 @@ export function createAdminApi(t: ApiTransport) {
       signal?: AbortSignal,
       deleteMessageSeconds?: number,
     ): Promise<BanMemberResponse> {
-      return t.memberRequest<BanMemberResponse>(
+      return t.memberRequest(
+        "BanMemberResponse",
         "PATCH",
         `/${userId}`,
         {
@@ -166,7 +162,8 @@ export function createAdminApi(t: ApiTransport) {
     },
 
     adminChangeRole(userId: number, roleId: number, signal?: AbortSignal): Promise<void> {
-      return t.memberRequest<void>(
+      return t.memberRequest(
+        "NoBody",
         "PATCH",
         `/${userId}`,
         {
@@ -183,7 +180,7 @@ export function createAdminApi(t: ApiTransport) {
      * Answers 204; the roster changes on the `member_update` echo.
      */
     adminAddMemberRole(userId: number, roleId: number, signal?: AbortSignal): Promise<void> {
-      return t.memberRequest<void>("PUT", `/${userId}/roles/${roleId}`, undefined, signal);
+      return t.memberRequest("NoBody", "PUT", `/${userId}/roles/${roleId}`, undefined, signal);
     },
 
     /**
@@ -191,7 +188,7 @@ export function createAdminApi(t: ApiTransport) {
      * `LAST_ROLE`; otherwise the same checks and echo as `adminAddMemberRole`.
      */
     adminRemoveMemberRole(userId: number, roleId: number, signal?: AbortSignal): Promise<void> {
-      return t.memberRequest<void>("DELETE", `/${userId}/roles/${roleId}`, undefined, signal);
+      return t.memberRequest("NoBody", "DELETE", `/${userId}/roles/${roleId}`, undefined, signal);
     },
 
     /**
@@ -200,7 +197,7 @@ export function createAdminApi(t: ApiTransport) {
      * roster entry, so the roster needs no refreshing locally.
      */
     adminUnbanMember(userId: number, signal?: AbortSignal): Promise<void> {
-      return t.memberRequest<void>("PATCH", `/${userId}`, { banned: false }, signal);
+      return t.memberRequest("NoBody", "PATCH", `/${userId}`, { banned: false }, signal);
     },
 
     /**
@@ -208,21 +205,27 @@ export function createAdminApi(t: ApiTransport) {
      * banned member is removed from the roster entirely (MEMBER_BAN), so this
      * is the only way back to them. The server pages it (limit caps at 500,
      * ordered by ascending id), so this walks every page: one page alone would
-     * hide a ban on any account past the first 500.
+     * hide a ban on any account past the first 500. `bannedOnly` asks the
+     * server for banned accounts only; a server from before that filter
+     * ignores it and returns everyone, so callers still check the ban state.
      */
-    async adminListUsers(signal?: AbortSignal): Promise<AdminUser[]> {
+    async adminListUsers(
+      signal?: AbortSignal,
+      opts?: { readonly bannedOnly?: boolean },
+    ): Promise<AdminUser[]> {
       const pageSize = 500;
       const users: AdminUser[] = [];
       // ponytail: 200 pages (100k accounts) is a stop for a server that never
-      // returns a short page, not a product limit; a banned-only server query
-      // is the upgrade if the walk ever gets slow.
+      // returns a short page, not a product limit.
       for (let pageIndex = 0; pageIndex < 200; pageIndex++) {
         const params = new URLSearchParams({
           limit: String(pageSize),
           offset: String(pageIndex * pageSize),
         });
+        if (opts?.bannedOnly) params.set("banned", "1");
         // oxlint-disable-next-line no-await-in-loop -- sequential paging: whether a next page exists depends on this one
-        const page = await t.memberRequest<AdminUser[]>(
+        const page = await t.memberRequest(
+          "AdminUserList",
           "GET",
           `?${params.toString()}`,
           undefined,

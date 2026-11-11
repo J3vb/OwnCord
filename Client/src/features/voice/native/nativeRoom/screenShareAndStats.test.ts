@@ -7,6 +7,7 @@ import { nativeCounters } from "../counters";
 import { setLocalDeafened } from "../../../../stores/voice.store";
 import { createConnectionStatsPoller } from "../../../../lib/voice/connectionStats";
 import { readSenderSample } from "../../shareSenderStats";
+import { applyVideoBitrateCap, resetVideoBitrateCap } from "../../videoBitrateCap";
 import {
   audio,
   emit,
@@ -411,6 +412,36 @@ describe("NativeRoom screen share", () => {
     ]);
   });
 
+  it("publishes under the server's video cap: the lower rate, and one layer when it is tight", async () => {
+    host.pick = () =>
+      Promise.resolve({
+        source: "screen:7",
+        capture: { fps: 30, maxWidth: 1280, maxHeight: 720 },
+        maxBitrate: 3_000_000,
+        maxFramerate: 30,
+        simulcast: true,
+      });
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    applyVideoBitrateCap(2_000_000);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    expect(host.calls.at(-1)?.[1]).toEqual([
+      1,
+      4,
+      expect.objectContaining({ maxBitrate: 2_000_000, simulcast: false }),
+    ]);
+    // The track keeps what the picker chose: a lifted cap restores it.
+    resetVideoBitrateCap();
+    await room.localParticipant.unpublishTrack(screen.mediaStreamTrack, false);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    expect(host.calls.at(-1)?.[1]).toEqual([
+      1,
+      4,
+      expect.objectContaining({ maxBitrate: 3_000_000, simulcast: true }),
+    ]);
+  });
+
   it("maps a closed picker to a dismissed picker and a portal that never started to its own outcome", async () => {
     const dismissed = { name: "NotAllowedError", message: "Permission denied by user" };
     const room = createNativeRoom(audio);
@@ -523,7 +554,7 @@ describe("NativeRoom stats", () => {
     host.getStats = () => Promise.resolve(sample());
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
-    const poller = createConnectionStatsPoller(() => room as never);
+    const poller = createConnectionStatsPoller(() => room);
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
     const stats = poller.getStats();
@@ -606,7 +637,7 @@ describe("NativeRoom stats", () => {
     host.getStats = () => Promise.resolve(null);
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
-    const poller = createConnectionStatsPoller(() => room as never);
+    const poller = createConnectionStatsPoller(() => room);
     const updates = vi.fn();
     poller.onUpdate(updates);
     poller.start();

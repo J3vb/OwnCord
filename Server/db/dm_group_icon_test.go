@@ -251,3 +251,46 @@ func TestEraseAccount_ClearsIconUploadedBySubject(t *testing.T) {
 		t.Errorf("summary after erasure = %+v, %v; want no icon", dms, err)
 	}
 }
+
+// A member who uploaded the group's icon and then leaves (or is removed) takes
+// the icon out of use: the group shows no icon, and the file is theirs to delete
+// again. An icon someone else uploaded stays through the same exit.
+func TestGroupDMExit_ClearsTheIconTheLeaverUploaded(t *testing.T) {
+	for _, exit := range []string{"leave", "remove"} {
+		t.Run(exit, func(t *testing.T) {
+			f := newGroupRowFixture(t)
+			ctx := context.Background()
+			seedIconAttachment(t, f.database, "icon-bob", f.bob)
+			_, err := f.database.SetGroupDMIcon(ctx, f.group, f.bob, new("icon-bob"), "set")
+			mustDo(t, "SetGroupDMIcon", err)
+
+			if exit == "leave" {
+				_, err = f.database.LeaveGroupDM(ctx, f.bob, f.group, "bob left")
+			} else {
+				_, err = f.database.RemoveGroupDMMember(ctx, f.group, f.alice, f.bob, "removed")
+			}
+			mustDo(t, exit, err)
+			if got := iconOf(t, f.database, f.group); got != "" {
+				t.Errorf("dm_icon = %q after its uploader's %s, want none", got, exit)
+			}
+			_, found, err := f.database.DeleteOwnAttachment(ctx, "icon-bob", f.bob)
+			mustDo(t, "DeleteOwnAttachment", err)
+			if !found {
+				t.Error("the ex-member still cannot delete the icon file they uploaded")
+			}
+		})
+	}
+}
+
+func TestGroupDMExit_KeepsAnIconUploadedBySomeoneElse(t *testing.T) {
+	f := newGroupRowFixture(t)
+	ctx := context.Background()
+	seedIconAttachment(t, f.database, "icon-bob", f.bob)
+	_, err := f.database.SetGroupDMIcon(ctx, f.group, f.bob, new("icon-bob"), "set")
+	mustDo(t, "SetGroupDMIcon", err)
+	_, err = f.database.LeaveGroupDM(ctx, f.carol, f.group, "carol left")
+	mustDo(t, "LeaveGroupDM", err)
+	if got := iconOf(t, f.database, f.group); got != "icon-bob" {
+		t.Errorf("dm_icon = %q after another member left, want icon-bob", got)
+	}
+}

@@ -1,7 +1,7 @@
 import { vi, type Mock } from "vitest";
 import type { Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
-import type { enableScreenshare } from "@lib/voice/screenShare";
+import type { enableScreenshare } from "../../src/features/voice/screenShare";
 
 export type ScreenShareDeps = Parameters<typeof enableScreenshare>[1] & {
   onError: Mock<(message: string) => void>;

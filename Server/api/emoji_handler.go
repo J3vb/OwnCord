@@ -23,15 +23,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// EmojiBroadcaster is the slice of the hub the emoji routes need: after every
-// mutation the full set is pushed to every client so pickers, rendering and
-// reaction pills converge without a reconnect.
+// EmojiBroadcaster is the slice of the hub the emoji routes need: after every mutation the full set is
+// pushed to all clients.
 type EmojiBroadcaster interface {
 	BroadcastEmojiUpdate(list []*db.Emoji)
 }
 
-// emojiResponse is one emoji in GET/POST /api/v1/emoji. Deliberately not
-// db.Emoji: the storage id and sniffed mime type are server-side details.
+// Deliberately not db.Emoji: the storage id and sniffed mime type are server-side details.
 type emojiResponse struct {
 	ID        int64  `json:"id"`
 	Shortcode string `json:"shortcode"`
@@ -53,10 +51,8 @@ func toEmojiResponses(list []*db.Emoji) []emojiResponse {
 	return out
 }
 
-// allowedEmojiMIME is the set of image types an emoji may be, matched against
-// the type sniffed from the bytes. SVG is absent on purpose: it is script- and
-// external-fetch-capable markup, which isUnsafeInlineMIME forces to a download
-// on the attachment route, and an emoji is always rendered inline.
+// Image types an emoji may be, matched against the sniffed type. SVG is absent on purpose: it is
+// script-capable markup that isUnsafeInlineMIME forces to a download, and an emoji always renders inline.
 var allowedEmojiMIME = map[string]bool{
 	"image/png":  true,
 	"image/jpeg": true,
@@ -64,11 +60,9 @@ var allowedEmojiMIME = map[string]bool{
 	"image/webp": true,
 }
 
-// MountEmojiRoutes registers the custom-emoji endpoints; every route needs
-// authentication. Reading is otherwise ungated (emoji are server-wide) while
-// POST and DELETE are gated on MANAGE_SERVER inside EmojiService. The image
-// route is authenticated so an emoji cannot serve as a tracking pixel hosted on
-// someone else's server.
+// MountEmojiRoutes registers the custom-emoji endpoints; all need authentication. POST and DELETE are
+// gated on MANAGE_SERVER inside EmojiService. The image route is authenticated so an emoji cannot serve as
+// a tracking pixel hosted on someone else's server.
 func MountEmojiRoutes(r chi.Router, svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster EmojiBroadcaster) {
 	r.Route("/api/v1/emoji", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
@@ -91,11 +85,9 @@ func handleListEmoji(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleCreateEmoji processes POST /api/v1/emoji (multipart: `file` +
-// `shortcode`). Order matters: the permission gate runs BEFORE the multipart
-// parse so a member without MANAGE_SERVER cannot make the server spool a body to
-// disk; the shortcode is validated next; only then are the bytes read, sniffed,
-// measured and stored.
+// handleCreateEmoji processes POST /api/v1/emoji (multipart: `file` + `shortcode`). The permission gate
+// runs BEFORE the multipart parse so a member without MANAGE_SERVER cannot make the server spool a body to
+// disk.
 func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster EmojiBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -113,8 +105,7 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 			return
 		}
 
-		// Bound the body before the multipart parser: the route has MaxBodySize
-		// too, but the parser is what turns an unbounded body into heap.
+		// Bound the body before the multipart parser, which is what turns an unbounded body into heap.
 		r.Body = http.MaxBytesReader(w, r.Body, emojiMaxBodySize)
 
 		if err := r.ParseMultipartForm(emojiMultipartMemoryLimit); err != nil {
@@ -133,10 +124,8 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 			return
 		}
 
-		// Emoji are a bounded exclusion from the per-user quota (a
-		// server-wide asset that changes owner on erasure, MANAGE_SERVER-gated,
-		// capped at service.MaxEmojiCount files of maxEmojiFileBytes) but not
-		// from the headroom floor: a full disk is full for everyone.
+		// Emoji are a bounded exclusion from the per-user quota (server-wide, MANAGE_SERVER-gated, capped at
+		// service.MaxEmojiCount files) but not from the headroom floor: a full disk is full for everyone.
 		res, err := svc.Uploads.ReserveHeadroom(r.Context(), int64(len(raw)))
 		if err != nil {
 			writeStorageSaveError(w, err, "emoji upload")
@@ -146,15 +135,14 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 
 		storedAs := uuid.New().String()
 		if _, saveErr := saveReserved(r.Context(), res, store, storedAs, bytes.NewReader(raw)); saveErr != nil {
-			// writeStorageSaveError also stops raw storage errors (which embed
-			// absolute paths) reaching the response body.
+			// writeStorageSaveError also keeps raw storage errors (absolute paths) out of the response body.
 			writeStorageSaveError(w, saveErr, "emoji upload")
 			return
 		}
 
 		created, err := svc.Emoji.Create(r.Context(), user.ID, shortcode, storedAs, mimeType)
 		if err != nil {
-			// The row never landed, so the file is an orphan — unlink it.
+			// The row never landed, so the file is an orphan; unlink it.
 			if delErr := store.Delete(storedAs); delErr != nil {
 				slog.Error("failed to clean up orphaned emoji file", "stored_as", storedAs, "error", delErr)
 			}
@@ -168,9 +156,8 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 	}
 }
 
-// readEmojiUpload pulls the file out of the parsed multipart form and enforces
-// the size cap, sniffed MIME type and sniffed dimensions. It writes the refusal
-// itself, so a false third result means the response is complete.
+// readEmojiUpload pulls the file from the parsed form and enforces size, sniffed MIME and dimensions. It
+// writes the refusal itself, so a false third result means the response is complete.
 func readEmojiUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bool) {
 	file, _, err := r.FormFile("file")
 	if err != nil {
@@ -179,8 +166,8 @@ func readEmojiUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bo
 	}
 	defer file.Close() //nolint:errcheck
 
-	// Read at most one byte past the cap so "exactly at the limit" passes
-	// and "one byte over" is caught, without buffering an unbounded body.
+	// Read one byte past the cap so exactly-at-limit passes and one-over is caught without buffering an
+	// unbounded body.
 	raw, err := io.ReadAll(io.LimitReader(file, maxEmojiFileBytes+1))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "failed to read uploaded file")
@@ -202,9 +189,7 @@ func readEmojiUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bo
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "could not read image dimensions")
 		return nil, "", false
 	}
-	// Re-check the sniffed dimensions rather than trust the client: the cap
-	// keeps an "emoji" from being a full-size picture inlined into every message
-	// that names it.
+	// Re-check the sniffed dimensions rather than trust the client, so an "emoji" is not a full-size picture.
 	if width <= 0 || height <= 0 || width > maxEmojiDimension || height > maxEmojiDimension {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("emoji must be at most %dx%d pixels (got %dx%d)", maxEmojiDimension, maxEmojiDimension, width, height))
 		return nil, "", false
@@ -230,8 +215,7 @@ func handleDeleteEmoji(svc *service.Services, store FileStore, broadcaster Emoji
 			writeServiceError(r.Context(), w, err)
 			return
 		}
-		// The row is already gone, so a failed unlink leaves an orphaned blob,
-		// not a broken emoji — log it rather than failing a successful delete.
+		// The row is already gone, so a failed unlink leaves an orphaned blob, not a broken emoji; log it.
 		if delErr := store.Delete(removed.StoredAs); delErr != nil {
 			slog.Warn("failed to remove emoji file", "stored_as", removed.StoredAs, "error", delErr)
 		}
@@ -241,11 +225,8 @@ func handleDeleteEmoji(svc *service.Services, store FileStore, broadcaster Emoji
 	}
 }
 
-// broadcastEmojiSet re-reads the set and pushes it to every client. A failure is
-// logged and swallowed: the mutation succeeded and the caller's response carries
-// the change. It runs after commit, so the request context may be canceled;
-// context.WithoutCancel detaches the re-read (as service/emoji.go does for its
-// post-commit audit write).
+// broadcastEmojiSet re-reads the set and pushes it to every client. A failure is logged and swallowed: the
+// mutation succeeded. It runs after commit, so the re-read is detached with context.WithoutCancel.
 func broadcastEmojiSet(ctx context.Context, svc *service.Services, broadcaster EmojiBroadcaster) {
 	if broadcaster == nil {
 		return
@@ -258,10 +239,8 @@ func broadcastEmojiSet(ctx context.Context, svc *service.Services, broadcaster E
 	broadcaster.BroadcastEmojiUpdate(list)
 }
 
-// handleServeEmojiImage serves one emoji's bytes. Unlike /api/v1/files/{id}
-// there is no per-channel ACL: an emoji is server-wide, so authentication is the
-// whole check. The response is immutable for the id's lifetime (a replacement is
-// a new row), so it can be cached hard.
+// handleServeEmojiImage serves one emoji's bytes. An emoji is server-wide, so authentication is the whole
+// check; the response is immutable for the id's lifetime (a replacement is a new row), so it caches hard.
 func handleServeEmojiImage(svc *service.Services, store FileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, ok := pathID(r, "id")
@@ -288,8 +267,7 @@ func handleServeEmojiImage(svc *service.Services, store FileStore) http.HandlerF
 		w.Header().Set("Content-Type", e.MimeType)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Disposition", "inline")
-		// Private (it needed a session to fetch) but immutable, so a client may
-		// keep it for a day rather than re-fetching it for every message.
+		// Private (it needed a session) but immutable, so a client may keep it for a day.
 		w.Header().Set("Cache-Control", "private, max-age=86400, immutable")
 
 		var modTime time.Time
@@ -300,11 +278,9 @@ func handleServeEmojiImage(svc *service.Services, store FileStore) http.HandlerF
 	}
 }
 
-// imageDimensions returns the pixel size of an image already known to be an
-// allowed type. PNG/JPEG/GIF use image.DecodeConfig; WebP has no stdlib decoder,
-// so its header is read directly (decoding a whole frame just to learn its size
-// is the work the cap exists to avoid). Shared by the emoji and avatar upload
-// routes.
+// imageDimensions returns the pixel size of an image of an allowed type. WebP has no stdlib decoder, so its
+// header is read directly (decoding a frame just for its size is the work the cap exists to avoid). Shared
+// by the emoji and avatar upload routes.
 func imageDimensions(raw []byte, mimeType string) (width, height int, err error) {
 	if mimeType == "image/webp" {
 		width, height, err = webpDimensions(raw)
@@ -319,33 +295,25 @@ func imageDimensions(raw []byte, mimeType string) (width, height int, err error)
 	if err != nil {
 		return 0, 0, err
 	}
-	// Callers compare a non-error result straight against their pixel cap, so
-	// reject zero width or height here: it is a degenerate header, not a small
-	// image (Go's GIF DecodeConfig reports height=0 for a malformed logical
-	// screen descriptor), and the invariant then holds even for a caller that
-	// forgets to re-check.
+	// Callers compare a non-error result straight against their pixel cap, so reject zero width or height
+	// here: Go's GIF DecodeConfig reports height=0 for a malformed screen descriptor.
 	if width <= 0 || height <= 0 {
 		return 0, 0, fmt.Errorf("decoding image config: non-positive dimensions %dx%d", width, height)
 	}
 	return width, height, nil
 }
 
-// errBadWebP is returned for any WebP whose header does not parse; the caller
-// turns it into the same 400 a corrupt PNG gets.
+// errBadWebP is returned for any WebP whose header does not parse; the caller answers 400.
 var errBadWebP = errors.New("malformed WebP header")
 
-// webpDimensions reads the canvas size out of a RIFF/WEBP container. All three
-// chunk flavours are handled: VP8 (lossy), VP8L (lossless) and VP8X (extended,
-// which is what an animated or alpha WebP uses).
+// webpDimensions reads the canvas size out of a RIFF/WEBP container: VP8 (lossy), VP8L (lossless) and VP8X
+// (extended, used by animated or alpha WebP).
 func webpDimensions(raw []byte) (width, height int, err error) {
-	// 12-byte RIFF header + at least a 4-byte chunk fourcc.
 	if len(raw) < 16 || string(raw[0:4]) != "RIFF" || string(raw[8:12]) != "WEBP" {
 		return 0, 0, errBadWebP
 	}
 	switch string(raw[12:16]) {
 	case "VP8 ":
-		// Chunk payload starts at 20; the keyframe start code sits 3 bytes in,
-		// followed by two 14-bit dimensions (the top 2 bits are a scale field).
 		if len(raw) < 30 {
 			return 0, 0, errBadWebP
 		}
@@ -354,16 +322,13 @@ func webpDimensions(raw []byte) (width, height int, err error) {
 		}
 		w := int(binary.LittleEndian.Uint16(raw[26:28]) & 0x3FFF)
 		h := int(binary.LittleEndian.Uint16(raw[28:30]) & 0x3FFF)
-		// Unlike VP8L/VP8X (which store size-1 and cannot encode zero), the VP8
-		// keyframe stores size directly: an all-zero field is a degenerate
-		// header, not a real 0x0 canvas, so reject it.
+		// VP8 stores size directly (unlike VP8L/VP8X, which store size-1): an all-zero field is a degenerate
+		// header; reject it.
 		if w == 0 || h == 0 {
 			return 0, 0, errBadWebP
 		}
 		return w, h, nil
 	case "VP8L":
-		// Payload starts at 20 with a 0x2F signature byte, then a packed
-		// 14+14-bit (width-1, height-1) pair.
 		if len(raw) < 25 || raw[20] != 0x2F {
 			return 0, 0, errBadWebP
 		}
@@ -372,8 +337,6 @@ func webpDimensions(raw []byte) (width, height int, err error) {
 		h := int((bits>>14)&0x3FFF) + 1
 		return w, h, nil
 	case "VP8X":
-		// Payload starts at 20: flags byte, 3 reserved bytes, then canvas
-		// width-1 and height-1 as 24-bit little-endian values.
 		if len(raw) < 30 {
 			return 0, 0, errBadWebP
 		}

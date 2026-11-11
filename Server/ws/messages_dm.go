@@ -7,19 +7,17 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// callSignalPayload carries an ephemeral DM call signal (call_incoming /
-// call_declined). There is no call id: the call is presence in the DM's voice
-// channel.
+// callSignalPayload carries an ephemeral DM call signal (call_incoming / call_declined). No call id: the call
+// is presence in the DM's voice channel.
 type callSignalPayload struct {
 	ChannelID int64  `json:"channel_id"`
 	FromUser  int64  `json:"from_user"`
 	Username  string `json:"username"`
 }
 
-// buildDMChannelOpen constructs a dm_channel_open for one viewer. The payload is
-// db.DMChannelInfo, the shape REST and ready carry. It is built per viewer
-// because recipient/recipients are relative to the reader and each participant's
-// status is the live one (presentDMStatuses), not the users.status row.
+// buildDMChannelOpen constructs a dm_channel_open for one viewer (db.DMChannelInfo, as REST
+// and ready carry). Built per viewer because recipient/recipients are reader-relative and
+// each status is the live one (presentDMStatuses), not the users.status row.
 func buildDMChannelOpen(info db.DMChannelInfo, viewerID int64, liveStatus func(userID int64) string, liveMobile func(userID int64) bool) []byte {
 	presented := presentDMStatuses([]db.DMChannelInfo{info}, viewerID, liveStatus)
 	if liveMobile != nil {
@@ -31,8 +29,7 @@ func buildDMChannelOpen(info db.DMChannelInfo, viewerID int64, liveStatus func(u
 	})
 }
 
-// buildDMChannelOpenFor announces a 1:1 DM to the user on the other end. Returns
-// nil if recipient is nil.
+// buildDMChannelOpenFor announces a 1:1 DM to the user on the other end; nil if recipient is nil.
 func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64, liveStatus func(userID int64) string, liveMobile func(userID int64) bool) []byte {
 	if recipient == nil {
 		slog.Warn("buildDMChannelOpenFor called with nil recipient", "channel_id", channelID)
@@ -59,8 +56,8 @@ func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64, 
 	}, viewerID, liveStatus, liveMobile)
 }
 
-// dmRequestSenderPayload is the sender profile a dm_request carries, so the inbox
-// renders without a second fetch; mirrors GET /api/v1/dm-requests.
+// dmRequestSenderPayload is the sender profile a dm_request carries so the inbox renders without a second
+// fetch; mirrors GET /api/v1/dm-requests.
 type dmRequestSenderPayload struct {
 	ID          int64  `json:"id"`
 	Username    string `json:"username"`
@@ -68,7 +65,6 @@ type dmRequestSenderPayload struct {
 	Avatar      string `json:"avatar"`
 }
 
-// dmRequestPreviewPayload is the held message's preview, present only on creation.
 type dmRequestPreviewPayload struct {
 	MessageID int64  `json:"message_id"`
 	Content   string `json:"content"`
@@ -85,8 +81,8 @@ type dmRequestPayload struct {
 	DecidedAt *string                  `json:"decided_at"`
 }
 
-// buildDMRequest constructs a dm_request: sent once on creation (Preview set) and
-// again with a new State on every transition (Preview nil); see DMRequestEvent.
+// buildDMRequest constructs a dm_request: sent on creation (Preview set) and on every transition (Preview
+// nil); see DMRequestEvent.
 func buildDMRequest(p dmRequestPayload) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeDMRequest,
@@ -94,9 +90,8 @@ func buildDMRequest(p dmRequestPayload) []byte {
 	})
 }
 
-// buildDMRequestForCreation builds the creation-time dm_request for a staged
-// request: req from service.SendMessageResult.RequestCreatedFor, sender from
-// SenderUser, preview from RequestPreview.
+// buildDMRequestForCreation builds the creation-time dm_request for a staged request from
+// service.SendMessageResult (RequestCreatedFor, SenderUser, RequestPreview).
 func buildDMRequestForCreation(req *db.MessageRequest, sender *db.User, preview *service.DMRequestPreview) []byte {
 	avatar := ""
 	if sender.Avatar != nil {

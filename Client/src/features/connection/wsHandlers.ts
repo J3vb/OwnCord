@@ -24,6 +24,7 @@ import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
 import { noteJoinSent } from "../voice/joinRequest";
 import { sendOwedVoiceLeave } from "../voice/leaveOwed";
+import { applyVideoBitrateCap } from "../voice/videoBitrateCap";
 import { livekitSession, log, route } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock, WsRoute } from "./dispatchContext";
 import type { ConnectionState } from "../../lib/ws";
@@ -52,6 +53,9 @@ export function handleAuthOk(
     payload.motd,
     payload.upload_policy ?? null,
   );
+  // The video cap rides every auth_ok, since a resume may have missed its frame
+  // while offline; an older server states none, which is no cap.
+  applyVideoBitrateCap(payload.video_bitrate_cap?.max_video_bitrate ?? 0);
 
   // The resume path can land with no ChannelTopic subscription: the hub
   // only transfers a focused channel from an old connection entry, but

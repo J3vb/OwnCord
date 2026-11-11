@@ -12,8 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// MediaStore is the slice of the database a channel's media gallery reads
-// beyond Store.
+// MediaStore is the slice of the database a channel's media gallery reads beyond Store.
 type MediaStore interface {
 	ListChannelMedia(ctx context.Context, q db.ChannelMediaQuery) ([]db.ChannelMediaItem, error)
 	ChannelMediaBuckets(ctx context.Context, q db.ChannelMediaQuery) ([]db.MediaBucket, error)
@@ -21,7 +20,6 @@ type MediaStore interface {
 
 var _ MediaStore = (*db.DB)(nil)
 
-// Gallery page bounds and the longest file name search.
 const (
 	MediaPageDefaultLimit = 60
 	MediaPageMaxLimit     = 100
@@ -29,10 +27,9 @@ const (
 	maxMediaCursorLen     = 100
 )
 
-// ChannelMediaRequest is one gallery call. Kind is db.MediaKindMedia (also
-// for "") or db.MediaKindFiles. Month ("YYYY-MM", read in TZ) starts the walk
-// at that month and is ignored when Cursor is set. Cursor is a previous
-// page's NextCursor.
+// ChannelMediaRequest is one gallery call. Kind is db.MediaKindMedia (also for "") or
+// db.MediaKindFiles. Month ("YYYY-MM", read in TZ) starts the walk there and is ignored
+// when Cursor is set; Cursor is a previous page's NextCursor.
 type ChannelMediaRequest struct {
 	Kind       string
 	Name       string
@@ -44,8 +41,7 @@ type ChannelMediaRequest struct {
 	Limit      int
 }
 
-// ChannelMediaPage is one page of a channel's media. NextCursor is "" on the
-// last page.
+// ChannelMediaPage is one page of a channel's media.
 type ChannelMediaPage struct {
 	Items      []db.ChannelMediaItem `json:"items"`
 	NextCursor string                `json:"next_cursor"`
@@ -57,8 +53,8 @@ type MediaMonth struct {
 	Count int    `json:"count"`
 }
 
-// ListChannelMedia returns one page of the attachments in a channel the caller
-// may read, behind the same gate as the message history.
+// ListChannelMedia returns one page of the channel's attachments the caller may read, behind the
+// message-history gate.
 func (s *messageReads) ListChannelMedia(ctx context.Context, userID, channelID int64, in ChannelMediaRequest) (page ChannelMediaPage, err error) {
 	if s.media == nil {
 		return ChannelMediaPage{}, fmt.Errorf("%w: the media gallery is not available", ErrInternal)
@@ -110,8 +106,8 @@ func (s *messageReads) ListChannelMedia(ctx context.Context, userID, channelID i
 	return page, nil
 }
 
-// ChannelMediaMonths counts a channel's media per calendar month in the
-// caller's zone, newest month first, with the same filters as the list.
+// ChannelMediaMonths counts media per calendar month in the caller's zone, newest first, with the list's
+// filters.
 func (s *messageReads) ChannelMediaMonths(ctx context.Context, userID, channelID int64, in ChannelMediaRequest) (months []MediaMonth, err error) {
 	if s.media == nil {
 		return nil, fmt.Errorf("%w: the media gallery is not available", ErrInternal)
@@ -134,7 +130,6 @@ func (s *messageReads) ChannelMediaMonths(ctx context.Context, userID, channelID
 	return foldMediaMonths(buckets, loc), nil
 }
 
-// mediaQuery validates the filters shared by the list and the month counts.
 func mediaQuery(userID, channelID int64, in ChannelMediaRequest) (q db.ChannelMediaQuery, err error) {
 	kind := in.Kind
 	switch kind {
@@ -161,7 +156,6 @@ func mediaQuery(userID, channelID int64, in ChannelMediaRequest) (q db.ChannelMe
 	}, nil
 }
 
-// foldMediaMonths sums quarter-hour buckets into local months, newest first.
 func foldMediaMonths(buckets []db.MediaBucket, loc *time.Location) []MediaMonth {
 	byMonth := map[string]int{}
 	for _, b := range buckets {
@@ -175,8 +169,6 @@ func foldMediaMonths(buckets []db.MediaBucket, loc *time.Location) []MediaMonth 
 	return months
 }
 
-// parseMediaMonth reads "YYYY-MM" as local midnight on the 1st in loc and
-// returns that instant and the next month's.
 func parseMediaMonth(val string, loc *time.Location) (start, next time.Time, err error) {
 	t, perr := time.Parse("2006-01", val)
 	if perr != nil || t.Year() < 1 || t.Year() > 9998 {

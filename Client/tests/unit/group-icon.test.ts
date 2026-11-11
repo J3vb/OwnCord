@@ -11,15 +11,15 @@ vi.mock("../../src/features/messaging/content/attachments", () => ({
 }));
 
 import { useDmSidebarHost } from "../helpers/dmSidebarHost";
-import { buildGroupAvatarStack } from "../../src/components/DmSidebar";
-import type { DmConversation } from "../../src/components/DmSidebar";
+import { buildGroupAvatarStack } from "../../src/features/direct-messages/DmSidebar";
+import type { DmConversation } from "../../src/features/direct-messages/DmSidebar";
 import {
   cropGroupIcon,
   removeGroupIcon,
   uploadGroupIcon,
 } from "../../src/features/direct-messages/groupIcon";
 import { ApiClientError, type ApiClient } from "../../src/lib/api";
-import { buildDmConversations } from "../../src/pages/main-page/SidebarDmHelpers";
+import { buildDmConversations } from "../../src/features/direct-messages/SidebarDmHelpers";
 import { dmStore, type DmChannel } from "../../src/stores/dm.store";
 
 const faces = [

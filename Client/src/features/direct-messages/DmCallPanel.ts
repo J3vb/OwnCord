@@ -35,7 +35,7 @@ import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore } from "@stores/ui.store";
-import type { VideoGridComponent } from "@components/VideoGrid";
+import type { VideoGridComponent } from "../voice/videoGrid/VideoGrid";
 import { dmCallText as d } from "../../i18n/dmCall";
 import {
   type AvatarRef,

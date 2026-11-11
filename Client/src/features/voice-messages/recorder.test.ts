@@ -184,6 +184,49 @@ describe("voice recorder", () => {
     localStorage.clear();
   });
 
+  it.each([
+    ["NotAllowedError", "denied"],
+    ["SecurityError", "denied"],
+    ["NotFoundError", "no-device"],
+    ["OverconstrainedError", "no-device"],
+    ["AbortError", "failed"],
+  ])(
+    "names a failed open (%s) as %s, with no retry when no device was picked",
+    async (name, kind) => {
+      getUserMedia = vi.fn().mockRejectedValue(Object.assign(new Error("x"), { name }));
+      await expect(createVoiceRecorder({ env: env() }).start()).rejects.toMatchObject({ kind });
+      expect(getUserMedia).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ["NotAllowedError", "denied"],
+    ["NotFoundError", "no-device"],
+    ["OverconstrainedError", "no-device"],
+    ["AbortError", "failed"],
+  ])("names a failed default-device retry (%s) as %s", async (name, kind) => {
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("gone"));
+    getUserMedia = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("x"), { name: "NotFoundError" }))
+      .mockRejectedValueOnce(Object.assign(new Error("y"), { name }));
+    await expect(createVoiceRecorder({ env: env() }).start()).rejects.toMatchObject({ kind });
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    localStorage.clear();
+  });
+
+  it("does not retry a picked device that the system denied", async () => {
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("gone"));
+    getUserMedia = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error("x"), { name: "NotAllowedError" }));
+    await expect(createVoiceRecorder({ env: env() }).start()).rejects.toMatchObject({
+      kind: "denied",
+    });
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    localStorage.clear();
+  });
+
   it("stops itself at five minutes and hands the clip to onLimit", async () => {
     const onLimit = vi.fn();
     const rec = createVoiceRecorder({ env: env(), onLimit });

@@ -8,9 +8,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// MentionIDStore is the slice of the database the id and role mention forms
-// read beyond Store. A store without it (a test fake) resolves @username
-// tokens only; the id forms stay plain text.
+// MentionIDStore is the slice of the database the id and role mention forms read beyond
+// Store. Without it (a test fake) only @username tokens resolve.
 type MentionIDStore interface {
 	GetReachableUserIDs(ctx context.Context, ids []int64) ([]int64, error)
 	ListUserIDsByRoles(ctx context.Context, roleIDs []int64) ([]int64, error)
@@ -18,9 +17,6 @@ type MentionIDStore interface {
 
 var _ MentionIDStore = (*db.DB)(nil)
 
-// resolveIDMentions returns the <@id> tokens that name a reachable user (one
-// that exists and is not banned), in token order. A read failure is logged and
-// leaves the tokens as text.
 func (s *mentionState) resolveIDMentions(ctx context.Context, ids []int64, channelID int64) []int64 {
 	if len(ids) == 0 || s.mentionIDs == nil {
 		return nil
@@ -43,10 +39,9 @@ func (s *mentionState) resolveIDMentions(ctx context.Context, ids []int64, chann
 	return out
 }
 
-// resolveRoleMentions fills set.RoleIDs with the pinged roles that exist and
-// clear the gate. The roles read and
-// the author's Subject are fetched only here, so a message without a role token
-// pays neither. A read failure leaves the tokens as plain text.
+// resolveRoleMentions fills set.RoleIDs with the pinged roles that exist and clear the
+// gate. Roles and the author's Subject are read only here, so a message without a role
+// token pays neither. A read failure leaves the tokens as text.
 func (s *mentionState) resolveRoleMentions(ctx context.Context, set *mentionSet, tokens []int64, authorID, channelID int64) {
 	if s.mentionIDs == nil {
 		return
@@ -82,10 +77,9 @@ func (s *mentionState) resolveRoleMentions(ctx context.Context, set *mentionSet,
 	}
 }
 
-// loadRoleHolders reads every holder of set.RoleIDs once and returns the set
-// with RoleUserIDs filled. Only a send calls it: an edit never raises a badge,
-// so it does not pay the read. Nothing is read when no role resolved; a read
-// failure is logged and leaves the roles listed with no holders to ping.
+// loadRoleHolders reads every holder of set.RoleIDs once and fills RoleUserIDs. Only a send
+// calls it (an edit never raises a badge). A read failure is logged and leaves the roles listed with no
+// holders.
 func (s *mentionState) loadRoleHolders(ctx context.Context, set mentionSet, channelID int64) mentionSet {
 	if len(set.RoleIDs) == 0 || s.mentionIDs == nil {
 		return set

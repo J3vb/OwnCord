@@ -8,7 +8,6 @@ import (
 	"strings"
 )
 
-// File kinds the admin Storage page filters by, read from the sniffed MIME type.
 const (
 	UploadKindImage = "image"
 	UploadKindVideo = "video"
@@ -16,18 +15,17 @@ const (
 	UploadKindOther = "other"
 )
 
-// uploadKindSQL is the CASE that sorts an attachment row (alias a) into one
-// of the kinds above. One text, so the filter and the totals never disagree.
+// uploadKindSQL is the CASE sorting an attachment row (alias a) into one of the kinds;
+// one text so the filter and totals never disagree.
 const uploadKindSQL = `CASE
 	WHEN a.mime_type LIKE 'image/%' THEN 'image'
 	WHEN a.mime_type LIKE 'video/%' THEN 'video'
 	WHEN a.mime_type LIKE 'audio/%' THEN 'audio'
 	ELSE 'other' END`
 
-// AdminUploadQuery is one page of every upload on the server. Zero values mean
-// "any". Every value reaches SQL as a bound argument.
+// AdminUploadQuery is one page of every upload; zero values mean "any". Every value reaches SQL as a
+// bound argument.
 type AdminUploadQuery struct {
-	// Sort is UploadSortNewest or UploadSortLargest.
 	Sort string
 	// Name keeps files whose name contains it, ASCII case-insensitive.
 	Name string
@@ -41,9 +39,7 @@ type AdminUploadQuery struct {
 	Limit  int
 }
 
-// AdminUpload is one file on the admin Storage page. UploaderID and Uploader
-// are empty for a legacy row with no uploader. ChannelName is left out of a
-// direct message, whose name is a member list, not a channel.
+// AdminUpload is one file on the Storage page; ChannelName is omitted for a DM.
 type AdminUpload struct {
 	Attachment  AttachmentInfo `json:"attachment"`
 	UploadedAt  string         `json:"uploaded_at"`
@@ -64,23 +60,21 @@ type UploadKindTotal struct {
 	Bytes int64  `json:"bytes"`
 }
 
-// AdminRemovedAttachment is what an admin removal took out: RemovedAttachment
-// plus who uploaded it (nil for a legacy row) and its name for the audit log.
+// AdminRemovedAttachment is RemovedAttachment plus the uploader and name for the audit log.
 type AdminRemovedAttachment struct {
 	RemovedAttachment
 	UploaderID *int64
 	Filename   string
 }
 
-// MemberStorage is one member's counted upload bytes and own limit. QuotaMB is
-// nil when the member follows the server-wide limit, 0 for no limit.
+// MemberStorage is a member's upload bytes and limit; QuotaMB nil follows the server
+// limit, 0 is unlimited.
 type MemberStorage struct {
 	UserID    int64  `json:"user_id"`
 	BytesUsed int64  `json:"bytes_used"`
 	QuotaMB   *int64 `json:"quota_mb"`
 }
 
-// adminUploadFilter appends the WHERE fragments and arguments of q's filters.
 func adminUploadFilter(q AdminUploadQuery, sb *strings.Builder, args []any) []any {
 	if q.Name != "" {
 		sb.WriteString(` AND a.filename LIKE ? ESCAPE '\'`)
@@ -105,8 +99,7 @@ func adminUploadFilter(q AdminUploadQuery, sb *strings.Builder, args []any) []an
 	return args
 }
 
-// ListAllUploads returns up to q.Limit attachment rows of every member, newest
-// or largest first, with the same states and removable rule as the own list.
+// ListAllUploads returns up to q.Limit rows of every member, with the own list's states.
 func (d *DB) ListAllUploads(ctx context.Context, q AdminUploadQuery) ([]AdminUpload, error) {
 	if q.Limit < 1 {
 		return []AdminUpload{}, nil
@@ -202,11 +195,11 @@ func (d *DB) UploadTotals(ctx context.Context) ([]UploadKindTotal, error) {
 	return out, nil
 }
 
-// DeleteAttachmentByAdmin removes the attachment row id in one statement, whoever
-// uploaded it, unless it is a live avatar, group DM icon or profile banner. found
-// is false when no row matched: unknown, already gone or in use
-// (AttachmentInUse tells the last apart). Of two callers racing on one row,
-// a member's own removal included, exactly one gets it back from RETURNING.
+// DeleteAttachmentByAdmin removes the attachment row id in one statement,
+// whoever uploaded it, unless it is a live avatar, group DM icon or banner.
+// found is false when unknown, gone or in use (AttachmentInUse tells the last
+// apart). Of two callers racing on one row, a member's own removal included, exactly
+// one gets it from RETURNING.
 func (d *DB) DeleteAttachmentByAdmin(ctx context.Context, id string) (removed AdminRemovedAttachment, found bool, err error) {
 	err = d.writer.QueryRowContext(ctx,
 		`DELETE FROM attachments AS a
@@ -223,8 +216,7 @@ func (d *DB) DeleteAttachmentByAdmin(ctx context.Context, id string) (removed Ad
 	return removed, true, nil
 }
 
-// AttachmentInUse reports whether a row id exists and whether it is a live
-// avatar, group DM icon or profile banner.
+// AttachmentInUse reports whether row id exists and is a live avatar, icon or banner.
 func (d *DB) AttachmentInUse(ctx context.Context, id string) (inUse, exists bool, err error) {
 	err = d.reader.QueryRowContext(ctx,
 		`SELECT NOT (`+attachmentNotInUse+`) FROM attachments a WHERE a.id = ?`, id).Scan(&inUse)
@@ -237,8 +229,7 @@ func (d *DB) AttachmentInUse(ctx context.Context, id string) (inUse, exists bool
 	return inUse, true, nil
 }
 
-// UserStorageQuotaMB reports userID's own upload limit: nil when the member
-// follows the server-wide limit or has no counter row yet.
+// UserStorageQuotaMB reports userID's own limit; nil follows the server limit.
 func (d *DB) UserStorageQuotaMB(ctx context.Context, userID int64) (*int64, error) {
 	var q *int64
 	err := d.reader.QueryRowContext(ctx, `SELECT quota_mb FROM user_storage WHERE user_id = ?`, userID).Scan(&q)
@@ -251,9 +242,8 @@ func (d *DB) UserStorageQuotaMB(ctx context.Context, userID int64) (*int64, erro
 	return q, nil
 }
 
-// SetUserStorageQuotaMB sets userID's own upload limit (nil returns the member
-// to the server-wide limit). A member with no counter row gets one, seeded from
-// their attachment rows like EnsureUserStorage. found is false when no such
+// SetUserStorageQuotaMB sets userID's own upload limit (nil returns to the server-wide
+// limit), seeding the counter row like EnsureUserStorage; found is false when no such
 // user exists.
 func (d *DB) SetUserStorageQuotaMB(ctx context.Context, userID int64, quotaMB *int64) (found bool, err error) {
 	res, err := d.writer.ExecContext(ctx,
@@ -271,8 +261,7 @@ func (d *DB) SetUserStorageQuotaMB(ctx context.Context, userID int64, quotaMB *i
 	return n > 0, nil
 }
 
-// ListMemberStorage returns the counter rows of the given users. A user with
-// no row has uploaded nothing and set no limit, and is left out.
+// ListMemberStorage returns the counter rows of the given users; a user with no row is left out.
 func (d *DB) ListMemberStorage(ctx context.Context, userIDs []int64) ([]MemberStorage, error) {
 	out := []MemberStorage{}
 	if len(userIDs) == 0 {

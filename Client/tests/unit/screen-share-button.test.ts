@@ -12,7 +12,7 @@ vi.mock("@lib/voice/livekitSession", () =>
 
 vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock());
 
-import { createVoiceWidget } from "@components/VoiceWidget";
+import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
 import { voiceStore } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 

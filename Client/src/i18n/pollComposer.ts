@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** The poll composer dialog (components/PollComposer.ts). Its own catalog so the copy loads with that lazy module. */
+/** The poll composer dialog (features/messaging/PollComposer.ts). Its own catalog so the copy loads with that lazy module. */
 export const pollComposerText = defineCatalog("pollComposer", {
   "dialog.title": "Create a poll",
   "question.label": "Question",

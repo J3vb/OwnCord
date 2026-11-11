@@ -1,14 +1,8 @@
 // Package archivebin pulls one named executable out of a downloaded release
-// archive. The updater (chatserver) and the LiveKit download (livekit-server)
-// both stage a single binary this way; they share this code so the rules for
-// which entry is taken and how it is written live in one place.
-//
-// Rules: only a regular file is taken, never a link or a folder; a name with
-// a ".." anywhere is skipped; the first entry the caller's match accepts is
-// written to destPath, created O_EXCL with mode 0600 so a file already there
-// fails the extraction instead of being written through; the entry must be
-// no larger than maxBytes and must yield exactly the size its header claims.
-// A file this package created is removed again when the write fails.
+// archive, for the updater and the LiveKit download. Only a regular file is taken (never a link or folder);
+// a name containing ".." is skipped; the first match is written O_EXCL with mode 0600; the entry must be
+// <= maxBytes and exactly its header's size. A file this package created is removed again when the write
+// fails.
 package archivebin
 
 import (
@@ -59,8 +53,7 @@ func FromTarGz(r io.Reader, destPath string, match Match, maxBytes int64) (strin
 	}
 }
 
-// FromZip extracts the first matching regular entry of a zip to destPath and
-// returns the hex sha256 of the bytes written.
+// FromZip is FromTarGz for a zip.
 func FromZip(r io.ReaderAt, size int64, destPath string, match Match, maxBytes int64) (string, error) {
 	zr, err := zip.NewReader(r, size)
 	if err != nil {
@@ -88,7 +81,6 @@ func wanted(name string, match Match) bool {
 	return !strings.Contains(name, "..") && match(name)
 }
 
-// write copies exactly size bytes from r into a new destPath.
 func write(destPath string, r io.Reader, size, maxBytes int64) (string, error) {
 	if size < 0 || size > maxBytes {
 		return "", fmt.Errorf("%w: %d bytes, the limit is %d", ErrTooLarge, size, maxBytes)

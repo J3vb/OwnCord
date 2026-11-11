@@ -69,44 +69,52 @@ func TestBackupToSafe_RejectsPathOutsideRoot(t *testing.T) {
 	}
 }
 
-// TestBackupToSafe_RejectsSingleQuote ensures a path containing a single-quote
-// is rejected before the SQL is executed (prevents SQL injection).
-func TestBackupToSafe_RejectsSingleQuote(t *testing.T) {
-	database, tmpDir := newBackupFileDB(t)
+// TestBackupToSafe_AcceptsAnyNameTheFilesystemAllows: the backup folder sits
+// under wherever the operator installed the server, so its path can hold an
+// accented user name, brackets, an apostrophe or a double hyphen. Each such
+// path must produce a restorable backup at exactly that name, and nothing else.
+func TestBackupToSafe_AcceptsAnyNameTheFilesystemAllows(t *testing.T) {
+	names := []string{"o'neil", "a;b", "a--b", "Jörg (x86) +@&!", "100% #1 [new] {x}=$,"}
+	if runtime.GOOS != "windows" {
+		names = append(names, `say "hi"`, "what?", "a*b|c<d>")
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			database, tmpDir := newBackupFileDB(t)
+			backupDir := filepath.Join(tmpDir, name, "backups")
+			mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
+			backupPath := filepath.Join(backupDir, name+".db")
 
-	backupDir := filepath.Join(tmpDir, "backups")
-	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
-	malicious := filepath.Join(backupDir, "evil'.db")
-	err := database.BackupToSafe(context.Background(), malicious, backupDir)
-	if err == nil {
-		t.Error("BackupToSafe() with single-quote in path should return error, got nil")
+			mustDo(t, "BackupToSafe", database.BackupToSafe(context.Background(), backupPath, backupDir))
+			mustDo(t, "CheckBackupIntegrity", db.CheckBackupIntegrity(context.Background(), backupPath))
+
+			entries, err := os.ReadDir(backupDir)
+			mustDo(t, "ReadDir", err)
+			if len(entries) != 1 || entries[0].Name() != name+".db" {
+				t.Errorf("backup dir holds %v, want only %q", entries, name+".db")
+			}
+		})
 	}
 }
 
-// TestBackupToSafe_RejectsSemicolon ensures a semicolon in the path is rejected.
-func TestBackupToSafe_RejectsSemicolon(t *testing.T) {
+// TestBackupToSafe_QuotedNameCannotRunSQL: a destination that reads like the
+// end of a string followed by a statement is only ever a file name.
+func TestBackupToSafe_QuotedNameCannotRunSQL(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
+	_, err := database.ExecContext(context.Background(), `CREATE TABLE backup_canary (id INTEGER PRIMARY KEY)`)
+	mustDo(t, "create canary table", err)
 
 	backupDir := filepath.Join(tmpDir, "backups")
 	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
-	malicious := filepath.Join(backupDir, "evil;drop.db")
-	err := database.BackupToSafe(context.Background(), malicious, backupDir)
-	if err == nil {
-		t.Error("BackupToSafe() with semicolon in path should return error, got nil")
-	}
-}
+	backupPath := filepath.Join(backupDir, "x'; DROP TABLE backup_canary; --.db")
+	mustDo(t, "BackupToSafe", database.BackupToSafe(context.Background(), backupPath, backupDir))
 
-// TestBackupToSafe_RejectsSQLComment ensures a path containing "--" is rejected.
-func TestBackupToSafe_RejectsSQLComment(t *testing.T) {
-	database, tmpDir := newBackupFileDB(t)
-
-	backupDir := filepath.Join(tmpDir, "backups")
-	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
-	malicious := filepath.Join(backupDir, "evil--comment.db")
-	err := database.BackupToSafe(context.Background(), malicious, backupDir)
-	if err == nil {
-		t.Error("BackupToSafe() with '--' in path should return error, got nil")
+	if _, err := os.Stat(backupPath); err != nil {
+		t.Errorf("backup is not at the name it was given: %v", err)
 	}
+	var n int
+	mustDo(t, "canary table is still there",
+		database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM backup_canary`).Scan(&n))
 }
 
 // TestBackupToSafe_RejectsNullByte ensures a path containing a null byte is rejected.
@@ -208,20 +216,6 @@ func TestBackupChecks_URIMetacharactersInPath(t *testing.T) {
 		if n := e.Name(); n != filepath.Base(good) && n != filepath.Base(bad) {
 			t.Errorf("the checks created a stray file %q", n)
 		}
-	}
-}
-
-// TestBackupToSafe_RejectsDoubleQuote ensures a path containing a double-quote
-// is rejected.
-func TestBackupToSafe_RejectsDoubleQuote(t *testing.T) {
-	database, tmpDir := newBackupFileDB(t)
-
-	backupDir := filepath.Join(tmpDir, "backups")
-	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
-	malicious := filepath.Join(backupDir, `evil".db`)
-	err := database.BackupToSafe(context.Background(), malicious, backupDir)
-	if err == nil {
-		t.Error("BackupToSafe() with double-quote in path should return error, got nil")
 	}
 }
 

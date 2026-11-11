@@ -9,7 +9,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// messageFromGen maps a generated message row to the domain Message model.
 func messageFromGen(m dbgen.Message) *Message {
 	return &Message{
 		ID:               m.ID,
@@ -26,8 +25,7 @@ func messageFromGen(m dbgen.Message) *Message {
 	}
 }
 
-// CreateMessage inserts a new message and returns its ID; content must already
-// be sanitized.
+// CreateMessage inserts a message and returns its ID; content must already be sanitized.
 func (d *DB) CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error) {
 	m, err := d.CreateMessageReturning(ctx, channelID, userID, content, replyTo)
 	if err != nil {
@@ -36,9 +34,8 @@ func (d *DB) CreateMessage(ctx context.Context, channelID, userID int64, content
 	return m.ID, nil
 }
 
-// CreateMessageReturning inserts a message and returns the full row via
-// RETURNING, so the send fan-out gets the DB-assigned timestamp without a
-// re-read.
+// CreateMessageReturning inserts a message and returns the full row, with the
+// DB-assigned timestamp.
 func (d *DB) CreateMessageReturning(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (*Message, error) {
 	m, err := d.q.CreateMessage(ctx, dbgen.CreateMessageParams{
 		ChannelID: channelID,
@@ -52,8 +49,8 @@ func (d *DB) CreateMessageReturning(ctx context.Context, channelID, userID int64
 	return messageFromGen(m), nil
 }
 
-// GetMessage returns the message with the given ID, or nil if not found.
-// Soft-deleted messages are returned so callers can broadcast the deletion.
+// GetMessage returns the message, or nil; soft-deleted ones are returned so the
+// deletion can be broadcast.
 func (d *DB) GetMessage(ctx context.Context, id int64) (*Message, error) {
 	m, err := d.q.GetMessage(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -65,10 +62,9 @@ func (d *DB) GetMessage(ctx context.Context, id int64) (*Message, error) {
 	return messageFromGen(m), nil
 }
 
-// IsMessageDeleted reports the soft-delete flag of one message and whether the
-// row exists. found=false is not an error: the attachment-access path treats a
-// missing message as "no tombstone to enforce" and leaves the decision to its
-// own ACL. It is a one-column read rather than GetMessage on purpose.
+// IsMessageDeleted reports the soft-delete flag of one message and whether the row
+// exists; found=false is not an error (the attachment-access path leaves a missing
+// message to its own ACL).
 func (d *DB) IsMessageDeleted(ctx context.Context, id int64) (deleted, found bool, err error) {
 	var flag bool
 	scanErr := d.reader.QueryRowContext(ctx, `SELECT deleted FROM messages WHERE id = ?`, id).Scan(&flag)
@@ -81,8 +77,7 @@ func (d *DB) IsMessageDeleted(ctx context.Context, id int64) (deleted, found boo
 	return flag, true, nil
 }
 
-// GetMessages returns up to limit messages in a channel, newest first; before
-// > 0 restricts to id < before.
+// GetMessages returns up to limit messages, newest first; before > 0 restricts to id < before.
 func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int) ([]MessageWithUser, error) {
 	var (
 		rows *sql.Rows
@@ -131,14 +126,11 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 	return msgs, nil
 }
 
-// EditMessage updates the content, sets edited_at and returns the updated row
-// via RETURNING. It returns ErrNotFound if the message does not exist, is
-// deleted, or userID is not the owner.
-//
-// The UPDATE carries `AND deleted = 0` (like SoftDeleteMessage and
-// SetMessagePinned) because a delete can commit between the ownership read and
-// the write; without it the tombstone would be rewritten and chat_edited
-// broadcast for a message clients already replaced.
+// EditMessage updates the content, sets edited_at and returns the row via
+// RETURNING; ErrNotFound if the message does not exist, is deleted or userID is
+// not the owner. The UPDATE carries `AND deleted = 0` because a delete can
+// commit between the ownership read and the write; otherwise the tombstone
+// would be rewritten and chat_edited broadcast for a replaced message.
 func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) (*Message, error) {
 	msg, err := d.GetMessage(ctx, id)
 	if err != nil {
@@ -164,12 +156,9 @@ func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) 
 	return messageFromGen(updated), nil
 }
 
-// DeleteMessage soft-deletes (deleted=1) the message; the caller must be the
-// owner or ismod must be true.
-//
-// The UPDATE is guarded with `AND deleted = 0` and RowsAffected is checked, so
-// an already-deleted message (including one that raced to the writer) returns
-// ErrNotFound instead of succeeding twice, which would run
+// DeleteMessage soft-deletes the message; the caller must be the owner or ismod. The
+// UPDATE is guarded with `AND deleted = 0` and RowsAffected is checked, so an
+// already-deleted message returns ErrNotFound instead of running
 // MessageService.DeleteMessage's mention_count reversal twice.
 func (d *DB) DeleteMessage(ctx context.Context, id, userID int64, ismod bool) error {
 	msg, err := d.GetMessage(ctx, id)
@@ -193,8 +182,7 @@ func (d *DB) DeleteMessage(ctx context.Context, id, userID int64, ismod bool) er
 	return nil
 }
 
-// GetMessagesForAPI returns messages in the docs/api.md response shape
-// (user, reactions with me flag, attachments).
+// GetMessagesForAPI returns messages in the docs/api.md shape.
 func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]MessageAPIResponse, error) {
 	var (
 		rows *sql.Rows
@@ -229,9 +217,8 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
 
-// GetMessagesAfterForAPI returns up to limit messages with id > after in the
-// API shape, oldest first (the mirror of GetMessagesForAPI's before-pages).
-// Callers needing has_more ask for limit+1 and trim.
+// GetMessagesAfterForAPI returns up to limit messages with id > after, oldest first;
+// has_more callers ask for limit+1.
 func (d *DB) GetMessagesAfterForAPI(ctx context.Context, channelID, after int64, limit int, requestingUserID int64) ([]MessageAPIResponse, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
@@ -250,10 +237,9 @@ func (d *DB) GetMessagesAfterForAPI(ctx context.Context, channelID, after int64,
 	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
 
-// GetMessagesAroundForAPI returns a window of messages centred on centerID in
-// the API shape, oldest first: up to beforeCount older, the centre, and up to
-// afterCount newer. It does no has_more probing; callers pass one extra on
-// each count.
+// GetMessagesAroundForAPI returns a window centred on centerID, oldest first: up to
+// beforeCount older, the centre, up to afterCount newer. Callers pass one extra on
+// each count for has_more.
 func (d *DB) GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]MessageAPIResponse, error) {
 	if beforeCount < 0 {
 		beforeCount = 0
@@ -261,9 +247,8 @@ func (d *DB) GetMessagesAroundForAPI(ctx context.Context, channelID, centerID in
 	if afterCount < 0 {
 		afterCount = 0
 	}
-	// SQLite forbids ORDER BY/LIMIT on a compound-SELECT operand, so each half
-	// of the window is a nested subquery. The older half includes the centre
-	// row itself, hence beforeCount+1.
+	// SQLite forbids ORDER BY/LIMIT on a compound-SELECT operand, so each half is a nested
+	// subquery; the older half includes the centre, hence beforeCount+1.
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
@@ -295,9 +280,8 @@ func (d *DB) GetMessagesAroundForAPI(ctx context.Context, channelID, centerID in
 }
 
 // scanAndEnrichMessages scans rows into MessageAPIResponse and batch-fetches
-// reactions, attachments and mentions. The caller must defer rows.Close().
-// Callers pass withCachedReads(ctx): every sqlc read here binds constant SQL
-// or ids padded with padIDs.
+// reactions, attachments and mentions; the caller defers rows.Close() and passes
+// withCachedReads(ctx).
 func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requestingUserID int64) ([]MessageAPIResponse, error) {
 	var msgs []MessageAPIResponse
 	var msgIDs []int64
@@ -381,7 +365,6 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 	return d.attachReferencedMessages(ctx, msgs)
 }
 
-// scanMessageWithUser scans a MessageWithUser from *sql.Rows.
 func scanMessageWithUser(rows *sql.Rows) (MessageWithUser, error) {
 	var mwu MessageWithUser
 	var deleted, pinned int

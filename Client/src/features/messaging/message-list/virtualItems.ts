@@ -111,6 +111,41 @@ function galleryGridHeight(count: number): number {
   return rows * rowHeight + (rows - 1) * 4 + MEDIA_MARGIN;
 }
 
+/** `height` plus what the attachments reserve. Video shares the image box, so
+ *  it reserves the same space; the audio player is a chip-height row. Two or
+ *  more images share one mosaic, whatever their own sizes are. */
+function addAttachmentsHeight(height: number, attachments: Message["attachments"]): number {
+  const tiles = attachments.filter(isGalleryImage);
+  const gridded = tiles.length >= 2;
+  if (gridded) height += galleryGridHeight(tiles.length);
+  for (const att of attachments) {
+    if (gridded && tiles.includes(att)) continue;
+    if (isVideoAttachment(att)) {
+      height += 220;
+    } else if (isAudioMime(att.mime)) {
+      height += 96;
+    } else if (isImageMime(att.mime)) {
+      const known = knownAttachmentHeight(att);
+      height += known === undefined ? 220 : known + MEDIA_MARGIN;
+    }
+  }
+  return height;
+}
+
+/** `height` plus the box measured for each inline image URL in `content`, else 220. */
+function addInlineImagesHeight(height: number, content: string, listWidth: number): number {
+  // The URLs renderUrlEmbeds draws (none inside code, masked links,
+  // spoilers or angle brackets), one embed per distinct URL.
+  const rowWidth = Math.max(listWidth - ROW_HORIZONTAL_PADDING, 1);
+  for (const url of new Set(extractUrls(content).filter(isDirectImageUrl))) {
+    const box = getImageBox(url);
+    // The box shrinks with the row (max-width 100%), keeping its ratio.
+    height +=
+      box === undefined ? 220 : Math.round(box.h * Math.min(1, rowWidth / box.w)) + MEDIA_MARGIN;
+  }
+  return height;
+}
+
 export function estimateItemHeight(
   item: VirtualItem,
   listWidth: number = DEFAULT_LIST_WIDTH,
@@ -123,37 +158,10 @@ export function estimateItemHeight(
   let height = item.isGrouped ? 22 : 61;
   const { content } = item.message;
   height += (estimateTextLines(content, listWidth) - 1) * TEXT_LINE_HEIGHT;
-
-  // Media attachments. Video shares the image box, so it reserves the same
-  // space; the audio player is a chip-height row.
-  // Two or more images share one mosaic, whatever their own sizes are.
-  const tiles = item.message.attachments.filter(isGalleryImage);
-  const gridded = tiles.length >= 2;
-  if (gridded) height += galleryGridHeight(tiles.length);
-  for (const att of item.message.attachments) {
-    if (gridded && tiles.includes(att)) continue;
-    if (isVideoAttachment(att)) {
-      height += 220;
-    } else if (isAudioMime(att.mime)) {
-      height += 96;
-    } else if (isImageMime(att.mime)) {
-      const known = knownAttachmentHeight(att);
-      height += known === undefined ? 220 : known + MEDIA_MARGIN;
-    }
-  }
+  height = addAttachmentsHeight(height, item.message.attachments);
 
   // Inline image URLs in content: the box measured for each URL, else 220.
-  if (IMAGE_URL_RE.test(content)) {
-    // The URLs renderUrlEmbeds draws (none inside code, masked links,
-    // spoilers or angle brackets), one embed per distinct URL.
-    const rowWidth = Math.max(listWidth - ROW_HORIZONTAL_PADDING, 1);
-    for (const url of new Set(extractUrls(content).filter(isDirectImageUrl))) {
-      const box = getImageBox(url);
-      // The box shrinks with the row (max-width 100%), keeping its ratio.
-      height +=
-        box === undefined ? 220 : Math.round(box.h * Math.min(1, rowWidth / box.w)) + MEDIA_MARGIN;
-    }
-  }
+  if (IMAGE_URL_RE.test(content)) height = addInlineImagesHeight(height, content, listWidth);
 
   // YouTube embeds
   if (YOUTUBE_URL_RE.test(content)) {

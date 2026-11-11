@@ -18,26 +18,21 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// resumeHint carries the client-supplied reconnect hints from the auth frame. Both
-// fields are UNTRUSTED: LastSeq only narrows what replay sends, and ChannelID is
-// checked against the allowed set before it is honoured (handleReconnect and
-// handleFreshConnect).
+// resumeHint carries the client-supplied reconnect hints from the auth frame, both UNTRUSTED:
+// LastSeq only narrows what replay sends, and ChannelID is checked against the allowed set
+// before it is honoured.
 type resumeHint struct {
 	LastSeq   uint64
 	ChannelID int64
-	// Features is the parsed `features` list of the auth frame. UNTRUSTED; it only
-	// narrows what the socket is sent.
+	// Features is the parsed `features` list. UNTRUSTED; it only narrows what the socket is sent.
 	Features clientFeatures
-	// IdentityKey is the device identity public key from the auth frame (voice E2EE, key
-	// per device), trimmed and validated; "" if none or invalid. It is relayed to peers
-	// in this connection's voice announces, which verify it against the announce's own
-	// signature.
+	// IdentityKey is the validated device identity public key ("" if none or invalid), relayed
+	// to peers in this connection's voice announces, which verify it against the announce signature.
 	IdentityKey string
 }
 
-// authenticateConn reads the first WebSocket message and validates the session
-// token. Returns the authenticated user, the token hash (for periodic session
-// revalidation) and the resume hints.
+// authenticateConn reads the first WebSocket message and validates the session token,
+// returning the user, the token hash (for periodic revalidation) and the resume hints.
 func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*db.User, string, resumeHint, error) {
 	ctx, cancel := context.WithTimeout(parent, authDeadline)
 	defer cancel()
@@ -60,22 +55,19 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 	var p struct {
 		Token   string `json:"token"`
 		LastSeq uint64 `json:"last_seq"`
-		// ActiveChannelID lets a resuming client re-declare its open channel so the server
-		// restores its ChannelTopic subscription during the handshake instead of leaving it
-		// unsubscribed until the post-auth_ok channel_focus lands.
+		// ActiveChannelID lets a resuming client re-declare its open channel so the ChannelTopic
+		// subscription is restored during the handshake, not after the post-auth_ok channel_focus.
 		ActiveChannelID int64 `json:"active_channel_id"`
-		// Epoch is the wire epoch the client speaks (docs/protocol.md, Compatibility).
-		// Absent means 0: clients up to v1.2.0-alpha.4 predate the field.
+		// Epoch is the wire epoch the client speaks (docs/protocol.md). Absent means 0: clients up to
+		// v1.2.0-alpha.4 predate it.
 		Epoch int `json:"epoch"`
-		// Wake marks a reconnect after a process suspend. Accepted and ignored: several devices may be signed in at once, so no wake is refused. Optional;
-		// absent means an ordinary connect.
+		// Wake marks a reconnect after a process suspend. Accepted and ignored: several devices may be signed
+		// in at once.
 		Wake bool `json:"wake"`
-		// Features declares optional client capabilities (client_features.go); absent
-		// means none (clients from before forums predate it).
+		// Features declares optional client capabilities (client_features.go); absent means none.
 		Features []string `json:"features"`
-		// IdentityPublicKey is this device's E2EE identity public key (base64). Optional
-		// and never fatal: kept raw so a wrongly typed value cannot make the whole frame
-		// fail to parse, and validated below.
+		// IdentityPublicKey is this device's E2EE identity public key (base64). Never fatal: kept
+		// raw so a wrongly typed value cannot fail the whole frame parse.
 		IdentityPublicKey json.RawMessage `json:"identity_public_key"`
 	}
 	if err := json.Unmarshal(env.Payload, &p); err != nil || p.Token == "" {
@@ -87,12 +79,10 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		return nil, "", resumeHint{}, fmt.Errorf("auth: protocol epoch %d outside [%d, %d]", p.Epoch, minClientEpoch, ProtocolEpoch)
 	}
 
-	// The session, expiry, user and ban gates are AuthService's
-	// (ResolveSocketPrincipal). What stays here is the wire answer: a bad credential
-	// gets buildAuthError, NON-RECOVERABLE on the wire (the client stops reconnecting
-	// and clears its credentials), while a database failure gets an ordinary error
-	// frame so the client's backoff retries. Collapsing the two would log every user
-	// out during a blip.
+	// The session, expiry, user and ban gates are AuthService's (ResolveSocketPrincipal). Here
+	// only the wire answer: a bad credential gets buildAuthError, NON-RECOVERABLE (the client
+	// stops reconnecting and clears credentials); a database failure gets an ordinary error
+	// frame so backoff retries. Collapsing them would log every user out during a blip.
 	hash := auth.HashToken(p.Token)
 	user, err := h.seams.authn.ResolveSocketPrincipal(ctx, hash)
 	switch {
@@ -121,15 +111,12 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 	}, nil
 }
 
-// sessionIdentityKeyTimeout bounds the session-row write of the device key so a
-// busy database writer cannot stall the handshake.
+// sessionIdentityKeyTimeout bounds the device-key session write so a busy writer cannot stall the handshake.
 const sessionIdentityKeyTimeout = 2 * time.Second
 
-// recordSessionIdentityKey stores the device key on the session row under its own
-// deadline: after the hijack the request context no longer ends on client
-// disconnect, so the timeout keeps a busy writer from stalling the handshake.
-// Failure is log-only: the key is also held on the Client, and the row is kept only
-// for a resumed connection and future device lists.
+// recordSessionIdentityKey stores the device key on the session row under its own deadline
+// (after the hijack the request context no longer ends on client disconnect). Failure is
+// log-only: the key is also held on the Client; the row serves resumed connections and device lists.
 func (h *Hub) recordSessionIdentityKey(ctx context.Context, userID int64, tokenHash, key string) {
 	ctx, cancel := context.WithTimeout(ctx, sessionIdentityKeyTimeout)
 	defer cancel()
@@ -138,9 +125,8 @@ func (h *Hub) recordSessionIdentityKey(ctx context.Context, userID int64, tokenH
 	}
 }
 
-// authIdentityKey returns the device identity key an auth frame carried, or "" if
-// none or invalid. An invalid key is logged and ignored, never an auth failure: a
-// bad key must not lock a device out, and the announce just goes out without one.
+// authIdentityKey returns the device identity key an auth frame carried, or "" if none or
+// invalid. An invalid key is logged and ignored: it must not lock a device out.
 func authIdentityKey(userID int64, raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return ""
@@ -158,21 +144,18 @@ func authIdentityKey(userID int64, raw json.RawMessage) string {
 	return key
 }
 
-// handshakeWrite writes one handshake-phase message (auth_ok, ready, a replay event)
-// under writeTimeout. Every handshake write runs against r.Context() from ServeWS;
-// websocket.Accept hijacks the connection, which stops net/http cancelling that
-// context on client disconnect, so without this a peer that stops reading would
-// pin the write, the handler goroutine and the socket forever. writePumpWrite
-// bounds its writes the same way.
+// handshakeWrite writes one handshake-phase message under writeTimeout. websocket.Accept
+// hijacks the connection, so net/http no longer cancels r.Context() on client disconnect;
+// without this deadline a peer that stops reading would pin the write, the handler goroutine
+// and the socket forever. writePumpWrite bounds its writes the same way.
 func handshakeWrite(ctx context.Context, conn *websocket.Conn, msg []byte) error {
 	wCtx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
 	return conn.Write(wCtx, websocket.MessageText, msg)
 }
 
-// handshakeWriteReady streams the ready frame to conn as one message in frames the
-// size of writeReady's buffer, so the roster's shared cached encoding is never
-// copied into a per-viewer buffer.
+// handshakeWriteReady streams ready as one message in writeReady-buffer-sized frames, so the
+// shared cached roster encoding is never copied into a per-viewer buffer.
 func (h *Hub) handshakeWriteReady(ctx context.Context, conn *websocket.Conn, p *readyPayload) (int64, error) {
 	wCtx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
@@ -182,16 +165,16 @@ func (h *Hub) handshakeWriteReady(ctx context.Context, conn *websocket.Conn, p *
 	}
 	n, err := h.writeReady(w, p)
 	if err != nil {
-		// No Close: its fin frame would deliver the frames so far as a whole, truncated
-		// ready. The caller closes the connection instead.
+		// No Close: its fin frame would deliver a truncated ready as a whole. The caller closes the
+		// connection.
 		return n, err
 	}
 	return n, w.Close()
 }
 
 func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, uint64, error) {
-	// Resolve the client address through trusted_proxies so handshake logs and the
-	// ws_connect audit row name the client, not the reverse proxy.
+	// Resolve the client address through trusted_proxies so logs and the ws_connect audit row name the
+	// client, not the proxy.
 	clientAddr := clientip.Resolve(r, h.seams.trustedProxyNets)
 	user, tokenHash, hint, err := h.authenticateConn(r.Context(), conn)
 	if err != nil {
@@ -203,21 +186,16 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 
 	c := newClient(h, conn, user, tokenHash, lastSeq, r.Context())
 	c.remoteAddr = clientAddr
-	// Untrusted until handleReconnect checks it against the allowed set.
 	c.authChannelID = hint.ChannelID
-	// What the client says it can render; forums are withheld without it.
 	c.features = hint.Features
-	// Voice E2EE key per device: set once before registerNow makes c reachable and
-	// never written again, so reading it needs no lock.
+	// Set once before registerNow makes c reachable and never written again, so reads need no lock.
 	c.identityKey = hint.IdentityKey
 	if hint.IdentityKey != "" {
 		h.recordSessionIdentityKey(r.Context(), user.ID, tokenHash, hint.IdentityKey)
 	}
 
-	// Fail closed like handleFreshConnect's lookup: this value is authoritative on the
-	// wire (auth_ok's own role, a new member's presence_batch entry, every
-	// chat_message), so a lookup failure must not substitute "member" and pin the
-	// session to a fabricated role.
+	// Fail closed like handleFreshConnect's lookup: this is authoritative on the wire (auth_ok,
+	// presence_batch, every chat_message), so a failure must not substitute "member".
 	role, roleErr := h.readers.Visibility.GetRoleByID(r.Context(), user.RoleID)
 	if roleErr != nil || role == nil {
 		slog.Error("ws: role lookup failed during handshake, closing connection",
@@ -233,39 +211,33 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	return c, lastSeq, nil
 }
 
-// unregisterFailedHandshake removes c after a post-registerNow handshake write
-// failure. No readPump ever starts for this connection (fresh-connect callers
-// return an error before the pumps; handleReconnect's report startPumps=false), and
-// the replaced old connection already ran its defer, skipping teardown because
-// this client held the slot. So when no replacement remains the standard
-// disconnect teardown must run here or the user stays online forever.
+// unregisterFailedHandshake removes c after a post-registerNow handshake write failure. No
+// readPump ever starts for it, and the replaced old connection skipped teardown because
+// this client held the slot, so when no replacement remains the standard disconnect
+// teardown must run here or the user stays online forever.
 func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
-	// Snapshot voice state before unregister, as readPump's defer does: once
-	// unregisterNow removes c there is no telling whether it owned a (possibly
-	// just-transferred) voice session.
+	// Snapshot voice state before unregister, as readPump's defer does: afterwards there is no
+	// telling whether c owned a (possibly transferred) voice session.
 	txn := h.begin(c.userID)
 	voiceChID := c.voice.channel()
 	replaced := h.unregisterNow(c)
 	if !replaced {
 		cleanupCtx := context.WithoutCancel(ctx)
-		// A connection that inherited a transferred voice session (the replay-failure
-		// fallback in handleFreshConnect keeps the row and registerNow transfers it onto c)
-		// must have it parked or torn down here, or the row, LiveKit participant and a
-		// stale key-holder entry all survive until the next sweep (up to 60s).
+		// A connection that inherited a transferred voice session (the replay-failure fallback)
+		// must have it parked or torn down here, or the row, LiveKit participant and key-holder
+		// entry survive until the next sweep (up to 60s).
 		if voiceChID != 0 {
 			h.disconnectVoice(cleanupCtx, txn, c, voiceLeaveReasonHandshake)
 		}
 	}
 	txn.end()
-	// shouldMarkOffline re-checks h.clients rather than trusting the `replaced`
-	// snapshot, sampled before handleVoiceLeave (can block for seconds), so a reconnect
-	// landing meanwhile is not marked offline (as in readPump's defer).
+	// shouldMarkOffline re-checks h.clients rather than the `replaced` snapshot, sampled before
+	// handleVoiceLeave (can block for seconds), so a reconnect landing meanwhile is not marked offline.
 	if h.shouldMarkOffline(c, replaced) {
 		cleanupCtx := context.WithoutCancel(ctx)
 		_ = h.presence.StampDisconnect(cleanupCtx, c.userID)
-		// custom_status is nil, not c.user.CustomStatus (an auth-time snapshot; see
-		// readPump's defer). Re-check after the DB write: a device that registered
-		// meanwhile queues its own online presence after this point.
+		// custom_status is nil, not the auth-time c.user.CustomStatus (see readPump's defer).
+		// Re-check after the DB write: a device that registered meanwhile queues its own online presence.
 		if !h.isConnected(c.userID) {
 			h.QueuePresence(c.userID, db.StatusOffline, nil)
 		}

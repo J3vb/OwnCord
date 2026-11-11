@@ -9,9 +9,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// SearchRequest is one search call: the raw query (free text plus filter
-// tokens), an optional single-channel scope, the caller's time zone for date
-// filters, and the page to fetch.
+// SearchRequest is one search call: raw query (free text plus filter tokens), optional
+// single-channel scope, the caller's time zone, and the page.
 type SearchRequest struct {
 	Query     string
 	ChannelID *int64
@@ -20,10 +19,8 @@ type SearchRequest struct {
 	Page db.SearchPage
 }
 
-// SearchMessages performs full-text search across the channels the caller may
-// read and returns one page of hits. nextBefore is the cursor for the
-// following page of a Recent search (0 when there is none). A query with
-// filters but no words is newest-first only.
+// SearchMessages performs full-text search across the channels the caller may read. nextBefore is the cursor
+// for the next page of a Recent search (0 when none). A query with filters but no words is newest-first only.
 func (s *messageReads) SearchMessages(ctx context.Context, userID int64, in SearchRequest) (results []db.MessageSearchResult, nextBefore int64, err error) {
 	if in.Query == "" {
 		return nil, 0, fmt.Errorf("%w: query cannot be empty", ErrBadRequest)
@@ -50,7 +47,6 @@ func (s *messageReads) SearchMessages(ctx context.Context, userID int64, in Sear
 		page.Recent = true
 	}
 	if page.Recent {
-		// Fetch one extra to learn whether another page follows.
 		page.Limit++
 	}
 
@@ -105,13 +101,11 @@ func (s *messageReads) SearchMessages(ctx context.Context, userID int64, in Sear
 	return results, nextBefore, nil
 }
 
-// searchScope returns the channel ids a search may touch. An explicit channelID
-// keeps the single-channel 403/404 contract; otherwise the scope is the caller's
-// READABLE set (visible minus labelled channels the caller has not acknowledged, so
-// a hit inside one is silently absent; a gate on the single-channel branch alone
-// leaves that leak open). in: names narrow the scope and are compared only against
-// channels already in it, so an unreadable or nonexistent target looks like any
-// name that matches nothing.
+// searchScope returns the channel ids a search may touch. An explicit channelID keeps the single-channel
+// 403/404 contract; otherwise the scope is the caller's READABLE set (so a hit in an unacknowledged labelled
+// channel is silently absent; gating only the single-channel branch leaves that leak open). in: names narrow
+// the scope and are compared only against channels already in it, so an unreadable target looks like any name
+// that matches nothing.
 func (s *messageReads) searchScope(ctx context.Context, userID int64, channelID *int64, inNames []string) ([]int64, error) {
 	var scope []int64
 	if channelID != nil && *channelID > 0 {
@@ -172,10 +166,8 @@ func (s *messageReads) resolveSearchUsers(ctx context.Context, names []string) (
 	return ids, nil
 }
 
-// resolveSearchMentions maps mentions: usernames to distinct user ids. The
-// result is empty when any name is unknown: mentions: values are AND'd, so one
-// unknown user means nothing can match. Two spellings of one user collapse to
-// one id.
+// resolveSearchMentions maps mentions: usernames to distinct user ids; empty when any name is unknown, since
+// mentions: values are AND'd.
 func (s *messageReads) resolveSearchMentions(ctx context.Context, names []string) ([]int64, error) {
 	ids := make([]int64, 0, len(names))
 	for _, name := range names {

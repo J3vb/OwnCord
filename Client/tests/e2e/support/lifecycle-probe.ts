@@ -219,6 +219,27 @@ async function takeHeapSnapshot(cdp: CDPSession): Promise<HeapSnapshotJson> {
  * Quiesce the page, then read every metric. Callers pass the same `cdp` session
  * for the whole run so the object groups are released between samples.
  */
+/** Heap reads per sample, and the pause between them. */
+export const HEAP_READS = 3;
+const HEAP_READ_GAP_MS = 500;
+
+/**
+ * The lowest of `reads` heap readings, pausing between them. `read` collects
+ * garbage before it measures.
+ */
+export async function settledHeapUsed(
+  read: () => Promise<number>,
+  pause: () => Promise<void>,
+  reads: number = HEAP_READS,
+): Promise<number> {
+  let lowest = await read();
+  for (let i = 1; i < reads; i++) {
+    await pause();
+    lowest = Math.min(lowest, await read());
+  }
+  return lowest;
+}
+
 export async function sampleLifecycle(
   page: Page,
   cdp: CDPSession,
@@ -302,7 +323,19 @@ export async function sampleLifecycle(
     }
     return { attached: count(document), regions };
   });
-  const heap = await cdp.send("Runtime.getHeapUsage");
+  // Heap is read after the DOM walk above, which allocates, so each read follows
+  // its own GC, and the lowest of a few reads counts: a short-lived allocation
+  // at one read (that walk, a chunk still being evaluated) is not something the
+  // app holds, while retained memory is present on every read, so the bar stays
+  // as strict as before.
+  const heapUsed = await settledHeapUsed(
+    async () => {
+      await cdp.send("HeapProfiler.collectGarbage");
+      await cdp.send("HeapProfiler.collectGarbage");
+      return (await cdp.send("Runtime.getHeapUsage")).usedSize;
+    },
+    () => page.waitForTimeout(HEAP_READ_GAP_MS),
+  );
   const detached =
     cycle > 0 && cycle % 5 === 0 ? detachedByName(await takeHeapSnapshot(cdp)) : undefined;
   await page.waitForTimeout(Math.max(0, firstLedgerAt + 1000 - Date.now()));
@@ -344,7 +377,7 @@ export async function sampleLifecycle(
       "AudioContext.prototype",
       "(c) => c.state !== 'closed'",
     ),
-    heapUsed: heap.usedSize,
+    heapUsed,
     dom,
     ...(detached !== undefined ? { detached } : {}),
   };

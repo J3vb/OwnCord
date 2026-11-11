@@ -12,46 +12,32 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Chunked account erasure. One writer connection serves every request, so a
-// single transaction deleting a prolific account's history would hold every
-// other write behind it. The erasure is three stages, each its own short
-// writer transaction:
-//
+// Chunked account erasure. One writer connection serves every request, so one
+// transaction deleting a prolific account's history would hold every other write
+// behind it. Three stages, each its own short writer transaction:
 //  1. Lock (EraseAccountLock): the point of no return. Runs the last-admin
-//     guard, records a 'queued' erasure_jobs row, and revokes the subject's
+//     guard, records a 'queued' erasure_jobs row, revokes the subject's
 //     sessions, API tokens and half-finished logins.
 //  2. Drain (EraseAccountDrain): deletes the bulky per-user tables in chunks
-//     of at most erasureChunk rows, one transaction each. Attachment names
-//     are appended to the queued row in the chunk that unlinks them.
-//  3. Finish (EraseAccountFinish): the single-transaction body over tables
-//     already nearly empty, moving the row from 'queued' to 'db_done'.
-//
-// Every statement is idempotent, so an interrupted stage, or a drain never
-// started, is repeated by the next caller. database/sql hands a returned writer
-// connection to its longest-waiting caller, so other writers get a turn between
-// chunks.
+//     of at most erasureChunk rows; attachment names are appended to the
+//     queued row in the chunk that unlinks them.
+//  3. Finish (EraseAccountFinish): the rest, over tables already nearly
+//     empty, moving the row from 'queued' to 'db_done'.
+// Every statement is idempotent, so an interrupted stage, or a drain never started, is
+// repeated by the next caller. database/sql hands a returned writer connection to its
+// longest-waiting caller, so other writers get a turn between chunks.
 
-// ErasureStateQueued is the state of a job whose lock stage has committed and
-// whose finish stage has not: the account is locked and part of its data is
-// still there.
+// ErasureStateQueued is the state of a job whose lock stage committed but not its finish stage.
 const ErasureStateQueued = "queued"
 
-// Chunk sizes. Package variables so tests can shrink them; no config key
-// because nothing has measured a better number.
+// Chunk sizes; variables so tests can shrink them.
 var (
-	// erasureChunk is the most rows one drain transaction deletes from an
-	// indexed per-user predicate (and the most messages it removes).
-	erasureChunk = 500
-	// erasureScanWindow is the most key values one drain transaction walks
-	// for a table with no index on the user column (reactions, events).
+	erasureChunk      = 500
 	erasureScanWindow = 5000
 )
 
-// erasureHook runs the test seam testErasureChunkHook after each chunked
-// erasure transaction commits, with the stage ("lock", "chunk", "finish",
-// "checkpoint") and, for "chunk", the 1-based count of chunks committed. A
-// non-nil error aborts the erasure there, standing in for a crash mid-drain;
-// the hook may block to hold the erasure between stages. Nil in production.
+// erasureHook runs testErasureChunkHook after each chunked transaction commits, with
+// the stage and chunk count; a non-nil error aborts as a crash would.
 func (d *DB) erasureHook(stage string, n int) error {
 	if d.testErasureChunkHook == nil {
 		return nil
@@ -59,10 +45,8 @@ func (d *DB) erasureHook(stage string, n int) error {
 	return d.testErasureChunkHook(stage, n)
 }
 
-// withErasureConn runs fn on the writer connection with PRAGMA secure_delete
-// ON, so erased bytes do not survive in freed pages, and restores it
-// afterwards. secure_delete is per connection and the writer pool is one
-// connection, so later writes use it too.
+// withErasureConn runs fn on the writer connection with secure_delete ON so erased
+// bytes do not survive in freed pages, then restores it.
 func (d *DB) withErasureConn(ctx context.Context, userID int64, fn func(conn *sql.Conn) error) error {
 	conn, err := d.writer.Conn(ctx)
 	if err != nil {
@@ -85,8 +69,6 @@ func (d *DB) withErasureConn(ctx context.Context, userID int64, fn func(conn *sq
 	return fn(conn)
 }
 
-// eraseAccount is EraseAccount and ReplayEraseAccount: all three stages with
-// no time budget. guard selects the last-admin guard.
 func (d *DB) eraseAccount(ctx context.Context, userID int64, subjectToken string, guard bool) (*ErasureJob, error) {
 	if _, err := d.EraseAccountLock(ctx, userID, guard); err != nil {
 		return nil, err
@@ -98,11 +80,11 @@ func (d *DB) eraseAccount(ctx context.Context, userID int64, subjectToken string
 }
 
 // EraseAccountLock is the lock stage: the last-admin guard (when guard is set
-// and no job is queued yet), then one transaction that finds or inserts the
+// and no job is queued), then one transaction that finds or inserts the
 // subject's queued job and deletes their sessions, API tokens and
 // partial-auth challenges. It returns ErrLastAdmin and ErrNotFound as
 // EraseAccount does, changing nothing. After a nil error the erasure is
-// committed to: the caller finishes it now or leaves it to Resume.
+// committed to: the caller finishes it or leaves it to Resume.
 func (d *DB) EraseAccountLock(ctx context.Context, userID int64, guard bool) (*ErasureJob, error) {
 	var job *ErasureJob
 	err := d.withErasureConn(ctx, userID, func(conn *sql.Conn) error {
@@ -113,8 +95,8 @@ func (d *DB) EraseAccountLock(ctx context.Context, userID int64, guard bool) (*E
 	if err != nil {
 		return nil, err
 	}
-	// The lock has committed: a test hook here must not return an error, or the
-	// caller would treat a committed lock as nothing changed.
+	// The lock has committed: a test hook here must not return an error, or the caller
+	// would treat it as nothing changed.
 	if err := d.erasureHook("lock", 0); err != nil {
 		return nil, err
 	}
@@ -140,7 +122,6 @@ func eraseLockTx(ctx context.Context, conn *sql.Conn, userID int64, guard bool) 
 	queued, err := q.GetQueuedErasureJobForUser(ctx, userID)
 	switch {
 	case err == nil:
-		// A job already queued passed the guard when it was queued.
 		job.ID = queued.ID
 		if err := json.Unmarshal([]byte(queued.Files), &job.Files); err != nil {
 			return nil, fmt.Errorf("EraseAccount decode queued files: %w", err)
@@ -169,36 +150,26 @@ func eraseLockTx(ctx context.Context, conn *sql.Conn, userID int64, guard bool) 
 	return job, nil
 }
 
-// erasureLockStatements revoke every credential the subject holds, so the
-// account stops working at the lock, not at the end of the drain.
 var erasureLockStatements = []struct{ label, query string }{
 	{"sessions", `DELETE FROM sessions WHERE user_id = ?`},
 	{"api_tokens", `DELETE FROM api_tokens WHERE user_id = ?`},
 	{"partial_auth_challenges", `DELETE FROM partial_auth_challenges WHERE user_id = ?`},
 }
 
-// drainResult is what one chunk transaction reports.
 type drainResult struct {
-	// done: the step has nothing left to delete.
-	done bool
-	// next: the cursor for the following chunk of a windowed step.
-	next int64
-	// files: stored_as names the chunk unlinked, to be appended to the job.
+	done  bool
+	next  int64
 	files []string
 }
 
-// drainStep deletes one chunk of one per-user table inside tx; cursor is the
-// previous chunk's next (zero at the start).
 type drainStep struct {
 	label string
 	run   func(ctx context.Context, tx *sql.Tx, userID, cursor int64) (drainResult, error)
 }
 
-// EraseAccountDrain is the drain stage: it deletes the subject's rows from the
-// bulky tables, one chunk per writer transaction, in erasureStatements order.
-// It stops early with done=false once deadline has passed between chunks (a
-// zero deadline never stops). Safe on an already-drained account and to repeat
-// after an error.
+// EraseAccountDrain is the drain stage: one chunk per writer transaction in
+// erasureStatements order. It stops early with done=false once deadline has passed
+// between chunks (zero never stops). Safe to repeat.
 func (d *DB) EraseAccountDrain(ctx context.Context, userID int64, deadline time.Time) (bool, error) {
 	chunks := 0
 	for _, step := range erasureDrainSteps {
@@ -250,9 +221,8 @@ func drainChunk(ctx context.Context, conn *sql.Conn, step drainStep, userID, cur
 	return res, nil
 }
 
-// appendErasureJobFiles adds names to the subject's queued job in the same
-// transaction that unlinked them (as appendRetentionRunBatch does); the job is
-// the only handle left on the blobs once the attachment rows go.
+// appendErasureJobFiles adds names to the subject's queued job in the transaction
+// that unlinked them; the job is the only handle left on the blobs.
 func appendErasureJobFiles(ctx context.Context, tx *sql.Tx, userID int64, names []string) error {
 	q := dbgen.New(tx)
 	queued, err := q.GetQueuedErasureJobForUser(ctx, userID)
@@ -280,9 +250,8 @@ func appendErasureJobFiles(ctx context.Context, tx *sql.Tx, userID int64, names 
 	return nil
 }
 
-// sessionRowID reads the id of the session row InsertSession wrote. Sign-in is
-// refused while an account deletion completes: the insert writes no row for a
-// user with a queued erasure job, reported as ErrAccountErasing.
+// sessionRowID reads the session row id InsertSession wrote; no row is written for a
+// user with a queued erasure job (ErrAccountErasing).
 func sessionRowID(res sql.Result, err error, userID int64) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("CreateSession: %w", err)
@@ -295,9 +264,8 @@ func sessionRowID(res sql.Result, err error, userID int64) (int64, error) {
 	return res.LastInsertId()
 }
 
-// refuseWhileErasing fails a write for a user whose deletion is being
-// completed. Inside the writer transaction it cannot interleave with the lock
-// stage, so nothing the drain has passed is written again.
+// refuseWhileErasing fails a write for a user whose deletion is completing; in the
+// writer transaction it cannot interleave with the lock stage.
 func refuseWhileErasing(ctx context.Context, tx *sql.Tx, userID int64) error {
 	var one int
 	err := tx.QueryRowContext(ctx,

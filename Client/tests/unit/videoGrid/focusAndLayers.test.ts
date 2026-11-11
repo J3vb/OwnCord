@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stubCapturingResizeObserver } from "../../helpers/resizeObserverStub";
 import * as mocks from "../../helpers/videoGridMocks";
-import { createVideoGrid, type VideoGridComponent } from "../../../src/components/VideoGrid";
+import {
+  createVideoGrid,
+  type VideoGridComponent,
+} from "../../../src/features/voice/videoGrid/VideoGrid";
 import { RemoteTracks } from "../../../src/features/voice/remoteTracks";
 import { VideoQuality, type Room } from "livekit-client";
 import {
@@ -26,87 +29,121 @@ describe("VideoGrid", () => {
   });
 
   // -----------------------------------------------------------------------
-  // Focus mode tests (Spec 2)
+  // Focus: the focused tile is pinned in the packed grid, the rest are Small
   // -----------------------------------------------------------------------
 
-  describe("focus mode", () => {
-    it("setFocusedTile creates focus layout with main and strip areas", () => {
-      grid.addStream(1, "Alice", fakeStream());
-      grid.addStream(2, "Bob", fakeStream());
+  describe("focus", () => {
+    const tileEl = (id: number): HTMLElement =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id="${id}"]`)!;
+    const sizeOf = (id: number): string | undefined =>
+      tileEl(id).querySelector<HTMLElement>("[role='radio'][aria-checked='true']")?.dataset["size"];
+    const isPinned = (id: number): boolean =>
+      tileEl(id).querySelector("[data-tile-control='pin']")?.getAttribute("aria-pressed") ===
+      "true";
+    const addTiles = (...ids: number[]): void =>
+      ids.forEach((id) => grid.addStream(id, `User ${id}`, fakeStream()));
+    const chooseSize = (id: number, size: string): void =>
+      tileEl(id).querySelector<HTMLElement>(`[data-tile-control='size-${size}']`)!.click();
+
+    it("setFocusedTile pins the tile and draws the others Small, in the one grid", () => {
+      addTiles(1, 2, 3);
 
       grid.setFocusedTile(1);
 
-      const mainArea = container.querySelector(".video-focus-main");
-      const stripArea = container.querySelector(".video-focus-strip");
-      expect(mainArea).not.toBeNull();
-      expect(stripArea).not.toBeNull();
-
-      // Focused tile should be in main area
-      const focusedCell = mainArea!.querySelector('[data-user-id="1"]');
-      expect(focusedCell).not.toBeNull();
-      expect(focusedCell!.classList.contains("focused")).toBe(true);
-
-      // Other tile should be in strip area
-      const thumbCell = stripArea!.querySelector('[data-user-id="2"]');
-      expect(thumbCell).not.toBeNull();
-      expect(thumbCell!.classList.contains("thumb")).toBe(true);
+      expect(isPinned(1)).toBe(true);
+      expect(sizeOf(1)).toBe("large");
+      expect(tileEl(1).classList.contains("focused")).toBe(true);
+      for (const id of [2, 3]) {
+        expect(isPinned(id)).toBe(false);
+        expect(sizeOf(id)).toBe("small");
+        expect(tileEl(id).classList.contains("focused")).toBe(false);
+      }
+      // No second layout: every tile is a direct child of the grid.
+      const root = container.querySelector(".video-grid")!;
+      expect(root.classList.contains("focus-mode")).toBe(false);
+      expect(tileEl(2).parentElement).toBe(root);
     });
 
-    it("clicking a thumbnail switches focus", () => {
-      grid.addStream(1, "Alice", fakeStream());
-      grid.addStream(2, "Bob", fakeStream());
+    it("clicking another tile moves the focus and keeps what the first one covered", () => {
+      addTiles(1, 2);
+      chooseSize(2, "large");
 
       grid.setFocusedTile(1);
+      expect(sizeOf(2)).toBe("small");
+      tileEl(2).click();
 
-      // Click the second tile (thumbnail in strip)
-      const thumbCell = container.querySelector('[data-user-id="2"]') as HTMLElement;
-      expect(thumbCell).not.toBeNull();
-      thumbCell.click();
-
-      // Now tile 2 should be focused in main area
-      const mainArea = container.querySelector(".video-focus-main");
-      expect(mainArea).not.toBeNull();
-      const newFocused = mainArea!.querySelector('[data-user-id="2"]');
-      expect(newFocused).not.toBeNull();
-      expect(newFocused!.classList.contains("focused")).toBe(true);
-
-      // Tile 1 should now be a thumbnail
-      const stripArea = container.querySelector(".video-focus-strip");
-      expect(stripArea).not.toBeNull();
-      const oldFocused = stripArea!.querySelector('[data-user-id="1"]');
-      expect(oldFocused).not.toBeNull();
-      expect(oldFocused!.classList.contains("thumb")).toBe(true);
-    });
-
-    it("removeStream auto-focuses next tile when focused tile is removed", () => {
-      grid.addStream(1, "Alice", fakeStream());
-      grid.addStream(2, "Bob", fakeStream());
-
-      grid.setFocusedTile(1);
-      expect(grid.getFocusedTileId()).toBe(1);
-
-      grid.removeStream(1);
-
-      // Remaining tile 2 should become focused
       expect(grid.getFocusedTileId()).toBe(2);
+      expect(isPinned(2)).toBe(true);
+      expect(isPinned(1)).toBe(false);
+      expect(sizeOf(1)).toBe("small");
+
+      grid.setFocusedTile(null);
+      expect(sizeOf(1)).toBe("medium");
+      expect(sizeOf(2)).toBe("large");
     });
 
-    it("removeStream clears focus when last tile removed", () => {
-      grid.addStream(1, "Alice", fakeStream());
+    it("Back to grid unpins the tile and gives the others their earlier sizes", () => {
+      addTiles(1, 2, 3);
+      chooseSize(2, "large");
+      chooseSize(3, "small");
+
+      grid.setFocusedTile(1);
+      grid.setFocusedTile(null);
+
+      expect(grid.getFocusedTileId()).toBeNull();
+      expect(isPinned(1)).toBe(false);
+      expect([1, 2, 3].map(sizeOf)).toEqual(["medium", "large", "small"]);
+    });
+
+    it("keeps a pin the viewer had before focus, and gives it back", () => {
+      addTiles(1, 2);
+      tileEl(2).querySelector<HTMLElement>("[data-tile-control='pin']")!.click();
+
+      grid.setFocusedTile(1);
+      expect(isPinned(2)).toBe(false);
+      grid.setFocusedTile(null);
+
+      expect(isPinned(2)).toBe(true);
+      expect(isPinned(1)).toBe(false);
+    });
+
+    it("removeStream of the focused tile returns to the grid with the earlier sizes", () => {
+      addTiles(1, 2, 3);
+      chooseSize(2, "large");
+
+      grid.setFocusedTile(1);
+      grid.removeStream(1);
+
+      expect(grid.getFocusedTileId()).toBeNull();
+      expect(sizeOf(2)).toBe("large");
+      expect(sizeOf(3)).toBe("medium");
+    });
+
+    it("hands keyboard focus to the grid when the focused stream ends under it", () => {
+      document.body.appendChild(container);
+      addTiles(1, 2);
+      grid.setFocusedTile(1);
+      tileEl(1).querySelector<HTMLElement>("[data-tile-control='grid']")!.focus();
+
+      grid.removeStream(1);
+
+      expect(document.activeElement).toBe(container.querySelector(".video-grid"));
+      container.remove();
+    });
+
+    it("removeStream clears focus when the last tile is removed", () => {
+      addTiles(1);
 
       grid.setFocusedTile(1);
       expect(grid.getFocusedTileId()).toBe(1);
 
       grid.removeStream(1);
 
-      // Focus cleared — no focus-mode class
       expect(grid.getFocusedTileId()).toBeNull();
-      const root = container.querySelector(".video-grid");
-      expect(root!.classList.contains("focus-mode")).toBe(false);
     });
 
     it("getFocusedTileId returns correct value", () => {
-      grid.addStream(1, "Alice", fakeStream());
+      addTiles(1);
 
       expect(grid.getFocusedTileId()).toBeNull();
 
@@ -114,27 +151,15 @@ describe("VideoGrid", () => {
       expect(grid.getFocusedTileId()).toBe(1);
     });
 
-    it("focus-mode class is added to root when a tile is focused", () => {
-      grid.addStream(1, "Alice", fakeStream());
-      grid.addStream(2, "Bob", fakeStream());
+    it("focuses a lone tile, and keeps a tile that is not up waiting", () => {
+      addTiles(1);
 
-      const root = container.querySelector(".video-grid") as HTMLElement;
-      expect(root.classList.contains("focus-mode")).toBe(false);
-
-      grid.setFocusedTile(1);
-      expect(root.classList.contains("focus-mode")).toBe(true);
-    });
-
-    it("strip area not shown when only one tile is focused (no thumbnails)", () => {
-      grid.addStream(1, "Alice", fakeStream());
+      grid.setFocusedTile(9);
+      expect(grid.getFocusedTileId()).toBe(9);
+      expect(isPinned(1)).toBe(false);
 
       grid.setFocusedTile(1);
-
-      const mainArea = container.querySelector(".video-focus-main");
-      expect(mainArea).not.toBeNull();
-      // Only one tile — no strip should be rendered
-      const stripArea = container.querySelector(".video-focus-strip");
-      expect(stripArea).toBeNull();
+      expect(isPinned(1)).toBe(true);
     });
 
     it("clicking mute button on a focused tile does not switch focus", () => {
@@ -152,65 +177,68 @@ describe("VideoGrid", () => {
       expect(grid.getFocusedTileId()).toBe(1);
     });
 
-    it("adding a stream during focus mode preserves focus layout", () => {
-      grid.addStream(1, "Alice", fakeStream());
-      grid.addStream(2, "Bob", fakeStream());
+    it("draws a stream added during focus Small, and default again after Back to grid", () => {
+      addTiles(1, 2);
 
       grid.setFocusedTile(1);
-
-      // Add a third stream
       grid.addStream(3, "Charlie", fakeStream());
 
-      // Focus should still be on tile 1
       expect(grid.getFocusedTileId()).toBe(1);
+      expect(sizeOf(3)).toBe("small");
 
-      const mainArea = container.querySelector(".video-focus-main");
-      expect(mainArea).not.toBeNull();
-      expect(mainArea!.querySelector('[data-user-id="1"]')).not.toBeNull();
-
-      // Both Bob and Charlie should be in strip
-      const stripArea = container.querySelector(".video-focus-strip");
-      expect(stripArea).not.toBeNull();
-      expect(stripArea!.querySelectorAll(".video-cell").length).toBe(2);
+      grid.setFocusedTile(null);
+      expect(sizeOf(3)).toBe("medium");
     });
 
-    it("focused cell retains data-stream-type attribute in focus layout", () => {
-      const config = makeTileConfig({ isScreenshare: true });
-      grid.addStream(1, "Alice (Screen)", fakeStream(), config);
-      grid.addStream(2, "Bob", fakeStream());
-
-      grid.setFocusedTile(1);
-
-      const mainArea = container.querySelector(".video-focus-main");
-      const focusedCell = mainArea!.querySelector(".video-cell") as HTMLElement;
-      expect(focusedCell.dataset.streamType).toBe("screenshare");
-    });
-
-    it("thumbnail cells retain data-stream-type attribute in strip", () => {
-      const cameraConfig = makeTileConfig({ isScreenshare: false });
-      grid.addStream(1, "Alice", fakeStream(), cameraConfig);
-
-      const screenConfig = makeTileConfig({ isScreenshare: true });
-      grid.addStream(2, "Bob (Screen)", fakeStream(), screenConfig);
-
-      grid.setFocusedTile(2);
-
-      const stripArea = container.querySelector(".video-focus-strip");
-      const thumbCell = stripArea!.querySelector(".video-cell") as HTMLElement;
-      expect(thumbCell.dataset.streamType).toBe("camera");
-    });
-
-    it("removing non-focused tile preserves current focus", () => {
-      grid.addStream(1, "Alice", fakeStream());
-      grid.addStream(2, "Bob", fakeStream());
+    it("removing a non-focused tile preserves current focus", () => {
+      addTiles(1, 2);
       grid.addStream(3, "Charlie", fakeStream());
 
       grid.setFocusedTile(1);
       grid.removeStream(3);
 
       expect(grid.getFocusedTileId()).toBe(1);
-      const mainArea = container.querySelector(".video-focus-main");
-      expect(mainArea!.querySelector('[data-user-id="1"]')).not.toBeNull();
+      expect(isPinned(1)).toBe(true);
+    });
+
+    it("picking a size on the focused tile ends focus and restores the others", () => {
+      addTiles(1, 2);
+      chooseSize(2, "large");
+      grid.setFocusedTile(1);
+
+      chooseSize(1, "medium");
+
+      expect(grid.getFocusedTileId()).toBeNull();
+      expect(isPinned(1)).toBe(false);
+      expect(sizeOf(1)).toBe("medium");
+      expect(sizeOf(2)).toBe("large");
+      expect(tileEl(1).querySelector<HTMLElement>("[data-tile-control='grid']")!.hidden).toBe(true);
+    });
+
+    it("unpinning the focused tile ends focus: no stuck Back to grid", () => {
+      addTiles(1, 2);
+      grid.setFocusedTile(1);
+
+      tileEl(1).querySelector<HTMLElement>("[data-tile-control='pin']")!.click();
+
+      expect(grid.getFocusedTileId()).toBeNull();
+      expect(isPinned(1)).toBe(false);
+      expect(sizeOf(2)).toBe("medium");
+      expect(tileEl(1).classList.contains("focused")).toBe(false);
+      expect(tileEl(1).querySelector<HTMLElement>("[data-tile-control='grid']")!.hidden).toBe(true);
+      expect(tileEl(1).querySelector<HTMLElement>("[data-tile-control='select']")!.hidden).toBe(
+        false,
+      );
+    });
+
+    it("keeps a size picked on another tile during focus", () => {
+      addTiles(1, 2);
+      grid.setFocusedTile(1);
+
+      chooseSize(2, "large");
+      grid.setFocusedTile(null);
+
+      expect(sizeOf(2)).toBe("large");
     });
   });
 

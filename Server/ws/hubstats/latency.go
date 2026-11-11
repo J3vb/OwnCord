@@ -1,9 +1,7 @@
-// Package hubstats holds the hub's in-process metrics: the latency histograms
-// behind /api/v1/metrics and the process-lifetime drop and reconnect counters.
-// The zero values are usable, so the hub needs no initializer. Unlike the
-// OpenTelemetry instruments in Server/telemetry (compiled only under -tags
-// otel), these exist in every build, including the untagged release and Docker
-// builds. Every read and write is an atomic operation; nothing here takes a lock.
+// Package hubstats holds the hub's in-process metrics: the latency histograms behind
+// /api/v1/metrics and the process-lifetime counters. Zero values are usable. Unlike the
+// OpenTelemetry instruments (only under -tags otel), these exist in every build. All
+// access is atomic; nothing here takes a lock.
 package hubstats
 
 import (
@@ -15,31 +13,25 @@ import (
 
 // Latency is the shipped latency surface. It must not be copied.
 type Latency struct {
-	// broadcast is enqueue to fanout-done: time queued behind other broadcasts plus delivery.
 	broadcast metrics.Histogram
-	// dispatchLag is enqueue to dispatch-start: how long a frame waited for the single
-	// dispatch goroutine; the direct signal for a contended loop.
+	// dispatchLag is enqueue to dispatch-start: how long a frame waited for the single dispatch goroutine.
 	dispatchLag metrics.Histogram
-	// chatAck is chat_send receipt to its chat_send_ok being queued: the in-server
-	// round trip, compared against k6's client-side figure.
-	chatAck metrics.Histogram
-	// seqMuHold is the longest single hold of the broadcast-sequence mutex, in ms.
+	// chatAck is chat_send receipt to its chat_send_ok being queued, compared against k6's client-side
+	// figure.
+	chatAck   metrics.Histogram
 	seqMuHold metrics.MaxGauge
-	// topicSheds counts channel frames the topic limiter dropped before a seq was
-	// assigned (distinct from the hub-wide queue's broadcast drops).
+	// topicSheds counts channel frames the topic limiter dropped before a seq was assigned.
 	topicSheds atomic.Uint64
-	// voiceJoin is voice_join_ms: each phase of a completed voice join.
-	voiceJoin voiceJoin
+	voiceJoin  voiceJoin
 }
 
-// voiceJoin times the phases of a voice join that reaches the joiner; a refused
-// or rolled-back join records nothing, so every phase shares one count.
+// voiceJoin times the phases of a voice join that reaches the joiner; a refused or rolled-back join records
+// nothing.
 type voiceJoin struct {
 	precheck, leave, persist, token, complete, total metrics.Histogram
 }
 
-// VoiceJoinPhases is the voice_join_ms snapshot: precheck, leave (previous channel
-// on a switch), persist, token, complete and total.
+// VoiceJoinPhases is the voice_join_ms snapshot: precheck, leave, persist, token, complete and total.
 type VoiceJoinPhases struct {
 	Precheck metrics.Summary `json:"precheck"`
 	Leave    metrics.Summary `json:"leave"`
@@ -49,15 +41,14 @@ type VoiceJoinPhases struct {
 	Total    metrics.Summary `json:"total"`
 }
 
-// LatencyCounts holds the raw cumulative counts of every shipped latency
-// histogram keyed by JSON name ("ws_broadcast_ms", "ws_dispatch_lag_ms",
-// "chat_send_ack_ms", "voice_join_ms.<phase>"), as Histograms names them.
+// LatencyCounts holds the raw cumulative counts of every latency histogram keyed by its JSON name, as
+// Histograms names them.
 type LatencyCounts map[string]metrics.Counts
 
 func sinceMs(t time.Time) float64 { return float64(time.Since(t)) / float64(time.Millisecond) }
 
-// ObserveSeqMuHold records how long the current seqMu critical section has been
-// held, in milliseconds, from start (taken after Lock returned).
+// ObserveSeqMuHold records how long the current seqMu critical section has been held, from start (taken after
+// Lock returned).
 func (l *Latency) ObserveSeqMuHold(start time.Time) { l.seqMuHold.Observe(sinceMs(start)) }
 
 // ObserveDispatchLag records enqueue to dispatch-start in ms; a zero enqueuedAt is skipped.
@@ -79,8 +70,7 @@ func (l *Latency) ObserveBroadcast(enqueuedAt time.Time) {
 // ObserveChatAck records chat_send receipt to its chat_send_ok being queued.
 func (l *Latency) ObserveChatAck(receivedAt time.Time) { l.chatAck.Observe(sinceMs(receivedAt)) }
 
-// ObserveVoiceJoin records one completed join from the timestamps taken as each
-// phase ended.
+// ObserveVoiceJoin records one completed join from the timestamps taken as each phase ended.
 func (l *Latency) ObserveVoiceJoin(start, precheckDone, leaveDone, persistDone, tokenDone, completeDone time.Time) {
 	ms := func(from, to time.Time) float64 { return float64(to.Sub(from)) / float64(time.Millisecond) }
 	v := &l.voiceJoin
@@ -123,8 +113,8 @@ func (l *Latency) VoiceJoinMs() VoiceJoinPhases {
 	}
 }
 
-// Histograms lists every latency histogram under its JSON name. The slice is
-// fresh and points at l's own histograms.
+// Histograms lists every latency histogram under its JSON name; the slice is fresh and points at l's own
+// histograms.
 func (l *Latency) Histograms() []metrics.NamedHistogram {
 	v := &l.voiceJoin
 	return []metrics.NamedHistogram{
@@ -145,7 +135,7 @@ func (l *Latency) Gauges() []metrics.NamedMaxGauge {
 	return []metrics.NamedMaxGauge{{Name: "hub_seqmu_max_hold_ms", G: &l.seqMuHold}}
 }
 
-// Counts reads every histogram's raw counts: atomic loads only.
+// Counts reads every histogram's raw counts with atomic loads only.
 func (l *Latency) Counts() LatencyCounts {
 	hists := l.Histograms()
 	out := make(LatencyCounts, len(hists))

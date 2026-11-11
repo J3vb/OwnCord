@@ -11,50 +11,39 @@ import (
 	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
-// A deadline on the non-streaming REST routes. A request waiting on a stalled
-// database writer holds its goroutine and connection and, past the 30 s
-// WriteTimeout, loses its response. The middleware gives every non-exempt
-// request a context deadline of restRequestDeadline, short enough to leave room
-// to answer inside that timeout; handlers passing r.Context() to the database
-// see a cancelled query. A 500 or 503 written AFTER the deadline is the
-// deadline's doing, so the writer wrapper turns it into 503 SERVICE_UNAVAILABLE
-// with Retry-After (the client maps both: Client/src/lib/api.ts). A status below
-// 500 is never rewritten, so a request that committed stays a success.
-// It is a context deadline, not a handler kill: the goroutine runs to completion
-// and a route ignoring its context is not interrupted. It can only fail a
-// request before its commit, because post-commit steps are detached from the
-// request context.
+// A deadline on the non-streaming REST routes. A request waiting on a stalled database writer holds its
+// goroutine and, past the 30 s WriteTimeout, loses its response. Every non-exempt request gets a context
+// deadline of restRequestDeadline, leaving room to answer inside that timeout. A 500 or 503 written AFTER
+// the deadline is the deadline's doing, so the writer wrapper turns it into 503 SERVICE_UNAVAILABLE with
+// Retry-After (the client maps both: Client/src/lib/api.ts); statuses below 500 are never rewritten. It is
+// a context deadline, not a handler kill, and can only fail a request before its commit, because
+// post-commit steps are detached from the request context.
 
-// requestDeadlineRewritable reports the statuses the deadline turns into 503:
-// the generic 500 and 503 a handler answers when its work is cancelled. A
-// specific 5xx code (502 UPDATE_CHECK_FAILED, 507 STORAGE_ERROR) is kept.
+// requestDeadlineRewritable reports the statuses the deadline turns into 503: the generic 500 and 503 a
+// cancelled handler answers. A specific 5xx code (502 UPDATE_CHECK_FAILED, 507 STORAGE_ERROR) is kept.
 func requestDeadlineRewritable(code int) bool {
 	return code == http.StatusInternalServerError || code == http.StatusServiceUnavailable
 }
 
-// restRequestDeadline bounds one non-exempt REST request. A package var, not a
-// config key, so tests can shrink it; the 30 s WriteTimeout in
-// internal/app/lifecycle.go leaves room to answer after it fires.
+// restRequestDeadline bounds one non-exempt REST request; a var so tests can shrink it. The 30 s
+// WriteTimeout leaves room to answer after it fires.
 var restRequestDeadline = 15 * time.Second
 
 const requestDeadlineRetryAfter = "2"
 
 const requestDeadlineBody = `{"error":"` + string(httperr.CodeServiceUnavailable) + `","message":"the server is busy; try again"}` + "\n"
 
-// requestDeadlineExemption is one route (or family) the deadline must not touch.
-// method is "" for any method; path matches the escaped path, like
-// bodyCapExemptPattern.
+// requestDeadlineExemption is one route (or family) the deadline must not touch; method "" matches any,
+// path matches the escaped path.
 type requestDeadlineExemption struct {
 	method string
 	path   *regexp.Regexp
 	reason string
 }
 
-// requestDeadlineExempt is the exempt table: every route that streams, holds a
-// connection open or is deliberately long-running, each with its reason.
-// TestRequestDeadline_EveryRouteClassified fails on a mounted route neither
-// exempt here nor listed as bound, and on an entry matching no route; add a
-// route with a reason rather than widening a pattern.
+// requestDeadlineExempt is every route that streams, holds a connection open or is deliberately
+// long-running, each with its reason. TestRequestDeadline_EveryRouteClassified fails on an unclassified
+// route or an entry matching none; add a route with a reason rather than widening a pattern.
 var requestDeadlineExempt = []requestDeadlineExemption{
 	{http.MethodGet, regexp.MustCompile(`^/api/v1/ws$`),
 		"the WebSocket upgrade: r.Context() is the socket's lifetime, so a deadline would close every connection at 15 s"},
@@ -113,10 +102,8 @@ func requestDeadlineExemptRequest(method, escapedPath string) bool {
 	return false
 }
 
-// RequestDeadlineUnless gives every request whose method and path are not in
-// the exempt table a context deadline of d, and rewrites a 500 or 503 the handler
-// writes after that deadline into 503 SERVICE_UNAVAILABLE with Retry-After. d
-// is read per request so tests can shrink the package var.
+// RequestDeadlineUnless gives every non-exempt request a context deadline of d (read per request so tests
+// can shrink it) and rewrites a post-deadline 500 or 503 into 503 SERVICE_UNAVAILABLE with Retry-After.
 func RequestDeadlineUnless(d func() time.Duration, exempt func(method, escapedPath string) bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,9 +123,8 @@ func requestDeadlineMiddleware() func(http.Handler) http.Handler {
 	return RequestDeadlineUnless(func() time.Duration { return restRequestDeadline }, requestDeadlineExemptRequest)
 }
 
-// deadlineWriter rewrites a post-deadline 5xx. It is not safe for concurrent
-// use, like any ResponseWriter. Unwrap keeps http.ResponseController (and so
-// Flusher, Hijacker and the write-deadline controls) reaching the connection.
+// deadlineWriter rewrites a post-deadline 5xx; not safe for concurrent use. Unwrap keeps
+// http.ResponseController reaching the connection.
 type deadlineWriter struct {
 	http.ResponseWriter
 	ctx    context.Context
@@ -151,9 +137,8 @@ type deadlineWriter struct {
 
 func (w *deadlineWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-// WriteHeader passes a status through unless it is a 5xx written after the
-// request's own deadline expired; that one becomes the 503 and the handler's
-// body is dropped (only 500 and 503). 1xx informational statuses pass without committing.
+// WriteHeader passes a status through unless it is a 500/503 written after the deadline expired, which
+// becomes the 503 with the handler's body dropped. 1xx statuses pass without committing.
 func (w *deadlineWriter) WriteHeader(code int) {
 	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
 		w.ResponseWriter.WriteHeader(code)
@@ -168,8 +153,7 @@ func (w *deadlineWriter) WriteHeader(code int) {
 		slog.WarnContext(w.ctx, "request deadline exceeded; answering 503 instead of the handler's failure",
 			"method", w.method, "path", truncateForLog(w.path, maxLoggedPathLen), "handler_status", code)
 		h := w.Header()
-		// Drop only what described the handler's own body; the security
-		// headers and request id set by outer middleware stay.
+		// Drop only what described the handler's own body; outer security headers and the request id stay.
 		for _, k := range []string{"Content-Length", "Content-Encoding", "Content-Disposition", "ETag", "Last-Modified", "Location", "Set-Cookie"} {
 			h.Del(k)
 		}
@@ -183,8 +167,7 @@ func (w *deadlineWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
-// Write commits an implicit 200 like net/http and drops the handler's body once
-// the status was rewritten.
+// Write commits an implicit 200 like net/http and drops the body once the status was rewritten.
 func (w *deadlineWriter) Write(p []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
@@ -195,8 +178,7 @@ func (w *deadlineWriter) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
-// Flush commits an implicit 200 and flushes, unless the response was rewritten
-// (already complete).
+// Flush commits an implicit 200 and flushes, unless the response was rewritten.
 func (w *deadlineWriter) Flush() {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)

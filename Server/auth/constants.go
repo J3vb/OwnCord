@@ -4,22 +4,19 @@ import "time"
 
 const (
 
-	// minUsernameLength is the minimum number of runes in a username.
+	// minUsernameLength and maxUsernameLength bound a username in runes.
 	minUsernameLength = 2
 
-	// maxUsernameLength is the maximum number of runes in a username.
 	maxUsernameLength = 32
 
-	// sessionTokenBytes is the number of random bytes in a session token (256 bits).
+	// sessionTokenBytes and opaqueTokenBytes are random bytes per token (256 bits).
 	sessionTokenBytes = 32
 
-	// opaqueTokenBytes is the number of random bytes in an opaque token (256 bits).
 	opaqueTokenBytes = 32
 
-	// totpSecretBytes is the number of random bytes used to generate a TOTP secret.
 	totpSecretBytes = 20
 
-	// usedTOTPCodeTTL is how long a verified TOTP code is remembered to prevent
-	// replay attacks (covers the current period +/- 1, ~90 seconds).
+	// usedTOTPCodeTTL is how long a verified TOTP code is remembered against
+	// replay (the current period +/- 1).
 	usedTOTPCodeTTL = 90 * time.Second
 )

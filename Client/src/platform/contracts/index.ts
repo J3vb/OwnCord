@@ -36,6 +36,7 @@ export type { WindowPrefs } from "./windowPrefs";
 export type { GpuAdapter } from "./gpuAdapter";
 export type { AppAudio } from "./appAudio";
 export type { CallService } from "./callService";
+export type { MeteredNetwork } from "./meteredNetwork";
 export type { ServerScope } from "./serverScope";
 
 import type { HttpClient } from "./http";
@@ -69,6 +70,7 @@ import type { WindowPrefs } from "./windowPrefs";
 import type { GpuAdapter } from "./gpuAdapter";
 import type { AppAudio } from "./appAudio";
 import type { CallService } from "./callService";
+import type { MeteredNetwork } from "./meteredNetwork";
 import type { ServerScope } from "./serverScope";
 import type { ShareSheet } from "./shareSheet";
 
@@ -106,6 +108,7 @@ export interface Platform {
   readonly gpuAdapter: GpuAdapter;
   readonly appAudio: AppAudio;
   readonly callService: CallService;
+  readonly meteredNetwork: MeteredNetwork;
   readonly serverScope: ServerScope;
   readonly shareSheet: ShareSheet;
 }

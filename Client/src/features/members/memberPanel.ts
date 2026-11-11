@@ -18,10 +18,9 @@ import { membersStore, memberDisplayName } from "@stores/members.store";
 import { currentUserRoleHasPermission, topPositionFor } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
 import { type ApiClient, ApiClientError, errorText } from "@lib/api";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
-import { moderationText } from "../../i18n/moderation";
 import type { BlockDeps } from "../blocks/blockActions";
 import {
   addMemberRole,
@@ -34,7 +33,7 @@ import {
 import { TIMEOUT_PRESETS } from "../moderation/timeoutPresets";
 
 /** The two UI-layer functions the panel needs. Injected rather than imported:
- *  `features/` is a lower layer and may not statically import `components/`.
+ *  `features/` is a lower layer and may not statically import `pages/`.
  *  The host (`pages/`) passes the real ones. */
 export interface MemberPanelUi {
   readonly createMemberList: typeof createMemberList;
@@ -143,7 +142,9 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
       return;
     }
     try {
-      bannedUsers = (await api.adminListUsers()).filter(isBanInForce);
+      bannedUsers = (await api.adminListUsers(undefined, { bannedOnly: true })).filter(
+        isBanInForce,
+      );
     } catch {
       return;
     }
@@ -177,8 +178,6 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
   // roleRevision moves on exactly those (and on role and profile changes, never
   // on presence or typing), and it is monotonic, so a ban and a join batched
   // into one notification still register.
-  // ponytail: every roster change re-walks the user list for a moderator; a
-  // banned-only server query is the upgrade if that ever costs something.
   unsubs.push(
     membersStore.subscribeSelector(
       (state) => state.roleRevision,
@@ -289,7 +288,7 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
             fallbackFocus: () => memberList.focusMember(userId),
           });
         },
-        () => getToast()?.show(moderationText("nicknameDialog.failed"), "error"),
+        () => getToast()?.show(shellText("member.nicknameFailed"), "error"),
       );
     },
     // Loaded on first use: the dialog and request code stay out of MainPage.

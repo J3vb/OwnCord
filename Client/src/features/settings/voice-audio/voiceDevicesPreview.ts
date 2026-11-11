@@ -29,6 +29,147 @@ import {
 } from "./voiceTabShared";
 import type { VoiceTabScope } from "./voiceTabScope";
 
+type DeviceEntry = Pick<MediaDeviceInfo, "deviceId" | "label" | "kind">;
+type DeviceList = readonly DeviceEntry[];
+type WebDeviceList = readonly MediaDeviceInfo[];
+
+/** On Linux the native lists replace the webview's; elsewhere only the webview's exist. */
+function mergeDeviceLists(
+  nativeInputs: DeviceList | null,
+  nativeOutputs: DeviceList | null,
+  nativeCameras: DeviceList | null,
+  all: WebDeviceList,
+): DeviceList {
+  if (nativeInputs === null || nativeOutputs === null) return all;
+  return [
+    ...nativeInputs,
+    ...nativeOutputs,
+    ...(nativeCameras ?? all.filter((d) => d.kind === "videoinput")),
+  ];
+}
+
+/**
+ * A saved device that has vanished stays as an entry: disabled and labelled
+ * "(disconnected)", or plain when the webview hides the list so presence is
+ * unknown.
+ */
+function appendSavedDeviceOption(
+  sc: VoiceTabScope,
+  select: HTMLSelectElement,
+  saved: string,
+  label: string,
+  hidden: boolean,
+): void {
+  const device = sc.deviceLabels.get(saved) ?? `${label} (${saved.slice(0, 8)})`;
+  select.appendChild(
+    hidden
+      ? createElement("option", { value: saved }, device)
+      : createElement(
+          "option",
+          { value: saved, disabled: "" },
+          t("voiceAudio.deviceDisconnected", { device }),
+        ),
+  );
+}
+
+/** Refill one dropdown, keeping its leading "Default" option. */
+function fillDeviceSelect(
+  sc: VoiceTabScope,
+  select: HTMLSelectElement,
+  kind: MediaDeviceKind,
+  prefKey: string,
+  label: string,
+  devices: DeviceList,
+): void {
+  const saved = loadPref<string>(prefKey, "");
+  // Keep the leading "Default" option, replace the rest.
+  while (select.options.length > 1) select.remove(1);
+  let savedStillPresent = false;
+  // Without a media permission the webview hides the list behind one
+  // nameless entry per kind, so whether the saved device is here is unknown.
+  let hidden = false;
+  for (const d of devices) {
+    if (d.kind !== kind) continue;
+    if (d.deviceId === "") {
+      hidden = true;
+      continue;
+    }
+    if (d.deviceId === saved) savedStillPresent = true;
+    const name = d.label || `${label} (${d.deviceId.slice(0, 8)})`;
+    sc.deviceLabels.set(d.deviceId, name);
+    select.appendChild(createElement("option", { value: d.deviceId }, name));
+  }
+  const keepSaved = savedStillPresent || kind !== "videoinput";
+  if (saved !== "" && !savedStillPresent && keepSaved) {
+    appendSavedDeviceOption(sc, select, saved, label, hidden);
+  }
+  select.value = keepSaved ? saved : "";
+}
+
+/**
+ * "Default" is a preference; name the device the call really captures,
+ * which can lag the system default after an unplug and replug. Only a
+ * web room has a mic track to read, so the list is the webview's.
+ */
+function paintDefaultInputLabel(sc: VoiceTabScope, all: WebDeviceList): void {
+  const live = loadPref<string>("audioInputDevice", "") === "" ? getLocalMicSettings() : null;
+  const liveDevice =
+    live === null
+      ? undefined
+      : (all.find((d) => isRealInput(d) && d.deviceId === live.deviceId) ??
+        all.find((d) => isRealInput(d) && d.groupId !== "" && d.groupId === live.groupId));
+  setText(
+    sc.defaultInputOpt,
+    liveDevice?.label
+      ? t("voiceAudio.defaultLive", { device: liveDevice.label })
+      : t("voiceAudio.default"),
+  );
+}
+
+/** First preview on Linux: discovery awaits must not outlive a newer request. */
+async function startInitialNativePreview(sc: VoiceTabScope, device: string): Promise<void> {
+  // The discovery awaits must not outlive a newer request: if the user
+  // picks a camera while they are pending, that choice owns the preview.
+  const thisRequest = sc.cameraRequestId;
+  try {
+    // GStreamer may be missing entirely: no capture can start, so explain why
+    // instead of leaving the preview box empty or showing a generic error.
+    const support = await nativeCameraSupport();
+    if (sc.signal.aborted || thisRequest !== sc.cameraRequestId) return;
+    if (support !== null && !support.available) {
+      setText(sc.previewLabel, t("voiceAudio.gstreamerMissing"));
+      sc.previewLabel.hidden = false;
+      return;
+    }
+    const cameras = await nativeCameraDevices();
+    if (sc.signal.aborted || thisRequest !== sc.cameraRequestId) return;
+    if (cameras !== null && cameras.length === 0) {
+      setText(sc.previewLabel, t("voiceAudio.noCamera"));
+      sc.previewLabel.hidden = false;
+      return;
+    }
+    await sc.startNativeCameraPreview(device);
+  } catch {
+    // A failed support/device query must still explain itself, not leave
+    // the preview box in its default empty state.
+    if (sc.signal.aborted || thisRequest !== sc.cameraRequestId) return;
+    setText(sc.previewLabel, t("voiceAudio.cameraUnavailable"));
+    sc.previewLabel.hidden = false;
+  }
+}
+
+/** First preview in the webview: with no saved device, only when a camera exists. */
+async function startInitialWebPreview(sc: VoiceTabScope, device: string): Promise<void> {
+  if (device === "" && navigator.mediaDevices?.enumerateDevices !== undefined) {
+    const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+    if (!devices.some((d) => d.kind === "videoinput")) {
+      setText(sc.previewLabel, t("voiceAudio.noCamera"));
+      return;
+    }
+  }
+  sc.startCameraPreview(device);
+}
+
 export function mountDevicesAndPreview(sc: VoiceTabScope): void {
   // Device names seen while this tab is open, to name one that is unplugged.
   sc.deviceLabels = new Map<string, string>();
@@ -59,65 +200,13 @@ export function mountDevicesAndPreview(sc: VoiceTabScope): void {
         nativeCameraDevices(),
         navigator.mediaDevices.enumerateDevices(),
       ]);
-      const devices =
-        nativeInputs === null || nativeOutputs === null
-          ? all
-          : [
-              ...nativeInputs,
-              ...nativeOutputs,
-              ...(nativeCameras ?? all.filter((d) => d.kind === "videoinput")),
-            ];
+      const devices = mergeDeviceLists(nativeInputs, nativeOutputs, nativeCameras, all);
       if (sc.signal.aborted) return;
 
       for (const [select, kind, prefKey, label] of selects) {
-        const saved = loadPref<string>(prefKey, "");
-        // Keep the leading "Default" option, replace the rest.
-        while (select.options.length > 1) select.remove(1);
-        let savedStillPresent = false;
-        // Without a media permission the webview hides the list behind one
-        // nameless entry per kind, so whether the saved device is here is unknown.
-        let hidden = false;
-        for (const d of devices) {
-          if (d.kind !== kind) continue;
-          if (d.deviceId === "") {
-            hidden = true;
-            continue;
-          }
-          if (d.deviceId === saved) savedStillPresent = true;
-          const name = d.label || `${label} (${d.deviceId.slice(0, 8)})`;
-          sc.deviceLabels.set(d.deviceId, name);
-          select.appendChild(createElement("option", { value: d.deviceId }, name));
-        }
-        const keepSaved = savedStillPresent || kind !== "videoinput";
-        if (saved !== "" && !savedStillPresent && keepSaved) {
-          const device = sc.deviceLabels.get(saved) ?? `${label} (${saved.slice(0, 8)})`;
-          select.appendChild(
-            hidden
-              ? createElement("option", { value: saved }, device)
-              : createElement(
-                  "option",
-                  { value: saved, disabled: "" },
-                  t("voiceAudio.deviceDisconnected", { device }),
-                ),
-          );
-        }
-        select.value = keepSaved ? saved : "";
+        fillDeviceSelect(sc, select, kind, prefKey, label, devices);
       }
-      // "Default" is a preference; name the device the call really captures,
-      // which can lag the system default after an unplug and replug. Only a
-      // web room has a mic track to read, so the list is the webview's.
-      const live = loadPref<string>("audioInputDevice", "") === "" ? getLocalMicSettings() : null;
-      const liveDevice =
-        live === null
-          ? undefined
-          : (all.find((d) => isRealInput(d) && d.deviceId === live.deviceId) ??
-            all.find((d) => isRealInput(d) && d.groupId !== "" && d.groupId === live.groupId));
-      setText(
-        sc.defaultInputOpt,
-        liveDevice?.label
-          ? t("voiceAudio.defaultLive", { device: liveDevice.label })
-          : t("voiceAudio.default"),
-      );
+      paintDefaultInputLabel(sc, all);
     } catch {
       const errOpt = createElement(
         "option",
@@ -264,48 +353,9 @@ export function mountDevicesAndPreview(sc: VoiceTabScope): void {
 
   sc.activeNativePreview = null;
 
-  void (async () => {
-    const device = sc.savedVideoDevice;
-    if (isLinuxDesktop()) {
-      // The discovery awaits must not outlive a newer request: if the user
-      // picks a camera while they are pending, that choice owns the preview.
-      const thisRequest = sc.cameraRequestId;
-      try {
-        // GStreamer may be missing entirely: no capture can start, so explain why
-        // instead of leaving the preview box empty or showing a generic error.
-        const support = await nativeCameraSupport();
-        if (sc.signal.aborted || thisRequest !== sc.cameraRequestId) return;
-        if (support !== null && !support.available) {
-          setText(sc.previewLabel, t("voiceAudio.gstreamerMissing"));
-          sc.previewLabel.hidden = false;
-          return;
-        }
-        const cameras = await nativeCameraDevices();
-        if (sc.signal.aborted || thisRequest !== sc.cameraRequestId) return;
-        if (cameras !== null && cameras.length === 0) {
-          setText(sc.previewLabel, t("voiceAudio.noCamera"));
-          sc.previewLabel.hidden = false;
-          return;
-        }
-        await sc.startNativeCameraPreview(device);
-      } catch {
-        // A failed support/device query must still explain itself, not leave
-        // the preview box in its default empty state.
-        if (sc.signal.aborted || thisRequest !== sc.cameraRequestId) return;
-        setText(sc.previewLabel, t("voiceAudio.cameraUnavailable"));
-        sc.previewLabel.hidden = false;
-      }
-      return;
-    }
-    if (device === "" && navigator.mediaDevices?.enumerateDevices !== undefined) {
-      const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
-      if (!devices.some((d) => d.kind === "videoinput")) {
-        setText(sc.previewLabel, t("voiceAudio.noCamera"));
-        return;
-      }
-    }
-    sc.startCameraPreview(device);
-  })();
+  void (isLinuxDesktop()
+    ? startInitialNativePreview(sc, sc.savedVideoDevice)
+    : startInitialWebPreview(sc, sc.savedVideoDevice));
 
   /** The Linux settings preview: capture natively (works while the window is
    *  hidden and exposes the same device ids the call will select) and draw the

@@ -101,10 +101,10 @@ All four are optimistic with rollback; each also emits a WS control message.
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------- |
 | **Mute**        | `localMuted` (`setLocalMuted`) — stops the mic capture track (`stopMicTrackOnMute` in the Room's `publishDefaults`, applied by `applyMicMuteState`, `features/voice/mediaControl.ts`), so the OS microphone in-use indicator goes out; the LiveKit publication is **not** removed — it stays muted, and unmute re-acquires the device | `voice_mute{muted}`           | n/a (local-authoritative)                    |
 | **Deafen**      | `localDeafened` + forces mute — unsubscribes remote voice audio and mutes screen-share/stream audio (it stays subscribed; undeafen restores each stream's own per-tile mute)                                                                                                                                                          | `voice_deafen` + `voice_mute` | implies mute                                 |
-| **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `lib/voice/screenShare.ts`)                                                                                                                                                                                                                      | `voice_camera{enabled}`       | revert on failure + toast                    |
-| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `lib/voice/screenShare.ts`); rate-limited                                                                                                                                                                                                                | `voice_screenshare{enabled}`  | revert + toast; a dismissed picker is silent |
+| **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `features/voice/screenShare.ts`)                                                                                                                                                                                                                 | `voice_camera{enabled}`       | revert on failure + toast                    |
+| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `features/voice/screenShare.ts`); rate-limited                                                                                                                                                                                                           | `voice_screenshare{enabled}`  | revert + toast; a dismissed picker is silent |
 
-Mute and deafen live in the user panel (`components/UserBar.ts`, next to
+Mute and deafen live in the user panel (`features/voice/UserBar.ts`, next to
 Settings), not the voice widget. They, their keys and the tray work outside a
 call too: there they change only the local state and send nothing. The
 member's own mute and deafen are saved (`saveSelfVoiceState`, never a
@@ -122,7 +122,7 @@ the accepted cost.
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | mic muted      | Mic-slash icon on self tile + control bar                                                                                                                                                                                                                                              |
 | deafened       | Headphone-slash alone (deafen implies mute, so no mic-slash beside it); a moderator mute or deafen gives it the server-muted class and title                                                                                                                                           |
-| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `features/channels/ChannelSidebar.ts`, `components/UserBar.ts`                                     |
+| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `features/channels/voiceSidebarRows.ts`, `features/voice/UserBar.ts`                               |
 | listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                                                       |
 | camera on      | Self video tile in the grid                                                                                                                                                                                                                                                            |
 | screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                                                                    |
@@ -135,18 +135,31 @@ call bar above the chat (Mute, Leave, Expand); reopening the DM opens the call
 view again. On a computer the panel keeps its resizable height and the
 collapsed choice survives a DM switch.
 
-**Video tiles** (`components/VideoGrid.ts`, in guild voice and DM calls alike):
-each tile is a button (click, Enter, Space) that opens it in focus view, with a
-filmstrip for the rest and **Back to grid** to leave. Screen shares carry a
+**Video tiles** (`features/voice/videoGrid/VideoGrid.ts`, in guild voice and DM calls alike):
+the tiles share one packed layout (`packLayout.ts`), each Small, Medium or
+Large and pinnable from its hover controls or its menu. Each tile is also a
+button (click, Enter, Space) that **focuses** it: the tile is pinned (drawn
+large and placed first) and every other video tile is drawn Small, in the same
+grid, with no second layout and no filmstrip. **Back to grid** unpins it and
+puts the other tiles back to the sizes they had before. Choosing a size or
+unpinning on the focused tile ends focus the same way (keeping the size you
+chose), and when the focused stream ends the grid returns to its normal layout
+with keyboard focus on the grid. A stream that arrives during focus is drawn
+Small. People without video sit in the participant strip in focus as in the
+grid (`gridPeopleStrip.ts`). Screen shares carry a
 **LIVE** badge, and the speaking ring (`--text-positive`) and a mic-slash or
 headphone-slash badge for a muted or deafened user are on camera tiles. A
-**Show chat** control in the grid's header leaves the grid or focus view for
+**Show chat** control in the grid's header leaves the grid for
 the chat without leaving the call. In the guild call view the header also has
 **Show non-video participants**, **Show my camera** (hides only your own
-camera tile, here) and, in focus view, **Show participant strip**; each is a
+camera tile, here) and **Show participant strip**; each is a
 saved preference (`callShowNonVideo`, `callShowSelfCamera`, `callShowStrip`)
-and none applies while the DM call panel hosts the grid. A control bar at the
-bottom of the call view, in grid and focus view, has mute, deafen, camera,
+and none applies while the DM call panel hosts the grid. **Show non-video
+participants** decides whether people without video are drawn at all, in the
+strip or as tiles; **Show participant strip** hides or shows the strip itself
+while a video tile is up (with no video up the people are tiles in the grid and
+only the first toggle applies). A control bar at the
+bottom of the call view, focused or not, has mute, deafen, camera,
 share and disconnect; camera and share are inert until the join has connected.
 The header toggles sit beside the bar, or stack above it with room kept below
 the tiles when the call view is narrower than 680 px. On a phone the toggles
@@ -187,7 +200,7 @@ A remote tile's volume slider is named for whose it is ("Otto stream volume"
 for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %; its mute
 button is the same local Mute as the sidebar menu's) and
 shows its value. The tile menu (right-click, the Menu key, Shift+F10;
-`components/video-grid/tileMenu.ts`, loaded on first use) is the person's
+`features/voice/videoGrid/tileMenu.ts`, loaded on first use) is the person's
 menu: Profile, Message, the two volumes kept apart, Mute stream, the local
 Mute, Focus (Back to grid when focused), Full screen, Pop out, **Stop
 watching**, and the voice roster's moderation section where the channel's
@@ -221,7 +234,7 @@ stream as it is published. Every subscribed tile asks only for its displayed
 size, and a tile nobody can see (grid closed, app hidden, stopped) for none.
 Your own screen share is covered by what is going out (surface, resolution, fps, audio) with **Stop sharing** and
 **Hide preview**. While you share, the voice widget shows a stream card
-(`components/voice-widget/streamCard.ts`, loaded on the first share): what is
+(`features/voice/voiceWidget/streamCard.ts`, loaded on the first share): what is
 going out, **Change source**, **Quality** and **Stop sharing**. Change source
 opens the picker and swaps the new capture under the published track
 (`features/voice/screenshareChange.ts`), so viewers keep watching and the
@@ -232,7 +245,7 @@ rate; once the bandwidth is back, `lib/voice/shareResolutionRecovery.ts`
 restarts WebRTC's adaptation (Chromium's capturer never grows the source back
 by itself), so the share returns to full size after a hitch of a second or two,
 at most once per 30 s. On Linux the native capture picks in its own dialog, so the card has
-Stop sharing only. In a DM call, focus view stays inside the call panel and the
+Stop sharing only. In a DM call, a focused tile stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
 double-click) puts the tile in HTML full screen and the window with it
 (`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in
@@ -336,7 +349,41 @@ Per-user volume is adjustable (0–200%; saved values above 200% are read as 200
 Token refresh (a 4 min timer against the 5 min token) and voice reconnect (five attempts, 3 s-doubling
 backoff capped at 6 s, about 27 s, then every 15 s for up to 5 minutes) should be **invisible on success** beyond the
 "Reconnecting voice…" badge while a reconnect runs. Only giving up surfaces:
-"Voice connection lost — failed to reconnect" + auto-leave. A reconnect drops your camera and screen
+"Voice connection lost — failed to reconnect" + auto-leave. An attempt that connects to the voice
+server but then fails to set the call up ends the same way, at once: the new room is already the
+session by then, so it is not retried. A failed roster read or token refresh does not end the loop: the
+attempt waits for the next delay, or runs with the token it has. Clicking another voice channel while
+a reconnect runs hands the call to that join: from the click on, the loop starts nothing new for the old
+channel, and if it would give up (or fail late) before the join is answered it only clears its own session,
+with no `voice_leave` and no "Voice connection lost". The join's token then connects as usual; a refusal
+still ends the old call on the server. If neither arrives, the join's own bound below runs out first
+(it counts from the click) and ends the call like any unanswered join; the hand-over keeps a 15 s wait
+of its own behind it (counted again for a newer click, or while the chat socket is itself reconnecting)
+that ends the call as a give-up does.
+Every `voice_join` has the same bound from the moment it is sent (`features/voice/joinRequest.ts`): with
+neither a `voice_token` nor a refusal after 15 s on a settled chat socket, the join ends like the user's
+own Disconnect, with a `voice_leave` and "Could not join voice: the server did not answer. Try again."
+A server that advertises `voice_messages` echoes the join's id on every refusal, so there an error with
+no id never counts as the join's refusal. When the user clicks faster than the server answers, the
+answers of several joins interleave: a self `voice_state` for a channel other than the one the store
+names is not followed, and a `voice_token` for a channel the user already clicked away from is let pass.
+A token that arrives with no channel selected, and every refused join that finds no session here, is
+answered with a bare `voice_leave`, so the server never keeps a call nobody sees (it ignores a leave
+from a socket that holds no call). A join attempt writes the status on screen only while the store names
+its channel: a room that finishes connecting after a click on another channel leaves that channel's
+"Connecting…" as it is, and the refusal or the 15 s bound of the newer join still ends it.
+A click on another channel from a connected call keeps that call until the server acts on the switch
+(`features/voice/joinClick.ts`): the store keeps naming the call and only records the target
+(`voiceStore.switchingTo`). The old channel's self `voice_leave` or the new channel's `voice_token`
+moves the store to the target; a refusal (a locked or full channel, a missing permission) clears the
+target and leaves the call as it was, with the password dialog opening over it for a locked channel.
+Another click while the switch waits is ignored, and a switch with no answer in 15 s ends like any
+unanswered join. A self `voice_leave` names only a channel, so it is matched to the oldest join this
+client sent for that channel (`leaveEndsEarlierStay`, `features/voice/joinRequest.ts`): when the user
+leaves a channel and is back in it before the server answered, the first stay's leave, arriving before
+or after the new token, does not end the new call.
+A drop that only starts after the click leaves the widget on "Connecting…" for the new channel instead of
+"Reconnecting voice…". A reconnect drops your camera and screen
 share (`teardownForReconnect`); once it (or its rejoin) lands, the camera turns back on by itself, under
 the server's video limit. A screen share needs the OS picker again, so a sticky toast says it stopped,
 with a "Share again" button; on Linux X11 the same source is shared again with no dialog while the host
@@ -379,7 +426,7 @@ at warn, and a warning toast naming the peer stays until dismissed
 for the rest of the call. `mismatch` is now only a pinned peer whose key is no
 longer delivered, or an announce that fails verification.
 
-The mismatch modal (`createIdentityMismatchModal()`, `components/IdentityMismatchModal.ts`;
+The mismatch modal (`createIdentityMismatchModal()`, `features/voice/IdentityMismatchModal.ts`;
 opened from `openIdentityMismatchModal()` in `features/voice/peerVerification.ts`, shared with `DmCallPanel`) shows the **new key's fingerprint** so
 the user can verify it out-of-band before trusting. "Trust this key as well" re-pins
 via `rePinPeerIdentity` — deliberately pinning the exact key whose fingerprint
@@ -476,7 +523,7 @@ badge.
   indicators only; hovering a user opens no live preview. There
   is no pre-share preview of your own stream in the app on Windows — that step
   is the OS `getDisplayMedia` picker dialog; on Linux it is the "Share your
-  screen" dialog (`components/ScreenSharePicker.ts`).
+  screen" dialog (`features/voice/ScreenSharePicker.ts`).
 
 ## 9. DM calls (ring)
 
@@ -487,7 +534,7 @@ call):
 | Event                      | Reaction                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Outgoing: user clicks Call | Caller joins the DM voice channel, then `call_ring` is sent once the voice session is connected (not while joining or securing) and held back (with transport slack) so it stays inside the 1/3 s server limit, and dropped if the socket disconnects meanwhile; a refused join sends none, and a 1:1 ring to someone who has not accepted the caller is refused at once with `CALL_REQUIRES_ACCEPTANCE` (the ring is never delivered; the caller's "Calling…" ends and the error toast explains), and a held-back ring or Ring again is dropped if the caller has left the call; the call panel shows "Calling…" and a 30 s no-answer window over the members who are online (offline members are left out, since the server drops their rings; if none is online all are kept) (`createOutgoingCall`, `lib/voice/callRing.ts`), except on a redial into a call someone else is already in, which only re-rings. While the ring is in flight the caller hears a soft 440 Hz ringback every 3 s (`lib/media/notificationSound.ts`); DND and the Incoming Call Sound toggle silence it, an incoming ring pauses it and it resumes when that ring ends, and it stops the moment the phase leaves `ringing` — a join, the last callee declining, the timeout or leaving |
-| Incoming: `call_incoming`  | A repeating ringtone distinct from the message chime (`lib/media/notificationSound.ts`; governed by the Incoming Call Sound toggle and DND, which also silence the caller's ringback) driven by the `lib/voice/callRing.ts` state machine (30 s auto-timeout). When the window is not focused, a new ring also raises one "_X_ is calling you" OS notification (not under DND) and one urgent taskbar flash until focus (`features/direct-messages/callAlerts.ts`); clicking it opens the DM (`owncord://channel/<id>?host=` on Windows, same cross-server guard as a message notification). With the ringing DM open, the call panel is the answer surface and the banner stays hidden; anywhere else, `components/IncomingCallBanner.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Incoming: `call_incoming`  | A repeating ringtone distinct from the message chime (`lib/media/notificationSound.ts`; governed by the Incoming Call Sound toggle and DND, which also silence the caller's ringback) driven by the `lib/voice/callRing.ts` state machine (30 s auto-timeout). When the window is not focused, a new ring also raises one "_X_ is calling you" OS notification (not under DND) and one urgent taskbar flash until focus (`features/direct-messages/callAlerts.ts`); clicking it opens the DM (`owncord://channel/<id>?host=` on Windows, same cross-server guard as a message notification). With the ringing DM open, the call panel is the answer surface and the banner stays hidden; anywhere else, `features/direct-messages/IncomingCallBanner.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Accept                     | Join the DM voice channel; ring clears. "Join with video" also turns the camera on once connected. Being in the room answers the ring however you got there: joining it another way clears the ring, and a `call_incoming` for the channel you are already in is ignored                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Decline                    | `call_decline` sent → the ringer's panel says "declined" in a 1:1, and in a group that callee drops off the ringing list. Another callee's ring stops when its own ringer declines (`call_declined`) or when a `voice_leave` for that channel leaves the room empty, whoever left; the ringer leaving while others stay in does not stop it. A caller who is not looking at that DM (another channel, settings or another view) gets one toast instead: "<name> declined"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Timeout / caller leaves    | Timeout: the callee's ring clears with a "Missed call from _X_" toast (plus an OS notification when the window is not focused; the ringer hanging up before the timeout is reported the same way, but an accept, decline or newer call is not a miss), and the caller's panel says "didn't answer", draws only the caller's own tile, and stays in the call with Ring again / Leave call; a caller who is not looking at the DM gets a "No answer" toast. Caller leaves: the call simply ends, the caller's outgoing ring clears, and the callees' rings clear once the room is empty, with the same "Missed call" notice. In a 1:1, when the other person hangs up and you are left alone, the connected panel's status reads "<name> left the call" with Ring again                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -554,11 +601,11 @@ never silences message chimes for the rest of the session.
 ## Source of truth
 
 `src/lib/voice/livekitSession.ts`, `src/features/voice/`, `src/lib/voice/livekitE2EE.ts`,
-`src/stores/voice.store.ts`, `src/lib/voice/screenShare.ts`,
-`src/lib/voice/ptt.ts`, `src/lib/ui/inputMode.ts`, `src/lib/voice/noiseFloor.ts`, `src/lib/voice/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
-`src/components/UserBar.ts` (mute and deafen buttons),
-`src/features/channels/ChannelSidebar.ts` (voice rows, join freeze on WS reconnect,
-and the E2EE verification badge), `src/components/VideoGrid.ts`,
+`src/stores/voice.store.ts`, `src/features/voice/screenShare.ts`,
+`src/lib/voice/ptt.ts`, `src/lib/ui/inputMode.ts`, `src/lib/voice/noiseFloor.ts`, `src/lib/voice/roomEventHandlers.ts`, `src/features/voice/VoiceWidget.ts`,
+`src/features/voice/UserBar.ts` (mute and deafen buttons),
+`src/features/channels/voiceSidebarRows.ts` (voice rows, join freeze on WS reconnect,
+and the E2EE verification badge), `src/features/voice/videoGrid/VideoGrid.ts`,
 `src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,
 `src/lib/net/e2eeCrypto.ts`, `src/lib/net/identity.ts`; and the structural map in
 [../voice-e2ee.md](../voice-e2ee.md).

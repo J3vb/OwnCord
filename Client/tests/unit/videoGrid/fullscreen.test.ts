@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoGridMocks";
 import { cascadedDeclaration, keyword } from "../../helpers/app-css";
 import { expectConsole } from "../../helpers/console";
-import { type VideoGridComponent } from "../../../src/components/VideoGrid";
+import { type VideoGridComponent } from "../../../src/features/voice/videoGrid/VideoGrid";
 import type { ShareSenderSample } from "../../../src/features/voice/shareSenderStats";
 import {
   fakeStream,

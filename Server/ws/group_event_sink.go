@@ -7,15 +7,11 @@ import (
 )
 
 // GroupEventRows delivers group DM system rows (group_add, group_remove,
-// group_leave, group_rename, group_icon) as sequenced chat_message frames to audience. The
-// REST handler that wrote them calls it after commit, once the refreshed
-// dm_channel_open has been sent, so on each connection the open arrives first
-// and an added user never receives a row for a DM they do not know yet.
-//
-// It holds no lock of its own: sendSequencedToUsers takes the sequence lock
-// itself, so the lock order does not change. Rows are ordinary sequenced DM
-// frames: they are replayed on reconnect, persisted, and carry no mention, so
-// they raise no mention count and send no push.
+// group_leave, group_rename, group_icon) as sequenced chat_message frames. The
+// REST handler calls it after commit and after the refreshed dm_channel_open, so
+// an added user never gets a row for a DM they do not know yet.
+// It holds no lock itself (sendSequencedToUsers takes the sequence lock). Rows
+// are replayed, persisted, and raise no mention count or push.
 func (h *Hub) GroupEventRows(ctx context.Context, channelID int64, audience []int64, rows []service.GroupEventRow) {
 	if len(rows) == 0 || len(audience) == 0 {
 		return
@@ -48,9 +44,9 @@ func (h *Hub) GroupEventRows(ctx context.Context, channelID int64, audience []in
 	h.EmitEvents(ctx, events)
 }
 
-// newGroupEventBlock is the group_event object of a row, by kind: add and
-// remove name the target, rename carries the new name ("" = removed), icon says
-// whether the icon was removed, and a leave is the empty object.
+// newGroupEventBlock builds a row's group_event object: add/remove name the
+// target, rename carries the new name ("" = removed), icon says whether it was
+// removed, leave is empty.
 func newGroupEventBlock(r *service.GroupEventRow) *groupEventBlock {
 	switch r.Kind {
 	case string(MessageKindGroupAdd), string(MessageKindGroupRemove):

@@ -60,7 +60,7 @@ func TestEmitEvents_CallIncoming_FollowsEarlierVoiceLeave(t *testing.T) {
 	// Stall dispatch so the leave is provably still queued when the ring is
 	// emitted.
 	h.seqMu.Lock()
-	h.broadcastChannelScopedTo(9, []byte(`{"type":"voice_leave"}`), []int64{2}, "voice event")
+	h.broadcastChannelScopedTo(9, []byte(`{"type":"voice_leave"}`), []int64{2}, 0, "voice event")
 
 	done := make(chan struct{})
 	go func() {

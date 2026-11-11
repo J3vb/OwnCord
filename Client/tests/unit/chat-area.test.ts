@@ -62,7 +62,7 @@ vi.mock("../../src/pages/main-page/MediaGalleryController", () => ({
   })),
 }));
 
-vi.mock("@components/VideoGrid", () => ({
+vi.mock("../../src/features/voice/videoGrid/VideoGrid", () => ({
   createVideoGrid: vi.fn(() => ({
     mount: mockVideoMount,
     destroy: mockVideoDestroy,
@@ -79,7 +79,7 @@ vi.mock("@components/VideoGrid", () => ({
 // ---------------------------------------------------------------------------
 
 import { createChatArea } from "../../src/pages/main-page/ChatArea";
-import { createVideoGrid } from "@components/VideoGrid";
+import { createVideoGrid } from "../../src/features/voice/videoGrid/VideoGrid";
 import type { ChatAreaOptions } from "../../src/pages/main-page/ChatArea";
 import { jumpToMessage, setMessageJumpHandler } from "@lib/nav/messageNavigation";
 import {

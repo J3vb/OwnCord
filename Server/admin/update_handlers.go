@@ -18,9 +18,8 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// installWritable reports whether the install directory accepts the files a
-// self-update writes next to the binary. A var so tests can stand in for a
-// read-only install.
+// installWritable reports whether the install directory accepts a self-update's files; a var so tests can
+// fake a read-only install.
 var installWritable = func() error {
 	exePath, err := updater.ExecutablePath()
 	if err != nil {
@@ -36,12 +35,9 @@ const (
 	applyBlockedDevelopment     = "development_build"
 )
 
-// handleCheckUpdate returns the current update status. can_apply tells the
-// admin SPA whether POST /updates/apply is usable in this deployment: false in
-// containers (upgrades are image pulls), for a development build (a source
-// build is never swapped for a release) and when the service cannot write to
-// its install directory. apply_blocked names which; the container check wins,
-// then the development build.
+// handleCheckUpdate returns the update status. can_apply is false in containers (upgrades are image pulls),
+// for a development build and when the install directory is unwritable; apply_blocked names which (container
+// first).
 func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if u == nil {
@@ -71,18 +67,16 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 	}
 }
 
-// applyRestartDelay is how long the "restarting in 5s" countdown broadcast to
-// clients actually gets before the swap + restart request. A var so tests can
-// shrink it; the broadcast countdown below stays 5 to match this value.
+// applyRestartDelay is how long the 5s restart countdown broadcast gets before the swap; a var so tests
+// shrink it.
 var applyRestartDelay = 5 * time.Second
 
-// downloadAndVerify is the updater's download stage; a var only so a test can
-// stand in for it (the real one needs a signed release manifest).
+// downloadAndVerify is a var only so a test can stand in for it (the real one needs a signed release
+// manifest).
 var downloadAndVerify = (*updater.Updater).DownloadAndVerify
 
-// applyCancelled answers 503 SERVER_SHUTTING_DOWN and reports true when the
-// apply's context was cancelled (shutdown, via EndApplies) rather than timed
-// out. A deadline stays on the ordinary failure codes.
+// applyCancelled answers 503 SERVER_SHUTTING_DOWN and reports true when shutdown (EndApplies) cancelled the
+// apply's context; a deadline stays on the ordinary failure codes.
 func applyCancelled(ctx context.Context, w http.ResponseWriter) bool {
 	if !errors.Is(ctx.Err(), context.Canceled) {
 		return false
@@ -93,45 +87,34 @@ func applyCancelled(ctx context.Context, w http.ResponseWriter) bool {
 	return true
 }
 
-// applyBudget bounds one POST /updates/apply: the release check, the asset
-// download and its verification, together. It matches the shortest transfer
-// lifetime in api (transferMinLifetime). The request context ends at this budget and the
-// connection deadlines extend to it plus applyDeadlineMargin.
+// applyBudget bounds one POST /updates/apply (check, download, verification) and matches api's
+// transferMinLifetime. The request context ends at it; connection deadlines extend to it plus
+// applyDeadlineMargin.
 const applyBudget = 10 * time.Minute
 
-// applyDeadlineMargin is added to applyBudget for the connection deadlines so
-// the handler's own context expires first and its error response can still be
-// written.
+// applyDeadlineMargin extends the connection deadlines past applyBudget so the handler's own context expires
+// first and its error response can still be written.
 const applyDeadlineMargin = 30 * time.Second
 
-// extendApplyDeadlines pushes the connection's read and write deadlines out to
-// cover applyBudget. The server's WriteTimeout is far shorter than a slow
-// download; without this the stream is reset (HTTP/2) or the late response is
-// never delivered (HTTP/1.1) while the update carries on. The read deadline
-// moves too because on HTTP/1.1 an expired read deadline cancels the request
-// context. Errors are ignored: http.ErrNotSupported means the writer has no
-// connection (a test recorder). ResponseController reaches the connection
-// through any wrapper that exposes Unwrap.
+// extendApplyDeadlines pushes the connection's deadlines out to cover applyBudget: the server's WriteTimeout
+// is shorter than a slow download, so without this the stream is reset (HTTP/2) or the response never
+// delivered (HTTP/1.1) while the update carries on. The read deadline moves too: on HTTP/1.1 an expired one
+// cancels the request context. Errors are ignored: http.ErrNotSupported means no connection (a test
+// recorder).
 func extendApplyDeadlines(w http.ResponseWriter, deadline time.Time) {
 	ctl := http.NewResponseController(w)
 	_ = ctl.SetReadDeadline(deadline)
 	_ = ctl.SetWriteDeadline(deadline)
 }
 
-// handleApplyUpdate downloads and applies a server update.
-//
-// It is audited, which is why it takes a database handle it otherwise has no
-// use for: replacing the running binary is the largest change an owner
-// credential can make. Both halves are recorded: update_apply when the
-// verified binary is staged and the swap becomes inevitable, update_applied or
-// update_failed for what actually happened.
+// handleApplyUpdate downloads and applies a server update. It is audited, which is why it takes a database
+// handle: replacing the running binary is the largest change an owner credential can make. update_apply is
+// recorded once the swap becomes inevitable, update_applied or update_failed for the outcome.
 func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, _ string, bg *syncutil.Group, shutdown <-chan struct{}) http.Handler {
 	stop := stopSignal{draining: bg.Draining(), shutdown: shutdown}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// In a container the running binary is image content: the staged
-		// replacement dies with the container and the restart comes back as the
-		// old image. Refuse before any availability logic so the answer does not
-		// depend on updater configuration.
+		// In a container the running binary is image content: the staged replacement dies with it and the restart
+		// comes back as the old image. Refuse before any availability logic so the answer ignores updater config.
 		if updater.RunningInContainer() {
 			writeErr(w, http.StatusServiceUnavailable, httperr.CodeContainerDeployment,
 				"in-place self-update is disabled in container deployments — upgrade by pulling the new image")
@@ -142,23 +125,20 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			return
 		}
 
-		// Refuse a begun shutdown up front: before any outbound call, slot claim
-		// or long download, while the database is surely open.
+		// Refuse a begun shutdown up front, before any outbound call, slot claim or download.
 		if stop.stopping() {
 			refuseApplyShuttingDown(w)
 			return
 		}
 
-		// A source build would be replaced by the release binary, which is
-		// almost never what someone running from source wants.
+		// A source build would be replaced by the release binary, which is almost never what a source user wants.
 		if u.DevelopmentBuild() {
 			writeErr(w, http.StatusConflict, httperr.CodeDevelopmentBuild,
 				"this is a development build; updates are not applied automatically, build or install the release by hand")
 			return
 		}
 
-		// A read-only install directory cannot take the staged file or backup
-		// name; say so before any download or countdown.
+		// A read-only install directory cannot take the staged file or backup name; say so before any download.
 		if err := installWritable(); err != nil {
 			slog.Info("update apply refused: install directory not writable", "err", err)
 			writeErr(w, http.StatusServiceUnavailable, httperr.CodeInstallReadOnly,
@@ -166,11 +146,9 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			return
 		}
 
-		// Serialize against concurrent applies, restores and an already-requested
-		// restart. Claimed before any updater work so a pending restart answers
-		// 409 without an outbound GitHub call, and two applies never stage into
-		// the same .new path. The deferred release covers every early return;
-		// ownership transfers to the applyAndRestart goroutine at the bottom.
+		// Serialize against concurrent applies, restores and a requested restart. Claimed before any updater work
+		// so a pending restart answers 409 without an outbound call and two applies never stage into the same .new
+		// path. Ownership transfers to the applyAndRestart goroutine at the bottom.
 		if !beginRestartSensitiveOp() {
 			writeRestartConflict(w)
 			return
@@ -182,9 +160,8 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			}
 		}()
 
-		// One budget for the check and the download; EndApplies cancels it at
-		// shutdown. Connection deadlines derive from it so the final response can
-		// still be written after the context expires.
+		// One budget for check and download; EndApplies cancels it at shutdown. Connection deadlines derive from
+		// it.
 		ctx, cancel := context.WithTimeout(r.Context(), applyBudget)
 		defer cancel()
 		srv, _ := r.Context().Value(http.ServerContextKey).(*http.Server)
@@ -193,14 +170,12 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			extendApplyDeadlines(w, dl.Add(applyDeadlineMargin))
 		}
 
-		// Check for available update.
 		info, ok := checkApplyUpdate(ctx, w, u)
 		if !ok {
 			return
 		}
 
-		// Use the installation path captured before any update can rename
-		// the running image; restart handoff and cleanup use this same path.
+		// Use the install path captured before an update can rename the running image.
 		exePath, err := updater.ExecutablePath()
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "cannot determine executable path")
@@ -208,35 +183,25 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		}
 		newPath := exePath + ".new"
 
-		// Download and verify.
-
-		// DownloadAndVerify stages the binary and returns its trusted hash
-		// (bound to the signed release manifest). The apply goroutine below
-		// re-verifies the staged file against this hash through an open
-		// handle — never by path — before the rename.
+		// DownloadAndVerify returns the trusted hash (bound to the signed manifest); the apply goroutine
+		// re-verifies the staged file against it through an open handle, never by path, before the rename.
 		stagedHash, ok := stageApplyUpdate(ctx, w, u, &info, newPath)
 		if !ok {
 			return
 		}
 
-		// Audited here rather than on entry: everything above can refuse the
-		// request, and a row per refused attempt would bury the one that matters.
-		// From here the binary is staged and verified and the swap happens in the
-		// background, so this is the last moment the request context is alive.
+		// Audited here, not on entry: earlier refusals would bury the one row that matters. From here the swap
+		// happens in the background, so this is the last moment the request context is alive.
 		actor := actorFromContext(r)
 		auditCtx := context.WithoutCancel(r.Context())
 		slog.Info("server update applying", "actor_id", actor, "from", info.Current, "to", info.Latest)
 		db.WriteAudit(auditCtx, database, actor, "update_apply", "server", 0,
 			fmt.Sprintf("applying server update %s -> %s", info.Current, info.Latest))
 
-		// The tail runs on the app's background group, so shutdown can abort its
-		// countdown and join it before the database closes. Admitted before the
-		// response so a refusal (already shutting down) can still be answered
-		// honestly: the slot is released by the deferred abort and the outcome row
-		// records that nothing was swapped. The goroutine takes over the busy
-		// state claimed above, so the deferred release stands down once the job
-		// is admitted. Checked again after the download: a handler that finishes
-		// during the drain must not tell the admin UI the server is restarting.
+		// The tail runs on the app's background group so shutdown can abort its countdown and join it before the
+		// database closes. Admitted before the response so a refusal can still be answered honestly; the goroutine
+		// takes over the busy state claimed above. Checked again after the download: a handler finishing during the
+		// drain must not tell the admin UI the server is restarting.
 		if stop.stopping() || !bg.Go(auditCtx, func(jobCtx context.Context) {
 			applyAndRestart(jobCtx, database, actor, info.Latest, hub, exePath, newPath, stagedHash, stop)
 		}) {
@@ -246,16 +211,13 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			return
 		}
 		claimed = false
-		// Shutdown can begin while the job is being admitted. The job then
-		// aborts its countdown, releases the slot and records update_failed
-		// itself, so the handler only has to stop claiming success.
+		// Shutdown can begin while the job is admitted; the job aborts, releases the slot and records update_failed
+		// itself, so the handler only stops claiming success.
 		if stop.stopping() {
 			refuseApplyShuttingDown(w)
 			return
 		}
 
-		// Respond to the client; the countdown broadcast and the swap
-		// continue in the background.
 		writeJSON(w, http.StatusOK, map[string]string{
 			"status":  "applying",
 			"version": info.Latest,
@@ -263,8 +225,7 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 	})
 }
 
-// checkApplyUpdate runs the release check for an apply. It reports false after
-// writing the refusal (cancelled, check failed, missing assets, or no update).
+// checkApplyUpdate runs the release check; it reports false after writing the refusal.
 func checkApplyUpdate(ctx context.Context, w http.ResponseWriter, u *updater.Updater) (updater.UpdateInfo, bool) {
 	info, err := u.CheckForUpdate(ctx)
 	if err == nil && ctx.Err() != nil {
@@ -293,14 +254,12 @@ func checkApplyUpdate(ctx context.Context, w http.ResponseWriter, u *updater.Upd
 	return info, true
 }
 
-// stageApplyUpdate downloads and verifies the release into newPath and returns
-// its trusted hash (bound to the signed release manifest). It reports false
-// after writing the refusal, having removed the staged file.
+// stageApplyUpdate downloads and verifies the release into newPath and returns its trusted hash. It reports
+// false after writing the refusal, having removed the staged file.
 func stageApplyUpdate(ctx context.Context, w http.ResponseWriter, u *updater.Updater, info *updater.UpdateInfo, newPath string) (string, bool) {
 	stagedHash, err := downloadAndVerify(u, ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath)
 	if err == nil && ctx.Err() != nil {
-		// Cancelled (shutdown) after verification but before the swap was
-		// promised: do not start it, and do not leave the staged file.
+		// Cancelled by shutdown after verification: do not start the swap or leave the staged file.
 		err = ctx.Err()
 	}
 	if err != nil {
@@ -315,18 +274,11 @@ func stageApplyUpdate(ctx context.Context, w http.ResponseWriter, u *updater.Upd
 	return stagedHash, true
 }
 
-// applyAndRestart is POST /updates/apply's background tail: give clients the
-// promised countdown, swap the binary on disk, and hand the process to the
-// main package's restart coordinator. On a failed swap it releases the
-// exclusive slot so a corrected release can be applied without a manual
-// restart (applyStagedUpdate's deferred guard sends the corrective
-// update_aborted broadcast).
-//
-// stop fires when the process starts shutting down. It, not ctx, ends the
-// countdown early: ctx is cancelled only after the group's grace, so a SIGTERM
-// during the countdown would otherwise still swap the binary and request an
-// unwanted restart. On a drain nothing is swapped, the slot is released and an
-// update_failed row is written while the database is still open.
+// applyAndRestart is POST /updates/apply's background tail: the promised countdown, the on-disk swap, then
+// handoff to the main package's restart coordinator. A failed swap releases the exclusive slot so a corrected
+// release can be applied without a restart. stop, not ctx, ends the countdown early: ctx is cancelled only
+// after the group's grace, so a SIGTERM during the countdown would otherwise still swap the binary. On a
+// drain nothing is swapped and update_failed is written while the database is still open.
 func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version string, hub HubBroadcaster, exePath, newPath, stagedHash string, stop stopSignal) {
 	if hub != nil {
 		hub.BroadcastServerRestart(ws.RestartReasonUpdate, 5)
@@ -338,10 +290,8 @@ func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version 
 		return
 	}
 	if applyStagedUpdate(hub, exePath, newPath, stagedHash, stop.stopping) {
-		// Synchronous, like the backup restore's row: the next step hands the
-		// process to the restart coordinator, and a row still in the async
-		// writer's buffer would go with it. A failed write is logged, never a
-		// reason to leave a swapped binary unstarted.
+		// Synchronous: the next step hands the process to the restart coordinator and a row in the async writer's
+		// buffer would be lost. A failed write is logged, never a reason to leave a swapped binary unstarted.
 		auditUpdateOutcome(ctx, database, actor, "update_applied",
 			fmt.Sprintf("server binary replaced with %s, restarting", version))
 		commitRestartPending()
@@ -353,17 +303,14 @@ func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version 
 	abortRestartSensitiveOp()
 }
 
-// stopSignal says the process has begun to shut down. Two channels carry it
-// because they close at different times: shutdown at the very start of
-// App.Close (before the HTTP drain), draining only when the background group
-// is stopped, seven steps later. The group's ctx is cancelled later still, so
-// it is never the signal. Either channel may be nil, which never fires.
+// stopSignal says the process has begun to shut down. shutdown closes at the start of App.Close, draining
+// only when the background group stops, much later; the group's ctx is cancelled later still, so it is never
+// the signal. Either channel may be nil, which never fires.
 type stopSignal struct {
 	draining <-chan struct{}
 	shutdown <-chan struct{}
 }
 
-// stopping reports, without blocking, whether a shutdown has begun.
 func (s stopSignal) stopping() bool {
 	select {
 	case <-s.shutdown:
@@ -375,10 +322,8 @@ func (s stopSignal) stopping() bool {
 	}
 }
 
-// waitCountdown sleeps the restart countdown and reports whether it ran to
-// the end. It returns false as soon as either signal fires, and also when a
-// shutdown began in the instant the timer fired, so a shutdown that has
-// started never goes on to swap the binary.
+// waitCountdown sleeps the countdown and reports whether it ran to the end. It also returns false when a
+// shutdown began as the timer fired, so a started shutdown never goes on to swap the binary.
 func (s stopSignal) waitCountdown() bool {
 	timer := time.NewTimer(applyRestartDelay)
 	defer timer.Stop()
@@ -392,17 +337,14 @@ func (s stopSignal) waitCountdown() bool {
 	return !s.stopping()
 }
 
-// refuseApplyShuttingDown answers a request the shutdown arrived before.
 func refuseApplyShuttingDown(w http.ResponseWriter) {
 	writeErr(w, http.StatusServiceUnavailable, httperr.CodeShuttingDown, "the server is shutting down — the update was not applied")
 }
 
-// updateOutcomeTimeout bounds the synchronous outcome row. The row must be
-// written even when the group cancelled the job's ctx at the end of its grace.
+// updateOutcomeTimeout bounds the synchronous outcome row, which must be written even after ctx is cancelled.
 const updateOutcomeTimeout = 5 * time.Second
 
-// auditUpdateOutcome writes the outcome row synchronously. database is nil in
-// tests that exercise the swap without a store.
+// auditUpdateOutcome writes the outcome row synchronously; database is nil in tests without a store.
 func auditUpdateOutcome(ctx context.Context, database *db.DB, actor int64, action, detail string) {
 	if database == nil {
 		return
@@ -414,26 +356,14 @@ func auditUpdateOutcome(ctx context.Context, database *db.DB, actor int64, actio
 	}
 }
 
-// applyStagedUpdate performs the on-disk swap: verified staged binary ->
-// exePath, previous binary -> a unique exePath.old-*. It reports whether the
-// swap committed; on true the caller must request a restart, because the file
-// at exePath is no longer the binary this process is running.
-//
-// The caller has already broadcast "restarting in 5s", so every failure path
-// must correct that promise or the client's restart banner counts down to a
-// permanent "Reconnecting..." over a connection that never dropped. The
-// deferred broadcast below is that one guard (verification, rename and commit
-// failure); committed=true cancels it once the verified binary is in place.
-//
-// It does NOT spawn, signal, or exit: the restart is the main package's job,
-// after run() has fully drained (Server/internal/app/restart.go). Keeping the
-// swap free of process side effects also makes the success path
-// unit-testable.
-//
-// The name is unique because an earlier binary can still be running: on
-// Windows a server on a console stays behind until its replacement exits
-// (updater.SpawnReplacement), and its image cannot be replaced or removed
-// until then.
+// applyStagedUpdate performs the on-disk swap: staged binary -> exePath, previous binary -> a unique
+// exePath.old-*. On true the caller must request a restart, because exePath is no longer the running binary.
+// The caller already broadcast "restarting in 5s", so every failure path must correct that promise or the
+// client's banner counts down to a permanent "Reconnecting..."; the deferred broadcast is that guard, and
+// committed=true cancels it. It does NOT spawn, signal or exit: restart is the main package's job after run()
+// drained (Server/internal/app/restart.go), which also keeps the swap unit-testable. The name is unique
+// because an earlier binary can still be running: on Windows a console server stays behind until its
+// replacement exits (updater.SpawnReplacement), and its image cannot be replaced or removed.
 func applyStagedUpdate(hub HubBroadcaster, exePath, newPath, stagedHash string, stopping func() bool) bool {
 	committed := false
 	defer func() {
@@ -442,10 +372,8 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, newPath, stagedHash string, 
 		}
 	}()
 
-	// TOCTOU guard: open the staged binary once, verify its hash through that
-	// handle, and commit (rename) that exact file. Commit fails if the path was
-	// swapped after verification, so the bytes verified are the bytes the
-	// restart will execute.
+	// TOCTOU guard: verify the hash through one open handle and commit (rename) that exact file, so the bytes
+	// verified are the bytes the restart executes.
 	staged, err := updater.OpenVerifiedBinary(newPath, stagedHash)
 	if err != nil {
 		slog.Error("update: staged binary re-verification failed, aborting update", "error", err)
@@ -453,15 +381,12 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, newPath, stagedHash string, 
 	}
 	defer staged.Close() //nolint:errcheck
 
-	// Last chance to honour a shutdown that landed in the moments since the
-	// countdown ended: nothing has been renamed yet. A nil stopping never
-	// fires.
+	// Last chance to honour a shutdown that landed since the countdown ended; nothing is renamed yet.
 	if stopping != nil && stopping() {
 		slog.Info("update: shutdown began before the swap, leaving the running binary in place")
 		return false
 	}
 
-	// Rename: current -> .old-*, verified staged binary -> current
 	reserved, err := os.CreateTemp(filepath.Dir(exePath), filepath.Base(exePath)+".old-*")
 	if err != nil {
 		slog.Error("update: reserving a name for the previous binary failed", "error", err)
@@ -476,8 +401,7 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, newPath, stagedHash string, 
 	}
 	if err := staged.Commit(exePath); err != nil {
 		slog.Error("update: committing staged binary failed, restoring original binary", "error", err)
-		// Whatever is at exePath now (if anything) is not the verified
-		// binary; restoring the previous one replaces it.
+		// Whatever is at exePath now is not the verified binary; restoring the previous one replaces it.
 		if restoreErr := os.Rename(oldPath, exePath); restoreErr != nil {
 			slog.Error("update: CRITICAL — recovery rename also failed, server binary may be missing",
 				"restore_error", restoreErr, "original_error", err,
