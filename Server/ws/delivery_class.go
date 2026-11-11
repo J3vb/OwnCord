@@ -1,63 +1,57 @@
 package ws
 
-// deliveryClass names the route emitEventsFrom takes for an Event. Every
-// concrete event declares its own through the unexported Event.deliveryClass
-// method, which also seals Event to this package: a new event type cannot
-// compile until it chooses a route, and a type that matches no accessor
-// interface can no longer fall through to a server-wide broadcast.
-//
-// The zero value is deliberately invalid. An event that reports it, or a class
+// deliveryClass names the route emitEventsFrom takes for an Event. Each event
+// declares its own through the unexported Event.deliveryClass, which seals Event
+// to this package: a new event cannot compile until it chooses a route, so none
+// falls through to a server-wide broadcast.
+// The zero value is deliberately invalid; an event reporting it, or a class
 // emitEventsFrom has no case for, is logged and dropped.
 type deliveryClass int
 
 const (
-	// classInvalid is the zero value: never a route.
 	classInvalid deliveryClass = iota
 	// classChannel: sequenced, replayable, one channel's topic subscribers
-	// (Hub.broadcastChannelEvent). Needs ChannelEvent.
+	// (ChannelEvent).
 	classChannel
 	// classSequencedDM: sequenced, replayable, a DM's participants
-	// (Hub.sendSequencedToUsers). Needs SequencedDMEvent.
+	// (SequencedDMEvent).
 	classSequencedDM
-	// classExcludeSender: ephemeral low-priority channel broadcast that skips
-	// the sender (Hub.broadcastExcludeLow). Needs ExcludeSenderEvent.
+	// classExcludeSender: ephemeral low-priority channel broadcast skipping the
+	// sender (ExcludeSenderEvent).
 	classExcludeSender
-	// classTypingDM: ephemeral low-priority direct delivery
-	// (Hub.SendToUserLow). Needs UserTargetedEvent.
+	// classTypingDM: ephemeral low-priority direct delivery (UserTargetedEvent).
 	classTypingDM
-	// classPresence: a user-chosen presence broadcast to everyone, through the
-	// presence coalescer's drop-and-broadcast. Needs PresenceEvent.
+	// classPresence: a user-chosen presence broadcast to everyone via the
+	// coalescer's drop-and-broadcast (PresenceEvent).
 	classPresence
-	// classPresenceOthers: an invisible user's public presence half, to
-	// everyone but the owner. Needs PresenceOthersEvent.
+	// classPresenceOthers: an invisible user's public presence half, to everyone
+	// but the owner (PresenceOthersEvent).
 	classPresenceOthers
-	// classPresenceSelf: the owner's own true presence, normal priority. Needs
-	// PresenceSelfEvent.
+	// classPresenceSelf: the owner's own true presence, normal priority
+	// (PresenceSelfEvent).
 	classPresenceSelf
 	// classUserTargeted: durable high-priority delivery to one user
-	// (Hub.SendToUserHigh). Needs UserTargetedEvent.
+	// (UserTargetedEvent).
 	classUserTargeted
-	// classCallSignal: normal-priority delivery to one user, after the
-	// connection's voice dispatch barrier. Needs UserTargetedEvent.
+	// classCallSignal: normal-priority delivery to one user after the voice
+	// dispatch barrier (UserTargetedEvent).
 	classCallSignal
 	// classVoiceChannel: ephemeral delivery to a voice channel's participants
-	// except the sender. Needs VoiceChannelEvent.
+	// except the sender (VoiceChannelEvent).
 	classVoiceChannel
 	// classVoiceChannelGuarded: atomic check-and-send to one user still in the
-	// voice channel. Needs VoiceChannelGuardedEvent.
+	// voice channel (VoiceChannelGuardedEvent).
 	classVoiceChannelGuarded
 	// classVoiceVisibility: server-wide, narrowed to clients that may read the
-	// named channel. Needs VoiceVisibilityEvent.
+	// named channel (VoiceVisibilityEvent).
 	classVoiceVisibility
-	// classActivity: a note for the channel_activity coalescer; nothing is
-	// sent. Needs ActivityEvent.
+	// classActivity: a note for the channel_activity coalescer; nothing is sent
+	// (ActivityEvent).
 	classActivity
-	// classBroadcastAll: normal-priority broadcast to every client. Only an
-	// event that names this class explicitly can reach it. Needs
-	// BroadcastAllEvent.
+	// classBroadcastAll: normal-priority broadcast to every client; reachable
+	// only by naming this class (BroadcastAllEvent).
 	classBroadcastAll
-	// classThreadNote: a note for the thread_changed coalescer; nothing is
-	// sent now, the coalescer sequences the frame when it flushes. Needs
-	// ThreadNoteEvent.
+	// classThreadNote: a note for the thread_changed coalescer, which sequences
+	// the frame on flush (ThreadNoteEvent).
 	classThreadNote
 )

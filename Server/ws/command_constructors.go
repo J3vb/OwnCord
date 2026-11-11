@@ -6,10 +6,8 @@ import (
 	"strings"
 )
 
-// parseModTarget parses the (channel, target user) pair every voice moderation
-// payload carries; channelField names the channel key in the error. Both must
-// be positive: a non-positive id can only come from a malformed client, and
-// rejecting at parse time keeps the handlers free of id-shape checks.
+// parseModTarget parses the (channel, target user) pair of every voice moderation
+// payload; both must be positive, so handlers need no id-shape checks.
 func parseModTarget(channelID, userID json.Number, channelField string) (int64, int64, error) {
 	chID, err := positiveID(channelID, channelField)
 	if err != nil {
@@ -22,9 +20,8 @@ func parseModTarget(channelID, userID json.Number, channelField string) (int64, 
 	return chID, targetID, nil
 }
 
-// parseCallChannelID parses the lone channel_id the call signalling, typing,
-// focus, read and voice_join payloads carry. Shared so they cannot drift on
-// what counts as a valid channel reference.
+// parseCallChannelID parses the lone channel_id shared by call, typing, focus,
+// read and voice_join payloads so they cannot drift on validity.
 func parseCallChannelID(msgType string, raw json.RawMessage) (int64, error) {
 	var p struct {
 		ChannelID json.Number `json:"channel_id"`
@@ -35,9 +32,8 @@ func parseCallChannelID(msgType string, raw json.RawMessage) (int64, error) {
 	return positiveID(p.ChannelID, "channel_id")
 }
 
-// commandConstructors maps message types to functions that parse payloads into typed
-// Commands (userID and reqID come from the envelope and authenticated client; raw is
-// the JSON payload body). Unexported to prevent mutation; use getCommandConstructor.
+// commandConstructors maps message types to payload parsers. Unexported to
+// prevent mutation; use getCommandConstructor.
 var commandConstructors = map[string]func(userID int64, reqID string, raw json.RawMessage) (Command, error){
 	MsgTypePing: func(userID int64, _ string, _ json.RawMessage) (Command, error) { //nolint:unparam // error always nil; signature dictated by map type
 		return PingCmd{userID: userID}, nil
@@ -286,7 +282,6 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_e2ee_announce payload: %w", err)
 		}
-		// A wrongly typed list is dropped like an invalid one; it must never cost the key.
 		var videoDecode []string
 		if len(p.VideoDecode) > 0 && json.Unmarshal(p.VideoDecode, &videoDecode) != nil {
 			videoDecode = nil
@@ -358,7 +353,6 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 	},
 }
 
-// getCommandConstructor returns the constructor for a message type, if registered.
 func getCommandConstructor(msgType string) (func(int64, string, json.RawMessage) (Command, error), bool) {
 	ctor, ok := commandConstructors[msgType]
 	return ctor, ok

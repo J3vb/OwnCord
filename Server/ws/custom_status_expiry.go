@@ -11,12 +11,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// visibleCustomStatus is the publish guard for a custom status line that may predate
-// its own clear: it returns text while expiresAt (a dbtime.ISOLayout instant, "" for
-// none) is ahead of now, else nil. An unparseable expiry keeps the text, since
-// nothing can say it ended. The expirer clears the row about a second after the
-// instant, so every place a status leaves the server from a source that may not
-// have seen that clear applies this.
+// visibleCustomStatus is the publish guard for a custom status that may predate
+// its own clear: text while expiresAt (a dbtime.ISOLayout instant, "" for none)
+// is ahead of now, else nil. An unparseable expiry keeps the text. The expirer
+// clears the row about a second after the instant, so every path that may not
+// have seen the clear applies this.
 func visibleCustomStatus(text *string, expiresAt string, now time.Time) *string {
 	if text == nil || expiresAt == "" {
 		return text
@@ -31,9 +30,8 @@ func visibleCustomStatus(text *string, expiresAt string, now time.Time) *string 
 	return text
 }
 
-// storedCustomStatus is a user's custom status line and expiry tag (the
-// db.User fields, passed apart so this file stays off the db import), with the
-// publish guard applied: nil text and an empty tag once it has expired.
+// storedCustomStatus applies the publish guard to a user's stored text and expiry
+// tag (passed apart to keep this file off the db import).
 func storedCustomStatus(text, expiresAt *string, now time.Time) (visible *string, tag string) {
 	if expiresAt != nil {
 		tag = *expiresAt
@@ -45,28 +43,23 @@ func storedCustomStatus(text, expiresAt *string, now time.Time) (visible *string
 	return visible, tag
 }
 
-// customStatusExpiredLookupHook runs between CustomStatusExpired's client
-// lookup and presenceFeed.mu. Test-only (always nil in production).
+// customStatusExpiredLookupHook runs between CustomStatusExpired's client lookup
+// and presenceFeed.mu; test-only.
 var customStatusExpiredLookupHook func(*Hub)
 
-// CustomStatusExpired is the expirer's hook (service.CustomStatusNotifier): the
-// custom status of userID that carried expiresAt was just cleared in the database. A
-// connection still showing it drops it and everyone is told the status is null; a
-// connection showing a newer one, or none, is left alone.
-//
-// It takes presenceFeed.mu itself rather than through dropQueuedPresenceAndBroadcast,
+// CustomStatusExpired is the expirer's hook (service.CustomStatusNotifier): a
+// connection still showing the cleared status drops it and everyone is told it is
+// null; one showing a newer status, or none, is left alone.
+// It takes presenceFeed.mu itself rather than dropQueuedPresenceAndBroadcast,
 // whose drop is unconditional: a stale tag must leave a queued connect presence
 // alone.
-//
-// Lock order: presenceFeed.mu, then h.mu (read, to confirm c is still the registered
-// client; nothing takes presenceFeed.mu while holding h.mu), then the client's atomic
-// presence pointer, then Client.mu (sendPresenceMsg, for the self half of an
-// invisible split), then the presenceResyncMu/presenceFeed.repair leaf. Nothing takes
-// presenceFeed.mu while holding Client.mu (sendPresenceMsg releases c.mu before
-// presenceDropped), and there is no DB I/O under presenceFeed.mu, so this adds no edge.
-// The compare-and-swap runs under presenceFeed.mu, and a presence_update stores its live
-// presence before it emits, so a racing set either swaps the pointer first (the tag
-// no longer matches and nothing is sent) or emits after this frame with newer text.
+// Lock order: presenceFeed.mu, then h.mu (read, to confirm c is still
+// registered), then the client's atomic presence pointer, then Client.mu
+// (sendPresenceMsg), then the presenceResyncMu/presenceFeed.repair leaf. Nothing
+// takes presenceFeed.mu under h.mu or Client.mu and there is no DB I/O under it,
+// so this adds no edge. The compare-and-swap runs under presenceFeed.mu and
+// presence_update stores before it emits, so a racing set either swaps first (the
+// tag no longer matches) or emits after this frame with newer text.
 func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 	conns := h.clientsOf(userID)
 	if len(conns) == 0 {
@@ -77,16 +70,15 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 	}
 	h.presenceFeed.mu.Lock()
 	defer h.presenceFeed.mu.Unlock()
-	// A same-session reconnect may have replaced a connection since the
-	// lookup; re-read so only live ones are cleared (the replacement carries
-	// its own presence and its own tag).
+	// A same-session reconnect may have replaced a connection since the lookup;
+	// re-read so only live ones are cleared.
 	conns = h.clientsOf(userID)
 	if len(conns) == 0 {
 		return
 	}
-	// The user's shown presence is the most recent setter's. The expiry is
-	// announced only when that is the status that expired; any connection
-	// still carrying the expired tag is cleared either way.
+	// The expiry is announced only when the most recent setter's status is the
+	// one that expired; any connection carrying the expired tag is cleared either
+	// way.
 	shown := mergeLivePresence(conns)
 	announce := shown.customStatus != nil && shown.customStatusExpiresAt == expiresAt
 	var first *Client
@@ -100,8 +92,8 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 		}
 	}
 	if !announce || first == nil {
-		// Not the status that expired: no frame, and the queued connect
-		// presence (if any) is still owed, so it is not dropped either.
+		// Not the expired status: no frame, and a queued connect presence is
+		// still owed.
 		return
 	}
 	// Like every user-chosen presence, this supersedes a queued connect entry.
@@ -111,10 +103,10 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 	}
 }
 
-// enqueueExpiredPresence enqueues one half of an expired status's presence the way
-// emitEventsFrom does. CustomStatusExpired already holds presenceFeed.mu, so the only
-// further locks are the non-blocking enqueues' own: Client.mu in sendPresenceMsg
-// (released before presenceDropped), then the presenceResyncMu/presenceFeed.repair leaf.
+// enqueueExpiredPresence enqueues one half of an expired status's presence like
+// emitEventsFrom. The caller holds presenceFeed.mu; the only further locks are
+// the non-blocking enqueues' own (Client.mu in sendPresenceMsg, then the
+// presenceResyncMu/presenceFeed.repair leaf).
 func (h *Hub) enqueueExpiredPresence(c *Client, ev Event) {
 	switch e := ev.(type) {
 	case PresenceEvent:
@@ -127,11 +119,10 @@ func (h *Hub) enqueueExpiredPresence(c *Client, ev Event) {
 }
 
 // parseCustomStatusExpiresIn reads presence_update's optional
-// custom_status_expires_in: a plain JSON integer of
-// service.MinCustomStatusExpirySeconds to service.MaxCustomStatusExpirySeconds,
-// valid only alongside a non-empty custom_status. A string, a fraction, an
-// exponent or an out-of-range value is an error (BAD_REQUEST). Absent and null
-// both mean "no expiry".
+// custom_status_expires_in: a plain JSON integer within
+// service.MinCustomStatusExpirySeconds..MaxCustomStatusExpirySeconds, valid only
+// with a non-empty custom_status. Anything else is BAD_REQUEST; absent and null
+// mean no expiry.
 func parseCustomStatusExpiresIn(raw json.RawMessage, customStatus *string) (*int64, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
@@ -150,7 +141,6 @@ func parseCustomStatusExpiresIn(raw json.RawMessage, customStatus *string) (*int
 	return &n, nil
 }
 
-// parsePresenceUpdate builds a PresenceUpdateCmd from a presence_update payload.
 func parsePresenceUpdate(userID int64, raw json.RawMessage) (Command, error) {
 	var p struct {
 		Status       string          `json:"status"`

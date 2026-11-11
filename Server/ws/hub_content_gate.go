@@ -9,23 +9,19 @@ import (
 	"github.com/J3vb/OwnCord/Server/stackutil"
 )
 
-// contentGateTimeout bounds one NSFW content gate read (the channel's label and its
-// acknowledgement list). A read normally takes well under a millisecond; on
-// timeout the gate fails closed and the frame forces a resync, as on any
-// read error.
+// contentGateTimeout bounds one NSFW gate read (label and acknowledgement list); on timeout the
+// gate fails closed and the frame forces a resync.
 const contentGateTimeout = time.Second
 
-// gateResult is one resolved NSFW content gate: who may receive the frame
-// live, whether the channel is labelled, and whether the answer stands in
-// for one the database could not give (deny-all, watermark bumped).
+// gateResult is a resolved NSFW gate: who may receive the frame live, whether the channel is
+// labelled, and whether it stands in for an answer the database could not give (deny-all, watermark
+// bumped).
 type gateResult struct {
 	allow       func(userID int64) bool
 	labelled    bool
 	unconfirmed bool
 }
 
-// gateResolution is a resolver's answer for channelID, covering every
-// content entry parked there with a ticket at or below through.
 type gateResolution struct {
 	channelID int64
 	through   uint64
@@ -39,9 +35,8 @@ type parkedEntry struct {
 	gate    *gateResult
 }
 
-// gateLane holds a channel's frames while its content gate is read. Entries
-// stay in enqueue order; the head is always unresolved content with a read
-// in flight, so a lane drains within one contentGateTimeout.
+// gateLane holds a channel's frames while its gate is read, in enqueue order; the head is always
+// unresolved content with a read in flight, so a lane drains within one contentGateTimeout.
 type gateLane struct {
 	entries  []parkedEntry
 	inFlight bool
@@ -52,16 +47,11 @@ type parkedBarrier struct {
 	done   chan struct{}
 }
 
-// contentGates keeps the dispatch goroutine off the database. A
-// content frame parks in its channel's lane while a resolver goroutine reads
-// the gate with a timeout, and every later frame for that channel queues
-// behind it, so order within a channel is kept; frames for other channels
-// and global frames are delivered at once. A seq is allocated only at
-// delivery, so parking never spends one.
-//
-// Owned by the dispatch goroutine: no lock, nothing else touches it except
-// through results. Resolvers take no hub lock; deliverGated takes seqMu as
-// deliverBroadcast always did.
+// contentGates keeps the dispatch goroutine off the database. A content frame parks in its
+// channel's lane while a resolver reads the gate with a timeout, and later frames for that channel
+// queue behind it (order kept); other channels and global frames deliver at once. A seq is
+// allocated only at delivery.
+// Owned by the dispatch goroutine: no lock. Resolvers take no hub lock; deliverGated takes seqMu.
 type contentGates struct {
 	lanes    map[int64]*gateLane
 	parked   int
@@ -71,8 +61,8 @@ type contentGates struct {
 	timeout  time.Duration // 0 = contentGateTimeout; tests shorten it
 }
 
-// initContentGates makes the results channel on first use. Only the dispatch
-// goroutine calls it, and Run re-reads h.gates.results on every select.
+// initContentGates makes the results channel on first use; only the dispatch goroutine calls it,
+// and Run re-reads h.gates.results on every select.
 func (h *Hub) initContentGates() {
 	if h.gates.results == nil {
 		h.gates.results = make(chan gateResolution, 16)
@@ -93,9 +83,9 @@ func (h *Hub) lifeCtx() context.Context {
 	return context.Background()
 }
 
-// broadcastIn is the queue Run reads, or nil while as many frames are parked
-// as the queue holds: a stalled database then pushes back through enqueue's
-// wait and drop accounting instead of growing memory.
+// broadcastIn is the queue Run reads, or nil while as many frames are parked as the queue holds, so
+// a stalled database pushes back through enqueue's wait and drop accounting instead of growing
+// memory.
 func (h *Hub) broadcastIn() chan broadcastMsg {
 	if h.gates.parked >= cap(h.broadcast) {
 		return nil
@@ -103,7 +93,6 @@ func (h *Hub) broadcastIn() chan broadcastMsg {
 	return h.broadcast
 }
 
-// dispatch is Run's handler for one dequeued entry.
 func (h *Hub) dispatch(bm broadcastMsg) {
 	g := &h.gates
 	switch {
@@ -122,8 +111,8 @@ func (h *Hub) dispatch(bm broadcastMsg) {
 	h.observeDispatchLag(bm.enqueuedAt)
 
 	if bm.nsfwChannelID != 0 {
-		// The hook runs here, on the dispatch goroutine, before the read is
-		// issued: a revocation or relabelling completed by now is honoured.
+		// The hook runs on the dispatch goroutine before the read is issued, so a revocation or
+		// relabel completed by now is honoured.
 		if nsfwDispatchResolveRaceHook != nil {
 			nsfwDispatchResolveRaceHook(bm.nsfwChannelID)
 		}
@@ -163,9 +152,8 @@ func (h *Hub) park(channelID int64, bm broadcastMsg, content bool) {
 	}
 }
 
-// issueGate starts one read covering every content entry parked in the lane
-// so far: a backlog behind a slow read costs one more round trip, not one
-// per frame.
+// issueGate starts one read covering every content entry parked so far: a backlog costs one more
+// round trip, not one per frame.
 func (h *Hub) issueGate(channelID int64, lane *gateLane) {
 	h.initContentGates()
 	lane.inFlight = true
@@ -180,8 +168,8 @@ func (h *Hub) issueGate(channelID int64, lane *gateLane) {
 	})
 }
 
-// resolveGateOnce reads the gate under its own timeout. A software panic
-// fails closed like a read error; a hardware fault re-panics.
+// resolveGateOnce reads the gate under its own timeout. A software panic fails closed like a read
+// error; a hardware fault re-panics.
 func (h *Hub) resolveGateOnce(life context.Context, timeout time.Duration, channelID int64) (res gateResult) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -199,7 +187,6 @@ func (h *Hub) resolveGateOnce(life context.Context, timeout time.Duration, chann
 	return gateResult{allow: allow, labelled: labelled, unconfirmed: unconfirmed}
 }
 
-// onGateResolved applies a resolver's answer and drains what it unblocked.
 func (h *Hub) onGateResolved(res gateResolution) {
 	lane := h.gates.lanes[res.channelID]
 	if lane == nil {
@@ -207,9 +194,8 @@ func (h *Hub) onGateResolved(res gateResolution) {
 	}
 	lane.inFlight = false
 	defer h.releaseBarriers()
-	// Deferred so a delivery that panics cannot strand the lane: an empty one
-	// is removed, and the rest of a non-empty one gets a fresh read once the
-	// loop restarts.
+	// Deferred so a delivery that panics cannot strand the lane: an empty one is removed and a non-
+	// empty one gets a fresh read after the loop restarts.
 	defer func() {
 		switch {
 		case len(lane.entries) == 0:
@@ -241,9 +227,8 @@ func (h *Hub) onGateResolved(res gateResolution) {
 	}
 }
 
-// closeParkedBarriers releases every barrier still parked when Run exits:
-// nothing will drain the lanes now, and awaitDispatch should not wait out its
-// ctx to learn that.
+// closeParkedBarriers releases every barrier still parked when Run exits; nothing will drain the
+// lanes, and awaitDispatch should not wait out its ctx.
 func (h *Hub) closeParkedBarriers() {
 	for _, b := range h.gates.barriers {
 		close(b.done)
@@ -251,8 +236,6 @@ func (h *Hub) closeParkedBarriers() {
 	h.gates.barriers = nil
 }
 
-// releaseBarriers closes every parked barrier that no longer has a parked
-// frame ahead of it.
 func (h *Hub) releaseBarriers() {
 	g := &h.gates
 	if len(g.barriers) == 0 {
@@ -276,11 +259,9 @@ func (h *Hub) releaseBarriers() {
 	g.barriers = keep
 }
 
-// deliverBroadcast delivers one entry synchronously, reading the content gate
-// inline under the same timeout. Run uses dispatch; this is for callers that
-// need the frame delivered before they continue (tests, export_test), and
-// only while Run is not running: like dispatch, it reads gate state that the
-// dispatch goroutine owns.
+// deliverBroadcast delivers one entry synchronously, reading the gate inline. For callers that need
+// the frame delivered first (tests), and only while Run is not running, since it reads gate state
+// the dispatch goroutine owns.
 func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	if bm.barrier != nil {
 		close(bm.barrier)

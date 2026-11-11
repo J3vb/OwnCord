@@ -7,16 +7,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// modQueuePayload is the mod_queue frame's payload: EITHER a report's
-// PUBLIC id (report_id) OR an appeal's PUBLIC id (appeal_id) plus
-// the new state — never the reporter's/appellant's identity, never the
-// reported content, never the subject (S5, report confidentiality), and
-// never the internal sequential id (that would let a bit holder
-// infer a neighbouring report's or appeal's existence from a gap in the
-// ids they see). One wire type, two optional ids, so the moderation queue's audience
-// helper (moderationAudience) is reused for the appeal queue rather than a
-// second one being written; exactly one of ReportID/AppealID is set on any
-// given frame.
+// modQueuePayload is the mod_queue payload: EITHER a report's PUBLIC id (report_id) OR an
+// appeal's PUBLIC id (appeal_id) plus the new state, never the reporter's/appellant's
+// identity, the reported content or subject (report confidentiality), nor the internal
+// sequential id (a gap would let a bit holder infer a neighbouring report's existence).
+// Exactly one of ReportID/AppealID is set, so moderationAudience serves both queues.
 type modQueuePayload struct {
 	ReportID string `json:"report_id,omitempty"`
 	AppealID string `json:"appeal_id,omitempty"`
@@ -31,13 +26,9 @@ func buildAppealModQueue(publicID, state string) []byte {
 	return buildJSON(wsMsg{Type: MsgTypeModQueue, Payload: modQueuePayload{AppealID: publicID, State: state}})
 }
 
-// moderationAudience returns the connected user IDs whose current Subject
-// satisfies permissions.CanModerate, excluding any id in exclude — the
-// server-wide mirror of channelReadAudienceImpl (hub_visibility.go), which
-// resolves a per-channel predicate the same way. CanModerate is not
-// channel-scoped, so this asks each connected user's role-only Subject
-// (channelID 0: no channel exists to resolve an override against, and
-// CanModerate does not consult one).
+// moderationAudience returns the connected user IDs whose current Subject satisfies
+// permissions.CanModerate, minus exclude: the server-wide mirror of channelReadAudienceImpl.
+// CanModerate is not channel-scoped, so each user's role-only Subject (channelID 0) is asked.
 func (h *Hub) moderationAudience(ctx context.Context, exclude ...int64) []int64 {
 	mods := h.moderators(ctx)
 	audience := mods[:0]
@@ -56,9 +47,8 @@ func (h *Hub) moderationAudience(ctx context.Context, exclude ...int64) []int64 
 	return audience
 }
 
-// moderators is every connected CanModerate holder, memoised like a channel
-// audience (audience_memo.go) under the zero ChannelRef. The returned slice is the
-// caller's own.
+// moderators is every connected CanModerate holder, memoised like a channel audience
+// (audience_memo.go) under the zero ChannelRef. The returned slice is the caller's own.
 func (h *Hub) moderators(ctx context.Context) []int64 {
 	var key struct{}
 	now := time.Now()
@@ -87,19 +77,12 @@ func (h *Hub) moderators(ctx context.Context) []int64 {
 	return mods
 }
 
-// BroadcastModQueue notifies every connected moderation-bit holder that
-// report reportID (the INTERNAL id, resolved to a public id below before it
-// ever reaches the wire) changed, on create, assign and close.
-//
-// A bit-holding SUBJECT or REPORTER must never receive
-// this frame even though they satisfy CanModerate — the whole point of
-// filing confidentially is that the subject (and the reporter's identity)
-// stays unknown to them. The prior version excluded neither, which leaked a
-// bit holder's own report to them the moment they were also its subject or
-// reporter. Both principals are looked up here (not threaded through every
-// caller) so File/Assign/Close's signatures stay untouched. Fails closed:
-// if the report cannot be read, nothing is sent to anyone, rather than
-// guessing who is safe to exclude.
+// BroadcastModQueue notifies every connected moderation-bit holder that report reportID
+// (the INTERNAL id, resolved to a public id before the wire) changed, on create, assign and
+// close. A bit-holding SUBJECT or REPORTER must never receive it though they satisfy
+// CanModerate: confidential filing keeps the subject and reporter identity unknown to them.
+// Both principals are looked up here so File/Assign/Close signatures stay untouched. Fails
+// closed: if the report cannot be read, nothing is sent.
 func (h *Hub) BroadcastModQueue(ctx context.Context, reportID int64, state string) {
 	if h.db == nil {
 		return
@@ -114,15 +97,12 @@ func (h *Hub) BroadcastModQueue(ctx context.Context, reportID int64, state strin
 	}
 }
 
-// BroadcastAppealQueue notifies every connected moderation-bit holder that
-// appeal appealID (the INTERNAL id, resolved to a public id below before it
-// ever reaches the wire) changed, on submit, assign and decide. The
-// APPELLANT is excluded (F5 review: a moderator-appellant must not learn
-// about their own appeal's queue movement through the surface built for
-// reviewing other people's, the same confidentiality rule Queue/Get apply
-// to the read side) — but the acting moderator is NOT excluded (decided:
-// they may already see their own action's appeal move through the queue
-// like any other bit holder).
+// BroadcastAppealQueue notifies every connected moderation-bit holder that appeal appealID
+// (INTERNAL id, resolved to a public id before the wire) changed, on submit, assign and
+// decide. The APPELLANT is excluded: a moderator-appellant must not learn of their own
+// appeal's queue movement through the surface for reviewing others' (the rule Queue/Get
+// apply to the read side). The acting moderator is NOT excluded: they may already see their
+// own action's appeal move like any other bit holder.
 func (h *Hub) BroadcastAppealQueue(ctx context.Context, appealID int64, state string) {
 	if h.db == nil {
 		return
