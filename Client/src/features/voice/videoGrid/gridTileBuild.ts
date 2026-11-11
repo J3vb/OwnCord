@@ -262,7 +262,7 @@ export function createGridTileBuild(st: GridState, api: GridApi, menus: GridMenu
     }
     const { nav, back } = buildTileNav(userId);
 
-    appendChildren(cell, video, select, label, nav);
+    appendChildren(cell, video, select, label, nav, api.buildTileArrange(userId));
     syncVideoSurface(video);
     if (viewers !== null) cell.appendChild(viewers);
     cell.addEventListener("click", (e) => onTileClick(e, userId, cell));

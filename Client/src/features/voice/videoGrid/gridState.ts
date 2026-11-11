@@ -2,6 +2,7 @@
 import type { Disposable } from "@lib/disposable";
 import type { IconName } from "@lib/icons";
 import type { StreamInfo } from "./streamInfo";
+import type { TileSize } from "./packLayout";
 import type { VideoView } from "../remoteTracks";
 import type { PopoutWindow } from "../popout";
 import type { ViewToggle, CellEntry } from "./gridShared";
@@ -11,6 +12,10 @@ export interface GridState {
   root: HTMLDivElement | null;
   readonly cells: Map<number, CellEntry>;
   focusedTileId: number | null;
+  /** The size the viewer chose for a tile, over its default. */
+  readonly tileSizes: Map<number, TileSize>;
+  /** Tiles the viewer pinned: shown large and placed first. */
+  readonly pinned: Set<number>;
   people: readonly GridPerson[];
   readonly personCells: Map<number, HTMLDivElement>;
   resizeObserver: ResizeObserver | null;
@@ -68,6 +73,20 @@ export interface GridApi {
   resetPeopleStrip(): void;
   /** Pack again when the tile's picture changes shape. */
   watchTileShape(entry: CellEntry): void;
+  /** Choose a tile's size (a pinned tile is unpinned by it). */
+  setTileSize(tileId: number, size: TileSize): void;
+  /** Pin the tile, or unpin it. */
+  toggleTilePin(tileId: number): void;
+  /** Forget a tile's size and pin (its stream ended for good). */
+  forgetTileSize(tileId: number): void;
+  /** Forget every tile's size and pin (the call's streams are cleared). */
+  forgetTileSizes(): void;
+  /** The tile's size and pin as the menu and the controls show them. */
+  tileArrangement(tileId: number): { size: TileSize; pinned: boolean };
+  /** Show or hide each tile's size controls for the layout in use. */
+  syncTileArrange(): void;
+  /** The tile's size and pin controls. */
+  buildTileArrange(tileId: number): HTMLElement;
   syncPeople(): void;
   hiddenByView(el: HTMLDivElement, config: TileConfig | undefined): boolean;
   applyViewFilters(): void;

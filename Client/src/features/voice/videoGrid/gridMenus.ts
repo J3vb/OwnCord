@@ -6,8 +6,24 @@ import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { CellEntry } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
 import type { TileConfig } from "./VideoGrid";
+import type { TileSize } from "./packLayout";
 
 export function createGridMenus(st: GridState, api: GridApi) {
+  /** The Size and Pin rows, in the grid layout only: focus mode sizes by CSS and a full-screen tile
+   *  fills the screen. */
+  function arrangeOf(tileId: number) {
+    if (st.focusedTileId !== null || api.isFullscreen(tileId)) return {};
+    const { size, pinned } = api.tileArrangement(tileId);
+    return {
+      arrange: {
+        size,
+        pinned,
+        onSize: (next: TileSize) => api.setTileSize(tileId, next),
+        onPin: () => api.toggleTilePin(tileId),
+      },
+    };
+  }
+
   /** A remote tile's menu, with the tile's view state as it is now. */
   function tileMenuOptions(
     x: number,
@@ -37,6 +53,7 @@ export function createGridMenus(st: GridState, api: GridApi) {
       onVolumeChange: (isScreenshare: boolean, level: number, muted: boolean) =>
         applyVolume(personId, isScreenshare, level, muted),
       onStopWatching: () => api.setWatching(tileId, false),
+      ...arrangeOf(tileId),
       view: {
         focused: st.focusedTileId === tileId,
         fullscreen: api.isFullscreen(tileId),
@@ -72,6 +89,7 @@ export function createGridMenus(st: GridState, api: GridApi) {
       y,
       doc: api.doc(),
       signal: entry.listeners.signal,
+      ...arrangeOf(tileId),
       ...(st.callView ? { onHide: hide } : {}),
       ...(onCamera === undefined
         ? {}
