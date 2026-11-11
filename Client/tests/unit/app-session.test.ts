@@ -77,9 +77,16 @@ vi.mock("@lib/dispatcher", () => ({
     const id = ++dispatcherSeq;
     return () => events.push(`dispatcher-${id}-unsub`);
   }),
+  wireConnectionStatus: vi.fn(() => () => {}),
 }));
 
+vi.mock("../../src/app/sessionDispatcher", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../src/app/sessionDispatcher")>();
+  return { ...real, loadDispatcher: vi.fn(real.loadDispatcher) };
+});
+
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
+import { loadDispatcher } from "../../src/app/sessionDispatcher";
 import { createApiClient } from "@lib/api";
 import { createWsClient, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { authStore, clearAuth, setAuth } from "@stores/auth.store";
@@ -151,12 +158,29 @@ describe("start and abandon", () => {
     expect(sessionInFlight()).toBe(false);
   });
 
-  it("records the connect target and wires the dispatcher on startSession", () => {
+  it("records the connect target, then wires the dispatcher before it dials", async () => {
+    const connect = vi.spyOn(ws, "connect");
     startSession("a.example:8443", "tok-a", "casey");
     expect(sessionTarget()).toEqual({ host: "a.example:8443", token: "tok-a" });
     expect(sessionInFlight()).toBe(true);
     expect(authStore.getState().token).toBe("tok-a");
+    // The dispatcher is its own chunk: nothing dials until it is wired.
+    expect(connect).not.toHaveBeenCalled();
+    await vi.dynamicImportSettled();
     expect(dispatcherSeq).toBe(1);
+    expect(connect).toHaveBeenCalledTimes(1);
+    connect.mockRestore();
+  });
+
+  it("an attempt abandoned while the dispatcher loads never wires or dials", async () => {
+    const connect = vi.spyOn(ws, "connect");
+    startSession("a.example:8443", "tok-a", "casey");
+    api.endSession();
+    abandonInFlight();
+    await vi.dynamicImportSettled();
+    expect(dispatcherSeq).toBe(0);
+    expect(connect).not.toHaveBeenCalled();
+    connect.mockRestore();
   });
 
   it("abandonInFlight tears the wiring and overlay down and forgets the target", async () => {
@@ -216,13 +240,35 @@ describe("a second startSession while an attempt is in flight", () => {
 
 describe("a same-host, same-token re-entry", () => {
   it("drops the first attempt's listeners and keeps a single overlay", async () => {
+    const connect = vi.spyOn(ws, "connect");
     startSession("a.example:8443", "tok-a", "casey");
     startSession("a.example:8443", "tok-a", "casey");
-    expect(events).toContain("dispatcher-1-unsub");
     await authOk();
+    // The first attempt was superseded while the dispatcher loaded: only the second wires and dials.
+    expect(dispatcherSeq).toBe(1);
+    expect(connect).toHaveBeenCalledTimes(1);
+    connect.mockRestore();
     // Only the second attempt's auth_ok listener is left, so one overlay is built.
     expect(overlays).toHaveLength(1);
     expect(overlays.filter((o) => !o.destroyed)).toHaveLength(1);
+  });
+});
+
+describe("the dispatcher chunk fails to load", () => {
+  it("ends the sign-in on the form without dialing or running the offline wait", async () => {
+    vi.mocked(loadDispatcher).mockRejectedValueOnce(new Error("chunk fetch failed"));
+    const connect = vi.spyOn(ws, "connect");
+    const onTimeout = vi.fn();
+    startSession("a.example:8443", "tok-a", "casey", undefined, true, false, onTimeout);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connect).not.toHaveBeenCalled();
+    expect(sessionTarget()).toBeNull();
+    expect(uiStore.getState().transientError).toBe(connectText("session.codeLoadFailed"));
+    expect(onTimeout).not.toHaveBeenCalled();
+    // The pre-auth deadline went with the attempt.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    connect.mockRestore();
   });
 });
 
