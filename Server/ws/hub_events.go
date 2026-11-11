@@ -297,29 +297,40 @@ func (h *Hub) persistEvent(seq uint64, channelID int64, payload []byte) {
 
 // extractEventType scans a wrapped envelope for the literal `"type":"<value>"` token, "" on
 // failure. Deliberately not a JSON decode: it matches every envelope this server produces and
-// avoids allocation on the broadcast hot path.
+// keeps a decode's allocations off the broadcast hot path.
 func extractEventType(payload []byte) string {
+	return string(eventTypeBytes(payload))
+}
+
+// frameIsContentBearing is contentBearingKinds[extractEventType(payload)] without the string: a
+// map index on string(bytes) does not allocate.
+func frameIsContentBearing(payload []byte) bool {
+	return contentBearingKinds[string(eventTypeBytes(payload))]
+}
+
+// eventTypeBytes is extractEventType's scan; the result aliases payload, nil on failure.
+func eventTypeBytes(payload []byte) []byte {
 	const needle = `"type":"`
 	idx := bytes.Index(payload, []byte(needle))
 	if idx < 0 {
-		return ""
+		return nil
 	}
 	start := idx + len(needle)
 	end := bytes.IndexByte(payload[start:], '"')
 	if end < 0 {
-		return ""
+		return nil
 	}
 	t := payload[start : start+end]
 	// Reject control chars or escapes (a clean label, not arbitrary user metadata); length-capped.
 	if len(t) == 0 || len(t) > 64 {
-		return ""
+		return nil
 	}
 	for _, b := range t {
 		if b < 0x20 || b == '\\' {
-			return ""
+			return nil
 		}
 	}
-	return string(t)
+	return t
 }
 
 func sequenceable(msg []byte) bool {

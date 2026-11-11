@@ -272,7 +272,7 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, mark uint64, msg []byte) {
 	// The replay copy's JSON work happens before the lock.
 	rs := newReplaySplice(msg)
-	contentBearing := contentBearingKinds[extractEventType(msg)]
+	contentBearing := frameIsContentBearing(msg)
 	h.seqMu.Lock()
 	start := time.Now()
 	defer h.seqMu.Unlock()
@@ -305,7 +305,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 	contentBearing := false
 	if bm.presence == nil {
 		rs = newReplaySplice(bm.msg)
-		contentBearing = contentBearingKinds[extractEventType(bm.msg)]
+		contentBearing = frameIsContentBearing(bm.msg)
 	}
 
 	// The limiter key depends on bm alone, so it is built before the lock.

@@ -32,11 +32,14 @@ func (h *Hub) recordBroadcastLatency(enqueuedAt time.Time) {
 func topicLimiterKey(bm broadcastMsg) string {
 	// Counted per sender so a few members cannot use up a channel's budget; server-originated
 	// frames (senderID 0) share the channel's own key.
-	key := "topic:" + string(ChannelTopic(bm.channelID))
+	var buf [64]byte // "topic:channel:" plus two int64s and a colon is at most 55 bytes
+	b := append(buf[:0], "topic:channel:"...)
+	b = strconv.AppendInt(b, bm.channelID, 10)
 	if bm.senderID != 0 {
-		key += ":" + strconv.FormatInt(bm.senderID, 10)
+		b = append(b, ':')
+		b = strconv.AppendInt(b, bm.senderID, 10)
 	}
-	return key
+	return string(b)
 }
 
 // allowTopicFrame reports whether a channel-scoped broadcast may proceed under the per-channel,
