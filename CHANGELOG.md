@@ -93,6 +93,7 @@ and only when it changes something a contributor or fork holder must do
 - A thread that was renamed, locked, unlocked, archived or deleted while you were in another channel now shows its current name and state when you return, instead of keeping the old chip and a wrongly locked or unlocked composer.
 - If the app cannot read a live update from the server, it now reconnects for a fresh copy of everything instead of reconnecting and still missing that update.
 - Blocking or unblocking someone on one device now reaches your other signed-in devices after they reconnect, without restarting the app.
+- Deleting a message that mentioned you, or a moderator clearing messages, no longer makes the mention badge come out one too low when you mark a channel unread at the same moment.
 - In a channel with slow mode, a message, poll, forward or forum post that failed to send (for example when every attached file had expired) no longer starts your wait. You can send again right away.
 - Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
 - Linux: switching audio devices or muting and unmuting no longer makes other voice controls wait.

@@ -57,7 +57,11 @@ func (s *messageRemoval) PurgeMessages(ctx context.Context, userID, channelID in
 	// real one.
 	s.mentions.flushChannelMentionCounts(context.WithoutCancel(ctx), channelID)
 
-	ids, err := s.st.PurgeChannelMessagesWithAction(ctx, channelID, before, limit, userID, nil)
+	// The purge and the reversal of its mention badges run under the channel's emit
+	// lock, so a reader's read-pointer move cannot land between them.
+	ids, mcErr, err := s.mentions.removeAndReverseMentions(ctx, channelID, func() ([]int64, error) {
+		return s.st.PurgeChannelMessagesWithAction(ctx, channelID, before, limit, userID, nil)
+	})
 	if err != nil {
 		slog.Error("MessageService.PurgeMessages", "err", err, "channel_id", channelID)
 		return nil, fmt.Errorf("%w: failed to purge messages", ErrInternal)
@@ -71,9 +75,8 @@ func (s *messageRemoval) PurgeMessages(ctx context.Context, userID, channelID in
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "message_purge", "channel", channelID,
 		fmt.Sprintf("purged %d messages, limit=%d, before=%d", len(ids), limit, before))
 
-	// Reverse the purged messages' mention_count increments, as DeleteMessage does; detached like the audit
-	// write.
-	if mcErr := s.mentions.reverseMentionCounts(context.WithoutCancel(ctx), channelID, ids); mcErr != nil {
+	// The reversal took back the purged messages' mention_count increments, as DeleteMessage does.
+	if mcErr != nil {
 		slog.Error("MessageService.PurgeMessages DecrementMentionCounts", "err", mcErr, "channel_id", channelID)
 	}
 

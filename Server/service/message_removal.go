@@ -131,7 +131,12 @@ func (s *messageRemoval) deleteMessage(ctx context.Context, userID, msgID int64,
 	// symmetric; an unflushed reversal could consume a genuine badge.
 	s.mentions.FlushPendingMentionCounts(context.WithoutCancel(ctx), []int64{msgID})
 
-	if err := s.softDeleteRow(ctx, msgID, userID, isMod, msg.UserID, reportID, reason, onlyIfEmpty); err != nil {
+	// The delete and the reversal of its mention badge run under the channel's emit
+	// lock, so a reader's read-pointer move cannot land between them.
+	_, mcErr, err := s.mentions.removeAndReverseMentions(ctx, msg.ChannelID, func() ([]int64, error) {
+		return []int64{msgID}, s.softDeleteRow(ctx, msgID, userID, isMod, msg.UserID, reportID, reason, onlyIfEmpty)
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -140,8 +145,8 @@ func (s *messageRemoval) deleteMessage(ctx context.Context, userID, msgID int64,
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "message_delete", "message", msgID,
 		fmt.Sprintf("channel %d, mod_action=%v", msg.ChannelID, isMod))
 
-	// Reverse this message's mention_count increments; detached because the soft-delete committed.
-	if mcErr := s.mentions.reverseMentionCounts(context.WithoutCancel(ctx), msg.ChannelID, []int64{msgID}); mcErr != nil {
+	// The reversal took this message's mention_count increments back.
+	if mcErr != nil {
 		slog.Error("MessageService.DeleteMessage DecrementMentionCounts", "err", mcErr, "channel_id", msg.ChannelID, "msg_id", msgID)
 	}
 
