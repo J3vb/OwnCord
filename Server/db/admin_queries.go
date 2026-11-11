@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
@@ -214,7 +215,14 @@ type ChannelUpdate struct {
 	Base *Channel
 	// Before receives the row as the write found it; left alone when the channel is gone.
 	Before *Channel
+	// settled is the stored row when the write keeps its name or its category over the
+	// request's: the pair it writes is then one the caller never checked.
+	settled *Channel
 }
+
+// ErrChannelNameTaken means a write that kept a concurrent edit would leave two channels
+// of one type with the same name in one category.
+var ErrChannelNameTaken = errors.New("channel name is taken in the category")
 
 // keepStored returns stored when the request left the field as the snapshot had it.
 func keepStored[T comparable](requested, snapshot, stored T) T {
@@ -245,6 +253,7 @@ func (u ChannelUpdate) settleAgainstStored(ctx context.Context, q *dbgen.Queries
 	if b == nil {
 		return u, nil
 	}
+	name, category := u.Name, u.CategoryID
 	u.Name = keepStored(u.Name, b.Name, cur.Name)
 	u.Topic = keepStored(u.Topic, b.Topic, cur.Topic)
 	u.SlowMode = keepStored(u.SlowMode, b.SlowMode, cur.SlowMode)
@@ -256,7 +265,36 @@ func (u ChannelUpdate) settleAgainstStored(ctx context.Context, q *dbgen.Queries
 	if u.CategoryName == nil && u.CategoryID == b.CategoryID {
 		u.CategoryID, u.CategoryIfExists = cur.CategoryID, true
 	}
+	if u.Name != name || u.CategoryID != category {
+		u.settled = &cur
+	}
 	return u, nil
+}
+
+// requireSettledNameFree refuses (ErrChannelNameTaken) a settled write that would put the
+// channel beside another of its type with the same name, ignoring case, in the category
+// it ends up in. The caller checked the name and category it asked for, and one of them
+// was replaced by the stored row's. A write that leaves both as stored (a change of case
+// in the name aside) moves nothing and passes, as an existing duplicate does.
+func requireSettledNameFree(ctx context.Context, q *dbgen.Queries, id int64, stored *Channel, name string, catID *int64) error {
+	var category int64
+	if catID != nil {
+		category = *catID
+	}
+	if strings.EqualFold(name, stored.Name) && category == stored.CategoryID {
+		return nil
+	}
+	rows, err := q.ListChannels(ctx)
+	if err != nil {
+		return err
+	}
+	for i := range rows {
+		r := &rows[i]
+		if r.ID != id && r.Type == stored.Type && r.CategoryID == category && strings.EqualFold(r.Name, name) {
+			return fmt.Errorf("%w: %q", ErrChannelNameTaken, r.Name)
+		}
+	}
+	return nil
 }
 
 // AdminUpdateChannel updates all mutable channel fields, category included, in one transaction.
@@ -285,6 +323,11 @@ func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate) 
 		}
 		if err != nil {
 			return err
+		}
+		if u.settled != nil {
+			if err := requireSettledNameFree(ctx, q, id, u.settled, u.Name, catID); err != nil {
+				return err
+			}
 		}
 		if u.CreatedCategory != nil && created != 0 {
 			*u.CreatedCategory = created

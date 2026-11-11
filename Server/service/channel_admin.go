@@ -228,6 +228,26 @@ func (s *ChannelService) requireChannelNameFree(ctx context.Context, name, chTyp
 	return nil
 }
 
+// channelWriteError turns a failed channel write into the caller's error, nil when it
+// succeeded. refused is the sync guard's own refusal, which wins over the write error
+// it caused.
+func channelWriteError(writeErr, refused error, chType string) error {
+	switch {
+	case writeErr == nil:
+		return nil
+	case refused != nil:
+		return refused
+	case errors.Is(writeErr, db.ErrNotFound):
+		return fmt.Errorf("category_id does not exist%.0w", ErrBadRequest)
+	case errors.Is(writeErr, db.ErrUncategorized):
+		return fmt.Errorf("channel has no category to sync with%.0w", ErrBadRequest)
+	case errors.Is(writeErr, db.ErrChannelNameTaken):
+		return fmt.Errorf("another edit changed this channel, and a %s channel with its name already exists in that category%.0w", chType, ErrConflict)
+	default:
+		return fmt.Errorf("%w: failed to update channel: %w", ErrInternal, writeErr)
+	}
+}
+
 // AdminChannelUpdate is a full update pre-filled by the handler from the existing row so a partial PATCH is
 // safe.
 type AdminChannelUpdate struct {
@@ -319,18 +339,8 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	// whenever the row it writes is unlabelled, so a later re-label re-prompts everyone.
 	// Keyed on the RESULTING flag, not a 1-to-0 transition from the stale `existing`
 	// snapshot, which a concurrent edit could leave pointing at a DIFFERENT labelling.
-	writeErr := s.st.AdminUpdateChannel(ctx, existing.ID, update)
-	if refused != nil && writeErr != nil {
-		return nil, nil, refused
-	}
-	if errors.Is(writeErr, db.ErrNotFound) {
-		return nil, nil, fmt.Errorf("category_id does not exist%.0w", ErrBadRequest)
-	}
-	if errors.Is(writeErr, db.ErrUncategorized) {
-		return nil, nil, fmt.Errorf("channel has no category to sync with%.0w", ErrBadRequest)
-	}
-	if writeErr != nil {
-		return nil, nil, fmt.Errorf("%w: failed to update channel: %w", ErrInternal, writeErr)
+	if err := channelWriteError(s.st.AdminUpdateChannel(ctx, existing.ID, update), refused, existing.Type); err != nil {
+		return nil, nil, err
 	}
 
 	tail := context.WithoutCancel(ctx)
