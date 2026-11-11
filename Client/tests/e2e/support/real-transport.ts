@@ -2,6 +2,8 @@ import type { Page } from "@playwright/test";
 import type { TestServer } from "./server";
 
 type TestEnvelope = { type: string; id?: string; payload?: Record<string, unknown> };
+/** What `save_credential` is called with, kept as the stored sign-in. */
+type SavedCredentialArgs = { username: string; token: string; password?: string | null };
 
 /** The path token the test tunnel hands out, standing in for the native one. */
 export const TUNNEL_TOKEN = "e2e-tunnel";
@@ -177,8 +179,18 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "save_credential":
           secrets.set(`credential:${args.host}`, args);
           return;
-        case "load_credential":
-          return secrets.get(`credential:${args.host}`) ?? null;
+        case "load_credential": {
+          const stored = secrets.get(`credential:${args.host}`) as SavedCredentialArgs | undefined;
+          return stored
+            ? { username: stored.username, has_password: typeof stored.password === "string" }
+            : null;
+        }
+        case "resume_saved_session": {
+          const stored = secrets.get(`credential:${args.host}`) as SavedCredentialArgs | undefined;
+          return stored
+            ? { outcome: "resumed", username: stored.username, token: stored.token }
+            : null;
+        }
         case "delete_credential":
           secrets.delete(`credential:${args.host}`);
           return;

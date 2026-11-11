@@ -156,6 +156,9 @@ export function installCertPrompts(
             void (async () => {
               try {
                 await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
+                // As after a first-use accept: re-check the server and carry on
+                // with a sign-in the changed certificate held up.
+                rerunHealth(evt.host);
                 const target = sessionTarget();
                 if (target?.token && evt.host === normalizeHostForCertCompare(target.host)) {
                   reconnectAfterCertAccept(

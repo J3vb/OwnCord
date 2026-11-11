@@ -65,26 +65,28 @@ export function describeCredentialStoreSuite(
     });
 
     describe("load", () => {
+      // The store's own record carries the token; the prefill answer never does.
       checkPassword(
-        "resolves the stored credential, mapping has_password to hasPassword",
+        "resolves the stored username, mapping has_password to hasPassword, without the token",
         async () => {
           ctx.native.succeedWith({ username: "alice", token: "tok", has_password: true });
           await expect(ctx.subject.load("host")).resolves.toEqual({
             username: "alice",
-            token: "tok",
             hasPassword: true,
           });
         },
       );
 
-      checkTokenOnly("resolves the stored credential, never with a saved password", async () => {
-        ctx.native.succeedWith({ username: "alice", token: "tok", has_password: true });
-        await expect(ctx.subject.load("host")).resolves.toEqual({
-          username: "alice",
-          token: "tok",
-          hasPassword: false,
-        });
-      });
+      checkTokenOnly(
+        "resolves the stored username, never with a saved password or the token",
+        async () => {
+          ctx.native.succeedWith({ username: "alice", token: "tok", has_password: true });
+          await expect(ctx.subject.load("host")).resolves.toEqual({
+            username: "alice",
+            hasPassword: false,
+          });
+        },
+      );
 
       check("resolves null when nothing is stored (a malformed/empty result)", async () => {
         ctx.native.succeedWith(null);
@@ -101,6 +103,63 @@ export function describeCredentialStoreSuite(
       check("resolves null when the native host is unavailable", async () => {
         ctx.native.unavailable();
         await expect(ctx.subject.load("host")).resolves.toBeNull();
+      });
+    });
+
+    describe("resume", () => {
+      checkPassword("resolves the token the native side hands over", async () => {
+        ctx.native.succeedWith({ outcome: "resumed", username: "alice", token: "tok" });
+        await expect(ctx.subject.resume("host")).resolves.toEqual({
+          outcome: "resumed",
+          username: "alice",
+          token: "tok",
+        });
+      });
+
+      checkPassword("resolves the native side's refusals without a token", async () => {
+        ctx.native.succeedWith({ outcome: "sign_in_needed", token: "must-not-pass" });
+        await expect(ctx.subject.resume("host")).resolves.toEqual({ outcome: "sign_in_needed" });
+        ctx.native.succeedWith({ outcome: "certificate_unverified", token: "must-not-pass" });
+        await expect(ctx.subject.resume("host")).resolves.toEqual({
+          outcome: "certificate_unverified",
+        });
+        ctx.native.succeedWith({ outcome: "refused", token: "must-not-pass" });
+        await expect(ctx.subject.resume("host")).resolves.toEqual({ outcome: "refused" });
+      });
+
+      checkPassword("resolves null for an answer that is not one of the outcomes", async () => {
+        ctx.native.succeedWith({ outcome: "resumed", username: "alice" });
+        await expect(ctx.subject.resume("host")).resolves.toBeNull();
+        ctx.native.succeedWith({ outcome: "resumed", username: "alice", token: 5 });
+        await expect(ctx.subject.resume("host")).resolves.toBeNull();
+        ctx.native.succeedWith({ outcome: "something_else" });
+        await expect(ctx.subject.resume("host")).resolves.toBeNull();
+        ctx.native.succeedWith({ username: "alice", token: "tok" });
+        await expect(ctx.subject.resume("host")).resolves.toBeNull();
+      });
+
+      checkTokenOnly("resolves the stored token", async () => {
+        ctx.native.succeedWith({ username: "alice", token: "tok" });
+        await expect(ctx.subject.resume("host")).resolves.toEqual({
+          outcome: "resumed",
+          username: "alice",
+          token: "tok",
+        });
+      });
+
+      check("resolves null when nothing is stored", async () => {
+        ctx.native.succeedWith(null);
+        await expect(ctx.subject.resume("host")).resolves.toBeNull();
+      });
+
+      check("rejects when the native store errors", async () => {
+        ctx.native.failWith(new Error("keychain locked"));
+        await expect(ctx.subject.resume("host")).rejects.toThrow();
+      });
+
+      check("resolves null when the native host is unavailable", async () => {
+        ctx.native.unavailable();
+        await expect(ctx.subject.resume("host")).resolves.toBeNull();
       });
     });
 

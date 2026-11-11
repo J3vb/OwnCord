@@ -271,11 +271,12 @@ export function renderConnect(
         cancelAutoLogin();
         deactivatePendingMessages();
         api.endSession();
-        // Every read of this flag (in app/autoLogin.ts) runs before the overlay carrying
-        // this Cancel button is ever painted, so by the time a click
-        // reaches here the session is already in flight (startSession has
-        // called ws.connect and registered listeners). Tear it down the
-        // same way the logout path does.
+        // The overlay carrying this Cancel button goes up when the session
+        // is in flight (startSession has called ws.connect and registered
+        // listeners): tear it down the same way the logout path does. It
+        // also shows while a saved sign-in is still being checked; then
+        // nothing is in flight yet, and ending the API session above drops
+        // the pending answer.
         abandonInFlight();
       },
       onUpdateClient(host) {
@@ -287,14 +288,15 @@ export function renderConnect(
     getProfileList(),
   );
 
-  const [startAutoLogin, cancelAutoLogin, forgetServerWait] = createAutoLogin(
-    api,
-    profileManager,
-    pageOwner,
-    connectPage,
-    ensureProfileExists,
-    getProfileList,
-  );
+  const [startAutoLogin, cancelAutoLogin, forgetServerWait, resumeAfterCertAccept] =
+    createAutoLogin(
+      api,
+      profileManager,
+      pageOwner,
+      connectPage,
+      ensureProfileExists,
+      getProfileList,
+    );
 
   safeMount(connectPage, appEl, renderRecovery);
 
@@ -362,10 +364,12 @@ export function renderConnect(
     page,
     // A health-refresh hook so trusting a first-use certificate can re-check
     // the now-reachable server without a full page navigation, and carry on
-    // with the sign-in that certificate refused.
+    // with the sign-in or the saved-session resume that certificate held up.
     (acceptedHost) => {
       runHealthChecks(connectPage, getProfileList(), pageOwner);
-      if (acceptedHost !== undefined) connectPage.resubmitAfterCertAccept(acceptedHost);
+      if (acceptedHost === undefined) return;
+      connectPage.resubmitAfterCertAccept(acceptedHost);
+      resumeAfterCertAccept(acceptedHost);
     },
     (code, host) => connectPage.applyInviteLink(code, host),
   ];

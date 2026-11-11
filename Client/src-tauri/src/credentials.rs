@@ -8,16 +8,21 @@ use tokio::time::timeout;
 
 use crate::secret_store;
 
+pub mod session_resume;
+
 /// Data returned from `load_credential`.
 ///
-/// The plaintext password is deliberately NOT part of the IPC payload. It stays
+/// Neither secret is part of the IPC payload. The plaintext password stays
 /// inside this process and is used only by `login_with_saved_password`; the
 /// frontend learns that one exists through `has_password` and prefills a
-/// placeholder. See `docs/security.md` and `docs/architecture/client.md`, both
-/// of which state that plaintext passwords never cross IPC back to JS.
+/// placeholder. The session token reaches the page only through
+/// `resume_saved_session`. See `docs/security-model.md` and
+/// `docs/architecture/client.md`, both of which state that plaintext passwords
+/// never cross IPC back to JS.
 #[derive(Serialize, Clone)]
 pub struct CredentialData {
     pub username: String,
+    #[serde(skip)]
     pub token: String,
     #[serde(skip)]
     pub password: Option<String>,
@@ -217,7 +222,9 @@ pub async fn save_credential(
     .await
 }
 
-/// Load a credential from the system credential store.
+/// Load what the connect page prefills for a host: the saved username and
+/// whether a password is stored. Neither the token nor the password is
+/// returned.
 ///
 /// Returns `None` when no credential exists for the given host.
 #[tauri::command(async)]
@@ -226,9 +233,9 @@ pub async fn load_credential(
     session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
 ) -> Result<Option<CredentialData>, String> {
-    // Pre-session: the connect page prefills and auto-login reads before any
-    // ws_connect. Once a session exists, only its host may be read.
-    session.ensure(&host, true)?;
+    // Pre-session: the connect page prefills before any ws_connect. Once a
+    // session exists, only its host may be read.
+    session.ensure_no_other_session(&host)?;
     run_store_op(move || {
         require_non_empty(&host, "host")?;
 
@@ -278,7 +285,7 @@ fn parse_credential_blob(json_str: &str) -> Result<CredentialData, String> {
 ///
 /// Deleting a non-existent credential is not treated as an error. It does not
 /// touch the session's verified-host set: removing a stored credential must
-/// never widen which hosts a pre-session flow can read.
+/// never widen which hosts' tokens a pre-session flow is handed as stored.
 #[tauri::command(async)]
 pub async fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
     run_store_op(move || {
@@ -517,9 +524,9 @@ pub async fn login_with_saved_password(
     username: String,
 ) -> Result<SavedLoginResponse, String> {
     // Pre-session by definition: this IS the login that establishes a session,
-    // and it runs before ws_connect. Once a session exists, only its host may
-    // be used.
-    session.ensure(&host, true)?;
+    // and it runs before ws_connect. The password goes only to this host's own
+    // server. Once a session exists, only its host may be used.
+    session.ensure_no_other_session(&host)?;
     require_non_empty(&host, "host")?;
     require_non_empty(&username, "username")?;
 
@@ -599,14 +606,20 @@ async fn post_login(
     password: &str,
 ) -> Result<SavedLoginResponse, String> {
     let request = build_login_request(token, username, password);
+    let raw = tunnel_exchange(port, &request, "saved-password login").await?;
+    parse_http_response(&raw)
+}
 
+/// Send one `Connection: close` request to the loopback proxy and read the
+/// whole response. `what` names the caller in every error.
+async fn tunnel_exchange(port: u16, request: &str, what: &str) -> Result<Vec<u8>, String> {
     let mut stream = TcpStream::connect(("127.0.0.1", port))
         .await
-        .map_err(|e| format!("saved-password login: connect failed: {e}"))?;
+        .map_err(|e| format!("{what}: connect failed: {e}"))?;
     stream
         .write_all(request.as_bytes())
         .await
-        .map_err(|e| format!("saved-password login: write failed: {e}"))?;
+        .map_err(|e| format!("{what}: write failed: {e}"))?;
 
     // Bounded read: one byte over the cap is treated as a failure rather than
     // silently truncated, so a partial body can never be parsed as a complete
@@ -616,12 +629,11 @@ async fn post_login(
     bounded
         .read_to_end(&mut raw)
         .await
-        .map_err(|e| format!("saved-password login: read failed: {e}"))?;
+        .map_err(|e| format!("{what}: read failed: {e}"))?;
     if raw.len() as u64 > SAVED_LOGIN_MAX_RESPONSE {
-        return Err("saved-password login: response exceeded the size limit".to_string());
+        return Err(format!("{what}: response exceeded the size limit"));
     }
-
-    parse_http_response(&raw)
+    Ok(raw)
 }
 
 /// Whether a response header block declares chunked transfer framing.
@@ -920,6 +932,22 @@ mod tests {
         // The frontend still learns that one exists, so it can prefill a
         // placeholder and offer the saved-password login path.
         assert!(json.contains("\"has_password\":true"), "{json}");
+    }
+
+    /// The prefill read hands the page a username and a flag, never the
+    /// session token: that goes through `resume_saved_session` only.
+    #[test]
+    fn credential_data_never_serializes_the_token() {
+        let data = CredentialData {
+            username: "alice".into(),
+            token: "session-token-value".into(),
+            password: None,
+            has_password: false,
+        };
+        let json = serde_json::to_string(&data).unwrap();
+        assert!(!json.contains("session-token-value"), "{json}");
+        assert!(!json.contains("\"token\""), "token key present: {json}");
+        assert_eq!(json, r#"{"username":"alice","has_password":false}"#);
     }
 
     #[test]

@@ -305,6 +305,7 @@ pub fn run() {
             credentials::save_credential,
             credentials::load_credential,
             credentials::login_with_saved_password,
+            credentials::session_resume::resume_saved_session,
             credentials::delete_credential,
             credentials::save_identity_key,
             credentials::load_identity_key,
