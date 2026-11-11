@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { checkAgainst, checkFrame, checkRest, type WireFault } from "../../src/lib/net/wireCheck";
 import { FRAME_SHAPES, type Shape } from "../../src/lib/net/wireShapes";
 import * as restTable from "../../src/lib/net/restShapes";
@@ -187,6 +187,15 @@ describe("checkAgainst: nesting", () => {
 });
 
 describe("checkFrame and checkRest", () => {
+  it("fails every frame, known or not, before the frame table is installed", async () => {
+    vi.resetModules();
+    const fresh = await import("../../src/lib/net/wireCheck");
+    const noTable = { path: "", expected: "a loaded shape table" };
+    expect(fresh.checkFrame("chat_deleted", { message_id: 1, channel_id: 2 })).toEqual(noTable);
+    expect(fresh.checkFrame("not_a_real_frame", {})).toEqual(noTable);
+    fresh.installFrameShapes(await import("../../src/lib/net/wireShapes"));
+    expect(fresh.checkFrame("not_a_real_frame", {})).toBeNull();
+  });
   it("passes a frame type with no shape", () => {
     expect(checkFrame("not_a_real_frame", 12)).toBeNull();
   });

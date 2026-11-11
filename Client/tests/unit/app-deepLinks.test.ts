@@ -41,7 +41,7 @@ vi.mock("@lib/logger", () => ({
 vi.mock("@lib/pendingMessages", () => ({
   deactivatePendingMessages: hoisted.deactivatePendingMessages,
 }));
-vi.mock("@lib/notifications", () => ({ openMessageTarget: hoisted.openMessageTarget }));
+vi.mock("@lib/notificationDelivery", () => ({ openMessageTarget: hoisted.openMessageTarget }));
 vi.mock("@lib/nav/inviteNavigation", () => ({
   setInviteJoinHandler: hoisted.setInviteJoinHandler,
 }));

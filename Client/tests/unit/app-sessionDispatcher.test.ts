@@ -9,6 +9,9 @@ vi.mock("@lib/dispatcher", () => {
 });
 
 import { loadDispatcher } from "../../src/app/sessionDispatcher";
+import { installFrameShapes } from "../../src/lib/net/wireCheck";
+
+vi.mock("../../src/lib/net/wireCheck", () => ({ installFrameShapes: vi.fn() }));
 
 describe("loadDispatcher", () => {
   it("forgets a failed load so the next sign-in retries, then reuses the loaded module", async () => {
@@ -19,5 +22,8 @@ describe("loadDispatcher", () => {
     expect(second).toBe(first);
     expect(typeof first.wireDispatcher).toBe("function");
     expect(state.loads).toBe(2);
+    // The frame table is installed with the load, before anything can dial.
+    expect(vi.mocked(installFrameShapes)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(installFrameShapes).mock.calls[0]![0]).toHaveProperty("FRAME_SHAPES");
   });
 });
