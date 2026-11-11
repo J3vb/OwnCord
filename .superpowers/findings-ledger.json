@@ -1,5 +1,5 @@
 {
-  "nextId": 590,
+  "nextId": 593,
   "findings": [
     {
       "id": "OC-0001",
@@ -13608,6 +13608,75 @@
         "commit": "pending",
         "test": "Client/tests/unit/account-tab-profile.test.ts",
         "revertProof": "without the write-back 'shows the stored text after a save and no longer counts it as unsaved' fails"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0590",
+      "title": "Two edits to one channel at the same moment: the later one put back the settings it had read before the first was saved",
+      "file": "Server/admin/handlers_channels.go",
+      "line": 165,
+      "severity": "low",
+      "why": "A channel edit read the row once, filled every field of its write from that copy and wrote the whole row. A drag in the same category sends one position-only request per channel, so a rename, topic, slow mode, age label, archive state or category saved at that moment was silently written back to its old value.",
+      "repro": "Save a channel's new name while another manager drags a channel in the same category: the name returns to the old one.",
+      "evidence": "Server/service/nsfw_race_test.go, Server/service/channel_admin_test.go (TestAdminUpdateChannel_StaleSnapshotKeepsAConcurrentEdit)",
+      "suggestedFix": "Read the row again inside the write transaction and keep the stored value of every field the request left as it found it.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/channel_admin_test.go",
+        "revertProof": "without the in-transaction read TestAdminUpdateChannel_StaleSnapshotKeepsAConcurrentEdit fails"
+      },
+      "lens": "correctness",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0591",
+      "title": "After a restore the clean-up of unused uploads removed every file uploaded since the backup",
+      "file": "Server/internal/app/maintenance.go",
+      "line": 421,
+      "severity": "low",
+      "why": "The 15-minute storage reconciliation removes files no database row names. A restored backup has no rows for uploads made after it, so they were deleted within minutes, and going back to the pre-restore safety copy left its messages with missing files, although the hosting guide said uploads stay as they are.",
+      "repro": "Restore an older backup, wait for a maintenance pass, then restore the pre-restore safety copy: attachments uploaded since the backup are gone.",
+      "evidence": "Server/internal/app/maintenance_restore_hold_test.go",
+      "suggestedFix": "Skip the reconciliation pass while a pre-restore safety copy younger than 7 days exists, and when the backup folder cannot be read.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/internal/app/maintenance_restore_hold_test.go",
+        "revertProof": "without the hold TestReconcileFiles_KeepsUnreferencedUploadsWhileARestoreSafetyCopyIsFresh fails"
+      },
+      "lens": "correctness",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0592",
+      "title": "After retention was turned off, unpinning an old pinned message got it deleted at the next server start",
+      "file": "Server/service/retention_sweep.go",
+      "line": 247,
+      "severity": "medium",
+      "why": "The start-up replay of retention markers swept each channel to the cutoff recorded outside the database without looking at the current policy or at what the database had already swept. A message that was pinned during the sweeps and unpinned after retention was turned off (or its window made longer) was removed for good on the next start.",
+      "repro": "Set a 7-day retention, pin an old message, turn retention off, unpin the message, restart the server: the message is gone.",
+      "evidence": "Server/service/retention_test.go (TestRetention_ReplayKeepsAMessageUnpinnedAfterRetentionWasTurnedOff)",
+      "suggestedFix": "Give each sweep of a channel an id in the marker file, record in the database the last one it finished, and replay a marker only when the database does not name the marker's last sweep, as after a restore of an older backup.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/retention_test.go",
+        "revertProof": "without the finished-sweep check TestRetention_ReplayKeepsAMessageUnpinnedAfterRetentionWasTurnedOff fails"
       },
       "lens": "correctness",
       "confidence": "high",

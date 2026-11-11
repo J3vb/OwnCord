@@ -396,3 +396,32 @@ func (d *DB) DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, e
 	}
 	return n, nil
 }
+
+// RetentionSwept returns the id of the marker sweep this database last
+// finished for the channel. ok is false when none is recorded: a database from
+// before the record, or a restored older backup.
+func (d *DB) RetentionSwept(ctx context.Context, channelID int64) (sweep string, ok bool, err error) {
+	err = d.reader.QueryRowContext(ctx,
+		`SELECT sweep FROM channel_retention_swept WHERE channel_id = ?`, channelID).Scan(&sweep)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("RetentionSwept: %w", err)
+	}
+	return sweep, true, nil
+}
+
+// RecordRetentionSwept records that the channel finished the marker sweep
+// named sweep (MarkerStore.MessagesSweepID), pinned messages exempt. A channel
+// that no longer exists records nothing.
+func (d *DB) RecordRetentionSwept(ctx context.Context, channelID int64, sweep string) error {
+	if _, err := d.writer.ExecContext(ctx,
+		`INSERT INTO channel_retention_swept (channel_id, sweep)
+		 SELECT id, ? FROM channels WHERE id = ?
+		 ON CONFLICT(channel_id) DO UPDATE SET sweep = excluded.sweep, updated_at = datetime('now')`,
+		sweep, channelID); err != nil {
+		return fmt.Errorf("RecordRetentionSwept: %w", err)
+	}
+	return nil
+}

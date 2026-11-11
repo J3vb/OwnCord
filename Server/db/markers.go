@@ -36,6 +36,8 @@ type DeletionMarker struct {
 	ErasedAt     string
 	Replays      int
 	LastReplay   *string
+	// SweepID names the last retention sweep a messages marker recorded.
+	SweepID string
 }
 
 const (
@@ -67,7 +69,8 @@ CREATE TABLE IF NOT EXISTS deletion_markers (
     state         TEXT    NOT NULL DEFAULT 'recorded' CHECK (state IN ('pending', 'recorded')),
     erased_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     replays       INTEGER NOT NULL DEFAULT 0,
-    last_replay   TEXT
+    last_replay   TEXT,
+    sweep_id      TEXT    NOT NULL DEFAULT ''
 );`, `
 CREATE TABLE IF NOT EXISTS sequence_floors (
     name TEXT    PRIMARY KEY,
@@ -129,11 +132,31 @@ func OpenMarkerStore(path string, key []byte) (*MarkerStore, error) {
 			return nil, fmt.Errorf("marker store: schema: %w", err)
 		}
 	}
+	if err := addMarkerSweepID(sqlDB); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
 	if err := bindMarkerKey(sqlDB, path, markerKeyFingerprint(key)); err != nil {
 		_ = sqlDB.Close()
 		return nil, err
 	}
 	return &MarkerStore{sqlDB: sqlDB, key: append([]byte(nil), key...), path: path}, nil
+}
+
+// addMarkerSweepID gives a marker file written before sweeps were named its
+// sweep_id column, every marker starting with none.
+func addMarkerSweepID(sqlDB *sql.DB) error {
+	var has int
+	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('deletion_markers') WHERE name = 'sweep_id'`).Scan(&has); err != nil {
+		return fmt.Errorf("marker store: reading the marker columns: %w", err)
+	}
+	if has > 0 {
+		return nil
+	}
+	if _, err := sqlDB.Exec(`ALTER TABLE deletion_markers ADD COLUMN sweep_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("marker store: adding the sweep_id column: %w", err)
+	}
+	return nil
 }
 
 // markerFileEscapeHatch is the warning every refusal carries: deleting the file to get past it
