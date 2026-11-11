@@ -242,6 +242,17 @@ describe("page presence on connect", () => {
     expect(loadAgreedStatus()).toBeNull();
   });
 
+  it("sends the saved status when the server has no known address to agree under", () => {
+    setChannelMutesHost(null);
+    saveUserStatus("dnd");
+    setServerStatus("online");
+    const { presence, send } = makePresence();
+    presence.restoreSavedPresence();
+    expect(send).toHaveBeenCalledExactlyOnceWith("dnd");
+    expect(loadUserStatus()).toBe("dnd");
+    expect(loadAgreedStatus()).toBeNull();
+  });
+
   it("answers a server that reports idle with the saved status", () => {
     saveUserStatus("dnd");
     setServerStatus("idle");

@@ -37,14 +37,15 @@ import {
  * the saved status for the caller to send; null when there is nothing to send.
  */
 export function settleSavedStatus(
-  account: string,
+  account: string | null,
   serverStatus: UserStatus | undefined,
 ): UserStatus | null {
   const status = loadUserStatus();
   const agreed = loadAgreedStatus();
   noteServerStatus(account, serverStatus);
   if (serverStatus === status) return null;
-  if (!isAccountStatus(serverStatus)) return status;
+  // With no server to file an agreement under, nothing says who changed last.
+  if (account === null || !isAccountStatus(serverStatus)) return status;
   // An idle the idle watcher set stands for the Online it goes back to.
   const chosen = status === "idle" && loadUserStatusOrigin() === "auto" ? "online" : status;
   if (agreed !== null && (agreed.owner !== account || agreed.status !== chosen)) return status;

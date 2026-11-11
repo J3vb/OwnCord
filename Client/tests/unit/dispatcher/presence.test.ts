@@ -73,6 +73,9 @@ describe("WS Dispatcher", () => {
       ...prev,
       user: { id: 5, username: "me", avatar: null, role: "member" },
     }));
+    // Before the page has named the server, a frame is not filed under any account.
+    mock.dispatch("presence", { user_id: 5, status: "dnd" });
+    expect(loadAgreedStatus()).toBeNull();
     setChannelMutesHost("one.example");
     onTestFinished(() => setChannelMutesHost(null));
 
