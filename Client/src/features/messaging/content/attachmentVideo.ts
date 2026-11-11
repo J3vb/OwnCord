@@ -6,6 +6,7 @@
 import { createElement, setText } from "@lib/dom";
 import type { Attachment } from "@lib/types";
 import { messageStatusText } from "../../../i18n/messageStatus";
+import { dataSaverActive } from "./dataSaver";
 import { type FileLink, getFileLink, VIDEO_DIMS_CAP, videoDims } from "./attachmentCache";
 import { log } from "./attachmentUrls";
 import {
@@ -103,7 +104,7 @@ const VIDEO_RELINK_COOLDOWN_MS = 60_000;
 export function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivElement {
   const wrap = createElement("div", { class: "msg-image msg-video" });
 
-  const video = createElement("video", { preload: "metadata" });
+  const video = createElement("video", { preload: dataSaverActive() ? "none" : "metadata" });
   video.setAttribute("aria-label", att.filename);
   const known =
     att.width != null && att.height != null && att.width > 0 && att.height > 0
