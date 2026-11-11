@@ -79,7 +79,7 @@ func TestSweepStaleVoiceStates_JoinCatchesUpDuringDeleteWindow(t *testing.T) {
 // OC-0022.
 //
 // Both production callers of CleanupVoiceForChannel (admin/handlers_channels.go's
-// archive and delete paths, per admin/api_test.go's
+// archive and delete paths, per admin/api_channels_test.go's
 // TestAdminAPI_DeleteChannel_ArchivesBeforeVoiceCleanup) commit archived=1 to
 // the channel before calling it. channelReadAudience (OC-0073) treats any
 // archived channel as invisible to every role and returns an empty audience,
