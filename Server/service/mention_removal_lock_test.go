@@ -149,15 +149,13 @@ func TestPurgeAfterBan_MarkUnreadInGapKeepsMentionBadge(t *testing.T) {
 	gap := &removalGapStore{messageRemovalStore: f.messages.messageRemoval.st}
 	f.messages.messageRemoval.st = gap
 
-	mention := func(author int64) int64 {
-		id := banPurgeMsg(t, database, fixtureChannel, author, time.Minute)
+	m1 := banPurgeMsg(t, database, fixtureChannel, fixtureOwner, time.Minute)
+	m2 := banPurgeMsg(t, database, fixtureChannel, fixtureMember2, time.Minute)
+	for _, id := range []int64{m1, m2} {
 		_, err := database.ReplaceMessageMentions(ctx, id, []int64{fixtureMember}, false, nil)
 		mustDo(t, "ReplaceMessageMentions", err)
 		mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, fixtureChannel, id, []int64{fixtureMember}))
-		return id
 	}
-	m1 := mention(fixtureOwner)
-	mention(fixtureMember2)
 	_, err := f.messages.MoveReadPointer(ctx, fixtureMember, fixtureChannel, db.ReadAtLatest, 0)
 	mustDo(t, "ReadAtLatest", err)
 
