@@ -13,6 +13,7 @@ import {
 } from "@lib/prefs/appearance";
 import { setOutputVolume } from "@lib/voice/livekitSession";
 import { isLinuxDesktop } from "../../voice/native/platform";
+import { SCREEN_SHARE_BACKUP_LAYER_PREF, getScreenShareBackupLayer } from "@lib/voice/videoPresets";
 import {
   getVideoCodecPref,
   h264Offered,
@@ -339,7 +340,8 @@ export function mountOutputAndVideo(sc: VoiceTabScope): void {
 
   sc.cameraCard.append(...sc.cameraQualityGroup);
 
-  if (!sc.android) sc.cameraCard.append(...sc.screenQualityGroup, ...sc.fpsGroup);
+  if (!sc.android)
+    sc.cameraCard.append(...sc.screenQualityGroup, ...sc.fpsGroup, buildBackupLayerRow(sc.signal));
 
   // The codec choice. Off Linux the webview's own encoders decide what is
   // offered; on Linux the native engine offers VP8, Auto (VP8), and H.264 and
@@ -382,4 +384,25 @@ export function mountOutputAndVideo(sc: VoiceTabScope): void {
   // WebView2 picks its graphics card at start. The row mounts on the
   // Windows desktop app only.
   mountGpuAdapterRow(sc.cameraCard, sc.signal);
+}
+
+/** The "Send a backup copy" switch, read when a share starts. */
+function buildBackupLayerRow(signal: AbortSignal): HTMLDivElement {
+  const row = createElement("div", { class: "setting-row", "data-testid": "screen-backup-layer" });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, t("voiceAudio.screenBackupLayer")),
+    createElement("div", { class: "setting-desc" }, t("voiceAudio.screenBackupLayerDesc")),
+  );
+  appendChildren(
+    row,
+    info,
+    createToggle(getScreenShareBackupLayer(), {
+      signal,
+      label: t("voiceAudio.screenBackupLayer"),
+      onChange: (nowOn) => savePref(SCREEN_SHARE_BACKUP_LAYER_PREF, nowOn),
+    }),
+  );
+  return row;
 }

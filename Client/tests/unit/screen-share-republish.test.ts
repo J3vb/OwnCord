@@ -199,7 +199,8 @@ describe("republishVideo", () => {
     expect(r.publishTrack.mock.calls[0]?.[1]).toMatchObject({
       source: Track.Source.ScreenShare,
       videoCodec: "vp8",
-      simulcast: true,
+      // One layer: the backup copy is off by default.
+      simulcast: false,
       degradationPreference: "maintain-framerate",
     });
     expect(audio.stop).not.toHaveBeenCalled();
