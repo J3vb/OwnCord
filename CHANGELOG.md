@@ -100,6 +100,7 @@ and only when it changes something a contributor or fork holder must do
 - A group DM icon you uploaded could never be deleted after you left or were removed from the group: it stayed listed under your uploads, counted against your storage and could not be removed. The group now drops that icon when its uploader leaves, and the file is yours to delete.
 - A forum set to "Require a tag" with no tags could not be posted in by anyone. Forum settings now refuse to require a tag until the forum has one, and a forum already in that state accepts posts without a tag.
 - After you blocked and unblocked someone and then wrote to them first, their reply was held as a new message request, or refused when your settings turn off direct messages from members. Writing to someone now counts as trusting them, so their reply arrives in the conversation. A message from them before you write is still a request.
+- After a server database restore, forwarding a message or posting a poll works again right away instead of being refused for a few minutes.
 - Reading old messages in a channel while a thread was open (or had been) no longer throws you to the newest messages after a server restart.
 - A thread whose history could not be reloaded after a reconnect now tells you and offers Jump to present, instead of silently showing a gap in the replies.
 - A thread reply that failed to send can still be retried after you close and reopen the thread; Retry used to do nothing.

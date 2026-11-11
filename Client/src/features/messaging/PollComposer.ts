@@ -17,7 +17,7 @@ import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
-import { newClientMessageId } from "@lib/pendingMessages";
+import { newClientMessageId, pendingMessageSessionFloor } from "@lib/pendingMessages";
 import { listCustomEmoji } from "@stores/emoji.store";
 import {
   POLL_ANSWER_MAX,
@@ -362,7 +362,7 @@ export function openPollComposer(opts: PollComposerOptions): void {
 
   async function post(): Promise<void> {
     if (busy || checkPollDraft(draft).length > 0) return;
-    attemptId ??= newClientMessageId();
+    attemptId ??= newClientMessageId(pendingMessageSessionFloor());
     postError = null;
     setBusy(true);
     const out = await createPoll(

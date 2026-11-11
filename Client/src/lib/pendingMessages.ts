@@ -258,6 +258,14 @@ export function pendingMessageRetryFloor(owner: PendingMessageOwner): number {
   return activeQueue?.owns(owner) ? retryFloor : 0;
 }
 
+/**
+ * The restore floor of the active session, for sends with no per-owner
+ * context (forward, poll): an id below it is refused by the server.
+ */
+export function pendingMessageSessionFloor(): number {
+  return retryFloor;
+}
+
 export async function savePendingText(
   owner: PendingMessageOwner,
   draft: PendingTextMessage,
