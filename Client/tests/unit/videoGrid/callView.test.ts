@@ -65,7 +65,7 @@ describe("VideoGrid", () => {
       localStorage.clear();
     });
 
-    it("shows the control bar in the call view, in grid and focus mode", () => {
+    it("shows the control bar in the call view, with and without a focused tile", () => {
       grid.setCallbacks({ callControls: controls() });
       expect(bar()).toBeNull();
 
@@ -82,7 +82,7 @@ describe("VideoGrid", () => {
       grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
       grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
       grid.setFocusedTile(2);
-      expect(root().classList.contains("focus-mode")).toBe(true);
+      expect(grid.getFocusedTileId()).toBe(2);
       expect(bar()).not.toBeNull();
       grid.setFocusedTile(null);
       expect(bar()).not.toBeNull();
@@ -346,33 +346,25 @@ describe("VideoGrid", () => {
 
       toggle("selfCamera").click();
       expect(grid.getFocusedTileId()).toBeNull();
-      expect(root().classList.contains("focus-mode")).toBe(false);
+      expect(tile(2).classList.contains("focused")).toBe(false);
       expect(tile(2).parentElement).toBe(root());
     });
 
-    it("offers the strip toggle only in focus view, and hides the strip with it", () => {
+    it("offers the strip toggle in the grid and in focus, and remembers it", () => {
       grid.setExitVisible(true);
       grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
       grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
-      expect(toggle("strip").hidden).toBe(true);
+      expect(toggle("strip").hidden).toBe(false);
 
       grid.setFocusedTile(2);
       expect(toggle("strip").hidden).toBe(false);
-      expect(root().querySelector(".video-focus-strip")).not.toBeNull();
 
       toggle("strip").click();
-      // Hidden, not detached: a video taken out of the document pauses.
-      const strip = root().querySelector<HTMLElement>(".video-focus-strip")!;
-      expect(strip.hidden).toBe(true);
-      expect(strip.contains(tile(3))).toBe(true);
-      expect(tile(2).parentElement!.classList.contains("video-focus-main")).toBe(true);
+      expect(toggle("strip").getAttribute("aria-pressed")).toBe("false");
       expect(localStorage.getItem("owncord:settings:callShowStrip")).toBe("false");
-
-      toggle("strip").click();
-      expect(root().querySelector<HTMLElement>(".video-focus-strip")!.hidden).toBe(false);
     });
 
-    it("moves focus past your hidden camera when the focused stream ends", () => {
+    it("returns to the grid, your camera still hidden, when the focused stream ends", () => {
       grid.setExitVisible(true);
       grid.addStream(SELF, "You", fakeStream(), selfCfg);
       grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
@@ -381,7 +373,9 @@ describe("VideoGrid", () => {
       grid.setFocusedTile(2);
 
       grid.removeStream(2);
-      expect(grid.getFocusedTileId()).toBe(3);
+      expect(grid.getFocusedTileId()).toBeNull();
+      expect(tile(SELF).hidden).toBe(true);
+      expect(tile(3).hidden).toBe(false);
     });
 
     it("keeps keyboard focus on a bar button or toggle while focus view redraws", () => {

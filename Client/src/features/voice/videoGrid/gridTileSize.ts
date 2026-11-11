@@ -12,6 +12,7 @@ import type { GridState, GridApi } from "./gridState";
 import { tileSizeOf } from "./gridSizing";
 import type { TileSize } from "./packLayout";
 import { TILE_SIZES, tileSizeText } from "./tileArrange";
+import { keepChoiceThroughFocus } from "./tileFocus";
 
 const SIZE_ICON: Record<TileSize, IconName> = {
   small: "size-small",
@@ -53,16 +54,30 @@ export function createGridTileSize(st: GridState, api: GridApi) {
     api.scheduleResize();
   }
 
+  /** Picking a size or unpinning the focused tile ends focus: the other
+   *  tiles take their earlier sizes back first. */
+  function endFocusOn(tileId: number): void {
+    if (st.focusedTileId === tileId) api.setFocusedTile(null);
+  }
+
   function setTileSize(tileId: number, size: TileSize): void {
     if (!st.cells.has(tileId)) return;
+    endFocusOn(tileId);
     st.pinned.delete(tileId);
     st.tileSizes.set(tileId, size);
+    keepChoiceThroughFocus(st, tileId);
     changed(tileId);
   }
 
   function toggleTilePin(tileId: number): void {
     if (!st.cells.has(tileId)) return;
-    if (!st.pinned.delete(tileId)) st.pinned.add(tileId);
+    if (st.focusedTileId === tileId) {
+      api.setFocusedTile(null);
+      st.pinned.delete(tileId);
+    } else if (!st.pinned.delete(tileId)) {
+      st.pinned.add(tileId);
+    }
+    keepChoiceThroughFocus(st, tileId);
     changed(tileId);
   }
 
@@ -74,6 +89,7 @@ export function createGridTileSize(st: GridState, api: GridApi) {
   function forgetTileSizes(): void {
     st.tileSizes.clear();
     st.pinned.clear();
+    st.focusSaved = null;
   }
 
   /** Arrow keys move through the sizes and choose as they go. */

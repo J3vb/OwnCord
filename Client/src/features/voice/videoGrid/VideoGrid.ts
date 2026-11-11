@@ -196,6 +196,7 @@ export function createVideoGrid(): VideoGridComponent {
     root: null,
     cells: new Map<number, CellEntry>(),
     focusedTileId: null,
+    focusSaved: null,
     tileSizes: new Map(),
     pinned: new Set(),
     people: [],

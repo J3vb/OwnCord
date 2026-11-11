@@ -219,7 +219,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
       if (entry === undefined) return;
       streams.delete(userId);
       if (entry.config !== undefined && entry.config.isSelf !== true) forgetWatch(userId);
-      if (focusedTileId === userId) focusedTileId = firstTile();
+      if (focusedTileId === userId) focusedTileId = null;
     },
 
     clearStreams(): void {
@@ -303,9 +303,4 @@ export function createLazyVideoGrid(): LazyVideoGrid {
     },
     raiseCallPopout: (): boolean => real?.raiseCallPopout() ?? false,
   };
-
-  function firstTile(): number | null {
-    for (const id of streams.keys()) return id;
-    return null;
-  }
 }

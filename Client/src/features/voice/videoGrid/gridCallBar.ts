@@ -306,9 +306,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
 
   /** The view toggles as one menu, for the phone's round control row. */
   function openViewMenu(anchor: HTMLButtonElement): void {
-    const items: ContextMenuItem[] = VIEW_TOGGLES.filter(
-      ([key]) => key !== "strip" || st.focusedTileId !== null,
-    ).map(([key, label]) => ({
+    const items: ContextMenuItem[] = VIEW_TOGGLES.map(([key, label]) => ({
       label,
       checked: st.viewOn[key],
       testId: `view-menu-${key}`,
@@ -412,13 +410,12 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     api.syncViews();
   }
 
-  /** Each toggle's pressed state; the strip toggle only in focus mode. */
+  /** Each toggle's pressed state. */
   function syncViewBar(): void {
     if (st.viewBar === null) return;
     for (const btn of st.viewBar.querySelectorAll<HTMLButtonElement>("[data-view-toggle]")) {
       const key = btn.dataset["viewToggle"] as ViewToggle;
       btn.setAttribute("aria-pressed", String(st.viewOn[key]));
-      if (key === "strip") btn.hidden = st.focusedTileId === null;
     }
   }
 

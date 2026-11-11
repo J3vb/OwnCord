@@ -20,6 +20,7 @@ import { createGridBadges } from "./gridBadges";
 import { createGridMenus } from "./gridMenus";
 import { createGridTileBuild } from "./gridTileBuild";
 import { applyNames, sameTracks, setTrackMuted } from "./tileParts";
+import { drawSmallInFocus, leaveFocus } from "./tileFocus";
 
 export function createGridStreams(st: GridState, api: GridApi) {
   const menus = createGridMenus(st, api);
@@ -169,6 +170,7 @@ export function createGridStreams(st: GridState, api: GridApi) {
     const entry = buildTile(userId, stream, config);
     applyNames(entry, username, config?.name ?? username);
     st.cells.set(userId, entry);
+    drawSmallInFocus(st, userId);
     api.syncTileArrange();
     st.pendingWatch.delete(userId);
     if (stream !== null) attachTrackLifecycle(userId, stream);
@@ -302,27 +304,25 @@ export function createGridStreams(st: GridState, api: GridApi) {
     // Capture the focused tile control before detaching, so a user tabbing
     // through the overlay keeps a focus target when this tile leaves (Q1).
     const savedFocus = api.captureFocusedControl();
+    const hadFocus = entry.el.contains(api.doc().activeElement);
+    // The pinned stream ending is Back to grid: the others take their earlier
+    // sizes. Before the release, which forgets the ended tile's own.
+    const wasFocused = st.focusedTileId === userId;
+    if (wasFocused) leaveFocus(st);
 
     releaseEntry(userId, entry, keepWatch);
 
     entry.el.remove();
     st.cells.delete(userId);
 
-    // If focused tile was removed, focus the first remaining tile or clear
-    const wasFocusMode = st.focusedTileId !== null;
-    if (st.focusedTileId === userId) {
-      // Never onto a tile the view toggles hide.
-      st.focusedTileId = [...st.cells].find(([, e]) => !e.el.hidden)?.[0] ?? null;
-    }
-
     api.syncPeople();
-    if (st.focusedTileId !== null || wasFocusMode) {
-      api.rebuildFocusLayout();
-    } else {
-      api.relayout();
-    }
+    if (wasFocused) api.syncTileNav();
+    api.relayout();
     api.syncStatsPolling();
     api.restoreFocusedControl(savedFocus);
+    // Focus was inside the tile that left: the grid takes it, not <body>.
+    const active = api.doc().activeElement;
+    if (hadFocus && (active === null || active === api.doc().body)) st.root?.focus();
   }
 
   /** Remove every tile at once (trackCleanup + srcObject=null via dropTile).

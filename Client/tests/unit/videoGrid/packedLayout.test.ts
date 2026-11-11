@@ -150,27 +150,23 @@ describe("VideoGrid packed layout", () => {
     expect(px(cell, "top")).toBe(rect!.y);
   });
 
-  it("clears the inline places in focus mode and packs again on the way out", () => {
+  it("packs focus in the one grid: the focused tile large, the rest Small, and back", () => {
     addCamera(2);
     addCamera(3);
+    addCamera(4);
     vi.advanceTimersByTime(50);
     const root = document.querySelector<HTMLElement>("[data-testid='video-grid']")!;
-    expect(root.classList.contains("video-grid--packed")).toBe(true);
-    const packed = tile(3).style.left;
-    expect(packed).not.toBe("");
+    const before = [2, 3, 4].map((id) => px(tile(id), "width"));
+    const area = (id: number): number => px(tile(id), "width") * px(tile(id), "height");
 
-    tile(2).querySelector<HTMLButtonElement>("[data-tile-control='select']")!.click();
-    expect(root.classList.contains("video-grid--packed")).toBe(false);
-    for (const id of [2, 3]) {
-      for (const prop of ["left", "top", "width", "height"] as const) {
-        expect(tile(id).style[prop]).toBe("");
-      }
-    }
-
-    tile(2).querySelector<HTMLButtonElement>("[data-tile-control='grid']")!.click();
+    tile(3).querySelector<HTMLButtonElement>("[data-tile-control='select']")!.click();
     expect(root.classList.contains("video-grid--packed")).toBe(true);
-    expect(tile(3).style.left).toBe(packed);
-    expect(px(tile(3), "width")).toBeGreaterThan(0);
+    expect(area(3)).toBeGreaterThan(area(2));
+    expect(px(tile(2), "width")).toBe(px(tile(4), "width"));
+    expect(px(tile(2), "width")).toBeLessThan(before[0]!);
+
+    tile(3).querySelector<HTMLButtonElement>("[data-tile-control='grid']")!.click();
+    expect([2, 3, 4].map((id) => px(tile(id), "width"))).toEqual(before);
   });
 
   it("marks a tile the packer gives no width as having no room, and frees it again", () => {

@@ -9,10 +9,9 @@ import type { TileConfig } from "./VideoGrid";
 import type { TileSize } from "./packLayout";
 
 export function createGridMenus(st: GridState, api: GridApi) {
-  /** The Size and Pin rows, in the grid layout only: focus mode sizes by CSS and a full-screen tile
-   *  fills the screen. */
+  /** The Size and Pin rows, except on a full-screen tile, which fills the screen. */
   function arrangeOf(tileId: number) {
-    if (st.focusedTileId !== null || api.isFullscreen(tileId)) return {};
+    if (api.isFullscreen(tileId)) return {};
     const { size, pinned } = api.tileArrangement(tileId);
     return {
       arrange: {

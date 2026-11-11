@@ -136,17 +136,30 @@ view again. On a computer the panel keeps its resizable height and the
 collapsed choice survives a DM switch.
 
 **Video tiles** (`features/voice/videoGrid/VideoGrid.ts`, in guild voice and DM calls alike):
-each tile is a button (click, Enter, Space) that opens it in focus view, with a
-filmstrip for the rest and **Back to grid** to leave. Screen shares carry a
+the tiles share one packed layout (`packLayout.ts`), each Small, Medium or
+Large and pinnable from its hover controls or its menu. Each tile is also a
+button (click, Enter, Space) that **focuses** it: the tile is pinned (drawn
+large and placed first) and every other video tile is drawn Small, in the same
+grid, with no second layout and no filmstrip. **Back to grid** unpins it and
+puts the other tiles back to the sizes they had before. Choosing a size or
+unpinning on the focused tile ends focus the same way (keeping the size you
+chose), and when the focused stream ends the grid returns to its normal layout
+with keyboard focus on the grid. A stream that arrives during focus is drawn
+Small. People without video sit in the participant strip in focus as in the
+grid (`gridPeopleStrip.ts`). Screen shares carry a
 **LIVE** badge, and the speaking ring (`--text-positive`) and a mic-slash or
 headphone-slash badge for a muted or deafened user are on camera tiles. A
-**Show chat** control in the grid's header leaves the grid or focus view for
+**Show chat** control in the grid's header leaves the grid for
 the chat without leaving the call. In the guild call view the header also has
 **Show non-video participants**, **Show my camera** (hides only your own
-camera tile, here) and, in focus view, **Show participant strip**; each is a
+camera tile, here) and **Show participant strip**; each is a
 saved preference (`callShowNonVideo`, `callShowSelfCamera`, `callShowStrip`)
-and none applies while the DM call panel hosts the grid. A control bar at the
-bottom of the call view, in grid and focus view, has mute, deafen, camera,
+and none applies while the DM call panel hosts the grid. **Show non-video
+participants** decides whether people without video are drawn at all, in the
+strip or as tiles; **Show participant strip** hides or shows the strip itself
+while a video tile is up (with no video up the people are tiles in the grid and
+only the first toggle applies). A control bar at the
+bottom of the call view, focused or not, has mute, deafen, camera,
 share and disconnect; camera and share are inert until the join has connected.
 The header toggles sit beside the bar, or stack above it with room kept below
 the tiles when the call view is narrower than 680 px. On a phone the toggles
@@ -232,7 +245,7 @@ rate; once the bandwidth is back, `lib/voice/shareResolutionRecovery.ts`
 restarts WebRTC's adaptation (Chromium's capturer never grows the source back
 by itself), so the share returns to full size after a hitch of a second or two,
 at most once per 30 s. On Linux the native capture picks in its own dialog, so the card has
-Stop sharing only. In a DM call, focus view stays inside the call panel and the
+Stop sharing only. In a DM call, a focused tile stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
 double-click) puts the tile in HTML full screen and the window with it
 (`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in

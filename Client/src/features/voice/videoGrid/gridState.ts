@@ -11,7 +11,10 @@ import type { TileConfig, VideoGridCallbacks, GridPerson, CallState } from "./Vi
 export interface GridState {
   root: HTMLDivElement | null;
   readonly cells: Map<number, CellEntry>;
+  /** The focused tile: pinned, with the others Small (see tileFocus.ts). */
   focusedTileId: number | null;
+  /** The sizes and pins the tiles had before focus, put back when it ends. */
+  focusSaved: { sizes: Map<number, TileSize>; pinned: Set<number> } | null;
   /** The size the viewer chose for a tile, over its default. */
   readonly tileSizes: Map<number, TileSize>;
   /** Tiles the viewer pinned: shown large and placed first. */
@@ -97,7 +100,6 @@ export interface GridApi {
   captureFocusedControl(): { userId: number; control: string } | null;
   restoreFocusedControl(saved: { userId: number; control: string } | null): void;
   syncTileNav(): void;
-  rebuildFocusLayout(): void;
   appendChrome(): void;
   isChrome(node: Node): boolean;
   beforeChrome(el: HTMLElement): void;
