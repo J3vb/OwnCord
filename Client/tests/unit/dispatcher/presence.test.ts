@@ -6,7 +6,7 @@ import { membersStore } from "../../../src/stores/members.store";
 import { voiceStore } from "../../../src/stores/voice.store";
 import { dmStore } from "../../../src/stores/dm.store";
 import { authStore } from "../../../src/stores/auth.store";
-import { loadAgreedStatus } from "../../../src/lib/presence/userStatus";
+import { loadAgreedStatus } from "../../../src/lib/presence/serverStatus";
 import { setChannelMutesHost } from "../../../src/lib/prefs/channelMutes";
 import {
   resetServerCapabilities,

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setConnectionStatus } from "@stores/ui.store";
+import { loadAgreedStatus } from "@lib/presence/serverStatus";
 import {
-  loadAgreedStatus,
   loadStatusTimer,
   loadUserStatus,
   saveStatusTimer,
@@ -12,6 +12,7 @@ import {
 import { startStatusTimerWatcher } from "@lib/presence/statusTimer";
 import { handlePresence } from "../../src/features/channels/wsHandlers";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
+import { savePref } from "@lib/prefs/preferences";
 import { createPagePresence } from "../../src/pages/main-page/pagePresence";
 import type { PageApi, PageState } from "../../src/pages/main-page/pageState";
 
@@ -251,6 +252,20 @@ describe("page presence on connect", () => {
     expect(send).toHaveBeenCalledExactlyOnceWith("dnd");
     expect(loadUserStatus()).toBe("dnd");
     expect(loadAgreedStatus()).toBeNull();
+  });
+
+  it("reads a stored agreement that is malformed, or names an idle, as none", () => {
+    for (const stored of [
+      "dnd",
+      { owner: 1, status: "dnd" },
+      { owner: "one.example#1", status: 3 },
+      { owner: "one.example#1", status: "idle" },
+    ]) {
+      savePref("userStatusAgreed", stored);
+      expect(loadAgreedStatus()).toBeNull();
+    }
+    savePref("userStatusAgreed", { owner: "one.example#1", status: "invisible" });
+    expect(loadAgreedStatus()).toEqual({ owner: "one.example#1", status: "invisible" });
   });
 
   it("answers a server that reports idle with the saved status", () => {

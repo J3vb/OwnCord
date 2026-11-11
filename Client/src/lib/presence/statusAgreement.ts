@@ -24,13 +24,8 @@
  */
 
 import type { UserStatus } from "../types";
-import { isAccountStatus, noteServerStatus } from "./serverStatus";
-import {
-  loadAgreedStatus,
-  loadUserStatus,
-  loadUserStatusOrigin,
-  saveUserStatus,
-} from "./userStatus";
+import { isAccountStatus, loadAgreedStatus, noteServerStatus } from "./serverStatus";
+import { loadUserStatus, loadUserStatusOrigin, saveUserStatus } from "./userStatus";
 
 /**
  * A connect to `account` that announced `serverStatus`: adopts it, or returns
