@@ -29,7 +29,6 @@ import { setOwnedTimeout } from "../dom";
 import type { UserStatus } from "../types";
 import {
   clearStatusTimer,
-  confirmAgreedStatus,
   loadStatusTimer,
   loadUserStatus,
   onStatusTimerChange,
@@ -126,7 +125,6 @@ export function startStatusTimerWatcher(options: StatusTimerWatcherOptions): Sta
     // elsewhere is taken as automatic, so this device's auto-idle can bring
     // it back like any idle it started itself.
     saveUserStatus(reported, reported === "idle" ? "auto" : "manual");
-    confirmAgreedStatus(reported);
   }
 
   function expire(timer: StatusTimer): void {

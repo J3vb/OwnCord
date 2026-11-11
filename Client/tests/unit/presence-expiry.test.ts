@@ -30,7 +30,6 @@ function mockWs(): { ws: WsClient; sent: Frame[] } {
       return `id-${++n}`;
     }),
     on: vi.fn().mockReturnValue(() => {}),
-    getState: () => "connected",
   } as unknown as WsClient;
   return { ws, sent };
 }

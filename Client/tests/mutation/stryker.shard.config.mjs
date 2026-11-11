@@ -470,6 +470,7 @@ export const shards = {
     "src/lib/prefs/channelMuteExpiry.ts",
     "src/lib/prefs/notificationLevel.ts",
     "src/lib/presence/latency.ts",
+    "src/lib/presence/serverStatus.ts",
     "src/lib/presence/statusAgreement.ts",
     "src/lib/presence/userStatus.ts",
     "src/lib/text/formatting.ts",

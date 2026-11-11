@@ -24,7 +24,6 @@ import type { UserStatus } from "../types";
 import { updatePresence, membersStore } from "@stores/members.store";
 import { authStore, updateUser } from "@stores/auth.store";
 import {
-  confirmAgreedStatus,
   loadUserStatus,
   loadUserStatusOrigin,
   saveCustomStatus,
@@ -150,8 +149,6 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     if (status !== loadUserStatus() || origin !== loadUserStatusOrigin()) {
       saveUserStatus(status, origin);
     }
-    // The frame was refused whole, so the server still holds the baseline's status.
-    confirmAgreedStatus(b.status);
     saveCustomStatus(b.custom ?? "");
   }
 
@@ -248,8 +245,6 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
       lastSentCustom = effectiveCustom;
       lastSentExpiresIn = effectiveExpiresIn;
       lastSentId = putOnWire(status, effectiveCustom, effectiveExpiresIn);
-      // On the wire of a live socket: the server holds it from here on.
-      if (ws.getState() === "connected") confirmAgreedStatus(status);
     } else {
       // The window is still closed from an earlier send (any producer's) —
       // retry once it reopens instead of dropping this one silently, with a
@@ -275,8 +270,6 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     if (retry !== null) return;
     if (id === undefined || id !== lastSentId) return; // not our frame
     pendingBaseline = sentBaseline;
-    // Refused, so the server still holds what it had before this frame.
-    if (sentBaseline !== null) confirmAgreedStatus(sentBaseline.status);
     armRetry(limiter.getRemainingMs() + RETRY_MARGIN_MS, lastSentCustom, lastSentExpiresIn);
   });
 

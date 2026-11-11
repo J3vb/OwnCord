@@ -2,13 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import {
-  confirmAgreedStatus,
+  loadAgreedStatus,
   loadStatusTimer,
   loadUserStatus,
   saveStatusTimer,
   saveUserStatus,
   type StatusOrigin,
 } from "@lib/presence/userStatus";
+import { startStatusTimerWatcher } from "@lib/presence/statusTimer";
+import { handlePresence } from "../../src/features/channels/wsHandlers";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { createPagePresence } from "../../src/pages/main-page/pagePresence";
 import type { PageApi, PageState } from "../../src/pages/main-page/pageState";
@@ -36,13 +38,18 @@ function makePresence() {
   return { presence, send };
 }
 
-/** A status set on this device whose frame went out on the live socket. */
+/** The server announces `status` for the signed-in account in a presence frame. */
+function serverAnnounces(status: Exclude<ServerStatus, undefined>): void {
+  handlePresence({ user_id: 1, status });
+}
+
+/** A status set on this device that reached the server, which announced it back. */
 function setAndSend(
   status: Exclude<ServerStatus, undefined>,
   origin: StatusOrigin = "manual",
 ): void {
   saveUserStatus(status, origin);
-  confirmAgreedStatus(status);
+  serverAnnounces(status);
 }
 
 /** The socket drops, `whileDown` happens, and it comes back to a server saying `status`. */
@@ -102,11 +109,10 @@ describe("page presence on connect", () => {
     expect(loadUserStatus()).toBe("invisible");
   });
 
-  it("sends a pick again when its frame had not gone out before the reconnect", () => {
+  it("sends a pick again when the server never announced it: still queued, or lost on the way", () => {
     setServerStatus("online");
     const { presence, send } = makePresence();
     presence.restoreSavedPresence();
-    // Picked while connected, still waiting behind the send limit.
     saveUserStatus("dnd");
     reconnectTo("online");
     presence.restoreSavedPresence();
@@ -120,18 +126,49 @@ describe("page presence on connect", () => {
     expect(loadUserStatus()).toBe("dnd");
   });
 
-  it("adopts another device's choice once the pick sent after a reconnect is on the wire", () => {
+  it("adopts another device's choice once the server announced the pick sent after a reconnect", () => {
     setServerStatus("online");
     const { presence, send } = makePresence();
     presence.restoreSavedPresence();
     saveUserStatus("dnd");
     reconnectTo("online");
     presence.restoreSavedPresence();
-    confirmAgreedStatus("dnd");
+    serverAnnounces("dnd");
     reconnectTo("invisible");
     presence.restoreSavedPresence();
     expect(send).toHaveBeenCalledExactlyOnceWith("dnd");
     expect(loadUserStatus()).toBe("invisible");
+  });
+
+  it("keeps the Online a timed status went back to while the app was closed", () => {
+    setServerStatus("dnd");
+    saveUserStatus("dnd");
+    makePresence().presence.restoreSavedPresence();
+    saveStatusTimer("dnd", Date.now() - 1000);
+
+    // The next start: the timer watcher reverts and sends first, then the
+    // connect is settled against the status the handshake still carried.
+    const { presence, send } = makePresence();
+    const watcher = startStatusTimerWatcher({ onRevert: (s) => presence.applyPresence(s) });
+    presence.restoreSavedPresence();
+    watcher.destroy();
+    expect(loadUserStatus()).toBe("online");
+    expect(send).toHaveBeenCalledWith("online");
+    expect(send).not.toHaveBeenCalledWith("dnd");
+  });
+
+  it("an idle or offline frame, or one naming someone else, is not what the account holds", () => {
+    setServerStatus("online");
+    const { presence, send } = makePresence();
+    presence.restoreSavedPresence();
+    saveUserStatus("dnd");
+    serverAnnounces("idle");
+    handlePresence({ user_id: 1, status: "offline" });
+    handlePresence({ user_id: 2, status: "dnd" });
+    expect(loadAgreedStatus()).toEqual({ owner: "one.example#1", status: "online" });
+    reconnectTo("online");
+    presence.restoreSavedPresence();
+    expect(send).toHaveBeenCalledExactlyOnceWith("dnd");
   });
 
   it("does not take a return from auto-idle while the socket was down for a pick", () => {
@@ -201,6 +238,8 @@ describe("page presence on connect", () => {
     const { presence, send } = makePresence();
     presence.restoreSavedPresence();
     expect(send).toHaveBeenCalledExactlyOnceWith("dnd");
+    // Nothing was reported, so nothing is agreed.
+    expect(loadAgreedStatus()).toBeNull();
   });
 
   it("answers a server that reports idle with the saved status", () => {

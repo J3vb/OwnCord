@@ -4,8 +4,8 @@
  */
 import type { UserStatus } from "@lib/types";
 import { authStore } from "@stores/auth.store";
+import { statusAccount } from "@lib/presence/serverStatus";
 import { settleSavedStatus } from "@lib/presence/statusAgreement";
-import { getChannelMutesHost } from "@lib/prefs/channelMutes";
 import type { PageState, PageApi } from "./pageState";
 
 export function createPagePresence(st: PageState, _pg: PageApi) {
@@ -20,8 +20,7 @@ export function createPagePresence(st: PageState, _pg: PageApi) {
    */
   function restoreSavedPresence(): void {
     const user = authStore.getState().user;
-    const account = `${getChannelMutesHost() ?? ""}#${user?.id ?? 0}`;
-    const toSend = settleSavedStatus(account, user?.status);
+    const toSend = settleSavedStatus(statusAccount(user?.id ?? 0), user?.status);
     if (toSend !== null) applyPresence(toSend);
   }
 
