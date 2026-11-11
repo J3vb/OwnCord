@@ -49,7 +49,8 @@
     "screenshots:readme": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.screenshots.ts",
     "test:e2e:web": "node tests/e2e/scripts/build-server.mjs --web && playwright test --config tests/e2e/config/playwright.config.web.ts",
     "test:e2e:fullstack": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.fullstack.ts",
-    "test:e2e:soak": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.soak.ts"
+    "test:e2e:soak": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.soak.ts",
+    "test:e2e:media-cost": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.media-cost.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
