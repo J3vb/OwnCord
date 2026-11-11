@@ -327,6 +327,9 @@ func TestCallDecline_ReachesTheDeclinersOtherDevices(t *testing.T) {
 	if dmWaitMsgType(sendAlice, "call_declined", waitTimeout) == nil {
 		t.Error("the ringer did not receive call_declined")
 	}
+	if dmWaitMsgType(sendAlice, "call_declined", 150*time.Millisecond) != nil {
+		t.Error("the ringer received call_declined twice")
+	}
 }
 
 func TestCallRing_RateLimited(t *testing.T) {
