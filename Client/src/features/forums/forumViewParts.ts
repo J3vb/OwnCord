@@ -356,3 +356,28 @@ export function paintGuidelines(
 export function markPressed<T>(buttons: ReadonlyMap<T, HTMLElement>, active: T): void {
   for (const [value, btn] of buttons) btn.setAttribute("aria-pressed", String(value === active));
 }
+
+/** Marks the shown layout on the view, and on the page shell while a reader
+ *  sits beside the list, so the stylesheet needs no page-wide `:has()`. */
+export function createLayoutPainter(root: HTMLElement): {
+  paint: (shown: ForumLayout) => void;
+  release: () => void;
+} {
+  let shell: Element | null = null;
+  return {
+    paint(shown) {
+      for (const value of FORUM_LAYOUTS)
+        root.classList.toggle(`forum-view--${value}`, value === shown);
+      const app = root.closest(".app");
+      if (app === null) return;
+      shell = app;
+      app.classList.toggle("app--forum-split", shown === "split");
+    },
+    release() {
+      if (shell === null) return;
+      // A newer forum view may already be mounted beside the split.
+      const other = [...shell.querySelectorAll(".forum-view--split")].some((el) => el !== root);
+      if (!other) shell.classList.remove("app--forum-split");
+    },
+  };
+}

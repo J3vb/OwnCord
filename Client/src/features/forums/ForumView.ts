@@ -29,7 +29,6 @@ import { forumsText } from "../../i18n/forums";
 import type { ForumViewContext } from "../navigation/destinations";
 import {
   FORUM_GUIDELINES_PREF,
-  FORUM_LAYOUTS,
   FORUM_LAYOUT_PREF,
   MAX_TAG_FILTERS,
   parseForumLayout,
@@ -45,6 +44,7 @@ import {
   buildForumHeader,
   buildForumList,
   buildPostRow,
+  createLayoutPainter,
   markCurrentPost,
   markPressed,
   paintForumFooter,
@@ -201,6 +201,9 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     return layout === "split" && isPhoneLayout() ? "list" : layout;
   }
 
+  const layoutPainter = createLayoutPainter(root);
+  disposable.addCleanup(layoutPainter.release);
+
   function paintHeader(): void {
     const channel = forumChannel();
     const topic = (channel?.topic ?? "").trim();
@@ -208,9 +211,7 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     newPostBtn.hidden = channel?.canSend === false;
     markPressed(sortButtons, sort);
     markPressed(layoutButtons, layout);
-    const shown = shownLayout();
-    for (const value of FORUM_LAYOUTS)
-      root.classList.toggle(`forum-view--${value}`, value === shown);
+    layoutPainter.paint(shownLayout());
 
     const tags = forumTags();
     tagBar.hidden = tags.length === 0;

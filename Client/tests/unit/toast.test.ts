@@ -383,4 +383,76 @@ describe("ToastContainer", () => {
       expect(measure).not.toHaveBeenCalled();
     });
   });
+
+  describe("cover classes", () => {
+    const microtask = (): Promise<void> => Promise.resolve();
+    const root = (): HTMLElement => container.querySelector<HTMLElement>(".toast-container")!;
+    const addOverlay = (cls: string): HTMLElement => {
+      const el = document.createElement("div");
+      el.className = cls;
+      document.body.appendChild(el);
+      return el;
+    };
+    afterEach(() => document.body.replaceChildren());
+
+    it("sets the dialog and sheet classes when a toast shows over an overlay", () => {
+      addOverlay("modal-overlay");
+      toast.show("Hi");
+      expect(root().classList.contains("toast-container--under-dialog")).toBe(true);
+      expect(root().classList.contains("toast-container--over-sheet")).toBe(true);
+    });
+
+    it("sets only the sheet class for a bottom sheet, and only the dialog class for settings", async () => {
+      addOverlay("bottom-sheet-overlay");
+      toast.show("Hi", "info", Infinity);
+      expect(root().classList.contains("toast-container--under-dialog")).toBe(false);
+      expect(root().classList.contains("toast-container--over-sheet")).toBe(true);
+      document.body.replaceChildren();
+      await microtask();
+      const settings = addOverlay("settings-overlay");
+      await microtask();
+      expect(root().classList.contains("toast-container--under-dialog")).toBe(false);
+      settings.classList.add("open");
+      await microtask();
+      expect(root().classList.contains("toast-container--under-dialog")).toBe(true);
+      expect(root().classList.contains("toast-container--over-sheet")).toBe(false);
+    });
+
+    it("follows an overlay opening and closing while a toast is on screen", async () => {
+      toast.show("Hi", "info", Infinity);
+      expect(root().classList.contains("toast-container--under-dialog")).toBe(false);
+      const modal = addOverlay("modal-overlay");
+      await microtask();
+      expect(root().classList.contains("toast-container--under-dialog")).toBe(true);
+      modal.remove();
+      await microtask();
+      expect(root().classList.contains("toast-container--under-dialog")).toBe(false);
+      expect(root().classList.contains("toast-container--over-sheet")).toBe(false);
+    });
+
+    it("clears the classes for the next toast after the dialog closed behind the last one", async () => {
+      const modal = addOverlay("modal-overlay");
+      toast.show("Hi");
+      vi.advanceTimersByTime(5400);
+      modal.remove();
+      await microtask();
+      toast.show("Next");
+      expect(root().classList.contains("toast-container--under-dialog")).toBe(false);
+    });
+
+    it("stops watching the page after the last toast leaves and on destroy", async () => {
+      const disconnect = vi.spyOn(MutationObserver.prototype, "disconnect");
+      toast.show("Hi");
+      vi.advanceTimersByTime(5400);
+      await microtask();
+      addOverlay("modal-overlay");
+      await microtask();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      disconnect.mockClear();
+      toast.show("Again", "info", Infinity);
+      toast.destroy?.();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      disconnect.mockRestore();
+    });
+  });
 });

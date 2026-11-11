@@ -182,6 +182,32 @@ describe("ForumView list", () => {
     expect(localStorage.getItem("owncord:settings:forumLayout")).toBe('"split"');
   });
 
+  it("puts the split class on the page shell while the reader layout shows, and takes it off on abort", () => {
+    localStorage.setItem("owncord:settings:forumLayout", '"split"');
+    const app = document.createElement("div");
+    app.className = "app";
+    document.body.appendChild(app);
+    root = document.createElement("div");
+    app.appendChild(root);
+    renderForumView(root, {
+      channelId: FORUM,
+      signal: ac.signal,
+      api: { listThreads } as unknown as ApiClient,
+      ws: createMockWsClient() as never,
+      openPost,
+    } satisfies ForumViewContext);
+    expect(app.classList.contains("app--forum-split")).toBe(true);
+    usePhone();
+    window.dispatchEvent(new Event("resize"));
+    expect(app.classList.contains("app--forum-split")).toBe(false);
+    usePhone(false);
+    window.dispatchEvent(new Event("resize"));
+    expect(app.classList.contains("app--forum-split")).toBe(true);
+    root.remove();
+    ac.abort();
+    expect(app.classList.contains("app--forum-split")).toBe(false);
+  });
+
   it("gives each row the author's avatar and a reply count, and marks the open post", async () => {
     serve({ "0:": page([makePost(1, { message_count: 4 }), makePost(2)]) });
     mount();
