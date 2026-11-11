@@ -104,76 +104,64 @@ func TestSendMessage_SlowModeNotChargedTwiceForDuplicate(t *testing.T) {
 	}
 }
 
-func TestCreatePoll_SlowModeRefundedOnWriteFailureAndDuplicate(t *testing.T) {
-	limiter := auth.NewRateLimiter()
-	f := newForwardFixture(t, limiter)
-	mustDo(t, "SetChannelSlowMode", f.database.SetChannelSlowMode(context.Background(), fwdDstChan, slowModeSeconds))
-	st := &deliveryFaultStore{Store: f.database}
-	svc := f.svc
-	svc.st = st
+// eachRefundCase runs try under a failing write and under a send an identical attempt
+// already committed: neither may post, and the same call right after must pass.
+func eachRefundCase(t *testing.T, st *deliveryFaultStore, try func(tag string) (posted bool, err error), reset func()) {
+	t.Helper()
 	for name, set := range map[string]func(){
 		"write failure": func() { st.fail, st.commitFirst = errors.New("writer busy"), false },
 		"duplicate":     func() { st.fail, st.commitFirst = nil, true },
 	} {
 		set()
-		if res, err := svc.CreatePoll(context.Background(), f.pollParams(fwdBob, fwdDstChan)); err == nil && !res.Duplicate {
-			t.Fatalf("%s: poll was created", name)
+		if posted, _ := try("t-" + name); posted {
+			t.Fatalf("%s: the send was posted", name)
 		}
 		st.fail, st.commitFirst = nil, false
-		if _, err := svc.CreatePoll(context.Background(), f.pollParams(fwdBob, fwdDstChan)); err != nil {
-			t.Fatalf("%s: poll right after: %v", name, err)
+		if _, err := try("u-" + name); err != nil {
+			t.Fatalf("%s: the same send right after: %v", name, err)
 		}
-		limiter.Reset(context.Background(), auth.Key(auth.Key("slow", fwdBob), fwdDstChan))
+		reset()
 	}
 }
 
-func TestForwardMessage_SlowModeRefundedOnWriteFailureAndDuplicate(t *testing.T) {
+// slowModeForwardFixture is a forward fixture whose target channel is in slow mode and
+// whose store can fail or pre-commit a write.
+func slowModeForwardFixture(t *testing.T) (*forwardFixture, *deliveryFaultStore, func()) {
+	t.Helper()
 	limiter := auth.NewRateLimiter()
 	f := newForwardFixture(t, limiter)
 	mustDo(t, "SetChannelSlowMode", f.database.SetChannelSlowMode(context.Background(), fwdDstChan, slowModeSeconds))
 	st := &deliveryFaultStore{Store: f.database}
-	svc := f.svc
-	svc.st = st
-	forward := func() (*SendMessageResult, error) {
-		return svc.ForwardMessage(context.Background(), ForwardParams{
+	f.svc.st = st
+	return f, st, func() { limiter.Reset(context.Background(), auth.Key(auth.Key("slow", fwdBob), fwdDstChan)) }
+}
+
+func TestCreatePoll_SlowModeRefundedOnWriteFailureAndDuplicate(t *testing.T) {
+	f, st, reset := slowModeForwardFixture(t)
+	eachRefundCase(t, st, func(string) (bool, error) {
+		res, err := f.svc.CreatePoll(context.Background(), f.pollParams(fwdBob, fwdDstChan))
+		return err == nil && !res.Duplicate, err
+	}, reset)
+}
+
+func TestForwardMessage_SlowModeRefundedOnWriteFailureAndDuplicate(t *testing.T) {
+	f, st, reset := slowModeForwardFixture(t)
+	eachRefundCase(t, st, func(string) (bool, error) {
+		res, err := f.svc.ForwardMessage(context.Background(), ForwardParams{
 			ClientMessageID: newClientMessageID(), UserID: fwdBob, Username: "bob",
 			TargetChannelID: fwdDstChan, SourceMessageID: f.srcID,
 		})
-	}
-	for name, set := range map[string]func(){
-		"write failure": func() { st.fail, st.commitFirst = errors.New("writer busy"), false },
-		"duplicate":     func() { st.fail, st.commitFirst = nil, true },
-	} {
-		set()
-		if res, err := forward(); err == nil && !res.Duplicate {
-			t.Fatalf("%s: message was forwarded", name)
-		}
-		st.fail, st.commitFirst = nil, false
-		if _, err := forward(); err != nil {
-			t.Fatalf("%s: forward right after: %v", name, err)
-		}
-		limiter.Reset(context.Background(), auth.Key(auth.Key("slow", fwdBob), fwdDstChan))
-	}
+		return err == nil && !res.Duplicate, err
+	}, reset)
 }
 
 func TestCreateForumPost_SlowModeRefundedOnWriteFailureAndDuplicate(t *testing.T) {
 	f := newForumPostFixture(t)
 	mustDo(t, "SetChannelSlowMode", f.database.SetChannelSlowMode(context.Background(), frmForum, slowModeSeconds))
 	st := &deliveryFaultStore{Store: f.database}
-	svc := f.limited
-	svc.st = st
-	for name, set := range map[string]func(){
-		"write failure": func() { st.fail, st.commitFirst = errors.New("writer busy"), false },
-		"duplicate":     func() { st.fail, st.commitFirst = nil, true },
-	} {
-		set()
-		if res, err := svc.CreateForumPost(bg(), f.req(thrOwner, "t-"+name, "c")); err == nil && res != nil && !res.Duplicate {
-			t.Fatalf("%s: post was created", name)
-		}
-		st.fail, st.commitFirst = nil, false
-		if _, err := svc.CreateForumPost(bg(), f.req(thrOwner, "u-"+name, "c")); err != nil {
-			t.Fatalf("%s: post right after: %v", name, err)
-		}
-		f.limited.limiter.Reset(context.Background(), auth.Key(auth.Key("slow", thrOwner), frmForum))
-	}
+	f.limited.st = st
+	eachRefundCase(t, st, func(tag string) (bool, error) {
+		res, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, tag, "c"))
+		return err == nil && res != nil && !res.Duplicate, err
+	}, func() { f.limited.limiter.Reset(context.Background(), auth.Key(auth.Key("slow", thrOwner), frmForum)) })
 }
