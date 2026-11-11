@@ -14,9 +14,10 @@ import (
 // publishes the client's in-memory voice state. Returns false once the error
 // frame has been sent.
 func (h *Hub) voiceJoinPersist(fctx, ctx context.Context, txn *voiceTxn, c *Client, capacity int, channelID int64, reqID string) (*db.VoiceState, bool) {
-	// The service picks the capacity-checked insert from capacity, so only
-	// voiceJoinPrecheck's moderator decision can select the unchecked insert for a
-	// capped channel. persistJoin sets the client's voice channel as soon as the row
+	// The service picks the capacity-checked insert from capacity. Two callers pass
+	// 0 for a capped channel: voiceJoinPrecheck's moderator decision, and a
+	// same-channel take-over, which re-takes the slot it just freed under the member
+	// lock (handleVoiceJoinFrame). persistJoin sets the client's voice channel as soon as the row
 	// is confirmed, before the token mint below; a later failure unwinds it via
 	// rollbackVoiceJoin.
 	state, err := txn.persistJoin(fctx, c, channelID, capacity)
@@ -89,9 +90,11 @@ func (h *Hub) voiceJoinPublishPerms(ctx context.Context, userID, channelID int64
 }
 
 // voiceJoinGrantToken mints the LiveKit credential and delivers it, withholding it
-// if the join was superseded meanwhile. Returns false once the join was abandoned
-// (rolled back or superseded).
-func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, afk bool, state *db.VoiceState, reqID string) bool {
+// if the join was superseded meanwhile. granted is false once the join was
+// abandoned; rolledBack is true only for the rollback this function performed
+// itself (a failed mint, announced to nobody). A superseded join returns false,
+// false: the evictor that won announced its end.
+func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, afk bool, state *db.VoiceState, reqID string) (granted, rolledBack bool) {
 	// Token generation failure is fatal (the client cannot reach the SFU), so roll
 	// back the DB join. rollbackVoiceJoin is called with broadcast=false: nobody else
 	// has been told about the join yet, so no spurious voice_leave.
@@ -106,7 +109,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client,
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
 			h.rollbackVoiceJoin(ctx, txn, c, channelID, state.JoinedAt, false)
 			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "failed to generate voice token", reqID))
-			return false
+			return false, true
 		}
 		if voiceJoinPostTokenRaceHook != nil {
 			voiceJoinPostTokenRaceHook(c)
@@ -124,7 +127,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client,
 			// Best-effort defense in depth; normally a no-op as the join never reached the
 			// SFU. Async because the voice lock is held and no LiveKit RPC runs under it.
 			h.removeLiveKitParticipantAsync(ctx, channelID, c.userID, state.JoinedAt, "handleVoiceJoin supersession")
-			return false
+			return false, false
 		}
 		// Send the proxy path and, on loopback, the direct URL; the client prefers
 		// direct_url on localhost (avoids self-signed TLS issues with WebView fetch).
@@ -134,7 +137,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client,
 		c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL(), isKeyHolder))
 	}
 
-	return true
+	return true, false
 }
 
 // voiceJoinComplete finishes a join that survived every guard: topic

@@ -104,11 +104,12 @@ func (s *VoiceService) CountInChannel(ctx context.Context, channelID int64) (int
 
 // Join persists userID's membership of channelID. maxUsers is the cap for this
 // joiner: the channel's voice_max_users, or 0 for a voice moderator there
-// (ws.voiceJoinCapacity). Positive takes the capacity-checked insert (count and
+// (ws.voiceJoinCapacity) and for a user re-taking the slot their own call just
+// freed in this channel (a take-over on another device). Positive takes the capacity-checked insert (count and
 // insert in one statement, so two joins racing for the last slot cannot both win)
 // and returns ErrVoiceChannelFull when met; zero or negative takes the plain
-// upsert. One method, so the only way past the cap is passing 0, the moderator
-// decision made in one place.
+// upsert. One method, so the only way past the cap is passing 0, a decision made
+// in the join handler alone.
 func (s *VoiceService) Join(ctx context.Context, userID, channelID int64, maxUsers int) error {
 	if maxUsers > 0 {
 		err := s.st.JoinVoiceChannelIfCapacity(ctx, userID, channelID, maxUsers)

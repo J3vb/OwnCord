@@ -12,7 +12,8 @@ import (
 // test is permissions.AuthorizeVoiceModerator, the same authorizer behind
 // can_moderate_voice and the voice_mod_* commands, so a per-channel deny of
 // MUTE_MEMBERS takes the bypass away too. This mirrors Discord, where Move
-// Members joins a full channel.
+// Members joins a full channel. The join handler also passes 0 for a same-channel
+// take-over, which re-takes the slot the user's own call just freed.
 func voiceJoinCapacity(sub permissions.Subject, maxUsers int) int {
 	if maxUsers > 0 && permissions.AuthorizeVoiceModerator(sub) == nil {
 		return 0

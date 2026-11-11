@@ -80,11 +80,17 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 	state = h.voiceJoinRestoreModFlags(ctx, c, channelID, state, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 	persistDone := time.Now()
 
-	if !h.voiceJoinGrantToken(ctx, txn, c, channelID, ch.AFK, state, reqID) {
-		// voiceJoinRestoreModFlags wrote these flags into the row that
-		// voiceJoinGrantToken's failure path is about to roll back; re-stash as above.
+	granted, tokenRolledBack := h.voiceJoinGrantToken(ctx, txn, c, channelID, ch.AFK, state, reqID)
+	if !granted {
+		// voiceJoinRestoreModFlags wrote these flags into the row this join no longer
+		// holds; re-stash as above. Kept for a superseded join too: not every evictor
+		// carries the flags, and a mute applied twice is the same mute.
 		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
-		h.announceUnconfirmedMoveLeave(ctx, c, unannounced)
+		if tokenRolledBack {
+			// Only this join's own rollback is silent. A superseded join was
+			// announced by the evictor that ended it.
+			h.announceUnconfirmedMoveLeave(ctx, c, unannounced)
+		}
 		return
 	}
 	tokenDone := time.Now()
