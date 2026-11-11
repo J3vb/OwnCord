@@ -194,6 +194,7 @@ export const shards = {
     "src/features/members/gameActivityLine.ts",
     "src/features/members/memberModel.ts",
     "src/features/members/memberRow.view.ts",
+    "src/features/members/scrollReport.ts",
     "src/features/voice/miniPlayer.ts",
     "src/lib/ui/touchInput.ts",
     "src/lib/ui/videoZoomNavigator.ts",
@@ -217,6 +218,7 @@ export const shards = {
     "src/lib/ui/savedNotice.ts",
     "src/lib/ui/zoomPan.ts",
     "src/lib/voice/audioScreenshareState.ts",
+    "src/lib/voice/screenshareDelivery.ts",
     "src/lib/voice/gateScale.ts",
   ],
   "transport-auth-1": [
@@ -245,6 +247,7 @@ export const shards = {
   ],
   "transport-auth-3": [
     "src/features/connection/connectBranding.ts",
+    "src/features/connection/ocLogo.ts",
     "src/features/profiles/openUserProfilePopup.ts",
     "src/lib/apiShared.ts",
     "src/lib/net/hostNormalize.ts",
@@ -301,11 +304,13 @@ export const shards = {
     "src/lib/ws.ts",
   ],
   "transport-auth-8": [
+    "src/features/messaging/channelWarmup.ts",
     "src/features/messaging/chatNotify.ts",
     "src/features/safety/wsHandlers.ts",
     "src/lib/apiAccount.ts",
     "src/lib/dispatcher.ts",
     "src/lib/nav/deepLink.ts",
+    "src/lib/nav/pressWarm.ts",
     "src/lib/net/httpProxy.ts",
     "src/lib/net/identityPins.ts",
     "src/lib/permissions.ts",
@@ -343,6 +348,7 @@ export const shards = {
   "lib-rest-4": [
     "src/features/developer-mode/developerTools.ts",
     "src/features/messaging/pickerImages.ts",
+    "src/features/messaging/pickerLazyGrids.ts",
     "src/features/share/shareIn.ts",
     "src/lib/disposable.ts",
     "src/lib/dmUnread.ts",
@@ -470,6 +476,8 @@ export const shards = {
     "src/lib/prefs/channelMuteExpiry.ts",
     "src/lib/prefs/notificationLevel.ts",
     "src/lib/presence/latency.ts",
+    "src/lib/presence/serverStatus.ts",
+    "src/lib/presence/statusAgreement.ts",
     "src/lib/presence/userStatus.ts",
     "src/lib/text/formatting.ts",
   ],
@@ -517,6 +525,8 @@ export const shards = {
   ],
   "stores-1": [
     "src/features/channels/categoryActions.ts",
+    "src/features/messaging/loadJournal.ts",
+    "src/features/messaging/loadJournalReplay.ts",
     "src/features/messaging/readingAnchor.ts",
     "src/features/panes/paneResize.ts",
     "src/features/profiles/userNotes.ts",

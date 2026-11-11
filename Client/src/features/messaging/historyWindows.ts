@@ -11,6 +11,8 @@ import type { Message, MessagesState } from "./messageModel";
 import { isUnreconciledEcho } from "./echoReconcile";
 import { sameValue } from "./sameValue";
 import { mergeMessagePoll } from "../../lib/pollState";
+import { endLoadJournal, startLoadJournal } from "./loadJournal";
+import { replayLoadJournal } from "./loadJournalReplay";
 
 /** setChannelLoading's reducer. */
 export function reduceSetChannelLoading(prev: MessagesState, channelId: number): MessagesState {
@@ -20,7 +22,10 @@ export function reduceSetChannelLoading(prev: MessagesState, channelId: number):
   const currentMaxId = existing.reduce((max, m) => Math.max(max, m.id), 0);
   const updatedWatermark = new Map(prev.loadWatermark ?? []);
   updatedWatermark.set(channelId, currentMaxId);
-  return { ...prev, historyLoadState: updated, loadWatermark: updatedWatermark };
+  return startLoadJournal(
+    { ...prev, historyLoadState: updated, loadWatermark: updatedWatermark },
+    channelId,
+  );
 }
 
 /** setOlderLoadFailed's reducer. Returns `prev` itself when nothing changes, so
@@ -45,10 +50,12 @@ export function reduceSetChannelLoadError(prev: MessagesState, channelId: number
   const updated = new Map(prev.historyLoadState);
   updated.set(channelId, "error");
   const rows = prev.messagesByChannel.get(channelId) ?? [];
-  if (!rows.some((m) => m.status === "sent")) return { ...prev, historyLoadState: updated };
+  if (!rows.some((m) => m.status === "sent")) {
+    return endLoadJournal({ ...prev, historyLoadState: updated }, channelId);
+  }
   const detachedChannels = new Set(prev.detachedChannels);
   detachedChannels.add(channelId);
-  return { ...prev, historyLoadState: updated, detachedChannels };
+  return endLoadJournal({ ...prev, historyLoadState: updated, detachedChannels }, channelId);
 }
 
 /** The rows of the loaded window that outlive a fetched page: live rows newer
@@ -197,7 +204,7 @@ export function reduceSetMessages(
   // the watermark) is still newer than either bound and survives either way.
   const carryFloor = Math.max(maxSnapshotId, prev.loadWatermark?.get(channelId) ?? 0);
   const carried = carryRows(previous, trimmed, carryFloor);
-  const snapshot = reuseUnchangedRows(previous, trimmed);
+  const snapshot = replayLoadJournal(prev, channelId, reuseUnchangedRows(previous, trimmed));
   const older = olderThanPage(prev, channelId, previous, trimmed, hasMore, splice);
   const { merged, mergeTrimmed, keepHead } = capMerged(
     [...older, ...snapshot, ...carried],
@@ -221,7 +228,7 @@ export function reduceSetMessages(
   // The watermark's job ends here — it was consumed as carryFloor above.
   const updatedWatermark = new Map(prev.loadWatermark ?? []);
   updatedWatermark.delete(channelId);
-  return { ...next, loadWatermark: updatedWatermark };
+  return endLoadJournal({ ...next, loadWatermark: updatedWatermark }, channelId);
 }
 
 /** The rows of an around-window fetch, a poll no older than the loaded one, cut to the cap. */
@@ -281,8 +288,9 @@ export function reduceSetAroundMessages(
   hasMoreAfter: boolean,
   splice = false,
 ): MessagesState {
-  const { converted, trimmed } = aroundRows(prev, channelId, messages);
+  const { converted, trimmed: fetched } = aroundRows(prev, channelId, messages);
   const previous = prev.messagesByChannel.get(channelId) ?? [];
+  const trimmed = replayLoadJournal(prev, channelId, fetched);
   // Reattaches iff the window reaches the live tail with nothing stranded —
   // the exact negation of the detached condition below. Only then does the
   // window claim to BE "now", so only then may a live "sent" row newer than
@@ -304,13 +312,16 @@ export function reduceSetAroundMessages(
       : trimmed;
   const mergeTrimmed = splicing && merged.length > MAX_MESSAGES_PER_CHANNEL;
   if (mergeTrimmed) merged = merged.slice(merged.length - MAX_MESSAGES_PER_CHANNEL);
-  return withChannelWindow(
-    prev,
+  return endLoadJournal(
+    withChannelWindow(
+      prev,
+      channelId,
+      merged,
+      (older.length > 0 ? (prev.hasMore.get(channelId) ?? hasMoreBefore) : hasMoreBefore) ||
+        mergeTrimmed,
+      !attached,
+    ),
     channelId,
-    merged,
-    (older.length > 0 ? (prev.hasMore.get(channelId) ?? hasMoreBefore) : hasMoreBefore) ||
-      mergeTrimmed,
-    !attached,
   );
 }
 

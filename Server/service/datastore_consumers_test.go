@@ -33,7 +33,7 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[accountRecovery]():       11,
 	reflect.TypeFor[BlockService]():          4,
 	reflect.TypeFor[CallLogService]():        13,
-	reflect.TypeFor[ChannelService]():        20,
+	reflect.TypeFor[ChannelService]():        19,
 	reflect.TypeFor[channelOverrides]():      16,
 	reflect.TypeFor[readFocus]():             3,
 	reflect.TypeFor[ConnWrites]():            4,

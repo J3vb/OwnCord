@@ -8,8 +8,63 @@ import { readPointerEnabled } from "@lib/net/serverCapabilities";
 import { openUserProfilePopup } from "../../profiles/openUserProfilePopup";
 import { withMessageMenu } from "./messageMenuLoader";
 import { moreButtonOf } from "./listShared";
+import { ensureActionsBar, hasShellBar } from "./messageActionBar";
 import type { ListState, ListApi } from "./listState";
 import type { ListDom } from "./listDom";
+
+const focusVisible = (el: Element): boolean => {
+  try {
+    return el.matches(":focus-visible");
+  } catch {
+    return false;
+  }
+};
+
+/** Tab went forward into `row` from an element before it. */
+function enteredForward(row: Element, from: EventTarget | null): boolean {
+  return (
+    from instanceof Node &&
+    !row.contains(from) &&
+    (row.compareDocumentPosition(from) & Node.DOCUMENT_POSITION_PRECEDING) !== 0
+  );
+}
+
+/**
+ * The hover bar is drawn with its "..." button only. A row's own focus builds
+ * the rest; keyboard focus entering the list builds every row's, and rows drawn
+ * while it stays, so the Tab stops are the ones a full bar gives. A forward Tab
+ * onto a shell's "..." moves on to the first button the full bar has before it.
+ */
+function wireBarFocus(st: ListState, content: HTMLElement): void {
+  const { signal } = st.disposable;
+  content.addEventListener(
+    "focusin",
+    (e) => {
+      const { target } = e;
+      const row = target instanceof Element ? target.closest(".message") : null;
+      if (row === null) return;
+      const wasShell = hasShellBar(row);
+      ensureActionsBar(row);
+      if (!focusVisible(target as Element)) return;
+      if (wasShell && moreButtonOf(target) !== null && enteredForward(row, e.relatedTarget)) {
+        row.querySelector<HTMLElement>(".msg-actions-bar button:not([tabindex='-1'])")?.focus();
+      }
+      if (st.fullBars) return;
+      st.fullBars = true;
+      for (const other of content.querySelectorAll(".message")) ensureActionsBar(other);
+    },
+    { signal },
+  );
+  content.addEventListener(
+    "focusout",
+    (e) => {
+      if (!(e.relatedTarget instanceof Node && content.contains(e.relatedTarget))) {
+        st.fullBars = false;
+      }
+    },
+    { signal },
+  );
+}
 
 export function wireListInput(st: ListState, api: ListApi, dom: ListDom): void {
   const { root, content } = dom;
@@ -150,9 +205,12 @@ export function wireListInput(st: ListState, api: ListApi, dom: ListDom): void {
     "mouseover",
     (e) => {
       st.root?.classList.toggle("shift-held", e.shiftKey);
+      const row = e.target instanceof Element ? e.target.closest(".message") : null;
+      if (row !== null) ensureActionsBar(row);
     },
     { signal: st.disposable.signal },
   );
+  wireBarFocus(st, content);
   // Alt+click on a message row marks it unread (the lazy module decides which
   // targets count: not a link, button, image or text field).
   content.addEventListener(

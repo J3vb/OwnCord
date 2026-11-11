@@ -179,6 +179,29 @@ describe("memberPanel", () => {
     await Promise.resolve();
     expect(o.api.adminListUsers).toHaveBeenCalledTimes(1);
   });
+  it("asks for banned users only and still drops a reply that holds unbanned ones", async () => {
+    const user = (id: number, name: string, banned: boolean) => ({
+      id,
+      username: name,
+      banned,
+      role_id: 4,
+      role_name: "member",
+      status: "offline",
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    const o = opts();
+    vi.mocked(o.api.adminListUsers).mockResolvedValue([
+      user(10, "banned-one", true),
+      user(11, "plain", false),
+    ] as never);
+    const panel = createMemberPanel(o);
+    host.appendChild(panel.element);
+
+    await vi.waitFor(() => expect(panel.element.querySelectorAll(".banned-row")).toHaveLength(1));
+    expect(panel.element.querySelector(".banned-name")?.textContent).toBe("banned-one");
+    expect(o.api.adminListUsers).toHaveBeenCalledWith(undefined, { bannedOnly: true });
+    panel.destroy();
+  });
   it("offers Unban only for bans the viewer outranks", async () => {
     channelsStore.setState((prev) => ({
       ...prev,

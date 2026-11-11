@@ -31,6 +31,7 @@ import {
   detachScreenshareAudio,
 } from "./audioTrackElements";
 import { ScreenshareAudioState } from "./audioScreenshareState";
+import { resendStreamAudioDelivery, syncScreenshareDelivery } from "./screenshareDelivery";
 import type { VoiceRemoteParticipant, VoiceRoom } from "@lib/voice/voiceRoom";
 
 export { setAudioVolumeHost } from "./audioVolumePrefs";
@@ -98,6 +99,13 @@ export class AudioElements extends ScreenshareAudioState {
       this.closeAudioContext();
       return;
     }
+    // A stream audio (re)subscribed may be a fresh server subscription, which
+    // starts delivered whatever livekit cached: send its state again.
+    onRoom(room, RoomEvent.TrackSubscriptionStatusChanged, (pub, status, participant) => {
+      if (this.room !== room || status !== "subscribed") return;
+      const userId = parseUserId(participant.identity);
+      resendStreamAudioDelivery(pub, !this.isScreenshareSilenced(userId));
+    });
     if (typeof AudioContext === "undefined") return;
     // Every output switch (settings, hot-plug fallback, join) goes through
     // room.switchActiveDevice, which only moves the elements; the context
@@ -373,13 +381,7 @@ export class AudioElements extends ScreenshareAudioState {
   // --- Remote audio subscription state (deafen) ---
 
   applyRemoteAudioSubscriptionState(deafened: boolean): void {
-    // Deafen silences stream audio too (Discord's rule) by muting its
-    // elements, not unsubscribing, so undeafen restores each tile's own mute.
-    for (const [userId, audioEls] of this.screenshareAudioElements) {
-      const muted = deafened || this.getScreenshareAudioMuted(userId);
-      for (const el of audioEls) el.muted = muted;
-    }
-    this.screenshareGainListener?.();
+    this.applyScreenshareDeafen(deafened);
     if (this.room === null) return;
     for (const participant of this.room.remoteParticipants.values()) {
       for (const publication of participant.audioTrackPublications.values()) {
@@ -388,6 +390,17 @@ export class AudioElements extends ScreenshareAudioState {
         publication.setSubscribed(!deafened);
       }
     }
+    this.syncScreenshareDelivery(undefined, deafened);
+  }
+
+  /** The Linux native room plays stream audio itself and is left as it is. */
+  protected syncScreenshareDelivery(onlyUserId?: number, deafened = this.isLocalDeafened()): void {
+    if (hasNativePlayout(this.room)) return;
+    syncScreenshareDelivery(this.room, (identity) => {
+      const userId = parseUserId(identity);
+      if (onlyUserId !== undefined && userId !== onlyUserId) return null;
+      return !deafened && !this.getScreenshareAudioMuted(userId);
+    });
   }
 
   // --- Volume control ---
@@ -448,15 +461,7 @@ export class AudioElements extends ScreenshareAudioState {
     savePref("outputVolume", clamped);
     this.outputVolumeMultiplier = clamped / 100;
     this.applyAllVolumes();
-    // Re-apply per-user screenshare volumes scaled by the new master value
-    // (BUG: previously overwrote them with just the master multiplier).
-    for (const [userId, audioEls] of this.screenshareAudioElements) {
-      const effective = this.getEffectiveScreenshareVolume(userId);
-      for (const audioEl of audioEls) {
-        audioEl.volume = effective;
-      }
-    }
-    this.screenshareGainListener?.();
+    this.applyScreenshareVolumes();
   }
 
   // --- Screenshare audio ---

@@ -607,6 +607,29 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).toBe("none");
   });
 
+  it("stops ringing when this account declines on another device, and does not ring for a room it is already in", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+
+    m.page = mountPage(m.container, ws);
+    incomingCall(ws);
+    const banner = incomingBannerEl();
+    expect(banner.style.display).not.toBe("none");
+
+    // The server sends the account's own other devices the decline too.
+    ws.emit("call_declined", { channel_id: 50, from_user: 1, username: "alice" });
+    expect(banner.style.display).toBe("none");
+
+    // Another device of this account (user 1) is already in the room: a
+    // re-ring from inside the call does not ring this one.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: roster(50, [voiceUser(1, { username: "alice" })]),
+    }));
+    incomingCall(ws);
+    expect(incomingBannerEl().style.display).toBe("none");
+  });
+
   it("does not cancel an incoming ring on a voice_leave for a different channel from the ringer", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));

@@ -28,6 +28,7 @@ import {
 import { resolveNewDividerIndex, storeDividerEnv } from "./newDivider";
 import { createListHeights } from "./listHeights";
 import { createRowFocus } from "./listFocus";
+import { carryHoveredBar, ensureActionsBar } from "./messageActionBar";
 import type { ListState, ListApi } from "./listState";
 
 interface Measurement {
@@ -83,6 +84,7 @@ export function createListWindow(st: ListState, api: ListApi) {
     if (item.message.id === st.replyTargetId && el.classList.contains("message")) {
       el.classList.add("reply-target");
     }
+    if (st.fullBars) ensureActionsBar(el);
     return el;
   }
 
@@ -381,6 +383,7 @@ export function createListWindow(st: ListState, api: ListApi) {
     // clearChildren; capture its identity so it can be restored on its
     // replacement row (Q1: focus stays put through a virtualized rebuild).
     const focusedRow = captureRowFocus();
+    const hovered = content.querySelector(".message:hover");
     if (api.editHoldsFocus()) st.editRefocus = true;
     releaseTrackedMedia();
     beginRowRender();
@@ -390,6 +393,7 @@ export function createListWindow(st: ListState, api: ListApi) {
       fragment.appendChild(renderVirtualItem(st.virtualItems[i]!));
     }
     content.appendChild(fragment);
+    carryHoveredBar(content, hovered);
 
     // Measure newly rendered elements and update spacers
     measureRendered();

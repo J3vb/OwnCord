@@ -32,6 +32,12 @@ import {
 const MISSING_IMAGES_MAX = 1000;
 const DEFINITE_FAILURES = new Set([403, 404, 410]);
 
+/** Whether `url` is a server image already held in memory, so showing it needs
+ *  no download. */
+export function hasCachedImage(url: string): boolean {
+  return !isExternalUrl(url) && imageCache.get(url) !== undefined;
+}
+
 /** Fetch an image and return a `blob:` URL an `<img>` can show. Server images
  *  come through memory → IndexedDB → the TOFU proxy; an external image comes
  *  from the broker and never enters those two caches, which hold server

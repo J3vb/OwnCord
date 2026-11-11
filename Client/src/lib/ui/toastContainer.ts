@@ -93,6 +93,46 @@ export function createToastContainer(): ToastContainer {
     else style.removeProperty("--toast-bottom");
   }
 
+  /** Lift the stack clear of a dialog, settings overlay or sheet. Two classes
+   *  the stylesheet keys on, set from code so no rule has to ask the whole page
+   *  whether such an overlay exists. */
+  function syncCover(): void {
+    if (root === null) return;
+    root.classList.toggle(
+      "toast-container--under-dialog",
+      document.querySelector(".modal-overlay, .settings-overlay.open") !== null,
+    );
+    root.classList.toggle(
+      "toast-container--over-sheet",
+      document.querySelector(".bottom-sheet-overlay, .modal-overlay") !== null,
+    );
+  }
+
+  let coverWatch: MutationObserver | null = null;
+
+  function stopCoverWatch(): void {
+    coverWatch?.disconnect();
+    coverWatch = null;
+  }
+
+  /** Follow overlays opening and closing for as long as the stack holds a toast. */
+  function startCoverWatch(): void {
+    if (coverWatch !== null || typeof MutationObserver === "undefined") return;
+    coverWatch = new MutationObserver(() => {
+      if (root === null || root.childElementCount === 0) {
+        stopCoverWatch();
+        return;
+      }
+      syncCover();
+    });
+    coverWatch.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
+
   function removeToast(entry: ToastEntry): void {
     const idx = toasts.indexOf(entry);
     if (idx === -1) return;
@@ -219,7 +259,9 @@ export function createToastContainer(): ToastContainer {
     });
     toasts.push(entry);
     place();
+    syncCover();
     root.appendChild(el);
+    startCoverWatch();
     resume(entry);
 
     // Trigger .show on the next frame so the CSS opacity transition plays
@@ -270,6 +312,7 @@ export function createToastContainer(): ToastContainer {
   }
 
   function destroy(): void {
+    stopCoverWatch();
     anchorWatch?.destroy();
     anchorWatch = null;
     anchor = null;

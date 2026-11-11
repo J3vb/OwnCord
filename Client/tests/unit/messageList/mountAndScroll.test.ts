@@ -17,6 +17,7 @@ import {
   setHistoryLoadState,
   useWiredMessageList,
 } from "../../helpers/messageListHarness";
+import { hoverRows } from "../../helpers/hoverRows";
 
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
@@ -293,6 +294,7 @@ describe("MessageList", () => {
     const windowSignals: AbortSignal[][] = [];
     for (let i = 1; i <= 5; i++) {
       expect(w.msgList.scrollToMessage(i)).toBe(true);
+      hoverRows(w.container);
       const signals = rowSignalsSinceLastRender();
       // Each rendered row has its own owner (P4-01), so a row patch can
       // release exactly the rows it replaces.
@@ -505,6 +507,7 @@ describe("MessageList", () => {
     uiStore.flush();
     setMessages(1, [makeMessage({ id: 1, reactions: [{ emoji: "🔥", count: 2, me: false }] })]);
     w.msgList.mount(w.container);
+    hoverRows(w.container);
     const controls = (): HTMLElement[] => [
       ...w.container.querySelectorAll<HTMLElement>(
         "[data-testid='message-1'] .reaction-chip, [data-testid='msg-react-1']",
@@ -535,6 +538,7 @@ describe("MessageList", () => {
     uiStore.flush();
     setMessages(1, [makeMessage({ id: 1 })]);
     w.msgList.mount(w.container);
+    hoverRows(w.container);
     const deleteBtn = (): HTMLButtonElement =>
       w.container.querySelector<HTMLButtonElement>("[data-testid='msg-delete-1']")!;
     expect(deleteBtn().disabled).toBe(false);

@@ -20,6 +20,7 @@ import {
   type MemberItemModel,
 } from "./memberRow.view";
 import { createAvatarElement } from "../profiles/avatar";
+import { listenForFlyingScroll } from "./scrollReport";
 import {
   buildModel,
   flattenModel,
@@ -282,7 +283,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     if (root !== null) observer?.unobserve(root);
     const binding = new Disposable();
     scrollBinding = binding;
-    next.addEventListener("scroll", schedule, { passive: true, signal: binding.signal });
+    listenForFlyingScroll(next, binding.signal, schedule);
     observer?.observe(next);
   }
 

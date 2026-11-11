@@ -123,14 +123,3 @@ func (d *DB) DeleteNSFWAcknowledgementsForChannel(ctx context.Context, channelID
 	}
 	return nil
 }
-
-// AdminUpdateChannelClearingNSFW is AdminUpdateChannel plus
-// DeleteNSFWAcknowledgementsForChannel in one transaction: a crash between them could
-// leave the flag off with acknowledgements on file, and a re-label would trust old
-// consent. Used only when nsfw goes from 1 to 0.
-func (d *DB) AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u ChannelUpdate) error {
-	if err := d.adminUpdateChannel(ctx, id, u, true); err != nil {
-		return fmt.Errorf("AdminUpdateChannelClearingNSFW: %w", err)
-	}
-	return nil
-}

@@ -94,6 +94,7 @@ export {
   isTrustedServerUrl,
   openCacheDb,
   fetchImageAsObjectUrl,
+  hasCachedImage,
   cachedImageBytes,
   fetchMediaAsObjectUrl,
   externalPartition,

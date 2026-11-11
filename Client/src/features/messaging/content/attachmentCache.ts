@@ -22,7 +22,12 @@ export {
   clearAttachmentCaches,
 } from "./attachmentCacheState";
 export type { FileLink } from "./attachmentCacheState";
-export { fetchImageAsObjectUrl, cachedImageBytes, recoverEvictedImage } from "./attachmentImages";
+export {
+  fetchImageAsObjectUrl,
+  hasCachedImage,
+  cachedImageBytes,
+  recoverEvictedImage,
+} from "./attachmentImages";
 export { fetchMediaAsObjectUrl, getFileLink } from "./attachmentMedia";
 export {
   isServerUrl,

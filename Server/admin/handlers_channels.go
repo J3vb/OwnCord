@@ -174,6 +174,8 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 			categoryID, legacyName, keepCategory = 0, req.Category, false
 		}
 
+		// The write fills this in with the row it replaced; it starts as the snapshot.
+		before := *existing
 		updated, newCats, err := channels.AdminUpdateChannel(r.Context(), actorFromContext(r), existing, service.AdminChannelUpdate{
 			Name:          req.Name,
 			Topic:         req.Topic,
@@ -190,6 +192,7 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 			SyncPermissions: req.SyncPermissions,
 			ActorRole:       actorRoleFromContext(r),
 			Password:        req.Password,
+			Before:          &before,
 		}, patchChannelPostCommitHook)
 		if err != nil {
 			writeChannelErr(w, err)
@@ -202,9 +205,10 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 			}
 			// Archiving changes who sees the channel, not just metadata: send targeted channel_create/channel_delete
 			// so clients re-sync without a reconnect. Archiving hides a voice channel like deleting does, so live
-			// participants are evicted first, matching the delete ordering.
-			if existing.Archived != updated.Archived {
-				if !existing.Archived && updated.Archived {
+			// participants are evicted first, matching the delete ordering. Compared with the row the write
+			// replaced: another edit may have changed the archive state after this request read its snapshot.
+			if before.Archived != updated.Archived {
+				if !before.Archived && updated.Archived {
 					hub.CleanupVoiceForChannel(existing.ID)
 				}
 				hub.RefreshChannelVisibility(updated)

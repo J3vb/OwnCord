@@ -11,6 +11,7 @@ import type {
 import type { ReferencedMessage } from "../../lib/types";
 import { isPinRowKind } from "../../lib/text/messageKind";
 import type { Message, MessagesState } from "./messageModel";
+import { recordLoadJournal } from "./loadJournal";
 
 /** A parent that is deleted, purged or erased: no author, no text. */
 function redactSnippet(id: number): ReferencedMessage {
@@ -56,6 +57,10 @@ function refreshReplies(
 
 /** editMessage's reducer. */
 export function reduceEditMessage(prev: MessagesState, payload: ChatEditedPayload): MessagesState {
+  return recordLoadJournal(editRows(prev, payload), payload.channel_id, { kind: "edit", payload });
+}
+
+function editRows(prev: MessagesState, payload: ChatEditedPayload): MessagesState {
   const channelMessages = prev.messagesByChannel.get(payload.channel_id);
   if (!channelMessages) return prev;
 
@@ -90,6 +95,13 @@ export function reduceDeleteMessage(
   prev: MessagesState,
   payload: ChatDeletedPayload,
 ): MessagesState {
+  return recordLoadJournal(deleteRows(prev, payload), payload.channel_id, {
+    kind: "delete",
+    payload,
+  });
+}
+
+function deleteRows(prev: MessagesState, payload: ChatDeletedPayload): MessagesState {
   const channelMessages = prev.messagesByChannel.get(payload.channel_id);
   if (!channelMessages) return prev;
 
@@ -108,6 +120,13 @@ export function reduceBulkDeleteMessages(
   prev: MessagesState,
   payload: ChatBulkDeletedPayload,
 ): MessagesState {
+  return recordLoadJournal(bulkDeleteRows(prev, payload), payload.channel_id, {
+    kind: "bulkDelete",
+    payload,
+  });
+}
+
+function bulkDeleteRows(prev: MessagesState, payload: ChatBulkDeletedPayload): MessagesState {
   const channelMessages = prev.messagesByChannel.get(payload.channel_id);
   if (!channelMessages) return prev;
 
@@ -132,6 +151,19 @@ export function reduceBulkDeleteMessages(
 
 /** setMessagePinned's reducer. */
 export function reduceSetMessagePinned(
+  prev: MessagesState,
+  channelId: number,
+  messageId: number,
+  pinned: boolean,
+): MessagesState {
+  return recordLoadJournal(pinRows(prev, channelId, messageId, pinned), channelId, {
+    kind: "pin",
+    messageId,
+    pinned,
+  });
+}
+
+function pinRows(
   prev: MessagesState,
   channelId: number,
   messageId: number,

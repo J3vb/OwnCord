@@ -36,7 +36,7 @@ export function applyDeleteGate(
 /** The lock is applied at render from the current timeout, then updated in
  *  place by refreshReactionLocks when the timeout changes. */
 function appendQuickReactions(
-  bar: HTMLElement,
+  bar: Node,
   msg: Message,
   opts: MessageListOptions,
   gates: MessageActionGates,
@@ -77,7 +77,7 @@ function iconButton(
 }
 
 function appendReactButton(
-  bar: HTMLElement,
+  bar: Node,
   msg: Message,
   opts: MessageListOptions,
   gates: MessageActionGates,
@@ -94,7 +94,7 @@ function appendReactButton(
 }
 
 function appendEditButton(
-  bar: HTMLElement,
+  bar: Node,
   msg: Message,
   opts: MessageListOptions,
   signal: AbortSignal,
@@ -110,7 +110,7 @@ function appendEditButton(
 }
 
 function appendReplyButton(
-  bar: HTMLElement,
+  bar: Node,
   msg: Message,
   opts: MessageListOptions,
   own: boolean,
@@ -132,7 +132,7 @@ function appendReplyButton(
 }
 
 function appendPinButton(
-  bar: HTMLElement,
+  bar: Node,
   msg: Message,
   opts: MessageListOptions,
   signal: AbortSignal,
@@ -155,7 +155,7 @@ function appendPinButton(
 }
 
 function appendDeleteButton(
-  bar: HTMLElement,
+  bar: Node,
   msg: Message,
   opts: MessageListOptions,
   signal: AbortSignal,
@@ -187,6 +187,62 @@ function appendDeleteButton(
   bar.appendChild(deleteBtn);
 }
 
+/** Fills still owed by rows that show only their "..." button. */
+const pendingFills = new WeakMap<Element, () => void>();
+/** Rows whose bar holds every button. */
+const filledRows = new WeakSet<Element>();
+
+/**
+ * Build the rest of `row`'s hover bar if it is still only the "..." button.
+ * Called by the list on hover and keyboard focus, and by the code that looks
+ * for a bar button (reply swipe, reaction picker, focus restore).
+ */
+export function ensureActionsBar(row: Element): void {
+  const fill = pendingFills.get(row);
+  if (fill === undefined) return;
+  pendingFills.delete(row);
+  filledRows.add(row);
+  fill();
+}
+
+/** Give `fresh` a full bar when the row it replaces had one. */
+export function carryActionsBar(old: Element, fresh: Element): void {
+  if (filledRows.has(old)) ensureActionsBar(fresh);
+}
+
+/** After a full rebuild, the row that was under the pointer gets its full bar again. */
+export function carryHoveredBar(content: ParentNode, hovered: Element | null): void {
+  const id = hovered?.getAttribute("data-testid");
+  if (id === undefined || id === null) return;
+  const again = content.querySelector(`[data-testid="${id}"]`);
+  if (again !== null) ensureActionsBar(again);
+}
+
+/** Whether `row` still shows only its "..." button. */
+export function hasShellBar(row: Element): boolean {
+  return pendingFills.has(row);
+}
+
+function fillActionsBar(
+  bar: Node,
+  more: HTMLElement,
+  msg: Message,
+  opts: MessageListOptions,
+  signal: AbortSignal,
+): void {
+  if (signal.aborted) return;
+  const gates = messageActionGates(msg, opts);
+  const stage = document.createDocumentFragment();
+  appendQuickReactions(stage, msg, opts, gates, signal);
+  appendReactButton(stage, msg, opts, gates, signal);
+  const own = gates.edit.shown;
+  if (own) appendEditButton(stage, msg, opts, signal);
+  appendReplyButton(stage, msg, opts, own, signal);
+  if (gates.pin.shown) appendPinButton(stage, msg, opts, signal);
+  if (gates.delete.shown) appendDeleteButton(stage, msg, opts, signal);
+  bar.insertBefore(stage, more);
+}
+
 /**
  * The hover action bar only applies to confirmed server messages — not
  * deleted rows or unsent optimistic rows. Normal bar: the quick reactions,
@@ -195,33 +251,30 @@ function appendDeleteButton(
  * buttons are always rendered when their gate allows, `display:none` keeps
  * them out of the tab order otherwise). Copy Link, Report and Copy ID live
  * in the "..." menu.
+ *
+ * A row is drawn with the "..." button only; the rest is built by
+ * {@link ensureActionsBar} the first time it is needed, from the state of that
+ * moment. `row` is the message element the bar will sit in.
  */
 export function renderActionsBar(
+  row: Element,
   msg: Message,
   opts: MessageListOptions,
   signal: AbortSignal,
 ): HTMLDivElement {
-  const gates = messageActionGates(msg, opts);
   const bar = createElement("div", { class: "msg-actions-bar" });
-  appendQuickReactions(bar, msg, opts, gates, signal);
-  appendReactButton(bar, msg, opts, gates, signal);
-  const own = gates.edit.shown;
-  if (own) appendEditButton(bar, msg, opts, signal);
-  appendReplyButton(bar, msg, opts, own, signal);
-  if (gates.pin.shown) appendPinButton(bar, msg, opts, signal);
-  if (gates.delete.shown) appendDeleteButton(bar, msg, opts, signal);
   // Opened by MessageList's delegated listener, which owns the menu's signal.
-  bar.appendChild(
-    iconButton(
-      {
-        "data-testid": `msg-more-${msg.id}`,
-        "aria-label": messagingText("action.more"),
-        "aria-haspopup": "menu",
-        "aria-expanded": "false",
-      },
-      "ellipsis",
-      messagingText("action.more"),
-    ),
+  const more = iconButton(
+    {
+      "data-testid": `msg-more-${msg.id}`,
+      "aria-label": messagingText("action.more"),
+      "aria-haspopup": "menu",
+      "aria-expanded": "false",
+    },
+    "ellipsis",
+    messagingText("action.more"),
   );
+  bar.appendChild(more);
+  pendingFills.set(row, () => fillActionsBar(bar, more, msg, opts, signal));
   return bar;
 }

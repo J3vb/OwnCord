@@ -297,6 +297,49 @@ func TestCallDecline_ForwardsToOtherParticipants(t *testing.T) {
 	}
 }
 
+func TestCallDecline_ReachesTheDeclinersOtherDevices(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "decline-dev-alice")
+	bob := seedMemberUser(t, database, "decline-dev-bob")
+	chID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	// Three devices of one account are three connections with their own
+	// sessions. Only the second declares call_sync; the third is an older client.
+	sendBobFirst := make(chan []byte, 64)
+	cBob := ws.NewTestClientWithTokenHash(hub, bob, "decline-dev-hash-1", chID, sendBobFirst)
+	hub.Register(cBob)
+	sendBobSecond := make(chan []byte, 64)
+	cBob2 := ws.NewTestClientWithTokenHash(hub, bob, "decline-dev-hash-2", chID, sendBobSecond)
+	ws.DeclareFeaturesForTest(cBob2, "call_sync")
+	hub.Register(cBob2)
+	sendBobOld := make(chan []byte, 64)
+	cBobOld := ws.NewTestClientWithTokenHash(hub, bob, "decline-dev-hash-3", chID, sendBobOld)
+	hub.Register(cBobOld)
+	waitRegistered(t, hub, cBobOld)
+	_, sendAlice := connectClient(t, hub, alice, chID, 64)
+
+	hub.HandleMessageForTest(cBob, callMsg("call_decline", chID))
+
+	// Bob's second device hears his decline; so does the ringer.
+	env := dmWaitMsgType(sendBobSecond, "call_declined", waitTimeout)
+	if env == nil {
+		t.Fatal("the decliner's other device did not receive call_declined")
+	}
+	payload, _ := env["payload"].(map[string]any)
+	if int64(payload["from_user"].(float64)) != bob.ID {
+		t.Errorf("call_declined carried from_user %v, want %d", payload["from_user"], bob.ID)
+	}
+	if dmWaitMsgType(sendAlice, "call_declined", waitTimeout) == nil {
+		t.Error("the ringer did not receive call_declined")
+	}
+	if dmWaitMsgType(sendAlice, "call_declined", 150*time.Millisecond) != nil {
+		t.Error("the ringer received call_declined twice")
+	}
+	if dmWaitMsgType(sendBobOld, "call_declined", 150*time.Millisecond) != nil {
+		t.Error("a device that did not declare call_sync received its own account's decline")
+	}
+}
+
 func TestCallRing_RateLimited(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	alice := seedOwnerUser(t, database, "ringlimit-alice")

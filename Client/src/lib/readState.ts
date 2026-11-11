@@ -366,8 +366,13 @@ export function noteMessageSeen(channelId: number, messageId: number, live = fal
   raiseHighestSeen(channelId, messageId);
 }
 
+/** Whether recording `messageId` as seen would raise the channel's highest seen id. */
+export function wouldRaiseSeen(channelId: number, messageId: number): boolean {
+  return messageId > (highestSeen.get(channelId) ?? 0);
+}
+
 function raiseHighestSeen(channelId: number, messageId: number): void {
-  if (messageId > (highestSeen.get(channelId) ?? 0)) highestSeen.set(channelId, messageId);
+  if (wouldRaiseSeen(channelId, messageId)) highestSeen.set(channelId, messageId);
 }
 
 /**

@@ -8,9 +8,10 @@ import type { WsState } from "./wsState";
 /**
  * What this client can render, declared in every `auth` frame. The
  * server withholds the matching channels and frames from a socket that does not
- * declare them, so an older client never shows a broken forum.
+ * declare them, so an older client never shows a broken forum. `call_sync`:
+ * this client ends a ring when its own account declines on another device.
  */
-const CLIENT_FEATURES: readonly string[] = ["forums"];
+const CLIENT_FEATURES: readonly string[] = ["forums", "call_sync"];
 
 /** CLIENT_FEATURES plus `mobile` in the Android app (and only there: a phone's
  *  browser is a web client and counts as a desktop). It tells the server to show

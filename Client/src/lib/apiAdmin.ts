@@ -205,19 +205,24 @@ export function createAdminApi(t: ApiTransport) {
      * banned member is removed from the roster entirely (MEMBER_BAN), so this
      * is the only way back to them. The server pages it (limit caps at 500,
      * ordered by ascending id), so this walks every page: one page alone would
-     * hide a ban on any account past the first 500.
+     * hide a ban on any account past the first 500. `bannedOnly` asks the
+     * server for banned accounts only; a server from before that filter
+     * ignores it and returns everyone, so callers still check the ban state.
      */
-    async adminListUsers(signal?: AbortSignal): Promise<AdminUser[]> {
+    async adminListUsers(
+      signal?: AbortSignal,
+      opts?: { readonly bannedOnly?: boolean },
+    ): Promise<AdminUser[]> {
       const pageSize = 500;
       const users: AdminUser[] = [];
       // ponytail: 200 pages (100k accounts) is a stop for a server that never
-      // returns a short page, not a product limit; a banned-only server query
-      // is the upgrade if the walk ever gets slow.
+      // returns a short page, not a product limit.
       for (let pageIndex = 0; pageIndex < 200; pageIndex++) {
         const params = new URLSearchParams({
           limit: String(pageSize),
           offset: String(pageIndex * pageSize),
         });
+        if (opts?.bannedOnly) params.set("banned", "1");
         // oxlint-disable-next-line no-await-in-loop -- sequential paging: whether a next page exists depends on this one
         const page = await t.memberRequest(
           "AdminUserList",

@@ -8,7 +8,7 @@
 
 import type { ApiClient } from "@lib/api";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { openMessageTarget } from "@lib/notifications";
+import { openMessageTarget } from "@lib/notificationDelivery";
 import { setInviteJoinHandler } from "@lib/nav/inviteNavigation";
 import { createLogger } from "@lib/logger";
 import { authStore, clearAuth } from "@stores/auth.store";

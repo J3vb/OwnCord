@@ -198,7 +198,7 @@ export function renderMessage(
   // Confirmed server messages only: not deleted rows, unsent optimistic rows
   // or a row being edited.
   if (!msg.deleted && msg.status === "sent" && editor === undefined) {
-    el.appendChild(renderActionsBar(msg, opts, signal));
+    el.appendChild(renderActionsBar(el, msg, opts, signal));
   }
   return el;
 }

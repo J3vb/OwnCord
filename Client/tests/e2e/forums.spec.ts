@@ -238,6 +238,7 @@ for (const theme of ["dark", "light"] as const) {
       await page.getByTestId("forum-post-2").click();
       await expect(page.getByTestId("thread-panel")).toBeVisible();
       await expect(page.getByTestId("forum-post-2")).toHaveAttribute("aria-current", "true");
+      await expect(page.locator(".app")).toHaveClass(/app--forum-split/);
       // The reader takes the rest of the row: wider than the list beside it.
       const panel = await page.getByTestId("thread-panel").boundingBox();
       const list = await page.getByTestId("forum-view").boundingBox();

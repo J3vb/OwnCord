@@ -6,6 +6,8 @@ import { membersStore } from "../../../src/stores/members.store";
 import { voiceStore } from "../../../src/stores/voice.store";
 import { dmStore } from "../../../src/stores/dm.store";
 import { authStore } from "../../../src/stores/auth.store";
+import { loadAgreedStatus } from "../../../src/lib/presence/serverStatus";
+import { setChannelMutesHost } from "../../../src/lib/prefs/channelMutes";
 import {
   resetServerCapabilities,
   serverSupportsGameActivity,
@@ -64,6 +66,34 @@ describe("WS Dispatcher", () => {
     // An explicit null clears it.
     mock.dispatch("presence", { user_id: 1, status: "online", custom_status: null });
     expect(membersStore.getState().members.get(1)?.customStatus).toBeNull();
+  });
+
+  it("records the status the server announces for the signed-in account, from a frame or a batch", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    // Before the page has named the server, a frame is not filed under any account.
+    mock.dispatch("presence", { user_id: 5, status: "dnd" });
+    expect(loadAgreedStatus()).toBeNull();
+    setChannelMutesHost("one.example");
+    onTestFinished(() => setChannelMutesHost(null));
+
+    mock.dispatch("presence", { user_id: 6, status: "dnd" });
+    expect(loadAgreedStatus()).toBeNull();
+    mock.dispatch("presence", { user_id: 5, status: "dnd" });
+    expect(loadAgreedStatus()).toEqual({ owner: "one.example#5", status: "dnd" });
+
+    mock.dispatch("presence_batch", {
+      updates: [
+        { user_id: 6, status: "online" },
+        { user_id: 5, status: "invisible" },
+      ],
+    });
+    expect(loadAgreedStatus()?.status).toBe("invisible");
+    // Idle belongs to one connection, so it is not the account's status.
+    mock.dispatch("presence_batch", { updates: [{ user_id: 5, status: "idle" }] });
+    expect(loadAgreedStatus()?.status).toBe("invisible");
   });
 
   describe("presence_batch", () => {

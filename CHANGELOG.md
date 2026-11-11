@@ -55,6 +55,7 @@ and only when it changes something a contributor or fork holder must do
 
 - The app now checks each server reply before using it. A reply it cannot read (from a much older or newer server, or a proxy answering in its place) shows "The server sent a reply this version of OwnCord cannot read" instead of half-loading; after a save, it adds that the change may already have been made.
 - Voice: the microphone gate starts closed and keeps its state when you change the sensitivity.
+- Voice: muting a stream's sound (or deafening) now stops the server sending it to you, instead of only silencing it on your side. That saves about 140 kbps per muted stream; unmuting brings the sound back.
 - Voice: a Medium or High screen share now sends one stream instead of two, which leaves your graphics card more room while gaming. A viewer on a slow connection may see stutters instead of a softer 720p picture; turn on Settings > Voice & Video > **Send a backup copy for slow connections** to send the 720p copy again.
 - Emoji and GIF pickers load the previews you can see first, fetch the next GIF page earlier, and scroll the emoji list more smoothly.
 - In-app dialogs (join with an invite link, rename prompts, new DM picker, nickname, new thread) use the same Save and Cancel buttons as Create Channel.
@@ -91,6 +92,9 @@ and only when it changes something a contributor or fork holder must do
 ### Fixed
 
 - Voice moderation: a server mute (or unmute) given at the exact moment the member was being moved, switched channel or moved the call to another device could be reported as done and then not apply in the new channel. It now either follows the member or the moderator is told the member has left the channel.
+- After turning message retention off (or making its window longer), unpinning an old pinned message could get it deleted for good the next time the server started. The server now remembers in its own database which clean-up each channel last finished, and from the second start on, a channel whose clean-up finished is not cleaned again by the start-up check unless an older backup was restored.
+- Restoring a backup and then going back to the pre-restore safety copy no longer leaves messages with missing files. The server's clean-up of unused uploaded files now waits 7 days after a restore instead of removing the files uploaded since the backup within 15 minutes.
+- Two admins editing the same channel at the same moment (or dragging channels while one saves its settings) no longer undo each other: a save keeps every setting it did not change, including a rename, topic, slow mode, age label, archive state or category set a moment earlier.
 - Server owners: backups, the safety copy before a restore, the full archive download and the backup taken before an update all failed when the server's folder path held characters such as an accented letter, brackets, `+`, `@` or an apostrophe (for example a Windows user name like `Jörg` or a folder like `Program Files (x86)`). After an update that changed the database, such a server refused to start. Folder names with those characters now work.
 - Reconnecting: an app that reconnected at the exact moment a channel was renamed or someone joined, left or muted in voice could miss that change and keep showing the old name or voice list. It now receives it.
 - Unread hints: after one of your devices disconnected while it was switching channels quickly, your other devices could stop showing new activity for one channel until the server restarted. The disconnect now always releases that channel.
@@ -110,6 +114,10 @@ and only when it changes something a contributor or fork holder must do
 - A thread whose history could not be reloaded after a reconnect now tells you and offers Jump to present, instead of silently showing a gap in the replies.
 - A thread reply that failed to send can still be retried after you close and reopen the thread; Retry used to do nothing.
 - A thread or forum post that lost its newest replies (after a failed load, or after scrolling back through hundreds of replies) now recovers: Jump to present reloads the newest replies, scrolling to the bottom loads newer ones, and new replies from others appear again.
+- After saving your profile, the display name and About fields now show what the server stored when it cleaned the text, and Settings no longer asks to discard changes you already saved.
+- A status chosen on one device (Do Not Disturb, Invisible, Online) is now adopted by your other signed-in devices. They used to put their own older status back when they reconnected, started or came back from idle.
+- A message edited, deleted or pinned just as you opened (or came back to) a channel no longer shows its old state until you leave and return; the change is kept when the message list finishes loading.
+- A direct-message call you answered or declined on one device no longer keeps ringing on your other signed-in devices or ends there as a missed call. Ringing again from inside a call you are already in no longer rings your other devices either.
 - Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
 - Linux: switching audio devices or muting and unmuting no longer makes other voice controls wait.
 - Linux: stopping a camera or screen share no longer makes other voice controls wait, and starting the camera again right after waits for the old one to close.

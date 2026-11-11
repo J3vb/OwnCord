@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
+const hasCachedImage = vi.hoisted(() => vi.fn((_url: string) => false));
 const cachedImageBytes = vi.hoisted(() =>
   vi.fn((): (() => Promise<Uint8Array | null>) | null => null),
 );
@@ -10,6 +11,7 @@ const cachedImageBytes = vi.hoisted(() =>
 // kept honest by reimplementing exactly what they do.
 vi.mock("../../src/features/messaging/content/attachments", () => ({
   fetchImageAsObjectUrl,
+  hasCachedImage,
   cachedImageBytes,
   recoverEvictedImage: () => {},
   isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
@@ -189,6 +191,8 @@ describe("createAvatarElement with deferUntilVisible", () => {
 
   beforeEach(() => {
     fetchImageAsObjectUrl.mockReset();
+    hasCachedImage.mockReset();
+    hasCachedImage.mockReturnValue(false);
     callback = null;
     observed = new Set();
     constructed = 0;
@@ -301,6 +305,111 @@ describe("createAvatarElement with deferUntilVisible", () => {
     settlers[0]?.(null);
     await vi.waitFor(() => expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(7));
     for (const settle of settlers) settle(null);
+  });
+
+  describe("while the list flies", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("starts at once below flying speed, and flies just past it", async () => {
+      fetchImageAsObjectUrl.mockResolvedValue(null);
+      const mod = await load();
+      // Exactly the view height in 150 ms is not flying; one pixel more is,
+      // upward as well as downward.
+      mod.reportListScroll(800, 150, 800);
+      show(mount(mod.createAvatarElement, 1));
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+
+      mod.reportListScroll(-801, 150, 800);
+      show(mount(mod.createAvatarElement, 2));
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(2);
+    });
+
+    it("waits while flying, then starts the rows still in view after the settle time", async () => {
+      fetchImageAsObjectUrl.mockResolvedValue(null);
+      const mod = await load();
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
+      const el = mount(mod.createAvatarElement, 1);
+      show(el);
+      expect(fetchImageAsObjectUrl).not.toHaveBeenCalled();
+      expect(observed.has(el)).toBe(true);
+
+      vi.advanceTimersByTime(99);
+      expect(fetchImageAsObjectUrl).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+      expect(observed.has(el)).toBe(false);
+    });
+
+    it("keeps pushing the settle time back while frames keep flying", async () => {
+      fetchImageAsObjectUrl.mockResolvedValue(null);
+      const mod = await load();
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
+      show(mount(mod.createAvatarElement, 1));
+      vi.advanceTimersByTime(80);
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
+      vi.advanceTimersByTime(80);
+      expect(fetchImageAsObjectUrl).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(20);
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+    });
+
+    it("never starts a row that left the view before the list settled", async () => {
+      fetchImageAsObjectUrl.mockResolvedValue(null);
+      const mod = await load();
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
+      const gone = mount(mod.createAvatarElement, 1);
+      const kept = mount(mod.createAvatarElement, 2);
+      show(gone);
+      show(kept);
+      callback?.([{ target: gone, isIntersecting: false }]);
+      vi.advanceTimersByTime(100);
+
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/2");
+      // It stays observed, so it loads when it comes back after the list slows.
+      expect(observed.has(gone)).toBe(true);
+      show(gone);
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(2);
+    });
+
+    it("starts no download, and keeps no reference, for a row removed while it waited", async () => {
+      fetchImageAsObjectUrl.mockResolvedValue(null);
+      const mod = await load();
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
+      const gone = mount(mod.createAvatarElement, 1);
+      show(gone);
+      gone.remove();
+      vi.advanceTimersByTime(100);
+
+      expect(fetchImageAsObjectUrl).not.toHaveBeenCalled();
+      expect(observed.has(gone)).toBe(false);
+    });
+
+    it("shows a picture already in memory at once, flying or not", async () => {
+      fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,AAA");
+      hasCachedImage.mockReturnValue(true);
+      const mod = await load();
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
+      const el = mount(mod.createAvatarElement, 1);
+      show(el);
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores reports with no time or no view height", async () => {
+      fetchImageAsObjectUrl.mockResolvedValue(null);
+      const mod = await load();
+      mod.reportListScroll(6000, 0, 800);
+      mod.reportListScroll(6000, 16, 0);
+      show(mount(mod.createAvatarElement, 1));
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("leaves the default path ungated", async () => {

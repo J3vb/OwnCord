@@ -13,6 +13,10 @@ const (
 	// only decides the phone icon on the user's status (mergeLivePresence).
 	featureMobile = "mobile"
 
+	// featureCallSync marks a client that ends a ring when its own account
+	// declines on another device; only such a socket is sent its own decline.
+	featureCallSync = "call_sync"
+
 	// maxAuthFeatures and maxAuthFeatureLen bound what the parser reads, so a
 	// hostile list costs nothing.
 	maxAuthFeatures   = 32
@@ -20,8 +24,9 @@ const (
 )
 
 type clientFeatures struct {
-	forums bool
-	mobile bool
+	forums   bool
+	mobile   bool
+	callSync bool
 }
 
 func parseClientFeatures(raw []string) clientFeatures {
@@ -38,6 +43,8 @@ func parseClientFeatures(raw []string) clientFeatures {
 			f.forums = true
 		case featureMobile:
 			f.mobile = true
+		case featureCallSync:
+			f.callSync = true
 		}
 	}
 	return f

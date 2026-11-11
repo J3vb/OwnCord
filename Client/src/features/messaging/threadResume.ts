@@ -2,7 +2,12 @@
 // host registers this with the dispatcher's hook (stores/threadsLoader) while
 // it is mounted, so none of it weighs on startup.
 import { removeThread, setFocusedThread, threadsStore } from "@stores/threads.store";
-import { getChannelMessages, setChannelLoadError, setMessages } from "@stores/messages.store";
+import {
+  getChannelMessages,
+  setChannelLoadError,
+  setChannelLoading,
+  setMessages,
+} from "@stores/messages.store";
 import { ApiClientError, type ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/ui/toast";
@@ -37,12 +42,17 @@ export function resumeThreadFocus(
   if (getMessages === undefined) return;
   const current = (): boolean =>
     attempt === resumeGeneration && threadsStore.getState().focusedThreadId === threadId;
+  // Marks the fetch so a change that lands while it is in flight is kept when
+  // the page is installed.
+  setChannelLoading(threadId);
   getMessages(threadId, { limit: 50 }).then(
     (resp) => {
       if (current()) setMessages(threadId, resp.messages, resp.has_more, true);
     },
     (err: unknown) => {
       if (!current()) return;
+      // Ends the fetch's journal on every failure, including a gone thread.
+      setChannelLoadError(threadId);
       if (err instanceof ApiClientError && err.status === 404) {
         removeThread(threadId);
         return;
@@ -55,7 +65,6 @@ export function resumeThreadFocus(
       // Rows that were on screen may now end short of the live tail: detach the
       // window so no live reply lands across the gap, and let "Jump to present"
       // refetch it. The rows hide the inline error, so say it with a toast.
-      setChannelLoadError(threadId);
       if (getChannelMessages(threadId).length > 0) {
         showToast(connectText("app.loadHistoryFailed"), "error");
       }
