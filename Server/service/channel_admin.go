@@ -315,16 +315,11 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	if err := s.prepareUpdateSync(ctx, req, existing.ID, target.id, &update, &refused); err != nil {
 		return nil, nil, err
 	}
-	// Clearing the flag deletes the channel's standing acknowledgements in the SAME
-	// transaction, so a later re-label re-prompts everyone. Keyed on the RESULTING flag, not a
-	// 1-to-0 transition from the stale `existing` snapshot, which a concurrent edit could
-	// leave pointing at an acknowledgement from a DIFFERENT labelling.
-	var writeErr error
-	if !req.NSFW {
-		writeErr = s.st.AdminUpdateChannelClearingNSFW(ctx, existing.ID, update)
-	} else {
-		writeErr = s.st.AdminUpdateChannel(ctx, existing.ID, update)
-	}
+	// The write deletes the channel's standing acknowledgements in the SAME transaction
+	// whenever the row it writes is unlabelled, so a later re-label re-prompts everyone.
+	// Keyed on the RESULTING flag, not a 1-to-0 transition from the stale `existing`
+	// snapshot, which a concurrent edit could leave pointing at a DIFFERENT labelling.
+	writeErr := s.st.AdminUpdateChannel(ctx, existing.ID, update)
 	if refused != nil && writeErr != nil {
 		return nil, nil, refused
 	}
@@ -343,14 +338,18 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 		postCommitHook()
 	}
 	syncEffect := s.afterUpdateSync(tail, actorID, existing, req, syncPlan)
-	slog.Info("channel updated", "actor_id", actorID, "channel_id", existing.ID, "name", meta.Name, "nsfw", req.NSFW)
+	updated, getErr := s.st.GetChannel(tail, existing.ID)
+	// Log and audit the row actually written, which a concurrent edit may have
+	// settled differently from the request; the request's values stand in only
+	// when the row cannot be read back.
+	name, nsfw := writtenNameAndNSFW(updated, meta.Name, req.NSFW)
+	slog.Info("channel updated", "actor_id", actorID, "channel_id", existing.ID, "name", name, "nsfw", nsfw)
 	db.WriteAudit(tail, s.st, actorID, "channel_update", "channel", existing.ID,
-		fmt.Sprintf("updated #%s%s%s", meta.Name, nsfwAuditSuffix(existing.NSFW, req.NSFW),
+		fmt.Sprintf("updated #%s%s%s", name, nsfwAuditSuffix(existing.NSFW, nsfw),
 			passwordAuditSuffix(existing.JoinLocked, pwChange)))
 
-	updated, err := s.st.GetChannel(tail, existing.ID)
-	if err != nil || updated == nil {
-		return nil, nil, fmt.Errorf("%w: failed to fetch updated channel: %w", ErrInternal, err)
+	if getErr != nil || updated == nil {
+		return nil, nil, fmt.Errorf("%w: failed to fetch updated channel: %w", ErrInternal, getErr)
 	}
 	// A sync replaced override rows: re-derive the audience from the post-sync rows.
 	s.notifyAudienceIf(syncEffect.Applied, updated)
@@ -402,4 +401,13 @@ func (s *ChannelService) AdminDeleteChannel(ctx context.Context, actorID int64, 
 	db.WriteAudit(delCtx, s.st, actorID, "channel_delete", "channel", existing.ID,
 		fmt.Sprintf("deleted #%s", existing.Name))
 	return nil, nil
+}
+
+// writtenNameAndNSFW returns the name and label of the row an update wrote, or
+// the requested ones when that row could not be read back.
+func writtenNameAndNSFW(written *db.Channel, requestedName string, requestedNSFW bool) (string, bool) {
+	if written == nil {
+		return requestedName, requestedNSFW
+	}
+	return written.Name, written.NSFW
 }

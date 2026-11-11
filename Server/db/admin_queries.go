@@ -210,6 +210,7 @@ type ChannelUpdate struct {
 	SyncPlan  *ChannelSyncPlan
 	// Base is the row this update was built from. The write keeps the stored value of
 	// every field left equal to Base, so an edit that committed in between survives.
+	// It must be a real stored row: a zero-value Base would keep every zero-valued field.
 	Base *Channel
 	// Before receives the row as the write found it; left alone when the channel is gone.
 	Before *Channel
@@ -260,20 +261,20 @@ func (u ChannelUpdate) settleAgainstStored(ctx context.Context, q *dbgen.Queries
 
 // AdminUpdateChannel updates all mutable channel fields, category included, in one transaction.
 func (d *DB) AdminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate) error {
-	if err := d.adminUpdateChannel(ctx, id, u, false); err != nil {
+	if err := d.adminUpdateChannel(ctx, id, u); err != nil {
 		return fmt.Errorf("AdminUpdateChannel: %w", err)
 	}
 	return nil
 }
 
-func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, clearNSFW bool) error {
+// adminUpdateChannel also deletes the channel's standing NSFW acknowledgements in the
+// same transaction whenever the row it writes is unlabelled, so none outlives its label.
+func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate) error {
 	return d.inWriteTx(ctx, "update", func(q *dbgen.Queries) error {
 		u, err := u.settleAgainstStored(ctx, q, id)
 		if err != nil {
 			return err
 		}
-		// A label kept from a concurrent edit keeps its acknowledgements.
-		clearNSFW := clearNSFW && !u.NSFW
 		var catID *int64
 		var created int64
 		switch {
@@ -317,7 +318,9 @@ func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, 
 		if err := applyPermissionSyncTx(ctx, q, id, catID, moved, u); err != nil {
 			return err
 		}
-		if clearNSFW {
+		// The flag as settled against the stored row: a label kept from a concurrent
+		// edit keeps its acknowledgements, an unlabelled row keeps none.
+		if !u.NSFW {
 			return q.DeleteNSFWAcknowledgementsForChannel(ctx, id)
 		}
 		return nil

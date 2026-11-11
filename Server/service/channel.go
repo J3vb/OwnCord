@@ -30,7 +30,6 @@ type channelCoreStore interface {
 	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus, expiresAt *string) error
 	UpdateUserStatus(ctx context.Context, id int64, status string) error
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
-	AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u db.ChannelUpdate) error
 	AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
 	AdminUpdateChannel(ctx context.Context, id int64, u db.ChannelUpdate) error
 	AdminDeleteChannel(ctx context.Context, id int64) error
