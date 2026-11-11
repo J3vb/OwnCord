@@ -29,10 +29,13 @@ func (s *dmDelivery) dmFirstContactGate(ctx context.Context, p SendMessageParams
 		// Writing to someone is trusting them: record the sender's trust in the
 		// recipient so their reply is a reply, not a request back, even after the
 		// recipient's own trust was dropped by a block that was later lifted.
-		// Idempotent, so a no-op when the sender already trusts them.
-		if tErr := s.st.TrustSender(ctx, p.UserID, recipientID, "sent_first"); tErr != nil {
-			slog.Error("MessageService.SendMessage: recording the sender's trust failed",
-				"err", tErr, "recipient_id", recipientID, "sender_id", p.UserID)
+		// Only when the row is missing: a write on every delivered DM would take the
+		// single writer for nothing.
+		if !target.TrustedBySender {
+			if tErr := s.st.TrustSender(ctx, p.UserID, recipientID, "sent_first"); tErr != nil {
+				slog.Error("MessageService.SendMessage: recording the sender's trust failed",
+					"err", tErr, "recipient_id", recipientID, "sender_id", p.UserID)
+			}
 		}
 		return false // today's OpenDM path
 	}
