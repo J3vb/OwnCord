@@ -1,5 +1,5 @@
 {
-  "nextId": 561,
+  "nextId": 562,
   "findings": [
     {
       "id": "OC-0001",
@@ -12947,6 +12947,29 @@
         "revertProof": "restore the character list and TestBackupToSafe_AcceptsAnyNameTheFilesystemAllows fails on every name"
       },
       "lens": "db-storage",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0561",
+      "title": "A voice join whose answers crossed a later click, or never arrived, left the app and the server disagreeing about the call",
+      "file": "Client/src/features/voice/wsHandlers.ts",
+      "line": 175,
+      "severity": "medium",
+      "why": "A voice join names the channel in the store before the server answers. Four sequences ended wrong: a switch clicked right after a mute or camera toggle was pulled back to the old channel by the toggle's own late voice_state, so the new channel's token was dropped; clicking three channels faster than the answers dropped a token while the server kept that membership for the socket; a join whose frame or answer was lost stayed on Connecting until the user pressed Disconnect; and an error frame with no id cancelled the join in flight.",
+      "repro": "Click voice channel A, then B, then A again before the first answers arrive: the client ends with no call while the server still lists the user in a channel.",
+      "evidence": "Client/src/features/voice/strandedJoin.test.ts and Client/tests/unit/livekitSession/switchDuringReconnect.test.ts (leaves no call on either side when the answers of three quick clicks cross)",
+      "suggestedFix": "Follow a self voice_state only for the channel the store names, remember a let-pass token and send one bare voice_leave when the client then shows no call, and bound every voice_join with an answer wait.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src/features/voice/strandedJoin.test.ts",
+        "revertProof": "without the answer wait and the let-pass token mark the new tests in strandedJoin.test.ts and joinRequest.test.ts fail"
+      },
+      "lens": "flow-voice",
       "confidence": "high",
       "status": "fixed",
       "found": "2026-11-11",
