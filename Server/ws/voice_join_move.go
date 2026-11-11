@@ -42,46 +42,11 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 		return false, false, false, nil, true, 0
 	}
 
-	// A moderator-imposed mute/deafen follows the user to the new device, as it
-	// follows a channel switch: read it off the row about to be deleted, or off
-	// the old connection's stash when the row is already gone.
-	prev, prevErr := h.voice.State(fctx, c.userID)
-	if commandDeadlineExceeded(fctx, prevErr) {
-		voiceJoinFail(fctx, c, reqID, prevErr, ErrCodeInternal, "voice channel switch failed — please try again")
+	flags, unannounced, left := h.leaveForCallMove(fctx, ctx, txn, c, from, channelID, reqID)
+	if !left {
 		return true, false, false, nil, false, 0
 	}
-	if prevErr == nil && prev != nil {
-		wasServerMuted, wasServerDeafened, wasServerMutedBy = prev.ServerMuted, prev.ServerDeafened, prev.ServerMutedBy
-	}
-	if from != nil {
-		if sm, sd, sby := h.takeUserModFlags(from); (sm || sd) && !wasServerMuted && !wasServerDeafened {
-			wasServerMuted, wasServerDeafened, wasServerMutedBy = sm, sd, sby
-		}
-		snap := txn.clear(from)
-		if snap.chID != 0 {
-			slog.Info("voice call moved to another device", "user_id", c.userID,
-				"from_channel_id", snap.chID, "to_channel_id", channelID)
-			from.sendMsg(buildVoiceDisconnected(snap.chID, voiceMovedReason))
-			h.finishVoiceLeaveAnnounce(ctx, txn, from, snap.chID, snap.joinToken, voiceLeaveReasonMoved, snap.chID != channelID)
-			if snap.chID == channelID {
-				unannounced = snap.chID
-			}
-		}
-	} else if e := txn.takeParked(0); e != nil {
-		slog.Info("voice parked call moved to another device", "user_id", c.userID,
-			"from_channel_id", e.snap.chID, "to_channel_id", channelID)
-		// The parking device's socket is gone, so it cannot be told now: leave
-		// a note it collects when it next registers (registerNow).
-		// Never for the joining connection's own session: re-joining its own
-		// parked call is not a move.
-		if e.client.tokenHash != c.tokenHash {
-			h.voiceHub.reg.voiceGrace.markMoved(c.userID, e.client.tokenHash, e.snap.chID)
-		}
-		h.finishVoiceLeaveAnnounce(ctx, txn, e.client, e.snap.chID, e.snap.joinToken, voiceLeaveReasonMoved, e.snap.chID != channelID)
-		if e.snap.chID == channelID {
-			unannounced = e.snap.chID
-		}
-	}
+	wasServerMuted, wasServerDeafened, wasServerMutedBy = flags.muted, flags.deafened, flags.mutedBy
 
 	// Same check as a channel switch: the old row must really be gone
 	// before the new one is inserted.
@@ -99,6 +64,63 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 		return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, false, unannounced
 	}
 	return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, true, unannounced
+}
+
+// leaveForCallMove is the leave half of voiceJoinMoveCall: it reads the
+// moderator mute/deafen the old call carries and ends that call, on from's
+// connection or, when from is nil, on the parked session. The read and the
+// leave share one hold of the moderation lock every mute and unmute writes
+// under, so one that races the move is carried to the new device or told the
+// member has left, never lost with the old row. left is false when the read ran
+// out of time: the error frame is sent and nothing was torn down.
+func (h *Hub) leaveForCallMove(fctx, ctx context.Context, txn *voiceTxn, c, from *Client, channelID int64, reqID string) (flags modFlagStash, unannounced int64, left bool) {
+	unlockMod := h.voiceHub.mod.Lock(c.userID)
+	defer unlockMod()
+	// A moderator-imposed mute/deafen follows the user to the new device, as it
+	// follows a channel switch: read it off the row about to be deleted, or off
+	// the old connection's stash when the row is already gone.
+	prev, prevErr := h.voice.State(fctx, c.userID)
+	if commandDeadlineExceeded(fctx, prevErr) {
+		voiceJoinFail(fctx, c, reqID, prevErr, ErrCodeInternal, "voice channel switch failed — please try again")
+		return modFlagStash{}, 0, false
+	}
+	if prevErr == nil && prev != nil {
+		flags = modFlagStash{muted: prev.ServerMuted, deafened: prev.ServerDeafened, mutedBy: prev.ServerMutedBy}
+	}
+	if from != nil {
+		if sm, sd, sby := h.takeUserModFlags(from); (sm || sd) && !flags.muted && !flags.deafened {
+			flags = modFlagStash{muted: sm, deafened: sd, mutedBy: sby}
+		}
+		snap := txn.clear(from)
+		if snap.chID != 0 {
+			slog.Info("voice call moved to another device", "user_id", c.userID,
+				"from_channel_id", snap.chID, "to_channel_id", channelID)
+			from.sendMsg(buildVoiceDisconnected(snap.chID, voiceMovedReason))
+			h.finishVoiceLeaveAnnounce(ctx, txn, from, snap.chID, snap.joinToken, voiceLeaveReasonMoved, snap.chID != channelID)
+			if snap.chID == channelID {
+				unannounced = snap.chID
+			}
+		}
+		return flags, unannounced, true
+	}
+	e := txn.takeParked(0)
+	if e == nil {
+		return flags, 0, true
+	}
+	slog.Info("voice parked call moved to another device", "user_id", c.userID,
+		"from_channel_id", e.snap.chID, "to_channel_id", channelID)
+	// The parking device's socket is gone, so it cannot be told now: leave
+	// a note it collects when it next registers (registerNow).
+	// Never for the joining connection's own session: re-joining its own
+	// parked call is not a move.
+	if e.client.tokenHash != c.tokenHash {
+		h.voiceHub.reg.voiceGrace.markMoved(c.userID, e.client.tokenHash, e.snap.chID)
+	}
+	h.finishVoiceLeaveAnnounce(ctx, txn, e.client, e.snap.chID, e.snap.joinToken, voiceLeaveReasonMoved, e.snap.chID != channelID)
+	if e.snap.chID == channelID {
+		unannounced = e.snap.chID
+	}
+	return flags, unannounced, true
 }
 
 // announceUnconfirmedMoveLeave sends the voice_leave a same-channel move left
