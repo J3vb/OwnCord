@@ -115,6 +115,29 @@ describe("EmojiPicker", () => {
     picker.destroy();
   });
 
+  it("sets --ep-rows on each grid to its number of rows of 8", () => {
+    const { picker } = makePicker();
+    const grids = Array.from(picker.element.querySelectorAll<HTMLElement>(".ep-grid"));
+    expect(grids.length).toBeGreaterThan(1);
+    for (const grid of grids) {
+      const cells = grid.querySelectorAll(".ep-emoji").length;
+      expect(grid.style.getPropertyValue("--ep-rows")).toBe(String(Math.ceil(cells / 8)));
+    }
+    picker.destroy();
+  });
+
+  it("sizes a filtered grid whose last row is not full", () => {
+    const { picker } = makePicker();
+    searchFor(picker, "heart");
+    const grids = Array.from(picker.element.querySelectorAll<HTMLElement>(".ep-grid"));
+    expect(grids.length).toBeGreaterThan(0);
+    for (const grid of grids) {
+      const cells = grid.querySelectorAll(".ep-emoji").length;
+      expect(grid.style.getPropertyValue("--ep-rows")).toBe(String(Math.ceil(cells / 8)));
+    }
+    picker.destroy();
+  });
+
   it("clicking an emoji calls onSelect", () => {
     const onSelect = vi.fn();
     const { picker } = makePicker({ onSelect });
