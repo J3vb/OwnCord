@@ -256,7 +256,10 @@ func drainChanUntil(ch chan []byte, deadline time.Time) [][]byte {
 	msgs := drainChan(ch, time.Until(deadline))
 	for {
 		select {
-		case msg := <-ch:
+		case msg, ok := <-ch:
+			if !ok {
+				return msgs
+			}
 			msgs = append(msgs, msg)
 		default:
 			return msgs

@@ -34,6 +34,6 @@ func (h *Hub) SendDMVoiceRoster(ctx context.Context, userID, channelID int64) {
 		if vs.UserID == userID {
 			continue
 		}
-		h.sendSequencedToUsers(channelID, []int64{userID}, buildVoiceState(vs))
+		h.sendSequencedToUsers(channelID, []int64{userID}, 0, buildVoiceState(vs))
 	}
 }

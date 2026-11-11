@@ -14,7 +14,10 @@ func pendingFrameOfType(t *testing.T, c *Client, want string) map[string]any {
 	var found map[string]any
 	for {
 		select {
-		case raw := <-c.send:
+		case raw, ok := <-c.send:
+			if !ok {
+				return found
+			}
 			var f struct {
 				Type    string         `json:"type"`
 				Payload map[string]any `json:"payload"`

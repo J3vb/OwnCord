@@ -141,7 +141,10 @@ func drainForErrorCode(ch <-chan []byte, deadline time.Duration) string {
 func drainChanBuf(ch <-chan []byte) {
 	for {
 		select {
-		case <-ch:
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
 		default:
 			return
 		}
@@ -155,7 +158,10 @@ func drainChanTimeout(ch <-chan []byte, d time.Duration) [][]byte {
 	defer timer.Stop()
 	for {
 		select {
-		case msg := <-ch:
+		case msg, ok := <-ch:
+			if !ok {
+				return msgs
+			}
 			msgs = append(msgs, msg)
 		case <-timer.C:
 			return msgs

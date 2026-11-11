@@ -780,7 +780,10 @@ func drainHasVoiceLeave(ch chan []byte, channelID, userID int64) bool {
 	for {
 		for {
 			select {
-			case frame := <-ch:
+			case frame, ok := <-ch:
+				if !ok {
+					return false
+				}
 				var env struct {
 					Type    string `json:"type"`
 					Payload struct {

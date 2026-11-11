@@ -78,7 +78,7 @@ func (h *Hub) emitSequencedDM(_ context.Context, _ int64, ev Event) bool {
 	}
 	// Normal priority: sequenced frames must share the per-client FIFO so the max-seq
 	// ack watermark never passes an undelivered event.
-	h.sendSequencedToUsers(e.ChannelID(), e.ParticipantIDs(), e.Payload())
+	h.sendSequencedToUsers(e.ChannelID(), e.ParticipantIDs(), 0, e.Payload())
 	return true
 }
 

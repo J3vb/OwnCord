@@ -70,7 +70,10 @@ func TestDeliverBroadcast_ShedFrameLeavesNoSeqGap(t *testing.T) {
 readLoop:
 	for {
 		select {
-		case msg := <-send:
+		case msg, ok := <-send:
+			if !ok {
+				break readLoop
+			}
 			var frame struct {
 				Seq uint64 `json:"seq"`
 			}

@@ -122,7 +122,10 @@ func drainMoved(c *Client) []movedFrame {
 	var out []movedFrame
 	for {
 		select {
-		case raw := <-c.send:
+		case raw, ok := <-c.send:
+			if !ok {
+				return out
+			}
 			var f struct {
 				Type    string `json:"type"`
 				Payload struct {
