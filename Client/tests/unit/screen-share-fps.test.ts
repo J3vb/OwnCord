@@ -44,6 +44,13 @@ const SCREENSHARE_AUDIO_CAPTURE = {
   channelCount: 2,
 };
 
+/** Turn the sharer's "Send a backup copy" switch on. */
+function withBackupLayer(): void {
+  mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+    key === "screenShareBackupLayer" ? true : defaultVal,
+  );
+}
+
 function setPolicy(value: unknown): void {
   mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
     key === "shareMotionPolicy" ? value : defaultVal,
@@ -128,14 +135,21 @@ describe("screen share FPS", () => {
       expect(getCameraQuality()).toBe("medium");
     });
 
-    it("simulcasts medium and high only", () => {
+    it("sends one layer at every quality by default", () => {
+      for (const quality of ["low", "medium", "high", "source"] as const)
+        for (const fps of [30, 60, 120]) expect(isScreenShareSimulcast(quality, fps)).toBe(false);
+    });
+
+    it("with the backup copy on, simulcasts medium and high only", () => {
+      withBackupLayer();
       expect(isScreenShareSimulcast("low", 30)).toBe(false);
       expect(isScreenShareSimulcast("medium", 30)).toBe(true);
       expect(isScreenShareSimulcast("high", 30)).toBe(true);
       expect(isScreenShareSimulcast("source", 30)).toBe(false);
     });
 
-    it("drops the lower layer for High at 120 fps, as Source does", () => {
+    it("with the backup copy on, drops the lower layer for High at 120 fps, as Source does", () => {
+      withBackupLayer();
       // Encoding both layers in turn held a 1080p120 share to 40-50 fps.
       expect(isScreenShareSimulcast("high", 120)).toBe(false);
       expect(isScreenShareSimulcast("high", 60)).toBe(true);
@@ -213,6 +227,10 @@ describe("screen share FPS", () => {
 });
 
 describe("videoLayerOptions", () => {
+  beforeEach(() => {
+    mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+  });
+
   it.each(["low", "medium", "high", "source"] as const)(
     "gives a VP9 camera at %s no simulcast and no layers",
     (quality) => {
@@ -244,8 +262,17 @@ describe("videoLayerOptions", () => {
   });
 
   it.each(["vp8", "h264", "h265"] as const)(
-    "keeps today's screen share options for %s",
+    "sends a screen share as one layer by default for %s",
     (codec) => {
+      for (const quality of ["low", "medium", "high", "source"] as const)
+        expect(videoLayerOptions("screen", codec, quality, 30)).toEqual({ simulcast: false });
+    },
+  );
+
+  it.each(["vp8", "h264", "h265"] as const)(
+    "keeps the backup copy's screen share options for %s",
+    (codec) => {
+      withBackupLayer();
       expect(videoLayerOptions("screen", codec, "medium", 30)).toEqual({
         simulcast: true,
         screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS],

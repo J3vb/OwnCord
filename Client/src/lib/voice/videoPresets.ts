@@ -175,14 +175,25 @@ export function getScreenShareQuality(): StreamQuality {
   return loadQuality("screenShareQuality", "medium");
 }
 
+/** Saved "Send a backup copy" choice: whether a screen share also encodes
+ *  the 720p lower layer for viewers on a weak link. */
+export const SCREEN_SHARE_BACKUP_LAYER_PREF = "screenShareBackupLayer";
+
+/** Off by default: the lower layer is encoded whenever anyone watches, even
+ *  when every viewer takes the top one, and that encoder work competes with a
+ *  game for the GPU. Without it a viewer whose link cannot carry the share
+ *  stalls instead of dropping to 720p; the other viewers are unaffected. */
+export function getScreenShareBackupLayer(): boolean {
+  return loadPref<boolean>(SCREEN_SHARE_BACKUP_LAYER_PREF, false) === true;
+}
+
 /** Whether a screen share at `quality` and `fps` is published with
- *  SCREENSHARE_SIMULCAST_LAYERS. Without a lower layer the SFU can only send
- *  a viewer whose link cannot carry the share the full stream, which they
- *  cannot decode at all (a frozen frame), while their keyframe requests raise
- *  the bitrate for every other viewer. Low is already a small stream, and
- *  Source is meant to arrive untouched. High at 120 fps goes out as one layer
- *  too: encoding both layers in turn held 1080p120 to 40-50 fps. */
+ *  SCREENSHARE_SIMULCAST_LAYERS: only when the sharer turned the backup copy
+ *  on. Low is already a small stream, and Source is meant to arrive
+ *  untouched. High at 120 fps goes out as one layer too: encoding both layers
+ *  in turn held 1080p120 to 40-50 fps. */
 export function isScreenShareSimulcast(quality: StreamQuality, fps: number): boolean {
+  if (!getScreenShareBackupLayer()) return false;
   return quality === "medium" || (quality === "high" && fps !== 120);
 }
 

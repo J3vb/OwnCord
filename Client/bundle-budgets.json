@@ -39,7 +39,7 @@
     "SettingsOverlay": {
       "budget": 54500,
       "lazy": true,
-      "note": "The Settings overlay, loaded when Settings first opens. 51250 -> 51500: the profile popup helper split out for the complexity baseline (51253 B). 51500 -> 52000 for the unsaved-changes prompt on the Account tab (51578 B)."
+      "note": "The Settings overlay, loaded when Settings first opens. 51250 -> 51500: the profile popup helper split out for the complexity baseline (51253 B). 51500 -> 52000 for the unsaved-changes prompt on the Account tab (51578 B). 54000 -> 54500 for the screen share backup copy switch (54021 B)."
     },
     "AdminActions": {
       "budget": 4000,

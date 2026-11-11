@@ -145,6 +145,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
       s("voiceAudio.screenQualityDesc"),
       s("voiceAudio.screenFps"),
       s("voiceAudio.screenFpsDesc"),
+      s("voiceAudio.screenBackupLayer"),
+      s("voiceAudio.screenBackupLayerDesc"),
       s("voiceAudio.videoCodec"),
       s("voiceAudio.videoCodecDesc"),
     ),
