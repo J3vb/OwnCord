@@ -4,7 +4,6 @@
 import { createLogger } from "../../../lib/logger";
 import { loadPref } from "../../../lib/prefs/preferences";
 import { desktop } from "../../../platform/desktop";
-import type { NativeVoiceStats } from "../../../platform/contracts/nativeVoice";
 import { NativeCameraTrack } from "./nativeCameraTrack";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "../cameraSwitch";
 import { NativeScreenAudioTrack } from "./screenAudioTrack";
@@ -19,65 +18,30 @@ import {
 } from "./screenPicker";
 import type { StreamQuality } from "../screenShare";
 import type { PublishCodec } from "../videoCodec";
+import {
+  CAMERA_NO_FRAME,
+  forgetCameraAndStop,
+  forgetScreenAndStop,
+  forgetScreenAudioAndUnpublish,
+} from "./nativeCaptureStops";
+import {
+  nativeCodec,
+  unsupported,
+  type NativeLocalPublication,
+  type NativeVideoHost,
+  type PublishableTrack,
+  type PublishOptions,
+} from "./nativeVideoTypes";
 
 const log = createLogger("nativeRoom");
 
-/** The host's reason for a camera that opened but produced no first frame
- *  (`TIMED_OUT` in `src-tauri/src/native_voice/camera.rs`). */
-// i18n-exempt: the host's error text matched, never rendered
-const CAMERA_NO_FRAME = "camera capture produced no frame in time";
-
-/** The slice of livekit-client's `LocalVideoTrack` the camera path hands
- *  `publishTrack`. */
-export interface PublishableTrack {
-  kind: string;
-  source: string;
-  mediaStreamTrack: MediaStreamTrack;
-}
-
-export interface PublishOptions {
-  source?: string;
-  simulcast?: boolean;
-  /** The selected preset's capture size; the host downscales a larger source. */
-  resolution?: { width: number; height: number };
-  videoEncoding?: { maxBitrate: number; maxFramerate?: number };
-  /** The codec `resolveVideoCodec` chose; the native engine publishes VP8
-   *  unless this is `h264` or `vp9`. */
-  videoCodec?: string;
-}
-
-/** The native publish's codec for the shared path's `videoCodec` option:
- *  H.264 or VP9 when asked for, VP8 for everything else (the native engine has
- *  no H.265). */
-export function nativeCodec(options: PublishOptions): "vp8" | "h264" | "vp9" {
-  return options.videoCodec === "h264" || options.videoCodec === "vp9" ? options.videoCodec : "vp8";
-}
-
-/** A local camera or screen publication, as `getLocalCameraStream`,
- *  `getLocalScreenshareStream` and the diagnostics read it. */
-export interface NativeLocalPublication {
-  readonly trackSid: string;
-  readonly source: string;
-  readonly kind: string;
-  readonly isMuted: boolean;
-  /** The camera track is a `NativeCameraTrack`, the screen share a
-   *  `NativeScreenTrack`; both stand in for `LocalVideoTrack`. */
-  readonly track: PublishableTrack | NativeCameraTrack | NativeScreenTrack | NativeScreenAudioTrack;
-}
-
-export function unsupported(what: string): Error {
-  // i18n-exempt: internal Linux unsupported-path guard, caught and mapped by the caller
-  return new Error(`${what} is not available on Linux yet`);
-}
-
-/** What the local video reads from its room: the live session, the frame
- *  socket and the local publications map. */
-export interface NativeVideoHost {
-  sessionId(): number | null;
-  frames(): string;
-  readonly publications: Map<string, NativeLocalPublication>;
-  readStats(): Promise<NativeVoiceStats | null>;
-}
+export { unsupported } from "./nativeVideoTypes";
+export type {
+  NativeLocalPublication,
+  NativeVideoHost,
+  PublishableTrack,
+  PublishOptions,
+} from "./nativeVideoTypes";
 
 export class NativeLocalVideo {
   /** The live screen capture's track; null when not capturing. */
@@ -251,12 +215,7 @@ export class NativeLocalVideo {
    *  capture (a no-op for a capture a newer one replaced). */
   private stopCamera(session: number, track: NativeCameraTrack): void {
     if (this.camera === track) this.camera = null;
-    const pubs = this.host.publications;
-    if (pubs.get("camera")?.track === track) pubs.delete("camera");
-    if (this.host.sessionId() !== session) return;
-    desktop.nativeVoice
-      .stopCamera(session, track.capture)
-      .catch((err) => log.warn("native stopCamera failed", { capture: track.capture, err }));
+    forgetCameraAndStop(this.host, session, track);
   }
 
   /** `stopCapture` false unpublishes alone and leaves the capture, and the
@@ -421,15 +380,7 @@ export class NativeLocalVideo {
   private stopScreen(session: number, track: NativeScreenTrack): void {
     const current = this.screen === track;
     if (current) this.screen = null;
-    const pubs = this.host.publications;
-    if (pubs.get("screen_share")?.track === track) pubs.delete("screen_share");
-    // The host ends the audio with its capture: the track follows, but only
-    // when the live share stops, never a stale track's late stop.
-    if (current) this.screenAudio?.stop();
-    if (this.host.sessionId() !== session) return;
-    desktop.nativeVoice
-      .stopScreen(session, track.capture)
-      .catch((err) => log.warn("native stopScreen failed", { capture: track.capture, err }));
+    forgetScreenAndStop(this.host, session, track, current ? this.screenAudio : null);
   }
 
   async publishScreen(
@@ -518,14 +469,7 @@ export class NativeLocalVideo {
    *  (stop() is synchronous); a stale sid is a no-op in the host. */
   private stopScreenAudio(session: number, track: NativeScreenAudioTrack): void {
     if (this.screenAudio === track) this.screenAudio = null;
-    const pubs = this.host.publications;
-    const pub = pubs.get("screen_share_audio");
-    if (pub?.track !== track) return;
-    pubs.delete("screen_share_audio");
-    if (this.host.sessionId() !== session) return;
-    desktop.nativeVoice
-      .unpublishScreenAudio(session, pub.trackSid)
-      .catch((err) => log.warn("native unpublishScreenAudio failed", { sid: pub.trackSid, err }));
+    forgetScreenAudioAndUnpublish(this.host, session, track);
   }
 
   /** Unpublishing a screen share stops its track, and with it the host

@@ -1,3 +1,50 @@
+import type {
+  NativeVoiceCameraCapture,
+  NativeVoiceCameraDevice,
+  NativeVoiceCameraOptions,
+  NativeVoiceCameraPreview,
+  NativeVoiceCameraStarted,
+  NativeVoiceCameraSupport,
+  NativeVoiceScreenCapture,
+  NativeVoiceScreenOptions,
+  NativeVoiceScreenQualityResult,
+  NativeVoiceScreenSources,
+  NativeVoiceScreenStarted,
+  NativeVoiceVideoCodecs,
+} from "./nativeVoiceVideo";
+import type {
+  NativeMicTestEnvelope,
+  NativeMicTestOptions,
+  NativeMicTestUpdate,
+  NativeVoiceStats,
+} from "./nativeVoiceDiagnostics";
+
+export type {
+  NativeVoiceVideoCodecs,
+  NativeVoiceCameraOptions,
+  NativeVoiceCameraDevice,
+  NativeVoiceCameraSupport,
+  NativeVoiceCameraCapture,
+  NativeVoiceCameraStarted,
+  NativeVoiceCameraPreview,
+  NativeVoiceScreenSource,
+  NativeVoiceScreenSources,
+  NativeVoiceScreenCapture,
+  NativeVoiceScreenStarted,
+  NativeVoiceScreenOptions,
+  NativeVoiceScreenQualitySet,
+  NativeVoiceScreenQualityResult,
+} from "./nativeVoiceVideo";
+export type {
+  NativeMicTestOptions,
+  NativeMicTestUpdate,
+  NativeMicTestEnvelope,
+  NativeVoiceStatsEntry,
+  NativeVoiceSenderLayer,
+  NativeVoiceStats,
+} from "./nativeVoiceDiagnostics";
+export { NATIVE_MIC_TEST_IN_CALL } from "./nativeVoiceDiagnostics";
+
 /**
  * Native voice: the Linux desktop backend that runs the LiveKit room in the
  * host process, because the Linux system webview ships no WebRTC. The web
@@ -130,244 +177,6 @@ export interface NativeVoiceConnected {
    *  `/remote/<track sid>` to read a remote video track (I420 frames) or
    *  `/camera` to upload the local camera. */
   frames: string;
-}
-
-/** A video codec the native engine publishes. */
-export type NativeVoiceVideoCodec = "vp8" | "h264" | "vp9";
-
-/** What the native engine can encode beyond VP8 (`h264`, `vp9`) and decode
- *  (`decode`: lowercase codec names from libwebrtc's receiver capabilities). */
-export interface NativeVoiceVideoCodecs {
-  h264: boolean;
-  vp9: boolean;
-  decode: string[];
-}
-
-/** How the camera is published: the web path's `publishTrack` options. */
-export interface NativeVoiceCameraOptions {
-  width: number;
-  height: number;
-  maxBitrate: number;
-  maxFramerate: number;
-  simulcast: boolean;
-  /** The codec to publish with. The host defaults to VP8 when it is absent;
-   *  `h264` and `vp9` only go out when `videoCodecs` said the engine can encode them. */
-  codec: NativeVoiceVideoCodec;
-}
-
-/** A native camera device: the id `startCamera` takes. */
-export interface NativeVoiceCameraDevice {
-  id: string;
-  name: string;
-  /** Offers only greyscale formats: a face-unlock infrared sensor, listed
-   *  after the colour cameras. */
-  infrared: boolean;
-}
-
-/** Whether the host can capture cameras at all: GStreamer initialises and the
- *  capture pipeline's required elements exist. `missing` names the required
- *  elements that could not be found. */
-export interface NativeVoiceCameraSupport {
-  available: boolean;
-  missing: string[];
-}
-
-/** Capture pacing and size cap for the native camera; 0 for both sizes is the
- *  source size. */
-export interface NativeVoiceCameraCapture {
-  fps: number;
-  maxWidth: number;
-  maxHeight: number;
-}
-
-/** A started camera capture: its id and the first frame's size. */
-export interface NativeVoiceCameraStarted {
-  capture: number;
-  width: number;
-  height: number;
-}
-
-/** A camera preview outside any room (the settings tab): the live preview
- *  plays on the frame socket's `/camera` route. */
-export interface NativeVoiceCameraPreview {
-  width: number;
-  height: number;
-  /** The preview's frame-socket base URL, token included. */
-  frames: string;
-}
-
-export interface NativeVoiceScreenSource {
-  /** What `startScreen` takes. */
-  id: string;
-  kind: "screen" | "window";
-  title: string;
-  /** An image URL of the source as it looks now, when it could be read. */
-  thumbnail: string | null;
-  /** Refresh rate in Hz of the monitor a `screen` source is (X11, from
-   *  XRandR). `null` for windows and when it could not be read. */
-  readonly refreshHz?: number | null;
-}
-
-/** What can be shared. `portal`: the desktop portal's dialog picks
- *  (Wayland), so `sources` is empty and `startScreen` takes `"portal"`. */
-export interface NativeVoiceScreenSources {
-  portal: boolean;
-  sources: NativeVoiceScreenSource[];
-  /** Other applications' sound can be shared with the screen: a PulseAudio
-   *  protocol server (PulseAudio or pipewire-pulse) answered. */
-  audio: boolean;
-}
-
-/** Capture pacing and size cap; 0 for both sizes is the source size. */
-export interface NativeVoiceScreenCapture {
-  fps: number;
-  maxWidth: number;
-  maxHeight: number;
-}
-
-/** A started capture: its id and the first frame's size. */
-export interface NativeVoiceScreenStarted {
-  capture: number;
-  width: number;
-  height: number;
-}
-
-/** How the screen share is published: the capture's size and the web
- *  path's `publishTrack` encoding for it. `simulcast` adds the web path's
- *  720p 15 fps layer (`SCREENSHARE_SIMULCAST_LAYERS`). */
-export interface NativeVoiceScreenOptions {
-  width: number;
-  height: number;
-  maxBitrate: number;
-  maxFramerate: number;
-  simulcast: boolean;
-  /** The codec to publish with. The host defaults to VP8 when it is absent;
-   *  `h264` and `vp9` only go out when `videoCodecs` said the engine can encode them. */
-  codec: NativeVoiceVideoCodec;
-}
-
-/** What a live quality change published: the new publication's sid and the
- *  size the capture now delivers. */
-export interface NativeVoiceScreenQualitySet {
-  sid: string;
-  width: number;
-  height: number;
-}
-
-/** The outcome of `setScreenQuality`. `refused`: nothing changed and the
- *  share goes on (no published share, a stale capture, a source change
- *  pending, or a host that rejected without a stage). `publish`: the
- *  republish failed and only the screen video is unpublished: the capture
- *  and the share audio stay up, so the caller must `stopScreen` or retry
- *  `publishScreen`. */
-export type NativeVoiceScreenQualityResult =
-  | ({ ok: true } & NativeVoiceScreenQualitySet)
-  | { ok: false; stage: "refused" | "publish"; message: string };
-
-/** What the settings tab's mic test starts with (Linux only). */
-export interface NativeMicTestOptions {
-  /** `listDevices` ids; empty selects the host default. */
-  input: string;
-  output: string;
-  audio: NativeVoiceAudioOptions;
-  /** The input volume, percent (0-200). */
-  inputGain: number;
-  /** The output volume, linear (0-1). */
-  outputGain: number;
-  /** The voice gate's threshold on the web path's scale; 0 is no gate. */
-  threshold: number;
-  /** The voice gate also asks RNNoise's verdict (whenever a gate runs). */
-  speech?: boolean;
-  /** Capture and report levels only: no output is opened or played. */
-  monitor?: boolean;
-}
-
-/** A live change to a running mic test. */
-export type NativeMicTestUpdate =
-  | { kind: "processing"; audio: NativeVoiceAudioOptions }
-  | { kind: "inputGain"; percent: number }
-  | { kind: "voiceGate"; threshold: number; retune: boolean; speech?: boolean }
-  | { kind: "outputGain"; gain: number }
-  | { kind: "inputDevice"; deviceId: string }
-  | { kind: "outputDevice"; deviceId: string };
-
-export type NativeMicTestEvent =
-  | { type: "inputLevel"; rms: number; open: boolean }
-  /** The host stopped the test (a call joined). */
-  | { type: "ended" };
-
-export interface NativeMicTestEnvelope {
-  /** The id `startMicTest` resolved with. */
-  test: number;
-  event: NativeMicTestEvent;
-}
-
-/** The host's refusal of a mic test start during a call. */
-// i18n-exempt: the host's refusal code, matched by the tab, never shown
-export const NATIVE_MIC_TEST_IN_CALL = "mic test unavailable during a call";
-
-/** One W3C-shaped stats entry (`RTCStats` field names) of a transport, cut to
- *  what `connectionStats.ts` reads. Times are seconds, as in the W3C reports. */
-export type NativeVoiceStatsEntry =
-  | {
-      type: "candidate-pair";
-      id: string;
-      currentRoundTripTime: number;
-      bytesSent: number;
-      bytesReceived: number;
-    }
-  | { type: "outbound-rtp"; id: string; kind: string; packetsSent: number; bytesSent: number }
-  | {
-      type: "inbound-rtp";
-      id: string;
-      kind: string;
-      packetsReceived: number;
-      bytesReceived: number;
-      packetsLost: number;
-      jitter: number;
-    }
-  | {
-      type: "remote-inbound-rtp";
-      id: string;
-      kind: string;
-      /** The id of the outbound entry this one reports on. */
-      localId: string;
-      packetsLost: number;
-      jitter: number;
-    };
-
-/** A subscribed remote video track's receiver sample. */
-export interface NativeVoiceReceiverSample {
-  frameWidth: number;
-  frameHeight: number;
-  framesDecoded: number;
-  bytesReceived: number;
-  packetsLost: number;
-  packetsReceived: number;
-  mimeType?: string;
-}
-
-/** One encoder layer of a local video track. */
-export interface NativeVoiceSenderLayer {
-  framesPerSecond?: number;
-  frameWidth: number;
-  frameHeight: number;
-  qualityLimitationReason: string;
-  encoderImplementation?: string;
-  active: boolean;
-}
-
-/** One stats sample of a native session. */
-export interface NativeVoiceStats {
-  /** Host wall clock (ms since the epoch) at collection. */
-  atMs: number;
-  publisher: NativeVoiceStatsEntry[];
-  /** Empty in single-PC mode. */
-  subscriber: NativeVoiceStatsEntry[];
-  /** Subscribed remote video by publication sid. */
-  remoteVideo: Record<string, NativeVoiceReceiverSample>;
-  /** Local video by source. */
-  localVideo: { camera?: NativeVoiceSenderLayer[]; screen_share?: NativeVoiceSenderLayer[] };
 }
 
 /** A room key slot. Each sent frame names its sender's slot. */

@@ -4,13 +4,6 @@
   "src/features/members/MemberList.ts": 1000,
   "src/features/moderation/AppealQueue.ts": 550,
   "src/features/moderation/Queue.ts": 900,
-  "src/features/voice/ScreenSharePicker.ts": 550,
-  "src/features/voice/joinOrchestration.ts": 800,
-  "src/features/voice/mediaControl.ts": 550,
-  "src/features/voice/native/nativeLocalVideo.ts": 550,
-  "src/features/voice/native/nativeRoom.ts": 1000,
-  "src/features/voice/videoGrid/gridStreams.ts": 900,
-  "src/features/voice/wsHandlers.ts": 750,
   "src/lib/apiAccount.ts": 550,
   "src/lib/apiShared.ts": 650,
   "src/lib/diagnostics/eventCodes.ts": 600,
@@ -23,6 +16,5 @@
   "src/pages/ConnectPage.ts": 550,
   "src/pages/connect-page/ServerPanel.ts": 650,
   "src/pages/connect-page/login-form/loginFormDom.ts": 600,
-  "src/platform/contracts/nativeVoice.ts": 650,
   "src/stores/members.store.ts": 550
 }
