@@ -278,10 +278,6 @@ video[hidden] + .video-surface {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.video-cell.focused .video-label {
-  top: 8px;
-  bottom: auto;
-}
 .video-live {
   flex-shrink: 0;
   padding: 1px 5px;
@@ -593,8 +589,12 @@ video[hidden] + .video-surface {
 /* The theatre fallback: the tile fills the window when the full-screen API
    is refused (the window itself goes full screen alongside). */
 .video-cell--theatre {
-  position: fixed;
+  /* Over the packed grid's absolute position and inline left and top. */
+  position: fixed !important;
   inset: 0;
+  left: 0 !important;
+  top: 0 !important;
+  transition: none;
   z-index: 1000;
   width: 100% !important;
   height: 100% !important;

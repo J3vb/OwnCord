@@ -22,6 +22,13 @@ describe("video full-screen CSS", () => {
     });
   });
 
+  it.each(["position", "left", "top"])(
+    "the theatre tile's %s wins over the packed grid's placement",
+    (prop) => {
+      expect(cascadedDeclaration(".video-cell--theatre", prop)?.important).toBe(true);
+    },
+  );
+
   it("opens the tile menu above the theatre tile", () => {
     const zIndex = (selector: string): number => {
       const v = cascadedDeclaration(selector, "z-index")?.value.value as

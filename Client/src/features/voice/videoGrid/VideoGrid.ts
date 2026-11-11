@@ -281,7 +281,7 @@ export function createVideoGrid(): VideoGridComponent {
       tabindex: "-1",
     });
 
-    // An exit control, always reachable in focus mode too: the focused
+    // An exit control, always reachable while a tile is focused too: the focused
     // tile's own "Back to grid" nav can be scrolled off, and an empty grid
     // could otherwise cover the chat with no way back (OC video-grid exit).
     st.exitBtn = createElement("button", {
