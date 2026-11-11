@@ -199,7 +199,7 @@ A member in a voice channel can send two kinds of things through the media serve
 
 If your server is dual-homed (e.g. `192.168.1.10` on the LAN and `47.x.x.x` public), leave `voice.node_ip` empty (auto-detect) and set `voice.advertise_internal_ip: true`. LiveKit then advertises the LAN address in addition to the detected public one, so clients on the local network connect directly while remote clients use the public IP.
 
-For LiveKit options OwnCord does not model, you can take ownership of the auto-started server's config: edit `data/livekit.yaml` and delete the header line containing the auto-generated marker — OwnCord will stop regenerating the file on startup (your `keys:` entry must still match `voice.livekit_api_key` / `voice.livekit_api_secret`).
+For LiveKit options OwnCord does not model, you can take ownership of the auto-started server's config: edit `data/livekit.yaml` and delete the header line containing the auto-generated marker — OwnCord will stop regenerating the file on startup (your `keys:` entry must still match `voice.livekit_api_key` / `voice.livekit_api_secret`, and should be the only entry: OwnCord accepts voice connections made with that key only).
 
 ### GitHub / Updates (`github`)
 

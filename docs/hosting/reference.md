@@ -1240,7 +1240,8 @@ manages LiveKit like this:
 network interfaces, and so on), delete the header line that contains the
 auto-generated marker. OwnCord then leaves the file alone on future starts.
 Your `keys:` entry must still match `voice.livekit_api_key` and
-`voice.livekit_api_secret`.
+`voice.livekit_api_secret`. Keep it the only entry: OwnCord accepts voice
+connections made with that key only, and LiveKit signs with any key it has.
 
 If `livekit_binary` is empty and `auto_download_livekit` is off, OwnCord
 assumes you run LiveKit yourself, for example with Docker, systemd or by hand.
@@ -1281,7 +1282,13 @@ Client                     OwnCord Server              LiveKit Server
 **How clients connect:**
 
 - **Proxy path (`/livekit`):** the client connects through OwnCord's HTTPS
-  server. This avoids mixed-content problems. It is the normal path.
+  server. This avoids mixed-content problems. It is the normal path. The
+  server checks each connection here before LiveKit sees it: the token must
+  belong to a voice session the member is in right now, or the connection is
+  refused. The server then connects to LiveKit with a token it issues at that
+  moment, so the connection starts with the member's current rights. Only
+  LiveKit's signalling addresses are passed on (`/rtc`, `/rtc/v1` and their
+  `/validate` forms).
 - **Direct URL (`ws://localhost:7880`):** sent only when `voice.livekit_url` is
   itself a local (loopback) address
   ([protocol.md](../protocol.md#voice_token-server---client-direct)). The client

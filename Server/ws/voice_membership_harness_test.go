@@ -47,6 +47,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── fake room service ──────────────────────────────────────────────────────
@@ -63,6 +64,45 @@ type fakeSFU struct {
 	listFails    bool                                // when set, ListParticipants answers an error
 	onList       func()                              // when set, runs once at the next ListParticipants, before it answers
 	updates      []*lkproto.UpdateParticipantRequest // every UpdateParticipant the hub sent
+	// strictUpdates makes UpdateParticipant behave as the SFU does for an
+	// identity that is not in the room: not_found, and nothing recorded.
+	strictUpdates bool
+	// onMissingUpdate, when set, runs once after a strict update found no participant.
+	onMissingUpdate func()
+	// updatesFail makes UpdateParticipant answer "unavailable".
+	updatesFail bool
+}
+
+// setStrictUpdates turns strictUpdates on or off.
+func (f *fakeSFU) setStrictUpdates(v bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.strictUpdates = v
+}
+
+func (f *fakeSFU) setOnMissingUpdate(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onMissingUpdate = fn
+}
+
+func (f *fakeSFU) setUpdatesFail(v bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updatesFail = v
+}
+
+// updatesFor returns the recorded UpdateParticipant requests for identity.
+func (f *fakeSFU) updatesFor(identity string) []*lkproto.UpdateParticipantRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*lkproto.UpdateParticipantRequest
+	for _, u := range f.updates {
+		if u.GetIdentity() == identity {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // beforeNextList runs fn once, inside the next ListParticipants, before the
@@ -186,8 +226,34 @@ func (f *fakeSFU) handle(w http.ResponseWriter, r *http.Request) {
 		var req lkproto.UpdateParticipantRequest
 		_ = proto.Unmarshal(body, &req)
 		f.mu.Lock()
-		f.updates = append(f.updates, &req)
+		_, present := f.participants[req.GetRoom()][req.GetIdentity()]
+		missing := f.strictUpdates && !present
+		failing := f.updatesFail
+		var onMissing func()
+		switch {
+		case failing:
+			missing = false
+		case missing:
+			onMissing, f.onMissingUpdate = f.onMissingUpdate, nil
+		default:
+			f.updates = append(f.updates, &req)
+		}
 		f.mu.Unlock()
+		if failing {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"code":"unavailable","msg":"temporarily offline"}`))
+			return
+		}
+		if missing {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"code":"not_found","msg":"participant does not exist"}`))
+			if onMissing != nil {
+				onMissing()
+			}
+			return
+		}
 		marshal(&lkproto.ParticipantInfo{Identity: req.GetIdentity()})
 	case "ListRooms":
 		f.mu.Lock()
@@ -238,11 +304,22 @@ type vmHarness struct {
 // to absorb the voice fan-out without the overflow kick.
 func newVMHarness(t *testing.T, n int) *vmHarness {
 	t.Helper()
+	return newVMHarnessWithVoice(t, n, nil)
+}
+
+// newVMHarnessWithVoice lets a test wrap the voice store before the hub starts
+// running; a store swapped in afterwards races the hub's own loops.
+func newVMHarnessWithVoice(t *testing.T, n int, wrap func(VoiceStore) VoiceStore) *vmHarness {
+	t.Helper()
 	database := newHarvestVoiceDB(t)
 	sfu := newFakeSFU()
 	lk := sfu.serve(t)
 
-	hub := newTestHubWith(t, HubOptions{DB: database, Limiter: auth.NewRateLimiter(), LiveKit: lk})
+	opts := HubOptions{DB: database, Limiter: auth.NewRateLimiter(), LiveKit: lk}
+	if wrap != nil {
+		opts.Voice = wrap(service.NewVoiceService(database))
+	}
+	hub := newTestHubWith(t, opts)
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 

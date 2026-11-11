@@ -1,13 +1,13 @@
 package ws
 
 // voice_removed_watch.go: a removed SFU identity stays removed. LiveKit tokens cannot be
-// revoked (they lapse after tokenTTL), so every identity RemoveParticipant removes is
-// remembered for tokenTTL, and a short tick lists those rooms and removes it again if
-// present. Identities carry the join token, so a fresh join is never affected. A leave the
-// client asked for itself (voice_leave, a channel switch, leaving a group DM) is the common
-// case and the client discarded that session, so it is checked only every
-// voiceOwnLeaveWatchEvery ticks; still checked, since a rejoin with the token would put the
-// user in the room with no voice_states row.
+// revoked (they lapse on their own), so every identity RemoveParticipant removes is
+// remembered for voiceRemovedWatchWindow, and a short tick lists those rooms and removes it
+// again if present; each such sighting restarts the window. Identities carry the join token,
+// so a fresh join is never affected. A leave the client asked for itself (voice_leave, a
+// channel switch, leaving a group DM) is the common case and the client discarded that
+// session, so it is checked only every voiceOwnLeaveWatchEvery ticks; still checked, since a
+// rejoin with the token would put the user in the room with no voice_states row.
 
 import (
 	"context"
@@ -18,6 +18,9 @@ import (
 )
 
 const voiceRemovedWatchInterval = 2 * time.Second
+
+// voiceRemovedWatchWindow is how long a removed identity is remembered.
+const voiceRemovedWatchWindow = 12 * time.Minute
 
 // voiceOwnLeaveWatchEvery is how many ticks apart own-leave identities are checked (10 s at the 2 s
 // interval).
@@ -35,7 +38,8 @@ type removedIdentity struct {
 	ownLeave bool
 }
 
-// removedIdentities is the identity -> removal record set; entries expire tokenTTL after the removal.
+// removedIdentities is the identity -> removal record set; entries expire voiceRemovedWatchWindow
+// after the removal, credential or sighting that last restarted them.
 type removedIdentities struct {
 	mu      syncutil.Ranked[lockRankLeaf]
 	entries map[string]removedIdentity
@@ -49,8 +53,9 @@ func (s *removedIdentities) clock() time.Time {
 	return time.Now()
 }
 
-// record remembers one removed identity for tokenTTL from now; a repeat restarts the window.
-// A legacy identity with no join token names the user, not one join, so it is not recorded.
+// record remembers one removed identity for voiceRemovedWatchWindow from now; a repeat restarts
+// the window. A legacy identity with no join token names the user, not one join, so it is not
+// recorded.
 func (s *removedIdentities) record(channelID, userID int64, token string, ownLeave bool) {
 	if token == "" {
 		return
@@ -64,11 +69,11 @@ func (s *removedIdentities) record(channelID, userID int64, token string, ownLea
 	if prev, ok := s.entries[id]; ok && !prev.ownLeave {
 		ownLeave = false
 	}
-	s.entries[id] = removedIdentity{channelID: channelID, userID: userID, token: token, until: s.clock().Add(tokenTTL), ownLeave: ownLeave}
+	s.entries[id] = removedIdentity{channelID: channelID, userID: userID, token: token, until: s.clock().Add(voiceRemovedWatchWindow), ownLeave: ownLeave}
 }
 
-// extend restarts the window of a remembered identity when another token is minted for it, so the window
-// covers that token too.
+// extend restarts the window of a remembered identity when another token is minted for it, so the
+// window covers that token too, and when the watch finds the identity back in its room.
 func (s *removedIdentities) extend(identity string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -76,7 +81,7 @@ func (s *removedIdentities) extend(identity string) {
 	if !ok {
 		return
 	}
-	e.until = s.clock().Add(tokenTTL)
+	e.until = s.clock().Add(voiceRemovedWatchWindow)
 	s.entries[identity] = e
 }
 
@@ -158,6 +163,8 @@ func (h *Hub) enforceRemovedVoiceIdentities(ctx context.Context, includeOwnLeave
 				// it.
 				continue
 			}
+			// Back in the room: keep watching it for a full window from now.
+			h.livekit.removed.extend(id)
 			if err := h.livekit.removeIdentity(ctx, channelID, id); err != nil {
 				slog.Warn("voice removed watch: removing participant failed, retrying next tick",
 					"err", err, "user_id", e.userID, "channel_id", channelID)
