@@ -12,7 +12,7 @@ import (
 
 // ─── B5 Condition 6: withdrawn authority never reaches a later attempt ──────
 //
-// The R3 tests in push_dispatch_test.go pin each per-attempt recheck on its
+// The R3 tests in push_dispatch_recheck_test.go pin each per-attempt recheck on its
 // own, withdrawing through raw DB writes at a single boundary. This file
 // is the Condition 6 proof: the withdrawal goes through the services a user
 // actually reaches (PushService.Revoke, BlockService.BlockUser), the message
