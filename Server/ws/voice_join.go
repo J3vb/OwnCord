@@ -81,9 +81,15 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 	}
 	tokenDone := time.Now()
 
-	if h.voiceJoinComplete(ctx, txn, c, ch, channelID, state, reqID) {
+	completed, rolledBack := h.voiceJoinComplete(ctx, txn, c, ch, channelID, state, reqID)
+	if completed {
 		h.voice.NoteJoinCompleted(channelID, c.userID)
 		h.stats.latency.ObserveVoiceJoin(start, precheckDone, leaveDone, persistDone, tokenDone, time.Now())
+	} else if rolledBack {
+		// The ChannelStates read failed and the join deleted the row holding the
+		// flags; re-stash as above. A superseded join is not rolledBack: its
+		// evictor owns the flags.
+		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 	}
 }
 

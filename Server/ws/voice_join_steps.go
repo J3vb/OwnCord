@@ -140,8 +140,11 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client,
 // voiceJoinComplete finishes a join that survived every guard: topic
 // subscription, key-holder election, the joiner's voice_state fan-out, existing
 // participants' states and E2EE keys, and voice_config. Returns false when the
-// join was superseded or rolled back.
-func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, ch *db.Channel, channelID int64, state *db.VoiceState, reqID string) bool {
+// join was superseded or rolled back; rolledBack is true only for the rollback
+// this function performed itself (the row and the flags it held are gone, so the
+// caller puts the moderator stash back). A superseded join returns false with
+// rolledBack false: the evictor that won owns the flags.
+func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, ch *db.Channel, channelID int64, state *db.VoiceState, reqID string) (completed, rolledBack bool) {
 	// Tail guard: a concurrent eviction (revocation sweep, participant_left webhook,
 	// moderator kick/move) can land on this join instance after the commit. Evictors
 	// clear the client's voice state and delete the row, so completing here would
@@ -156,7 +159,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 		curChID, _ := c.voice.state()
 		slog.Info("ws handleVoiceJoin: join superseded before completion",
 			"user_id", c.userID, "channel_id", channelID, "current_channel_id", curChID)
-		return false
+		return false, false
 	}
 
 	// Update key holder map now that this client's voice state is set.
@@ -177,7 +180,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 		slog.Error("ws handleVoiceJoin ChannelStates", "err", err)
 		h.rollbackVoiceJoin(ctx, txn, c, channelID, state.JoinedAt, true)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "failed to join voice channel", reqID))
-		return false
+		return false, true
 	}
 	for _, vs := range existing {
 		if vs.UserID == c.userID {
@@ -212,5 +215,5 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 		"channel_users", len(existing),
 		"channel_max", maxUsers,
 	)
-	return true
+	return true, false
 }
