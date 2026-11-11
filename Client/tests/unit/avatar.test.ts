@@ -315,9 +315,6 @@ describe("createAvatarElement with deferUntilVisible", () => {
       vi.useRealTimers();
     });
 
-    /** 6,000 px in one 16 ms frame in an 800 px view: far past flying. */
-    const fly = (report: (d: number, t: number, v: number) => void): void => report(6000, 16, 800);
-
     it("starts at once below flying speed", async () => {
       fetchImageAsObjectUrl.mockResolvedValue(null);
       const { reportListScroll } = await load();
@@ -331,7 +328,7 @@ describe("createAvatarElement with deferUntilVisible", () => {
     it("waits while flying, then starts the rows still in view after the settle time", async () => {
       fetchImageAsObjectUrl.mockResolvedValue(null);
       const mod = await load();
-      fly(mod.reportListScroll);
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
       const el = mount(mod.createAvatarElement, 1);
       show(el);
       expect(fetchImageAsObjectUrl).not.toHaveBeenCalled();
@@ -347,10 +344,10 @@ describe("createAvatarElement with deferUntilVisible", () => {
     it("keeps pushing the settle time back while frames keep flying", async () => {
       fetchImageAsObjectUrl.mockResolvedValue(null);
       const mod = await load();
-      fly(mod.reportListScroll);
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
       show(mount(mod.createAvatarElement, 1));
       vi.advanceTimersByTime(80);
-      fly(mod.reportListScroll);
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
       vi.advanceTimersByTime(80);
       expect(fetchImageAsObjectUrl).not.toHaveBeenCalled();
       vi.advanceTimersByTime(20);
@@ -360,7 +357,7 @@ describe("createAvatarElement with deferUntilVisible", () => {
     it("never starts a row that left the view before the list settled", async () => {
       fetchImageAsObjectUrl.mockResolvedValue(null);
       const mod = await load();
-      fly(mod.reportListScroll);
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
       const gone = mount(mod.createAvatarElement, 1);
       const kept = mount(mod.createAvatarElement, 2);
       show(gone);
@@ -379,7 +376,7 @@ describe("createAvatarElement with deferUntilVisible", () => {
     it("starts no download, and keeps no reference, for a row removed while it waited", async () => {
       fetchImageAsObjectUrl.mockResolvedValue(null);
       const mod = await load();
-      fly(mod.reportListScroll);
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
       const gone = mount(mod.createAvatarElement, 1);
       show(gone);
       gone.remove();
@@ -393,7 +390,7 @@ describe("createAvatarElement with deferUntilVisible", () => {
       fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,AAA");
       hasCachedImage.mockReturnValue(true);
       const mod = await load();
-      fly(mod.reportListScroll);
+      mod.reportListScroll(6000, 16, 800); // far past flying speed
       const el = mount(mod.createAvatarElement, 1);
       show(el);
       expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
