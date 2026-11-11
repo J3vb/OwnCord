@@ -552,7 +552,7 @@ func (h *Hub) DeliverBroadcastForTest(channelID int64, recipients []int64, msg [
 // as DeliverBroadcastForTest.
 func (h *Hub) SendSequencedToUsersForTest(channelID int64, userIDs []int64, msg []byte) uint64 {
 	before := atomic.LoadUint64(&h.seq)
-	h.sendSequencedToUsers(channelID, userIDs, msg)
+	h.sendSequencedToUsers(channelID, userIDs, 0, msg)
 	if after := atomic.LoadUint64(&h.seq); after != before {
 		return after
 	}

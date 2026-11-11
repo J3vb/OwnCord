@@ -18,6 +18,10 @@ type broadcastMsg struct {
 	// not disclose a channel the recipient cannot READ; the audience is resolved off
 	// the hub goroutine so deliverBroadcast stays free of permission queries.
 	recipients []int64
+	// audienceMark, when non-zero, is audienceMark() read before recipients was
+	// resolved. recipients lists users connected at that moment, so delivery also
+	// reaches a connection that resumed since (sendToLateResumes).
+	audienceMark uint64
 	// excludeUserID, when non-zero, is omitted from a global (channelID == 0)
 	// broadcast. Used for the public half of an invisible user's presence
 	// (BroadcastToAllExcept): the owner's view comes from a separate synchronous
@@ -85,17 +89,20 @@ func (h *Hub) BroadcastToAllExcept(excludeUserID int64, msg []byte) {
 // (EventsSinceFiltered replays channelID 0 unconditionally). kind only labels the
 // drop warning.
 func (h *Hub) broadcastChannelScoped(ctx context.Context, channelID int64, msg []byte, kind string) {
-	h.broadcastChannelScopedTo(channelID, msg, h.channelReadAudience(ctx, channelID), kind)
+	mark := h.audienceMark()
+	h.broadcastChannelScopedTo(channelID, msg, h.channelReadAudience(ctx, channelID), mark, kind)
 }
 
 // broadcastChannelScopedTo enqueues msg for a pre-resolved audience, so callers
 // fanning out several messages for one channel (CleanupVoiceForChannel) resolve it
-// once. recipients is only read after enqueue, so sharing the slice is safe.
-func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients []int64, kind string) {
+// once. recipients is only read after enqueue, so sharing the slice is safe. mark
+// is audienceMark() read before recipients was resolved.
+func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients []int64, mark uint64, kind string) {
 	h.enqueue(broadcastMsg{
-		channelID:  channelID,
-		msg:        msg,
-		recipients: recipients,
+		channelID:    channelID,
+		msg:          msg,
+		recipients:   recipients,
+		audienceMark: mark,
 	}, kind)
 }
 
@@ -298,7 +305,10 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 // lower-seq frames still in send. The client acks max(seq) and replay is strictly
 // seq > last_seq, so a disconnect then would silently lose the overtaken events.
 // The high queue is for unsequenced targeted messages only.
-func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
+//
+// mark is audienceMark() read before userIDs was resolved from the connected
+// users, or zero when userIDs does not depend on who is connected.
+func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, mark uint64, msg []byte) {
 	// The replay copy's JSON work happens before the lock.
 	rs := newReplaySplice(msg)
 	contentBearing := contentBearingKinds[extractEventType(msg)]
@@ -319,6 +329,7 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	for _, userID := range userIDs {
 		h.SendToUser(userID, wrapped)
 	}
+	h.sendToLateResumes(mark, channelID, userIDs, wrapped)
 }
 
 // deliverGated stamps bm.msg with a monotonic seq, stores it in the replay buffer
@@ -387,7 +398,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 			// The deny-all gate withheld this frame from subscribers it may not have meant to
 			// skip: a resume at or behind it must take the full-ready path, a connected one resync.
 			h.bumpVisibilityWatermark()
-			h.markLoss(lossRoute{channelID: bm.channelID, recipients: bm.recipients})
+			h.markLoss(lossRoute{channelID: bm.channelID, recipients: bm.recipients, audienceMark: bm.audienceMark})
 		}
 
 		stored := storedCopy(rs, bm.msg, msg, seq)
@@ -406,6 +417,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 			for _, userID := range bm.recipients {
 				h.SendToUser(userID, msg)
 			}
+			h.sendToLateResumes(bm.audienceMark, bm.channelID, bm.recipients, msg)
 		case bm.channelID == 0:
 			h.publishGlobal(bm, msg, seq, private)
 		default:

@@ -284,6 +284,10 @@ func (h *Hub) unregisterNow(c *Client) bool {
 	if h.removeClientLocked(c) {
 		slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", h.connectionCountLocked())
 		h.mu.Unlock()
+		// Close before stripping, as kickClient and registerNow's replace do:
+		// Subscribe refuses a closed client, so a handler still running for c (a
+		// deferred channel_focus) cannot re-take a topic nothing would strip again.
+		c.closeSend()
 		h.pubsub.UnsubscribeAll(c)
 		return false // not replaced
 	}

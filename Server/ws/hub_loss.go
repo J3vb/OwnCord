@@ -24,6 +24,8 @@ type lossRoute struct {
 	channelID     int64
 	recipients    []int64
 	excludeUserID int64
+	// audienceMark is the lost frame's broadcastMsg.audienceMark.
+	audienceMark uint64
 }
 
 // markLoss marks every connected recipient of r. Called under seqMu.
@@ -34,6 +36,9 @@ func (h *Hub) markLoss(r lossRoute) {
 		for _, uid := range r.recipients {
 			clients = append(clients, h.clientsOf(uid)...)
 		}
+		// The wider voice match is used whatever the frame was: marking a
+		// connection that would not have received it costs one resync.
+		clients = append(clients, h.lateResumes(r.audienceMark, r.channelID, r.recipients, true)...)
 	case r.channelID != 0:
 		clients = h.pubsub.subscribers(ChannelTopic(r.channelID), 0)
 	default:
@@ -67,7 +72,9 @@ func (h *Hub) noteDropRoute(bm broadcastMsg) {
 	q := &h.stats.queueDrops
 	q.mu.Lock()
 	if len(q.routes) < queueDropRouteCap {
-		q.routes = append(q.routes, lossRoute{channelID: bm.channelID, recipients: bm.recipients, excludeUserID: bm.excludeUserID})
+		q.routes = append(q.routes, lossRoute{
+			channelID: bm.channelID, recipients: bm.recipients, excludeUserID: bm.excludeUserID, audienceMark: bm.audienceMark,
+		})
 	} else {
 		q.routesOverflow = true
 	}

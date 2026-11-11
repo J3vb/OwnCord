@@ -68,7 +68,10 @@ func drainFor(ch <-chan []byte, d time.Duration) [][]byte {
 	var out [][]byte
 	for {
 		select {
-		case m := <-ch:
+		case m, ok := <-ch:
+			if !ok {
+				return out
+			}
 			out = append(out, m)
 		case <-time.After(d):
 			return out
