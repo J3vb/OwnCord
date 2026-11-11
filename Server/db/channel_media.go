@@ -23,10 +23,13 @@ type MediaCursor struct {
 
 // ChannelMediaQuery is one gallery request over a single channel; every value is a bound argument.
 type ChannelMediaQuery struct {
-	ChannelID  int64
-	ViewerID   int64
-	Kind       string
-	Name       string
+	ChannelID int64
+	// ViewerID is the caller; media from users they blocked is left out.
+	ViewerID int64
+	Kind     string
+	// Name keeps attachments whose file name contains it, ASCII case-insensitive.
+	Name string
+	// UploaderID keeps media posted by this user; 0 means anyone.
 	UploaderID int64
 	Oldest     bool
 	// From, when set, is where the walk starts (newest-first keeps messages before

@@ -8,14 +8,15 @@ type ChannelThread struct {
 	// Archived is the thread's own idle state, not Channel.Archived: an
 	// archived thread stays readable and a new message reopens it.
 	Archived bool
-	Locked   bool
+	// Locked lets only members with MANAGE_MESSAGES post, react or pin.
+	Locked bool
 }
 
 // IsThread reports whether the channel is a thread under a text channel.
 func (c *Channel) IsThread() bool { return c.Thread.ParentID != 0 }
 
 // AuthorityID is the channel whose overrides, NSFW consent and archive state govern
-// this one: the parent for a thread.
+// this one: the parent for a thread, itself otherwise.
 func (c *Channel) AuthorityID() int64 {
 	if c.Thread.ParentID != 0 {
 		return c.Thread.ParentID

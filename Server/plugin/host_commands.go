@@ -26,7 +26,8 @@ func (r *Registry) RegisterCommand(cmd string, inst *Instance) error {
 	if !inst.Manifest.HasCapability(CapCommands) {
 		return ErrCapabilityNotGranted
 	}
-	// The manifest is the authority on which commands a plugin may claim.
+	// The manifest is the authority on which commands a plugin may claim; this single choke point is where
+	// auto-registration and direct registration both route.
 	if !inst.Manifest.DeclaresCommand(cmd) {
 		return fmt.Errorf("%w: %s/%s", ErrCommandNotDeclared, inst.Manifest.Name, cmd)
 	}

@@ -24,8 +24,11 @@ import (
 type contextKey int
 
 const (
+	// UserKey is the context key for the authenticated *db.User.
 	UserKey contextKey = iota
+	// SessionKey is the context key for the authenticated *db.Session.
 	SessionKey
+	// RoleKey is the context key for the *db.Role of the authenticated user.
 	RoleKey
 )
 
@@ -173,7 +176,7 @@ func resolvePrincipal(ctx context.Context, sessions *service.SessionService, tou
 }
 
 // AuthMiddleware validates the "Authorization: Bearer <token>" session and injects user and session
-// into the request context.
+// into the request context. 401 if the token is missing, invalid or expired.
 func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Handler {
 	touches := &touchThrottle{seen: make(map[string]time.Time)}
 	return func(next http.Handler) http.Handler {

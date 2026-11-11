@@ -42,7 +42,7 @@ func ValidateUsername(username string) error {
 }
 
 // ExtractBearerToken returns the token from the "Authorization: Bearer" header,
-// or "", false if it is absent, another scheme, or empty.
+// or "", false if it is absent, another scheme, or empty. The scheme is matched case-insensitively.
 func ExtractBearerToken(r *http.Request) (string, bool) {
 	header := r.Header.Get("Authorization")
 	if header == "" {

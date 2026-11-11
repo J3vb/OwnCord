@@ -56,8 +56,11 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 
 // UserListFilter narrows ListAllUsers for the admin Members page; the zero value lists everyone.
 type UserListFilter struct {
-	Query      string
-	RoleID     int64
+	// Query is a case-insensitive substring of the username or nickname; empty matches all.
+	Query string
+	// RoleID keeps one role; 0 means any role.
+	RoleID int64
+	// BannedOnly keeps only effectively banned users (a lapsed temporary ban does not count).
 	BannedOnly bool
 }
 

@@ -13,10 +13,12 @@ import (
 type AppealWriteOutcome int
 
 const (
+	// AppealWriteOK: the write (and, for an overturn, its reversal) landed.
 	AppealWriteOK AppealWriteOutcome = iota
 	// AppealWriteConflict: the observed state/assignee was stale, or the moderator no
 	// longer resolves to a user.
 	AppealWriteConflict
+	// AppealWriteSelfReview: another eligible reviewer exists.
 	AppealWriteSelfReview
 	// AppealWriteReversalFailed: the overturn hit a real reversal error and the
 	// whole transaction rolled back; the appellant is never told "overturned" while the
@@ -138,6 +140,7 @@ func (d *DB) DecideAppealTx(
 		}
 	}
 
+	// Authority is re-read fresh, never trusted from before the transaction.
 	if checkAuthority != nil {
 		rolePerms, banned, banExpires, ok := deciderAuthority(ctx, tx, decidedBy)
 		if !ok {
@@ -191,6 +194,7 @@ func (d *DB) DecideAppealTx(
 		return AppealWriteConflict, false, false, nil
 	}
 
+	// The reversal runs in this transaction, so its failure rolls back the decision UPDATE too.
 	if outcome == "overturned" {
 		reversalApplied, err = applyAppealReversalTx(ctx, tx, q, action.Kind, action.ID, action.TargetID)
 		if err != nil {

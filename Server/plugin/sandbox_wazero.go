@@ -114,7 +114,8 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 	// manifest did not declare, so a guest cannot widen its command surface.
 	r.mu.Lock()
 	if inst.module != nil {
-		// Lost a concurrent activation race: keep the winner's module.
+		// Lost a concurrent activation race: keep the winner's module. Our compile is closed only if the
+		// winner is not running on the same retained one.
 		shared := inst.compiled == compiled
 		r.mu.Unlock()
 		_ = module.Close(ctx)
@@ -173,8 +174,9 @@ func (r *Registry) platformDeactivate(ctx context.Context, inst *Instance) {
 	inst.compiled = nil
 }
 
-// invokeCommand calls the guest's `command_dispatch`. No export returns (nil, false)
-// (dispatcher falls back to not-found); a missing allocate returns a diagnostic.
+// invokeCommand calls the guest's `command_dispatch` over a JSON ABI: allocate(size) -> ptr,
+// command_dispatch(ptr, len) -> (result_ptr, result_len), deallocate(ptr, len). No export returns
+// (nil, false) (dispatcher falls back to not-found); a missing allocate returns a diagnostic.
 func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, channelID int64, cmd string, args []string) (*CommandResult, bool) {
 	if inst == nil {
 		return nil, false

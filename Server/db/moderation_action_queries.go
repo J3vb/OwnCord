@@ -254,8 +254,8 @@ func (d *DB) LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedID
 
 // LiftTimeoutActionsByID marks each of ids lifted if still an active timeout; others
 // are skipped. It runs in the caller's tx and does only the ledger write (no rank
-// check, voice half or audit row; see ModerationService.FinalizeTimeoutLift),
-// returning the ids lifted.
+// check, voice half or audit row), returning the ids lifted. The caller owns authorization and the
+// post-commit effects (ModerationService.FinalizeTimeoutLift).
 func LiftTimeoutActionsByID(ctx context.Context, tx *sql.Tx, ids []int64, liftedBy int64) ([]int64, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -346,7 +346,8 @@ func (d *DB) ListModerationActionsForReport(ctx context.Context, reportID int64)
 	return out, nil
 }
 
-// BanUserWithAction is BanUser plus a ledger row in one transaction.
+// BanUserWithAction is BanUser plus a ledger row in one transaction, so a ban never lands without the
+// entry an appeal will reference.
 func (d *DB) BanUserWithAction(ctx context.Context, targetID int64, reason string, expires *time.Time, actorID int64, reportID *int64) (int64, error) {
 	if moderationActionPreBeginTxHook != nil {
 		moderationActionPreBeginTxHook()

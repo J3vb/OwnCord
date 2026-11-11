@@ -17,17 +17,22 @@ var ErrSearchUnscoped = errors.New("search query has no channel scope")
 type SearchQuery struct {
 	// Text is the raw search words; when nothing searchable survives sanitising the query
 	// is filter-only, newest first.
-	Text       string
+	Text string
+	// ChannelIDs is the required, non-empty channel scope.
 	ChannelIDs []int64
-	AuthorIDs  []int64
+	// AuthorIDs, when non-empty, keeps messages by any of these users (OR).
+	AuthorIDs []int64
 	// AfterTS keeps timestamp >= AfterTS and BeforeTS timestamp < BeforeTS, in the stored
 	// "YYYY-MM-DD HH:MM:SS" UTC format; empty is unbounded.
 	AfterTS, BeforeTS string
 	// MentionIDs keeps messages that mention every one of these users in their text;
 	// reply-ping rows and @everyone do not count.
 	MentionIDs []int64
-	Has        []string
-	Pinned     *bool
+	// Has keeps messages that satisfy every kind (link, file, image, video, sound); attachment kinds
+	// only see attachments linked to the message.
+	Has []string
+	// Pinned, when set, keeps messages whose pinned flag equals it.
+	Pinned *bool
 }
 
 // HasSearchTerms reports whether text has anything left to search once sanitised for FTS5.

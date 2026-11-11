@@ -106,7 +106,7 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 
 // CreateUserWithInvite consumes an invite, creates the user and inserts the first
 // session in one transaction, so a failure leaves no half-registered account and does
-// not burn the invite.
+// not burn the invite. sessionTokenHash must already be hashed.
 func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {

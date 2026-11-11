@@ -159,8 +159,8 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 }
 
 // retentionCandidates is the WHERE clause of everything retention may remove in a
-// channel: older than the cutoff (UTC 'YYYY-MM-DD HH:MM:SS', compared bytewise), not
-// pinned, tombstones included.
+// channel: older than the cutoff (UTC 'YYYY-MM-DD HH:MM:SS', compared bytewise, so format the cutoff
+// the same way), not pinned, tombstones included.
 const retentionCandidates = `channel_id = ? AND pinned = 0 AND timestamp < ?`
 
 // CountRetentionCandidates previews how many messages a sweep would remove.

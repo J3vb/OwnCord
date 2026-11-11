@@ -244,7 +244,8 @@ type deleteAccountRequest struct {
 }
 
 // handleDeleteAccount processes DELETE /api/v1/auth/account; the caller must supply their current password.
-// The lockout, compare and member_ban broadcast are the service's.
+// The lockout, compare and member_ban broadcast are the service's. The logged IP is resolved through
+// trusted_proxies like every other auth route's.
 func handleDeleteAccount(svc AuthService, trustedProxies []string) http.HandlerFunc {
 	proxyNets := parseCIDRList(trustedProxies)
 	return func(w http.ResponseWriter, r *http.Request) {

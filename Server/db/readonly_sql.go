@@ -99,8 +99,8 @@ func isIdentByte(c byte) bool {
 	return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-// hasKeywordPrefix reports whether s starts with keyword followed by a non-identifier
-// character or end of input.
+// hasKeywordPrefix reports whether s starts with keyword (ASCII case-insensitive) followed by a
+// non-identifier character or end of input.
 func hasKeywordPrefix(s, keyword string) bool {
 	if len(s) < len(keyword) || !strings.EqualFold(s[:len(keyword)], keyword) {
 		return false

@@ -29,7 +29,8 @@ func memberBannerOf(bannerID, color *string) *MemberBanner {
 
 // MemberRoleSet is a member's displayed role and every role they hold.
 type MemberRoleSet struct {
-	Role    string  `json:"role"`
+	Role string `json:"role"`
+	// RoleIDs is every held role, top role first; never nil from ListMembers.
 	RoleIDs []int64 `json:"role_ids"`
 }
 

@@ -23,8 +23,10 @@ type ChannelForum struct {
 	DefaultAutoArchiveMinutes int        `json:"default_auto_archive_minutes"`
 }
 
+// ForumTypeName is the channels.type value of a forum.
 const ForumTypeName = "forum"
 
+// MaxForumTags is the most tags one forum may hold.
 const MaxForumTags = 20
 
 func forumTagFromGen(r dbgen.ForumTag) ForumTag {
@@ -163,6 +165,8 @@ func replaceForumTags(ctx context.Context, q *dbgen.Queries, forumID int64, tags
 			}
 		}
 	}
+	// Park kept tags under unique placeholders so swapped names cannot collide mid-write; a real name
+	// holds no control character.
 	for id := range keep {
 		if _, err := q.UpdateForumTag(ctx, dbgen.UpdateForumTagParams{
 			Name: fmt.Sprintf("\x01%d", id), ID: id, ForumID: forumID,

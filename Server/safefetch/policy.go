@@ -32,7 +32,7 @@ type Policy struct {
 	// listing "https" alone also refuses a redirect to "http".
 	Schemes []string
 
-	// Ports is the allowed destination ports; empty means each allowed scheme's default.
+	// Ports is the allowed destination ports; empty means each allowed scheme's default and nothing else.
 	Ports []int
 
 	// ContentTypes is the lowercase media-type allowlist; both the declared and
@@ -55,7 +55,8 @@ type Policy struct {
 	// stream can inflate past any amount of memory.
 	MaxDecompressedBytes int64
 
-	// MaxConcurrent bounds this Fetcher's fetches in flight.
+	// MaxConcurrent bounds this Fetcher's fetches in flight; a caller over the cap waits for a slot until
+	// its context expires.
 	MaxConcurrent int
 
 	// Truncate returns the first MaxDecompressedBytes of a longer body instead of

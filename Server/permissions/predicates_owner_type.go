@@ -14,38 +14,41 @@ func ownerOrExplicit(rolePerms int64, bit int64, topRoleID int64, topRolePositio
 	return IsOwner(topRoleID, topRolePosition) || HasPerm(rolePerms, bit)
 }
 
-// CanRestoreBackups reports whether a principal may restore or delete a backup
-// or download the full archive: the owner or an explicit RESTORE_BACKUPS holder.
+// CanRestoreBackups reports whether a principal may restore or delete a backup, download the full
+// archive and redeem those links: the owner or an explicit RESTORE_BACKUPS holder. Administrator does
+// not pass.
 func CanRestoreBackups(rolePerms, topRoleID int64, topRolePosition int) bool {
 	return ownerOrExplicit(rolePerms, RestoreBackups, topRoleID, topRolePosition)
 }
 
-// CanListBackups reports whether a principal may create or restore backups.
+// CanListBackups reports whether a principal may list backups: anyone who may create or restore one.
 func CanListBackups(rolePerms, topRoleID int64, topRolePosition int) bool {
 	return CanManageBackups(rolePerms, topRoleID, topRolePosition) ||
 		CanRestoreBackups(rolePerms, topRoleID, topRolePosition)
 }
 
 // CanManageConfig reports whether a principal may change config overrides and
-// restart the server: the owner or an explicit MANAGE_CONFIG holder.
+// restart the server: the owner or an explicit MANAGE_CONFIG holder. Administrator does not pass.
 func CanManageConfig(rolePerms, topRoleID int64, topRolePosition int) bool {
 	return ownerOrExplicit(rolePerms, ManageConfig, topRoleID, topRolePosition)
 }
 
 // CanManageUpdates reports whether a principal may check for and apply updates:
-// the owner or an explicit MANAGE_UPDATES holder.
+// the owner or an explicit MANAGE_UPDATES holder. Administrator does not pass.
 func CanManageUpdates(rolePerms, topRoleID int64, topRolePosition int) bool {
 	return ownerOrExplicit(rolePerms, ManageUpdates, topRoleID, topRolePosition)
 }
 
 // CanManageTokens reports whether a principal may use the API token routes: the
 // owner or an explicit MANAGE_TOKENS holder (confined to their own tokens by the handler).
+// Administrator does not pass.
 func CanManageTokens(rolePerms, topRoleID int64, topRolePosition int) bool {
 	return ownerOrExplicit(rolePerms, ManageTokens, topRoleID, topRolePosition)
 }
 
 // CanIssueRecovery reports whether a principal may issue a recovery credential:
 // the owner or an explicit ISSUE_RECOVERY holder, who must outrank the target (enforced by the service).
+// Administrator does not pass.
 func CanIssueRecovery(rolePerms, topRoleID int64, topRolePosition int) bool {
 	return ownerOrExplicit(rolePerms, IssueRecovery, topRoleID, topRolePosition)
 }

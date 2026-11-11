@@ -12,6 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
+// ErrChannelFull is returned when a voice channel is at capacity.
 var ErrChannelFull = errors.New("voice channel is full")
 
 var voiceJoinSeq uint64
@@ -204,11 +205,13 @@ func (d *DB) SetVoiceServerMute(ctx context.Context, userID, channelID int64, se
 // conditional UPDATE (WHERE server_muted = 0) applies the mute and stamps
 // actionID as owner on a genuine unmuted->muted transition, so a concurrent lift
 // has no gap to race.
-// ¶ matched=false covers "no such session" and "actionID is no longer an active
+//
+// matched=false covers "no such session" and "actionID is no longer an active
 // timeout on this target" (a delayed call after its row was lifted or expired
 // is refused, not a fresh mute). "Already muted by something else" is
 // matched=true, transitioned=false.
-// ¶ supersededIDs, when non-empty, first transfers ownership from those ledger
+//
+// supersededIDs, when non-empty, first transfers ownership from those ledger
 // ids onto actionID in this transaction. TimeoutUser cannot, because the
 // transfer must happen under the ws per-target lock the caller
 // (ws.Hub.MuteForTimeout) holds for the paired SFU call; outside it a failed

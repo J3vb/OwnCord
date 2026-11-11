@@ -129,6 +129,7 @@ var erasureStatements = []struct {
 	{"totp_recovery_codes", `DELETE FROM totp_recovery_codes WHERE user_id = ?`},
 	{"recovery_kits", `DELETE FROM recovery_kits WHERE user_id = ?`},
 	{"recovery_assists", `DELETE FROM recovery_assists WHERE user_id = ?`},
+	// Credentials the subject issued to others stay valid; the issuer link becomes the system actor.
 	{"recovery_assists issuer", `UPDATE recovery_assists SET issued_by = 0 WHERE issued_by = ?`},
 	{"voice_states", `DELETE FROM voice_states WHERE user_id = ?`},
 	// Retention policy setter: no FK, so the id would outlive the erasure; the
@@ -308,7 +309,10 @@ func erasureReassignAssets(ctx context.Context, tx *sql.Tx, userID int64) ([]str
 	}
 }
 
+// erasureDeleteAssetRows deletes the subject's rows of one asset table and returns their stored file
+// names. table is a fixed literal.
 func erasureDeleteAssetRows(ctx context.Context, tx *sql.Tx, table string, userID int64) ([]string, error) {
+	// G202: table is a fixed literal from the caller, never request data.
 	rows, err := tx.QueryContext(ctx, `DELETE FROM `+table+` WHERE uploaded_by = ? RETURNING filename`, userID) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("EraseAccount delete %s: %w", table, err)
@@ -330,13 +334,14 @@ func erasureDeleteAssetRows(ctx context.Context, tx *sql.Tx, table string, userI
 
 func referencedStoredFilesSQL(n int) string {
 	in := strings.TrimSuffix(strings.Repeat("?,", n), ",")
+	// G202: `in` is "?" placeholders only; every name is bound by the caller.
 	return `SELECT stored_as FROM attachments WHERE stored_as IN (` + in + `)` + //nolint:gosec
 		` UNION SELECT filename FROM emoji WHERE filename IN (` + in + `)` +
 		` UNION SELECT filename FROM stickers WHERE filename IN (` + in + `)`
 }
 
-// ReferencedStoredFiles reports which of names are still referenced by a row, for
-// storage reconciliation.
+// ReferencedStoredFiles reports which of names are still referenced by a row, for storage
+// reconciliation: a file no row names is stranded and may be removed.
 func (d *DB) ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error) {
 	referenced := make(map[string]bool, len(names))
 	const chunk = 200

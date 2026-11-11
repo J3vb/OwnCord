@@ -114,6 +114,8 @@ func insertForwardRow(ctx context.Context, q *dbgen.Queries, messageID int64, f 
 	return nil
 }
 
+// attachForwards fills Forward on every ordinary, live forward row in msgs with one batched read.
+// SourceMessageID is null when the original is soft deleted or purged.
 func (d *DB) attachForwards(ctx context.Context, msgs []MessageAPIResponse) error {
 	var ids []int64
 	for i := range msgs {

@@ -118,6 +118,9 @@ func stripDefaultPort(scheme, host string) string {
 	}
 }
 
+// isOriginAllowed reports whether r's Origin is allowed. No Origin, a same-origin Host match and the
+// first-party webview origins always pass; an empty allowedOrigins denies every other origin, and only
+// "*" allows all.
 func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {

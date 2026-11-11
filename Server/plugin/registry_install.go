@@ -97,6 +97,7 @@ func (r *Registry) InstallFromZip(ctx context.Context, zipBytes []byte) (string,
 }
 
 // installZipExtract writes every entry into stageAbs, enforcing zip-slip, symlink and size caps per entry.
+// The caller owns stageAbs and removes it on any error.
 func installZipExtract(zr *zip.Reader, stageAbs string) error {
 	var totalUncompressed int64
 	for _, f := range zr.File {

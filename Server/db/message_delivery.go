@@ -13,10 +13,14 @@ import (
 )
 
 var (
+	// ErrMessageDeliveryConflict refuses reuse of a logical id for another send.
 	ErrMessageDeliveryConflict = errors.New("message delivery id was already used for another payload")
-	ErrMessageDeliveryDeleted  = errors.New("message is deleted")
-	ErrMessageDeliveryEmpty    = errors.New("message content cannot be empty")
-	ErrMessageDeliveryExpired  = errors.New("message delivery id expired")
+	// ErrMessageDeliveryDeleted keeps a retry from resurrecting removed content.
+	ErrMessageDeliveryDeleted = errors.New("message is deleted")
+	// ErrMessageDeliveryEmpty means none of an attachment-only send's uploads linked.
+	ErrMessageDeliveryEmpty = errors.New("message content cannot be empty")
+	// ErrMessageDeliveryExpired closes the queue-wait gap after service validation.
+	ErrMessageDeliveryExpired = errors.New("message delivery id expired")
 	// ErrMessageDeliveryBeforeRestore refuses a send whose receipt may have been discarded
 	// by restoring an older database.
 	ErrMessageDeliveryBeforeRestore = errors.New("message delivery predates database restore")
@@ -60,8 +64,10 @@ type MessageDeliveryParams struct {
 
 // MessageDelivery is the committed result; a duplicate carries only the original id and timestamp.
 type MessageDelivery struct {
-	Message             *Message
-	Duplicate           bool
+	Message   *Message
+	Duplicate bool
+	// LinkedAttachmentIDs are the requested uploads this send attached, set only on a fresh commit (a
+	// duplicate does not re-link).
 	LinkedAttachmentIDs []string
 	// Thread is the post a forum-post send created, set only on a fresh commit;
 	// Message.ChannelID is then that thread.

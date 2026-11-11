@@ -9,7 +9,8 @@ import (
 // Subject. Nil means allowed; non-nil is a sentinel from this package or wraps
 // ErrPermissionDenied with the missing bit, so callers map it to their own status.
 
-// ErrArchived is returned for a write to, or client surface for, an archived channel.
+// ErrArchived is returned for a write to, or client surface for, an archived channel. History stays
+// readable, so read paths do not consult it.
 var ErrArchived = errors.New("channel is archived")
 
 // ErrThreadLocked is returned for a post or reaction in a locked thread without MANAGE_MESSAGES.
@@ -167,7 +168,9 @@ func CanAddReaction(s Subject) error {
 
 // CanDeleteMessage is the delete policy: READ and MANAGE delete anyone's
 // message (asModerator); the author needs only READ, so a muted or timed-out
-// author can still delete their own. In a DM membership is the whole rule.
+// author can still delete their own; a denied READ blocks it. In a DM membership is the whole rule and
+// the delete is never a moderation action, so the store's ownership check applies. The archive gate is
+// the caller's write gate, not this predicate.
 func CanDeleteMessage(s Subject, isAuthor bool) (asModerator bool, err error) {
 	if s.Channel.Type == "dm" {
 		return false, dmMember(s)
@@ -203,7 +206,8 @@ func CanPinMessage(s Subject) error {
 }
 
 // CanMentionRole allows an @role ping when the role is mentionable or the
-// author holds READ_MESSAGES and MENTION_EVERYONE.
+// author holds READ_MESSAGES and MENTION_EVERYONE. A refusal is not an error: the caller leaves the
+// token as plain text.
 func CanMentionRole(s Subject, mentionable bool) error {
 	if mentionable || s.Has(ReadMessages|MentionEveryone) {
 		return nil
@@ -213,7 +217,8 @@ func CanMentionRole(s Subject, mentionable bool) error {
 
 // CanPassChannelPassword is the extra lock on a password-protected voice
 // channel for a member's own join; it passes when unprotected, already
-// granted, or the subject holds MANAGE_CHANNELS.
+// granted, or the subject holds MANAGE_CHANNELS. It is not asked for a moderator move, the AFK move or
+// a token refresh; CanJoinVoice still decides the join.
 func CanPassChannelPassword(s Subject, protected, granted bool) error {
 	if !protected || granted || s.Has(ManageChannels) {
 		return nil

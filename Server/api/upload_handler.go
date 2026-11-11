@@ -116,7 +116,7 @@ func safeStorageErrorMessage(err error) string {
 }
 
 // writeStorageSaveError maps storage.ErrIO to 507 so dashboards tell it from bad uploads; everything else
-// is 400.
+// is 400. Detail never crosses the boundary (see safeStorageErrorMessage).
 func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
 	if writeTransferTimedOut(w, saveErr, what) {
 		return
@@ -275,6 +275,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			return
 		}
 
+		// Record the unlinked attachment and commit the reservation under the same lock.
 		rec := voice.record(user.ID, safeFilename, stored)
 		if err := uploads.Record(r.Context(), rec, res); err != nil {
 			if delErr := store.Delete(stored.id); delErr != nil {

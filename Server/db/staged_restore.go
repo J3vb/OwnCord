@@ -57,7 +57,8 @@ const (
 var (
 	// ErrRestoreInconsistent means the restore files are in a combination no crash can produce;
 	// nothing is touched.
-	ErrRestoreInconsistent  = errors.New("staged restore files are inconsistent")
+	ErrRestoreInconsistent = errors.New("staged restore files are inconsistent")
+	// ErrRestoreAlreadyStaged means a restore is already waiting for a boot.
 	ErrRestoreAlreadyStaged = errors.New("a restore is already staged")
 )
 
@@ -211,6 +212,7 @@ func ApplyStagedRestore(dbPath string) (RestoreResult, error) {
 	}
 	m, err := readRestoreMarker(p.marker)
 	if err != nil {
+		// A torn or foreign marker cannot be trusted; leave everything.
 		return RestoreResult{}, fmt.Errorf("applying staged restore: %w: %w", ErrRestoreInconsistent, err)
 	}
 
@@ -331,8 +333,9 @@ func startSwap(ctx context.Context, p restorePaths, dbPath string, m StagedResto
 		return refusedResult(m, "the staged copy failed its integrity check"), nil
 	}
 
-	// Nothing has the database open, so the floors come from exactly what the live
-	// database holds. A floor that cannot be stored must not block the boot: refuse and keep the old database.
+	// The process lock is held and nothing has the database open, so the floors come from exactly what
+	// the live database holds. A floor that cannot be stored must not block the boot: refuse and keep
+	// the old database.
 	if err := AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
 		slog.Error("staged restore refused: could not preserve the message retry cutoff", "err", err)
 		return refusedResult(m, "the message retry cutoff could not be preserved"), nil

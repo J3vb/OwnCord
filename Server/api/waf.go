@@ -14,6 +14,7 @@ import (
 
 // CRS layer modes (server.waf_crs_mode); the inline rules keep blocking in every mode.
 const (
+	// CRSModeOff disables the OWASP CRS layer entirely.
 	CRSModeOff = "off"
 	// CRSModeDetect evaluates the full OWASP CRS and logs matches without ever blocking.
 	CRSModeDetect = "detect"

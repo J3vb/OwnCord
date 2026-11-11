@@ -121,6 +121,8 @@ func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channel
 	return d.SearchMessagesFiltered(ctx, SearchQuery{Text: query, ChannelIDs: channelIDs}, page)
 }
 
+// scanSearchResults scans FTS search rows; label names the calling query in errors. It never returns a
+// nil slice.
 func scanSearchResults(rows *sql.Rows, label string) ([]MessageSearchResult, error) {
 	results := []MessageSearchResult{}
 	for rows.Next() {

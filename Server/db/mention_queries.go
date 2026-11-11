@@ -200,7 +200,7 @@ func (d *DB) GetMentionCount(ctx context.Context, userID, channelID int64) (int,
 
 // LowerASCII lowercases only 'A'-'Z', matching SQLite's COLLATE NOCASE fold on
 // users.username; strings.ToLower would fold letters NOCASE leaves alone (e.g. 'É')
-// and desync a Go-side key from the column.
+// and desync a Go-side key from the column. Every mention lookup key must fold through this.
 func LowerASCII(s string) string {
 	b := []byte(s)
 	for i, c := range b {

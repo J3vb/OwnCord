@@ -251,6 +251,8 @@ func (w *AuditWriter) Flush(ctx context.Context) error {
 	if w == nil || !w.started.Load() {
 		return nil
 	}
+	// select picks randomly among ready cases, so a cancelled barrier must fail here, not race the
+	// flushReq send.
 	if err := ctx.Err(); err != nil {
 		return err
 	}

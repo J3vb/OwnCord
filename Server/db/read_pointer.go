@@ -11,10 +11,14 @@ import (
 type ReadPointerOp int
 
 const (
+	// ReadAtLatest moves the pointer to the channel's newest live message and clears the badge; it never
+	// moves the pointer backward.
 	ReadAtLatest ReadPointerOp = iota + 1
 	// ReadUpTo moves the pointer forward to a message id, clamped to the channel's newest;
 	// a pointer already past it is left alone.
 	ReadUpTo
+	// MarkUnread moves the pointer to the message just before a live message of the channel; it may move
+	// either way.
 	MarkUnread
 )
 
@@ -38,8 +42,9 @@ const channelMaxLiveSQL = `SELECT COALESCE(MAX(id), 0) FROM messages WHERE chann
 // transaction, so the move is atomic against every mention increment and
 // decrement. The caller (MessageService) holds the channel's mention emit lock
 // across the call and the frame it sends.
-// ¶ Rules, with R(p) the live receipts after p from authors the user does not block:
-// ¶ ReadAtLatest: pointer MAX(old, newest live), count 0.
+//
+// Rules, with R(p) the live receipts after p from authors the user does not block:
+// ReadAtLatest: pointer MAX(old, newest live), count 0.
 // ReadUpTo:     pointer MAX(old, MIN(messageID, newest any)). If it moved,
 //
 //	count MIN(old, R(new)), otherwise unchanged.
@@ -50,7 +55,7 @@ const channelMaxLiveSQL = `SELECT COALESCE(MAX(id), 0) FROM messages WHERE chann
 //	unchanged. messageID must be a live message of the channel,
 //	otherwise ErrNotFound and nothing changes.
 //
-// ¶ A forward move never raises a badge and a backward move never lowers one. A
+// A forward move never raises a badge and a backward move never lowers one. A
 // mention increment still waiting for its flush finds last_message_id below its
 // message, adds one and writes its receipt after this commit, so it is counted
 // once: this recompute cannot see it.

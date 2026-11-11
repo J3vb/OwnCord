@@ -24,7 +24,8 @@ var (
 	// or not in the parent channel; CreateThread returns it inside its transaction, so a
 	// delete that commits first wins.
 	ErrThreadStarterInvalid = errors.New("thread starter message is not available")
-	ErrThreadGone           = errors.New("thread is gone")
+	// ErrThreadGone means the thread no longer exists.
+	ErrThreadGone = errors.New("thread is gone")
 	// ErrThreadLockedForActor means a non-moderator tried to change a locked thread;
 	// UpdateThread re-reads the lock in its transaction.
 	ErrThreadLockedForActor = errors.New("thread is locked")

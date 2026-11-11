@@ -113,9 +113,8 @@ const (
 	// Time to write the 408 once the read deadline has passed; both are armed to the same instant.
 	transferTimedOutWriteGrace = 5 * time.Second
 
-	// How long an in-flight transfer may continue once shutdown begins; fits inside the 30 s HTTP drain
-	// budget (httpDrainBudget in internal/app/lifecycle.go). still finishes while a trickling one cannot hold
-	// the drain past it.
+	// How long an in-flight transfer may continue once shutdown begins; it fits inside the 30 s HTTP drain
+	// budget (httpDrainBudget), so a short transfer finishes while a trickling one cannot hold the drain.
 	shutdownTransferGrace = 20 * time.Second
 
 	maxAvatarURLLen = 512

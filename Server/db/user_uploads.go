@@ -36,6 +36,7 @@ type OwnUploadCursor struct {
 type OwnUploadQuery struct {
 	UserID int64
 	Sort   string
+	// Name keeps files whose name contains it, ASCII case-insensitive.
 	Name   string
 	Cursor OwnUploadCursor
 	Limit  int

@@ -176,6 +176,8 @@ func (d *DB) FileReport(ctx context.Context, publicID string, reporterID, subjec
 			return 0, fmt.Errorf("FileReport insert evidence: %w", err)
 		}
 	}
+	// The opening report_events row, same transaction, never the shared audit_log; actor 0, the reporter
+	// is already on the reports row.
 	if err := q.InsertReportEvent(ctx, dbgen.InsertReportEventParams{ReportID: id, ActorID: 0, Action: "created", Detail: reason}); err != nil {
 		return 0, fmt.Errorf("FileReport insert event: %w", err)
 	}
@@ -344,7 +346,8 @@ var forceReassignInTxHook func(ctx context.Context, q *dbgen.Queries) error
 // conflict doUpdate's guard covers (including a principal no longer resolving
 // to a role), and (false, ErrForbidden) when the actor's fresh position does
 // not outrank the assignee's (callers map it to 403, not 409).
-// ¶ checkAuthority, when non-nil, re-checks the actor's moderation authority
+//
+// checkAuthority, when non-nil, re-checks the actor's moderation authority
 // (CanModerate bit, effective ban). checkSelfReview, when non-nil, is the
 // deciding-moderator eligibility test; refuse=true means another eligible
 // moderator exists and self-assignment fails with ErrSelfReview.

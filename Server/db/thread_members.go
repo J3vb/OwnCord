@@ -12,6 +12,7 @@ import (
 // here decides who may see a thread, and every caller turning a follow into
 // something a user receives joins it with the parent's visibility first.
 
+// MaxFollowedThreads bounds the followed threads one ready payload carries.
 const MaxFollowedThreads = 200
 
 // followedThreadScan is how many followed rows are read before the caller drops those

@@ -10,17 +10,23 @@ var (
 	// the account's deletion is being completed.
 	ErrAccountErasing = errors.New("account deletion in progress")
 
+	// ErrNotFound indicates the requested resource does not exist.
 	ErrNotFound = errors.New("not found")
 	// ErrReactionLimit means a new emoji was refused because the message already holds
 	// MaxDistinctReactions.
 	ErrReactionLimit = errors.New("reaction limit reached")
 
+	// ErrForbidden indicates the caller lacks permission for the operation.
 	ErrForbidden = errors.New("forbidden")
 
+	// ErrConflict indicates a uniqueness constraint violation (e.g., duplicate username).
 	ErrConflict = errors.New("conflict")
 
+	// ErrBanned indicates the user is banned.
 	ErrBanned = errors.New("banned")
 
+	// ErrLastAdmin indicates the operation was rejected because the user is the only remaining
+	// admin/owner.
 	ErrLastAdmin = errors.New("last admin cannot be deleted")
 
 	// ErrSelfReview indicates the acting moderator took the action under review and

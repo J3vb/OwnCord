@@ -23,16 +23,20 @@ const uploadKindSQL = `CASE
 	WHEN a.mime_type LIKE 'audio/%' THEN 'audio'
 	ELSE 'other' END`
 
-// AdminUploadQuery is one page of every upload; zero values mean "any".
+// AdminUploadQuery is one page of every upload; zero values mean "any". Every value reaches SQL as a
+// bound argument.
 type AdminUploadQuery struct {
-	Sort       string
-	Name       string
+	Sort string
+	// Name keeps files whose name contains it, ASCII case-insensitive.
+	Name string
+	// Kind is one of the UploadKind values, or "" for every kind.
 	Kind       string
 	UploaderID int64
 	ChannelID  int64
-	Before     string
-	Cursor     OwnUploadCursor
-	Limit      int
+	// Before keeps files uploaded before this UTC time ("YYYY-MM-DD HH:MM:SS").
+	Before string
+	Cursor OwnUploadCursor
+	Limit  int
 }
 
 // AdminUpload is one file on the Storage page; ChannelName is omitted for a DM.

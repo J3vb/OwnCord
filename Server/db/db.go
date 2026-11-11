@@ -213,6 +213,7 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 	}
 	writer.SetMaxOpenConns(1)
 
+	// Ping the writer first: it creates the file, so the reader never races its creation.
 	if err := writer.Ping(); err != nil {
 		_ = writer.Close()
 		return nil, fmt.Errorf("pinging sqlite db: %w", err)

@@ -20,6 +20,7 @@ import (
 // the hidden name.
 var ErrImportNameTaken = errors.New("an existing account holds the name reserved for the import account")
 
+// ErrImportRunning is returned by StartImport while another import runs.
 var ErrImportRunning = errors.New("another import is already running")
 
 const (
@@ -29,6 +30,7 @@ const (
 	ImportCancelled = "cancelled"
 )
 
+// ImportInterruptedMessage is the error recorded on a job a restart cut short.
 const ImportInterruptedMessage = "the server restarted before the import finished"
 
 // ImportAbandonedMessage is recorded on a job whose importer was gone when a new import started.

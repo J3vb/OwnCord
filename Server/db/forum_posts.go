@@ -14,8 +14,10 @@ import (
 // channels.thread_post_message_id. Post, message, tags and send receipt commit
 // in one transaction (CreateMessageDelivery).
 
+// MaxPostTags is the most tags one post may carry.
 const MaxPostTags = 5
 
+// ForumPostPreviewRunes bounds ForumFirstMessage.Preview.
 const ForumPostPreviewRunes = 200
 
 var (

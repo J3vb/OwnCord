@@ -100,8 +100,8 @@ type Invite struct {
 	CreatedAt       string
 }
 
-// Expired reports whether the invite's expiry has passed at now; an unparseable stamp
-// counts as expired, as in the redemption query.
+// Expired reports whether the invite's expiry has passed at now; a nil ExpiresAt never expires. The
+// stored format is RFC3339 UTC; an unparseable stamp counts as expired, as in the redemption query.
 func (i *Invite) Expired(now time.Time) bool {
 	if i.ExpiresAt == nil {
 		return false
@@ -138,20 +138,22 @@ type Channel struct {
 	AFK    bool          `json:"afk"`
 	Thread ChannelThread `json:"-"`
 	Forum  *ChannelForum `json:"forum,omitempty"` // forum rows only (migration 075)
+	// ChannelPassword carries password_protected; the hash is never part of this struct.
 	ChannelPassword
 }
 
 // Message represents a row in the messages table.
 type Message struct {
-	ID               int64
-	ChannelID        int64
-	UserID           int64
-	Content          string
-	ReplyTo          *int64
-	EditedAt         *string
-	Deleted          bool
-	Pinned           bool
-	Timestamp        string
+	ID        int64
+	ChannelID int64
+	UserID    int64
+	Content   string
+	ReplyTo   *int64
+	EditedAt  *string
+	Deleted   bool
+	Pinned    bool
+	Timestamp string
+	// MentionsEveryone: an @everyone/@here resolved and the author held MENTION_EVERYONE.
 	MentionsEveryone bool
 	// Kind is MessageKindUser for an ordinary message; other values are server-written rows (call log,
 	// group event).
@@ -204,19 +206,20 @@ type UserPublic struct {
 
 // MessageAPIResponse matches the docs/api.md shape for GET /channels/{id}/messages.
 type MessageAPIResponse struct {
-	ID               int64            `json:"id"`
-	ChannelID        int64            `json:"channel_id"`
-	User             UserPublic       `json:"user"`
-	Content          string           `json:"content"`
-	ReplyTo          *int64           `json:"reply_to"`
-	Attachments      []AttachmentInfo `json:"attachments"`
-	Reactions        []ReactionInfo   `json:"reactions"`
-	Pinned           bool             `json:"pinned"`
-	EditedAt         *string          `json:"edited_at"`
-	Deleted          bool             `json:"deleted"`
-	Timestamp        string           `json:"timestamp"`
-	Mentions         []int64          `json:"mentions"`
-	MentionsEveryone bool             `json:"mentions_everyone"`
+	ID          int64            `json:"id"`
+	ChannelID   int64            `json:"channel_id"`
+	User        UserPublic       `json:"user"`
+	Content     string           `json:"content"`
+	ReplyTo     *int64           `json:"reply_to"`
+	Attachments []AttachmentInfo `json:"attachments"`
+	Reactions   []ReactionInfo   `json:"reactions"`
+	Pinned      bool             `json:"pinned"`
+	EditedAt    *string          `json:"edited_at"`
+	Deleted     bool             `json:"deleted"`
+	Timestamp   string           `json:"timestamp"`
+	// Mentions is the resolved user ids the message mentions (never nil).
+	Mentions         []int64 `json:"mentions"`
+	MentionsEveryone bool    `json:"mentions_everyone"`
 	// RoleMentions adds mention_roles; embedded so its json tag lives outside models.go, whose tag
 	// count is pinned.
 	RoleMentions
@@ -242,7 +245,8 @@ type GroupEventInfo struct {
 	IconRemoved  *bool   `json:"icon_removed,omitempty"`
 }
 
-// CallInfo is the call block of a call log row; EndedAt is nil while live.
+// CallInfo is the call block of a call log row; EndedAt is nil while live. Times use the message
+// timestamp layout.
 type CallInfo struct {
 	StartedAt    string  `json:"started_at"`
 	EndedAt      *string `json:"ended_at"`
@@ -303,7 +307,8 @@ type ChannelUnread struct {
 	LastMessageID int64 `json:"last_message_id"`
 	UnreadCount   int   `json:"unread_count"`
 	// MentionCount is read_states.mention_count, zeroed by channel_focus and never advanced by an edit.
-	MentionCount      int   `json:"mention_count"`
+	MentionCount int `json:"mention_count"`
+	// LastReadMessageID is the caller's read pointer (0 with no row), not LastMessageID.
 	LastReadMessageID int64 `json:"last_read_message_id"`
 }
 
@@ -344,7 +349,8 @@ const (
 	RegistrationActive  = "active"
 	RegistrationPending = "pending"
 	RegistrationDenied  = "denied"
-	RegistrationSystem  = "system"
+	// RegistrationSystem marks the hidden account that owns imported messages.
+	RegistrationSystem = "system"
 )
 
 // PendingApproval reports an approval-mode application no admin has decided.

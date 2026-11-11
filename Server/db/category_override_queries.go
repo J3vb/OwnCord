@@ -190,8 +190,8 @@ func (d *DB) applyCategoryOverride(ctx context.Context, op string, k overrideKin
 	return touched, nil
 }
 
-// WriteCategoryRoleOverride sets a role's template row on a category and its synced
-// channels in one transaction.
+// WriteCategoryRoleOverride sets a role's template row on a category and its synced channels in one
+// transaction. ErrNotFound when the category is gone; it returns the rewritten channels' ids.
 func (d *DB) WriteCategoryRoleOverride(ctx context.Context, categoryID, roleID, allow, deny int64, guard CategoryOverrideGuard) ([]int64, error) {
 	return d.applyCategoryOverride(ctx, "WriteCategoryRoleOverride", roleOverrideKind, categoryID, roleID, OverrideBits{Allow: allow, Deny: deny}, false, guard)
 }
@@ -303,6 +303,8 @@ func (d *DB) SyncChannelPermissions(ctx context.Context, channelID int64, guard 
 	return plan, nil
 }
 
+// copyTemplateToNewChannelTx gives a new channel its category's template and marks it synced, inside
+// the create transaction. No guard runs: the template was authorized when it was written.
 func copyTemplateToNewChannelTx(ctx context.Context, q *dbgen.Queries, channelID, categoryID int64) error {
 	args := dbgen.CopyCategoryRoleOverridesToChannelParams{ChannelID: channelID, CategoryID: categoryID}
 	if err := q.CopyCategoryRoleOverridesToChannel(ctx, args); err != nil {

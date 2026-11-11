@@ -11,6 +11,7 @@ import (
 )
 
 var (
+	// ErrPollNotFound means the message is not a poll, or it was deleted.
 	ErrPollNotFound = errors.New("poll not found")
 	// ErrPollEnded means the poll was ended or expired, so it takes no more votes and
 	// cannot be ended again.

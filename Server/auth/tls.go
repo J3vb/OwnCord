@@ -358,7 +358,7 @@ func logCertificateFailures(
 		}
 
 		// Only a hello for the configured domain says issuance is broken; scanner
-		// hellos must not log or spend the throttle.
+		// hellos must not log or spend the throttle. hello.ServerName is compared, never logged.
 		if hello == nil || !strings.EqualFold(strings.TrimSuffix(hello.ServerName, "."), domain) {
 			return cert, err
 		}

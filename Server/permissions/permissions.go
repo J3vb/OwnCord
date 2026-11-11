@@ -47,8 +47,9 @@ const AllPerms = SendMessages | ReadMessages | ManageConfig | ManageUpdates | Ma
 // holding any one passes, and each route group re-checks its own bit.
 // ModerateMembers is excluded so a warning-only moderator does not inherit the
 // perimeter's read surface (/stats, /users, /me), which re-checks nothing.
-// ManageBackups and the owner-type bits are inside it so holders can reach
-// their routes.
+// ManageMessages and ManageInvites are excluded: neither has an /admin/api route.
+// ManageBackups and the owner-type bits are inside it so holders can reach their routes; a backup holds
+// every message and password hash, which is why ManageBackups is owner-grant-only.
 const AdminPerimeter = Administrator | ManageChannels | ManageRoles |
 	ManageServer | ViewAuditLog | KickMembers | BanMembers | MuteMembers | ManageBackups |
 	OwnerTierBits | AdministratorTierBits
@@ -65,8 +66,8 @@ const AdministratorTierBits = ViewDiagnostics | EraseAccounts
 // grant via a role; ManageRoles is not enough.
 const OwnerGrantOnly = MoveMembers | ManageBackups | OwnerTierBits | AdministratorTierBits
 
-// OwnerOnlyGrant is the subset of OwnerGrantOnly only the owner may grant; an
-// Administrator could otherwise give themself an owner-tier bit.
+// OwnerOnlyGrant is the subset of OwnerGrantOnly only the owner may add to or remove from a role or an
+// override, or hand out via a role; an Administrator could otherwise give themself an owner-tier bit.
 const OwnerOnlyGrant = OwnerTierBits
 
 // bitNames maps each single permission bit to its schema name.

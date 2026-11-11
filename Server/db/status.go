@@ -7,9 +7,13 @@ package db
 // place decides what others see and no new payload can leak it.
 
 const (
-	StatusOnline    = "online"
-	StatusIdle      = "idle"
-	StatusDND       = "dnd"
+	// StatusOnline is the default presence for a connected session.
+	StatusOnline = "online"
+	// StatusIdle is set manually or by the client's inactivity timer.
+	StatusIdle = "idle"
+	// StatusDND suppresses desktop notifications client-side.
+	StatusDND = "dnd"
+	// StatusInvisible means "connected, but shown to everyone else as offline".
 	StatusInvisible = "invisible"
 	// StatusOffline means "not connected": users can no longer pick it, but disconnect
 	// writes it and BroadcastStatus maps invisible to it.

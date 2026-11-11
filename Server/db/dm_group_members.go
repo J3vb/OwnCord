@@ -17,7 +17,9 @@ import (
 // second sees the first's commit.
 
 var (
-	ErrGroupDMFull       = errors.New("group DM is full")
+	// ErrGroupDMFull means adding the users would take the group past MaxGroupDMParticipants.
+	ErrGroupDMFull = errors.New("group DM is full")
+	// ErrNoNewGroupMembers means every user named by an add is already a member.
 	ErrNoNewGroupMembers = errors.New("no new group members")
 	// ErrGroupDMBlockedPair means a new member and another new or current member
 	// blocked each other (either direction), or a new member refuses the actor (DMs
@@ -119,6 +121,8 @@ func groupMemberIDs(ctx context.Context, tx *sql.Tx, channelID int64) ([]int64, 
 	return ids, nil
 }
 
+// requireGroupMember returns ErrNotFound unless userID is a member of the group DM channelID; a 1:1
+// channel counts as not found.
 func requireGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64) error {
 	var one int
 	err := tx.QueryRowContext(ctx,
@@ -134,6 +138,8 @@ func requireGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64
 	return nil
 }
 
+// removeGroupMember deletes userID's participant, open-state and read-state rows. No participant row
+// is ErrNotFound, and the caller writes no system row for it.
 func removeGroupMember(ctx context.Context, tx *sql.Tx, channelID, userID int64) error {
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM dm_participants WHERE channel_id = ? AND user_id = ?`, channelID, userID)
@@ -290,6 +296,8 @@ func (d *DB) RemoveGroupDMMember(ctx context.Context, channelID, ownerID, target
 	return &out, nil
 }
 
+// requireGroupOwner checks, in the caller's transaction, that userID is the group's owner:
+// ErrNotFound for a non-member, ErrForbidden for a member who is not the owner.
 func requireGroupOwner(ctx context.Context, tx *sql.Tx, channelID, userID int64) error {
 	if err := requireGroupMember(ctx, tx, channelID, userID); err != nil {
 		return err

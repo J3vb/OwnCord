@@ -59,6 +59,7 @@ func (m *MemberRoles) Effective() *Role {
 	return &r
 }
 
+// ErrLastRole is returned when removing a role would leave a member with none.
 var ErrLastRole = errors.New("member must keep at least one role")
 
 // syncTopRoleTx mirrors the member's top role into users.role_id; the only writer of

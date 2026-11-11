@@ -231,6 +231,8 @@ func MigrateFS(database *DB, fsys fs.FS) error {
 // migrateFSCount is MigrateFS reporting how many migrations executed, so Migrate
 // can skip the boot ANALYZE; seeding reports 0.
 func migrateFSCount(database *DB, fsys fs.FS) (int, error) {
+	// Read tracking state first: seeding must create schema_versions atomically with its rows, so
+	// ensureSchemaVersions must not run before it.
 	svExists, err := schemaVersionsExists(database)
 	if err != nil {
 		return 0, err
@@ -319,6 +321,7 @@ func applyMigration(database *DB, name, rawSQL string) error {
 		}
 	}
 
+	// Record the migration in the same transaction, so it and its tracking row are atomic.
 	if _, execErr := tx.Exec(
 		"INSERT INTO schema_versions (version) VALUES (?)", name,
 	); execErr != nil {
