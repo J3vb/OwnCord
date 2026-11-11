@@ -354,6 +354,16 @@ answers of several joins interleave: a self `voice_state` for a channel other th
 names is not followed, a `voice_token` for a channel the user already clicked away from is let pass, and
 whenever that leaves this client showing no call (the token arrives with no channel selected, or the
 later join is refused) it sends a bare `voice_leave` so the server does not keep a call nobody sees.
+A click on another channel from a connected call keeps that call until the server acts on the switch
+(`features/voice/joinClick.ts`): the store keeps naming the call and only records the target
+(`voiceStore.switchingTo`). The old channel's self `voice_leave` or the new channel's `voice_token`
+moves the store to the target; a refusal (a locked or full channel, a missing permission) clears the
+target and leaves the call as it was, with the password dialog opening over it for a locked channel.
+Another click while the switch waits is ignored, and a switch with no answer in 15 s ends like any
+unanswered join. A self `voice_leave` names only a channel, so it is matched to the oldest join this
+client sent for that channel (`leaveEndsEarlierStay`, `features/voice/joinRequest.ts`): when the user
+leaves a channel and is back in it before the server answered, the first stay's leave, arriving before
+or after the new token, does not end the new call.
 A drop that only starts after the click leaves the widget on "Connecting…" for the new channel instead of
 "Reconnecting voice…". A reconnect drops your camera and screen
 share (`teardownForReconnect`); once it (or its rejoin) lands, the camera turns back on by itself, under

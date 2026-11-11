@@ -107,6 +107,7 @@ export const shards = {
   ],
   "livekit-10": [
     "src/features/voice/dragMove.ts",
+    "src/features/voice/joinClick.ts",
     "src/features/voice/joinRequest.ts",
     "src/features/voice/localVoiceRestore.ts",
     "src/features/voice/moveHint.ts",

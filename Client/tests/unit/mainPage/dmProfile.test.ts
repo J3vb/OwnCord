@@ -398,6 +398,27 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).not.toBe("none");
   });
 
+  it("keeps an incoming ring alive when Accept is clicked while a channel switch waits", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    m.page = mountPage(m.container, ws);
+    incomingCall(ws);
+    // In a call, with a switch to another channel still at the server.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 7,
+      voiceStatus: "connected" as const,
+      switchingTo: 9,
+    }));
+
+    const banner = incomingBannerEl();
+    (document.querySelector('[data-testid="incoming-call-accept"]') as HTMLElement).click();
+
+    // The join would be dropped, so the ring must survive for the next click.
+    expect(banner.style.display).not.toBe("none");
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+  });
+
   it("keeps an incoming ring alive when Accept is clicked during the join backoff", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));

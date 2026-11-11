@@ -11,7 +11,14 @@ import {
   safetyStore,
   setActiveTimeout,
 } from "../../../src/features/safety/store";
-import { voiceStore, setSpeakers, removeVoiceUser } from "../../../src/stores/voice.store";
+import {
+  voiceStore,
+  setSpeakers,
+  removeVoiceUser,
+  joinVoiceChannel,
+  setSwitchingTo,
+  setVoiceStatus,
+} from "../../../src/stores/voice.store";
 import { membersStore } from "../../../src/stores/members.store";
 import { noteJoinFailed, noteJoinSucceeded } from "../../../src/features/voice/joinBackoff";
 import {
@@ -372,6 +379,53 @@ describe("ChannelSidebar", () => {
     // first, showVideoGrid has no cells to focus and the user is stranded on
     // an empty grid. currentChannelId defaults to null (not channel 3 here).
     expect(onVoiceJoin).toHaveBeenCalledWith(3);
+  });
+
+  describe("a stream row clicked from another live call", () => {
+    let onWatchStream: Mock<(tileId: number) => void>;
+
+    /** In channel 5, with a streamer in channel 3; the join is a switch that waits. */
+    const clickStreamer = (): void => {
+      onWatchStream = vi.fn();
+      rebuildSidebar({ onWatchStream });
+      setChannels(testChannels);
+      addVoiceUser(3, 30, "Streamer", { screenshare: true });
+      joinVoiceChannel(5);
+      setVoiceStatus("connected");
+      onVoiceJoin.mockImplementation((channelId) => setSwitchingTo(channelId));
+      sidebar.mount(container);
+      (container.querySelector(".voice-user-item") as HTMLElement).click();
+      voiceStore.flush();
+    };
+
+    it("watches the stream once the server accepted the switch", () => {
+      clickStreamer();
+      expect(onVoiceJoin).toHaveBeenCalledWith(3);
+      expect(onWatchStream).not.toHaveBeenCalled();
+
+      joinVoiceChannel(3);
+      voiceStore.flush();
+      expect(onWatchStream).toHaveBeenCalledExactlyOnceWith(30 + 1_000_000);
+    });
+
+    it("opens nothing when the switch is refused, now or after a later join", () => {
+      clickStreamer();
+
+      setSwitchingTo(null);
+      voiceStore.flush();
+      joinVoiceChannel(3);
+      voiceStore.flush();
+      expect(onWatchStream).not.toHaveBeenCalled();
+    });
+
+    it("stops waiting when the sidebar is destroyed", () => {
+      clickStreamer();
+
+      sidebar.destroy?.();
+      joinVoiceChannel(3);
+      voiceStore.flush();
+      expect(onWatchStream).not.toHaveBeenCalled();
+    });
   });
 
   it("opens no stream when the join backoff refuses the stream row's join", () => {

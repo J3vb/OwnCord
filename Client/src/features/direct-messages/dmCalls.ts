@@ -5,6 +5,7 @@ import { showToast } from "@lib/ui/toast";
 import { accountText as account } from "../../i18n/account";
 import { shellText } from "../../i18n/shell";
 import { joinBackoffText } from "../voice/joinBackoffText";
+import { switchWaiting } from "../voice/joinClick";
 import { uiStore } from "@stores/ui.store";
 import { getActiveChannel } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
@@ -65,8 +66,9 @@ export function createDmCalls(st: PageState, _pg: PageApi, deps: DmCallsDeps) {
             log.error("Camera on call start failed", { error: String(err) });
           });
         }
-      } else if (v.currentChannelId === active.id) {
-        // The join started; the voiceStore subscriber turns the camera on once
+      } else if (v.currentChannelId === active.id || v.switchingTo === active.id) {
+        // The join started (out of another call it first waits for the
+        // server); the voiceStore subscriber turns the camera on once
         // connected. A refused join (backoff) leaves nothing armed.
         st.cameraOnJoin = active.id;
       }
@@ -93,6 +95,8 @@ export function createDmCalls(st: PageState, _pg: PageApi, deps: DmCallsDeps) {
     cancelPendingRing();
     const settle = (): boolean => {
       const v = voiceStore.getState();
+      // A switch out of another call: the server has not acted on it yet.
+      if (v.switchingTo === channelId) return false;
       if (v.currentChannelId !== channelId) {
         cancelPendingRing();
         return true;
@@ -196,6 +200,9 @@ export function createDmCalls(st: PageState, _pg: PageApi, deps: DmCallsDeps) {
       showToast(backoffText, "error");
       return;
     }
+    // A switch out of the call the user is in still waits for the server, and
+    // a join sent now would be dropped: keep the ring for the next click.
+    if (switchWaiting()) return;
     const ring = st.ringCtrl?.current() ?? null;
     if (ring === null) return;
     st.cameraOnJoin = withVideo ? ring.channelId : null;
