@@ -12,7 +12,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// ErrChannelFull is returned when a voice channel is at capacity.
 var ErrChannelFull = errors.New("voice channel is full")
 
 var voiceJoinSeq uint64
@@ -22,10 +21,9 @@ func newVoiceJoinToken() string {
 	return fmt.Sprintf("%s-%020d", time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z"), seq)
 }
 
-// JoinVoiceChannel inserts or replaces the user's voice state for the channel,
-// replacing any row for a different channel; muted, deafened and speaking
-// reset to false. joined_at doubles as an opaque join-instance token so stale
-// cleanup can target one session even after a rejoin of the same channel.
+// JoinVoiceChannel inserts or replaces the user's voice state, resetting muted,
+// deafened and speaking. joined_at doubles as an opaque join-instance token so stale
+// cleanup can target one session.
 func (d *DB) JoinVoiceChannel(ctx context.Context, userID, channelID int64) error {
 	if err := d.q.JoinVoiceChannel(ctx, dbgen.JoinVoiceChannelParams{
 		UserID:    userID,
@@ -37,9 +35,8 @@ func (d *DB) JoinVoiceChannel(ctx context.Context, userID, channelID int64) erro
 	return nil
 }
 
-// JoinVoiceChannelIfCapacity inserts a voice state only if the channel has
-// fewer than maxUsers participants, atomically, so two concurrent joins cannot
-// both pass the capacity check. It returns ErrChannelFull at capacity.
+// JoinVoiceChannelIfCapacity inserts a voice state only if the channel has fewer
+// than maxUsers participants, atomically; it returns ErrChannelFull at capacity.
 func (d *DB) JoinVoiceChannelIfCapacity(ctx context.Context, userID, channelID int64, maxUsers int) error {
 	res, err := d.q.JoinVoiceChannelIfCapacity(ctx, dbgen.JoinVoiceChannelIfCapacityParams{
 		UserID:      userID,
@@ -67,9 +64,8 @@ func (d *DB) LeaveVoiceChannel(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// LeaveVoiceChannelIfMatch removes the user's voice state only if the row still
-// points at expectedChannelID with the expected join token. It returns true if
-// a row was deleted.
+// LeaveVoiceChannelIfMatch removes the voice state only if the row still points
+// at expectedChannelID with the expected join token; it reports whether a row was deleted.
 func (d *DB) LeaveVoiceChannelIfMatch(ctx context.Context, userID, expectedChannelID int64, expectedJoinedAt string) (bool, error) {
 	result, err := d.q.LeaveVoiceChannelIfMatch(ctx, dbgen.LeaveVoiceChannelIfMatchParams{
 		UserID:    userID,
@@ -83,8 +79,7 @@ func (d *DB) LeaveVoiceChannelIfMatch(ctx context.Context, userID, expectedChann
 	return n > 0, nil
 }
 
-// GetVoiceState returns the current voice state for the given user,
-// or nil if the user is not in any voice channel.
+// GetVoiceState returns the user's voice state, or nil when not in voice.
 func (d *DB) GetVoiceState(ctx context.Context, userID int64) (*VoiceState, error) {
 	r, err := d.q.GetUserVoiceState(ctx, userID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -135,8 +130,7 @@ func (d *DB) GetChannelVoiceStates(ctx context.Context, channelID int64) ([]Voic
 	return states, nil
 }
 
-// GetAllVoiceStates returns voice states across all channels in one query, to
-// build the ready payload without per-channel queries.
+// GetAllVoiceStates returns voice states across all channels in one query for the ready payload.
 func (d *DB) GetAllVoiceStates(ctx context.Context) ([]VoiceState, error) {
 	rows, err := d.q.GetAllVoiceStates(ctx)
 	if err != nil {
@@ -161,8 +155,7 @@ func (d *DB) GetAllVoiceStates(ctx context.Context) ([]VoiceState, error) {
 	return states, nil
 }
 
-// UpdateVoiceMute sets the muted field for the user's voice state; a no-op
-// when not in a channel.
+// UpdateVoiceMute sets the muted field for the user's voice state; a no-op when not in a channel.
 func (d *DB) UpdateVoiceMute(ctx context.Context, userID int64, muted bool) error {
 	if err := d.q.UpdateVoiceMute(ctx, dbgen.UpdateVoiceMuteParams{
 		Muted:  b2i64(muted),
@@ -173,8 +166,8 @@ func (d *DB) UpdateVoiceMute(ctx context.Context, userID int64, muted bool) erro
 	return nil
 }
 
-// UpdateVoiceDeafen sets the deafened field for the user's voice state; a
-// no-op when not in a channel.
+// UpdateVoiceDeafen sets the deafened field for the user's voice state; a no-op when not in a
+// channel.
 func (d *DB) UpdateVoiceDeafen(ctx context.Context, userID int64, deafened bool) error {
 	if err := d.q.UpdateVoiceDeafen(ctx, dbgen.UpdateVoiceDeafenParams{
 		Deafened: b2i64(deafened),
@@ -186,13 +179,11 @@ func (d *DB) UpdateVoiceDeafen(ctx context.Context, userID int64, deafened bool)
 }
 
 // SetVoiceServerMute applies or clears the moderator-imposed mute, scoped to
-// the channelID the caller's authorization passed for. Applying it also sets
-// muted so client state matches; clearing leaves muted alone, so a user muted
-// beforehand stays muted.
-//
-// matched=false means the target's row is no longer in channelID (a channel
-// switch raced the moderator's round trips); the row is left untouched so the
-// write cannot land on another channel, including a DM call nobody authorized.
+// the channelID the caller's authorization passed for. Applying also sets muted;
+// clearing leaves it, so a user muted beforehand stays muted. matched=false
+// means the row is no longer in channelID (a channel switch raced the
+// moderator); it is left untouched so the write cannot land on another channel,
+// including a DM call nobody authorized.
 func (d *DB) SetVoiceServerMute(ctx context.Context, userID, channelID int64, serverMuted bool) (matched bool, err error) {
 	var res sql.Result
 	if serverMuted {
@@ -208,26 +199,20 @@ func (d *DB) SetVoiceServerMute(ctx context.Context, userID, channelID int64, se
 }
 
 // MuteForTimeoutSession is the timeout voice half's mute, built on session
-// ownership (see migration 049 on voice_states.server_muted_by). It matches the
-// exact session (channelID and the joinedAt token JoinVoiceChannel mints) the
-// caller authorized. One conditional UPDATE (WHERE server_muted = 0) applies
-// the mute and stamps actionID as owner on a genuine unmuted->muted
-// transition, so a concurrent lift has no gap between "mute lands" and
-// "ownership recorded" to race.
-//
-// matched=false covers "no such session" (the target left or switched) and
-// "actionID is no longer an active timeout on this target" (a delayed call
-// after its row was lifted or expired must be refused, not treated as a fresh
-// mute). "Already muted by something else" is matched=true, transitioned=false
-// (not this call's ownership to claim); it is told apart only when the UPDATE
-// affects zero rows.
-//
-// supersededIDs, when non-empty, first transfers ownership from those
-// just-superseded ledger ids onto actionID inside this same transaction.
-// TimeoutUser does not, because the transfer must happen under the ws
-// per-target lock the caller (ws.Hub.MuteForTimeout) holds for the paired SFU
-// call; a transfer outside it could land between the lock's DB write and SFU
-// call and let a failed caller's rollback miss a row re-pointed elsewhere.
+// ownership (migration 049, voice_states.server_muted_by). It matches the exact
+// session (channelID and the joinedAt token JoinVoiceChannel mints). One
+// conditional UPDATE (WHERE server_muted = 0) applies the mute and stamps
+// actionID as owner on a genuine unmuted->muted transition, so a concurrent lift
+// has no gap to race.
+// ¶ matched=false covers "no such session" and "actionID is no longer an active
+// timeout on this target" (a delayed call after its row was lifted or expired
+// is refused, not a fresh mute). "Already muted by something else" is
+// matched=true, transitioned=false.
+// ¶ supersededIDs, when non-empty, first transfers ownership from those ledger
+// ids onto actionID in this transaction. TimeoutUser cannot, because the
+// transfer must happen under the ws per-target lock the caller
+// (ws.Hub.MuteForTimeout) holds for the paired SFU call; outside it a failed
+// caller's rollback could miss a re-pointed row.
 func (d *DB) MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -270,25 +255,20 @@ func (d *DB) MuteForTimeoutSession(ctx context.Context, userID, channelID, actio
 	if err != nil {
 		return false, false, fmt.Errorf("MuteForTimeoutSession active check: %w", err)
 	}
-	// Nothing was written either way; finish the read-only tx cleanly.
 	if err := tx.Commit(); err != nil {
 		return false, false, fmt.Errorf("MuteForTimeoutSession commit: %w", err)
 	}
 	if active == 0 {
-		// The incoming action is no longer live (lifted or expired), so it is not
-		// this call's mute to claim whatever the session's state.
 		return false, false, nil
 	}
 	return true, false, nil
 }
 
-// ClearServerMuteOwnedBy clears server_muted on the voice_states row (at most
-// one; user_id is the primary key) naming one of actionIDs as server_muted_by,
-// and reports that row's channel and join token for the caller's paired SFU
-// call. It is session-bound: an ended session has no row, and a rejoin starts
-// with server_muted_by NULL, so an old action id cannot clear a later
-// session's mute. It is also LiftTimeout's rollback path on an SFU mute
-// failure, with only the failed action id.
+// ClearServerMuteOwnedBy clears server_muted on the voice_states row naming one
+// of actionIDs as server_muted_by and reports its channel and join token for the
+// paired SFU call. It is session-bound: a rejoin starts with server_muted_by
+// NULL, so an old action id cannot clear a later session's mute. It is also
+// LiftTimeout's rollback path on an SFU mute failure.
 func (d *DB) ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error) {
 	if len(actionIDs) == 0 {
 		return 0, "", false, nil
@@ -315,17 +295,15 @@ func (d *DB) ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs
 	return channelID, joinedAt, true, nil
 }
 
-// OrphanedVoiceMute is a voice_states row from FindOrphanedVoiceMutes: UserID's
-// session still names ActionID as server_muted_by but that action is lifted or
-// expired.
+// OrphanedVoiceMute is a voice_states row whose session still names ActionID as
+// server_muted_by but that action is lifted or expired.
 type OrphanedVoiceMute struct {
 	UserID   int64
 	ActionID int64
 }
 
-// FindOrphanedVoiceMutes lists every voice_states row whose server_muted_by
-// names a lifted or expired timeout: the input of the maintenance-tick and
-// start-up reconcile sweep.
+// FindOrphanedVoiceMutes lists every voice_states row whose server_muted_by names a
+// lifted or expired timeout, for the reconcile sweep.
 func (d *DB) FindOrphanedVoiceMutes(ctx context.Context) ([]OrphanedVoiceMute, error) {
 	rows, err := d.q.FindOrphanedVoiceMutes(ctx)
 	if err != nil {
@@ -341,10 +319,9 @@ func (d *DB) FindOrphanedVoiceMutes(ctx context.Context) ([]OrphanedVoiceMute, e
 	return out, nil
 }
 
-// SetVoiceServerDeafen applies or clears the moderator-imposed deafen, scoped
-// to channelID with SetVoiceServerMute's matched semantics. Unlike the mute,
-// clearing also clears deafened (which applying set); muted is left for the
-// target to lift.
+// SetVoiceServerDeafen applies or clears the moderator-imposed deafen with
+// SetVoiceServerMute's matched semantics. Clearing also clears deafened; muted is left
+// for the target to lift.
 func (d *DB) SetVoiceServerDeafen(ctx context.Context, userID, channelID int64, serverDeafened bool) (matched bool, err error) {
 	var res sql.Result
 	if serverDeafened {
@@ -359,8 +336,7 @@ func (d *DB) SetVoiceServerDeafen(ctx context.Context, userID, channelID int64, 
 	return n > 0, nil
 }
 
-// ClearVoiceState removes a user's voice state on disconnect (LeaveVoiceChannel
-// under the name that clarifies the disconnect use).
+// ClearVoiceState is LeaveVoiceChannel under the name for the disconnect use.
 func (d *DB) ClearVoiceState(ctx context.Context, userID int64) error {
 	if err := d.q.ClearVoiceState(ctx, userID); err != nil {
 		return fmt.Errorf("ClearVoiceState: %w", err)
@@ -368,8 +344,7 @@ func (d *DB) ClearVoiceState(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// ClearAllVoiceStates removes all voice state rows, at startup, to clear stale
-// state from a previous run.
+// ClearAllVoiceStates removes all rows at startup to clear stale state.
 func (d *DB) ClearAllVoiceStates(ctx context.Context) error {
 	if err := d.q.ClearAllVoiceStates(ctx); err != nil {
 		return fmt.Errorf("ClearAllVoiceStates: %w", err)
@@ -377,8 +352,8 @@ func (d *DB) ClearAllVoiceStates(ctx context.Context) error {
 	return nil
 }
 
-// CountActiveCameras returns the users with camera enabled in the channel,
-// from the DB (race-free via SQLite serialization) rather than LiveKit.
+// CountActiveCameras returns the users with camera enabled in the channel, from the DB
+// (serialized) rather than LiveKit.
 func (d *DB) CountActiveCameras(ctx context.Context, channelID int64) (int, error) {
 	count, err := d.q.CountActiveCameras(ctx, channelID)
 	if err != nil {
@@ -398,8 +373,8 @@ func (d *DB) UpdateVoiceCamera(ctx context.Context, userID int64, camera bool) e
 	return nil
 }
 
-// EnableCameraIfUnderLimit enables a user's camera atomically only if the
-// channel has fewer than maxVideo active cameras; it returns whether it did.
+// EnableCameraIfUnderLimit enables the camera atomically only if fewer than maxVideo
+// are active; it returns whether it did.
 func (d *DB) EnableCameraIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error) {
 	res, err := d.q.EnableCameraIfUnderLimit(ctx, dbgen.EnableCameraIfUnderLimitParams{
 		UserID:      userID,
@@ -428,9 +403,9 @@ func (d *DB) UpdateVoiceScreenshare(ctx context.Context, userID int64, screensha
 	return nil
 }
 
-// EnableScreenshareIfUnderLimit enables a user's screenshare atomically only
-// if the channel has fewer than maxVideo active video streams (camera and
-// screenshare share the voice_max_video budget); it returns whether it did.
+// EnableScreenshareIfUnderLimit enables screenshare atomically only if fewer than
+// maxVideo video streams are active (camera and screenshare share voice_max_video); it
+// returns whether it did.
 func (d *DB) EnableScreenshareIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error) {
 	res, err := d.q.EnableScreenshareIfUnderLimit(ctx, dbgen.EnableScreenshareIfUnderLimitParams{
 		UserID:      userID,

@@ -12,8 +12,7 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// Failure is why the broker refused or could not complete a request. The
-// values are the client contract's ExternalContentFailure spellings.
+// Failure is why the broker refused or failed; the values are the client contract's spellings.
 type Failure string
 
 const (
@@ -25,9 +24,8 @@ const (
 	Unavailable        Failure = "unavailable"
 )
 
-// Error carries a Failure through an error return. transient marks one that
-// says nothing about the destination (no fetch slot came free), so it is never
-// remembered.
+// Error carries a Failure through an error return; transient marks one that says nothing about the
+// destination (no fetch slot came free), so it is never remembered.
 type Error struct {
 	Failure   Failure
 	transient bool
@@ -37,8 +35,7 @@ func (e *Error) Error() string { return "externalcontent: " + string(e.Failure) 
 
 func fail(f Failure) error { return &Error{Failure: f} }
 
-// FailureOf is the Failure an error from the broker stands for; anything
-// that is not one is Unavailable.
+// FailureOf is the Failure an error stands for; anything else is Unavailable.
 func FailureOf(err error) Failure {
 	if e, ok := errors.AsType[*Error](err); ok {
 		return e.Failure
@@ -58,12 +55,10 @@ const (
 	maxConcurrent = 6
 	cacheBytes    = 64 << 20
 	cacheTTL      = time.Hour
-	// failureTTL is how long a failed fetch is answered from the cache, so a
-	// link to a dead or slow host costs one fetch per five minutes instead of
-	// one per viewer per render.
+	// failureTTL is how long a failed fetch is answered from cache, so a dead host costs one fetch per
+	// five minutes, not one per viewer per render.
 	failureTTL = 5 * time.Minute
-	// failureEntryBytes is what a remembered failure is weighed at in the
-	// cache, beside its key.
+	// failureEntryBytes is a remembered failure's cache weight beside its key.
 	failureEntryBytes = 64
 	// handlesPerUser is how many preview image handles one member holds.
 	handlesPerUser = 256
@@ -71,19 +66,15 @@ const (
 	maxURLBytes = 2048
 )
 
-// userAgent is the crawler token sites match on for Open Graph markup. It
-// carries no OwnCord version.
+// userAgent is the crawler token sites match on for Open Graph markup; it carries no version.
 const userAgent = "facebookexternalhit/1.1"
 
-// imageTypes are the raster types an image fetch may return. SVG is absent on
-// purpose: it is the one image type that can carry script. AVIF is absent
-// because the content sniffer cannot recognise it, so its declared type could
-// never be checked against the bytes.
+// imageTypes are the raster types an image fetch may return. SVG is absent because it can carry
+// script; AVIF because the sniffer cannot recognise it, so its declared type could not be checked.
 var imageTypes = []string{"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"}
 
-// DefaultPagePolicy and DefaultImagePolicy are the production fetch
-// policies. Pages are read only as far as their first 64 KiB, which is
-// where <head> lives; an oEmbed document past that fails to parse.
+// DefaultPagePolicy and DefaultImagePolicy are the production fetch policies. Pages are read to
+// their first 64 KiB, where <head> lives; an oEmbed document past that fails to parse.
 var (
 	DefaultPagePolicy = safefetch.Policy{
 		Schemes:              []string{"https"},
@@ -108,8 +99,7 @@ var (
 	}
 )
 
-// Preview is the typed minimum a page reduces to. Image is an opaque handle,
-// fetchable only through Image by the user it was minted for.
+// Preview is the typed minimum a page reduces to; Image is an opaque handle fetchable only by its user.
 type Preview struct {
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
@@ -119,8 +109,7 @@ type Preview struct {
 	ImageHeight *uint32 `json:"image_height,omitempty"`
 }
 
-// Broker fetches previews and images under the policies above. It is safe
-// for concurrent use; build one per server.
+// Broker fetches previews and images under the policies above; safe for concurrent use.
 type Broker struct {
 	page    *safefetch.Fetcher
 	image   *safefetch.Fetcher
@@ -129,9 +118,7 @@ type Broker struct {
 	flight  singleflight.Group
 }
 
-// New builds a broker from two fetch policies. Production passes
-// DefaultPagePolicy and DefaultImagePolicy; tests pass ones that can reach a
-// loopback stub.
+// New builds a broker from two fetch policies; tests pass ones that can reach a loopback stub.
 func New(page, image safefetch.Policy) (*Broker, error) {
 	pf, err := safefetch.New(page)
 	if err != nil {
@@ -149,9 +136,8 @@ func New(page, image safefetch.Policy) (*Broker, error) {
 	}, nil
 }
 
-// MustNew is New for policies fixed at compile time, as production's are: a
-// policy New refuses is a programming error a test catches, so it panics
-// rather than returning a broker that is not bounded.
+// MustNew is New for compile-time policies: a refused one is a programming error, so it panics
+// rather than return an unbounded broker.
 func MustNew(page, image safefetch.Policy) *Broker {
 	b, err := New(page, image)
 	if err != nil {
@@ -261,9 +247,8 @@ func (b *Broker) Image(ctx context.Context, owner int64, handleID, rawURL string
 	return entry.image, entry.media, nil
 }
 
-// rememberFailure keeps a failed fetch of key for failureTTL and returns err.
-// A refused destination is not kept (refusing it again costs nothing), nor is
-// a fetch that never started for want of a slot.
+// rememberFailure keeps a failed fetch for failureTTL and returns err. Refused destinations and
+// fetches that never started for want of a slot are not kept.
 func (b *Broker) rememberFailure(key string, err error) error {
 	e, ok := errors.AsType[*Error](err)
 	if !ok || e.transient {
@@ -277,9 +262,8 @@ func (b *Broker) rememberFailure(key string, err error) error {
 	return err
 }
 
-// fetch runs one bounded GET. The fetch is detached from the caller's
-// cancellation, because other viewers may be waiting on the same flight; the
-// policy's own deadline still bounds it.
+// fetch runs one bounded GET, detached from the caller's cancellation because other viewers may
+// wait on the same flight; the policy's deadline still bounds it.
 func (b *Broker) fetch(ctx context.Context, f *safefetch.Fetcher, rawURL, accept string) (*safefetch.Response, error) {
 	resp, err := f.Fetch(context.WithoutCancel(ctx), safefetch.Request{
 		URL:    rawURL,
@@ -297,9 +281,7 @@ func (b *Broker) fetch(ctx context.Context, f *safefetch.Fetcher, rawURL, accept
 	return resp, nil
 }
 
-// classify maps a safefetch error to the failure class the client sees. The
-// reason a destination was refused stays in the server; the client learns
-// only the class.
+// classify maps a safefetch error to the client-visible failure class; the refusal reason stays server-side.
 func classify(err error) Failure {
 	switch {
 	case errors.Is(err, safefetch.ErrTooManyRedirects):
@@ -313,18 +295,16 @@ func classify(err error) Failure {
 		errors.Is(err, safefetch.ErrSchemeDowngrade), errors.Is(err, safefetch.ErrHostNotAllowed):
 		return BlockedDestination
 	case errors.Is(err, safefetch.ErrBlockedAddress):
-		// Answered like a name that does not resolve: the resolver is the
-		// operator's, and a different answer for "resolves to a private
-		// address" would let a member map the server's network by name.
+		// Answered like an unresolvable name: a different answer for "resolves to a private address" would
+		// let a member map the server's network by name.
 		return Unavailable
 	default:
 		return Unavailable
 	}
 }
 
-// reducePage turns a fetched page into preview data: the title of an oEmbed
-// document, or the Open Graph fields of an HTML page with its image resolved
-// against the page's final URL.
+// reducePage turns a page into preview data: an oEmbed title, or Open Graph fields with the image
+// resolved against the page's final URL.
 func reducePage(resp *safefetch.Response) (previewData, error) {
 	switch resp.ContentType {
 	case "application/json":
@@ -356,8 +336,7 @@ func reducePage(resp *safefetch.Response) (previewData, error) {
 	return data, nil
 }
 
-// sniffImage is the raster type the bytes actually are, by signature, or ""
-// for anything else.
+// sniffImage is the raster type the bytes are by signature, or "".
 func sniffImage(body []byte) string {
 	switch {
 	case bytes.HasPrefix(body, []byte("\x89PNG\r\n\x1a\n")):

@@ -8,9 +8,6 @@ import (
 	"syscall"
 )
 
-// tryLockFile takes a non-blocking exclusive flock on path. The lock is tied
-// to the open descriptor, so it vanishes with the process no matter how it
-// dies — there is no stale-lock failure mode.
 func tryLockFile(path string) (func(), error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // sidecar of the configured db path
 	if err != nil {

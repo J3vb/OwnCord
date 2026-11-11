@@ -7,14 +7,12 @@ import (
 	"path/filepath"
 )
 
-// Resolve at process startup, before an update can rename the running image.
-// On Linux os.Executable follows /proc/self/exe: after the swap it returns
-// the backup's .old-* path, which would restart the previous version.
+// Resolve at startup, before an update renames the running image: on Linux os.Executable follows
+// /proc/self/exe and would return the backup's .old-* path, restarting the previous version.
 var startupExecutablePath, startupExecutableErr = resolveExecutablePath()
 
-// ExecutablePath returns the canonical installation path captured at startup.
-// Update staging, restart handoff and backup cleanup must all use this same
-// path, even after the running executable has been renamed by an update.
+// ExecutablePath returns the installation path captured at startup, which
+// update staging, restart handoff and backup cleanup must all use.
 func ExecutablePath() (string, error) {
 	return startupExecutablePath, startupExecutableErr
 }
@@ -28,14 +26,10 @@ func resolveExecutablePath() (string, error) {
 }
 
 // CanReplaceExecutable reports whether the directory holding exePath accepts
-// the file a self-update creates next to the binary. It creates and removes a
-// probe file there, so a read-only install folder is reported before any
-// download starts. The ".old-" infix is deliberate: if the process dies
-// between create and remove, the boot cleanup (removeOldBinaryAt) matches the
-// leftover by that prefix and deletes it.
-//
-// A nil result does not promise the swap succeeds, only that the directory is
-// writable; the swap itself still reports its own failures.
+// the file a self-update creates, using a probe file, so a read-only install
+// folder is reported before any download. The ".old-" infix is deliberate: boot
+// cleanup (removeOldBinaryAt) matches a probe orphaned by a crash by that prefix.
+// A nil result promises writability, not that the swap succeeds.
 func CanReplaceExecutable(exePath string) error {
 	dir := filepath.Dir(exePath)
 	probe, err := os.CreateTemp(dir, filepath.Base(exePath)+".old-probe-*")
@@ -49,8 +43,7 @@ func CanReplaceExecutable(exePath string) error {
 		return fmt.Errorf("closing install directory probe: %w", closeErr)
 	}
 	if removeErr != nil {
-		// The create already proved the folder writable; a file briefly held
-		// open (antivirus, indexer) is left for the boot cleanup.
+		// The create proved the folder writable; a file briefly held open (antivirus) is left for boot cleanup.
 		slog.Debug("install directory probe not removed", "path", name, "err", removeErr)
 	}
 	return nil

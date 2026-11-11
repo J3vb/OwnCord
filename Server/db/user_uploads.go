@@ -8,15 +8,13 @@ import (
 	"strings"
 )
 
-// Sort orders of a user's own upload list.
 const (
 	UploadSortNewest  = "newest"
 	UploadSortLargest = "largest"
 )
 
-// What an upload is doing right now. The last three are in use: the file is a
-// live avatar, profile banner or group DM icon, and removing it would break that
-// surface, so it cannot be removed from the list.
+// What an upload is doing now. The last three are in use (live avatar, profile banner,
+// group DM icon) and cannot be removed from the list.
 const (
 	UploadStateMessage   = "message"
 	UploadStateDeleted   = "deleted"
@@ -26,29 +24,25 @@ const (
 	UploadStateGroupIcon = "group_icon"
 )
 
-// OwnUploadCursor is where a page of the list stops: the last item's upload time
-// (newest first) or size (largest first), and its id. The zero value is the
-// first page.
+// OwnUploadCursor is where a page stops: the last item's upload time (newest first) or
+// size (largest first), and its id; zero is the first page.
 type OwnUploadCursor struct {
 	UploadedAt string
 	Size       int64
 	ID         string
 }
 
-// OwnUploadQuery is one request for the files userID uploaded. Every value
-// reaches SQL as a bound argument; only fixed fragments are concatenated.
+// OwnUploadQuery is one request for the files userID uploaded; every value is a bound argument.
 type OwnUploadQuery struct {
 	UserID int64
-	// Sort is UploadSortNewest or UploadSortLargest.
-	Sort string
-	// Name keeps files whose name contains it, ASCII case-insensitive.
+	Sort   string
 	Name   string
 	Cursor OwnUploadCursor
 	Limit  int
 }
 
-// OwnUpload is one file in the list. ChannelID and MessageID are set while a
-// message holds the file (a deleted message included) and nil otherwise.
+// OwnUpload is one file in the list; ChannelID and MessageID are set while a message
+// holds the file (a deleted one included).
 type OwnUpload struct {
 	Attachment AttachmentInfo `json:"attachment"`
 	UploadedAt string         `json:"uploaded_at"`
@@ -58,24 +52,22 @@ type OwnUpload struct {
 	Removable  bool           `json:"removable"`
 }
 
-// RemovedAttachment is what a removal took out: the stored file name for the
-// caller to delete from disk, the message that held the file, and its size.
+// RemovedAttachment is what a removal took out: the stored file name to delete from
+// disk, the holding message and its size.
 type RemovedAttachment struct {
 	StoredAs  string
 	MessageID *int64
 	Size      int64
 }
 
-// attachmentNotInUse is the shared "not a live avatar, group DM icon or profile
-// banner" guard, kept in one text so no site can name one and forget another. a is
-// the attachments alias.
+// attachmentNotInUse is the shared "not a live avatar, group DM icon or banner" guard
+// in one text; a is the attachments alias.
 const attachmentNotInUse = `NOT EXISTS (SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || a.id)
 		   AND NOT EXISTS (SELECT 1 FROM channels c WHERE c.dm_icon = a.id)
 		   AND NOT EXISTS (SELECT 1 FROM users u WHERE u.banner_id = a.id)`
 
-// ListOwnUploads returns up to q.Limit of the user's attachment rows: newest
-// first (upload time, then id) or largest first (size, then id). Every row the
-// user uploaded counts, linked to a live message or not.
+// ListOwnUploads returns up to q.Limit of the user's attachment rows, newest or
+// largest first (then id), linked to a live message or not.
 func (d *DB) ListOwnUploads(ctx context.Context, q OwnUploadQuery) ([]OwnUpload, error) {
 	if q.Limit < 1 {
 		return []OwnUpload{}, nil
@@ -108,7 +100,6 @@ func (d *DB) ListOwnUploads(ctx context.Context, q OwnUploadQuery) ([]OwnUpload,
 	}
 	args = append(args, q.Limit)
 
-	//nolint:gosec // G202: the filter and order are fixed fragments with ? placeholders
 	query := `SELECT a.id, a.filename, a.size, a.mime_type, a.width, a.height, a.duration_ms, a.waveform,
 		        a.uploaded_at, a.message_id, m.channel_id,
 		        CASE
@@ -147,11 +138,11 @@ func (d *DB) ListOwnUploads(ctx context.Context, q OwnUploadQuery) ([]OwnUpload,
 	return items, nil
 }
 
-// DeleteOwnAttachment removes userID's attachment row for id in one statement,
-// unless it is a live avatar, group DM icon or profile banner, and returns what
-// it removed. found is false when no row matched: unknown, someone else's, or in
-// use (OwnAttachmentInUse tells the last apart). RETURNING makes the delete and
-// the read atomic, so of two callers racing on one row exactly one gets it.
+// DeleteOwnAttachment removes userID's attachment row in one statement unless
+// it is a live avatar, group DM icon or banner, and returns what it removed.
+// found is false when unknown, someone else's or in use (OwnAttachmentInUse
+// tells the last apart). RETURNING makes delete and read atomic, so of two
+// racing callers exactly one gets the row.
 func (d *DB) DeleteOwnAttachment(ctx context.Context, id string, userID int64) (removed RemovedAttachment, found bool, err error) {
 	err = d.writer.QueryRowContext(ctx,
 		`DELETE FROM attachments AS a
@@ -168,9 +159,9 @@ func (d *DB) DeleteOwnAttachment(ctx context.Context, id string, userID int64) (
 	return removed, true, nil
 }
 
-// OwnAttachmentInUse reports whether userID has an attachment row for id
-// (exists) and whether it is a live avatar, group DM icon or profile banner
-// (inUse). Someone else's row reads as absent.
+// OwnAttachmentInUse reports whether userID has a row for id (exists) and
+// whether it is a live avatar, group DM icon or banner (inUse); someone else's row
+// reads as absent.
 func (d *DB) OwnAttachmentInUse(ctx context.Context, id string, userID int64) (inUse, exists bool, err error) {
 	err = d.reader.QueryRowContext(ctx,
 		`SELECT NOT (`+attachmentNotInUse+`)
@@ -184,11 +175,10 @@ func (d *DB) OwnAttachmentInUse(ctx context.Context, id string, userID int64) (i
 	return inUse, true, nil
 }
 
-// attachmentStoredNameInUseSQL seeks idx_attachments_stored_as.
 const attachmentStoredNameInUseSQL = `SELECT EXISTS (SELECT 1 FROM attachments WHERE stored_as = ?)`
 
-// AttachmentStoredNameInUse reports whether any attachment row still names the
-// stored file storedAs.
+// AttachmentStoredNameInUse reports whether any attachment row still names the stored
+// file storedAs.
 func (d *DB) AttachmentStoredNameInUse(ctx context.Context, storedAs string) (bool, error) {
 	var n int
 	err := d.reader.QueryRowContext(ctx, attachmentStoredNameInUseSQL, storedAs).Scan(&n)
@@ -198,16 +188,14 @@ func (d *DB) AttachmentStoredNameInUse(ctx context.Context, storedAs string) (bo
 	return n == 1, nil
 }
 
-// ErrMessageNotEmpty means DeleteEmptyOwnMessage found the message live but no
-// longer empty: text or a file arrived after the caller looked.
+// ErrMessageNotEmpty means DeleteEmptyOwnMessage found the message live but no longer empty.
 var ErrMessageNotEmpty = errors.New("message is not empty")
 
-// DeleteEmptyOwnMessage soft-deletes userID's ordinary message when, in the same
-// statement, it still has no text and no attached file: the author branch of
-// DeleteMessage plus that guard, so an edit or upload landing between the
-// caller's read and this write keeps the message. It returns ErrNotFound when the
-// message is missing, already deleted or someone else's, and ErrMessageNotEmpty
-// when the guard refused.
+// DeleteEmptyOwnMessage soft-deletes userID's ordinary message when, in the
+// same statement, it still has no text and no file: DeleteMessage's author
+// branch plus that guard, so an edit or upload landing since the caller's read
+// keeps the message. ErrNotFound when missing, deleted or someone else's;
+// ErrMessageNotEmpty when the guard refused.
 func (d *DB) DeleteEmptyOwnMessage(ctx context.Context, id, userID int64) error {
 	res, err := d.writer.ExecContext(ctx,
 		`UPDATE messages SET deleted = 1

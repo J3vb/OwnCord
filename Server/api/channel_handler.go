@@ -34,18 +34,16 @@ func isInvalidSearchQueryError(err error) bool {
 		strings.Contains(msg, "syntax error")
 }
 
-// PurgeBroadcaster fans a bulk delete out over WebSocket from a REST handler;
-// satisfied by *ws.Hub.
+// PurgeBroadcaster fans a bulk delete out over WebSocket; satisfied by *ws.Hub.
 type PurgeBroadcaster interface {
 	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
 	BroadcastMessagePinned(channelID, messageID int64, pinned bool)
 	PinEventRow(ctx context.Context, res *service.PinEventResult)
 }
 
-// MountChannelRoutes registers all channel-related routes onto r.
-// All routes require authentication. The limiter is used to rate-limit
-// expensive endpoints like search. broadcaster may be nil, in which case a
-// purge still commits but no chat_bulk_deleted event is emitted.
+// MountChannelRoutes registers the channel routes; all require authentication and the limiter covers
+// expensive endpoints like search. broadcaster may be nil: a purge then commits without a chat_bulk_deleted
+// event.
 func MountChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.RateLimiter, trustedProxies []string, broadcaster PurgeBroadcaster) {
 	r.Route("/api/v1/channels", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
@@ -81,9 +79,8 @@ func handleListChannels(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleGetMessages returns paginated messages for a channel: newest-first
-// pages behind `before` (the default), or the oldest-first page that follows
-// `after`.
+// handleGetMessages returns paginated messages: newest-first behind `before` (the default), or the
+// oldest-first page after `after`.
 func handleGetMessages(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
@@ -106,9 +103,8 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 			before = v
 		}
 
-		// `after` pages downward from a detached around-window toward the live
-		// tail. It is a different direction from `before`, so the two cannot be
-		// combined.
+		// `after` pages downward from a detached around-window toward the live tail, the opposite direction
+		// from `before`, so the two cannot combine.
 		after := int64(0)
 		if raw := r.URL.Query().Get("after"); raw != "" {
 			if r.URL.Query().Get("before") != "" {
@@ -151,9 +147,8 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleGetMessagesAround returns the window of messages centred on a message,
-// oldest-first. Used to jump to a message (search hit, pinned entry, reply
-// reference, permalink) that is not in the client's loaded history.
+// handleGetMessagesAround returns the oldest-first window centred on a message, for jumping to one not in
+// the loaded history.
 func handleGetMessagesAround(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
@@ -184,10 +179,8 @@ func handleGetMessagesAround(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleGetReactionUsers returns the users who reacted to a message with a
-// given emoji, capped server-side at 100. The emoji arrives percent-encoded in
-// the path; chi routes on RawPath when it differs from Path, so the param must
-// be unescaped here rather than taken verbatim.
+// handleGetReactionUsers returns the users who reacted with a given emoji, capped server-side at 100. The
+// emoji is percent-encoded in the path and chi routes on RawPath, so it must be unescaped here.
 func handleGetReactionUsers(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
@@ -222,8 +215,7 @@ func handleGetReactionUsers(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// purgeRequest is the JSON body for POST /api/v1/channels/{id}/messages/purge.
-// Before is optional; 0 means "start from the newest message".
+// purgeRequest is the POST /api/v1/channels/{id}/messages/purge body; Before 0 means "from the newest".
 type purgeRequest struct {
 	Limit  int   `json:"limit"`
 	Before int64 `json:"before"`
@@ -258,8 +250,7 @@ func handlePurgeMessages(svc *service.Services, broadcaster PurgeBroadcaster) ht
 			return
 		}
 
-		// A purge that matched nothing is still a success, but there is no
-		// state change to announce.
+		// A purge that matched nothing is a success with no state change to announce.
 		if broadcaster != nil && len(result.MessageIDs) > 0 {
 			broadcaster.BroadcastChatBulkDeleted(result.ChannelID, result.MessageIDs)
 		}
@@ -375,9 +366,8 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 			Messages []db.MessageAPIResponse `json:"messages"`
 			HasMore  bool                    `json:"has_more"`
 		}
-		// Report the real cap state, not a hardcoded false: with more than
-		// MaxPinnedMessages pins the rest are truncated and the caller must be
-		// able to tell.
+		// Report the real cap state: with more than MaxPinnedMessages pins the rest are truncated and the
+		// caller must be able to tell.
 		hasMore := len(msgs) > db.MaxPinnedMessages
 		if hasMore {
 			msgs = msgs[:db.MaxPinnedMessages]
@@ -389,8 +379,7 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleSetPinned pins or unpins a message. The change is broadcast to every
-// reader so no client shows stale pins; a pin may also fan out a pin row.
+// handleSetPinned pins or unpins a message, broadcast to every reader so no client shows stale pins.
 func handleSetPinned(svc *service.Services, broadcaster PurgeBroadcaster, pinned bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
@@ -431,18 +420,15 @@ func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrNotFound):
 		writeErr(w, http.StatusNotFound, httperr.CodeNotFound, err.Error())
 	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
-		// The response carries the code and nothing else.
 		writeErr(w, http.StatusForbidden, httperr.CodeNSFWAcknowledgementRequired, "")
 	case errors.Is(err, service.ErrTimedOut):
 		writeErr(w, http.StatusForbidden, httperr.CodeTimedOut, err.Error())
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):
 		writeErr(w, http.StatusForbidden, httperr.CodeForbidden, err.Error())
 	case errors.Is(err, service.ErrDeletedMessage):
-		// The target is already gone: a state, not a failure. 404 would be wrong
-		// because the moderation client clears the report on 404, hiding the
-		// removal's own outcome. 409 ALREADY_DELETED is the "already in the
-		// requested end state" twin of DUPLICATE_REPORT, so the caller gets a
-		// typed refusal instead of a 500.
+		// The target is already gone: a state, not a failure. 404 would be wrong because the moderation
+		// client clears the report on 404, hiding the removal's outcome; 409 ALREADY_DELETED is the typed
+		// refusal.
 		writeErr(w, http.StatusConflict, httperr.CodeAlreadyDeleted, err.Error())
 	case errors.Is(err, service.ErrGroupDMFull):
 		// Before ErrConflict, which it wraps: the group has no room left.
@@ -450,8 +436,7 @@ func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrConflict):
 		writeErr(w, http.StatusConflict, httperr.CodeConflict, err.Error())
 	case errors.Is(err, service.ErrInternal):
-		// ErrorContext so the enriching handler attaches req_id/trace_id,
-		// linking this 500 to its request log line and trace.
+		// ErrorContext so the enriching handler attaches req_id/trace_id.
 		slog.ErrorContext(ctx, "service error", "error", err)
 		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "an internal error occurred")
 	default:
@@ -460,9 +445,8 @@ func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	}
 }
 
-// parseLimitParam reads the shared `limit` query parameter, defaulting to
-// defaultMessageLimit and clamping at maxMessageLimit. Writes a 400 response
-// and returns false when the value is present but not a positive integer.
+// parseLimitParam reads the shared `limit` parameter, defaulting to defaultMessageLimit and clamping at
+// maxMessageLimit; a present non-positive-integer value writes 400 and returns false.
 func parseLimitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 	raw := r.URL.Query().Get("limit")
 	if raw == "" {

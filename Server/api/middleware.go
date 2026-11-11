@@ -24,26 +24,19 @@ import (
 type contextKey int
 
 const (
-	// UserKey is the context key for the authenticated *db.User.
 	UserKey contextKey = iota
-	// SessionKey is the context key for the authenticated *db.Session.
 	SessionKey
-	// RoleKey is the context key for the *db.Role of the authenticated user.
 	RoleKey
 )
 
-// sessionTouchInterval is the minimum time between last_used writes per session;
-// minute granularity is plenty for the sessions list, and writing it on every
-// request serialized API traffic behind the single SQLite writer.
+// Minimum time between last_used writes per session; writing on every request serialized API traffic behind
+// the single SQLite writer.
 const sessionTouchInterval = 60 * time.Second
 
 var middlewareNow = time.Now
 
-// touchThrottle remembers when each session hash was last touched so
-// TouchSession runs at most once per sessionTouchInterval per session. Once per
-// interval the next call drops every entry older than the interval, so the map
-// holds only sessions seen in about the last two intervals and no call pays
-// for more than one scan per interval.
+// Remembers when each session hash was last touched so TouchSession runs at most once per interval; one
+// scan per interval drops stale entries, so the map stays small.
 type touchThrottle struct {
 	mu        sync.Mutex
 	seen      map[string]time.Time
@@ -69,9 +62,7 @@ func (t *touchThrottle) shouldTouch(hash string, now time.Time) bool {
 	return true
 }
 
-// principal returns the caller AuthMiddleware resolved for r as the shape
-// the service layer takes. ok is false when the request carries no
-// authenticated user; Session is nil for an API-token principal.
+// principal returns the caller AuthMiddleware resolved for r; Session is nil for an API-token principal.
 func principal(r *http.Request) (service.Principal, bool) {
 	user, ok := r.Context().Value(UserKey).(*db.User)
 	if !ok || user == nil {
@@ -81,9 +72,8 @@ func principal(r *http.Request) (service.Principal, bool) {
 	return service.Principal{User: user, Session: sess}, true
 }
 
-// requireUser resolves the authenticated user for a handler on a route mounted
-// behind AuthMiddleware, refusing the request with the same 401
-// writeNotAuthenticated sends when there is no usable one.
+// requireUser returns the authenticated user, refusing with the writeNotAuthenticated 401 when there is
+// none.
 func requireUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
 	user, ok := r.Context().Value(UserKey).(*db.User)
 	if !ok || user == nil {
@@ -93,10 +83,8 @@ func requireUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
 	return user, true
 }
 
-// requireLoginSession admits only a principal that holds a login session; an
-// API-token principal gets 403 LOGIN_SESSION_REQUIRED. It guards the
-// account-security routes (password, two-factor, recovery, sessions, account
-// deletion) and mounts after AuthMiddleware.
+// requireLoginSession admits only a login-session principal; an API-token principal gets 403
+// LOGIN_SESSION_REQUIRED. It guards account-security routes and mounts after AuthMiddleware.
 func requireLoginSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principal(r)
@@ -112,44 +100,31 @@ func requireLoginSession(next http.Handler) http.Handler {
 	})
 }
 
-// writeLoginSessionRequired answers a request that needs a login session but
-// carried an API token.
 func writeLoginSessionRequired(w http.ResponseWriter) {
 	writeErr(w, http.StatusForbidden, httperr.CodeLoginSessionRequired, service.ErrLoginSessionRequired.Error())
 }
 
-// backgroundWriteTimeout bounds AuthMiddleware's session writes that run when
-// no connection-writes batch is installed (the expired-session delete and the
-// API-token touch), so a wedged DB cannot hold a request forever. A var so tests can shorten it.
+// Bounds AuthMiddleware's session writes when no connection-writes batch is installed, so a wedged DB
+// cannot hold a request forever. A var so tests can shorten it.
 var backgroundWriteTimeout = 5 * time.Second
 
-// authFailure is why a credential hash did not resolve to a usable principal,
-// in the form both perimeters answer with.
 type authFailure struct {
 	status  int
 	code    httperr.Code
 	message string
-	// after, when set, is work the caller runs once the response is written
-	// (the expired-session cleanup).
+	// Work run once the response is written (expired-session cleanup).
 	after func()
 }
 
-// resolvePrincipal resolves a bearer credential hash to the request context
-// AuthMiddleware hands its handler (UserKey, SessionKey, RoleKey), applying
-// expired-session cleanup, the ban check and the last-used touch. A non-nil
-// failure carries the bearer perimeter's status; the file-link perimeter
-// (file_link.go) maps it to its own refusal, so a link never outlives what a
-// bearer request would be refused for.
+// resolvePrincipal resolves a bearer credential hash to the context AuthMiddleware hands its handler.
+// A non-nil failure carries the bearer perimeter's status; file_link.go maps it to its own refusal so a
+// link never outlives what a bearer request would be refused for.
 func resolvePrincipal(ctx context.Context, sessions *service.SessionService, touches *touchThrottle, hash string) (context.Context, *authFailure) {
-	// A login session is matched first; an API token is the fallback.
 	user, role, sess, err := sessions.ResolveBearer(ctx, hash)
 	switch {
 	case errors.Is(err, auth.ErrTokenExpired):
-		// Clean up the expired login session once the response is written. With
-		// the server's batch installed this only queues the delete for the
-		// connection-writes flush (no goroutine); without one (tests, the token
-		// CLI) it deletes inline, bounded. The ctx is detached: the delete must
-		// not die with the finished request.
+		// With the server's batch installed this only queues the delete; without one (tests, token CLI) it
+		// deletes inline, bounded. The ctx is detached so the delete does not die with the finished request.
 		cleanup := func() {
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundWriteTimeout)
 			defer cancel()
@@ -165,9 +140,8 @@ func resolvePrincipal(ctx context.Context, sessions *service.SessionService, tou
 	case errors.Is(err, auth.ErrTokenNotFound):
 		return nil, &authFailure{http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired session", nil}
 	case err != nil:
-		// A wrapped DB error, not a sentinel. A DB outage is not a bad token: a
-		// 401 would make the client clear auth, disconnect the WS and delete the
-		// stored credential. Log it and report a server-side fault.
+		// A DB outage is not a bad token: a 401 would make the client clear auth, disconnect the WS and
+		// delete the stored credential.
 		slog.ErrorContext(ctx, "auth: token resolution failed", "error", err)
 		return nil, &authFailure{http.StatusServiceUnavailable, httperr.CodeServiceUnavailable, "authentication service temporarily unavailable", nil}
 	}
@@ -176,11 +150,8 @@ func resolvePrincipal(ctx context.Context, sessions *service.SessionService, tou
 		return nil, &authFailure{http.StatusForbidden, httperr.CodeForbidden, "your account has been suspended", nil}
 	}
 
-	// Touch last-used, non-fatal. A login session is touched inline, throttled
-	// to once per sessionTouchInterval. An API-token principal (sess == nil) is
-	// touched off the hot path so bot/CI traffic gains no latency: with the
-	// server's batch installed it is only queued (one write per token per
-	// minute), otherwise written inline under backgroundWriteTimeout.
+	// Non-fatal. An API-token principal is touched off the hot path so bot/CI traffic gains no latency:
+	// queued with the batch installed, otherwise written inline under backgroundWriteTimeout.
 	if sess != nil {
 		if touches.shouldTouch(hash, middlewareNow()) {
 			if err := sessions.TouchSession(ctx, hash); err != nil {
@@ -201,9 +172,8 @@ func resolvePrincipal(ctx context.Context, sessions *service.SessionService, tou
 	return ctx, nil
 }
 
-// AuthMiddleware validates the "Authorization: Bearer <token>" session and
-// injects user and session into the request context. 401 if the token is
-// missing, invalid or expired.
+// AuthMiddleware validates the "Authorization: Bearer <token>" session and injects user and session
+// into the request context.
 func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Handler {
 	touches := &touchThrottle{seen: make(map[string]time.Time)}
 	return func(next http.Handler) http.Handler {
@@ -226,20 +196,10 @@ func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Ha
 	}
 }
 
-// RequirePermission returns middleware gating a route on SERVER-WIDE role
-// permissions. Returns 403 if the user lacks them.
-//
-// Scope contract — this is the whole reason the middleware and the service
-// layer look like two permission systems:
-//   - It consults the role bitfield only. Channel overrides are NOT applied,
-//     because a route reaching this middleware has no channel id to resolve
-//     them against, and a per-channel allow must never open a server-wide gate.
-//   - Anything channel-scoped belongs in the service layer behind
-//     permissions.Checker (via svc.Permissions), which resolves overrides.
-//   - ADMINISTRATOR bypasses; multi-bit masks require ALL bits.
-//
-// The rule itself lives in permissions.HasServerPerm so no call site can
-// re-derive it.
+// RequirePermission gates a route on SERVER-WIDE role permissions; 403 if the user lacks them. It
+// consults the role bitfield only: channel overrides are NOT applied, since a per-channel allow must never
+// open a server-wide gate. Channel-scoped checks belong in the service layer behind permissions.Checker.
+// ADMINISTRATOR bypasses; multi-bit masks require ALL bits. The rule lives in permissions.HasServerPerm.
 func RequirePermission(perm int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -259,13 +219,10 @@ func RequirePermission(perm int64) func(http.Handler) http.Handler {
 	}
 }
 
-// RateLimitMiddleware limits requests per IP with the RateLimiter, resolving the
-// client IP through trustedProxies (nil = RemoteAddr). 429 with Retry-After when
-// exceeded.
-// prefix names the endpoint's bucket and must be non-empty in production: the
-// limiter records one timestamp per call regardless of the limit, so endpoints
-// sharing a bare-IP key would cap each other at the lowest limit (profile edits
-// 429ing the password endpoint, NAT'd logins blocking register).
+// RateLimitMiddleware limits requests per IP, resolving the client IP through trustedProxies (nil =
+// RemoteAddr); 429 with Retry-After when exceeded. prefix must be non-empty in production: the limiter
+// records one timestamp per call, so endpoints sharing a bare-IP key would cap each other at the lowest
+// limit.
 func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, window time.Duration, trustedProxies ...[]string) func(http.Handler) http.Handler {
 	var proxies []string
 	if len(trustedProxies) > 0 {
@@ -278,10 +235,8 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, wi
 			key := prefix + clientip.RateKey(ip)
 
 			if !limiter.Allow(key, limit, window) {
-				// The true remainder, not the full window: a client told to wait
-				// the whole window retries too late.
+				// The true remainder, not the full window, which would make the client retry too late.
 				retry := limiter.RetryAfter(key, limit, window)
-				// Round up so a 59.4s remainder does not report 59.
 				secs := max(int(math.Ceil(retry.Seconds())), 1)
 				w.Header().Set("Retry-After", fmt.Sprintf("%d", secs))
 				writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many requests, please slow down")
@@ -293,9 +248,7 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, wi
 	}
 }
 
-// parseCIDRList parses CIDR strings, skipping invalid entries with a warning so
-// a misconfigured entry cannot take the server down. Call it at construction,
-// never per request.
+// parseCIDRList skips invalid entries with a warning. Call it at construction, never per request.
 func parseCIDRList(cidrs []string) []*net.IPNet {
 	for _, c := range cidrs {
 		if _, _, err := net.ParseCIDR(c); err != nil {
@@ -306,12 +259,9 @@ func parseCIDRList(cidrs []string) []*net.IPNet {
 	return clientip.ParseCIDRList(cidrs)
 }
 
-// AdminIPRestrict blocks requests from IPs outside the allowed CIDR list with
-// 403, naming settingName (the config key). An empty list allows all.
-// trustedProxyCIDRs lists the connecting IPs trusted to forward the real client
-// IP via X-Real-IP or X-Forwarded-For. Both lists are parsed once at
-// construction; a non-empty allowedCIDRs whose entries are all invalid yields
-// zero networks, so nothing matches and access is denied (fail closed).
+// AdminIPRestrict blocks requests from IPs outside the allowed CIDR list with 403, naming settingName.
+// An empty list allows all; a non-empty list whose entries are all invalid denies everything (fail closed).
+// trustedProxyCIDRs lists the peers trusted to forward the client IP via X-Real-IP or X-Forwarded-For.
 func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []string) func(http.Handler) http.Handler {
 	allowedNets := parseCIDRList(allowedCIDRs)
 	proxyNets := parseCIDRList(trustedProxyCIDRs)
@@ -326,19 +276,14 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 
 			ip := clientip.Resolve(r, proxyNets)
 			if !clientip.InNets(ip, allowedNets) {
-				// Name the setting so a self-hoster can fix it without reading
-				// the source: the default allowlist is private networks only, so
-				// a remote operator is refused until they add their address or
-				// use an SSH tunnel. The reply says nothing about which IP was
-				// seen or which CIDRs are configured (no topology disclosure).
+				// Name the setting so a self-hoster can fix it; the reply discloses no topology (no IP seen,
+				// no CIDRs).
 				writeErr(w, http.StatusForbidden, httperr.CodeForbidden,
 					"access denied by "+settingName+" — this address is not in its allowlist")
 				return
 			}
-			// A local peer forwarding for someone else while no proxy is
-			// trusted means the allowlist is judging the proxy, not the
-			// client: every client inherits the proxy's private address.
-			// Either header clientip.Resolve reads marks a proxy.
+			// A local peer forwarding for someone else while no proxy is trusted means the allowlist is
+			// judging the proxy, not the client.
 			forwarded := r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != ""
 			if len(proxyNets) == 0 && forwarded {
 				if peer := net.ParseIP(ip); peer != nil && (peer.IsLoopback() || peer.IsPrivate()) {
@@ -355,9 +300,7 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 	}
 }
 
-// SecurityHeadersWithTLS sets the standard defensive response headers (nosniff,
-// frame DENY, XSS filter off to rely on CSP, strict Referrer-Policy, CSP
-// default-src self, Permissions-Policy, no-store); a non-empty tlsMode also sets
+// SecurityHeadersWithTLS sets the defensive response headers; a non-empty tlsMode also sets
 // Strict-Transport-Security.
 func SecurityHeadersWithTLS(tlsMode string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -378,8 +321,7 @@ func SecurityHeadersWithTLS(tlsMode string) func(http.Handler) http.Handler {
 	}
 }
 
-// MaxBodySize wraps r.Body with http.MaxBytesReader so oversized bodies error
-// rather than exhaust memory. Upload routes needing more apply their own limit.
+// MaxBodySize wraps r.Body with http.MaxBytesReader; upload routes needing more apply their own limit.
 func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -389,10 +331,8 @@ func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
 	}
 }
 
-// MaxBodySizeUnless is like MaxBodySize but skips the limit for paths that
-// match any of the given prefixes, or a POST whose escaped path matches
-// exemptPOST (nil for none). Exempted paths apply their own limit via
-// route-scoped middleware.
+// MaxBodySizeUnless is MaxBodySize skipping prefix matches, or a POST whose escaped path matches exemptPOST
+// (nil for none).
 func MaxBodySizeUnless(maxBytes int64, exemptPOST *regexp.Regexp, exemptPrefixes ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

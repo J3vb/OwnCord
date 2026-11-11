@@ -1,12 +1,10 @@
 package db
 
-// Staged boot-time restore. The admin restore handler no longer copies
-// over the open database. It verifies a backup, stages a copy of it beside the
-// database and writes a marker last; the next boot applies it here, under the
-// process lock and before anything opens the database.
-//
-// The apply is a state machine keyed on which files exist, so it resumes after
-// a crash at any point. Files, all beside the database file D:
+// Staged boot-time restore. The admin handler verifies a backup, stages a copy
+// beside the database and writes a marker last; the next boot applies it here,
+// under the process lock before anything opens the database. The apply is a
+// state machine keyed on which files exist, so it resumes after a crash at any
+// point. Files, all beside the database file D:
 //
 //	D.restore-staged         the verified copy of the backup
 //	D.restore-pending.json   the marker; written last, it is the commit point
@@ -26,8 +24,7 @@ package db
 //	M, !S, !R, D   swapped with no prior database: integrity check
 //	M, S, R, D     inconsistent: touch nothing, return ErrRestoreInconsistent
 //
-// The marker's fields are labels only. Every path the apply opens is derived
-// from the database path.
+// The marker's fields are labels only; every path is derived from the database path.
 
 import (
 	"context"
@@ -51,7 +48,6 @@ const (
 	restoreResultSuffix   = ".restore-result.json"
 )
 
-// Restore outcomes written to the result file.
 const (
 	RestoreStatusApplied    = "applied"
 	RestoreStatusRolledBack = "rolled_back"
@@ -59,15 +55,13 @@ const (
 )
 
 var (
-	// ErrRestoreInconsistent means the restore files are in a combination no
-	// crash can produce. Nothing is touched; an operator must look.
-	ErrRestoreInconsistent = errors.New("staged restore files are inconsistent")
-	// ErrRestoreAlreadyStaged means a restore is already waiting for a boot.
+	// ErrRestoreInconsistent means the restore files are in a combination no crash can produce;
+	// nothing is touched.
+	ErrRestoreInconsistent  = errors.New("staged restore files are inconsistent")
 	ErrRestoreAlreadyStaged = errors.New("a restore is already staged")
 )
 
-// StagedRestoreMarker is the commit record of a staged restore. Its fields are
-// labels and a checksum; none is ever opened as a path.
+// StagedRestoreMarker is the commit record of a staged restore; none of its fields is opened as a path.
 type StagedRestoreMarker struct {
 	Backup      string    `json:"backup"`
 	SafetyCopy  string    `json:"safety_copy"`
@@ -85,12 +79,8 @@ type RestoreResult struct {
 	Error     string    `json:"error,omitempty"`
 }
 
-// Test seams. Production never changes them.
 var (
-	// checkSwapped verifies the database after the swap.
-	checkSwapped = CheckBackupIntegrity
-	// restoreStepHook is called after each named step of an apply; a non-nil
-	// error aborts the apply at that point, as a crash would.
+	checkSwapped    = CheckBackupIntegrity
 	restoreStepHook = func(string) error { return nil }
 )
 
@@ -120,10 +110,8 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// moveFile renames src over dst durably. On Windows a virus scanner or
-// indexer can hold a just-closed SQLite file for a while, so the rename is
-// retried with a growing delay for about ten seconds; elsewhere a failed
-// rename is final.
+// moveFile renames src over dst durably. On Windows a scanner or indexer can
+// hold a just-closed SQLite file, so the rename retries with growing delay for ~10s.
 func moveFile(src, dst string) error {
 	attempts := 1
 	if runtime.GOOS == "windows" {
@@ -142,8 +130,6 @@ func moveFile(src, dst string) error {
 	return fmt.Errorf("moving %s to %s: %w", filepath.Base(src), filepath.Base(dst), err)
 }
 
-// moveSidecars moves each of a database's -wal and -shm files (not the main
-// file) from one base name to another. A missing source is skipped.
 func moveSidecars(from, to string) error {
 	for _, suffix := range sqliteSidecars[1:] {
 		if !fileExists(from + suffix) {
@@ -169,7 +155,6 @@ func removeAll(base string) error {
 	return removeIfPresent(base, base+"-wal", base+"-shm")
 }
 
-// writeFileAtomic writes data to path through a temp file, fsync and rename.
 func writeFileAtomic(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".restore-*")
 	if err != nil {
@@ -204,11 +189,10 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// ApplyStagedRestore finishes a staged restore, or recovers a crashed one,
-// before the database is opened. The caller must hold the process lock. With
-// nothing staged it does nothing and returns the zero result. Otherwise it
-// returns the outcome, which is also written to the result file for the
-// next startup to report; an error means the files are left for an operator.
+// ApplyStagedRestore finishes a staged restore, or recovers a crashed one, before the
+// database is opened; the caller must hold the process lock. With nothing staged it
+// returns the zero result. The outcome is also written to the result file; an error
+// leaves the files for an operator.
 func ApplyStagedRestore(dbPath string) (RestoreResult, error) {
 	if dbPath == "" || isMemoryPath(dbPath) {
 		return RestoreResult{}, nil
@@ -217,7 +201,6 @@ func ApplyStagedRestore(dbPath string) (RestoreResult, error) {
 	if err != nil {
 		return RestoreResult{}, fmt.Errorf("applying staged restore: %w", err)
 	}
-	// Boot-time work with no caller context; bounded so a stuck check cannot hold the boot forever.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	hasMarker, hasStaged := fileExists(p.marker), fileExists(p.staged)
@@ -228,7 +211,6 @@ func ApplyStagedRestore(dbPath string) (RestoreResult, error) {
 	}
 	m, err := readRestoreMarker(p.marker)
 	if err != nil {
-		// A torn or foreign marker cannot be trusted; leave everything.
 		return RestoreResult{}, fmt.Errorf("applying staged restore: %w: %w", ErrRestoreInconsistent, err)
 	}
 
@@ -245,9 +227,8 @@ func ApplyStagedRestore(dbPath string) (RestoreResult, error) {
 	case hasRollback: // crash mid-rollback: the old files are still being put back
 		res, err = resumeRollback(p, m)
 	default:
-		// No staged copy and nothing moved aside: a swap always leaves the
-		// rollback file until it is finished, so this is a refusal that was
-		// recorded and interrupted, or a staged copy removed by hand.
+		// No staged copy and nothing moved aside: a swap always leaves the rollback
+		// file until finished, so this is an interrupted recorded refusal or a hand-removed copy.
 		res = priorResult(p, m)
 	}
 	if err != nil {
@@ -260,9 +241,8 @@ func ApplyStagedRestore(dbPath string) (RestoreResult, error) {
 	return res, nil
 }
 
-// finishAndClean records the result and drops the marker, then discards the
-// staged copy of a refusal. A crash before the discard leaves a staged copy
-// with no marker, which the next boot deletes as an orphan.
+// finishAndClean records the result, drops the marker, then discards a refusal's
+// staged copy; a crash before the discard leaves an orphan the next boot deletes.
 func finishAndClean(p restorePaths, res RestoreResult) error {
 	if err := finishRestore(p, res); err != nil {
 		return err
@@ -281,8 +261,6 @@ func resumeRollback(p restorePaths, m StagedRestoreMarker) (RestoreResult, error
 		Error: "an interrupted rollback was completed; the previous database was kept"}, nil
 }
 
-// cleanUncommitted handles the cases with no marker, none of which is a
-// restore in progress.
 func cleanUncommitted(p restorePaths, hasStaged, hasRollback, hasDB bool) error {
 	if hasStaged || fileExists(p.stagedTmp) {
 		slog.Warn("ignoring an incomplete staged restore: no marker was written")
@@ -291,10 +269,9 @@ func cleanUncommitted(p restorePaths, hasStaged, hasRollback, hasDB bool) error 
 		}
 	}
 	if hasRollback {
-		// Every finished apply deletes the moved-aside files before it removes
-		// its marker, so files still here mean the marker was deleted by hand
-		// (the documented way to cancel) while the swap was under way or just
-		// done. The moved-aside database is the one to keep.
+		// Every finished apply deletes the moved-aside files before removing its
+		// marker, so files still here mean the marker was hand-deleted (the documented
+		// cancel) mid-swap. The moved-aside database is the one to keep.
 		slog.Warn("restore marker removed during a swap — putting the previous database back")
 		if hasDB {
 			if err := removeIfPresent(p.db+"-wal", p.db+"-shm", p.db); err != nil {
@@ -315,8 +292,6 @@ func removeStaged(p restorePaths) error {
 	return nil
 }
 
-// priorResult returns the result an earlier, interrupted apply already wrote
-// for this marker's backup, or a refusal when there is none.
 func priorResult(p restorePaths, m StagedRestoreMarker) RestoreResult {
 	if data, err := os.ReadFile(p.result); err == nil { //nolint:gosec // G304: sibling of the configured database
 		var prior RestoreResult
@@ -343,13 +318,8 @@ func refusedResult(m StagedRestoreMarker, reason string) RestoreResult {
 	return RestoreResult{Status: RestoreStatusRefused, Backup: m.Backup, ActorID: m.ActorID, AppliedAt: time.Now().UTC(), Error: reason}
 }
 
-// startSwap verifies the staged copy and, if it holds, moves the live
-// database aside and swaps the copy in.
 func startSwap(ctx context.Context, p restorePaths, dbPath string, m StagedRestoreMarker) (RestoreResult, error) {
-	// A read-only open can leave -wal/-shm beside the staged copy on any exit.
 	defer func() { _ = removeIfPresent(p.staged+"-wal", p.staged+"-shm") }()
-	// A refusal returns a result only; the caller records it, removes the
-	// marker and only then discards the staged copy.
 	if sum, err := fileSHA256(p.staged); err != nil || sum != m.SHA256 {
 		reason := "the staged copy does not match its checksum"
 		if err != nil {
@@ -361,10 +331,8 @@ func startSwap(ctx context.Context, p restorePaths, dbPath string, m StagedResto
 		return refusedResult(m, "the staged copy failed its integrity check"), nil
 	}
 
-	// The process lock is held and nothing has the database open, so the
-	// floors can be taken from exactly what the live database holds now. A
-	// floor that cannot be stored must not block the boot: refuse, and keep
-	// the old database.
+	// Nothing has the database open, so the floors come from exactly what the live
+	// database holds. A floor that cannot be stored must not block the boot: refuse and keep the old database.
 	if err := AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
 		slog.Error("staged restore refused: could not preserve the message retry cutoff", "err", err)
 		return refusedResult(m, "the message retry cutoff could not be preserved"), nil
@@ -381,9 +349,8 @@ func startSwap(ctx context.Context, p restorePaths, dbPath string, m StagedResto
 	}
 
 	// Main file first: a leftover -wal beside a missing main file is then
-	// unambiguous on resume, and is moved with its database below. With no
-	// live database an empty file is parked, so a finished swap is always
-	// recognisable by the rollback file and putting it back means a fresh start.
+	// unambiguous on resume. With no live database an empty file is parked, so a
+	// finished swap is always recognisable by the rollback file.
 	if fileExists(p.db) {
 		if err := moveFile(p.db, p.rollback); err != nil {
 			return RestoreResult{}, fmt.Errorf("moving the live database aside: %w", err)
@@ -397,9 +364,8 @@ func startSwap(ctx context.Context, p restorePaths, dbPath string, m StagedResto
 	return resumeSwap(ctx, p, m)
 }
 
-// resumeSwap moves any leftover live sidecars aside with their database, then
-// renames the staged copy into place and verifies it. The main file is
-// already at the rollback name, or never existed.
+// resumeSwap moves leftover live sidecars aside with their database, then
+// renames the staged copy into place and verifies it.
 func resumeSwap(ctx context.Context, p restorePaths, m StagedRestoreMarker) (RestoreResult, error) {
 	if err := moveSidecars(p.db, p.rollback); err != nil {
 		return RestoreResult{}, fmt.Errorf("moving the live database's WAL files aside: %w", err)
@@ -416,12 +382,9 @@ func resumeSwap(ctx context.Context, p restorePaths, m StagedRestoreMarker) (Res
 	return verifySwapped(ctx, p, m)
 }
 
-// verifySwapped checks the database now in place. A failure rolls back to the
-// moved-aside file when there is one.
 func verifySwapped(ctx context.Context, p restorePaths, m StagedRestoreMarker) (RestoreResult, error) {
-	// Only the staged copy may be reported as applied (and the replaced
-	// database deleted). A different file here, say an empty database some
-	// tool created while the restore was interrupted, leaves everything alone.
+	// Only the staged copy may be reported applied (and the replaced database
+	// deleted); a different file, e.g. an empty database a tool created meanwhile, leaves everything alone.
 	if sum, err := fileSHA256(p.db); err != nil || sum != m.SHA256 {
 		return RestoreResult{}, fmt.Errorf("applying staged restore: %w: the live database is not the staged copy", ErrRestoreInconsistent)
 	}
@@ -433,8 +396,8 @@ func verifySwapped(ctx context.Context, p restorePaths, m StagedRestoreMarker) (
 }
 
 func rollBack(p restorePaths, m StagedRestoreMarker, reason string) (RestoreResult, error) {
-	// Sidecars first and the main file last: no main file then means the
-	// restored files are gone, and a resume must not touch what it finds.
+	// Sidecars first, main file last: no main file means the restored files are gone and a resume must
+	// not touch what it finds.
 	if err := removeIfPresent(p.db+"-wal", p.db+"-shm", p.db); err != nil {
 		return RestoreResult{}, fmt.Errorf("discarding the failed restore: %w", err)
 	}
@@ -444,8 +407,8 @@ func rollBack(p restorePaths, m StagedRestoreMarker, reason string) (RestoreResu
 	return RestoreResult{Status: RestoreStatusRolledBack, Backup: m.Backup, ActorID: m.ActorID, AppliedAt: time.Now().UTC(), Error: reason}, nil
 }
 
-// restoreRollbackFiles renames the moved-aside database and sidecars back.
-// The main file goes last, so a crash part-way is re-run by the same state.
+// restoreRollbackFiles renames the moved-aside files back, main file last so a crash part-way
+// re-runs from the same state.
 func restoreRollbackFiles(p restorePaths) error {
 	if err := moveSidecars(p.rollback, p.db); err != nil {
 		return err
@@ -456,8 +419,8 @@ func restoreRollbackFiles(p restorePaths) error {
 	return nil
 }
 
-// finishRestore records the result, then drops the marker, then the files
-// moved aside. A crash between any two leaves a state the table above reads.
+// finishRestore records the result, then drops the marker, then the moved-aside files; a crash
+// between any two leaves a state the table reads.
 func finishRestore(p restorePaths, res RestoreResult) error {
 	data, err := json.Marshal(res)
 	if err != nil {
@@ -469,16 +432,15 @@ func finishRestore(p restorePaths, res RestoreResult) error {
 	if err := restoreStepHook("result"); err != nil {
 		return err
 	}
-	// The replaced database goes before the marker: with no marker, files
-	// still moved aside can only mean a hand-cancelled restore (see
-	// cleanUncommitted), never a finished one.
+	// The replaced database goes before the marker: with no marker, files still moved aside can only
+	// mean a hand-cancelled restore.
 	if res.Status == RestoreStatusApplied {
 		if err := removeAll(p.rollback); err != nil {
 			return fmt.Errorf("removing replaced database: %w", err)
 		}
-		// Make the deletions durable first: a marker removal that survived a
-		// power loss while a rollback file came back would read as a
-		// hand-cancelled restore and discard the restored database.
+		// Make the deletions durable first: a marker removal that survived a power
+		// loss while a rollback file came back would read as a hand-cancelled restore
+		// and discard the restored database.
 		syncDir(filepath.Dir(p.marker))
 	}
 	if err := removeIfPresent(p.marker); err != nil {
@@ -487,9 +449,8 @@ func finishRestore(p restorePaths, res RestoreResult) error {
 	return nil
 }
 
-// syncDir flushes a directory's entries so completed removals survive a power
-// loss. Best effort: Windows cannot sync a directory, and a failure here only
-// narrows the durability window the caller already tolerates.
+// syncDir flushes a directory's entries so removals survive power loss; best effort (Windows
+// cannot sync a directory).
 func syncDir(dir string) {
 	d, err := os.Open(dir) //nolint:gosec // G304: the configured database directory
 	if err != nil {

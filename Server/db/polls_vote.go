@@ -10,22 +10,19 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Poll vote and end refusals. Use errors.Is.
 var (
-	// ErrPollNotFound means the message is not a poll, or it was deleted.
 	ErrPollNotFound = errors.New("poll not found")
-	// ErrPollEnded means the poll was ended, or its expiry has passed, so it
-	// takes no more votes and cannot be ended again.
+	// ErrPollEnded means the poll was ended or expired, so it takes no more votes and
+	// cannot be ended again.
 	ErrPollEnded = errors.New("poll ended")
-	// ErrPollAnswerInvalid means a vote named an answer the poll does not have,
-	// named one twice, or named more than one on a single-choice poll.
+	// ErrPollAnswerInvalid means a vote named an unknown or repeated answer, or several on
+	// a single-choice poll.
 	ErrPollAnswerInvalid = errors.New("poll answer invalid")
 )
 
-// PollTally is the full, absolute state of a poll after one change: its
-// version, the distinct voters and the count of every answer, in answer order.
-// It is what a poll_update carries, so any tally with a higher version is a
-// complete state and no update needs the ones before it.
+// PollTally is the full, absolute state of a poll after one change (version, distinct
+// voters, every answer's count); a poll_update carries it, so a higher version needs
+// no earlier update.
 type PollTally struct {
 	MessageID   int64
 	ChannelID   int64
@@ -36,19 +33,17 @@ type PollTally struct {
 	EndedAt     *string
 }
 
-// PollVoteResult is the outcome of SetPollVote. Changed is false when the
-// selection was already the voter's, in which case nothing was written and
-// Version is the poll's current one. AnswerIDs is the voter's selection after
-// the call, sorted and never nil.
+// PollVoteResult is the outcome of SetPollVote. Changed is false when the selection
+// was already the voter's (nothing written). AnswerIDs is the voter's selection after
+// the call, sorted, never nil.
 type PollVoteResult struct {
 	PollTally
 	Changed   bool
 	AnswerIDs []int64
 }
 
-// PollEndResult is the outcome of EndPoll. Deleted is true when the poll's
-// message was deleted: the poll is ended all the same, so it leaves the set the
-// expirer watches, but nobody needs telling.
+// PollEndResult is the outcome of EndPoll; Deleted means the poll's message was
+// deleted (ended all the same, nobody needs telling).
 type PollEndResult struct {
 	PollTally
 	AuthorID int64
@@ -63,19 +58,15 @@ type DuePoll struct {
 	Deleted   bool
 }
 
-// SetPollVote replaces userID's whole selection on a poll with answerIDs. An
-// empty selection removes the vote. It is one writer transaction, so the vote
-// and a racing end or expiry are strictly ordered: the version bump is a
-// conditional write that only lands while the poll is open by the database
-// clock, which makes a vote either counted (and then in the counts of
-// whatever ends the poll next) or refused with ErrPollEnded, never both.
-// The counts it returns are read in the same transaction.
-//
-// A missing, purged or deleted poll gives ErrPollNotFound. An ended or expired
-// poll gives ErrPollEnded, even for a selection the voter already holds. Unknown
-// or repeated ids, or more than one on a single-choice poll, give
-// ErrPollAnswerInvalid. A selection equal to the voter's current one writes
-// nothing and reports Changed false, so a retry after a lost acknowledgement is
+// SetPollVote replaces userID's whole selection with answerIDs; empty removes the
+// vote. One writer transaction orders the vote against a racing end or expiry: the
+// version bump is conditional on the poll being open by the database clock, so a vote
+// is either counted or refused with ErrPollEnded, never both. Counts are read in the
+// same transaction.
+// A missing, purged or deleted poll gives ErrPollNotFound; an ended or expired poll
+// ErrPollEnded, even for an unchanged selection; unknown or repeated ids, or several
+// on a single-choice poll, ErrPollAnswerInvalid. A selection equal to the current one
+// writes nothing and reports Changed false, so a retry after a lost acknowledgement is
 // harmless.
 func (d *DB) SetPollVote(ctx context.Context, messageID, userID int64, answerIDs []int64) (*PollVoteResult, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
@@ -123,8 +114,6 @@ func (d *DB) SetPollVote(ctx context.Context, messageID, userID int64, answerIDs
 	return &PollVoteResult{PollTally: tally, Changed: changed, AnswerIDs: selection}, nil
 }
 
-// readPollForVote reads a poll with its message, mapping a missing row or a
-// deleted message to ErrPollNotFound.
 func readPollForVote(ctx context.Context, q *dbgen.Queries, messageID int64) (dbgen.GetPollForVoteRow, error) {
 	poll, err := q.GetPollForVote(ctx, messageID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -139,8 +128,8 @@ func readPollForVote(ctx context.Context, q *dbgen.Queries, messageID int64) (db
 	return poll, nil
 }
 
-// normalizeSelection validates a selection against the poll's answers and
-// returns it sorted and never nil.
+// normalizeSelection validates a selection against the poll's answers and returns it
+// sorted, never nil.
 func normalizeSelection(answerIDs, known []int64, multi bool) ([]int64, error) {
 	if len(answerIDs) > 1 && !multi {
 		return nil, fmt.Errorf("a single-choice poll takes one answer: %w", ErrPollAnswerInvalid)
@@ -162,8 +151,7 @@ func normalizeSelection(answerIDs, known []int64, multi bool) ([]int64, error) {
 }
 
 // writeVote is the write half of a changed vote: the conditional version bump
-// first, so a poll that closed is refused before any vote row is touched, then
-// the replacement of the voter's rows.
+// first, so a closed poll is refused before any vote row is touched, then the replacement.
 func writeVote(ctx context.Context, q *dbgen.Queries, messageID, userID int64, selection []int64) (int64, error) {
 	version, err := q.BumpPollVersionIfOpen(ctx, messageID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -183,13 +171,12 @@ func writeVote(ctx context.Context, q *dbgen.Queries, messageID, userID int64, s
 	return version, nil
 }
 
-// EndPoll ends an open poll now, by the owner's button or by the expirer, and
-// returns the final tally read in the same transaction. The write is
-// conditional on the poll still being open, so an end and a racing end or vote
-// are strictly ordered: a vote that committed first is in the counts. A poll
-// that was already ended gives ErrPollEnded, a missing one ErrPollNotFound. An
-// expired poll that no sweep has marked yet can still be ended, which is how
-// the expirer marks it. A deleted poll is ended too, and reported as Deleted.
+// EndPoll ends an open poll now (owner's button or the expirer) and returns
+// the final tally read in the same transaction. The write is conditional on the
+// poll still being open, so a vote that committed first is in the counts.
+// Already ended gives ErrPollEnded, missing ErrPollNotFound. An expired poll no
+// sweep has marked can still be ended, which is how the expirer marks it. A
+// deleted poll is ended too and reported as Deleted.
 func (d *DB) EndPoll(ctx context.Context, messageID int64) (*PollEndResult, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -226,8 +213,8 @@ func (d *DB) EndPoll(ctx context.Context, messageID int64) (*PollEndResult, erro
 	return &PollEndResult{PollTally: tally, AuthorID: poll.AuthorID, Deleted: poll.Deleted != 0}, nil
 }
 
-// pollTally reads the counts of every answer and the distinct voters, on q's
-// connection, so inside a transaction it sees that transaction's writes.
+// pollTally reads every answer's count and the distinct voters on q's connection, so
+// inside a transaction it sees its writes.
 func pollTally(ctx context.Context, q *dbgen.Queries, messageID int64, answerIDs []int64) (PollTally, error) {
 	t := PollTally{MessageID: messageID, Counts: make([]PollCount, 0, len(answerIDs))}
 	for _, id := range answerIDs {
@@ -255,8 +242,7 @@ func pollTally(ctx context.Context, q *dbgen.Queries, messageID int64, answerIDs
 	return t, nil
 }
 
-// NextPollExpiry returns the soonest expiry among polls that are not ended, in
-// dbtime.ISOLayout text, or ok=false when none is pending.
+// NextPollExpiry returns the soonest expiry among unended polls (dbtime.ISOLayout), or ok=false.
 func (d *DB) NextPollExpiry(ctx context.Context) (next string, ok bool, err error) {
 	v, err := d.q.NextPollExpiry(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -268,8 +254,7 @@ func (d *DB) NextPollExpiry(ctx context.Context) (next string, ok bool, err erro
 	return v, true, nil
 }
 
-// ListDuePolls returns up to limit polls that are not ended and whose expiry is
-// at or before now (dbtime.ISOLayout text), oldest first.
+// ListDuePolls returns up to limit unended polls expiring at or before now, oldest first.
 func (d *DB) ListDuePolls(ctx context.Context, now string, limit int) ([]DuePoll, error) {
 	rows, err := d.q.ListDuePolls(ctx, dbgen.ListDuePollsParams{Now: now, MaxRows: int64(limit)})
 	if err != nil {

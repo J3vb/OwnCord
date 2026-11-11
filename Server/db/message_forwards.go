@@ -9,39 +9,34 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// ErrForwardSourceGone means the message being forwarded is deleted, was never
-// an ordinary message, or no longer exists. CreateMessageDelivery returns it
-// from inside its transaction, so a delete that commits first always wins.
+// ErrForwardSourceGone means the forwarded message is deleted; CreateMessageDelivery
+// returns it inside its transaction, so a delete that commits first wins.
 var ErrForwardSourceGone = errors.New("forward source is gone")
 
-// ForwardRow is a forward's side row (migration 071), and as an input
-// to CreateMessageDelivery it also names the message the transaction re-reads.
-// It has no json tags: the wire shape is ForwardInfo.
+// ForwardRow is a forward's side row (migration 071); as input to
+// CreateMessageDelivery it also names the message re-read. No json tags (the wire
+// shape is ForwardInfo).
 type ForwardRow struct {
-	// SourceMessageID is the original message the jump link names: the
-	// message itself, or for a forward of a forward the original it copied.
-	// nil when that original is already gone.
+	// SourceMessageID is the original the jump link names (for a forward of a forward, the
+	// original it copied); nil when gone.
 	SourceMessageID *int64
 	SourceChannelID int64
 	SourceTimestamp string
 
-	// ForwardedID is the message the sender chose to forward, which the
-	// transaction re-reads. It is an input only and is not stored. For a
-	// forward of a forward it differs from SourceMessageID.
+	// ForwardedID is the message the sender chose to forward, re-read by the transaction;
+	// input only, not stored, and differs from SourceMessageID for a forward of a forward.
 	ForwardedID int64
 }
 
-// ForwardInfo is the forward block of a history row and of a live chat_message
-// frame. SourceMessageID is null when the original is deleted or purged, so
-// the client never draws a dead link. No author is carried, by design.
+// ForwardInfo is the forward block of a history row and live frame; SourceMessageID is
+// null when the original is gone, and no author is carried.
 type ForwardInfo struct {
 	SourceChannelID int64  `json:"source_channel_id"`
 	SourceMessageID *int64 `json:"source_message_id"`
 	SourceTimestamp string `json:"source_timestamp"`
 }
 
-// ForwardAttachment is one file of a message being forwarded. StoredAs names
-// the bytes on disk; it never reaches a client.
+// ForwardAttachment is one file of a forwarded message; StoredAs never reaches a client.
 type ForwardAttachment struct {
 	ID            string
 	Filename      string
@@ -49,13 +44,11 @@ type ForwardAttachment struct {
 	Mime          string
 	Size          int64
 	Width, Height *int
-	// DurationMs and Waveform carry a voice message across a forward.
-	DurationMs *int
-	Waveform   *string
+	DurationMs    *int
+	Waveform      *string
 }
 
-// GetMessageForward returns the side row of messageID, or nil when it is not a
-// forward.
+// GetMessageForward returns the side row of messageID, or nil when it is not a forward.
 func (d *DB) GetMessageForward(ctx context.Context, messageID int64) (*ForwardRow, error) {
 	r, err := d.q.GetMessageForward(ctx, messageID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -95,9 +88,8 @@ func int64PtrToInt(v *int64) *int {
 	return &n
 }
 
-// recheckForwardSource is the first half of the forward step of
-// CreateMessageDelivery. It runs inside the transaction before anything is
-// written: the message being forwarded must still be a live ordinary message.
+// recheckForwardSource is the first half of the forward step: in the transaction
+// before any write, the forwarded message must still be a live ordinary message.
 func recheckForwardSource(ctx context.Context, q *dbgen.Queries, f *ForwardRow) error {
 	s, err := q.GetForwardSourceState(ctx, f.ForwardedID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -112,7 +104,6 @@ func recheckForwardSource(ctx context.Context, q *dbgen.Queries, f *ForwardRow) 
 	return nil
 }
 
-// insertForwardRow is the second half: the side row, after the message exists.
 func insertForwardRow(ctx context.Context, q *dbgen.Queries, messageID int64, f *ForwardRow) error {
 	if err := q.InsertMessageForward(ctx, dbgen.InsertMessageForwardParams{
 		MessageID: messageID, SourceMessageID: f.SourceMessageID,
@@ -123,11 +114,6 @@ func insertForwardRow(ctx context.Context, q *dbgen.Queries, messageID int64, f 
 	return nil
 }
 
-// attachForwards fills Forward on every ordinary, live row in msgs that is a
-// forward, with one batched read. A page with no candidate rows costs no query.
-// SourceMessageID is reported null when the original is soft deleted or already
-// purged, so the client never draws a dead link. The block is static: it is
-// the same on every read and on replay.
 func (d *DB) attachForwards(ctx context.Context, msgs []MessageAPIResponse) error {
 	var ids []int64
 	for i := range msgs {

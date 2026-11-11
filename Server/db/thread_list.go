@@ -29,8 +29,8 @@ type ThreadListOptions struct {
 }
 
 // ListThreads returns a parent's threads with the given archived state, newest
-// activity first, continuing after cursor. The cursor is a value, not a thread
-// id to look up, so activity in the cursor thread does not move the page.
+// activity first, continuing after cursor. The cursor is a value, not a thread id, so
+// activity in the cursor thread does not move the page.
 func (d *DB) ListThreads(ctx context.Context, parentID int64, archived bool, after ThreadCursor, limit int) ([]ThreadListRow, error) {
 	return d.ListThreadsBy(ctx, parentID, archived, ThreadListOptions{}, after, limit)
 }
@@ -47,10 +47,10 @@ func tagList(ids []int64) string {
 	return b.String()
 }
 
-// ListThreadsBy is ListThreads with a sort and a tag filter. Under the created
-// sort the cursor is just the previous page's last id. Under activity the
-// order is (thread_last_activity_at DESC, id DESC): activity has one-second
-// resolution, so the id breaks ties and the keyset is stable across them.
+// ListThreadsBy is ListThreads with a sort and a tag filter. Under the created sort
+// the cursor is the previous page's last id. Under activity the order is
+// (thread_last_activity_at DESC, id DESC): activity has one-second resolution, so the
+// id breaks ties.
 func (d *DB) ListThreadsBy(ctx context.Context, parentID int64, archived bool, opts ThreadListOptions, after ThreadCursor, limit int) ([]ThreadListRow, error) {
 	tags := slices.Clone(opts.TagIDs)
 	slices.Sort(tags)

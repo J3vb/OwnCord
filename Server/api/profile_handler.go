@@ -19,19 +19,15 @@ type userResponse struct {
 	ID       int64  `json:"id"`
 	Username string `json:"username"`
 	Avatar   string `json:"avatar,omitempty"`
-	// DisplayName and About are always present (null = unset) so the settings
-	// form can tell "cleared" from "the server does not know this field".
-	DisplayName  *string `json:"display_name"`
-	About        *string `json:"about"`
-	CustomStatus *string `json:"custom_status"`
-	// CustomStatusExpiresAt: RFC 3339 instant the status clears; null if none.
+	// Always present (null = unset) so the settings form can tell "cleared" from "unknown field".
+	DisplayName           *string `json:"display_name"`
+	About                 *string `json:"about"`
+	CustomStatus          *string `json:"custom_status"`
 	CustomStatusExpiresAt *string `json:"custom_status_expires_at"`
-	// Banner (the /api/v1/files/<id> path) and BannerColor are always present,
-	// null when unset, so a client can tell "cleared" from "not sent".
+	// Always present, null when unset, so a client can tell "cleared" from "not sent".
 	Banner      *string `json:"banner"`
 	BannerColor *string `json:"banner_color"`
-	// Status is the user's own true status, invisible included. This response
-	// only ever describes the caller, so there is nothing to hide from them.
+	// The caller's own true status, invisible included; nothing to hide from them.
 	Status      string `json:"status"`
 	RoleID      int64  `json:"role_id"`
 	TOTPEnabled bool   `json:"totp_enabled"`
@@ -69,22 +65,18 @@ func toUserResponse(u *db.User) *userResponse {
 	}
 }
 
-// updateProfileRequest is the JSON body for PATCH /api/v1/users/me.
-// identity_public_key, when present, publishes the client's long-term E2EE
-// identity public key; omitted leaves it unchanged.
+// updateProfileRequest is the PATCH /api/v1/users/me body; identity_public_key publishes the client's
+// long-term E2EE identity key, omitted leaves it unchanged.
 type updateProfileRequest struct {
 	Username          string  `json:"username"`
 	Avatar            *string `json:"avatar"`
 	IdentityPublicKey *string `json:"identity_public_key"`
-	// DisplayName and About: omitted = unchanged, "" = cleared. Both are
-	// length-checked in UserService (the path a non-REST caller takes);
-	// DisplayName is also sanitized in this handler before validateDisplayName
-	// runs, so UserService's own sanitize is then a no-op.
+	// Omitted = unchanged, "" = cleared. UserService length-checks both for non-REST callers; DisplayName is
+	// sanitized here before validateDisplayName, making UserService's own sanitize a no-op.
 	DisplayName *string `json:"display_name"`
 	About       *string `json:"about"`
-	// BannerColor is omitted = unchanged, "" = cleared, otherwise #rgb or
-	// #rrggbb (validated in UserService). There is deliberately no banner id or
-	// URL field: an image can only be set by uploading it to this server.
+	// Omitted = unchanged, "" = cleared, otherwise #rgb or #rrggbb. There is deliberately no banner id or URL
+	// field: an image can only be set by uploading it to this server.
 	BannerColor *string `json:"banner_color"`
 }
 
@@ -92,15 +84,11 @@ type ProfileBroadcaster interface {
 	BroadcastUserUpdate(u ws.UserUpdate)
 }
 
-// MountProfileRoutes registers the authenticated user profile endpoints;
-// trustedProxies is used for rate limiting.
-// store may be nil, in which case the avatar-upload route is not registered:
-// with no storage backend a route that 500s on every call is worse than one that
-// 404s.
-// cfg may be nil (tests mounting only the profile surface), in which case the
-// same-host avatar guard falls back to the request's Host header alone.
-// Production always passes the running config, so the guard compares against the
-// server's configured hosts, not anything the client supplied.
+// MountProfileRoutes registers the authenticated user profile endpoints; trustedProxies is for rate
+// limiting. store may be nil, in which case the avatar-upload route is not registered (a route that 500s on
+// every call is worse than one that 404s). cfg may be nil in tests, so the same-host avatar guard falls
+// back to the request's Host header alone; production passes the config so the guard uses the configured
+// hosts.
 func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster, cfg *config.Config) {
 	selfHosts := configuredSelfHosts(cfg)
 	r.Route("/api/v1/users/me", func(r chi.Router) {
@@ -151,39 +139,31 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 	})
 }
 
-// parseUpdateProfileRequest decodes the PATCH /users/me body and applies
-// bound-then-sanitize-then-validate to every field, in the order the register
-// path canonicalizes them. On failure it writes the error response and returns
-// ok=false, and the caller must write nothing further.
+// parseUpdateProfileRequest decodes the PATCH body and applies bound, sanitize, then validate to every
+// field, in the order the register path uses. On failure it writes the response and returns ok=false.
 func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string, currentUsername string) (updateProfileRequest, bool) {
 	var req updateProfileRequest
 	if !decodeJSON(w, r, &req) {
 		return req, false
 	}
 
-	// Bound the raw field before the fixpoint sanitizer, as on the register path
-	// (auth_handler.go's registerReadRequest): sanitizeToFixpoint is quadratic
-	// in input length. This is a cheap byte-length pre-check; *4 still admits
+	// Bound the raw field before the fixpoint sanitizer, which is quadratic in input length; *4 still admits
 	// any legitimate 32-rune UTF-8 username.
 	if len(req.Username) > maxLoginUsernameLen*4 {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is too long")
 		return req, false
 	}
 
-	// Use the fixpoint sanitizer (service.SanitizeText), not a bare
-	// bluemonday.StrictPolicy().Sanitize: its output is always HTML-escaped, so
-	// an apostrophe would be persisted as &#39; and login (which never
-	// re-escapes) would look the account up under a name that no longer matches.
-	// The register path canonicalizes the same way.
+	// Use service.SanitizeText, not a bare bluemonday call: its output is HTML-escaped, so an apostrophe
+	// would persist as &#39; and login (which never re-escapes) would no longer match. Register canonicalizes
+	// the same way.
 	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 	if req.Username == "" {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is required")
 		return req, false
 	}
-	// A rename is held to the strict rules; resending the account's current name
-	// (e.g. a display-name edit that carries it along) gets only the loose
-	// check, so an account that predates the strict rules can still edit the
-	// rest of its profile.
+	// A rename is held to the strict rules; resending the current name gets only the loose check, so an
+	// account that predates the strict rules can still edit the rest of its profile.
 	validateName := auth.ValidateNewUsername
 	if req.Username == currentUsername {
 		validateName = auth.ValidateUsername
@@ -198,9 +178,8 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		return req, false
 	}
 
-	// Use the fixpoint sanitizer (service.SanitizeText), not a bare bluemonday
-	// call: its output is HTML-escaped, so a URL with several query parameters
-	// would have its "&" rewritten to "&amp;" and be persisted broken.
+	// Use service.SanitizeText: bare bluemonday escaping would rewrite "&" in a URL to "&amp;" and persist it
+	// broken.
 	if req.Avatar != nil {
 		trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
 		if err := validateAvatarURL(trimmed, selfHosts, r.Host); err != nil {
@@ -210,14 +189,9 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		req.Avatar = &trimmed
 	}
 
-	// display_name gets the same scrutiny as a username beyond length, since it
-	// is rendered wherever a username is (control characters, bidi overrides).
-	// Sanitize BEFORE validateDisplayName: validating the raw JSON let an
-	// HTML-entity-encoded control or bidi character (e.g. "&#x202e;") pass as
-	// ASCII and become the real character later in UserService.UpdateProfile's
-	// cleanText. The raw-byte bound applies too; UserService still bounds
-	// DisplayName/About for non-REST callers, and cleanText's fixpoint output is
-	// stable, so its re-sanitize is a no-op.
+	// display_name is rendered wherever a username is, so it gets the same scrutiny. Sanitize BEFORE
+	// validateDisplayName: validating the raw JSON let an entity-encoded control or bidi character
+	// ("&#x202e;") pass as ASCII and become real later in UserService's cleanText.
 	if req.DisplayName != nil {
 		if len(*req.DisplayName) > service.MaxDisplayNameLen*4 {
 			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "display_name is too long")
@@ -231,16 +205,14 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		req.DisplayName = &trimmed
 	}
 
-	// Bound the raw colour first; the longest valid value is 7 bytes and the
-	// service does the real validation.
+	// Bound the raw colour first; the longest valid value is 7 bytes and the service validates the rest.
 	if req.BannerColor != nil && len(*req.BannerColor) > maxBannerColorLen*4 {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "banner_color is too long")
 		return req, false
 	}
 
-	// Validate the identity key before any write so the request is
-	// all-or-nothing. A device key belongs to a login session, so an API token
-	// may edit the profile but not publish one.
+	// Validate before any write so the request is all-or-nothing. A device key belongs to a login session, so
+	// an API token may edit the profile but not publish one.
 	if req.IdentityPublicKey != nil {
 		if p, _ := principal(r); p.Session == nil {
 			writeLoginSessionRequired(w)
@@ -287,9 +259,8 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, 
 	}
 }
 
-// broadcastUserUpdate pushes a profile snapshot to every connected client. Every
-// profile mutation goes through it so a new one cannot ship half the fields:
-// user_update replaces the client's copy wholesale.
+// broadcastUserUpdate pushes a profile snapshot to every client. Every profile mutation goes through it:
+// user_update replaces the client's copy wholesale, so a half-filled one would drop fields.
 func broadcastUserUpdate(broadcaster ProfileBroadcaster, u *db.User) {
 	if broadcaster == nil || u == nil {
 		return

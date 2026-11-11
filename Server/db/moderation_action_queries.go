@@ -13,10 +13,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// ModerationAction is one row of the moderator-action ledger: every warning,
-// timeout, kick, ban and removal. ActorToken is filled by erasure when the
-// acting moderator erased their account; LiftedBy is a bare id with no token
-// column, like reports.assignee_id.
+// ModerationAction is one row of the moderator-action ledger. ActorToken is filled by
+// erasure; LiftedBy is a bare id with no token column.
 type ModerationAction struct {
 	ID             int64
 	Kind           string
@@ -32,8 +30,7 @@ type ModerationAction struct {
 	CreatedAt      string
 }
 
-// ModerationNotice is one unacknowledged warning, as ready's notices slot and
-// the acknowledgement route need it; it carries no actor or report link.
+// ModerationNotice is one unacknowledged warning, with no actor or report link.
 type ModerationNotice struct {
 	ID        int64
 	Kind      string
@@ -41,8 +38,6 @@ type ModerationNotice struct {
 	CreatedAt string
 }
 
-// moderationActionRow mirrors dbgen.ModerationAction's fields so
-// moderationActionFromRow avoids a field-by-field copy per row type.
 type moderationActionRow struct {
 	ID             int64
 	Kind           string
@@ -67,16 +62,12 @@ func moderationActionFromRow(r moderationActionRow) ModerationAction {
 	}
 }
 
-// ErrOutranked is recordModerationAction's refusal: the actor does not
-// strictly outrank the target by role position at write time. Every moderator
-// action routes through that function, so a target promoted since the
-// service's cached check is refused here. The writer pool is a single
-// connection, so the position read is atomic with the insert against any
-// concurrent role change.
+// ErrOutranked is recordModerationAction's refusal: the actor does not strictly
+// outrank the target at write time. Every moderator action routes through it, so a
+// target promoted since the service's cached check is refused; the single writer
+// connection makes the position read atomic with the insert.
 var ErrOutranked = errors.New("moderation: actor does not outrank target")
 
-// rolePosition reads the position of userID's top role live, inside tx. A
-// failed lookup returns ok=false, which callers treat as "refuse".
 func rolePosition(ctx context.Context, tx *sql.Tx, userID int64) (int, bool) {
 	var pos int
 	err := tx.QueryRowContext(ctx,
@@ -88,10 +79,8 @@ func rolePosition(ctx context.Context, tx *sql.Tx, userID int64) (int, bool) {
 	return pos, true
 }
 
-// strictlyOutranks reports whether actorID strictly outranks targetID by role
-// position, read live inside tx. recordModerationAction, LiftTimeout and an
-// appeal overturn all use it so a demotion since an earlier cached check
-// governs. A missing actor role refuses; a missing target role is unbeatable.
+// strictlyOutranks reads positions live inside tx so a demotion since an
+// earlier cached check governs. A missing actor role refuses; a missing target role is unbeatable.
 func strictlyOutranks(ctx context.Context, tx *sql.Tx, actorID, targetID int64) bool {
 	actorPos, ok := rolePosition(ctx, tx, actorID)
 	if !ok {
@@ -104,17 +93,9 @@ func strictlyOutranks(ctx context.Context, tx *sql.Tx, actorID, targetID int64) 
 	return actorPos > targetPos
 }
 
-// recordModerationAction is the one ledger write for warning, timeout, kick
-// and ban, in the same tx as the kind's effect. The rank guard is re-validated
-// live against the current roles table, mirroring ModerationService's check.
-//
-// Not used for "removal": DeleteMessage and PurgeMessages authorize on channel
-// MANAGE_MESSAGES alone with no hierarchy requirement, and a bulk purge's
-// ledger entry targets the actor, so this guard would wrongly refuse both. See
-// recordLedgerRow.
-//
-// actorID <= 0 is refused first: every ledger row must carry a human actor.
-// The service enforces this too, but all four kinds funnel through here.
+// recordModerationAction is the ledger write for warning, timeout, kick and ban, in
+// the kind's own tx with the rank guard re-validated live (not "removal": see
+// recordLedgerRow). actorID <= 0 is refused first.
 func recordModerationAction(ctx context.Context, tx *sql.Tx, kind string, targetID, actorID int64, reportID *int64, reason string, expiresAt *string) (int64, error) {
 	if actorID <= 0 {
 		return 0, fmt.Errorf("recordModerationAction: %w", ErrOutranked)
@@ -125,9 +106,6 @@ func recordModerationAction(ctx context.Context, tx *sql.Tx, kind string, target
 	if moderationActionPreRankCheckHook != nil {
 		moderationActionPreRankCheckHook()
 	}
-	// A missing target (erased or never existed) is treated as unbeatable rather
-	// than a crash; the caller looked it up earlier, so this is the same race the
-	// effect's own write faces.
 	if !strictlyOutranks(ctx, tx, actorID, targetID) {
 		return 0, ErrOutranked
 	}
@@ -137,34 +115,21 @@ func recordModerationAction(ctx context.Context, tx *sql.Tx, kind string, target
 	return insertModerationActionRow(ctx, tx, kind, targetID, actorID, reportID, reason, expiresAt)
 }
 
-// moderationActionPreRankCheckHook runs inside recordModerationAction's
-// transaction before either rolePosition call, so a contention test can force
-// a concurrent role change to contend for the writer connection one step
-// earlier than moderationActionPreInsertHook. Test-only.
+// moderationActionPreRankCheckHook runs before either rolePosition call so a
+// contention test can force a concurrent role change one step earlier. Test-only.
 var moderationActionPreRankCheckHook func()
 
-// moderationActionPreInsertHook runs after the rank check read both positions
-// and before the insert, while tx still holds the writer's one connection. A
-// contention test uses it to make a real second writer (a role change on the
-// same target) contend for that connection. Test-only; set via
-// SetModerationActionPreInsertHookForTest.
+// moderationActionPreInsertHook runs after the rank check, before the insert, while tx
+// holds the writer, so a test can contend for it. Test-only.
 var moderationActionPreInsertHook func()
 
-// moderationActionPreBeginTxHook runs at the top of BanUserWithAction before
-// BeginTx, with no transaction open. It lets a test force a promotion to
-// complete first, proving the rank check still runs live inside the tx; a
-// barrier after BeginTx would stay green if the position read moved to a bare
-// connection before it. Test-only.
+// moderationActionPreBeginTxHook runs before BeginTx in BanUserWithAction so a test
+// can force a promotion first. Test-only.
 var moderationActionPreBeginTxHook func()
 
-// recordLedgerRow is "removal"'s ledger write. It has no rank guard on
-// purpose (see recordModerationAction): removal is governed by channel
-// MANAGE_MESSAGES alone through every entry point, including the report-linked
-// one (ActOnReport, kind="removal"). It keeps the human-actor guard and an
-// EXISTS(users) check (as in erasure.go) so a moderator erased between
-// authorization and this write cannot land as a ledger row's actor;
-// recordModerationAction gets that through its rank JOIN, this function has
-// none. Callers do not need the new row's id.
+// recordLedgerRow is "removal"'s ledger write, with no rank guard on purpose (channel
+// MANAGE_MESSAGES alone governs) but with the human-actor guard and EXISTS(users), so
+// an erased moderator cannot land as actor.
 func recordLedgerRow(ctx context.Context, tx *sql.Tx, kind string, targetID, actorID int64, reportID *int64, reason string) error {
 	if actorID <= 0 {
 		return fmt.Errorf("recordLedgerRow: %w", ErrOutranked)
@@ -190,9 +155,8 @@ func insertModerationActionRow(ctx context.Context, tx *sql.Tx, kind string, tar
 	return id, nil
 }
 
-// WarnUser writes a warning row, whose entire effect is the row: the target
-// acknowledges it on next connect (AcknowledgeWarning) and a live target gets
-// a mod_action frame. reportID links a report-linked warning.
+// WarnUser writes a warning row, whose entire effect is the row; the target
+// acknowledges it on next connect. reportID links a report.
 func (d *DB) WarnUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -209,26 +173,19 @@ func (d *DB) WarnUser(ctx context.Context, targetID, actorID int64, reportID *in
 	return id, nil
 }
 
-// TimeoutUser writes a timeout row with the given expiry, whose entire effect
-// is the row (read into Subject.TimedOut), and in the same transaction lifts
-// any other still-active timeout for targetID, so LiftTimeout never orphans
-// overlapping rows.
-//
-// Ownership of an SFU mute lives on the voice session
-// (voice_states.server_muted_by), not this ledger. Superseding a row that
-// owns a mute must transfer it to the new row, but that transfer runs inside
-// MuteForTimeoutSession's transaction under the ws per-target lock, so it
-// cannot land between that lock's DB write and its SFU call. TimeoutUser only
-// returns supersededIDs for the caller (service.applyTimeoutVoiceHalf) to pass
-// through.
+// TimeoutUser writes a timeout row, whose effect is the row (read into
+// Subject.TimedOut), and in the same transaction lifts any other active
+// timeout for targetID. An SFU mute's ownership lives on
+// voice_states.server_muted_by and transfers inside MuteForTimeoutSession's
+// transaction under the ws per-target lock; TimeoutUser only returns
+// supersededIDs for service.applyTimeoutVoiceHalf.
 func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (id int64, supersededIDs []int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, nil, fmt.Errorf("TimeoutUser begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	// SQLiteLayout, not ISOLayout: this table's other timestamps come from
-	// datetime('now') and SQL compares expires_at with them as text.
+	// SQLiteLayout, not ISOLayout: other timestamps here come from datetime('now') and compare as text.
 	expires := expiresAt.UTC().Format(dbtime.SQLiteLayout)
 	id, err = recordModerationAction(ctx, tx, "timeout", targetID, actorID, reportID, reason, &expires)
 	if err != nil {
@@ -247,9 +204,8 @@ func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID 
 	return id, supersededIDs, nil
 }
 
-// transferVoiceMuteOwnership repoints voice_states.server_muted_by from any of
-// fromIDs onto toID, inside tx. Hand-rolled because the number of superseded
-// rows is unbounded, so no fixed-arity sqlc query fits.
+// transferVoiceMuteOwnership repoints voice_states.server_muted_by from fromIDs
+// onto toID inside tx; hand-rolled because the count is unbounded.
 func transferVoiceMuteOwnership(ctx context.Context, tx *sql.Tx, fromIDs []int64, toID int64) error {
 	placeholders := make([]string, len(fromIDs))
 	args := make([]any, 0, len(fromIDs)+1)
@@ -265,11 +221,9 @@ func transferVoiceMuteOwnership(ctx context.Context, tx *sql.Tx, fromIDs []int64
 	return err
 }
 
-// LiftTimeout ends targetID's active timeouts early. It re-checks live, inside
-// its transaction, that the actor strictly outranks the target, then lifts
-// every still-active timeout row (normally one). It returns the lifted ids so
-// the caller can clear the voice_states row owned by one of them
-// (ClearServerMuteOwnedBy).
+// LiftTimeout ends targetID's active timeouts early after re-checking, inside its
+// transaction, that the actor strictly outranks the target. It returns the lifted ids
+// for ClearServerMuteOwnedBy.
 func (d *DB) LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedIDs []int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -298,12 +252,10 @@ func (d *DB) LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedID
 	return lifted, nil
 }
 
-// LiftTimeoutActionsByID marks each of ids lifted if still an active timeout;
-// an already-lifted or non-timeout id is skipped, not an error. It runs inside
-// the caller's tx (LiftTimeout and an appeal overturn both use it) and does
-// only the ledger write: no rank check, voice half or audit row. The caller
-// owns authorization and post-commit effects
-// (ModerationService.FinalizeTimeoutLift). It returns the ids actually lifted.
+// LiftTimeoutActionsByID marks each of ids lifted if still an active timeout; others
+// are skipped. It runs in the caller's tx and does only the ledger write (no rank
+// check, voice half or audit row; see ModerationService.FinalizeTimeoutLift),
+// returning the ids lifted.
 func LiftTimeoutActionsByID(ctx context.Context, tx *sql.Tx, ids []int64, liftedBy int64) ([]int64, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -336,8 +288,7 @@ func LiftTimeoutActionsByID(ctx context.Context, tx *sql.Tx, ids []int64, lifted
 	return out, rows.Err()
 }
 
-// HasActiveTimeout is the indexed lookup permissions.Checker.Subject runs,
-// uncached, to fill Subject.TimedOut.
+// HasActiveTimeout is the uncached indexed lookup behind Subject.TimedOut.
 func (d *DB) HasActiveTimeout(ctx context.Context, userID int64) (bool, error) {
 	active, err := d.q.HasActiveTimeout(ctx, userID)
 	if err != nil {
@@ -346,9 +297,8 @@ func (d *DB) HasActiveTimeout(ctx context.Context, userID int64) (bool, error) {
 	return active != 0, nil
 }
 
-// AcknowledgeWarning marks actionID acknowledged for userID's own rows only.
-// It returns false for a foreign id, an already-acknowledged one or a
-// non-warning id alike, so it cannot probe another user's warning ids.
+// AcknowledgeWarning marks actionID acknowledged for userID's own rows; false for
+// foreign, acknowledged or non-warning ids alike, so ids cannot be probed.
 func (d *DB) AcknowledgeWarning(ctx context.Context, userID, actionID int64) (bool, error) {
 	n, err := d.q.AcknowledgeWarning(ctx, dbgen.AcknowledgeWarningParams{ID: actionID, TargetID: userID})
 	if err != nil {
@@ -396,8 +346,7 @@ func (d *DB) ListModerationActionsForReport(ctx context.Context, reportID int64)
 	return out, nil
 }
 
-// BanUserWithAction is BanUser plus a ledger row in one transaction, so a ban
-// never lands without the entry an appeal will reference.
+// BanUserWithAction is BanUser plus a ledger row in one transaction.
 func (d *DB) BanUserWithAction(ctx context.Context, targetID int64, reason string, expires *time.Time, actorID int64, reportID *int64) (int64, error) {
 	if moderationActionPreBeginTxHook != nil {
 		moderationActionPreBeginTxHook()
@@ -429,9 +378,8 @@ func (d *DB) BanUserWithAction(ctx context.Context, targetID int64, reason strin
 	return id, nil
 }
 
-// ForceLogoutWithAction is ForceLogoutUser plus a ledger row in one
-// transaction. An empty reason falls back to "all sessions terminated"; only
-// the report-linked path (ActOnReport) supplies one.
+// ForceLogoutWithAction is ForceLogoutUser plus a ledger row in one transaction; an
+// empty reason becomes "all sessions terminated".
 func (d *DB) ForceLogoutWithAction(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -455,8 +403,6 @@ func (d *DB) ForceLogoutWithAction(ctx context.Context, targetID, actorID int64,
 	return id, nil
 }
 
-// tableExists reports whether name is a table in sqlite_master, so a retention
-// sweep can adapt to a table (appeals) that may not exist yet.
 func tableExists(ctx context.Context, q interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }, name string) bool {
@@ -465,15 +411,11 @@ func tableExists(ctx context.Context, q interface {
 	return err == nil
 }
 
-// RetireModerationActions is the retention sweep (moderation.action_retention_days):
-// warning rows retire `days` after acknowledged_at, timeout rows after
-// expires_at or lifted_at when lifted early. Ban, kick and removal rows are
-// never touched.
-//
-// An id an appeals row references (appeals.action_id) is excluded, because
-// the UNIQUE(action_id) memory that forbids re-appealing must survive. The
-// tableExists check is a fallback for a database caught mid-migration or a
-// test with a bare moderation_actions table.
+// RetireModerationActions is the retention sweep: warning rows retire `days`
+// after acknowledged_at, timeout rows after expires_at or lifted_at. Ban, kick
+// and removal rows are never touched. An id an appeals row references is
+// excluded so the UNIQUE(action_id) bar on re-appealing survives; tableExists
+// covers a database mid-migration.
 func (d *DB) RetireModerationActions(ctx context.Context, days int) (int64, error) {
 	if days <= 0 {
 		return 0, nil

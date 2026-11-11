@@ -8,21 +8,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Thread follows (migration 079). thread_members is never
-// permission: nothing here decides who may see a thread, and every caller that
-// turns a follow into something a user receives joins it with the parent's
-// visibility first.
+// Thread follows (migration 079). thread_members is never permission: nothing
+// here decides who may see a thread, and every caller turning a follow into
+// something a user receives joins it with the parent's visibility first.
 
-// MaxFollowedThreads bounds the followed threads one ready payload carries.
 const MaxFollowedThreads = 200
 
-// followedThreadScan is how many followed rows are read before the caller
-// drops the ones whose parent is no longer readable, so a user with a few
-// hidden follows still fills MaxFollowedThreads.
+// followedThreadScan is how many followed rows are read before the caller drops those
+// with an unreadable parent, so a few hidden follows still fill MaxFollowedThreads.
 const followedThreadScan = 2 * MaxFollowedThreads
 
-// FollowedThread is one followed open thread with its read position, for the
-// ready payload. UnreadCount stops at 100, as a channel's does.
+// FollowedThread is one followed open thread with its read position, for ready;
+// UnreadCount stops at 100.
 type FollowedThread struct {
 	Thread            ThreadInfo
 	LastMessageID     int64
@@ -31,9 +28,8 @@ type FollowedThread struct {
 	MentionCount      int64
 }
 
-// contentMentionIDs is the content-derived part of a mention set as it is
-// stored: the reply-ping target is taken out (it has its own flagged row) and
-// the rest is capped at maxMentionsPerMessage.
+// contentMentionIDs is the content-derived part of a stored mention set: the
+// reply-ping target is removed (it has its own row) and the rest capped.
 func contentMentionIDs(mentionedUserIDs []int64, replyPingUserID int64) []int64 {
 	if replyPingUserID != 0 {
 		mentionedUserIDs = slices.DeleteFunc(slices.Clone(mentionedUserIDs), func(id int64) bool { return id == replyPingUserID })
@@ -44,10 +40,9 @@ func contentMentionIDs(mentionedUserIDs []int64, replyPingUserID int64) []int64 
 	return mentionedUserIDs
 }
 
-// threadPostEffects runs inside a send transaction. For a message in a thread
-// it records the activity (touchIfThread) and joins the author and each direct
-// mention with INSERT OR IGNORE, returning the users this call actually
-// inserted. For any other channel it does nothing and returns nil.
+// threadPostEffects runs in a send transaction: for a thread message it records
+// activity and joins the author and direct mentions (INSERT OR IGNORE), returning the
+// newly inserted users.
 func threadPostEffects(ctx context.Context, q *dbgen.Queries, channelID, authorID int64, mentioned []int64, replyPingUserID int64) ([]int64, error) {
 	isThread, err := touchIfThread(ctx, q, channelID)
 	if err != nil || !isThread {
@@ -75,9 +70,8 @@ func threadPostEffects(ctx context.Context, q *dbgen.Queries, channelID, authorI
 	return joined, nil
 }
 
-// FollowThread makes userID a follower of the thread. It reports whether the
-// row was newly written: false for a user who already followed, and for an id
-// that is not a thread.
+// FollowThread makes userID a follower and reports whether the row is new (false for
+// an existing follower or a non-thread id).
 func (d *DB) FollowThread(ctx context.Context, threadID, userID int64) (bool, error) {
 	n, err := d.q.JoinThread(ctx, dbgen.JoinThreadParams{ThreadID: threadID, UserID: userID})
 	if err != nil {
@@ -86,8 +80,7 @@ func (d *DB) FollowThread(ctx context.Context, threadID, userID int64) (bool, er
 	return n > 0, nil
 }
 
-// UnfollowThread removes userID from the thread's followers. It reports whether
-// a row was removed.
+// UnfollowThread removes userID from the followers, reporting whether a row was removed.
 func (d *DB) UnfollowThread(ctx context.Context, threadID, userID int64) (bool, error) {
 	n, err := d.q.LeaveThread(ctx, dbgen.LeaveThreadParams{ThreadID: threadID, UserID: userID})
 	if err != nil {
@@ -114,9 +107,8 @@ func (d *DB) ListThreadFollowers(ctx context.Context, threadID int64) ([]int64, 
 	return ids, nil
 }
 
-// ListFollowedThreads returns userID's followed open threads, newest activity
-// first, for the caller to narrow to the parents the user can read. At most
-// followedThreadScan rows are read.
+// ListFollowedThreads returns userID's followed open threads, newest activity first,
+// for the caller to narrow to readable parents; at most followedThreadScan rows.
 func (d *DB) ListFollowedThreads(ctx context.Context, userID int64) ([]FollowedThread, error) {
 	rows, err := d.q.ListFollowedThreadStates(ctx, dbgen.ListFollowedThreadStatesParams{
 		UserID: userID, RowLimit: followedThreadScan,
@@ -143,7 +135,6 @@ func (d *DB) ListFollowedThreads(ctx context.Context, userID int64) ([]FollowedT
 	return out, nil
 }
 
-// anyInt64 reads an integer column sqlc typed as interface{}.
 func anyInt64(v any) int64 {
 	if n, ok := v.(int64); ok {
 		return n

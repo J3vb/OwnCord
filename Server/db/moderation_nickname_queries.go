@@ -7,24 +7,20 @@ import (
 	"fmt"
 )
 
-// manageNicknamesOrAdmin is MANAGE_NICKNAMES (0x800000) | ADMINISTRATOR
-// (0x40000000), the two masks that let an actor rename another member. The
-// db package cannot import permissions, so the literal sits here and
+// manageNicknamesOrAdmin is MANAGE_NICKNAMES (0x800000) | ADMINISTRATOR (0x40000000).
+// The db package cannot import permissions, so the literal sits here and
 // TestManageNicknamesMaskMatchesPermissions in db_test pins it.
 const manageNicknamesOrAdmin = int64(8388608 | 1073741824)
 
-// SetDisplayNameAsModerator writes targetID's display_name (nil clears it) on
-// behalf of actorID and returns the replaced value; it is the moderator
-// nickname route's one write. Authority is re-read live in the same write
-// transaction, not trusted from the caller's cached check: the actor must hold
-// MANAGE_NICKNAMES or ADMINISTRATOR in the OR of their roles and strictly
-// outrank the target by top role position. Failing either, an actor that is
-// not a real account, or a target that no longer exists returns ErrOutranked
-// with nothing written. ErrNotFound is only the row vanishing between the rank
-// read and the nickname read. The single writer connection means no other
-// write can interleave between the checks and the UPDATE.
-// change, the target's own profile edit) can interleave between the checks
-// and the UPDATE.
+// SetDisplayNameAsModerator writes targetID's display_name (nil clears it) on behalf
+// of actorID and returns the replaced value; it is the moderator nickname route's one
+// write. Authority is re-read live in the same write transaction, not trusted from the
+// caller's cached check: the actor must hold MANAGE_NICKNAMES or ADMINISTRATOR in the
+// OR of their roles and strictly outrank the target by top role position. Failing
+// either, an actor that is not a real account, or a vanished target returns
+// ErrOutranked with nothing written; ErrNotFound is only the row vanishing between the
+// rank read and the nickname read. The single writer connection means no other write
+// can interleave between the checks and the UPDATE.
 func (d *DB) SetDisplayNameAsModerator(ctx context.Context, actorID, targetID int64, name *string) (old *string, err error) {
 	if actorID <= 0 || actorID == targetID {
 		return nil, fmt.Errorf("SetDisplayNameAsModerator: %w", ErrOutranked)

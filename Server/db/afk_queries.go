@@ -7,8 +7,7 @@ import (
 	"fmt"
 )
 
-// GetAFKChannel returns the channel flagged AFK (migration 068), or nil when
-// none is.
+// GetAFKChannel returns the channel flagged AFK (migration 068), or nil.
 func (d *DB) GetAFKChannel(ctx context.Context) (*Channel, error) {
 	r, err := d.q.GetAFKChannel(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -21,17 +20,11 @@ func (d *DB) GetAFKChannel(ctx context.Context) (*Channel, error) {
 	return &ch, nil
 }
 
-// SetAFKChannel makes channelID the AFK channel, or clears the flag when
-// channelID is nil. The previously flagged channel's id is returned (nil when
-// there was none). The read of the old flag, the clear and the set share one
-// transaction on the single writer connection, and the partial unique index
-// idx_channels_afk backs it up, so two callers can never leave two flagged
-// rows. The clear runs before the set because the index is checked per
-// statement.
-//
-// The set only matches a live voice channel; if the channel was deleted or
-// archived after the caller validated it, nothing commits and ErrNotFound is
-// returned.
+// SetAFKChannel makes channelID the AFK channel, or clears the flag when channelID is
+// nil, and returns the previously flagged id (nil when none).
+// Read, clear and set share one writer transaction; idx_channels_afk backs it up, and
+// the clear runs first because the index is checked per statement. The set only
+// matches a live voice channel, else nothing commits and ErrNotFound is returned.
 func (d *DB) SetAFKChannel(ctx context.Context, channelID *int64) (*int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {

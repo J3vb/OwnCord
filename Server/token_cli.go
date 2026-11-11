@@ -14,10 +14,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// runTokenCLI implements `server token <create|list|revoke>`. It operates
-// directly against the database — no HTTP, no login — so an operator can mint
-// the first API token without any existing credential (the bootstrap path).
-// Returns a process exit code.
+// runTokenCLI implements `server token <create|list|revoke>` directly against the database, with
+// no HTTP or login, so an operator can mint the first API token (bootstrap). Returns an exit code.
 func runTokenCLI(args []string) int {
 	if len(args) == 0 {
 		tokenUsage()
@@ -29,27 +27,22 @@ func runTokenCLI(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: load config: %v\n", err)
 		return 1
 	}
-	// OpenShared: the CLI must work while the server is running (the docs'
-	// cron-backup recipe mints tokens against a live server). SQLite WAL makes
-	// the concurrent access safe; the single-process lock protects only the
-	// server's process-local state, which this CLI never touches.
+	// OpenShared: the CLI must work while the server runs (the docs' cron-backup recipe). SQLite WAL
+	// makes that safe; the process lock protects only server-local state the CLI never touches.
 	database, err := db.OpenShared(cfg.Database.Path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: open database: %v\n", err)
 		return 1
 	}
 	defer database.Close() //nolint:errcheck
-	// Idempotent: ensures the api_tokens table exists even if the server has
-	// never started against this database.
+	// Idempotent: ensure the api_tokens table exists even if the server never started on this database.
 	if err := db.Migrate(database); err != nil {
 		fmt.Fprintf(os.Stderr, "error: migrate: %v\n", err)
 		return 1
 	}
 
 	ctx := context.Background()
-	// The CLI holds the handle (it opens and migrates its own database) but
-	// makes no query of its own: the three subcommands are adapters over the
-	// TokenService the admin panel uses, so the two cannot drift apart.
+	// The subcommands are adapters over the TokenService the admin panel uses, so the two cannot drift.
 	tokens := service.NewTokenService(database)
 	switch args[0] {
 	case "create":
@@ -94,10 +87,8 @@ func tokenCreate(ctx context.Context, tokens *service.TokenService, args []strin
 		return 2
 	}
 
-	// ActorSelf attributes the audit row to the token's bound user rather than
-	// to an operator: this command runs with no credential at all (it is the
-	// bootstrap path), so there is no actor identity to record. The panel's
-	// route, which does have one, records that instead.
+	// ActorSelf attributes the audit row to the token's bound user: this command runs with no
+	// credential, so there is no operator identity to record (the panel's route records one).
 	minted, err := tokens.Create(ctx, service.ActorSelf, *username, *label, *expires)
 	switch {
 	case errors.Is(err, service.ErrNotFound):
@@ -114,8 +105,7 @@ func tokenCreate(ctx context.Context, tokens *service.TokenService, args []strin
 		return 1
 	}
 
-	// Metadata to stderr, raw token alone to stdout — so `... | tail -1` or a
-	// capture pipe gets exactly the token.
+	// Metadata to stderr, raw token alone to stdout, so `... | tail -1` captures exactly the token.
 	fmt.Fprintf(os.Stderr, "Created API token #%d for user %q (label %q).\n", minted.ID, minted.User.Username, minted.Label)
 	fmt.Fprintln(os.Stderr, "Store this token now — it is shown only once:")
 	fmt.Println(minted.Raw)
@@ -137,7 +127,6 @@ func tokenList(ctx context.Context, tokens *service.TokenService, args []string)
 		return 0
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	// Buffer-write errors surface via tw.Flush() below, which is checked.
 	_, _ = fmt.Fprintln(tw, "ID\tUSER\tLABEL\tCREATED\tLAST USED\tEXPIRES\tREVOKED")
 	for _, t := range list {
 		_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
@@ -163,12 +152,9 @@ func tokenRevoke(ctx context.Context, tokens *service.TokenService, args []strin
 	}
 	arg := rest[0]
 
-	// An argument that parses as an integer is tried as an id first; when no
-	// active token carries that id it is tried as a label, because labels are
-	// free text and an all-digit one is legal. Anything else is a label. Revoking
-	// by label is the CLI's own form (an operator recovering a compromised
-	// credential knows what they typed, not the row id); the id keeps
-	// precedence, as the usage text says.
+	// An integer argument is tried as an id first; if no active token has it, as a label (labels are
+	// free text and all-digit ones are legal). Revoking by label is the CLI's own form, since an
+	// operator recovering a compromised credential knows what they typed; the id keeps precedence.
 	var (
 		affected int64
 		err      error

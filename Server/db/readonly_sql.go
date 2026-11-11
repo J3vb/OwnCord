@@ -6,13 +6,11 @@ import (
 	"strings"
 )
 
-// dbtx routes statements between the reader and writer pools and satisfies
-// sqlc's DBTX interface. ExecContext and PrepareContext go to the writer
-// (nothing prepares a hot SELECT through DBTX today; one would serialize on
-// the writer). QueryContext/QueryRowContext go to the reader only when
-// isReadOnlySQL proves the statement read-only, because sqlc routes
-// INSERT/UPDATE/DELETE ... RETURNING through them and those must stay on the
-// writer. In-memory databases have writer == reader.
+// dbtx routes statements between the reader and writer pools for sqlc's DBTX.
+// ExecContext and PrepareContext go to the writer; QueryContext/QueryRowContext
+// go to the reader only when isReadOnlySQL proves the statement read-only, since
+// sqlc routes INSERT/UPDATE/DELETE ... RETURNING through them. In-memory
+// databases have writer == reader.
 type dbtx struct {
 	writer *sql.DB
 	reader *sql.DB
@@ -39,7 +37,6 @@ func (t *dbtx) QueryRowContext(ctx context.Context, query string, args ...any) *
 	return t.pool(query).QueryRowContext(ctx, query, args...)
 }
 
-// pool selects the reader for read-only statements and the writer otherwise.
 func (t *dbtx) pool(query string) *sql.DB {
 	if isReadOnlySQL(query) {
 		return t.reader
@@ -47,12 +44,10 @@ func (t *dbtx) pool(query string) *sql.DB {
 	return t.writer
 }
 
-// isReadOnlySQL reports whether the statement's leading keyword, after
-// whitespace and `--` line comments, is SELECT or PRAGMA, or is WITH and no
-// word in the text is a write keyword (a CTE can lead an INSERT, UPDATE or
-// DELETE). Skipping comments matters because sqlc SQL starts with
-// `-- name: ...`. Anything unrecognized (including `/* */`) is treated as a
-// write.
+// isReadOnlySQL reports whether the leading keyword, after whitespace and `--`
+// comments (sqlc SQL starts with `-- name: ...`), is SELECT or PRAGMA, or WITH with no
+// write keyword (a CTE can lead a write). Anything unrecognized, including `/* */`, is
+// a write.
 func isReadOnlySQL(query string) bool {
 	s := query
 	for {
@@ -72,14 +67,12 @@ func isReadOnlySQL(query string) bool {
 	return hasKeywordPrefix(s, "SELECT") || hasKeywordPrefix(s, "PRAGMA")
 }
 
-// writeKeywords are the words that make a WITH statement a write. RETURNING
-// is listed too so an unusual write shape still lands on the writer.
+// writeKeywords make a WITH statement a write; RETURNING is listed so an unusual write
+// shape lands on the writer.
 var writeKeywords = [...]string{"INSERT", "UPDATE", "DELETE", "REPLACE", "RETURNING"}
 
-// hasWriteKeyword reports whether any whole word of s (ASCII
-// case-insensitive) is a write keyword. Words inside string literals,
-// quoted identifiers and comments count too: a false hit only sends a read
-// to the writer, which is slower but correct.
+// hasWriteKeyword reports whether any whole word of s (ASCII case-insensitive)
+// is a write keyword. Words in literals and comments count too: a false hit only costs speed.
 func hasWriteKeyword(s string) bool {
 	start := -1
 	for i := 0; i <= len(s); i++ {
@@ -106,8 +99,8 @@ func isIdentByte(c byte) bool {
 	return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-// hasKeywordPrefix reports whether s starts with the keyword (ASCII
-// case-insensitive) followed by a non-identifier character or end of input.
+// hasKeywordPrefix reports whether s starts with keyword followed by a non-identifier
+// character or end of input.
 func hasKeywordPrefix(s, keyword string) bool {
 	if len(s) < len(keyword) || !strings.EqualFold(s[:len(keyword)], keyword) {
 		return false

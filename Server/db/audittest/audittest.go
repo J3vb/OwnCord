@@ -1,8 +1,5 @@
-// Package audittest captures audit entries through a fake db.AuditStore so a
-// test can assert which actions a mutation emitted and what its detail
-// carried. Install swaps the DB's audit path for an in-memory writer
-// for the test's lifetime; every db.WriteAudit routed through that *DB —
-// from api, admin, service or ws — lands in the recorder.
+// Package audittest captures audit entries through a fake db.AuditStore so a test can
+// assert which actions a mutation emitted and what its detail carried.
 package audittest
 
 import (
@@ -22,9 +19,8 @@ type Recorder struct {
 	entries []db.AuditEntry
 }
 
-// Install routes every audit write through d into a fresh Recorder until the
-// test ends. Call it before the mutation under test, after the fixture is
-// seeded (seeding may legitimately write audits you do not want to assert).
+// Install routes every audit write through d into a fresh Recorder until the test
+// ends. Call it after the fixture is seeded.
 func Install(t testing.TB, d *db.DB) *Recorder {
 	t.Helper()
 	rec := &Recorder{}
@@ -54,9 +50,8 @@ func (r *Recorder) Entries() []db.AuditEntry {
 	return append([]db.AuditEntry(nil), r.entries...)
 }
 
-// Wait returns the first recorded entry with the given action, polling until
-// the asynchronous writer has flushed it. It fails the test after five
-// seconds, listing the actions that did arrive.
+// Wait returns the first recorded entry with the given action, polling until the async
+// writer flushes it; it fails the test after five seconds.
 func (r *Recorder) Wait(t testing.TB, action string) db.AuditEntry {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -78,8 +73,7 @@ func (r *Recorder) Wait(t testing.TB, action string) db.AuditEntry {
 	}
 }
 
-// detailDenylist is the shape half of the denylist: patterns that a
-// safe detail string never contains regardless of the fixture's values.
+// detailDenylist holds patterns a safe detail string never contains.
 var detailDenylist = []*regexp.Regexp{
 	regexp.MustCompile(`\$2[aby]\$\d\d\$`), // bcrypt hash
 	regexp.MustCompile(`\$argon2`),         // argon2 hash
@@ -89,11 +83,9 @@ var detailDenylist = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bBearer\s+\S`),
 }
 
-// AssertSafeDetails fails the test if any recorded detail matches the shape
-// denylist or contains one of the fixture's known secrets — the raw tokens,
-// passwords and hashes, TOTP secrets, invite codes and message bodies the
-// calling table used. Fix a hit at the audit call site, never by widening
-// this list's exceptions.
+// AssertSafeDetails fails the test if any recorded detail matches the shape denylist
+// or contains one of the fixture's known secrets. Fix a hit at the audit call site,
+// never by widening the denylist.
 func AssertSafeDetails(t testing.TB, entries []db.AuditEntry, secrets ...string) {
 	t.Helper()
 	for i := range entries {

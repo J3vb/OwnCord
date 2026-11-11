@@ -9,32 +9,27 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// GetOrCreateDMChannel finds or creates a DM channel between two users,
-// opening it for both unconditionally, and returns the channel and whether it
-// was created. It is for callers with no first-contact gate (cmd/seed);
-// service/dm.go's CreateDM uses GetOrCreateDMChannelGated.
+// GetOrCreateDMChannel finds or creates a DM between two users, opening it for both,
+// and reports whether it was created. For callers with no first-contact gate
+// (cmd/seed); service/dm.go uses GetOrCreateDMChannelGated.
 func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*Channel, bool, error) {
 	ch, created, _, _, err := d.getOrCreateDMChannel(ctx, user1ID, user2ID, false)
 	return ch, created, err
 }
 
-// GetOrCreateDMChannelGated is the gated variant for a caller-initiated 1:1
-// DM (service/dm.go's CreateDM): on the create branch it decides whether to
-// open the recipient's side (does the recipient already trust callerID?) and
-// writes dm_open_state inside the same transaction as the trust check. A
-// separate CloseDM afterwards could leave the recipient open on a cancellation
-// or close a DM the recipient had meanwhile accepted. recipientOpened is
-// meaningful only when created is true.
+// GetOrCreateDMChannelGated is the gated variant for a caller-initiated 1:1 DM:
+// on the create branch it decides whether to open the recipient's side (does
+// the recipient already trust callerID?) and writes dm_open_state in the same
+// transaction as the trust check. A separate CloseDM afterwards could leave the
+// recipient open on a cancellation or close a DM they meanwhile accepted.
+// recipientOpened is meaningful only when created is true.
 func (d *DB) GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *Channel, created bool, recipientOpened bool, accepted *MessageRequest, err error) {
 	return d.getOrCreateDMChannel(ctx, callerID, recipientID, true)
 }
 
-// getOrCreateDMChannel is the shared implementation. user1ID is the caller,
-// whose side always ends up open; gateRecipient makes user2ID's side depend on
-// trust instead of opening unconditionally. Lookup and create share one
-// SERIALIZABLE transaction so two concurrent requests cannot each create a
-// channel for the same pair, and so the trust check and dm_open_state write
-// stay atomic.
+// getOrCreateDMChannel is the shared implementation: user1ID is the caller, whose side
+// ends up open; gateRecipient makes user2ID's side depend on trust. Lookup and create
+// share one SERIALIZABLE transaction so racing requests cannot create two channels.
 func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, gateRecipient bool) (*Channel, bool, bool, *MessageRequest, error) {
 	tx, err := d.writer.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelSerializable,
@@ -44,10 +39,9 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 	}
 
 	// Look for an existing DM inside the transaction. The is_group clause keeps
-	// group DMs out of the lookup, or "message Bob" could land in a group that
-	// contains both users. It is the stored flag, not a live participant count,
-	// because a group people left can have two members and must still not answer
-	// "the DM between these two".
+	// group DMs out, or "message Bob" could land in a group containing both users;
+	// it is the stored flag, not a participant count, because a group people left
+	// can have two members and must still not answer "the DM between these two".
 	var existingID int64
 	err = tx.QueryRow(
 		`SELECT dp1.channel_id FROM dm_participants dp1
@@ -59,17 +53,15 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 	).Scan(&existingID)
 
 	if err == nil {
-		// Existing channel: ensure the caller has it open (idempotent), so a user who
+		// Existing channel: ensure the caller has it open (idempotent) so a user who
 		// closed the DM sees it again when the other party re-initiates. The
-		// recipient's side is untouched; recipientOpened is reported true for callers
-		// that check it unconditionally.
+		// recipient's side is untouched.
 		_, _ = tx.Exec(
 			`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)`,
 			user1ID, existingID,
 		)
-		// A recipient opening the DM themselves while the other user's request is
-		// undecided is an acceptance: same trust, open state and transition as
-		// AcceptMessageRequest, in this transaction.
+		// A recipient opening the DM while the other user's request is undecided is an
+		// acceptance: same trust, open state and transition as AcceptMessageRequest.
 		var accepted *MessageRequest
 		if gateRecipient {
 			var acceptErr error
@@ -117,8 +109,6 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel insert participants: %w", err)
 	}
 
-	// Test seam (package db only): simulates a failure in the window where the
-	// recipient would otherwise land open, to prove the transaction rolls back.
 	if hook := d.afterDMParticipantsInsertHook; hook != nil {
 		if hookErr := hook(); hookErr != nil {
 			_ = tx.Rollback()
@@ -126,8 +116,6 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 		}
 	}
 
-	// Decide the recipient's visibility and write dm_open_state in this same
-	// transaction (see getOrCreateDMChannel).
 	recipientOpened, err := decideAndOpenRecipientDM(tx, user1ID, user2ID, channelID, gateRecipient)
 	if err != nil {
 		_ = tx.Rollback()
@@ -146,10 +134,8 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 }
 
 // acceptUndecidedRequestOnOpen accepts the pending, ignored or deleted request
-// senderID holds against recipientID (the caller opening the DM): TrustSender,
-// then the transition to accepted. The recipient's dm_open_state row is
-// already written. It returns nil when there is no such request; q must be
-// bound to the caller's transaction.
+// senderID holds against recipientID (the opener); nil when none. q is bound to the
+// caller's transaction.
 func acceptUndecidedRequestOnOpen(ctx context.Context, q *dbgen.Queries, recipientID, senderID int64) (*MessageRequest, error) {
 	row, err := q.GetMessageRequestByPair(ctx, dbgen.GetMessageRequestByPairParams{SenderID: senderID, RecipientID: recipientID})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -158,9 +144,8 @@ func acceptUndecidedRequestOnOpen(ctx context.Context, q *dbgen.Queries, recipie
 	if err != nil {
 		return nil, fmt.Errorf("get request: %w", err)
 	}
-	// Deleted is server-side identical to ignored: the recipient dismissed the
-	// request undecided, and opening the conversation is the decision. Accepted
-	// and blocked rows stay.
+	// Deleted is server-side identical to ignored: opening the conversation is the
+	// decision. Accepted and blocked rows stay.
 	switch row.State {
 	case "pending", "ignored", "deleted":
 	default:
@@ -179,11 +164,8 @@ func acceptUndecidedRequestOnOpen(ctx context.Context, q *dbgen.Queries, recipie
 	return fromDBGenMessageRequest(updated), nil
 }
 
-// decideAndOpenRecipientDM decides (when gateRecipient) whether user2ID
-// already trusts user1ID and writes dm_open_state for channelID against tx, so
-// it commits or rolls back with the caller's transaction. It is split out of
-// getOrCreateDMChannel only to keep that function short and owns no
-// transaction lifecycle.
+// decideAndOpenRecipientDM decides (when gateRecipient) whether user2ID already
+// trusts user1ID and writes dm_open_state against tx, so it commits or rolls back with the caller.
 func decideAndOpenRecipientDM(tx *sql.Tx, user1ID, user2ID, channelID int64, gateRecipient bool) (recipientOpened bool, err error) {
 	recipientOpened = true
 	if gateRecipient {

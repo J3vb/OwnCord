@@ -12,108 +12,76 @@ import (
 	"time"
 )
 
-// maxRedirectBudget is the largest hop count a policy may ask for; past it a
-// caller is confusing a redirect chain with a crawl.
+// maxRedirectBudget caps a policy's hop count.
 const maxRedirectBudget = 10
 
-// maxConcurrencyBudget bounds a single Fetcher's cap. The process gate below
-// is the real ceiling; this only catches a typo'd policy.
+// maxConcurrencyBudget only catches a typo'd policy; the process gate is the real ceiling.
 const maxConcurrencyBudget = 256
 
-// processConcurrency bounds fetches in flight across every Fetcher in the
-// process, so a caller cannot buy more of the server's sockets by constructing
-// more Fetchers. It is also the one admission point every fetch passes.
+// processConcurrency bounds fetches in flight across every Fetcher, so more
+// Fetchers cannot buy more of the server's sockets.
 const processConcurrency = 32
 
-// processGate is a var only so TestFetch_ProcessGateBoundsEveryFetcher can
-// swap in a smaller one; nothing in production reassigns it.
+// processGate is a var only so a test can swap in a smaller one.
 var processGate = make(semaphore, processConcurrency)
 
 // Policy is one call site's outbound-content policy. Every field is required
-// unless its documentation says otherwise: New refuses a policy with a
-// missing ceiling rather than inventing a default, because a default nobody
-// chose is how a call site ends up unbounded.
+// unless noted: New refuses a missing ceiling rather than inventing a default.
 type Policy struct {
-	// Schemes is the allowed URL schemes, lowercase. Only "http" and "https"
-	// are accepted; a policy that lists "https" alone also refuses a redirect
-	// that tries to move to "http".
+	// Schemes is the allowed URL schemes, lowercase ("http" and "https" only);
+	// listing "https" alone also refuses a redirect to "http".
 	Schemes []string
 
-	// Ports is the allowed destination ports. Empty means the default port of
-	// each allowed scheme (80, 443) and nothing else.
+	// Ports is the allowed destination ports; empty means each allowed scheme's default.
 	Ports []int
 
-	// ContentTypes is the media-type allowlist, without parameters and in
-	// lowercase. Both the declared type and the type sniffed from the body
-	// must appear in it. http.DetectContentType reports "text/plain" for
-	// every textual format, so a policy that allows "application/json" must
-	// allow "text/plain" too; the pairing still refuses an HTML error page
-	// wearing a JSON Content-Type, which is the attack this catches.
-	//
-	// Empty disables the check. That is only ever right for a caller that
-	// treats the body as opaque bytes, and no call site in this repository
-	// does.
+	// ContentTypes is the lowercase media-type allowlist; both the declared and
+	// the sniffed type must appear in it. DetectContentType reports "text/plain"
+	// for every textual format, so allowing "application/json" needs "text/plain"
+	// too; the pairing still refuses an HTML page wearing a JSON Content-Type.
+	// Empty disables the check, which no call site here does.
 	ContentTypes []string
 
-	// MaxRedirects is how many hops may be followed by hand. 0 refuses every
-	// redirect. Automatic following is off in all cases.
+	// MaxRedirects is how many hops are followed; 0 refuses every redirect.
 	MaxRedirects int
 
-	// Deadline bounds the whole fetch: connect, TLS, every redirect hop, and
-	// the last byte of the body.
+	// Deadline bounds the whole fetch.
 	Deadline time.Duration
 
 	// MaxBytes bounds the bytes read off the wire, enforced while reading.
 	MaxBytes int64
 
-	// MaxDecompressedBytes bounds the body after inflation. It is a separate
-	// number because a gzip stream well under MaxBytes can inflate past any
-	// amount of memory.
+	// MaxDecompressedBytes bounds the body after inflation, since a small gzip
+	// stream can inflate past any amount of memory.
 	MaxDecompressedBytes int64
 
-	// MaxConcurrent bounds this Fetcher's fetches in flight. A caller over
-	// the cap waits for a slot until its context expires.
+	// MaxConcurrent bounds this Fetcher's fetches in flight.
 	MaxConcurrent int
 
-	// Truncate keeps the first MaxDecompressedBytes of a longer body and
-	// returns them, instead of refusing the response. It is for a caller
-	// that only ever parses a prefix (the link-preview broker reads a page's
-	// <head>). The read stops at that prefix, so an endless stream costs no
-	// more than it; MaxBytes still bounds the wire bytes a gzip prefix takes,
-	// and the content type is judged on the prefix that is kept. A truncated
-	// JSON document no longer parses, so its caller sees a type failure, not
-	// a size one.
+	// Truncate returns the first MaxDecompressedBytes of a longer body instead of
+	// refusing it, for callers that parse only a prefix. MaxBytes still bounds the
+	// wire bytes and the content type is judged on the kept prefix.
 	Truncate bool
 
-	// Classify decides whether one resolved address may be dialled. nil
-	// selects ClassifyAddr, which is the policy in docs/trust-model.md.
-	//
-	// It is a seam for tests that must reach a loopback stub. No production
-	// call site in this repository sets it, and TestNoProductionOverrideOfSeams
-	// proves that.
+	// Classify decides whether an address may be dialled; nil selects
+	// ClassifyAddr. A test seam: no production call site sets it.
 	Classify func(netip.Addr) error
 
-	// Resolve returns every address a host resolves to. nil selects the
-	// system resolver over both address families.
+	// Resolve returns every address a host resolves to; nil is the system resolver.
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 
-	// Dial opens one connection to an already-validated concrete address.
-	// nil selects a plain net.Dialer. It never sees a hostname.
+	// Dial opens one connection to a validated address (never a hostname); nil selects net.Dialer.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 
-	// TLSConfig is the client TLS configuration. nil selects the system
-	// roots and full verification, which every production policy uses.
-	//
-	// It is a seam on the same footing as the three above — a config that
-	// trusts a private CA, or worse skips verification, is an opt-out of
-	// certificate validation — so TestProductionPolicyShape refuses it in
-	// production code too. Tests use it to trust an httptest TLS stub.
+	// TLSConfig is the client TLS configuration; nil selects system roots and
+	// full verification. A test seam like the three above: a config trusting a
+	// private CA or skipping verification opts out of validation, so
+	// production code must not set it.
 	TLSConfig *tls.Config
 }
 
 // Fetcher performs bounded fetches under one Policy. Build one per call site
-// at start-up and share it: it owns the concurrency cap and the connection
-// pool. It is safe for concurrent use.
+// and share it; it is safe for concurrent use.
 type Fetcher struct {
 	policy   Policy
 	ports    []int
@@ -130,8 +98,7 @@ func New(p Policy) (*Fetcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Copy the caller's slices: they alias its Policy, and a later write on its
-	// side would silently change what this Fetcher allows.
+	// Copy the caller's slices so a later write on its side cannot change what this Fetcher allows.
 	p.Schemes = slices.Clone(p.Schemes)
 	p.ContentTypes = slices.Clone(p.ContentTypes)
 	p.Ports = slices.Clone(p.Ports)
@@ -154,8 +121,7 @@ func New(p Policy) (*Fetcher, error) {
 	}
 	f.client = &http.Client{
 		// Proxy stays nil: a proxy would carry the request to a host this
-		// package never validated, and env-configured proxying is exactly
-		// the kind of ambient authority a destination policy must not have.
+		// package never validated (ambient authority).
 		Transport: &http.Transport{
 			DialContext:         f.dial,
 			TLSClientConfig:     p.TLSConfig,
@@ -165,17 +131,14 @@ func New(p Policy) (*Fetcher, error) {
 			IdleConnTimeout:     30 * time.Second,
 			TLSHandshakeTimeout: 10 * time.Second,
 		},
-		// Redirects are followed by hand in follow(), one hop at a time, so
-		// that the whole destination check runs again on each of them.
+		// Redirects are followed by hand so the destination check runs on each hop.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	return f, nil
 }
 
-// MustNew is New for a policy fixed at compile time, which is every policy in
-// this repository: a call site's ceilings are constants, so a policy New
-// refuses is a programming error that a test catches, not a runtime condition
-// to handle. It panics rather than returning a Fetcher that is not bounded.
+// MustNew is New for a compile-time policy; a refused policy is a programming
+// error, so it panics rather than return an unbounded Fetcher.
 func MustNew(p Policy) *Fetcher {
 	f, err := New(p)
 	if err != nil {
@@ -216,8 +179,7 @@ func (p Policy) check() ([]int, error) {
 	return p.effectivePorts()
 }
 
-// effectivePorts resolves Policy.Ports, defaulting to the allowed schemes'
-// own ports when it is empty.
+// effectivePorts resolves Policy.Ports, defaulting to the allowed schemes' ports.
 func (p Policy) effectivePorts() ([]int, error) {
 	if len(p.Ports) == 0 {
 		var out []int

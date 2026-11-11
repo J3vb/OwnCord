@@ -12,36 +12,27 @@ import (
 	"math"
 
 	xdraw "golang.org/x/image/draw"
-	// Registers the WebP decoder with image.Decode and image.DecodeConfig.
 	_ "golang.org/x/image/webp"
 )
 
 const (
-	// thumbBox bounds both sides of a thumbnail. The client shows an inline
-	// image in at most 400×350 CSS px, so 800 stays sharp at 2× scaling.
 	thumbBox = 800
-	// thumbMaxDecodeBytes caps the memory a decode may take, estimated from
-	// the header (thumbOrientation): an image declaring more is passed
-	// through without a decode. 96 MiB still fits a 24-megapixel photo at
-	// 4 bytes a pixel and refuses a 4500x4500 16-bit image.
+	// Caps decode memory, estimated from the header (thumbOrientation); 96 MiB fits a 24-megapixel photo at 4
+	// bytes a pixel.
 	thumbMaxDecodeBytes = 96 << 20
 	thumbJPEGQuality    = 82
-	// webpBytesPerPixel is what decoding a WebP pixel may cost: a lossless
-	// frame is decoded into 4 bytes a pixel and its inverse transforms can
-	// copy that once more, and a lossy frame with alpha stays well under it.
+	// What decoding a WebP pixel may cost: lossless decodes to 4 bytes and its inverse transforms can copy
+	// once more.
 	webpBytesPerPixel = 8
 
 	mimeWebP = "image/webp"
 )
 
-// pngSignature opens every PNG.
 var pngSignature = []byte("\x89PNG\r\n\x1a\n")
 
-// thumbFormat is the decoder name of an original of mimeType that is
-// thumbnailed, or "" when it is passed through as is: GIFs keep their
-// animation, and the rest have no decoder here. A JPEG or PNG thumbnail keeps
-// its original's format; a WebP's is a JPEG, or a PNG when it is transparent
-// (there is no WebP encoder here), see thumbMIME.
+// thumbFormat is the decoder name of an original that is thumbnailed, or "" when passed through (GIFs keep
+// their animation; the rest have no decoder). A WebP's thumbnail is a JPEG, or a PNG when transparent, as
+// there is no WebP encoder (thumbMIME).
 func thumbFormat(mimeType string) string {
 	switch mimeType {
 	case "image/jpeg":
@@ -54,8 +45,7 @@ func thumbFormat(mimeType string) string {
 	return ""
 }
 
-// thumbMIME is the media type of a thumbnail whose first bytes are head, made
-// for an original of mimeType.
+// thumbMIME is the media type of a thumbnail whose first bytes are head.
 func thumbMIME(mimeType string, head []byte) string {
 	if mimeType != mimeWebP {
 		return mimeType
@@ -66,9 +56,8 @@ func thumbMIME(mimeType string, head []byte) string {
 	return "image/jpeg"
 }
 
-// webpAnimated reports whether the WebP in r declares an animation in its
-// extended header. The decoder here reads only still images, so an animated
-// WebP is passed through and keeps its frames.
+// webpAnimated reports whether the WebP declares an animation; the decoder reads only stills, so an
+// animated one is passed through.
 func webpAnimated(r io.ReadSeeker) bool {
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return true
@@ -81,14 +70,10 @@ func webpAnimated(r io.ReadSeeker) bool {
 	return string(hdr[12:16]) == "VP8X" && hdr[20]&animationBit != 0
 }
 
-// thumbOrientation decides from the header alone whether the image in r is
-// thumbnailed, and returns its EXIF orientation when it is. ok is false when
-// the original should be passed through instead: it already fits, its header
-// does not parse, or its decode would take more than thumbMaxDecodeBytes.
-//
-// Like imageDimensions (emoji_handler.go), a decode error or a non-positive
-// size is never trusted, and nothing the declared size would allocate is
-// decoded past the cap.
+// thumbOrientation decides from the header alone whether the image is thumbnailed and returns its EXIF
+// orientation. ok is false when the original is passed through: it fits, its header does not parse, or its
+// decode would exceed thumbMaxDecodeBytes. Like imageDimensions, a decode error or non-positive size is
+// never trusted.
 func thumbOrientation(r io.ReadSeeker, format string) (orientation int, ok bool) {
 	cfg, got, err := image.DecodeConfig(r)
 	if err != nil || got != format || cfg.Width <= 0 || cfg.Height <= 0 ||
@@ -117,10 +102,8 @@ func thumbOrientation(r io.ReadSeeker, format string) (orientation int, ok bool)
 	return orientation, true
 }
 
-// decodedBytesPerPixel bounds what decoding a pixel of model m costs: 8 bytes
-// for any 16-bit model (the largest, RGBA64, takes 8), 4 for the rest. A
-// progressive JPEG costs three times that, for the coefficient block it also
-// holds per component.
+// decodedBytesPerPixel bounds a pixel's decode cost: 8 bytes for any 16-bit model, 4 otherwise; a
+// progressive JPEG costs three times that for its coefficient blocks.
 func decodedBytesPerPixel(m color.Model) int64 {
 	switch m {
 	case color.RGBA64Model, color.NRGBA64Model, color.Gray16Model:
@@ -129,10 +112,8 @@ func decodedBytesPerPixel(m color.Model) int64 {
 	return 4
 }
 
-// makeThumbnail decodes the image in r, which thumbOrientation accepted, and
-// scales it to fit thumbBox, upright by orientation: in the same format for a
-// JPEG or PNG, and for a WebP as a JPEG when every pixel is opaque, else as a
-// PNG. ok is false when it does not decode.
+// makeThumbnail decodes the image thumbOrientation accepted and scales it to fit thumbBox, upright; a WebP
+// becomes a JPEG when every pixel is opaque, else a PNG. ok is false when it does not decode.
 func makeThumbnail(r io.ReadSeeker, format string, orientation int) (thumb []byte, ok bool) {
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, false
@@ -159,10 +140,8 @@ func makeThumbnail(r io.ReadSeeker, format string, orientation int) (thumb []byt
 	return buf.Bytes(), true
 }
 
-// jpegHeader reads a JPEG's EXIF Orientation (1–8, or 1 when there is none
-// or it does not parse) and whether its frame is progressive, from the
-// segments before the image data. A frame it does not reach, past a segment
-// it cannot walk, counts as progressive.
+// jpegHeader reads a JPEG's EXIF Orientation (1-8, or 1) and whether its frame is progressive; a frame it
+// cannot reach counts as progressive.
 func jpegHeader(r io.Reader) (orientation int, progressive bool) {
 	orientation, progressive = 1, true
 	br := bufio.NewReader(r)
@@ -199,9 +178,8 @@ func jpegHeader(r io.Reader) (orientation int, progressive bool) {
 	return orientation, progressive
 }
 
-// endsSegmentWalk reports whether marker ends jpegHeader's walk: start of
-// scan, fill bytes, stuffed zeros and restart markers are read differently
-// from a segment by the decoder.
+// endsSegmentWalk reports whether marker ends jpegHeader's walk (scan start, fill, stuffed zeros,
+// restarts).
 func endsSegmentWalk(marker byte) bool {
 	return marker == 0xDA || marker == 0xFF || marker == 0x00 || (marker >= 0xD0 && marker <= 0xD7)
 }
@@ -239,8 +217,8 @@ func exifOrientation(tiff []byte) int {
 	return 1
 }
 
-// orient turns src upright for an EXIF orientation: 2–4 mirror or turn it
-// in place, 5–8 also swap its width and height.
+// orient turns src upright for an EXIF orientation: 2-4 mirror or turn in place, 5-8 also swap width and
+// height.
 func orient(src *image.RGBA, o int) image.Image {
 	if o < 2 || o > 8 {
 		return src

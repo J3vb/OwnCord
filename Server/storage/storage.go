@@ -14,13 +14,11 @@ import (
 	"time"
 )
 
-// ErrIO marks a Save failure caused by the server's own filesystem (disk full,
-// permissions, read-only mount) rather than invalid content, so handlers
-// return a 5xx instead of blaming the client with a 400.
+// ErrIO marks a Save failure from the server's own filesystem (disk full,
+// permissions) so handlers return 5xx, not a 400 blaming the client.
 var ErrIO = errors.New("storage io failure")
 
-// blockedMagic maps format names to their magic byte signatures. Files whose
-// leading bytes match any entry are rejected by ValidateFileType.
+// blockedMagic maps format names to magic signatures ValidateFileType rejects.
 var blockedMagic = []struct {
 	name  string
 	magic []byte
@@ -36,9 +34,7 @@ var blockedMagic = []struct {
 	{"Windows shortcut", []byte{0x4c, 0x00, 0x00, 0x00}}, // .lnk files
 }
 
-// ValidateFileType checks the first few bytes of a file against known blocked
-// magic bytes. It returns an error if the content matches a blocked file type,
-// or nil if the content is allowed.
+// ValidateFileType rejects content whose leading bytes match a blocked magic signature.
 func ValidateFileType(header []byte) error {
 	for _, blocked := range blockedMagic {
 		if len(header) >= len(blocked.magic) && bytes.Equal(header[:len(blocked.magic)], blocked.magic) {
@@ -54,8 +50,7 @@ type Storage struct {
 	maxSizeMB int
 }
 
-// New creates a Storage instance that stores files in dir.
-// dir is created if it does not exist.
+// New creates a Storage that stores files in dir, creating it if needed.
 func New(dir string, maxSizeMB int) (*Storage, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating storage dir %s: %w", dir, err)
@@ -63,43 +58,35 @@ func New(dir string, maxSizeMB int) (*Storage, error) {
 	return &Storage{dir: dir, maxSizeMB: maxSizeMB}, nil
 }
 
-// sanitizeFilename validates that name is safe to use as a filename inside the
-// storage directory.  It must be a plain basename with no path separators, must
-// not be empty, ".", or "..", and must not start with ".".
+// sanitizeFilename requires a plain basename: no separators, not empty, ".", "..", or leading ".".
 func sanitizeFilename(name string) error {
 	if name == "" {
 		return fmt.Errorf("invalid filename: empty string")
 	}
-	// filepath.Base strips any directory component; if it differs from the
-	// original input the caller smuggled a path separator.
+	// filepath.Base strips directories; a difference means a smuggled separator.
 	base := filepath.Base(name)
 	if base != name {
 		return fmt.Errorf("invalid filename %q: must not contain path separators", name)
 	}
-	// Reject "." and ".." explicitly.
 	if name == "." || name == ".." {
 		return fmt.Errorf("invalid filename %q: reserved name", name)
 	}
-	// Reject filenames starting with "." (hidden/config files).
 	if strings.HasPrefix(name, ".") {
 		return fmt.Errorf("invalid filename %q: must not start with '.'", name)
 	}
-	// Explicitly reject embedded separators on both Unix and Windows.
 	if strings.ContainsAny(name, "/\\") {
 		return fmt.Errorf("invalid filename %q: must not contain path separators", name)
 	}
 	return nil
 }
 
-// resolvedPath builds the absolute target path and verifies it stays within
-// the storage directory.
+// resolvedPath builds the absolute target path and verifies it stays under the storage directory.
 func (s *Storage) resolvedPath(name string) (string, error) {
 	absDir, err := filepath.Abs(s.dir)
 	if err != nil {
 		return "", fmt.Errorf("resolving storage dir: %w", err)
 	}
 	target := filepath.Join(absDir, name)
-	// Ensure the joined path is still under absDir.
 	if !strings.HasPrefix(target, absDir+string(filepath.Separator)) &&
 		target != absDir {
 		return "", fmt.Errorf("resolved path %q escapes storage directory", target)
@@ -107,17 +94,12 @@ func (s *Storage) resolvedPath(name string) (string, error) {
 	return target, nil
 }
 
-// Save writes the content from r to a file named by uuid within the storage dir.
-// It reads the first 8 bytes to validate the file type (rejecting executables
-// and scripts) before writing the full content to disk.
-// The caller is responsible for generating a UUID filename.
+// Save writes r to a file named uuid, first checking the first 8 bytes for a
+// blocked type. The caller generates the UUID filename.
 func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 	if s.maxSizeMB < 0 {
-		// A negative limit must never reach io.LimitReader: it treats negative
-		// N as "read nothing", so io.Copy would report a clean (0, nil), the
-		// over-size probe (gated on written == maxBytes) would never fire, and
-		// every uploaded byte would be discarded while claiming success. Fail
-		// loudly rather than trust config validation.
+		// A negative limit must never reach io.LimitReader (it reads nothing, so every
+		// byte would be discarded while Save claims success): fail loudly.
 		return 0, fmt.Errorf("invalid storage max size: %d MB", s.maxSizeMB)
 	}
 	if err := sanitizeFilename(uuid); err != nil {
@@ -128,7 +110,6 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 		return 0, err
 	}
 
-	// Read the first 8 bytes to check magic bytes without consuming the stream.
 	var header [8]byte
 	n, err := io.ReadFull(r, header[:])
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
@@ -144,9 +125,8 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("creating file %s: %w: %w", dst, ErrIO, err)
 	}
-	// Any failure after this point must remove the partial file: the orphan
-	// sweep is DB-row-driven, so a file without a DB row is never reclaimed.
-	// Close before remove — Windows cannot delete an open file.
+	// Remove the partial file on failure (the orphan sweep is row-driven and never
+	// reclaims a file with no row); close first, since Windows cannot delete an open file.
 	success := false
 	defer func() {
 		_ = f.Close()
@@ -157,21 +137,18 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 		}
 	}()
 
-	// Reconstruct the full stream: header bytes we already read + remainder.
 	maxBytes := int64(s.maxSizeMB) * 1024 * 1024
 	full := io.MultiReader(bytes.NewReader(headerSlice), r)
 	limited := io.LimitReader(full, maxBytes)
 	written, err := io.Copy(f, limited)
 	if err != nil {
-		// Write-side failures surface as *fs.PathError (File.Write wraps
-		// them); read-side failures (client aborted mid-upload) do not, and
-		// those stay the client's fault.
+		// Write-side failures surface as *fs.PathError; read-side ones (client aborted) do not and stay the
+		// client's fault.
 		if _, ok := errors.AsType[*fs.PathError](err); ok {
 			return 0, fmt.Errorf("writing file: %w: %w", ErrIO, err)
 		}
 		return 0, fmt.Errorf("writing file: %w", err)
 	}
-	// Probe for one more byte to detect if the file exceeds the limit.
 	if written == maxBytes {
 		var probe [1]byte
 		if n, _ := full.Read(probe[:]); n > 0 {
@@ -185,16 +162,13 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 	return written, nil
 }
 
-// thumbDir is the subdirectory holding thumbnails, each named after its
-// original. List reports regular files only, so the reconciliation pass never
-// sees a thumbnail as a stranded upload.
+// thumbDir holds thumbnails named after their originals; List skips it so reconciliation never sees one as a
+// stranded upload.
 const thumbDir = "thumbs"
 
-// Delete removes the file named uuid from the storage dir, and its thumbnail.
-// Erasure, retention and the orphan sweep all remove files here, so a
-// thumbnail always goes with its original. A missing original still removes
-// the thumbnail (a retried removal) and is reported as fs.ErrNotExist; a
-// thumbnail that could not be removed is an error, so the caller retries.
+// Delete removes the file named uuid and its thumbnail (erasure, retention and
+// the orphan sweep all come here). A missing original still removes the
+// thumbnail and reports fs.ErrNotExist; an unremovable thumbnail is an error so the caller retries.
 func (s *Storage) Delete(uuid string) error {
 	if err := sanitizeFilename(uuid); err != nil {
 		return err
@@ -203,8 +177,8 @@ func (s *Storage) Delete(uuid string) error {
 	if err != nil {
 		return err
 	}
-	// The original goes first: SaveThumb checks it after writing, so a
-	// thumbnail generated during this call is removed by one side or the other.
+	// The original goes first: SaveThumb checks it after writing, so a concurrent thumbnail is removed by one
+	// side.
 	err = os.Remove(dst)
 	thumb := filepath.Join(filepath.Dir(dst), thumbDir, uuid)
 	if thumbErr := os.Remove(thumb); thumbErr != nil && !errors.Is(thumbErr, fs.ErrNotExist) {
@@ -213,7 +187,6 @@ func (s *Storage) Delete(uuid string) error {
 	return err
 }
 
-// thumbPath is the thumbnail path for the original named uuid.
 func (s *Storage) thumbPath(uuid string) (string, error) {
 	if err := sanitizeFilename(uuid); err != nil {
 		return "", err
@@ -234,11 +207,9 @@ func (s *Storage) OpenThumb(uuid string) (File, error) {
 	return os.Open(p)
 }
 
-// SaveThumb stores data as the thumbnail of the original named uuid; empty data
-// records that the original has no thumbnail. The write is atomic (a temporary
-// file renamed into place), so a reader never sees a partial thumbnail. If the
-// original is gone once the thumbnail is in place, the thumbnail is removed
-// again and fs.ErrNotExist returned, so it never outlives its original.
+// SaveThumb stores data as uuid's thumbnail (empty data records that there is
+// none). The write is atomic via rename; if the original is gone afterwards the
+// thumbnail is removed and fs.ErrNotExist returned.
 func (s *Storage) SaveThumb(uuid string, data []byte) error {
 	p, err := s.thumbPath(uuid)
 	if err != nil {
@@ -276,11 +247,9 @@ type Entry struct {
 	Size    int64
 }
 
-// List returns every regular file in the storage directory with its
-// modification time, in name order; subdirectories and non-regular files are
-// skipped. It is the storage side of the reconciliation pass
-// (docs/architecture/data-lifecycle.md): a file no database row names is
-// stranded, and only a directory listing can find it.
+// List returns every regular file with its mtime, in name order: the storage
+// side of reconciliation (docs/architecture/data-lifecycle.md), since only a
+// directory listing finds a file no row names.
 func (s *Storage) List() ([]Entry, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
@@ -303,10 +272,9 @@ func (s *Storage) List() ([]Entry, error) {
 	return out, nil
 }
 
-// File is what serving a stored blob requires of an opened file. Seeking is
-// load-bearing: both serve paths hand the file to http.ServeContent, which
-// needs io.ReadSeeker for range requests, which is what makes a remote backend
-// (e.g. S3) the hard part of any storage swap. *os.File satisfies it.
+// File is what serving a stored blob needs of an opened file. Seeking is
+// load-bearing: http.ServeContent needs io.ReadSeeker for range requests, which
+// is what makes a remote backend (e.g. S3) the hard part of a storage swap.
 type File interface {
 	io.Reader
 	io.Seeker

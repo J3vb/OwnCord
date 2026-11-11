@@ -9,29 +9,25 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Forum posts. A post is a thread under a forum with no starter
-// message; its opening message is the thread's own first message, and
-// channels.thread_post_message_id points at it. The post, its message, its tags
-// and the send receipt commit in one transaction (CreateMessageDelivery).
+// Forum posts. A post is a thread under a forum with no starter message; its
+// opening message is the thread's first, pointed at by
+// channels.thread_post_message_id. Post, message, tags and send receipt commit
+// in one transaction (CreateMessageDelivery).
 
-// MaxPostTags is the most tags one post may carry.
 const MaxPostTags = 5
 
-// ForumPostPreviewRunes bounds ForumFirstMessage.Preview.
 const ForumPostPreviewRunes = 200
 
 var (
-	// ErrForumGone means the forum named by a post create is gone, or is not a
-	// forum. CreateMessageDelivery returns it from inside its transaction.
+	// ErrForumGone means the forum named by a post create is gone or not a forum; returned
+	// inside CreateMessageDelivery's transaction.
 	ErrForumGone = errors.New("forum is gone")
-	// ErrForumTagUnknown means a tag id is not (or no longer) a tag of the
-	// forum. Tag deletes and post writes both run on the single writer, so the
-	// answer is exact: either the tag exists for this write or it does not.
+	// ErrForumTagUnknown means a tag id is not (or no longer) a tag of the forum;
+	// tag deletes and post writes both run on the single writer, so the answer is exact.
 	ErrForumTagUnknown = errors.New("unknown forum tag")
 )
 
-// ForumPostInput is the post a forum_post_create makes, carried by
-// MessageDeliveryParams. The owner is the sender.
+// ForumPostInput is the post a forum_post_create makes, carried by MessageDeliveryParams.
 type ForumPostInput struct {
 	Name               string
 	AutoArchiveMinutes int
@@ -39,7 +35,6 @@ type ForumPostInput struct {
 }
 
 // ForumFirstMessage is a post's opening message as the forum list shows it.
-// Preview is empty once the message is deleted.
 type ForumFirstMessage struct {
 	ID             int64  `json:"id"`
 	AuthorID       *int64 `json:"author_id"`
@@ -48,14 +43,12 @@ type ForumFirstMessage struct {
 	Deleted        bool   `json:"deleted"`
 }
 
-// ForumPostMeta is the post block of a ThreadInfo. FirstMessage is null when
-// the opening message was hard-deleted (retention).
+// ForumPostMeta is the post block of a ThreadInfo.
 type ForumPostMeta struct {
 	TagIDs       []int64            `json:"tag_ids"`
 	FirstMessage *ForumFirstMessage `json:"first_message"`
 }
 
-// previewOf cuts content to ForumPostPreviewRunes runes.
 func previewOf(content string) string {
 	r := []rune(content)
 	if len(r) <= ForumPostPreviewRunes {
@@ -64,9 +57,6 @@ func previewOf(content string) string {
 	return string(r[:ForumPostPreviewRunes])
 }
 
-// attachPosts fills Post on every thread in ts whose parent is a forum, with
-// two batched reads. A page with no thread costs no query, and a thread under
-// a text channel matches nothing.
 func attachPosts(ctx context.Context, q *dbgen.Queries, ts []*ThreadInfo) error {
 	if len(ts) == 0 {
 		return nil
@@ -112,9 +102,9 @@ func attachPosts(ctx context.Context, q *dbgen.Queries, ts []*ThreadInfo) error 
 	return nil
 }
 
-// insertForumPost writes the post's thread row and checks the forum and tags
-// inside the delivery transaction, so a forum or tag deleted since the service
-// looked wins. It returns the new thread's id.
+// insertForumPost writes the post's thread row and checks forum and tags in the
+// delivery transaction, so a concurrent forum or tag delete wins; returns the thread
+// id.
 func insertForumPost(ctx context.Context, q *dbgen.Queries, forumID, ownerID int64, in *ForumPostInput, now string) (int64, error) {
 	isForum, err := q.IsForumChannel(ctx, forumID)
 	if err != nil {
@@ -140,8 +130,6 @@ func insertForumPost(ctx context.Context, q *dbgen.Queries, forumID, ownerID int
 	return id, nil
 }
 
-// requireForumTags is ErrForumTagUnknown unless every id is a distinct tag of
-// the forum.
 func requireForumTags(ctx context.Context, q *dbgen.Queries, forumID int64, tagIDs []int64) error {
 	if len(tagIDs) == 0 {
 		return nil
@@ -159,7 +147,6 @@ func requireForumTags(ctx context.Context, q *dbgen.Queries, forumID int64, tagI
 	return nil
 }
 
-// linkForumPost points the post at its opening message and writes its tags.
 func linkForumPost(ctx context.Context, q *dbgen.Queries, threadID, messageID int64, tagIDs []int64) error {
 	if n, err := q.SetThreadPostMessage(ctx, dbgen.SetThreadPostMessageParams{ID: threadID, MessageID: &messageID}); err != nil {
 		return fmt.Errorf("forum post opening message: %w", err)
@@ -174,9 +161,8 @@ func linkForumPost(ctx context.Context, q *dbgen.Queries, threadID, messageID in
 	return nil
 }
 
-// replaceThreadTags makes the tags of a post exactly tagIDs inside the
-// caller's transaction: every id must be a tag of the forum, the old links go,
-// the new ones are written.
+// replaceThreadTags makes a post's tags exactly tagIDs inside the caller's
+// transaction: every id must be a tag of the forum.
 func replaceThreadTags(ctx context.Context, q *dbgen.Queries, threadID, forumID int64, tagIDs []int64) error {
 	if err := requireForumTags(ctx, q, forumID, tagIDs); err != nil {
 		return err

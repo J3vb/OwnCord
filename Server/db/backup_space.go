@@ -10,10 +10,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/diskutil"
 )
 
-// ErrBackupNoSpace is returned by BackupToSafe when the backup directory's
-// volume has too little free space for the copy plus the configured reserve.
-// No file is created. Callers map it to a "low disk" answer, not a generic
-// failure.
+// ErrBackupNoSpace is returned by BackupToSafe when the backup volume has too little
+// free space for the copy plus the configured reserve. No file is created.
 var ErrBackupNoSpace = errors.New("not enough free disk space for a backup")
 
 // backupSpace is the reserve and free-space reader BackupToSafe checks
@@ -23,15 +21,14 @@ type backupSpace struct {
 	free    func(dir string) (uint64, error)
 }
 
-// SetBackupDiskReserve sets the free space every backup must leave on the
-// backup volume, in bytes (server.min_free_disk_mb). 0 checks only that the
-// copy itself fits. Call it once after Open, before anything takes a backup.
+// SetBackupDiskReserve sets the free space (bytes, server.min_free_disk_mb) every
+// backup must leave on the backup volume; 0 checks only that the copy fits. Call it
+// once after Open.
 func (d *DB) SetBackupDiskReserve(reserve uint64) {
 	d.backupSpace.Store(&backupSpace{reserve: reserve, free: diskutil.FreeBytes})
 }
 
-// SetBackupFreeBytesForTest replaces the free-space reader BackupToSafe uses,
-// keeping the reserve. Tests only; production code must not call it.
+// SetBackupFreeBytesForTest replaces BackupToSafe's free-space reader. Tests only.
 func (d *DB) SetBackupFreeBytesForTest(reserve uint64, free func(dir string) (uint64, error)) {
 	d.backupSpace.Store(&backupSpace{reserve: reserve, free: free})
 }
@@ -69,7 +66,6 @@ func (d *DB) checkBackupSpace(dir string) error {
 		ErrBackupNoSpace, mibUp(need), mibUp(space.reserve), free>>20)
 }
 
-// fileBytes is the size of path, 0 when it does not exist.
 func fileBytes(path string) (uint64, error) {
 	fi, err := os.Stat(path)
 	if err != nil {

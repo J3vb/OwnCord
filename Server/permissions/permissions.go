@@ -1,6 +1,5 @@
-// Package permissions provides the canonical permission bit constants and
-// role ID constants for the OwnCord server. All other packages must import
-// from here instead of defining their own local copies.
+// Package permissions holds the canonical permission bits and role IDs; other
+// packages import them from here.
 package permissions
 
 const (
@@ -36,8 +35,7 @@ const (
 	Administrator   = int64(0x40000000) // bit 30 — bypasses all permission checks
 )
 
-// AllPerms is the union of every defined permission bit. Use it to mask
-// externally supplied permission values so unknown bits are dropped.
+// AllPerms is the union of every defined permission bit; mask external values with it.
 const AllPerms = SendMessages | ReadMessages | ManageConfig | ManageUpdates | ManageTokens |
 	AttachFiles | AddReactions | IssueRecovery | ViewDiagnostics |
 	ConnectVoice | SpeakVoice | UseVideo | ShareScreen | MoveMembers | ManageBackups | RestoreBackups |
@@ -45,52 +43,33 @@ const AllPerms = SendMessages | ReadMessages | ManageConfig | ManageUpdates | Ma
 	MentionEveryone | ModerateMembers | ManageNicknames | ManageRoles | ManageServer | ManageInvites | ViewAuditLog |
 	EraseAccounts | Administrator
 
-// AdminPerimeter is the set of bits that admits a principal to the /admin/api
-// surface. Holding ANY one of them is enough to pass the perimeter; each route
-// group then re-checks the specific bit it needs. ManageMessages and
-// ManageInvites are excluded: neither has an /admin/api route (the Invites
-// page reaches invites through the member API, gated on the same bit).
-// ModerateMembers is excluded too: a warning-only moderator must not inherit
-// the perimeter's read surface (/stats, the /users list, /me), which
-// re-checks nothing by design.
-//
-// ManageBackups is inside it because a holder has to reach /admin/api to use
-// the backup routes. The backup holds far more than the perimeter's read
-// surface (every message and every password hash), which is why the bit is
-// owner-grant-only. The seven owner-type bits are inside it for the same
-// reason.
+// AdminPerimeter is the set of bits that admits a principal to /admin/api;
+// holding any one passes, and each route group re-checks its own bit.
+// ModerateMembers is excluded so a warning-only moderator does not inherit the
+// perimeter's read surface (/stats, /users, /me), which re-checks nothing.
+// ManageBackups and the owner-type bits are inside it so holders can reach
+// their routes.
 const AdminPerimeter = Administrator | ManageChannels | ManageRoles |
 	ManageServer | ViewAuditLog | KickMembers | BanMembers | MuteMembers | ManageBackups |
 	OwnerTierBits | AdministratorTierBits
 
-// OwnerTierBits are the owner-type bits whose actions were owner-only before
-// they were bits: restoring and deleting backups and the full archive, the
-// config overrides and restart, updates, API tokens and recovery credentials.
-// The gate is the owner or the bit held explicitly; Administrator does NOT
-// bypass it, because the seeded Admin role carries ADMINISTRATOR and a bypass
-// would hand every default Admin the owner's powers on upgrade.
+// OwnerTierBits are the owner-type bits. The gate is the owner or the bit held
+// explicitly; Administrator does NOT bypass it, or every seeded Admin would gain owner powers.
 const OwnerTierBits = RestoreBackups | ManageConfig | ManageUpdates | ManageTokens | IssueRecovery
 
-// AdministratorTierBits are the owner-type bits whose actions an
-// Administrator already had: server diagnostics and account erasure.
-// Administrator keeps passing them, and the bit lets a role without
-// ADMINISTRATOR do just that.
+// AdministratorTierBits are the owner-type bits whose actions an Administrator
+// already had; Administrator keeps passing them.
 const AdministratorTierBits = ViewDiagnostics | EraseAccounts
 
-// OwnerGrantOnly is the mask of bits that only the owner or an Administrator
-// may add to or remove from a role, or hand out by assigning a role that
-// carries them; ManageRoles is not enough. It includes both owner-type tiers;
-// OwnerOnlyGrant narrows the owner tier further.
+// OwnerGrantOnly is the mask of bits only the owner or an Administrator may
+// grant via a role; ManageRoles is not enough.
 const OwnerGrantOnly = MoveMembers | ManageBackups | OwnerTierBits | AdministratorTierBits
 
-// OwnerOnlyGrant is the subset of OwnerGrantOnly that only the owner may add
-// to or remove from a role or an override, or hand out by assigning a role
-// that carries it. An Administrator is not enough: otherwise they could give
-// themself an owner-tier bit, which the tier's no-bypass rule prevents.
+// OwnerOnlyGrant is the subset of OwnerGrantOnly only the owner may grant; an
+// Administrator could otherwise give themself an owner-tier bit.
 const OwnerOnlyGrant = OwnerTierBits
 
-// bitNames maps each single permission bit to its SCHEMA.md name, so
-// authorization error wording lives in one place.
+// bitNames maps each single permission bit to its schema name.
 var bitNames = map[int64]string{
 	SendMessages:    "SEND_MESSAGES",
 	ReadMessages:    "READ_MESSAGES",
@@ -124,8 +103,7 @@ var bitNames = map[int64]string{
 	Administrator:   "ADMINISTRATOR",
 }
 
-// Name returns the SCHEMA.md name of a single permission bit, or "UNKNOWN" for
-// a zero, multi-bit, or undefined value.
+// Name returns the schema name of a single permission bit, or "UNKNOWN".
 func Name(bit int64) string {
 	if name, ok := bitNames[bit]; ok {
 		return name
@@ -140,21 +118,17 @@ const (
 	MemberRoleID    = int64(4)
 )
 
-// OwnerRolePosition is the hierarchy position of the owner role. Roles below
-// it cannot modify the owner role or perform owner-reserved operations.
+// OwnerRolePosition is the hierarchy position of the owner role.
 const OwnerRolePosition = 100
 
-// IsOwner reports whether a role with the given id and hierarchy position is
-// the owner role. Position is the ordinary test; the seeded OwnerRoleID is
-// accepted too, so a database with hand-edited positions still recognizes the
-// real owner. Call sites must use this rather than comparing role.ID or
-// role.Position themselves.
+// IsOwner reports whether the role is the owner role. The seeded OwnerRoleID is
+// accepted besides position so hand-edited positions still find the owner;
+// call sites must use this, not compare ID or Position.
 func IsOwner(roleID int64, position int) bool {
 	return roleID == OwnerRoleID || position >= OwnerRolePosition
 }
 
-// HasPerm reports whether rolePerms contains all bits in requiredPerm.
-// Returns false when requiredPerm is zero because zero is not a valid bit.
+// HasPerm reports whether rolePerms contains all bits in requiredPerm; a zero requiredPerm is false.
 func HasPerm(rolePerms, requiredPerm int64) bool {
 	if requiredPerm == 0 {
 		return false
@@ -162,9 +136,7 @@ func HasPerm(rolePerms, requiredPerm int64) bool {
 	return rolePerms&requiredPerm == requiredPerm
 }
 
-// HasAnyPerm reports whether rolePerms contains at least one bit of mask; a
-// zero mask is never satisfied. Administrator is NOT implied: callers wanting
-// the bypass pass a mask that includes it (e.g. AdminPerimeter).
+// HasAnyPerm reports whether rolePerms holds any bit of mask; zero is never satisfied.
 func HasAnyPerm(rolePerms, mask int64) bool {
 	if mask == 0 {
 		return false
@@ -172,56 +144,36 @@ func HasAnyPerm(rolePerms, mask int64) bool {
 	return rolePerms&mask != 0
 }
 
-// HasAdmin reports whether rolePerms includes the Administrator bit, which
-// grants unconditional access to all operations.
+// HasAdmin reports whether rolePerms includes the Administrator bit.
 func HasAdmin(rolePerms int64) bool {
 	return rolePerms&Administrator != 0
 }
 
-// HasServerPerm reports whether a role holds a SERVER-WIDE permission.
-// Administrator bypasses. Channel overrides are deliberately NOT consulted;
-// use Checker.HasChannelPerm/HasChannelPermBatch whenever a channel id exists.
-// Multi-bit masks are ALL-of, matching HasPerm.
+// HasServerPerm reports whether a role holds a server-wide permission (all-of
+// for multi-bit masks). Administrator bypasses; channel overrides are NOT
+// consulted, so use Checker.HasChannelPerm when a channel id exists.
 func HasServerPerm(rolePerms, perm int64) bool {
 	return HasAdmin(rolePerms) || HasPerm(rolePerms, perm)
 }
 
-// EffectivePerms computes the resolved permission set for ONE override layer,
-// matching Discord's channel override semantics:
-//
-//	effective = (rolePerm & ^deny) | allow
-//
-// deny strips bits, then allow adds bits, so allow wins when both target the
-// same bit. Prefer EffectiveChannelPerms, which applies both layers in order.
+// EffectivePerms resolves ONE layer as (rolePerm & ^deny) | allow; allow wins.
 func EffectivePerms(rolePerm, allow, deny int64) int64 {
 	return (rolePerm &^ deny) | allow
 }
 
-// EffectiveChannelPerms resolves a member's permissions in ONE channel, in
-// Discord's order:
+// EffectiveChannelPerms resolves a member's permissions in ONE channel: base
+// role perms, then role override, then user override, each via EffectivePerms,
+// so the narrower layer wins (a user deny beats a role allow).
 //
-//	base role permissions -> role override -> user override
-//
-// Each layer is EffectivePerms, so within a layer allow beats deny, and across
-// layers the later (narrower) layer wins: a per-user deny beats a per-role
-// allow, and a per-user allow beats a per-user deny.
-//
-// ADMINISTRATOR is deliberately NOT handled here: it is a bypass, not a bit
-// that survives an override, and every caller short-circuits on HasAdmin first.
-// So a channel override can strip ADMINISTRATOR from a non-admin's computed
-// mask (it never grants it) without this function quietly re-granting it.
-//
-// This is the single resolution formula: Checker.HasChannelPerm,
-// Checker.HasChannelPermBatch (and VisibleChannelIDs) and
-// service.PermissionService all route through it.
+// ADMINISTRATOR is NOT handled here: callers short-circuit on HasAdmin first,
+// so an override never re-grants it. This is the single resolution formula all
+// checkers and service.PermissionService route through.
 func EffectiveChannelPerms(basePerms int64, o ChannelOverride) int64 {
 	roleLayer := EffectivePerms(basePerms, o.Allow, o.Deny)
 	return EffectivePerms(roleLayer, o.UserAllow, o.UserDeny)
 }
 
-// RoleGrant is one held role's contribution to a channel: the role's base
-// mask and that role's own channel override (Allow/Deny, zero when the role
-// has none there).
+// RoleGrant is one held role's base mask and its own channel override (zero when none).
 type RoleGrant struct {
 	Perms int64
 	Allow int64
@@ -230,18 +182,9 @@ type RoleGrant struct {
 	RoleID int64
 }
 
-// MemberChannelPerms resolves a member's permissions in ONE channel when they
-// hold several roles. Each held role is resolved with its OWN override, the
-// results are OR'd, and only then does the member's override apply:
-//
-//	roleLayer = OR over held roles r of ((perms_r & ^deny_r) | allow_r)
-//	effective = (roleLayer & ^userDeny) | userAllow
-//
-// A role therefore only ever adds permissions: a restrictive role (Member with
-// READ denied on a private channel) cannot take away a bit another held role
-// (Moderator) grants. For a single grant this is exactly EffectiveChannelPerms.
-// ADMINISTRATOR is not handled here, as in EffectiveChannelPerms: callers
-// short-circuit on HasAdmin of the OR of the held masks.
+// MemberChannelPerms is EffectiveChannelPerms for a multi-role member: each
+// role resolves with its own override, the results are OR'd, then the member's
+// override applies, so a role only ever adds permissions.
 func MemberChannelPerms(layers []RoleGrant, userAllow, userDeny int64) int64 {
 	var roleLayer int64
 	for _, g := range layers {

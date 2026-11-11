@@ -13,23 +13,18 @@ import (
 )
 
 var (
-	// ErrMessageDeliveryConflict refuses reuse of a logical id for another send.
 	ErrMessageDeliveryConflict = errors.New("message delivery id was already used for another payload")
-	// ErrMessageDeliveryDeleted keeps a retry from resurrecting removed content.
-	ErrMessageDeliveryDeleted = errors.New("message is deleted")
-	// ErrMessageDeliveryEmpty means none of an attachment-only send's uploads linked.
-	ErrMessageDeliveryEmpty = errors.New("message content cannot be empty")
-	// ErrMessageDeliveryExpired closes the queue-wait gap after service validation.
-	ErrMessageDeliveryExpired = errors.New("message delivery id expired")
-	// ErrMessageDeliveryBeforeRestore refuses a send whose receipt may have
-	// been discarded by restoring an older database.
+	ErrMessageDeliveryDeleted  = errors.New("message is deleted")
+	ErrMessageDeliveryEmpty    = errors.New("message content cannot be empty")
+	ErrMessageDeliveryExpired  = errors.New("message delivery id expired")
+	// ErrMessageDeliveryBeforeRestore refuses a send whose receipt may have been discarded
+	// by restoring an older database.
 	ErrMessageDeliveryBeforeRestore = errors.New("message delivery predates database restore")
 )
 
 // MessageDeliveryParams binds one immutable client id to its complete request.
-// PayloadHash is SHA-256 of channel, raw content, reply and ordered upload ids.
-// ExpiresAtMS comes from the validated timestamp in ClientMessageID, never from
-// the retry time. The service rejects expired ids before reading or writing.
+// PayloadHash is SHA-256 of channel, raw content, reply and ordered upload ids;
+// ExpiresAtMS comes from the ClientMessageID timestamp, not the retry time.
 type MessageDeliveryParams struct {
 	UserID, ChannelID int64
 	ClientMessageID   string
@@ -40,51 +35,43 @@ type MessageDeliveryParams struct {
 	ReplyTo           *int64
 	AttachmentIDs     []string
 	MentionedUserIDs  []int64
-	// MentionedRoleIDs are the roles whose @role tokens cleared the mention
-	// gate; stored as message_role_mentions rows with the message.
+	// MentionedRoleIDs are the roles whose @role tokens cleared the mention gate, stored
+	// with the message.
 	MentionedRoleIDs []int64
-	// ReplyPingUserID is the replied-to author a reply_ping adds to the mention
-	// set, 0 for none. It is stored as a message_mentions row flagged reply_ping.
+	// ReplyPingUserID is the replied-to author a reply_ping adds to the mention set (0 =
+	// none), stored flagged reply_ping.
 	ReplyPingUserID  int64
 	MentionsEveryone bool
-	// Forward, when set, makes this send a forward: the message is
-	// the snapshot, AttachmentIDs are the sender's own clones of the original's
-	// files, and the transaction re-checks the original before it writes.
+	// Forward, when set, makes this send a forward: the message is the snapshot,
+	// AttachmentIDs are the sender's clones, and the transaction re-checks the original
+	// before writing.
 	Forward *ForwardRow
-	// Poll, when set, makes this send a poll: the poll row and its
-	// answers commit with the message and the receipt. Content is the readable
-	// fallback text the service built from the same fields.
+	// Poll, when set, makes this send a poll whose row and answers commit with the message
+	// and receipt; Content is the fallback text.
 	Poll *PollInput
-	// Sticker, when set, makes this send a sticker message: the
-	// message_stickers row commits with the message and the receipt. Content is
-	// the readable fallback the service built.
+	// Sticker, when set, makes this a sticker message whose message_stickers row commits
+	// with the message and receipt.
 	Sticker *StickerRef
-	// ForumPost, when set, makes this send a forum post.
-	// ChannelID is the forum: the receipt is keyed on it, but the message is
-	// written into a thread the transaction creates under the forum, so the
-	// post, its opening message, its tags and the receipt commit or fail
-	// together.
+	// ForumPost, when set, makes this a forum post. ChannelID is the forum: the
+	// receipt is keyed on it, but the message goes into a thread this transaction
+	// creates, so post, opening message, tags and receipt commit or fail together.
 	ForumPost *ForumPostInput
 }
 
-// MessageDelivery is the committed result. A duplicate carries only the
-// original id/timestamp, never a stale copy of edited/deleted message content.
+// MessageDelivery is the committed result; a duplicate carries only the original id and timestamp.
 type MessageDelivery struct {
-	Message   *Message
-	Duplicate bool
-	// LinkedAttachmentIDs are the requested uploads this send attached, set
-	// only on a fresh commit (a duplicate does not re-link).
+	Message             *Message
+	Duplicate           bool
 	LinkedAttachmentIDs []string
-	// Thread is the post a forum-post send created, set only on a fresh
-	// commit. Message.ChannelID is then that thread, not the forum.
+	// Thread is the post a forum-post send created, set only on a fresh commit;
+	// Message.ChannelID is then that thread.
 	Thread *ThreadInfo
 }
 
-// FindMessageDelivery answers a retry from the sender's own receipt. The
-// service calls it right after the general rate limit, before the permission
-// gates, and a hit returns only the original id and timestamp.
-// CreateMessageDelivery repeats the lookup under its writer transaction to
-// serialize simultaneous sends.
+// FindMessageDelivery answers a retry from the sender's own receipt, called after the
+// general rate limit and before the permission gates; a hit returns only the original
+// id and timestamp. CreateMessageDelivery repeats the lookup under its writer
+// transaction to serialize simultaneous sends.
 func (d *DB) FindMessageDelivery(ctx context.Context, p MessageDeliveryParams) (*MessageDelivery, error) {
 	previous, err := findMessageDelivery(ctx, d.q, p)
 	if err == nil && previous == nil && p.CreatedAtMS < d.MessageDeliveryFloorMS() {
@@ -115,10 +102,10 @@ func findMessageDelivery(ctx context.Context, q *dbgen.Queries, p MessageDeliver
 }
 
 // CreateMessageDelivery commits message, receipt, mentions, attachment
-// ownership changes and the author's read state (advanceAuthorReadState)
-// together. Nothing observes a receipt for a half-written
-// message. One writer connection serializes competing callers, and the unique
-// key is the storage backstop. A lost response after commit is safe to retry.
+// ownership changes and the author's read state together, so nothing observes a
+// receipt for a half-written message. One writer connection serializes
+// competing callers and the unique key is the backstop. A lost response after
+// commit is safe to retry.
 func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams) (*MessageDelivery, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -190,8 +177,6 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	return &MessageDelivery{Message: msg, LinkedAttachmentIDs: linked, Thread: thread}, nil
 }
 
-// deliveryTargetChannel is the channel the message row goes into: the send's
-// channel, or for a forum post the new thread this call creates under the forum.
 func deliveryTargetChannel(ctx context.Context, q *dbgen.Queries, p MessageDeliveryParams) (int64, error) {
 	if p.ForumPost == nil {
 		return p.ChannelID, nil
@@ -200,8 +185,6 @@ func deliveryTargetChannel(ctx context.Context, q *dbgen.Queries, p MessageDeliv
 	return insertForumPost(ctx, q, p.ChannelID, p.UserID, p.ForumPost, now)
 }
 
-// finishForumPost links a forum post's tags and opening message once the
-// message exists and returns the post's thread; nil for any other send.
 func (d *DB) finishForumPost(ctx context.Context, q *dbgen.Queries, p MessageDeliveryParams, threadID, messageID int64) (*ThreadInfo, error) {
 	if p.ForumPost == nil {
 		return nil, nil
@@ -212,7 +195,6 @@ func (d *DB) finishForumPost(ctx context.Context, q *dbgen.Queries, p MessageDel
 	return d.getThread(ctx, q, threadID)
 }
 
-// insertMessageSideRows writes the forward block, poll or sticker a message carries.
 func insertMessageSideRows(ctx context.Context, q *dbgen.Queries, messageID int64, p MessageDeliveryParams) error {
 	if p.Forward != nil {
 		if err := insertForwardRow(ctx, q, messageID, p.Forward); err != nil {
@@ -232,8 +214,8 @@ func insertMessageSideRows(ctx context.Context, q *dbgen.Queries, messageID int6
 	return nil
 }
 
-// DeleteExpiredMessageDeliveryReceipts is the periodic maintenance sweep.
-// Rejection of expired ids does not depend on the sweep having run.
+// DeleteExpiredMessageDeliveryReceipts is the periodic sweep; rejecting expired ids
+// does not depend on it.
 func (d *DB) DeleteExpiredMessageDeliveryReceipts(ctx context.Context) error {
 	return d.q.DeleteExpiredMessageDeliveryReceipts(ctx, time.Now().UnixMilli())
 }

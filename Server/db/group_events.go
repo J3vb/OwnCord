@@ -5,7 +5,6 @@ import (
 	"fmt"
 )
 
-// isGroupEventKindName reports whether a wire kind name is a group event row.
 func isGroupEventKindName(kind string) bool {
 	switch kind {
 	case "group_add", "group_remove", "group_leave", "group_rename", "group_icon":

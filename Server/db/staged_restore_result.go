@@ -10,10 +10,9 @@ import (
 	"os"
 )
 
-// ReadRestoreResult reads the result file an apply left, without removing it.
-// found is false when there is none. The caller reports it, then calls
-// ClearRestoreResult, so a crash in between repeats the report rather than
-// losing it.
+// ReadRestoreResult reads the result file an apply left, without removing it; found is
+// false when there is none. The caller reports it, then calls ClearRestoreResult, so a
+// crash in between repeats the report rather than losing it.
 func ReadRestoreResult(dbPath string) (res RestoreResult, found bool, err error) {
 	if dbPath == "" || isMemoryPath(dbPath) {
 		return RestoreResult{}, false, nil
@@ -50,10 +49,9 @@ func ClearRestoreResult(dbPath string) error {
 	return nil
 }
 
-// applyOnOpen is ApplyStagedRestore behind a variable that nothing assigns
-// after init. The apply owns its own bounded context because Open has none to
-// hand down; a direct call (even with a nolint at the call site, which cannot
-// reach the reports in Open's callers) makes contextcheck flag every Open.
+// applyOnOpen is ApplyStagedRestore behind a variable nothing assigns after init. The
+// apply owns its bounded context because Open has none to hand down; a direct call
+// would make contextcheck flag every Open.
 var applyOnOpen = ApplyStagedRestore
 
 // ErrRestoreInProgress means a staged restore has not finished, so only the

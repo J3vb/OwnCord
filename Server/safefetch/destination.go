@@ -11,10 +11,8 @@ import (
 	"strings"
 )
 
-// destination is one validated hop: the URL as parsed, and the concrete
-// addresses the dial is allowed to use. Nothing else may be dialled, and the
-// host is never resolved again — that second lookup is the DNS-rebinding
-// window this type exists to close.
+// destination is one validated hop: the parsed URL and the only addresses the
+// dial may use. The host is never resolved again (the DNS-rebinding window).
 type destination struct {
 	url   *url.URL
 	host  string
@@ -22,14 +20,12 @@ type destination struct {
 	addrs []netip.Addr
 }
 
-// vettedKey carries a *destination from Fetcher.follow to Fetcher.dial. The
-// dial fails closed when it is absent: a dial the policy did not authorise is
-// a bug, not a fallback.
+// vettedKey carries a *destination from Fetcher.follow to Fetcher.dial, which
+// fails closed when it is absent.
 type vettedKey struct{}
 
-// destination parses, screens and resolves raw, returning the only addresses
-// this hop may connect to. allowHost is the caller's own host rule and may be
-// nil; it runs before the resolver, so a host the caller refuses costs no DNS.
+// destination parses, screens and resolves raw. allowHost may be nil and runs
+// before the resolver, so a refused host costs no DNS.
 func (f *Fetcher) destination(ctx context.Context, raw string, allowHost func(string) bool) (*destination, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -60,8 +56,7 @@ func (f *Fetcher) destination(ctx context.Context, raw string, allowHost func(st
 	return &destination{url: u, host: host, port: port, addrs: addrs}, nil
 }
 
-// hopPort returns the destination port as a string, refusing anything off the
-// policy's port allowlist.
+// hopPort returns the destination port, refusing anything off the port allowlist.
 func (f *Fetcher) hopPort(u *url.URL, scheme string) (string, error) {
 	port := u.Port()
 	if port == "" {
@@ -82,8 +77,7 @@ func (f *Fetcher) hopPort(u *url.URL, scheme string) (string, error) {
 }
 
 // addresses resolves host and refuses the whole request if any answer is
-// non-global. An IP literal is classified directly and never resolved, so
-// there is no way to reach a blocked address by skipping DNS.
+// non-global; an IP literal is classified directly, never resolved.
 func (f *Fetcher) addresses(ctx context.Context, host string) ([]netip.Addr, error) {
 	if literal, err := netip.ParseAddr(host); err == nil {
 		if err := f.classify(literal); err != nil {
@@ -98,9 +92,8 @@ func (f *Fetcher) addresses(ctx context.Context, host string) ([]netip.Addr, err
 	if len(addrs) == 0 {
 		return nil, fmt.Errorf("%w: %s", ErrNoAddresses, host)
 	}
-	// Every answer, not the first that works: one poisoned record among ten
-	// refuses the request, or the attacker just retries until ordering
-	// favours them.
+	// Every answer, not the first that works: one poisoned record refuses the
+	// request, or the attacker retries until ordering favours them.
 	for _, a := range addrs {
 		if err := f.classify(a); err != nil {
 			return nil, fmt.Errorf("%s: %w", host, err)
@@ -109,10 +102,8 @@ func (f *Fetcher) addresses(ctx context.Context, host string) ([]netip.Addr, err
 	return slices.Clone(addrs), nil
 }
 
-// dial is the transport's only way out. It connects to the addresses the
-// policy already vetted for this hop and to nothing else: the hostname never
-// reaches a resolver here, so a DNS answer that changes after validation
-// cannot move the connection.
+// dial is the transport's only way out: it connects only to the addresses
+// vetted for this hop, so a DNS answer that changes after validation cannot move it.
 func (f *Fetcher) dial(ctx context.Context, network, addr string) (net.Conn, error) {
 	dest, ok := ctx.Value(vettedKey{}).(*destination)
 	if !ok || dest == nil {
@@ -128,8 +119,7 @@ func (f *Fetcher) dial(ctx context.Context, network, addr string) (net.Conn, err
 	}
 	var lastErr error
 	for _, a := range dest.addrs {
-		// Re-classified immediately before the connect. The list cannot have
-		// changed, which is the point: this asserts it.
+		// Re-classified just before the connect to assert the list is unchanged.
 		if err := f.classify(a); err != nil {
 			return nil, err
 		}

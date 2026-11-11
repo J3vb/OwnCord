@@ -9,22 +9,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// category_overrides and category_user_overrides (migration 076) are a template
-// that channels in the category stay synced to. They are copied onto channels
-// and never read when a permission is computed: permissions.EffectiveChannelPerms
-// still sees only channel_overrides and channel_user_overrides.
-//
-// Every write here that touches more than one row runs in ONE writer
-// transaction, and the set of channels it rewrites is read inside that
-// transaction. A channel moved out of the category (or unsynced) by a racing
-// write is therefore either already out of the set this write reads, or the
-// write completes first and the move sees its result; no channel is ever left
-// half-written. The authorization guard is a callback run inside the
-// transaction, after the rows are read and before anything is written, so a
-// refusal rolls everything back.
+// category_overrides and category_user_overrides (migration 076) are a template that
+// channels in the category stay synced to. They are copied onto channels and never
+// read when a permission is computed (permissions.EffectiveChannelPerms sees only
+// channel_overrides and channel_user_overrides).
+// Every multi-row write runs in ONE writer transaction and reads the set of channels
+// it rewrites inside it, so a channel moved out by a racing write is either already
+// out of the set or the write completes first. The authorization guard is a callback
+// run after the reads and before any write, so a refusal rolls back.
 
-// ErrUncategorized means a sync was asked of a channel that has no category,
-// so there is no template to sync it to.
+// ErrUncategorized means a sync was asked of a channel with no category.
 var ErrUncategorized = errors.New("channel has no category")
 
 // OverrideBits is one allow/deny pair.
@@ -40,24 +34,20 @@ type OverrideRow struct {
 	Deny     int64
 }
 
-// SyncedChannelBits is the row a synced channel already carries for the role
-// or user a category write targets (zero when it has none).
+// SyncedChannelBits is the row a synced channel already carries for the target (zero when none).
 type SyncedChannelBits struct {
 	ChannelID int64
 	Allow     int64
 	Deny      int64
 }
 
-// CategoryOverrideScope is what a category override write is about to
-// overwrite, read inside the write transaction: the bits already on the
-// category row and on every synced channel's row for the same target.
+// CategoryOverrideScope is what a write is about to overwrite, read in its transaction.
 type CategoryOverrideScope struct {
 	Category OverrideBits
 	Channels []SyncedChannelBits
 }
 
-// CategoryOverrideGuard authorizes a category override write from the rows it
-// would overwrite. A non-nil error aborts the transaction with nothing written.
+// CategoryOverrideGuard authorizes a write from the rows it would overwrite; an error aborts it.
 type CategoryOverrideGuard func(CategoryOverrideScope) error
 
 // OverrideRows is a set of role rows and a set of user rows.
@@ -66,8 +56,7 @@ type OverrideRows struct {
 	Users []OverrideRow
 }
 
-// ChannelSyncPlan is a channel's override rows replaced by its category's
-// template: Removed is what the channel carried, Written is the template.
+// ChannelSyncPlan is a channel's rows replaced by its category's template (Removed, Written).
 type ChannelSyncPlan struct {
 	ChannelID  int64
 	CategoryID int64
@@ -75,11 +64,9 @@ type ChannelSyncPlan struct {
 	Written    OverrideRows
 }
 
-// ChannelSyncGuard authorizes a replace-with-template from the rows it removes
-// and writes. A non-nil error aborts the transaction with nothing written.
+// ChannelSyncGuard authorizes a replace-with-template; an error aborts it.
 type ChannelSyncGuard func(ChannelSyncPlan) error
 
-// overrideKind selects the role or the user flavour of the same operation.
 type overrideKind struct {
 	catGet func(ctx context.Context, q *dbgen.Queries, categoryID, target int64) (OverrideBits, error)
 	catSet func(ctx context.Context, q *dbgen.Queries, categoryID, target int64, b OverrideBits) error
@@ -144,12 +131,9 @@ var userOverrideKind = overrideKind{
 	},
 }
 
-// applyCategoryOverride is the one write behind the four public category
-// override mutations. In one transaction it reads the category, the category's
-// row for the target and every synced channel's row for the target, runs the
-// guard over that scope, then writes (or, with clear, deletes) the category
-// row and the same row on each synced channel. It returns the ids of the
-// channels it rewrote.
+// applyCategoryOverride is the one write behind the four public mutations: in one
+// transaction it reads the scope, runs the guard, then writes the category row and
+// each synced channel's row; returns the rewritten channel ids.
 func (d *DB) applyCategoryOverride(ctx context.Context, op string, k overrideKind, categoryID, target int64, bits OverrideBits, clear bool, guard CategoryOverrideGuard) ([]int64, error) {
 	var touched []int64
 	err := d.inWriteTx(ctx, op, func(q *dbgen.Queries) error {
@@ -206,15 +190,14 @@ func (d *DB) applyCategoryOverride(ctx context.Context, op string, k overrideKin
 	return touched, nil
 }
 
-// WriteCategoryRoleOverride sets a role's template row on a category and the
-// same row on every synced channel in it, in one transaction. ErrNotFound when
-// the category is gone. It returns the rewritten channels' ids.
+// WriteCategoryRoleOverride sets a role's template row on a category and its synced
+// channels in one transaction.
 func (d *DB) WriteCategoryRoleOverride(ctx context.Context, categoryID, roleID, allow, deny int64, guard CategoryOverrideGuard) ([]int64, error) {
 	return d.applyCategoryOverride(ctx, "WriteCategoryRoleOverride", roleOverrideKind, categoryID, roleID, OverrideBits{Allow: allow, Deny: deny}, false, guard)
 }
 
-// ClearCategoryRoleOverride removes a role's template row and its row on every
-// synced channel in the category, in one transaction.
+// ClearCategoryRoleOverride removes a role's template row and its synced-channel rows
+// in one transaction.
 func (d *DB) ClearCategoryRoleOverride(ctx context.Context, categoryID, roleID int64, guard CategoryOverrideGuard) ([]int64, error) {
 	return d.applyCategoryOverride(ctx, "ClearCategoryRoleOverride", roleOverrideKind, categoryID, roleID, OverrideBits{}, true, guard)
 }
@@ -229,8 +212,6 @@ func (d *DB) ClearCategoryUserOverride(ctx context.Context, categoryID, userID i
 	return d.applyCategoryOverride(ctx, "ClearCategoryUserOverride", userOverrideKind, categoryID, userID, OverrideBits{}, true, guard)
 }
 
-// loadSyncPlan reads the rows a replace-with-template would remove (the
-// channel's own) and write (the category's template).
 func loadSyncPlan(ctx context.Context, q *dbgen.Queries, channelID, categoryID int64) (ChannelSyncPlan, error) {
 	plan := ChannelSyncPlan{ChannelID: channelID, CategoryID: categoryID}
 	roles, err := q.GetChannelOverrides(ctx, channelID)
@@ -264,11 +245,9 @@ func loadSyncPlan(ctx context.Context, q *dbgen.Queries, channelID, categoryID i
 	return plan, nil
 }
 
-// PreviewChannelSync reads, outside any transaction, the rows syncing the
-// channel to the category would remove and write. A caller resolves who those
-// rows name (role and member hierarchy) from it BEFORE the write transaction,
-// so the guard it passes in stays free of store reads: the writer connection
-// is held for the whole transaction.
+// PreviewChannelSync reads, outside any transaction, the rows a sync would remove and
+// write, so the caller can resolve who they name BEFORE the write transaction and keep
+// its guard free of store reads.
 func (d *DB) PreviewChannelSync(ctx context.Context, channelID, categoryID int64) (ChannelSyncPlan, error) {
 	plan, err := loadSyncPlan(ctx, d.q, channelID, categoryID)
 	if err != nil {
@@ -277,10 +256,6 @@ func (d *DB) PreviewChannelSync(ctx context.Context, channelID, categoryID int64
 	return plan, nil
 }
 
-// replaceWithTemplateTx replaces a channel's role and user override rows with
-// the category's template and marks the channel synced. The guard sees the
-// removed and the written rows before anything changes. It runs inside the
-// caller's transaction.
 func replaceWithTemplateTx(ctx context.Context, q *dbgen.Queries, channelID, categoryID int64, guard ChannelSyncGuard) (ChannelSyncPlan, error) {
 	plan, err := loadSyncPlan(ctx, q, channelID, categoryID)
 	if err != nil {
@@ -303,9 +278,9 @@ func replaceWithTemplateTx(ctx context.Context, q *dbgen.Queries, channelID, cat
 	return plan, nil
 }
 
-// SyncChannelPermissions re-syncs one channel to its category's template in
-// one transaction. The channel's category is read inside it. ErrNotFound when
-// the channel is gone, ErrUncategorized when it has no category.
+// SyncChannelPermissions re-syncs one channel to its category's template in one
+// transaction. ErrNotFound when the channel is gone, ErrUncategorized when it has no
+// category.
 func (d *DB) SyncChannelPermissions(ctx context.Context, channelID int64, guard ChannelSyncGuard) (ChannelSyncPlan, error) {
 	var plan ChannelSyncPlan
 	err := d.inWriteTx(ctx, "SyncChannelPermissions", func(q *dbgen.Queries) error {
@@ -328,9 +303,6 @@ func (d *DB) SyncChannelPermissions(ctx context.Context, channelID int64, guard 
 	return plan, nil
 }
 
-// copyTemplateToNewChannelTx gives a freshly created channel its category's
-// template and marks it synced. It runs inside the create transaction and does
-// not consult any guard: the template was authorized when it was written.
 func copyTemplateToNewChannelTx(ctx context.Context, q *dbgen.Queries, channelID, categoryID int64) error {
 	args := dbgen.CopyCategoryRoleOverridesToChannelParams{ChannelID: channelID, CategoryID: categoryID}
 	if err := q.CopyCategoryRoleOverridesToChannel(ctx, args); err != nil {
@@ -342,9 +314,7 @@ func copyTemplateToNewChannelTx(ctx context.Context, q *dbgen.Queries, channelID
 	return q.SetChannelPermissionsSynced(ctx, dbgen.SetChannelPermissionsSyncedParams{PermissionsSynced: 1, ID: channelID})
 }
 
-// ListCategoryRoleOverrides returns every role together with its template
-// bits on the category (zero when it has no row), ordered like
-// ListChannelRoleOverrides.
+// ListCategoryRoleOverrides returns every role with its template bits (zero without a row).
 func (d *DB) ListCategoryRoleOverrides(ctx context.Context, categoryID int64) ([]ChannelRoleOverride, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT r.id, r.name, r.position, r.permissions,
@@ -373,8 +343,7 @@ func (d *DB) ListCategoryRoleOverrides(ctx context.Context, categoryID int64) ([
 	return result, nil
 }
 
-// ListCategoryUserOverrides returns the per-user template rows on a category
-// joined with the users' names, ordered by username.
+// ListCategoryUserOverrides returns the per-user template rows with the users' names, by username.
 func (d *DB) ListCategoryUserOverrides(ctx context.Context, categoryID int64) ([]ChannelUserOverride, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT u.id, u.username, u.role_id, o.allow, o.deny
@@ -403,8 +372,7 @@ func (d *DB) ListCategoryUserOverrides(ctx context.Context, categoryID int64) ([
 	return result, nil
 }
 
-// ListSyncedChannelIDs returns the ids of every channel whose overrides are
-// kept in sync with its category.
+// ListSyncedChannelIDs returns the ids of every channel synced with its category.
 func (d *DB) ListSyncedChannelIDs(ctx context.Context) ([]int64, error) {
 	ids, err := d.q.ListSyncedChannelIDs(ctx)
 	if err != nil {
@@ -413,8 +381,7 @@ func (d *DB) ListSyncedChannelIDs(ctx context.Context) ([]int64, error) {
 	return ids, nil
 }
 
-// ChannelPermissionsSynced reports whether a channel is synced to its
-// category. A channel that does not exist is not synced.
+// ChannelPermissionsSynced reports whether a channel is synced; a missing channel is not.
 func (d *DB) ChannelPermissionsSynced(ctx context.Context, channelID int64) (bool, error) {
 	v, err := d.q.GetChannelPermissionsSynced(ctx, channelID)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -12,46 +12,39 @@ import (
 	goyaml "go.yaml.in/yaml/v3"
 )
 
-// DefaultPath is the CWD-relative config path the server loads at startup,
-// shared by main.go, token_cli.go and the setup wizard so they cannot disagree
-// about which file is authoritative.
+// DefaultPath is the CWD-relative config path shared by main.go, token_cli.go and the setup wizard so they
+// agree on the authoritative file.
 const DefaultPath = "config.yaml"
 
-// Patch lists the config.yaml keys the first-run setup wizard may change.
-// A nil field leaves the file's current value untouched.
+// Patch lists the config.yaml keys the setup wizard may change; a nil field leaves the current value
+// untouched.
 type Patch struct {
-	ServerPort      *int
-	ServerName      *string
-	TLSMode         *string // self_signed | acme | manual | off
-	TLSDomain       *string
-	UploadMaxSizeMB *int
-	VoiceQuality    *string // low | medium | high
-	// VoiceAutoDownload toggles voice.auto_download_livekit.
+	ServerPort        *int
+	ServerName        *string
+	TLSMode           *string // self_signed | acme | manual | off
+	TLSDomain         *string
+	UploadMaxSizeMB   *int
+	VoiceQuality      *string // low | medium | high
 	VoiceAutoDownload *bool
 
-	// VoiceAPIKey/VoiceAPISecret are written ONLY when the file's value is
-	// absent or empty. This persists the generated LiveKit credentials (see
-	// ensureVoiceCredentials) across restarts without clobbering operator-set
-	// values.
+	// Written ONLY when the file's value is absent or empty, persisting the generated LiveKit credentials
+	// (see ensureVoiceCredentials) without clobbering operator-set values.
 	VoiceAPIKey    *string
 	VoiceAPISecret *string
 }
 
-// saveMu serialises Save's read-modify-write cycle.
 var saveMu sync.Mutex
 
-// Save patches the config file at path with the non-nil fields of p, preserving
-// comments, key order, hand edits and keys it does not model. The write is
-// atomic (temp file + rename) and verified to parse and unmarshal first, so Save
-// never leaves a file the server would refuse to boot from.
+// Save patches the config file at path with the non-nil fields of p, preserving comments, key order and
+// unmodelled keys. The write is atomic and verified to parse first, so Save never leaves an unbootable
+// file.
 func Save(path string, p Patch) error {
 	saveMu.Lock()
 	defer saveMu.Unlock()
 
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: path comes from trusted wiring, not request input
 	if errors.Is(err, os.ErrNotExist) {
-		// File deleted since startup — start from the shipped template so the
-		// documentation comments still end up in the patched file.
+		// File deleted since startup: start from the shipped template so the documentation comments survive.
 		raw = []byte(defaultYAML)
 	} else if err != nil {
 		return fmt.Errorf("reading config file %s: %w", path, err)
@@ -78,8 +71,8 @@ func Save(path string, p Patch) error {
 		return fmt.Errorf("encoding config: %w", err)
 	}
 
-	// Sanity gate: the buffer must survive the same parse+unmarshal path Load
-	// uses. A bug here must fail the request, never brick the server's boot.
+	// The buffer must survive Load's parse path; a bug here must fail the request, never brick the server's
+	// boot.
 	if err := verifyLoadable(buf.Bytes(), path); err != nil {
 		return fmt.Errorf("refusing to write config that would not load: %w", err)
 	}
@@ -121,8 +114,8 @@ func applyPatch(root *goyaml.Node, p Patch) {
 	}
 }
 
-// mappingRoot returns the top-level mapping of the parsed document, creating
-// an empty document+mapping when the file was empty or comments-only.
+// mappingRoot returns the top-level mapping, creating an empty document+mapping when the file was empty or
+// comments-only.
 func mappingRoot(doc *goyaml.Node) (*goyaml.Node, error) {
 	if doc.Kind == 0 {
 		doc.Kind = goyaml.DocumentNode
@@ -133,8 +126,7 @@ func mappingRoot(doc *goyaml.Node) (*goyaml.Node, error) {
 		return m, nil
 	}
 	root := doc.Content[0]
-	// A document holding only a null scalar (e.g. a file with nothing but
-	// comments) can be promoted to a mapping in place, keeping its comments.
+	// A document holding only a null scalar can be promoted to a mapping in place, keeping its comments.
 	if root.Kind == goyaml.ScalarNode && root.Tag == "!!null" {
 		root.Kind = goyaml.MappingNode
 		root.Tag = "!!map"
@@ -147,9 +139,8 @@ func mappingRoot(doc *goyaml.Node) (*goyaml.Node, error) {
 	return root, nil
 }
 
-// section returns the mapping node for a top-level section key, creating it when
-// absent. A present-but-null section (bare "voice:" with children commented out)
-// is promoted to a mapping in place so its comments survive.
+// section returns the mapping node for a top-level key, creating it when absent; a null section (bare
+// "voice:") is promoted in place so its comments survive.
 func section(root *goyaml.Node, name string) *goyaml.Node {
 	if v := findValue(root, name); v != nil {
 		if v.Kind != goyaml.MappingNode {
@@ -176,8 +167,8 @@ func findValue(m *goyaml.Node, key string) *goyaml.Node {
 	return nil
 }
 
-// setScalar upserts key: value in mapping m. Values are set as node content,
-// never spliced into text, so YAML syntax in a value stays one quoted scalar.
+// setScalar upserts key: value in mapping m as node content, never spliced into text, so YAML syntax in a
+// value stays one scalar.
 func setScalar(m *goyaml.Node, key, value, tag string) {
 	if v := findValue(m, key); v != nil {
 		v.Kind = goyaml.ScalarNode
@@ -193,17 +184,13 @@ func setScalar(m *goyaml.Node, key, value, tag string) {
 	)
 }
 
-// verifyLoadable checks that raw would survive Load's load path unchanged:
-// the same defaults-plus-file-plus-environment build, including the bounds
-// clamp and the credential fill, so a write that would only fail at the next
-// boot is refused here instead.
+// verifyLoadable checks that raw would survive Load's path (defaults, file, environment, bounds clamp,
+// credential fill), so a write that would only fail at the next boot is refused here.
 func verifyLoadable(raw []byte, path string) error {
 	_, err := loadBytes(raw, path)
 	return err
 }
 
-// atomicWrite replaces path via temp file + rename so a crash mid-write cannot
-// leave a truncated config.
 func atomicWrite(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".config-*.yaml.tmp")
