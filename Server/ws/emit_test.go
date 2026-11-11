@@ -16,7 +16,10 @@ func drainChan(ch chan []byte, timeout time.Duration) [][]byte {
 	defer timer.Stop()
 	for {
 		select {
-		case msg := <-ch:
+		case msg, ok := <-ch:
+			if !ok {
+				return msgs
+			}
 			msgs = append(msgs, msg)
 		case <-timer.C:
 			return msgs

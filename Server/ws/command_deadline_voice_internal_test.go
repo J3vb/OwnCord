@@ -54,7 +54,10 @@ func drainFrames(c *Client) []map[string]any {
 	var out []map[string]any
 	for {
 		select {
-		case raw := <-c.send:
+		case raw, ok := <-c.send:
+			if !ok {
+				return out
+			}
 			var env map[string]any
 			if json.Unmarshal(raw, &env) == nil {
 				out = append(out, env)

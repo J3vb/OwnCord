@@ -92,7 +92,10 @@ func TestDeliverBroadcast_NSFWGateStillRateLimited(t *testing.T) {
 drain:
 	for {
 		select {
-		case <-send:
+		case _, ok := <-send:
+			if !ok {
+				break drain
+			}
 			delivered++
 		default:
 			break drain

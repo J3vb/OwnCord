@@ -165,7 +165,10 @@ func TestChannelReadAudience_UnresolvedUserIsMarkedForResync(t *testing.T) {
 func chanHasFrame(ch chan []byte, typ string) bool {
 	for {
 		select {
-		case f := <-ch:
+		case f, ok := <-ch:
+			if !ok {
+				return false
+			}
 			if strings.Contains(string(f), typ) {
 				return true
 			}
