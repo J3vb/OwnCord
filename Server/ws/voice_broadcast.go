@@ -117,7 +117,8 @@ func (h *Hub) filterDMAudience(ctx context.Context, channelID, subjectID int64, 
 // The audience is resolved here, on the caller's goroutine, so the hub's dispatch
 // loop never blocks on permission lookups.
 func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID, subjectID int64, msg []byte) {
-	h.broadcastChannelScopedTo(channelID, msg, h.voiceEventAudience(ctx, channelID, subjectID), "voice event")
+	mark := h.audienceMark()
+	h.broadcastChannelScopedTo(channelID, msg, h.voiceEventAudience(ctx, channelID, subjectID), mark, "voice event")
 }
 
 // sendVoiceEventSync stamps and delivers a voice_state / voice_leave for
@@ -130,7 +131,8 @@ func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID, subjectID int6
 // SendToUser); only the plugin dispatch hook is skipped, as SequencedDMEvent does
 // for every synchronous per-recipient send (emit.go).
 func (h *Hub) sendVoiceEventSync(ctx context.Context, channelID, subjectID int64, msg []byte) {
-	h.sendSequencedToUsers(channelID, h.voiceEventAudience(ctx, channelID, subjectID), msg)
+	mark := h.audienceMark()
+	h.sendSequencedToUsers(channelID, h.voiceEventAudience(ctx, channelID, subjectID), mark, msg)
 }
 
 // broadcastVoiceEventWithLeaver is broadcastVoiceEvent guaranteeing leaverID is in
@@ -141,11 +143,12 @@ func (h *Hub) sendVoiceEventSync(ctx context.Context, channelID, subjectID int64
 // their call. Mirrors CleanupVoiceForChannel's per-batch leaver union. leaverID is
 // also the DM-audience subject: the leaver always sees their own leave.
 func (h *Hub) broadcastVoiceEventWithLeaver(ctx context.Context, channelID int64, msg []byte, leaverID int64) {
+	mark := h.audienceMark()
 	audience := h.voiceEventAudience(ctx, channelID, leaverID)
 	if !slices.Contains(audience, leaverID) {
 		audience = append(audience, leaverID)
 	}
-	h.broadcastChannelScopedTo(channelID, msg, audience, "voice event")
+	h.broadcastChannelScopedTo(channelID, msg, audience, mark, "voice event")
 }
 
 // VoiceSessionCount returns the number of connections currently in a voice

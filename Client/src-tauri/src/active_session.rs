@@ -9,15 +9,27 @@
 //! The same `auth_ok` records every host a login was verified for during this
 //! app run. That set survives `ws_disconnect`, a dropped connection and a
 //! credential removal — all renderer-reachable — so a renderer command can
-//! clear the active slot but never widen the set. While the slot is empty, the
-//! pre-session flows (connect-page credential prefill, stored-token resume and
-//! saved-password login) pass `allow_pre_session` and are admitted only for a
-//! host in the set. Before any login has been verified this app run the set is
-//! empty and the first-run behaviour stands, so a restart can still auto-login
-//! from a saved credential. The identity-key and identity-pin commands never
-//! run pre-session and require an exact active match. The pending-message
-//! commands require the active host, or a verified host while no session is
-//! active, and never admit a host before a verified login.
+//! clear the active slot but never widen the set.
+//!
+//! While the slot is empty, the saved-login commands follow two rules:
+//!
+//! - The stored session token is handed to the page as it is only for a host
+//!   in the set, or before any login has been verified this app run (the set
+//!   is empty and the first-run behaviour stands, so a restart can still
+//!   auto-login from a saved credential). For any other saved host the native
+//!   side signs in itself: the token goes to that host's own server over its
+//!   pinned connection, and reaches the page only once that server accepts it
+//!   (`saved_sign_in`, `SavedSignIn::AskServer`).
+//! - The token-less commands (the connect-page prefill, which answers a
+//!   username and whether a password is stored, and the saved-password login,
+//!   which keeps the password in this process) run for any saved host
+//!   (`ensure_no_other_session`).
+//!
+//! While a session is active, every one of them is refused for another host.
+//! The identity-key and identity-pin commands never run pre-session and
+//! require an exact active match. The pending-message commands require the
+//! active host, or a verified host while no session is active, and never admit
+//! a host before a verified login.
 
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -109,6 +121,26 @@ impl ActiveSession {
         }
     }
 
+    /// How a stored session token for `host` may be used right now, or the
+    /// error a command reports while another server's session is active.
+    ///
+    /// `Direct` is the rule `ensure(host, true)` states: the active host, a
+    /// host verified this app run, or any saved host before the first verified
+    /// login. Every other saved host is `AskServer` while no session is
+    /// active.
+    pub fn saved_sign_in(&self, host: &str) -> Result<SavedSignIn, String> {
+        let state = self.snapshot();
+        saved_sign_in_rule(state.host.as_deref(), &state.verified_hosts, host)
+            .ok_or_else(|| format!("host {host} is not the active session host"))
+    }
+
+    /// Guard a saved-login command that hands the page no secret (the
+    /// connect-page prefill, the saved-password login): allowed for the active
+    /// session's host, and for any host while no session is active.
+    pub fn ensure_no_other_session(&self, host: &str) -> Result<(), String> {
+        self.saved_sign_in(host).map(|_| ())
+    }
+
     /// Guard an identity command's `scope`. The identity-key commands take an
     /// opaque scope string (`{userId}@{host}`, or a bare legacy host), while
     /// the identity-pin commands take a bare host; both name the same server,
@@ -146,6 +178,16 @@ impl ActiveSession {
     }
 }
 
+/// How the native side may use a stored session token (see `saved_sign_in`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SavedSignIn {
+    /// The token may be handed to the page as stored.
+    Direct,
+    /// The token leaves this process only for the host's own server, and
+    /// reaches the page only after that server accepts it.
+    AskServer,
+}
+
 /// The bare host part of an identity scope. Identity-key commands receive
 /// `{userId}@{host}` (see `lib/net/identity.ts::identityScopeKey`); a legacy host
 /// has no `@`. `isValidHost` forbids `@` in a real host, so splitting on the
@@ -164,7 +206,8 @@ fn scope_host(scope: &str) -> &str {
 ///
 /// With no active session, a pre-session flow is admitted only for a host
 /// whose login was verified this app run; before any has been, the set is
-/// empty and the first-login behaviour stands.
+/// empty and the first-login behaviour stands. For the stored session token
+/// this is the "hand it over as stored" rule (`SavedSignIn::Direct`).
 fn host_access_allowed(
     active: Option<&str>,
     verified_hosts: &HashSet<String>,
@@ -181,6 +224,22 @@ fn host_access_allowed(
         return true;
     }
     verified_hosts.contains(&crate::tofu::cert_store_key(host))
+}
+
+/// Pure decision behind `saved_sign_in`. `None` while another host's session
+/// is active.
+fn saved_sign_in_rule(
+    active: Option<&str>,
+    verified_hosts: &HashSet<String>,
+    host: &str,
+) -> Option<SavedSignIn> {
+    if host_access_allowed(active, verified_hosts, host, true) {
+        return Some(SavedSignIn::Direct);
+    }
+    match active {
+        Some(_) => None,
+        None => Some(SavedSignIn::AskServer),
+    }
 }
 
 /// Pure decision behind `ensure_verified_host`.
@@ -438,6 +497,97 @@ mod tests {
         session.clear_active();
         assert!(session.ensure("chat.example.com", true).is_ok());
         assert!(session.ensure("other.example", true).is_ok());
+    }
+
+    #[test]
+    fn a_saved_host_not_verified_this_run_signs_in_through_its_server() {
+        // A was verified, then the session ended (a server switch). A's token
+        // is handed over as stored; B's and C's only after their own server
+        // accepts it.
+        let session = ActiveSession::new();
+        session.set("a.example");
+        session.clear_active();
+        assert_eq!(session.saved_sign_in("a.example"), Ok(SavedSignIn::Direct));
+        assert_eq!(
+            session.saved_sign_in("b.example"),
+            Ok(SavedSignIn::AskServer)
+        );
+        // Asking for B changes nothing: no host is admitted on the page's word.
+        assert_eq!(
+            session.saved_sign_in("b.example"),
+            Ok(SavedSignIn::AskServer)
+        );
+        assert!(session.ensure("b.example", true).is_err());
+        // Once B's server answers the sign-in, B is verified like A, and C is
+        // still not.
+        session.set("b.example");
+        session.clear_active();
+        assert_eq!(session.saved_sign_in("b.example"), Ok(SavedSignIn::Direct));
+        assert_eq!(
+            session.saved_sign_in("c.example"),
+            Ok(SavedSignIn::AskServer)
+        );
+        assert!(session.ensure("c.example", true).is_err());
+    }
+
+    #[test]
+    fn an_active_session_refuses_a_saved_sign_in_for_another_host() {
+        let session = ActiveSession::new();
+        session.set("a.example");
+        assert_eq!(
+            session.saved_sign_in("A.Example:443"),
+            Ok(SavedSignIn::Direct)
+        );
+        assert!(session.saved_sign_in("b.example").is_err());
+        assert!(session.ensure_no_other_session("b.example").is_err());
+        assert!(session.ensure_no_other_session("a.example").is_ok());
+        // A verified host that is not the active one is refused as well.
+        session.clear_active();
+        session.set("b.example");
+        assert!(session.saved_sign_in("a.example").is_err());
+    }
+
+    #[test]
+    fn the_first_run_hands_a_saved_token_over_as_stored() {
+        let session = ActiveSession::new();
+        assert_eq!(
+            session.saved_sign_in("chat.example.com"),
+            Ok(SavedSignIn::Direct)
+        );
+    }
+
+    #[test]
+    fn token_less_saved_login_commands_run_for_any_host_without_a_session() {
+        let session = ActiveSession::new();
+        assert!(session.ensure_no_other_session("a.example").is_ok());
+        session.set("a.example");
+        session.clear_active();
+        assert!(session.ensure_no_other_session("a.example").is_ok());
+        assert!(session.ensure_no_other_session("b.example").is_ok());
+    }
+
+    #[test]
+    fn the_saved_sign_in_rule_covers_every_state() {
+        let none = set_of(&[]);
+        let a = set_of(&["a.example"]);
+        assert_eq!(
+            saved_sign_in_rule(None, &none, "b.example"),
+            Some(SavedSignIn::Direct)
+        );
+        assert_eq!(
+            saved_sign_in_rule(None, &a, "a.example"),
+            Some(SavedSignIn::Direct)
+        );
+        assert_eq!(
+            saved_sign_in_rule(None, &a, "b.example"),
+            Some(SavedSignIn::AskServer)
+        );
+        assert_eq!(
+            saved_sign_in_rule(Some("a.example"), &a, "a.example"),
+            Some(SavedSignIn::Direct)
+        );
+        assert_eq!(saved_sign_in_rule(Some("a.example"), &a, "b.example"), None);
+        assert_eq!(saved_sign_in_rule(Some("b.example"), &a, "a.example"), None);
     }
 
     #[test]

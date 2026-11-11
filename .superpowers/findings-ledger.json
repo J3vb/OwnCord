@@ -1,5 +1,5 @@
 {
-  "nextId": 564,
+  "nextId": 566,
   "findings": [
     {
       "id": "OC-0001",
@@ -12979,6 +12979,52 @@
     },
     {
       "id": "OC-0562",
+      "title": "A client that resumed while a channel or voice update was on its way never got that update",
+      "file": "Server/ws/hub_broadcast.go",
+      "line": 94,
+      "severity": "medium",
+      "why": "A channel_update, voice_state or voice_leave is sent to a list of recipients resolved from the connections registered at that moment. A client that resumed between that resolution and the delivery was in neither the list nor the replay it had already received, and nothing told it to resync, so it kept a stale channel name or voice roster until its next full reload.",
+      "repro": "Resolve the audience for a channel update while a user is disconnected, register that user's resume, then deliver the frame: the resumed client never receives it and gets no resync signal.",
+      "evidence": "Server/ws/late_resume_audience_test.go and Server/ws/late_resume_stress_test.go (TestRecipientsFrame_ResumeLoopNeverMissesOrDuplicates)",
+      "suggestedFix": "Read the connection generation before resolving the audience and, at delivery, also hand the frame to connections that registered since and can read the channel.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/late_resume_audience_test.go",
+        "revertProof": "reading the mark after the audience makes TestRecipientsFrame_ResumeLoopNeverMissesOrDuplicates fail"
+      },
+      "lens": "ws-hub",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0563",
+      "title": "A channel focus applied while a connection was closing kept the closed connection subscribed",
+      "file": "Server/ws/hub_registry.go",
+      "line": 284,
+      "severity": "low",
+      "why": "A disconnect stripped the connection's topics before closing its send queue. A channel_focus that had been deferred by the burst limit could still be applied by its drain goroutine after the strip, which subscribed the dead connection again for good. The channel then counted as focused by that user, so their other devices stopped getting unread hints for it until the server restarted.",
+      "repro": "Send more than five channel_focus frames within a second, drop the socket, and let the deferred focus apply during teardown: the closed connection stays in the channel's subscriber set.",
+      "evidence": "Server/ws/focus_defer_test.go TestDeferredFocus_DoesNotLandAfterDisconnect",
+      "suggestedFix": "Close the send queue before stripping topics in unregisterNow, the order kick and replace already use, so Subscribe refuses the closed connection.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/focus_defer_test.go",
+        "revertProof": "without the close before the strip TestDeferredFocus_DoesNotLandAfterDisconnect fails"
+      },
+      "lens": "ws-hub",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0564",
       "title": "Clicking a password-protected or full voice channel while in a call ended the call the user was in",
       "file": "Client/src/features/voice/wsErrors.ts",
       "line": 27,
@@ -13001,7 +13047,7 @@
       "fixedDate": "2026-11-11"
     },
     {
-      "id": "OC-0563",
+      "id": "OC-0565",
       "title": "Leaving a voice channel and rejoining it before the server answered could end the new call",
       "file": "Client/src/features/voice/wsHandlers.ts",
       "line": 180,

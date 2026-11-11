@@ -111,6 +111,7 @@ const autostart: Autostart = {
 const inertCredentials: CredentialStore = {
   save: async () => false,
   load: async () => null,
+  resume: async () => null,
   delete: async () => false,
   loginWithSavedPassword: async () => null,
 };

@@ -402,6 +402,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// voice_join sees the archived gate), so plain channelReadAudience would always
 	// return nobody; the ignoring-archived resolver lets bystanders who could see the
 	// call a moment ago learn it ended.
+	mark := h.audienceMark()
 	audience := h.channelReadAudienceIgnoringArchived(ctx, channelID)
 	seen := make(map[int64]struct{}, len(audience))
 	for _, uid := range audience {
@@ -414,7 +415,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		}
 	}
 	for _, vs := range states {
-		h.broadcastChannelScopedTo(channelID, buildVoiceLeave(channelID, vs.UserID), audience, "voice event")
+		h.broadcastChannelScopedTo(channelID, buildVoiceLeave(channelID, vs.UserID), audience, mark, "voice event")
 	}
 
 	// Re-elect the key holder now that the room is torn down, as every removal path

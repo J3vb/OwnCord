@@ -6,13 +6,17 @@
 
 import { TransportError, httpError } from "../api";
 import { desktop } from "../../platform/desktop";
-import type { SavedCredential, SavedLoginResponse } from "../../platform/contracts/credentials";
+import type {
+  SavedCredential,
+  SavedLoginResponse,
+  SavedSessionResume,
+} from "../../platform/contracts/credentials";
 import type { AuthResponse } from "../types";
 import { readReply } from "../apiReply";
 import { authStore } from "@stores/auth.store";
 import { connectText } from "../../i18n/connect";
 
-export type { SavedCredential, SavedLoginResponse };
+export type { SavedCredential, SavedLoginResponse, SavedSessionResume };
 
 /** Save a credential to the OS credential store for `host`. */
 export async function saveCredential(
@@ -129,16 +133,39 @@ export async function loginWithSavedPassword(
   try {
     return await desktop.credentials.loginWithSavedPassword(host, username);
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith("saved-password login")) {
-      throw new TransportError(err.message, { cause: err });
-    }
-    throw err;
+    throw asTransportFailure(err, "saved-password login");
   }
 }
 
-/** Load the credential stored for `host`, or null when there is none. */
+/** A backend failure whose reason starts with `prefix` as a `TransportError`; any other as it is. */
+function asTransportFailure(err: unknown, prefix: string): unknown {
+  return err instanceof Error && err.message.startsWith(prefix)
+    ? new TransportError(err.message, { cause: err })
+    : err;
+}
+
+/**
+ * What the connect page prefills for `host` (the saved username and whether a
+ * password is stored), or null when nothing is stored. No secret comes back.
+ */
 export async function loadCredential(host: string): Promise<SavedCredential | null> {
   return desktop.credentials.load(host);
+}
+
+/**
+ * Resume the saved session for `host`, or null when nothing is stored. For a
+ * saved server not signed in to yet during this app run, the backend asks that
+ * server first and answers `sign_in_needed` when it refuses the stored token.
+ * A server that could not be asked (every "saved sign-in check…" reason)
+ * rejects as a `TransportError`; any other reason (an unreadable store)
+ * rejects unchanged.
+ */
+export async function resumeSavedSession(host: string): Promise<SavedSessionResume | null> {
+  try {
+    return await desktop.credentials.resume(host);
+  } catch (err) {
+    throw asTransportFailure(err, "saved sign-in check");
+  }
 }
 
 /** Delete the credential stored for `host`. */

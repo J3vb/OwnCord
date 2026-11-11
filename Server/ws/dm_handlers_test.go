@@ -100,7 +100,10 @@ func dmDrainAll(ch <-chan []byte) []map[string]any {
 	var result []map[string]any
 	for {
 		select {
-		case raw := <-ch:
+		case raw, ok := <-ch:
+			if !ok {
+				return result
+			}
 			var env map[string]any
 			if err := json.Unmarshal(raw, &env); err == nil {
 				result = append(result, env)
@@ -140,7 +143,10 @@ func dmCollectAll(ch <-chan []byte, d time.Duration) []map[string]any {
 	defer timer.Stop()
 	for {
 		select {
-		case raw := <-ch:
+		case raw, ok := <-ch:
+			if !ok {
+				return result
+			}
 			var env map[string]any
 			if err := json.Unmarshal(raw, &env); err == nil {
 				result = append(result, env)

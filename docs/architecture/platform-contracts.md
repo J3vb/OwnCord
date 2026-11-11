@@ -103,21 +103,21 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
-| Distinct `invoke` command names called from `Client/src/`  | 112   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 115   |
+| Distinct `invoke` command names called from `Client/src/`  | 113   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 116   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 62    |
 
-The handler count covers the 114 distinct registrations
+The handler count covers the 115 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]`, and the forty-four `native_voice_*` commands
 and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
 files dragged in or copied from the file manager) behind
 `#[cfg(target_os = "linux")]` (`read_staged_file` also on Android, where it
 reads the files another app shared), so a default build (no `devtools`)
-registers 102 on Linux and 57 elsewhere, plus eleven Android-only ones:
+registers 103 on Linux and 58 elsewhere, plus eleven Android-only ones:
 `set_call_service`, `save_file`, `share_file`, `share_text`, `read_staged_file`,
 `take_shared` (`share_in.rs`, the share another app sent to OwnCord) and the
 five notification commands in `android_notifications.rs`. The one environment-detection helper is
@@ -226,6 +226,7 @@ ptt_set_key
 ptt_start
 ptt_stop
 read_staged_file
+resume_saved_session
 save_credential
 save_file
 save_identity_key
@@ -322,7 +323,7 @@ native surface itself lives only in `platform/desktop/`.
 | HTTP fetch        | `lib/api.ts`, `lib/presence/profiles.ts`, `features/messaging/content/attachments.ts` (server files)  | `plugin-http`                                                                                                                                         | native `fetch` — but CORS becomes a server concern          |
 | External content  | `message-list/{embeds,media,attachments}.ts`, `GifPicker.ts`                                          | `api/core`; 2 invokes (`external_*`)                                                                                                                  | ⚠ no equivalent — a page cannot classify resolved addresses |
 | WebSocket         | `lib/ws.ts`                                                                                           | `api/core`, `api/event`; 4 invokes, 4 event listens                                                                                                   | ⚠ see hard cases                                            |
-| Secret storage    | `lib/net/credentials.ts`, `lib/net/identity.ts`, `lib/pendingMessages.ts`                             | `api/core`; 11 invokes, plus the SDK `isTauri` guard                                                                                                  | ⚠ see hard cases                                            |
+| Secret storage    | `lib/net/credentials.ts`, `lib/net/identity.ts`, `lib/pendingMessages.ts`                             | `api/core`; 12 invokes, plus the SDK `isTauri` guard                                                                                                  | ⚠ see hard cases                                            |
 | Settings          | `lib/presence/profiles.ts`                                                                            | `api/core` (`save_settings`, `get_settings`)                                                                                                          | `localStorage` / IndexedDB                                  |
 | Native proxies    | `lib/net/httpProxy.ts`, `lib/voice/livekitUrlResolver.ts`                                             | `api/core`; 3 invokes                                                                                                                                 | not needed — the proxies exist to work around desktop TLS   |
 | Notifications     | `lib/notifications.ts`, `main.ts`, `pages/MainPage.ts` (for the unread badge)                         | `plugin-notification`, `api/window`, `api/core` (`notify_message`, `clear_call_notification`, `set_unread_badge`), `api/event` (`notification-click`) | Notification API + Page Visibility                          |

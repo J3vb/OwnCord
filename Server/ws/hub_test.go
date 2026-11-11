@@ -527,7 +527,10 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 drainLoop:
 	for {
 		select {
-		case got := <-send:
+		case got, ok := <-send:
+			if !ok {
+				break drainLoop
+			}
 			var resp map[string]any
 			if err := json.Unmarshal(got, &resp); err != nil {
 				continue
@@ -1105,7 +1108,10 @@ func assertNoMsgType(t *testing.T, send chan []byte, msgType string) {
 	t.Helper()
 	for {
 		select {
-		case raw := <-send:
+		case raw, ok := <-send:
+			if !ok {
+				return
+			}
 			var msg map[string]any
 			if err := json.Unmarshal(raw, &msg); err != nil {
 				continue

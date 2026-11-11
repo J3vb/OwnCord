@@ -26,6 +26,7 @@ const hoisted = vi.hoisted(() => ({
   ensureProfileExists: vi.fn(),
   persistProfiles: vi.fn(),
   startAutoLogin: vi.fn(),
+  resumeAfterCertAccept: vi.fn(),
   logError: vi.fn(),
 }));
 
@@ -51,7 +52,7 @@ vi.mock("../../src/features/updates/UpdateNotifier", () => ({
   },
 }));
 vi.mock("../../src/app/autoLogin", () => ({
-  createAutoLogin: () => [hoisted.startAutoLogin, vi.fn(), vi.fn()],
+  createAutoLogin: () => [hoisted.startAutoLogin, vi.fn(), vi.fn(), hoisted.resumeAfterCertAccept],
 }));
 vi.mock("../../src/app/connectProfiles", () => ({
   createConnectProfiles: () => [
@@ -314,13 +315,15 @@ describe("renderConnect", () => {
         expect.anything(),
       );
       expect(hoisted.page["resubmitAfterCertAccept"]).not.toHaveBeenCalled();
+      expect(hoisted.resumeAfterCertAccept).not.toHaveBeenCalled();
     });
 
-    it("rerunHealth with a trusted host also resubmits the sign-in it refused", () => {
+    it("rerunHealth with a trusted host also carries on with the sign-in or resume it held up", () => {
       const [, rerunHealth] = mount();
       rerunHealth("chat.example:8443");
       expect(hoisted.runHealthChecks).toHaveBeenCalledTimes(1);
       expect(hoisted.page["resubmitAfterCertAccept"]).toHaveBeenCalledWith("chat.example:8443");
+      expect(hoisted.resumeAfterCertAccept).toHaveBeenCalledWith("chat.example:8443");
     });
   });
 

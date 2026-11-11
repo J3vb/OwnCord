@@ -81,6 +81,8 @@ and only when it changes something a contributor or fork holder must do
 ### Fixed
 
 - Server owners: backups, the safety copy before a restore, the full archive download and the backup taken before an update all failed when the server's folder path held characters such as an accented letter, brackets, `+`, `@` or an apostrophe (for example a Windows user name like `Jörg` or a folder like `Program Files (x86)`). After an update that changed the database, such a server refused to start. Folder names with those characters now work.
+- Reconnecting: an app that reconnected at the exact moment a channel was renamed or someone joined, left or muted in voice could miss that change and keep showing the old name or voice list. It now receives it.
+- Unread hints: after one of your devices disconnected while it was switching channels quickly, your other devices could stop showing new activity for one channel until the server restarted. The disconnect now always releases that channel.
 - Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
 - Linux: switching audio devices or muting and unmuting no longer makes other voice controls wait.
 - Linux: stopping a camera or screen share no longer makes other voice controls wait, and starting the camera again right after waits for the old one to close.
@@ -97,6 +99,7 @@ and only when it changes something a contributor or fork holder must do
 - Voice: leaving a voice channel and rejoining it right away could leave you with no call. The rejoin now connects.
 - Voice: an unrelated error from the server could cancel a voice join that was still in progress. Only the join's own refusal cancels it now.
 - Desktop and Android: saved logins, media and game activity, notifications, saving or sharing files and installing an update no longer hold up the rest of the app while the system is slow to answer.
+- Desktop and Android: switching to another saved server for the first time since the app started showed "Auto-login failed" and asked for the password. It now signs in with the saved login, and says so when that server no longer accepts it or cannot be reached.
 
 ### Under the hood
 

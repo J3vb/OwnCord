@@ -155,7 +155,10 @@ func drainChan(ch <-chan []byte) [][]byte {
 	var msgs [][]byte
 	for {
 		select {
-		case m := <-ch:
+		case m, ok := <-ch:
+			if !ok {
+				return msgs
+			}
 			msgs = append(msgs, m)
 		default:
 			return msgs
