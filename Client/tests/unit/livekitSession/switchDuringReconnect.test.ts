@@ -27,6 +27,7 @@ import { joinVoiceChannel, voiceStore } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { captureDisconnectedHandler } from "../../helpers/livekitSessionHarness";
+import { createDeferred } from "../../helpers/deferred";
 import {
   NEW,
   OLD,
@@ -125,6 +126,27 @@ describe("a switch to another voice channel during an auto-reconnect", () => {
     expect(voice.isVoiceSessionActive()).toBe(false);
     expect(store()).toMatchObject({ currentChannelId: null, voiceStatus: "idle" });
   });
+
+  // In the app every join also has its own wait, counted from the click: it
+  // runs out first and ends the call once, like any join with no answer.
+  it("ends through the join's own wait when that runs out first", async () => {
+    setConnectionStatus("connected");
+    setJoinAnswerWait(joinAnswerWaitFor(ws));
+    try {
+      // 15 s after the click; the hand-over itself came 3 s later.
+      await vi.advanceTimersByTimeAsync(12_000);
+      expect(store()).toMatchObject({ currentChannelId: null, voiceStatus: "idle" });
+      expect(voice.isVoiceSessionActive()).toBe(false);
+      expect(left()).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(left()).toBe(1);
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      setJoinAnswerWait(null);
+      setConnectionStatus("disconnected");
+    }
+  });
 });
 
 // The frames of several joins interleave when the user clicks faster than the
@@ -220,32 +242,101 @@ function leaveEcho(channelId: number): void {
 const settle = (): Promise<unknown> => vi.advanceTimersByTimeAsync(0);
 const inCall = (channelId: number) => ({ currentChannelId: channelId, voiceStatus: "connected" });
 
+/** Three voice channels, a live chat socket and the real click callbacks' wiring. */
+function wireClicks(): void {
+  wireVoice();
+  joinsSent = 0;
+  send.mockImplementation((msg) => (msg.type === "voice_join" ? `join-${++joinsSent}` : undefined));
+  channelsStore.setState((prev) => ({
+    ...prev,
+    channels: new Map([...prev.channels, [THIRD, { id: THIRD, type: "voice" } as never]]),
+  }));
+  setConnectionStatus("connected");
+  setJoinAnswerWait(joinAnswerWaitFor(ws));
+  noteJoinSucceeded();
+}
+
+function unwireClicks(): void {
+  setJoinAnswerWait(null);
+  send.mockReset();
+  setConnectionStatus("disconnected");
+  unwireVoice();
+}
+
+describe("a click on another channel before the first join is settled", () => {
+  beforeEach(wireClicks);
+  afterEach(unwireClicks);
+
+  describe("while the first channel's room is still connecting", () => {
+    /** The first join's token arrived and its room connects only after the
+     *  click on the second channel. */
+    beforeEach(async () => {
+      const connecting = createDeferred();
+      mocks.mockRoom.connect.mockReturnValue(connecting.promise);
+      sidebar.onVoiceJoin(OLD);
+      handleVoiceTokenFrame(tokenFor(OLD));
+      await settle();
+      sidebar.onVoiceJoin(NEW);
+
+      connecting.resolve();
+      await settle();
+      expect(voice.isVoiceSessionActive()).toBe(true);
+    });
+
+    it("keeps showing the second channel as connecting once the first room is up", () => {
+      expect(store()).toMatchObject({ currentChannelId: NEW, voiceStatus: "joining" });
+      expect(left()).toBe(0);
+    });
+
+    it("ends the first channel's call on both sides when the second is refused", async () => {
+      refuse("FORBIDDEN");
+      await settle();
+
+      expect(store()).toMatchObject({ currentChannelId: null, voiceStatus: "idle" });
+      expect(voice.isVoiceSessionActive()).toBe(false);
+      expect(left()).toBe(1);
+    });
+
+    it("ends it too when the second join gets no answer", async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      expect(store()).toMatchObject({ currentChannelId: null, voiceStatus: "idle" });
+      expect(voice.isVoiceSessionActive()).toBe(false);
+      expect(left()).toBe(1);
+    });
+
+    it("connects the second channel when its token arrives", async () => {
+      leaveEcho(OLD);
+      await granted(NEW);
+
+      expect(store()).toMatchObject(inCall(NEW));
+      expect(left()).toBe(0);
+    });
+  });
+
+  it("gives back a call whose answer was lost when the next join is refused", async () => {
+    // The server granted the first join; its token never arrived.
+    sidebar.onVoiceJoin(OLD);
+    sidebar.onVoiceJoin(NEW);
+
+    refuse("FORBIDDEN");
+    await settle();
+
+    expect(store()).toMatchObject({ currentChannelId: null, voiceStatus: "idle" });
+    expect(left()).toBe(1);
+    expect(send.mock.calls.at(-1)?.[0]).toEqual({ type: "voice_leave", payload: {} });
+  });
+});
+
 describe("clicks on voice channels while in a live call", () => {
   beforeEach(async () => {
-    wireVoice();
-    joinsSent = 0;
-    send.mockImplementation((msg) =>
-      msg.type === "voice_join" ? `join-${++joinsSent}` : undefined,
-    );
-    channelsStore.setState((prev) => ({
-      ...prev,
-      channels: new Map([...prev.channels, [THIRD, { id: THIRD, type: "voice" } as never]]),
-    }));
-    setConnectionStatus("connected");
-    setJoinAnswerWait(joinAnswerWaitFor(ws));
-    noteJoinSucceeded();
-
+    wireClicks();
     sidebar.onVoiceJoin(OLD);
     await granted(OLD);
     expect(store()).toMatchObject(inCall(OLD));
   });
 
-  afterEach(() => {
-    setJoinAnswerWait(null);
-    send.mockReset();
-    setConnectionStatus("disconnected");
-    unwireVoice();
-  });
+  afterEach(unwireClicks);
 
   it.each(["PASSWORD_REQUIRED", "WRONG_PASSWORD", "CHANNEL_FULL", "FORBIDDEN"] as const)(
     "keeps the call when the server refuses the switch with %s",

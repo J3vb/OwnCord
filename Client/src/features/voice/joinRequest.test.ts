@@ -8,11 +8,8 @@ import {
   leaveEndsEarlierStay,
   noteJoinAnswered,
   noteJoinSent,
-  noteTokenAccepted,
-  noteTokenIgnored,
   resetJoinRequest,
   takeJoinRefusal,
-  takeStrandedMembership,
 } from "./joinRequest";
 
 describe("joinRequest", () => {
@@ -73,16 +70,6 @@ describe("joinRequest", () => {
     applyReadyCapabilities({ threads: true });
     noteJoinSent("join-1");
     expect(takeJoinRefusal("FORBIDDEN", undefined)).toBe(true);
-  });
-
-  it("remembers a let-pass token until it is read or a token is taken up", () => {
-    expect(takeStrandedMembership()).toBe(false);
-    noteTokenIgnored();
-    expect(takeStrandedMembership()).toBe(true);
-    expect(takeStrandedMembership()).toBe(false);
-    noteTokenIgnored();
-    noteTokenAccepted();
-    expect(takeStrandedMembership()).toBe(false);
   });
 });
 

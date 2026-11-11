@@ -1,5 +1,5 @@
 {
-  "nextId": 566,
+  "nextId": 568,
   "findings": [
     {
       "id": "OC-0001",
@@ -13060,6 +13060,52 @@
         "commit": "pending",
         "test": "Client/src/features/voice/joinRequest.test.ts",
         "revertProof": "against the earlier source the two Disconnect-then-same-channel tests in switchDuringReconnect.test.ts fail"
+      },
+      "lens": "flow-voice",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0566",
+      "title": "A voice room that finished connecting after a click on another channel showed its status under that channel",
+      "file": "Client/src/features/voice/joinOrchestration.ts",
+      "line": 252,
+      "severity": "low",
+      "why": "A join attempt wrote joining, securing and connected into the store without checking that the store still named its channel. After a click on a second channel while the first was connecting, the first room's progress was shown under the second channel, and a refusal of the second join was then dropped because the status no longer read joining.",
+      "repro": "Click voice channel A and, before it connects, click channel B that is full: when A's room connects the widget reads connected in B while the media is live in A.",
+      "evidence": "Client/tests/unit/livekitSession/switchDuringReconnect.test.ts (a click on another channel before the first join is settled)",
+      "suggestedFix": "Write a join attempt's status only while the store names that attempt's channel; the newer join's token, refusal or answer wait then settles the call.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/livekitSession/switchDuringReconnect.test.ts",
+        "revertProof": "against the earlier source the four tests in that describe fail"
+      },
+      "lens": "flow-voice",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0567",
+      "title": "A refused voice join that found no session did not always tell the server to end the call it might hold",
+      "file": "Client/src/features/voice/wsErrors.ts",
+      "line": 105,
+      "severity": "low",
+      "why": "The rollback of a refused join sent a bare voice_leave only when a flag said a token had been let pass, or on ALREADY_JOINED. A join the server granted whose answer never arrived set no flag, so a later refused join left the server holding a call that no session on this device showed.",
+      "repro": "Join a voice channel while the answer is lost with the connection, then click a channel whose join is refused: the member list keeps showing the user in the first channel.",
+      "evidence": "Client/src/features/voice/strandedJoin.test.ts (gives back whatever the server may hold on every refusal that finds no session) and Client/src/features/voice/passwordRefusal.test.ts (one bare leave for the refused join)",
+      "suggestedFix": "Send the bare voice_leave on every refused join that finds no active session and no newer join; the server ignores a leave from a socket that holds no call.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src/features/voice/strandedJoin.test.ts",
+        "revertProof": "against the earlier source that test and the passwordRefusal one-bare-leave test fail"
       },
       "lens": "flow-voice",
       "confidence": "high",

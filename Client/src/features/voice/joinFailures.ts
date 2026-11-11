@@ -1,7 +1,7 @@
 // Synchronous failure and claim steps of the voice join orchestration, split
 // from joinOrchestration.ts. Each is a whole synchronous step run right after
 // the ownership check in JoinOrchestration; none awaits.
-import { leaveVoiceChannel } from "../../stores/voice.store";
+import { leaveVoiceChannel, voiceStore } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
 import { logIceConnectionInfo } from "../../lib/voice/livekitDiagnostics";
 import { setJoinedVoiceStatus } from "../../lib/voice/roomEventHandlers";
@@ -108,8 +108,10 @@ export function claimSession(
     lastUrl: url,
     lastDirectUrl: directUrl,
   });
-  // Room connected and E2EE key ready — the call is now secured.
-  setJoinedVoiceStatus(localRoom);
+  // Room connected and E2EE key ready — the call is now secured. Shown only
+  // while the store still names this channel: after a click on to another one
+  // the status on screen is that join's, and this room is not where it leads.
+  if (voiceStore.getState().currentChannelId === channelId) setJoinedVoiceStatus(localRoom);
   host.sweepPublications(localRoom);
   // Optimistic startAudio — may succeed if the join was triggered by a
   // recent user gesture. If not, the AudioPlaybackStatusChanged handler

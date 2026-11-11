@@ -3,7 +3,7 @@
 // given back when the join that replaced it is refused.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handleVoiceJoinRollback, handleVoiceState } from "./wsHandlers";
-import { noteJoinSent, noteTokenIgnored, resetJoinRequest } from "./joinRequest";
+import { noteJoinSent, resetJoinRequest } from "./joinRequest";
 import {
   voiceStore,
   resetVoiceStore,
@@ -71,23 +71,25 @@ describe("a refused join with a call still held for this socket", () => {
     expect(leaveVoice).not.toHaveBeenCalled();
   });
 
-  it("gives back a call whose token was let pass before this refusal, once", async () => {
+  it("gives back whatever the server may hold on every refusal that finds no session", async () => {
+    // A join the server granted whose token was let pass, or never arrived:
+    // this device cannot tell, and the server ignores a leave it has no call for.
     joinVoiceChannel(4);
-    noteTokenIgnored();
     const socket = socketStub();
 
     handleVoiceJoinRollback(socket, refusal("FORBIDDEN"), undefined);
     await vi.waitFor(() => expect(socket.send).toHaveBeenCalledTimes(1));
 
     joinVoiceChannel(4);
-    handleVoiceJoinRollback(socket, refusal("FORBIDDEN"), undefined);
-    await vi.waitFor(() => expect(failPendingRejoin).toHaveBeenCalledTimes(2));
-    expect(socket.send).toHaveBeenCalledTimes(1);
+    handleVoiceJoinRollback(socket, refusal("CHANNEL_FULL"), undefined);
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalledTimes(2));
+    expect(socket.send).toHaveBeenLastCalledWith({ type: "voice_leave", payload: {} });
+    expect(leaveVoice).not.toHaveBeenCalled();
+    expect(voiceStore.getState()).toMatchObject({ currentChannelId: null, voiceStatus: "idle" });
   });
 
   it("leaves that call to a join sent while the session module was loading", async () => {
     joinVoiceChannel(4);
-    noteTokenIgnored();
     const socket = socketStub();
 
     handleVoiceJoinRollback(socket, refusal("FORBIDDEN"), undefined);
