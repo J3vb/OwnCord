@@ -29,6 +29,7 @@ import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import {
   getChannelMessages,
+  isWindowDetached,
   messagesStore,
   reattachToPresent,
   setMessagePinned,
@@ -47,7 +48,7 @@ import { messagingText } from "../../i18n/messaging";
 import { shellText } from "../../i18n/shell";
 import { threadsText } from "../../i18n/threads";
 import { createThreadHeader } from "./threadHeader";
-import { createThreadSender, currentUser, currentUserId } from "./threadSender";
+import { createThreadSender, currentUser, currentUserId, type ThreadSender } from "./threadSender";
 import { createThreadStarter } from "./threadStarter";
 
 export interface ThreadPanelOptions {
@@ -116,6 +117,16 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     }
   }
 
+  /** A reply sent from a window that stops short of the newest message
+   *  reattaches first, so it lands at the end of what is shown. */
+  const sendReply: ThreadSender["sendText"] = (...args) => {
+    if (isWindowDetached(threadId) && !signal.aborted) {
+      reattachToPresent(threadId);
+      void msgCtrl.loadMessages(threadId, signal);
+    }
+    sender.sendText(...args);
+  };
+
   const queue = createThreadSendQueue({
     threadId,
     signal,
@@ -127,7 +138,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       const live =
         replyTo === null ||
         getChannelMessages(threadId).some((m) => m.id === replyTo && m.deleted !== true);
-      sender.sendText(content, live ? replyTo : null, live && replyPing, files);
+      sendReply(content, live ? replyTo : null, live && replyPing, files);
     },
   });
 
@@ -269,11 +280,11 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       channelName: t?.name ?? "",
       gifApi: api,
       onSend: (content, replyTo, _attachments, files, replyPing, queued) => {
-        if (queued === undefined) sender.sendText(content, replyTo, replyPing, files);
+        if (queued === undefined) sendReply(content, replyTo, replyPing, files);
         else queue.enqueue(content, replyTo, replyPing, queued);
       },
       onSendSticker: (sticker, replyTo, replyPing) => {
-        sender.sendText("", replyTo, replyPing, [], undefined, sticker);
+        sendReply("", replyTo, replyPing, [], undefined, sticker);
       },
       onUploadFile: uploadFile,
       onDiscardUpload: (id) => api.discardUpload(id),

@@ -1022,6 +1022,20 @@ describe("ThreadPanel detached window", () => {
     expect(isChannelLoaded(THREAD)).toBe(false);
   });
 
+  it("a reply sent from a detached window reattaches it and reloads the newest replies", async () => {
+    setConnectionStatus("connected");
+    mountPanel();
+    await flush();
+    setChannelLoadError(THREAD);
+    messagesStore.flush();
+    loadMessages.mockClear();
+    textarea().value = "from the past";
+    textarea().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(loadMessages).toHaveBeenCalledWith(THREAD, expect.any(AbortSignal));
+    const sent = ws.getSentMessages() as unknown as { type: string }[];
+    expect(sent.some((m) => m.type === "chat_send")).toBe(true);
+  });
+
   it("pages newer replies when the detached list is scrolled to the bottom", async () => {
     mountPanel();
     await flush();

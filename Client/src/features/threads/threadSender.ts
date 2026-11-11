@@ -54,7 +54,13 @@ function draftsFor(threadId: number): Map<string, SendDraft> {
     drafts = new Map<string, SendDraft>();
     draftsByThread.set(threadId, drafts);
   }
-  const live = new Set(getChannelMessages(threadId).map((m) => m.correlationId));
+  // A row settled while no panel was open keeps its correlation id, so only
+  // rows still unsettled keep their draft.
+  const live = new Set(
+    getChannelMessages(threadId)
+      .filter((m) => m.status !== "sent")
+      .map((m) => m.correlationId),
+  );
   for (const cid of drafts.keys()) if (!live.has(cid)) drafts.delete(cid);
   return drafts;
 }

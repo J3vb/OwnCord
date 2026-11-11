@@ -8,7 +8,12 @@ vi.mock("@lib/pendingMessages", async (importOriginal) => ({
 import { createThreadSender, holdsThreadDrafts } from "../../src/features/threads/threadSender";
 import { Disposable } from "@lib/disposable";
 import { WsErrorCode } from "@lib/protocolTypes";
-import { messagesStore, removeOptimistic, resetMessagesStore } from "@stores/messages.store";
+import {
+  confirmSend,
+  messagesStore,
+  removeOptimistic,
+  resetMessagesStore,
+} from "@stores/messages.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
@@ -190,5 +195,18 @@ describe("thread sender", () => {
     reopened.retryDraft(cid);
     expect(frames()).toHaveLength(0);
     expect(holdsThreadDrafts(THREAD)).toBe(false);
+  });
+
+  it("drops the draft of a reply acknowledged while no panel was open", () => {
+    setConnectionStatus("connected");
+    makeSender().sendText("sent while open", null, false, [FILE]);
+    const cid = frames()[0]!.id;
+    // The panel closed; the acknowledgement settles the row, which keeps its correlation id.
+    confirmSend(cid, 500, "2026-11-11T00:00:00Z");
+    expect(rows().find((m) => m.correlationId === cid)?.status).toBe("sent");
+    const reopened = makeSender();
+    expect(holdsThreadDrafts(THREAD)).toBe(false);
+    reopened.retryDraft(cid);
+    expect(frames()).toHaveLength(1);
   });
 });
