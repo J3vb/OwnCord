@@ -194,6 +194,7 @@ export const shards = {
     "src/features/members/gameActivityLine.ts",
     "src/features/members/memberModel.ts",
     "src/features/members/memberRow.view.ts",
+    "src/features/members/scrollReport.ts",
     "src/features/voice/miniPlayer.ts",
     "src/lib/ui/touchInput.ts",
     "src/lib/ui/videoZoomNavigator.ts",
