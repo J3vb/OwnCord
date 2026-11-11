@@ -103,13 +103,10 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   to wiring by a shrink-only line cap (`PAGES_LINE_CAP` in
   `tests/unit/pages-size-ratchet.test.ts`; lower it when pages shrink), and
   `tests/unit/layer-folders.test.ts` keeps `src/components/` gone.
-- **No new function over complexity 15 or nesting depth 4**
-  (`local/complexity-ratchet`, `local/max-depth-ratchet`, errors on
-  `src/**/*.ts` except tests). Functions over the limit before the cap are
-  listed in `scripts/complexity-baseline.json` and may not grow. When you
-  simplify one, run `node scripts/complexity-baseline.mjs --update` and lower
-  the caps in `tests/unit/complexity-baseline.test.ts`; after a rename or move,
-  re-key its entry by hand. Split a function rather than adding an entry.
+- **No function over complexity 15 or nesting depth 4** (ESLint's built-in
+  `complexity` and `max-depth`, errors on `src/**/*.ts` except tests). There is
+  no baseline: split the function with named helpers, lookup tables and early
+  returns.
 - `src/` has **no import cycles**: `npm run lint:cycles` (oxlint `import/no-cycle`)
   runs at `--max-warnings=0`, so a new cycle fails `npm run lint`. When a
   lower-level module has to trigger a higher one, invert the edge rather than

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Room } from "livekit-client";
+import { diagnosticServices, platformModuleMock } from "../helpers/diagnosticsServices";
 import { SessionScope } from "@lib/net/sessionScope";
 import { isLinuxDesktop } from "../../src/features/voice/native/platform";
 import { settingsText as t } from "../../src/i18n/settings";
@@ -9,10 +10,11 @@ import {
   type DiagnosticServices,
 } from "@lib/net/connectionDiagnostics";
 
-vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/voice/native/platform")>()),
-  isLinuxDesktop: vi.fn(() => false),
-}));
+vi.mock("../../src/features/voice/native/platform", async (importOriginal) =>
+  platformModuleMock(
+    await importOriginal<typeof import("../../src/features/voice/native/platform")>(),
+  ),
+);
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -42,19 +44,7 @@ describe("connection diagnostics", () => {
     stop = vi.fn();
     const track = { readyState: "live", stop };
     stream = { getAudioTracks: () => [track], getTracks: () => [track] } as unknown as MediaStream;
-    services = {
-      api: {
-        getSession: () => scope,
-        getConfig: () => ({ host: "server.test:8443", token: "[redacted]" }),
-        getHealth: vi.fn().mockResolvedValue({}),
-        getMe: vi.fn().mockResolvedValue({ id: 1 }),
-      },
-      ws: { ping: vi.fn().mockResolvedValue(undefined) },
-      getRoom: vi.fn().mockReturnValue(null),
-      getUserMedia: vi.fn().mockResolvedValue(stream),
-      listNativeInputs: vi.fn().mockResolvedValue(null),
-      probeNativeInput: vi.fn().mockResolvedValue("levels"),
-    };
+    services = diagnosticServices(scope, stream);
   });
   afterEach(() => {
     ac.abort();

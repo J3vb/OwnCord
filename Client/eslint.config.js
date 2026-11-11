@@ -8,11 +8,6 @@ import localRules from "./eslint-rules.js";
 const layerBaseline = JSON.parse(
   readFileSync(new URL("./scripts/layer-baseline.json", import.meta.url), "utf8"),
 );
-// Functions over the complexity or nesting limit before the cap existed;
-// shrink-only (tests/unit/complexity-baseline.test.ts).
-const complexityBaseline = JSON.parse(
-  readFileSync(new URL("./scripts/complexity-baseline.json", import.meta.url), "utf8"),
-);
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -150,14 +145,12 @@ export default tseslint.config(
     },
   },
   {
-    // No new function over complexity 15 or nesting depth 4 (the limits live in
-    // scripts/complexity-baseline.mjs too). Listed functions may not grow.
+    // No function over complexity 15 or nesting depth 4.
     files: ["src/**/*.ts"],
     ignores: ["src/**/*.test.ts"],
-    plugins: { local: localRules },
     rules: {
-      "local/complexity-ratchet": ["error", { max: 15, baseline: complexityBaseline.complexity }],
-      "local/max-depth-ratchet": ["error", { max: 4, baseline: complexityBaseline.depth }],
+      complexity: ["error", 15],
+      "max-depth": ["error", 4],
     },
   },
   {
