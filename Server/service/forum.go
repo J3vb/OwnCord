@@ -71,7 +71,7 @@ func cleanPostTags(forum *db.Channel, ids []int64) ([]int64, error) {
 		}
 		seen[id] = true
 	}
-	if forum != nil && forum.Forum != nil && forum.Forum.RequireTag && len(ids) == 0 {
+	if forum != nil && forum.Forum != nil && forum.Forum.RequireTag && len(forum.Forum.Tags) > 0 && len(ids) == 0 {
 		return nil, fmt.Errorf("%w: this forum requires a tag on every post", ErrBadRequest)
 	}
 	if ids == nil {

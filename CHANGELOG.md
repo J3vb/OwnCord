@@ -95,6 +95,7 @@ and only when it changes something a contributor or fork holder must do
 - Blocking or unblocking someone on one device now reaches your other signed-in devices after they reconnect, without restarting the app.
 - Deleting a message that mentioned you, or a moderator clearing messages, no longer makes the mention badge come out one too low when you mark a channel unread at the same moment.
 - In a channel with slow mode, a message, poll, forward or forum post that failed to send (for example when every attached file had expired) no longer starts your wait. You can send again right away.
+- A forum set to "Require a tag" with no tags could not be posted in by anyone. Forum settings now refuse to require a tag until the forum has one, and a forum already in that state accepts posts without a tag.
 - After you blocked and unblocked someone and then wrote to them first, their reply was held as a new message request, or refused when your settings turn off direct messages from members. Writing to someone now counts as trusting them, so their reply arrives in the conversation. A message from them before you write is still a request.
 - Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
 - Linux: switching audio devices or muting and unmuting no longer makes other voice controls wait.

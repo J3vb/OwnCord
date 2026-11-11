@@ -64,7 +64,7 @@ export function openNewPostDialog(options: NewPostDialogOptions): void {
   const tags = (forum?.forum?.tags ?? []).toSorted(
     (a, b) => a.position - b.position || a.id - b.id,
   );
-  const requireTag = forum?.forum?.require_tag === true;
+  const requireTag = forum?.forum?.require_tag === true && tags.length > 0;
   const guidelines = (forum?.topic ?? "").trim();
 
   const titleId = `forum-post-title-${channelId}`;
