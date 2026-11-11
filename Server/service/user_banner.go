@@ -7,8 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// validateBannerColor normalizes a banner colour: trimmed, lower-case, #rgb or
-// #rrggbb. The empty string clears it and is returned as "".
+// validateBannerColor normalizes a banner colour: trimmed, lower-case, #rgb or #rrggbb; "" clears it.
 func validateBannerColor(raw string) (string, error) {
 	c := strings.ToLower(strings.TrimSpace(raw))
 	if c == "" {
@@ -20,8 +19,6 @@ func validateBannerColor(raw string) (string, error) {
 	return c, nil
 }
 
-// cleanBannerPatch validates an optional banner colour from a ProfilePatch.
-// nil means unchanged; a pointer to "" means cleared.
 func cleanBannerPatch(raw *string) (*string, error) {
 	if raw == nil {
 		return nil, nil
@@ -33,9 +30,8 @@ func cleanBannerPatch(raw *string) (*string, error) {
 	return &c, nil
 }
 
-// mergeBanner resolves the banner columns a profile write stores: the patched
-// value where one was supplied (empty clears), the current row's otherwise.
-// color is already validated by cleanBannerPatch.
+// mergeBanner resolves the banner columns a profile write stores: the patched value where supplied (empty
+// clears), else the current row's.
 func mergeBanner(current *db.User, id, color *string) (bannerID, bannerColor *string) {
 	bannerID, bannerColor = current.BannerID, current.BannerColor
 	if id != nil {

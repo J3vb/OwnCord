@@ -11,8 +11,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// gracefulStopName names the stop this platform can actually deliver, so a
-// failure message says which mechanism was tried.
 const gracefulStopName = "CTRL_BREAK"
 
 // newProcessGroup puts the server in its own console process group. Windows

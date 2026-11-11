@@ -13,8 +13,7 @@ var _ DMPrivacyReader = (*db.DB)(nil)
 
 var _ groupReachabilityReader = (*db.DB)(nil)
 
-// PrivacyStore is the data access the privacy service needs. *db.DB satisfies
-// it; it is deliberately not part of Store.
+// PrivacyStore is the data access the privacy service needs; deliberately not part of Store.
 type PrivacyStore interface {
 	GetUserPrivacy(ctx context.Context, userID int64) (db.UserPrivacy, error)
 	SetUserPrivacy(ctx context.Context, userID int64, p db.UserPrivacy) error
@@ -30,8 +29,7 @@ type Privacy struct {
 	MessageRequests bool
 }
 
-// PrivacyService keeps each user's direct message privacy choices (migration
-// 070). Every call is keyed by the session user.
+// PrivacyService keeps each user's direct message privacy choices (migration 070), keyed by the session user.
 type PrivacyService struct {
 	st PrivacyStore
 }
@@ -50,9 +48,8 @@ func (s *PrivacyService) Get(ctx context.Context, userID int64) (Privacy, error)
 	return Privacy(p), nil
 }
 
-// Set replaces the user's settings as a whole and returns what was stored. The
-// write is one statement, so concurrent writers need no lock and the last
-// write wins.
+// Set replaces the user's settings as a whole and returns what was stored. One statement, so concurrent
+// writers need no lock and the last write wins.
 func (s *PrivacyService) Set(ctx context.Context, userID int64, p Privacy) (Privacy, error) {
 	if err := s.st.SetUserPrivacy(ctx, userID, db.UserPrivacy(p)); err != nil {
 		return Privacy{}, fmt.Errorf("set privacy: %w", err)
@@ -60,9 +57,8 @@ func (s *PrivacyService) Set(ctx context.Context, userID int64, p Privacy) (Priv
 	return p, nil
 }
 
-// UntrustedCallers returns the people in a 1:1 DM voice call with userID whom
-// userID does not trust while their direct messages from members are off. The
-// caller removes them from those calls once Set has stored the setting.
+// UntrustedCallers returns the people in a 1:1 DM voice call with userID whom userID does not trust while
+// their DMs from members are off. The caller removes them once Set has stored the setting.
 func (s *PrivacyService) UntrustedCallers(ctx context.Context, userID int64) ([]DMCaller, error) {
 	callers, err := s.st.UntrustedDMCallers(ctx, userID)
 	if err != nil {

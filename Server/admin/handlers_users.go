@@ -14,11 +14,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// statsResponse is the dashboard payload: the database stats flattened with
-// the TLS mode and the served certificate (see SetServedCertificate). The
-// fingerprint is the value users compare out of band before accepting the
-// client's trust prompt; it is omitted when there is none to show (TLS off,
-// or ACME before its first handshake).
+// statsResponse is the dashboard payload: database stats plus the TLS mode and served certificate. The
+// fingerprint is what users compare out of band before accepting the trust prompt; omitted when none (TLS
+// off, ACME before its first handshake).
 type statsResponse struct {
 	*db.ServerStats
 	TLSMode                string `json:"tls_mode,omitempty"`
@@ -41,13 +39,11 @@ func handleGetStats(users *service.UserService, hub HubBroadcaster) http.Handler
 	}
 }
 
-// maxUserSearchLen bounds the Members search box's q parameter. Usernames are
-// far shorter, so a longer query can only be a mistake or abuse.
+// maxUserSearchLen bounds the search q parameter; a longer query is a mistake or abuse.
 const maxUserSearchLen = 64
 
-// handleListUsers serves the Members page: q is a case-insensitive username
-// or nickname substring, role_id keeps one role and banned=1 keeps only effective bans.
-// Filtering happens in the query, so it covers every page, not the fetched one.
+// handleListUsers serves the Members page: q matches username or nickname, role_id keeps one role, banned=1
+// keeps effective bans. Filtering is in the query, so it covers every page.
 func handleListUsers(users *service.UserService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := queryInt(r, "limit", 50, 1, 500)
@@ -71,8 +67,7 @@ func handleListUsers(users *service.UserService) http.HandlerFunc {
 		safe := make([]adminUserResponse, len(page))
 		for i := range page {
 			safe[i] = toAdminUserResponse(&page[i].User, page[i].RoleName)
-			// The panel compares it with its own role_position from /me to
-			// offer only the actions the server's outrank rule allows.
+			// The panel compares it with its own role_position to offer only the actions the outrank rule allows.
 			safe[i].RolePosition = &page[i].RolePosition
 			safe[i].RoleIDs = page[i].RoleIDs
 			safe[i].DisplayName = page[i].DisplayName
@@ -81,45 +76,33 @@ func handleListUsers(users *service.UserService) http.HandlerFunc {
 	}
 }
 
-// patchUserRequest is the JSON body for PATCH /admin/api/users/{id}.
 type patchUserRequest struct {
 	RoleID    *int64  `json:"role_id"`
 	Banned    *bool   `json:"banned"`
 	BanReason *string `json:"ban_reason"`
-	// BanDurationHours makes the ban temporary: it expires this many hours
-	// from now (login re-checks via IsEffectivelyBanned). Omitted or 0 =
-	// permanent. Only meaningful with banned=true.
+	// BanDurationHours makes the ban expire after this many hours (login re-checks IsEffectivelyBanned); omitted
+	// or 0 is permanent. Only with banned=true.
 	BanDurationHours *int `json:"ban_duration_hours"`
-	// DeleteMessageSeconds also deletes the banned member's messages posted
-	// within this many seconds, in the channels the actor may moderate
-	// (0..604800). Only meaningful with banned=true; see
-	// handlers_users_ban_purge.go.
+	// DeleteMessageSeconds also deletes the banned member's messages from the last N seconds (0..604800) in
+	// channels the actor may moderate. Only with banned=true.
 	DeleteMessageSeconds *int `json:"delete_message_seconds"`
 }
 
-// maxBanDurationHours caps temporary bans at one year; anything longer is
-// effectively permanent and should be issued as such.
+// maxBanDurationHours caps temporary bans at one year; longer is effectively permanent.
 const maxBanDurationHours = 24 * 365
 
-// memberUnbanBroadcaster is an optional capability of HubBroadcaster: tell
-// every connected client a user is back in the roster after an unban, the
-// mirror of BroadcastMemberBan. It is checked with a type assertion so
-// HubBroadcaster implementations (including test doubles) need not gain the
-// method; *ws.Hub implements it, and an implementation without it sends
-// nothing.
+// memberUnbanBroadcaster is an optional HubBroadcaster capability (type-asserted so test doubles need not
+// gain it): tell clients a user is back in the roster after an unban.
 type memberUnbanBroadcaster interface {
 	BroadcastMemberUnban(userID int64)
 }
 
-// writeModerationErr maps ModerationService errors onto admin API responses.
 func writeModerationErr(w http.ResponseWriter, err error) {
 	writeSvcErr(w, err, "user not found", "", "moderation action failed")
 }
 
-// patchUserPrecheck resolves and validates the target of a
-// PATCH /admin/api/users/{id} before any mutation is attempted. It reports
-// whether the handler may continue; on false it has already written the error
-// response.
+// patchUserPrecheck resolves and validates the PATCH target before any mutation; false means the error
+// response is written.
 func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.UserService) (int64, patchUserRequest, int64, bool) {
 	var req patchUserRequest
 
@@ -144,8 +127,7 @@ func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.Us
 
 	actor := actorFromContext(r)
 
-	// Prevent admins from modifying their own role or ban status, which
-	// could lock them out of the admin panel with no recovery path.
+	// Self role/ban changes could lock the admin out of the panel with no recovery path.
 	if id == actor {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "cannot modify your own account via admin panel")
 		return 0, req, 0, false
@@ -154,10 +136,8 @@ func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.Us
 	return id, req, actor, true
 }
 
-// patchUserAuthorizeRole runs every ChangeUserRole precondition for a PATCH
-// carrying role_id without committing anything; a request without role_id is
-// a no-op. It reports whether the handler may continue; on false it has
-// already written the error response.
+// patchUserAuthorizeRole runs every ChangeUserRole precondition without committing; no role_id is a no-op.
+// False means the error is written.
 func patchUserAuthorizeRole(w http.ResponseWriter, r *http.Request, mod *service.ModerationService, actor, id int64, req patchUserRequest) bool {
 	if req.RoleID == nil {
 		return true
@@ -174,10 +154,8 @@ func patchUserAuthorizeRole(w http.ResponseWriter, r *http.Request, mod *service
 	return true
 }
 
-// patchUserApplyBan commits the ban/unban half of the PATCH and fans the
-// result out to connected clients; a request without banned is a no-op. It
-// reports whether the handler may continue; on false it has already written
-// the error response.
+// patchUserApplyBan commits the ban/unban half and fans it out; no banned field is a no-op. False means the
+// error is written.
 func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaster, mod *service.ModerationService, actor, id int64, req patchUserRequest, banExpires *time.Time) bool {
 	if req.Banned == nil {
 		return true
@@ -205,10 +183,8 @@ func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaste
 	case *req.Banned && hub != nil:
 		hub.BroadcastMemberBan(id)
 	case !*req.Banned && hub != nil:
-		// Ban had no WS event on the way out (member_ban hard-deletes the row
-		// client-side); unban needs one on the way back in, or connected
-		// clients keep the user missing from their member store while a freshly
-		// connecting client sees them.
+		// Unban needs a WS event on the way back in (ban has member_ban), or connected clients keep the user
+		// missing.
 		if mub, ok := hub.(memberUnbanBroadcaster); ok {
 			mub.BroadcastMemberUnban(id)
 		}
@@ -216,20 +192,14 @@ func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaste
 	return true
 }
 
-// patchUserApplyRole commits the role half of the PATCH; ModerationService
-// invalidates the target's cached permissions and fans the change out to
-// connected clients. A request without role_id is a no-op. It reports
-// whether the handler may continue; on false it has already written the error
-// response.
+// patchUserApplyRole commits the role half; ModerationService invalidates cached permissions and fans out. No
+// role_id is a no-op. False means the error is written.
 func patchUserApplyRole(w http.ResponseWriter, r *http.Request, mod *service.ModerationService, actor, id int64, req patchUserRequest) bool {
 	if req.RoleID == nil {
 		return true
 	}
-	// Routed through ModerationService, which re-runs the same MANAGE_ROLES,
-	// actor-outranks-target and assign-below-own-rank checks the
-	// AuthorizeRoleChange pre-flight passed (a second pass catches anything that
-	// changed in between, e.g. a concurrent role delete), then commits and
-	// writes the audit row.
+	// ModerationService re-runs the MANAGE_ROLES, outranks-target and assign-below-own-rank checks (a second
+	// pass catches a concurrent role delete), then commits and audits.
 	if mod == nil {
 		// Fail closed rather than fall back to an unchecked UPDATE.
 		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
@@ -255,34 +225,30 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, mod *servic
 			return
 		}
 
-		// Authorize the role change before applying anything else. Otherwise a
-		// PATCH combining banned + role_id would commit and broadcast the ban
-		// first, and a then-refused role change (missing MANAGE_ROLES, or the
-		// new role outranks the actor) would report the request as failed while
-		// the target was in fact banned. Running every ChangeUserRole
-		// precondition up front keeps the PATCH all-or-nothing.
+		// Authorize the role change first: otherwise banned + role_id would commit and broadcast the ban, then a
+		// refused role change would report failure for a banned target. Running every precondition up front keeps
+		// the PATCH all-or-nothing.
 		if !patchUserAuthorizeRole(w, r, mod, actor, id, req) {
 			return
 		}
 
-		// Validate the ban's own fields before the purge check spends the
-		// actor's rate-limit token, so a corrected retry is not throttled.
+		// Validate the ban's fields before the purge check spends the actor's rate-limit token, so a corrected
+		// retry is not throttled.
 		banExpires, ok := patchUserValidateBan(w, req)
 		if !ok {
 			return
 		}
 
-		// The purge's checks (including its rate limit) also run before the
-		// ban is written, so a refusal leaves the target unbanned.
+		// The purge checks (including rate limit) also run before the ban is written, so a refusal leaves the
+		// target unbanned.
 		if purgeSeconds > 0 && !patchUserAuthorizePurge(w, r, mod, actor, id) {
 			return
 		}
 		retry := purgeSeconds > 0 && patchUserIsPurgeRetry(r, users, id, req)
 
-		// Ban/unban first: it routes through ModerationService, which enforces
-		// BAN_MEMBERS + role hierarchy (the admin-auth perimeter alone does
-		// not). The role change was already authorized above, so a committed ban
-		// cannot be followed by a refused role change.
+		// Ban/unban goes through ModerationService, which enforces BAN_MEMBERS + hierarchy (the perimeter alone
+		// does not); the role change was authorized above, so a committed ban cannot be followed by a refused role
+		// change.
 		if !retry && !patchUserApplyBan(w, r, hub, mod, actor, id, req, banExpires) {
 			return
 		}
@@ -312,9 +278,8 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, mod *servic
 	}
 }
 
-// handleForceLogout revokes every session of the target user. The route is
-// gated on KICK_MEMBERS; ModerationService additionally enforces the
-// actor-outranks-target hierarchy and writes the audit row.
+// handleForceLogout revokes every session of the target. Gated on KICK_MEMBERS; ModerationService enforces
+// the hierarchy and audits.
 func handleForceLogout(mod *service.ModerationService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
@@ -336,8 +301,7 @@ func handleForceLogout(mod *service.ModerationService) http.HandlerFunc {
 	}
 }
 
-// writeMemberRoleErr maps ModerationService role-assignment errors: a member's
-// last role answers 409 LAST_ROLE, everything else follows writeModerationErr.
+// writeMemberRoleErr maps a member's last role to 409 LAST_ROLE; everything else follows writeModerationErr.
 func writeMemberRoleErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrLastRole) {
 		writeErr(w, http.StatusConflict, httperr.CodeLastRole, "a member must keep at least one role")
@@ -346,12 +310,8 @@ func writeMemberRoleErr(w http.ResponseWriter, err error) {
 	writeModerationErr(w, err)
 }
 
-// handleMemberRole serves PUT and DELETE {base}/{id}/roles/{roleId}: add or
-// remove one role of a member without touching the others. The route
-// is perimeter-level like PATCH; ModerationService enforces MANAGE_ROLES, the
-// actor-outranks-target rule and the assign-below-own-rank rule, owns the
-// cache invalidation and live fan-out, and writes the role_add/role_remove
-// audit row.
+// handleMemberRole serves PUT/DELETE {base}/{id}/roles/{roleId}: add or remove one role. Perimeter-level like
+// PATCH; ModerationService enforces MANAGE_ROLES, hierarchy, cache invalidation, fan-out and the audit row.
 func handleMemberRole(mod *service.ModerationService, add bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
@@ -382,11 +342,9 @@ func handleMemberRole(mod *service.ModerationService, add bool) http.HandlerFunc
 	}
 }
 
-// handleDeleteUser erases the target account. The route is gated on
-// ADMINISTRATOR; ModerationService additionally enforces the
-// actor-outranks-target hierarchy, refuses the last admin-class account and
-// writes the audit row. On success every connected client gets the same
-// member_ban the ban path sends, which also disconnects the subject.
+// handleDeleteUser erases the target account. Gated on ADMINISTRATOR; ModerationService enforces hierarchy,
+// refuses the last admin-class account and audits. Clients get member_ban, which also disconnects the
+// subject.
 func handleDeleteUser(mod *service.ModerationService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
@@ -411,11 +369,9 @@ func handleDeleteUser(mod *service.ModerationService, hub HubBroadcaster) http.H
 	}
 }
 
-// handleGetMe describes the calling principal so the admin panel can hide the
-// surfaces its role cannot use. Perimeter-level: every authenticated principal
-// may read its own permissions. It also names the server for the panel's top
-// bar with its build version. Only authenticated panel principals reach this
-// route; the unauthenticated health and info responses stay version-free.
+// handleGetMe describes the calling principal so the panel can hide surfaces its role cannot use; every
+// authenticated principal may read its own permissions. It adds the server name and build version, which the
+// unauthenticated health and info responses keep version-free.
 func handleGetMe(settings *service.SettingsService, version string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, userOK := r.Context().Value(adminUserKey).(*db.User)
@@ -435,8 +391,7 @@ func handleGetMe(settings *service.SettingsService, version string) http.Handler
 			Version:      version,
 		}
 		if settings != nil {
-			// Best effort: the name is decoration, so a failed read leaves it
-			// empty rather than failing the permission lookup the panel needs.
+			// Best effort: the name is decoration, so a failed read must not fail the permission lookup.
 			me.ServerName, _ = settings.Setting(r.Context(), "server_name")
 		}
 		writeJSON(w, http.StatusOK, me)

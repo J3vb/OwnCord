@@ -11,25 +11,20 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// mentionQueueSize bounds pending jobs. Past it, later jobs are dropped and
-// counted rather than growing the queue or blocking the sender: badges are
-// cosmetic and a send must never wait on badge bookkeeping.
+// mentionQueueSize bounds pending jobs. Past it, later jobs are dropped and counted:
+// badges are cosmetic and a send must never wait on badge bookkeeping.
 const mentionQueueSize = 4096
 
-// mentionFlushInterval is how often the worker checks the coalesce window; it
-// bounds flush latency, not throughput.
+// mentionFlushInterval is how often the worker checks the coalesce window; it bounds latency, not throughput.
 const mentionFlushInterval = 50 * time.Millisecond
 
-// mentionJobCoalesceWindow delays a job's write so messages sent close together
-// share one writer transaction (a 2,000-member @everyone was its own 2,000-row
-// transaction).
+// mentionJobCoalesceWindow delays a job's write so messages sent close together share one
+// writer transaction (a 2,000-member @everyone was its own 2,000-row transaction).
 const mentionJobCoalesceWindow = 250 * time.Millisecond
 
-// mentionJob is one message's deferred badge work. enqueueAt starts its coalesce
-// window; channelID groups jobs sharing a transaction; msgID lets a removal path
-// flush exactly this job before reversing its increments; apply resolves
-// recipients at flush time (so block and visibility filters and the read-state
-// guard see state after the send) and returns one batch entry per message.
+// mentionJob is one message's deferred badge work: enqueueAt starts its coalesce window,
+// channelID groups jobs sharing a transaction, msgID lets a removal flush exactly this
+// job, apply resolves recipients at flush time (so guards see post-send state).
 type mentionJob struct {
 	enqueueAt time.Time
 	channelID int64
@@ -37,30 +32,21 @@ type mentionJob struct {
 	apply     func(ctx context.Context) []db.MentionBatchEntry
 }
 
-// mentionFlushReq is a flush handled on the worker loop. match selects the jobs to
-// apply now; nil selects all (the full barrier for tests and shutdown). A removal
-// path passes a narrower match to flush exactly the messages it will reverse.
-// reply is closed once they are applied.
 type mentionFlushReq struct {
 	match func(mentionJob) bool
 	reply chan struct{}
 }
 
-// mentionBatchStore is what mentionWorker reads and writes. *db.DB satisfies it.
 type mentionBatchStore interface {
-	// IncrementMentionCountsBatch applies a coalesced window of mention jobs in one
-	// writer transaction (the mention worker's flush). It returns userID to
-	// mention_count for exactly the recipients whose read-state guard admitted the
-	// bump: the live-badge signal.
+	// IncrementMentionCountsBatch applies a coalesced window of mention jobs in one writer
+	// transaction and returns userID to mention_count for exactly the recipients whose
+	// read-state guard admitted the bump (the live-badge signal).
 	IncrementMentionCountsBatch(ctx context.Context, channelID int64, entries []db.MentionBatchEntry) (map[int64]int64, error)
 }
 
-// mentionWorker is the single background worker owning every mention badge write
-// while running. SendMessage enqueues here instead of a goroutine per send, so 100
-// concurrent @everyone sends cost one worker. Jobs coalesce per window and flush
-// as one writer transaction per channel. The root starts it (app.startHub) and
-// stops it on shutdown; SendMessage routes through it only while running,
-// otherwise resolves and writes inline.
+// mentionWorker is the single background worker owning every mention badge write while
+// running, so 100 concurrent @everyone sends cost one worker. Jobs flush as one writer
+// transaction per channel per window. SendMessage routes through it only while running.
 type mentionWorker struct {
 	st mentionBatchStore
 
@@ -72,28 +58,21 @@ type mentionWorker struct {
 	stopped   atomic.Bool
 	stop      chan struct{}
 	done      chan struct{}
-	// flushReq carries flush requests to loop, each answered once its jobs are
-	// applied; tests and removal paths use it to avoid waiting out the coalesce window.
+	// flushReq carries flush requests to loop, each answered once applied; tests and removal paths use it to
+	// skip the coalesce window.
 	flushReq chan mentionFlushReq
 
-	// dropped counts jobs refused because the queue was full or the worker stopped.
 	dropped atomic.Uint64
 
-	// prepare resolves which of a flush's recipients may get a live mention_count
-	// frame and returns the sender, before the channel's emit lock is taken.
-	// Captured from the service at start-up; nil for a directly-constructed worker
-	// or no hub, which skips notification.
+	// prepare resolves which of a flush's recipients may get a live frame and returns the
+	// sender, before the channel's emit lock is taken. Nil for a directly-constructed worker or no hub.
 	prepare mentionSendPrep
 
-	// emitLocks serializes a mention write with the mention_count frames it emits,
-	// per channel, so each frame reflects a later commit than the one before. The
-	// coalesced flush and a removal path's synchronous reverse both hold the
-	// channel's lock. Without it an increment committed on the worker loop and a
-	// decrement on the request goroutine push absolute totals from independent
-	// emitters, so a delete inside the coalesce window could be overtaken by an
-	// older total and leave the badge stale-low until the next ready.
-	// StartMentionWorker points this at mentionState's locks so the inline
-	// fallback, the removal paths and the read-pointer moves share them.
+	// emitLocks serializes a mention write with its mention_count frames, per channel, so each
+	// frame reflects a later commit than the one before. The coalesced flush and a removal's
+	// synchronous reverse both hold it; otherwise a delete inside the window could be
+	// overtaken by an older total, leaving the badge stale-low until the next ready.
+	// StartMentionWorker points this at mentionState's locks.
 	emitLocks *mentionEmitLocks
 }
 
@@ -108,7 +87,6 @@ func newMentionWorker(st mentionBatchStore) *mentionWorker {
 	}
 }
 
-// run starts the worker's loop. Idempotent.
 func (w *mentionWorker) run(ctx context.Context) {
 	w.startOnce.Do(func() {
 		w.started.Store(true)
@@ -116,8 +94,6 @@ func (w *mentionWorker) run(ctx context.Context) {
 	})
 }
 
-// enqueue queues a job without blocking: a stopped worker or full queue drops and
-// counts it, since the sender must never wait on badge work.
 func (w *mentionWorker) enqueue(job mentionJob) {
 	if !w.started.Load() || w.stopped.Load() {
 		w.dropped.Add(1)
@@ -130,9 +106,8 @@ func (w *mentionWorker) enqueue(job mentionJob) {
 	}
 }
 
-// stopAndDrain stops the loop, waits for it, then processes anything a racing
-// enqueue stranded. It returns after every job is applied or dropped, so the
-// caller can close the database.
+// stopAndDrain stops the loop, waits, then processes anything a racing enqueue stranded;
+// returns after every job is applied or dropped so the caller can close the database.
 func (w *mentionWorker) stopAndDrain(ctx context.Context) {
 	w.stopOnce.Do(func() {
 		w.stopped.Store(true)
@@ -156,19 +131,15 @@ func (w *mentionWorker) stopAndDrain(ctx context.Context) {
 	}
 }
 
-// flushNow applies every job queued before the call, ignoring the coalesce
-// window; a barrier for deterministic test reads. Returns once applied.
 func (w *mentionWorker) flushNow(ctx context.Context) {
 	w.sendFlush(ctx, nil)
 }
 
-// flushMessages applies the pending jobs for exactly msgIDs, ignoring the coalesce
-// window, and returns once written. A removal path calls it before reversing those
-// increments so they stay symmetric: a message deleted inside the window would be
-// reversed before its increment lands, and the delayed increment would then raise a
-// phantom badge (no guard) or be skipped by the liveness guard and reverse a
-// genuine pre-existing badge. Waiting also lets IncrementMentionCountsBatch's
-// liveness guard see the message live, so the reversal takes exactly it back.
+// flushMessages applies the pending jobs for exactly msgIDs, ignoring the window, and
+// returns once written. A removal calls it before reversing so they stay symmetric: a
+// message deleted inside the window would be reversed before its increment lands, and the
+// delayed increment would raise a phantom badge or, skipped by the liveness guard,
+// reverse a genuine one.
 func (w *mentionWorker) flushMessages(ctx context.Context, msgIDs []int64) {
 	if len(msgIDs) == 0 {
 		return
@@ -183,14 +154,10 @@ func (w *mentionWorker) flushMessages(ctx context.Context, msgIDs []int64) {
 	})
 }
 
-// flushChannel applies every pending job for channelID, ignoring the coalesce
-// window; PurgeMessages calls it so the messages it purges have increments on disk.
 func (w *mentionWorker) flushChannel(ctx context.Context, channelID int64) {
 	w.sendFlush(ctx, func(job mentionJob) bool { return job.channelID == channelID })
 }
 
-// sendFlush sends one flush request and waits for the answer. nil match is the
-// full barrier. It never blocks on a stopped or absent worker.
 func (w *mentionWorker) sendFlush(ctx context.Context, match func(mentionJob) bool) {
 	reply := make(chan struct{})
 	select {
@@ -224,8 +191,6 @@ func (w *mentionWorker) loop(ctx context.Context) {
 		case job := <-w.queue:
 			pending = append(pending, job)
 		case req := <-w.flushReq:
-			// Everything queued before the request is on the channel (its send is
-			// synchronous); take it all before flushing.
 			for {
 				select {
 				case job := <-w.queue:
@@ -248,8 +213,6 @@ func (w *mentionWorker) loop(ctx context.Context) {
 	}
 }
 
-// drain flushes every queued and pending job on shutdown, ignoring the window so
-// no badge is lost.
 func (w *mentionWorker) drain(pending []mentionJob, ctx context.Context) {
 	for {
 		select {
@@ -263,7 +226,6 @@ func (w *mentionWorker) drain(pending []mentionJob, ctx context.Context) {
 	w.flush(ctx, pending)
 }
 
-// sweep flushes jobs whose coalesce window elapsed and keeps the rest.
 func (w *mentionWorker) sweep(pending []mentionJob, now time.Time, ctx context.Context) []mentionJob {
 	kept := pending[:0]
 	var ready []mentionJob
@@ -280,8 +242,6 @@ func (w *mentionWorker) sweep(pending []mentionJob, now time.Time, ctx context.C
 	return kept
 }
 
-// flushSelected applies the pending jobs match accepts and returns the rest in
-// order, without disturbing other jobs' windows.
 func (w *mentionWorker) flushSelected(ctx context.Context, pending []mentionJob, match func(mentionJob) bool) []mentionJob {
 	kept := pending[:0]
 	var ready []mentionJob
@@ -298,10 +258,9 @@ func (w *mentionWorker) flushSelected(ctx context.Context, pending []mentionJob,
 	return kept
 }
 
-// flush resolves every job's recipients and writes one transaction per channel. A
-// job whose apply returns no entries still counts as flushed. After a channel's
-// transaction commits, each reader whose badge it raised gets one live
-// mention_count frame, outside the transaction so a push never outruns its write.
+// flush resolves every job's recipients and writes one transaction per channel; a job
+// whose apply returns no entries still counts as flushed. After commit each raised reader
+// gets one live frame, outside the transaction so a push never outruns its write.
 func (w *mentionWorker) flush(ctx context.Context, jobs []mentionJob) {
 	if len(jobs) == 0 {
 		return
@@ -319,11 +278,9 @@ func (w *mentionWorker) flush(ctx context.Context, jobs []mentionJob) {
 	}
 }
 
-// flushChannelEntries writes one channel's entries and pushes their frames. The
-// audience is resolved first, outside the lock (one channel read per flush, not
-// per reader); the channel's emit lock then covers only the write and the frame
-// enqueue, so commit order matches frame order against a concurrent removal
-// decrement or read-pointer move on the same channel (see emitLocks).
+// flushChannelEntries writes one channel's entries and pushes their frames. The audience
+// is resolved outside the lock; the emit lock covers only the write and frame enqueue, so
+// commit order matches frame order against a concurrent decrement or read-pointer move.
 func (w *mentionWorker) flushChannelEntries(ctx context.Context, channelID int64, entries []db.MentionBatchEntry) {
 	var send func(userID, count int64)
 	if w.prepare != nil {
@@ -340,8 +297,6 @@ func (w *mentionWorker) flushChannelEntries(ctx context.Context, channelID int64
 	emitMentionBumped(send, bumped)
 }
 
-// entryUserIDs lists every recipient named in entries once, sorted: the
-// candidates a flush may raise a badge for.
 func entryUserIDs(entries []db.MentionBatchEntry) []int64 {
 	n := 0
 	for _, e := range entries {
@@ -355,7 +310,6 @@ func entryUserIDs(entries []db.MentionBatchEntry) []int64 {
 	return slices.Compact(ids)
 }
 
-// bumpedUserIDs lists a write's changed readers, sorted.
 func bumpedUserIDs(bumped map[int64]int64) []int64 {
 	ids := make([]int64, 0, len(bumped))
 	for uid := range bumped {
@@ -365,8 +319,6 @@ func bumpedUserIDs(bumped map[int64]int64) []int64 {
 	return ids
 }
 
-// emitMentionBumped pushes one frame per bumped reader in sorted order so tests'
-// recorded calls do not depend on map order. A nil send is a no-op.
 func emitMentionBumped(send func(userID, count int64), bumped map[int64]int64) {
 	if send == nil || len(bumped) == 0 {
 		return

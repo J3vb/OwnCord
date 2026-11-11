@@ -22,8 +22,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// DefaultImportMaxBytes is the export upload cap when SetupOptions names none;
-// it matches upload.import_max_mb's default.
+// DefaultImportMaxBytes is the export upload cap when SetupOptions names none (upload.import_max_mb's
+// default).
 const DefaultImportMaxBytes = 500 << 20
 
 // ImportDirName is the folder under the data directory that holds uploaded
@@ -31,24 +31,21 @@ const DefaultImportMaxBytes = 500 << 20
 const ImportDirName = "import-tmp"
 
 const (
-	// importMinUploadRate is the slowest uplink an upload is sized for, in
-	// bytes per second (2 Mbit/s).
+	// importMinUploadRate is the slowest uplink an upload is sized for: 2 Mbit/s in bytes per second.
 	importMinUploadRate = 250 << 10
-	// importMinLifetime is the shortest total time an upload gets, the same
-	// 10 minutes the file routes allow.
+	// importMinLifetime is the shortest total upload time, the same 10 minutes the file routes allow.
 	importMinLifetime = 10 * time.Minute
 )
 
-// importTransferLifetime is how long an upload of up to maxBytes may take: long
-// enough for the cap at importMinUploadRate, and never under importMinLifetime.
-// The stall deadline still ends a peer that stops sending.
+// importTransferLifetime is long enough for the cap at importMinUploadRate and never under importMinLifetime;
+// the stall deadline still ends a peer that stops sending.
 func importTransferLifetime(maxBytes int64) time.Duration {
 	secs := min(maxBytes/importMinUploadRate, 1<<30)
 	return max(importMinLifetime, time.Duration(secs)*time.Second)
 }
 
-// DiscordImporter is the import service the admin routes drive;
-// *discordimport.Service satisfies it. It audits the import itself.
+// DiscordImporter is the import service the routes drive (*discordimport.Service); it audits the import
+// itself.
 type DiscordImporter interface {
 	Start(ctx context.Context, req discordimport.Request) (*discordimport.Job, error)
 	Running(id int64) *discordimport.Job
@@ -58,14 +55,11 @@ type DiscordImporter interface {
 	CategoryExists(ctx context.Context, id int64) (bool, error)
 }
 
-// TransferBegin starts the long-transfer deadline for one request and returns
-// the body wrapped to renew it as bytes arrive, plus the release to defer.
-// lifetime is how long the whole transfer may take however steadily it
-// progresses (see importTransferLifetime). Nil
-// in SetupOptions leaves a plain size-capped body.
+// TransferBegin starts the long-transfer deadline for one request and returns the body wrapped to renew it as
+// bytes arrive, plus the release to defer. lifetime caps the whole transfer however steadily it progresses.
+// Nil in SetupOptions leaves a plain size-capped body.
 type TransferBegin func(w http.ResponseWriter, r *http.Request, maxBytes int64, lifetime time.Duration) (body io.ReadCloser, release func())
 
-// discordImportAPI holds what the Discord import routes share.
 type discordImportAPI struct {
 	importer  DiscordImporter
 	retention *service.RetentionService
@@ -75,8 +69,7 @@ type discordImportAPI struct {
 	maxBytes  int64
 	// minFree is the free space kept in reserve on the import volume.
 	minFree uint64
-	// uploading is set while an upload is being received or started, so two
-	// large uploads never spool at once.
+	// uploading is set while an upload is received or started, so two large uploads never spool at once.
 	uploading atomic.Bool
 }
 
@@ -96,7 +89,6 @@ func newDiscordImportAPI(retention *service.RetentionService, opts SetupOptions)
 	}
 }
 
-// importJobResponse is a job as the panel reads it.
 type importJobResponse struct {
 	ID                 int64   `json:"id"`
 	Status             string  `json:"status"`
@@ -118,13 +110,11 @@ func importJobDTO(j discordimport.JobView) importJobResponse {
 	}
 }
 
-// latestImportResponse is GET /discord-imports/latest: the newest job (null
-// when none ran) and the facts the panel's form shows.
+// latestImportResponse is GET /discord-imports/latest: the newest job (null when none) and the form's facts.
 type latestImportResponse struct {
 	Job *importJobResponse `json:"job"`
 	// RetentionDays is the server-wide message window, 0 when messages are kept.
-	RetentionDays int `json:"retention_days"`
-	// MaxUploadBytes is the largest export file the upload takes.
+	RetentionDays  int   `json:"retention_days"`
 	MaxUploadBytes int64 `json:"max_upload_bytes"`
 }
 
@@ -136,7 +126,6 @@ func (a *discordImportAPI) unavailable(w http.ResponseWriter) bool {
 	return false
 }
 
-// handleLatest answers GET /discord-imports/latest.
 func (a *discordImportAPI) handleLatest(w http.ResponseWriter, r *http.Request) {
 	if a.unavailable(w) {
 		return
@@ -170,7 +159,6 @@ func importIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
-// handleStatus answers GET /discord-imports/{id}.
 func (a *discordImportAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if a.unavailable(w) {
 		return
@@ -191,8 +179,8 @@ func (a *discordImportAPI) handleStatus(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, importJobDTO(job))
 }
 
-// handleCancel answers POST /discord-imports/{id}/cancel. The job ends on its
-// own goroutine, so the answer is 202 and the panel polls for the final state.
+// handleCancel answers POST .../cancel. The job ends on its own goroutine, so the answer is 202 and the panel
+// polls for the final state.
 func (a *discordImportAPI) handleCancel(w http.ResponseWriter, r *http.Request) {
 	if a.unavailable(w) {
 		return
@@ -213,7 +201,6 @@ func (a *discordImportAPI) handleCancel(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// uploadQuery reads the file name and optional category of an upload.
 func uploadQuery(w http.ResponseWriter, r *http.Request) (name string, categoryID int64, ok bool) {
 	q := r.URL.Query()
 	name = filepath.Base(strings.ReplaceAll(q.Get("filename"), "\\", "/"))
@@ -234,8 +221,8 @@ func uploadQuery(w http.ResponseWriter, r *http.Request) (name string, categoryI
 	return name, categoryID, true
 }
 
-// handleUpload answers POST /discord-imports/upload. The body is the export
-// file itself, streamed to disk; filename and category_id travel in the query.
+// handleUpload answers POST /discord-imports/upload: the body is the export file, streamed to disk; filename
+// and category_id travel in the query.
 func (a *discordImportAPI) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if a.unavailable(w) {
 		return
@@ -289,8 +276,8 @@ func (a *discordImportAPI) handleUpload(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusAccepted, map[string]any{"id": job.ID, "status": discordimport.StatusRunning})
 }
 
-// spool streams the request body into a temp file under the import directory.
-// It answers the request itself on failure and then returns ok false.
+// spool streams the request body into a temp file under the import directory; on failure it answers the
+// request and returns ok false.
 func (a *discordImportAPI) spool(w http.ResponseWriter, r *http.Request, ext string) (path string, ok bool) {
 	var body io.ReadCloser
 	if a.begin != nil {
@@ -350,7 +337,6 @@ func tooLargeMessage(max int64) string {
 	return fmt.Sprintf("the export is larger than the %d MB limit (upload.import_max_mb)", max>>20)
 }
 
-// discard removes an upload and closes its export when one was opened.
 func (a *discordImportAPI) discard(path string, ex discordimport.Export) {
 	if ex != nil {
 		if err := ex.Close(); err != nil {
@@ -362,9 +348,8 @@ func (a *discordImportAPI) discard(path string, ex discordimport.Export) {
 	}
 }
 
-// finishInBackground closes the export and removes the upload once the job
-// ends. The group joins it at shutdown, when it leaves without waiting and the
-// start-up sweep removes the file.
+// finishInBackground closes the export and removes the upload once the job ends. The group joins it at
+// shutdown, when it leaves without waiting and the start-up sweep removes the file.
 func (a *discordImportAPI) finishInBackground(ctx context.Context, job *discordimport.Job, ex discordimport.Export, path string) {
 	finish := func(ctx context.Context) {
 		select {
@@ -381,7 +366,6 @@ func (a *discordImportAPI) finishInBackground(ctx context.Context, job *discordi
 	}
 }
 
-// writeImportStartErr maps an open or start failure onto a response.
 func writeImportStartErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, discordimport.ErrImportRunning):

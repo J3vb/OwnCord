@@ -52,8 +52,7 @@ func (a Author) DisplayName() string {
 	return "Unknown"
 }
 
-// Attachment is one file on a message. URL is a remote link or, in a zip
-// export, a path inside the zip.
+// Attachment is one file on a message. URL is a remote link or, in a zip export, a path inside the zip.
 type Attachment struct {
 	ID            string `json:"id"`
 	URL           string `json:"url"`
@@ -67,8 +66,8 @@ type Reference struct {
 	ChannelID string `json:"channelId"`
 }
 
-// Message is the part of an exported message the import uses. Reactions,
-// embeds, stickers and mentions are left in the file: they are not imported.
+// Message is the part of an exported message the import uses; reactions, embeds, stickers and mentions are
+// not imported.
 type Message struct {
 	ID              string       `json:"id"`
 	Type            string       `json:"type"`
@@ -81,6 +80,6 @@ type Message struct {
 	Reference       *Reference   `json:"reference"`
 }
 
-// Importable reports whether the message type is imported. System messages
-// (joins, boosts, calls, pins) are not.
+// Importable reports whether the message type is imported; system messages (joins, boosts, calls, pins) are
+// not.
 func (m *Message) Importable() bool { return m.Type == "Default" || m.Type == "Reply" }

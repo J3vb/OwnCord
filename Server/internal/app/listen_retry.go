@@ -7,18 +7,13 @@ import (
 	"time"
 )
 
-// serveWithBindRetry runs serve, retrying a bounded number of times while the
-// failure is an address-in-use bind conflict. http.ErrServerClosed (and nil)
-// pass straight through as clean shutdowns.
-//
-// This is a safety net: the restart handoff releases the port before the
-// successor starts (Server/internal/app/restart.go), so the retry matters only
-// for external squatters, supervisor relaunch races against a not-yet-dead
-// predecessor, and platform TIME_WAIT edge cases.
-// bindRetryEvery spaces the bind retries; a var only so the give-up-bound test
-// doesn't sleep the real ~10 seconds.
+// bindRetryEvery spaces the bind retries; a var so the give-up test does not
+// sleep ~10 seconds.
 var bindRetryEvery = 500 * time.Millisecond
 
+// serveWithBindRetry runs serve, retrying while the failure is an
+// address-in-use bind conflict; ErrServerClosed and nil pass through as clean
+// shutdowns.
 func serveWithBindRetry(log *slog.Logger, label string, serve func() error) error {
 	const attempts = 20
 	var err error

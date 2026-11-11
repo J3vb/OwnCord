@@ -9,7 +9,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// blockStore is what BlockService reads and writes. *db.DB satisfies it.
 type blockStore interface {
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	BlockUser(ctx context.Context, blockerID, blockedID int64) error
@@ -27,8 +26,7 @@ func NewBlockService(st blockStore) *BlockService {
 	return &BlockService{st: st}
 }
 
-// BlockUser blocks a target user. Validates the target exists and
-// prevents self-blocking.
+// BlockUser blocks a target user; the target must exist and not be the caller.
 func (s *BlockService) BlockUser(ctx context.Context, blockerID, targetID int64) error {
 	ctx, done := traceCall(ctx, "service/block", "BlockService.BlockUser",
 		telemetry.Int64("blocker_id", blockerID),

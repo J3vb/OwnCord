@@ -11,24 +11,20 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// Channel name, topic and category share one contract across every writer: bounds
-// count runes on the cleaned value, never bytes, and values are sanitized and
-// trimmed by cleanTextBounded (with its raw-byte pre-check) like every other
-// sidebar-rendered free-text field.
+// Channel name, topic and category share one contract across every writer: bounds count
+// runes on the cleaned value, never bytes, and values go through cleanTextBounded like
+// every other sidebar-rendered free-text field.
 
 const (
-	// MaxChannelNameLen bounds channels.name; 100 matches MaxGroupDMNameLen (dm.go)
-	// since both render in the same sidebar row.
+	// MaxChannelNameLen bounds channels.name; matches MaxGroupDMNameLen (dm.go), same sidebar row.
 	MaxChannelNameLen = 100
 	// MaxChannelTopicLen bounds channels.topic, matching the client edit modal's cap.
 	MaxChannelTopicLen = 1024
-	// MaxChannelCategoryLen bounds a category name (sidebar group header), taking the
-	// name cap.
+	// MaxChannelCategoryLen bounds a category name (sidebar group header).
 	MaxChannelCategoryLen = 100
 )
 
-// validChannelTypes is the set of types a create may name. A channel's CATEGORY
-// constrains nothing: grouping is display, so only the type is validated.
+// validChannelTypes is the set of types a create may name; a category constrains nothing (display only).
 var validChannelTypes = []string{"text", "voice", "announcement", "forum"}
 
 // ChannelMeta is the cleaned name/topic/category triple every channel write uses.
@@ -38,8 +34,6 @@ type ChannelMeta struct {
 	Category string
 }
 
-// cleanChannelMeta sanitizes, trims and rune-bounds each field and requires a
-// name; every violation is ErrBadRequest with the field's own message.
 func cleanChannelMeta(name, topic, category string) (ChannelMeta, error) {
 	cleanName, err := cleanChannelField(name, MaxChannelNameLen, "name")
 	if err != nil {
@@ -59,10 +53,8 @@ func cleanChannelMeta(name, topic, category string) (ChannelMeta, error) {
 	return ChannelMeta{Name: cleanName, Topic: cleanTopic, Category: cleanCategory}, nil
 }
 
-// cleanChannelField is cleanTextBounded with a prefix-free error: the body is
-// exactly the validation text, so the sentinel is wrapped with %.0w instead of
-// rendered (as the settings service does), keeping "bad request: ..." out of the
-// admin UI.
+// cleanChannelField is cleanTextBounded with a prefix-free error: the sentinel is
+// wrapped with %.0w so "bad request: ..." stays out of the admin UI.
 func cleanChannelField(v string, maxRunes int, field string) (string, error) {
 	cleaned, err := cleanTextBounded(v, maxRunes, field)
 	if err != nil {
@@ -71,12 +63,9 @@ func cleanChannelField(v string, maxRunes int, field string) (string, error) {
 	return cleaned, nil
 }
 
-// ResolveGuildChannel is the single admin-surface channel lookup: a missing
-// channel and a DM both answer ErrNotFound. DMs share the channels table and id
-// space but belong to their participants, and anything but "not found" confirms
-// which ids are private conversations. Every sibling lookup goes through here so
-// no path grows its own policy. A thread answers ErrBadRequest
-// (errThreadNotAdminChannel).
+// ResolveGuildChannel is the single admin-surface channel lookup: a missing channel and a
+// DM both answer ErrNotFound (anything else would confirm which ids are private
+// conversations). A thread answers ErrBadRequest.
 func (s *ChannelService) ResolveGuildChannel(ctx context.Context, id int64) (*db.Channel, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("invalid channel id%.0w", ErrBadRequest)
@@ -94,29 +83,26 @@ func (s *ChannelService) ResolveGuildChannel(ctx context.Context, id int64) (*db
 	return ch, nil
 }
 
-// errThreadNotAdminChannel refuses a thread id on the admin surface: a thread
-// takes permissions, NSFW, archive and retention from its parent, so an override,
-// edit or delete keyed by a thread id would be ignored or bypass the thread
-// rules.
+// errThreadNotAdminChannel refuses a thread id on the admin surface: a thread takes
+// permissions, NSFW, archive and retention from its parent, so an override, edit or
+// delete keyed by a thread id would be ignored or bypass the thread rules.
 var errThreadNotAdminChannel = fmt.Errorf("a thread is managed through its parent channel%.0w", ErrBadRequest)
 
-// AdminChannelCreate carries a create request's raw fields; the service cleans
-// and validates them first.
+// AdminChannelCreate carries a create request's raw fields; the service cleans them.
 type AdminChannelCreate struct {
 	Name string
 	Type string
-	// CategoryID places the channel in that category (0 = none); it must exist and
-	// wins over Category.
+	// CategoryID places the channel in that category (0 = none); must exist, wins over Category.
 	CategoryID int64
-	// Category is the legacy free-text category: matched by name ignoring case,
-	// created when missing, empty means none. Ignored when CategoryID is set.
+	// Category is the legacy free-text category: matched ignoring case, created when
+	// missing, empty means none. Ignored when CategoryID is set.
 	Category string
 	Topic    string
 	Position int
 }
 
-// AdminListChannels lists guild channels only: DM rows share the table, and
-// listing them exposed ids and group names to any MANAGE_CHANNELS holder.
+// AdminListChannels lists guild channels only: DM rows share the table and listing them would expose ids and
+// group names to any MANAGE_CHANNELS holder.
 func (s *ChannelService) AdminListChannels(ctx context.Context) ([]db.Channel, error) {
 	channels, err := s.st.ListChannels(ctx)
 	if err != nil {
@@ -131,11 +117,9 @@ func (s *ChannelService) AdminListChannels(ctx context.Context) ([]db.Channel, e
 	return guildChannels, nil
 }
 
-// AdminCreateChannel validates per the metadata contract, persists, audits and
-// returns the committed row, re-read on an uncancellable tail so a caller
-// disconnect cannot leave a created channel unread and unbroadcast. The second
-// result is the full category list, non-nil only when this create made a category
-// through the legacy string (audited here; the handler owes managers a
+// AdminCreateChannel validates, persists, audits and returns the committed row, re-read on
+// an uncancellable tail. The second result is the category list, non-nil only when this
+// create made a category through the legacy string (the handler owes managers a
 // channel_categories frame).
 func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, req AdminChannelCreate, postCommitHook func()) (*db.Channel, []db.ChannelCategory, error) {
 	if req.Type == "" {
@@ -144,8 +128,7 @@ func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, 
 	if !slices.Contains(validChannelTypes, req.Type) {
 		return nil, nil, fmt.Errorf("type must be one of text, voice, announcement, forum%.0w", ErrBadRequest)
 	}
-	// category_id wins over the legacy string, so the string is not looked at when an
-	// id is sent.
+	// category_id wins over the legacy string, so the string is not looked at when an id is sent.
 	legacyText := req.Category
 	if req.CategoryID != 0 {
 		legacyText = ""
@@ -181,9 +164,8 @@ func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, 
 	if err != nil || ch == nil {
 		return nil, nil, fmt.Errorf("%w: failed to fetch created channel: %w", ErrInternal, err)
 	}
-	// A channel created in a category starts as a copy of its template: drop the
-	// affected members' cached permissions before the broadcast so it resolves
-	// visibility afresh.
+	// A channel created in a category starts as a copy of its template: drop affected
+	// members' cached permissions before the broadcast so visibility resolves afresh.
 	s.invalidatePermEffect(s.templateEffect(tail, ch.CategoryID))
 	slog.Info("channel created", "actor_id", actorID, "channel", meta.Name, "type", req.Type)
 	db.WriteAudit(tail, s.st, actorID, "channel_create", "channel", id,
@@ -192,9 +174,8 @@ func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, 
 }
 
 // createChannelRow persists a new channel. A named category goes through
-// CategoryStore.CreateChannelIn so resolve-or-create and insert share one
-// transaction; no category keeps the plain Store path. created is the id of a
-// category the write made (0 if none).
+// CategoryStore.CreateChannelIn so resolve-or-create and insert share one transaction.
+// created is the id of a category the write made (0 if none).
 func (s *ChannelService) createChannelRow(ctx context.Context, meta ChannelMeta, req AdminChannelCreate, target categoryTarget) (id, created int64, err error) {
 	if target.id == 0 && target.name == nil {
 		id, err = s.st.AdminCreateChannel(ctx, meta.Name, req.Type, "", meta.Topic, req.Position)
@@ -230,10 +211,9 @@ func (s *ChannelService) createChannelRow(ctx context.Context, meta ChannelMeta,
 	return id, created, nil
 }
 
-// requireChannelNameFree refuses (ErrConflict) a name another channel of the same
-// type in the same category (0 = uncategorized) already has, ignoring case.
-// selfID is the channel being renamed (0 on create). A check, not a constraint:
-// rows already sharing a name are left alone.
+// requireChannelNameFree refuses (ErrConflict) a name another channel of the same type in
+// the same category (0 = uncategorized) has, ignoring case. selfID is the channel being
+// renamed (0 on create). A check, not a constraint: existing duplicates are left alone.
 func (s *ChannelService) requireChannelNameFree(ctx context.Context, name, chType string, categoryID, selfID int64) error {
 	channels, err := s.st.ListChannels(ctx)
 	if err != nil {
@@ -248,22 +228,19 @@ func (s *ChannelService) requireChannelNameFree(ctx context.Context, name, chTyp
 	return nil
 }
 
-// AdminChannelUpdate carries a full update, pre-filled by the handler from the
-// existing row so a partial PATCH is safe; text fields are cleaned per the
-// metadata contract.
+// AdminChannelUpdate is a full update pre-filled by the handler from the existing row so a partial PATCH is
+// safe.
 type AdminChannelUpdate struct {
 	Name  string
 	Topic string
-	// CategoryID is the category the channel ends up in (0 = none); it must exist and
-	// wins over Category. Category, when non-nil and CategoryID is 0, is the legacy
-	// free-text category (matched ignoring case, created when missing, empty means
-	// none). The handler pre-fills CategoryID, so a body naming neither leaves the
-	// category alone.
+	// CategoryID is the category the channel ends up in (0 = none); must exist, wins over
+	// Category. Category, when non-nil and CategoryID is 0, is the legacy free-text category
+	// (created when missing, empty means none).
 	CategoryID int64
 	Category   *string
-	// KeepCategory marks CategoryID as the channel's own current category, carried
-	// forward because the request named none; if it was deleted meanwhile the channel
-	// falls back to uncategorized instead of failing. Ignored when a category was named.
+	// KeepCategory marks CategoryID as the channel's own current category, carried forward
+	// because the request named none; if deleted meanwhile the channel becomes uncategorized
+	// instead of failing.
 	KeepCategory  bool
 	SlowMode      int
 	Position      int
@@ -271,24 +248,20 @@ type AdminChannelUpdate struct {
 	NSFW          bool
 	VoiceMaxUsers int
 	VoiceMaxVideo int
-	// SyncPermissions replaces the channel's role and member overrides with the
-	// template of the category it ends up in and marks it synced, in the update's
-	// transaction. It needs an existing category (ErrBadRequest) and ActorRole, and
-	// is refused (ErrForbidden) when the actor could not have written the rows it
-	// touches. Without it a move keeps the overrides and unsyncs the channel.
+	// SyncPermissions replaces the channel's overrides with the template of its resulting
+	// category and marks it synced, in the update's transaction. Needs an existing category
+	// (ErrBadRequest) and ActorRole; ErrForbidden when the actor could not have written the
+	// rows touched. Without it a move keeps the overrides and unsyncs.
 	SyncPermissions bool
 	ActorRole       *db.Role
-	// Password sets, changes or removes a voice channel's password: nil leaves
-	// it alone, "" removes it, anything else is the new password. Any value on
-	// a channel that is not a voice channel is refused (ErrBadRequest).
+	// Password sets, changes or removes a voice channel's password: nil leaves it, "" removes
+	// it, else the new one. Any value on a non-voice channel is ErrBadRequest.
 	Password *string
 }
 
-// AdminUpdateChannel validates (metadata contract and numeric bounds), persists,
-// audits and returns the row read on the uncancellable tail; the caller fans out
-// visibility changes from the before/after pair. The second result is the full
-// category list, non-nil only when the update created a category through the
-// legacy string (audited here; the handler broadcasts it).
+// AdminUpdateChannel validates, persists, audits and returns the row read on the
+// uncancellable tail; the caller fans out visibility changes from the before/after pair.
+// The second result is the category list, non-nil only when the update created a category.
 func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, existing *db.Channel, req AdminChannelUpdate, postCommitHook func()) (*db.Channel, []db.ChannelCategory, error) {
 	meta, err := cleanChannelMeta(req.Name, req.Topic, "")
 	if err != nil {
@@ -306,7 +279,6 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	if err != nil {
 		return nil, nil, err
 	}
-	// Only a rename or move is checked, so rows already sharing a name stay editable.
 	if !target.fresh && (!strings.EqualFold(meta.Name, existing.Name) || target.id != existing.CategoryID) {
 		if err := s.requireChannelNameFree(ctx, meta.Name, existing.Type, target.id, existing.ID); err != nil {
 			return nil, nil, err
@@ -317,13 +289,11 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	var refused error
 	var syncPlan db.ChannelSyncPlan
 	update := db.ChannelUpdate{
-		Password:     pwChange,
-		Name:         meta.Name,
-		Topic:        meta.Topic,
-		CategoryID:   target.id,
-		CategoryName: target.name,
-		// A carried category that vanished means uncategorized; a named one was checked
-		// above and must still exist.
+		Password:         pwChange,
+		Name:             meta.Name,
+		Topic:            meta.Topic,
+		CategoryID:       target.id,
+		CategoryName:     target.name,
 		CategoryIfExists: req.KeepCategory && req.Category == nil,
 		CreatedCategory:  &createdCat,
 		SlowMode:         req.SlowMode,
@@ -338,11 +308,9 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 		return nil, nil, err
 	}
 	// Clearing the flag deletes the channel's standing acknowledgements in the SAME
-	// transaction as the flag write, so a later re-label re-prompts everyone. It
-	// keys on the RESULTING flag (req.NSFW == false), not a 1-to-0 transition from the
-	// stale `existing` snapshot: a concurrent edit that labelled the channel and was
-	// immediately acknowledged would otherwise skip the delete and leave an
-	// acknowledgement from a DIFFERENT labelling.
+	// transaction, so a later re-label re-prompts everyone. Keyed on the RESULTING flag, not a
+	// 1-to-0 transition from the stale `existing` snapshot, which a concurrent edit could
+	// leave pointing at an acknowledgement from a DIFFERENT labelling.
 	var writeErr error
 	if !req.NSFW {
 		writeErr = s.st.AdminUpdateChannelClearingNSFW(ctx, existing.ID, update)
@@ -353,7 +321,6 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 		return nil, nil, refused
 	}
 	if errors.Is(writeErr, db.ErrNotFound) {
-		// The category was deleted between the check above and the write.
 		return nil, nil, fmt.Errorf("category_id does not exist%.0w", ErrBadRequest)
 	}
 	if errors.Is(writeErr, db.ErrUncategorized) {
@@ -377,36 +344,27 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	if err != nil || updated == nil {
 		return nil, nil, fmt.Errorf("%w: failed to fetch updated channel: %w", ErrInternal, err)
 	}
-	// A sync replaced override rows: the cache is dropped, so re-derive the audience
-	// from the post-sync rows.
+	// A sync replaced override rows: re-derive the audience from the post-sync rows.
 	s.notifyAudienceIf(syncEffect.Applied, updated)
 	return updated, s.auditCreatedCategory(tail, actorID, createdCat), nil
 }
 
-// AdminDeleteChannel owns the delete ordering: archive, then the caller's voice
-// eviction, then the row delete on an uncancellable tail.
+// AdminDeleteChannel owns the delete ordering: archive, the caller's voice eviction, then
+// the row delete on an uncancellable tail.
+//   - Archive BEFORE evicting: CleanupVoiceForChannel snapshots participants once, so a
+//     racing voice_join could insert a voice_states row after the snapshot, orphaning that
+//     joiner's hub state and LiveKit session. archived=1 makes voice_join refuse it.
+//   - Evict BEFORE deleting: the FK cascade wipes the rows the cleanup reads.
+//   - Delete on the tail: a disconnect must not leave the channel silently archived.
 //
-//   - Archive BEFORE evicting: CleanupVoiceForChannel snapshots participants
-//     once, so a racing voice_join could pass the archived gate and insert a
-//     voice_states row after the snapshot but before the cascade, orphaning that
-//     joiner's hub state and LiveKit session. archived=1 first makes voice_join
-//     refuse the race.
-//   - Evict BEFORE deleting: the voice_states FK cascade wipes the rows the
-//     cleanup reads.
-//   - Delete on the tail: archive and eviction committed, so a disconnect must not
-//     leave the channel silently archived, unbroadcast and unaudited.
-//
-// evictVoice is the hub's CleanupVoiceForChannel (nil in hub-less tests). If the
-// delete fails after the archive committed, the archived row is returned with the
-// error so the caller can tell clients about the state that did change.
+// evictVoice is the hub's CleanupVoiceForChannel (nil in hub-less tests). If the delete
+// fails after the archive committed, the archived row is returned with the error.
 func (s *ChannelService) AdminDeleteChannel(ctx context.Context, actorID int64, existing *db.Channel, evictVoice func(channelID int64)) (archivedRow *db.Channel, err error) {
 	if !existing.Archived {
 		if err := s.st.AdminUpdateChannel(ctx, existing.ID, db.ChannelUpdate{
-			Name:       existing.Name,
-			Topic:      existing.Topic,
-			CategoryID: existing.CategoryID,
-			// The channel is about to go; a category deleted since the handler read the row
-			// must not stop the archive.
+			Name:             existing.Name,
+			Topic:            existing.Topic,
+			CategoryID:       existing.CategoryID,
 			CategoryIfExists: true,
 			SlowMode:         existing.SlowMode,
 			Position:         existing.Position,

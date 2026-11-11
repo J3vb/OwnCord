@@ -7,15 +7,12 @@ import (
 	"syscall"
 )
 
-// wsaeAddrInUse is WSAEADDRINUSE (10048), the errno a Windows bind conflict
-// carries. The syscall package does not export it (it lives in
-// golang.org/x/sys/windows, not a direct dependency), and syscall.EADDRINUSE
-// on Windows is Go's distinct APPLICATION_ERROR-block value that errors.Is does
-// not map to WSA codes.
+// wsaeAddrInUse is WSAEADDRINUSE (10048); syscall does not export it and
+// syscall.EADDRINUSE is a distinct value on Windows.
 const wsaeAddrInUse = syscall.Errno(10048)
 
-// errnoIsAddrInUse unwraps err (net.OpError → os.SyscallError → Errno) and
-// compares against both Windows bind-conflict errnos.
+// errnoIsAddrInUse reports whether err wraps either Windows bind-conflict
+// errno.
 func errnoIsAddrInUse(err error) bool {
 	return errors.Is(err, wsaeAddrInUse) || errors.Is(err, syscall.EADDRINUSE)
 }

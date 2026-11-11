@@ -2,19 +2,14 @@ package admin
 
 // The event-code table for the support bundle's events.json.
 //
-// supportEventCodes maps a fixed Warn/Error log message (the constant string a
-// slog.Warn/Error call passes as its message) to a stable, lower_snake_case
-// event code. The message text itself is never exported: supportEvents emits
-// only the code, so a bundle cannot carry free-form text. Codes are derived
-// from the literal alone — no runtime data — so none can embed a request value.
+// supportEventCodes maps a fixed Warn/Error log message (the constant string passed to slog.Warn/Error) to a
+// stable lower_snake_case code. The message text is never exported: supportEvents emits only the code, so a
+// bundle cannot carry free-form text. Codes derive from the literal alone, so none can embed a request value.
 //
-// The entries were generated from the message literals in this tree. They are
-// hand-maintained from here: TestSupportEventCodes_EveryWarnErrorLiteralIsCoded
-// parses the tree, and when a new Warn/Error message has no code it names the
-// message and file, so an author adds the entry it needs. A message held in a
-// struct field (a maintenance step's failLog, a voice toggle's updateLog) needs
-// an entry for each constant that field is set to. Messages with a variable
-// suffix are covered by supportEventPrefixCodes (support_redaction.go).
+// Entries are hand-maintained: TestSupportEventCodes_EveryWarnErrorLiteralIsCoded parses the tree and names
+// any new Warn/Error message lacking a code. A message held in a struct field (a step's failLog, a toggle's
+// updateLog) needs an entry for each constant it is set to. Variable-suffix messages are covered by
+// supportEventPrefixCodes (support_redaction.go).
 var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positive — log messages and event codes, not credentials
 	"ACME HTTP server error — HTTP-01 challenges and certificate renewal will fail until the next restart": "acme_http_server_error_http_01",
 	"ACME HTTP server shutdown error": "acme_http_server_shutdown_error",

@@ -13,13 +13,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// StartCallLogWorker recovers calls a previous run left open, then starts the
-// worker loop. The composition root calls it once, after the hub and event
-// persister are up and before the router listens; ctx is the worker's lifecycle
-// context. The returned func stops the loop, waits for it and stamps last_seen_at
-// on every call still occupied (or in its end grace), so the next boot ends those
-// calls at shutdown time. A Start while a worker runs is a no-op; after a stop it
-// runs a fresh worker.
+// StartCallLogWorker recovers calls a previous run left open, then starts the worker. Call
+// once after the hub and event persister are up and before the router listens. The
+// returned func stops the loop and stamps last_seen_at on occupied calls. Idempotent while running.
 func (s *CallLogService) StartCallLogWorker(ctx context.Context) func(context.Context) {
 	s.callLogMu.Lock()
 	if s.running {
@@ -33,9 +29,9 @@ func (s *CallLogService) StartCallLogWorker(ctx context.Context) func(context.Co
 	s.done = done
 	s.callLogMu.Unlock()
 
-	// A previous loop whose stop gave up waiting may still be finishing. Wait for it
-	// so two loops never overlap and recovery cannot end a call that loop still
-	// tends. If ctx ends first, this Start does not run.
+	// A previous loop whose stop gave up waiting may still be finishing. Wait so two loops
+	// never overlap and recovery cannot end a call that loop still tends. If ctx ends first,
+	// this Start does not run.
 	if prev != nil {
 		select {
 		case <-prev:
@@ -48,8 +44,8 @@ func (s *CallLogService) StartCallLogWorker(ctx context.Context) func(context.Co
 		}
 	}
 
-	// ClearAllVoiceStates already ran at boot, so nobody can be in a call yet:
-	// every open row is a leftover and ends at the last time it was seen.
+	// ClearAllVoiceStates already ran at boot, so every open row is a leftover and ends at
+	// the last time it was seen.
 	s.recoverOpenCalls(ctx)
 	go s.loop(ctx, stop, done)
 
@@ -70,8 +66,6 @@ func (s *CallLogService) StartCallLogWorker(ctx context.Context) func(context.Co
 	}
 }
 
-// loop is the only goroutine that reconciles while the worker runs. It exits
-// when ctx is done or stop is closed.
 func (s *CallLogService) loop(ctx context.Context, stop, done chan struct{}) {
 	defer close(done)
 	tick := time.NewTicker(s.tick)
@@ -109,7 +103,6 @@ func (s *CallLogService) loop(ctx context.Context, stop, done chan struct{}) {
 	}
 }
 
-// sleepOrExit waits d, reporting false when the worker was told to exit first.
 func sleepOrExit(ctx context.Context, stop <-chan struct{}, d time.Duration) bool {
 	t := time.NewTimer(d)
 	defer t.Stop()
@@ -123,15 +116,12 @@ func sleepOrExit(ctx context.Context, stop <-chan struct{}, d time.Duration) boo
 	}
 }
 
-// reconcileDirty reconciles every channel a note touched since the last pass.
 func (s *CallLogService) reconcileDirty(ctx context.Context) {
 	for _, ch := range sortedChannels(s.takeDirty()) {
 		s.reconcileTaken(ctx, ch.id, ch.p)
 	}
 }
 
-// reconcileAll is the periodic pass: every dirty channel and every channel
-// with a live call, once each.
 func (s *CallLogService) reconcileAll(ctx context.Context) {
 	dirty := s.takeDirty()
 	open, err := s.st.ListOpenCalls(ctx)
@@ -148,10 +138,6 @@ func (s *CallLogService) reconcileAll(ctx context.Context) {
 	}
 }
 
-// reconcileDue reconciles the channels with timed work due: a grace period
-// that has run out or a retry delay that has passed. A note still waiting in
-// the channel's dirty entry is taken along, so it cannot open a second row
-// after an end.
 func (s *CallLogService) reconcileDue(ctx context.Context) {
 	for _, ch := range s.dueChannels(s.now()) {
 		s.reconcileTaken(ctx, ch, s.takeDirtyFor(ch))
@@ -172,9 +158,8 @@ func sortedChannels(m map[int64]*callLogPending) []channelPending {
 	return out
 }
 
-// reconcileTaken reconciles one channel. A channel still backing off from a
-// failure is left alone with its notes put back; a failure puts the notes back
-// and backs the channel off, so the next attempt is on a growing delay.
+// reconcileTaken reconciles one channel. A channel still backing off is left alone with
+// its notes put back; a failure puts them back and backs off on a growing delay.
 func (s *CallLogService) reconcileTaken(ctx context.Context, channelID int64, p *callLogPending) {
 	if s.inBackoff(channelID) {
 		s.requeue(channelID, p)
@@ -189,10 +174,9 @@ func (s *CallLogService) reconcileTaken(ctx context.Context, channelID int64, p 
 	s.clearRetry(channelID)
 }
 
-// reconcile compares the channel's voice rows with its live call row and
-// brings the row in line: start, record participants, refresh last_seen_at or
-// end. The voice rows tell only whether the room is occupied; who joined comes
-// from the completion notes in p (nil for a pass with none).
+// reconcile brings the live call row in line with the channel's voice rows: start, record
+// participants, refresh last_seen_at or end. Voice rows only say whether the room is
+// occupied; who joined comes from the notes in p (nil when none).
 func (s *CallLogService) reconcile(ctx context.Context, channelID int64, p *callLogPending) error {
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil {
@@ -220,15 +204,13 @@ func (s *CallLogService) reconcile(ctx context.Context, channelID int64, p *call
 	return s.tendCall(ctx, open, p, occupied)
 }
 
-// joiner is a user whose completed join was noted, with the time of the note.
 type joiner struct {
 	id int64
 	at time.Time
 }
 
-// liveJoiners returns the noted joiners who still exist, earliest first (ties:
-// the lowest user id). A vanished user is dropped from p so a retry does not
-// carry it again.
+// liveJoiners returns the noted joiners who still exist, earliest first (ties: lowest user
+// id). A vanished user is dropped from p so a retry does not carry it again.
 func (s *CallLogService) liveJoiners(ctx context.Context, p *callLogPending) ([]joiner, error) {
 	if p == nil {
 		return nil, nil
@@ -254,9 +236,6 @@ func (s *CallLogService) liveJoiners(ctx context.Context, p *callLogPending) ([]
 	return out, nil
 }
 
-// startCall writes the row for a room that just filled, when someone's join
-// was noted and the DM is allowed to carry it. It returns the live row to
-// tend, or nil when there is nothing to tend.
 func (s *CallLogService) startCall(ctx context.Context, channelID int64, p *callLogPending, occupied bool) (*db.OpenCall, error) {
 	s.clearEmptySince(channelID)
 	joiners, err := s.liveJoiners(ctx, p)
@@ -272,12 +251,9 @@ func (s *CallLogService) startCall(ctx context.Context, channelID int64, p *call
 	author, startedAt := joiners[0].id, joiners[0].at
 	ok, audience, err := s.callAllowed(ctx, channelID, author)
 	if err != nil {
-		// A failed lookup writes no row and is retried on the channel's
-		// backoff with its notes kept, so one busy read does not lose the call.
 		return nil, fmt.Errorf("call allowed: %w", err)
 	}
 	if !ok {
-		// Not accepted by both sides: no row until the room has been empty.
 		s.setSuppressed(channelID, true)
 		return nil, nil
 	}
@@ -293,7 +269,6 @@ func (s *CallLogService) startCall(ctx context.Context, channelID int64, p *call
 		ParticipantIDs: ids,
 	})
 	if errors.Is(err, db.ErrConflict) {
-		// A row already exists: tend it instead.
 		return s.st.GetOpenCall(ctx, channelID)
 	}
 	if err != nil {
@@ -308,10 +283,9 @@ func (s *CallLogService) startCall(ctx context.Context, channelID int64, p *call
 	}, nil
 }
 
-// callAllowed is the acceptance gate for logging a call: a one-to-one call is
-// logged once both people have accepted the DM, each trusting the other. A
-// group DM has no such condition. It also returns the audience the author's
-// frames go to. Any lookup error fails closed.
+// callAllowed is the gate for logging a call: a one-to-one call is logged once both
+// people have accepted the DM, each trusting the other; a group DM has no such condition.
+// Also returns the audience of the author's frames. Any lookup error fails closed.
 func (s *CallLogService) callAllowed(ctx context.Context, channelID, author int64) (bool, []int64, error) {
 	isGroup, targets, err := s.st.GetDMDeliveryTargets(ctx, channelID, author)
 	if err != nil {
@@ -339,9 +313,6 @@ func (s *CallLogService) callAllowed(ctx context.Context, channelID, author int6
 	return true, audience, nil
 }
 
-// announceCreated reopens the DM for recipients who had closed it, then hands
-// the row to the sink. The reopen payloads are built first so a client has the
-// channel before the row arrives.
 func (s *CallLogService) announceCreated(ctx context.Context, row *db.CallLogRow, audience []int64) {
 	sink := s.loadSink()
 	m := row.Message
@@ -358,8 +329,8 @@ func (s *CallLogService) announceCreated(ctx context.Context, row *db.CallLogRow
 	if sink == nil {
 		return
 	}
-	// If the author cannot be read the row still goes out with the id alone,
-	// so the frame that ends it has a row to update.
+	// If the author cannot be read the row still goes out with the id alone, so the ending frame has a row to
+	// update.
 	author := &db.User{ID: m.UserID}
 	roleName := ""
 	if u, err := s.st.GetUserByID(ctx, m.UserID); err == nil && u != nil {
@@ -377,9 +348,6 @@ func (s *CallLogService) announceCreated(ctx context.Context, row *db.CallLogRow
 	})
 }
 
-// tendCall keeps a live row in step with the room: it records participants
-// (not broadcast), refreshes last_seen_at while someone is present, and ends
-// the call once the room has been empty for the grace period.
 func (s *CallLogService) tendCall(ctx context.Context, open *db.OpenCall, p *callLogPending, occupied bool) error {
 	if err := s.recordParticipants(ctx, open, p); err != nil {
 		return err
@@ -403,10 +371,8 @@ func (s *CallLogService) tendCall(ctx context.Context, open *db.OpenCall, p *cal
 	return s.endCall(ctx, open, since)
 }
 
-// recordParticipants writes the joiners the notes name that are not recorded
-// yet. An unchanged room costs no write. In a one-to-one DM the acceptance gate
-// is checked again first, so a participant is never added once it no longer
-// holds.
+// recordParticipants writes joiners not yet recorded. In a one-to-one DM the acceptance
+// gate is rechecked first, so a participant is never added once it no longer holds.
 func (s *CallLogService) recordParticipants(ctx context.Context, open *db.OpenCall, p *callLogPending) error {
 	if p == nil || len(p.joiners) == 0 {
 		return nil
@@ -436,8 +402,6 @@ func (s *CallLogService) recordParticipants(ctx context.Context, open *db.OpenCa
 	return nil
 }
 
-// refreshLastSeen advances last_seen_at once it is half a tick old, so after a
-// crash it is never much more than one tick stale.
 func (s *CallLogService) refreshLastSeen(ctx context.Context, open *db.OpenCall, now time.Time) error {
 	if seen, ok := parseCallTime(open.LastSeenAt); ok && now.Sub(seen) < s.tick/2 {
 		return nil
