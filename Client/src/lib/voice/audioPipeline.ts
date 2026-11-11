@@ -2,7 +2,7 @@
 // keep the processor attached, so LiveKit always publishes the gated output.
 // Native rooms apply the same settings to their own capture.
 
-import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-client";
+import { Track, TrackEvent, type LocalAudioTrack } from "livekit-client";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import {
@@ -24,6 +24,7 @@ import type {
   VoiceGatedRoom,
 } from "./audioRoomCapabilities";
 import { startVadDetector, type SpeechDetection, type VadDetector } from "./vadDetector";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 export { startVadDetector } from "./vadDetector";
 export type { SpeechDetection, VadDetector } from "./vadDetector";
@@ -89,7 +90,7 @@ export function enhancedNoiseSuppressionEnabled(): boolean {
 export type InputLevelListener = (rms: number | null, open: boolean) => void;
 
 export class AudioPipeline {
-  private room: Room | null = null;
+  private room: VoiceRoom | null = null;
   private processor: MicProcessor | null = null;
 
   /** `pttPollingLive` reports whether a Push to Talk key can gate the mic
@@ -125,7 +126,7 @@ export class AudioPipeline {
    *  ring so it matches the slider and what transmits. */
   onGateSpeaking: ((speaking: boolean | null) => void) | null = null;
 
-  setRoom(room: Room | null): void {
+  setRoom(room: VoiceRoom | null): void {
     const previous = this.room as Partial<InputGainRoom> | null;
     if (previous?.setInputLevelListener) {
       previous.setInputLevelListener(null);

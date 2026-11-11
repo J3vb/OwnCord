@@ -1,11 +1,11 @@
 // The collaborator surface JoinOrchestration reads from LiveKitSession. Split
 // from joinOrchestration.ts so the join helper modules can share the type.
-import type { Room } from "livekit-client";
 import type { AudioPipeline } from "../../lib/voice/audioPipeline";
 import type { AudioElements } from "../../lib/voice/audioElements";
 import type { DeviceManager } from "../../lib/voice/deviceManager";
 import type { E2EEManager } from "../../lib/voice/livekitE2EE";
 import type { SessionState } from "./sessionState";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 /** Everything the join orchestration needs from LiveKitSession. Collaborators
  *  are read through getters on every use, never captured, so the session (and
@@ -15,7 +15,7 @@ export interface JoinHost {
   setState(next: SessionState): void;
   /** Draw the next value from the session's monotonic join-generation counter. */
   nextJoinGeneration(): number;
-  getRoom(): Room | null;
+  getRoom(): VoiceRoom | null;
   getE2EE(): Pick<
     E2EEManager,
     "clearState" | "setupKeyExchange" | "holdAnnouncesForQueuedJoin" | "releaseHeldAnnounces"
@@ -24,7 +24,7 @@ export interface JoinHost {
   getAudioElements(): AudioElements;
   getDeviceManager(): DeviceManager;
   getOnError(): ((message: string) => void) | null;
-  createRoom(channelId: number): Promise<Room>;
+  createRoom(channelId: number): Promise<VoiceRoom>;
   resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string>;
   restoreLocalVoiceState(mode: "join"): Promise<void>;
   reapplyMuteGain(): void;
@@ -37,7 +37,7 @@ export interface JoinHost {
    *  socket, and nothing when it holds none. No local teardown. */
   sendVoiceLeave(): void;
   /** Offer the adopted room's already-published streams (Watch stream tiles). */
-  sweepPublications(room: Room): void;
+  sweepPublications(room: VoiceRoom): void;
   handleVoiceTokenRefresh(token: string): void;
   /** The session's own connectAndSetup, so the drain loop re-enters through it. */
   connectAndSetup(

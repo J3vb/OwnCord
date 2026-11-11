@@ -1,13 +1,13 @@
 // What the auto-reconnect loop (lib/voice/livekitReconnect.ts) needs from the
 // voice session. Types only.
-import type { Room } from "livekit-client";
 import type { SessionState } from "./sessionState";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 /** What the voice roster says about the membership the old token belongs to. */
 export type ServerMembership = "held" | "released" | "unknown";
 
 export interface ReconnectDeps {
-  sweepPublications(room: Room): void;
+  sweepPublications(room: VoiceRoom): void;
   /** Current session state accessor. */
   getState: () => SessionState;
   /** Transition to a new state. */
@@ -23,9 +23,9 @@ export interface ReconnectDeps {
    *  room-less. Syncing there wires every module to null, so the reconnect
    *  finishes with no audio pipeline and no remote-subscription handling —
    *  deafen silently stops being re-applied. */
-  setModuleRooms: (room: Room) => void;
+  setModuleRooms: (room: VoiceRoom) => void;
   /** Create a new Room with E2EE wired up. */
-  createRoom: () => Promise<Room>;
+  createRoom: () => Promise<VoiceRoom>;
   /** Resolve a LiveKit URL. */
   resolveUrl: (proxyPath: string, directUrl?: string) => Promise<string>;
   /** Re-announce E2EE for the new session (forward secrecy). */
@@ -86,9 +86,9 @@ export interface ReconnectDeps {
   /** Error callback. */
   onError: (message: string) => void;
   /** True when the shared state is still THIS attempt's connected room. */
-  isStateConnected: (channelId: number, room: Room) => boolean;
+  isStateConnected: (channelId: number, room: VoiceRoom) => boolean;
   /** Tear down a room this attempt no longer owns. */
-  disconnectSupersededLocalRoom: (room: Room) => void;
+  disconnectSupersededLocalRoom: (room: VoiceRoom) => void;
   /** Rebuild the audio pipeline against the new room. */
   setupAudioPipeline: () => void;
   /** Re-apply mute gain once the pipeline is rebuilt. */

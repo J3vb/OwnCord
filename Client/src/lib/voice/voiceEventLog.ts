@@ -8,13 +8,13 @@ import {
   RoomEvent,
   type LocalTrackPublication,
   type Participant,
-  type Room,
   type RoomEventCallbacks,
   type TrackPublication,
 } from "livekit-client";
 import { recordEvent } from "@lib/diagnostics/eventSink";
 import { pseudonym, reportHash } from "@lib/diagnostics/identifiers";
 import { Disposable } from "@lib/disposable";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 type Source = "camera" | "microphone" | "screen_share" | "screen_share_audio" | "unknown";
 type MediaError =
@@ -207,7 +207,7 @@ function followLocalTrack(pub: LocalTrackPublication, owner: Disposable): void {
 }
 
 type OnRoom = <E extends keyof RoomEventCallbacks>(
-  room: Room,
+  room: VoiceRoom,
   event: E,
   listener: RoomEventCallbacks[E],
 ) => void;
@@ -217,11 +217,11 @@ type OnRoom = <E extends keyof RoomEventCallbacks>(
  *  guarded: these run before the app's own handlers and must never throw. */
 /** The user left the call. Called by the leave path itself: it drops the
  *  room's listeners before disconnecting, so no room event reports it. */
-export function recordVoiceLeft(room: Room): void {
+export function recordVoiceLeft(room: VoiceRoom): void {
   recordEvent("voice.left", { channel: room.name ? pseudonym("c", room.name) : null });
 }
 
-export function attachVoiceEventLog(room: Room, onRoomFn: OnRoom): void {
+export function attachVoiceEventLog(room: VoiceRoom, onRoomFn: OnRoom): void {
   const owners = new Map<string, Disposable>();
   let reconnectingAt: number | null = null;
   let attempt = 0;

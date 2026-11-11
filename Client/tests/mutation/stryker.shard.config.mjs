@@ -31,6 +31,7 @@ export const shards = {
     "src/features/voice/videoBitrateCap.ts",
     "src/features/voice/videoBudgetNow.ts",
     "src/features/voice/videoCapFollow.ts",
+    "src/lib/voice/voiceRoom.ts",
     "src/lib/voice/audioPipeline.ts",
     "src/lib/voice/vadDetector.ts",
     "src/lib/voice/audioRoomCapabilities.ts",

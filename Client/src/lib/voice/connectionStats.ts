@@ -1,7 +1,8 @@
 // Connection stats poller — extracts WebRTC metrics from LiveKit Room
-import type { Room, Track } from "livekit-client";
+import type { Track } from "livekit-client";
 import type { CameraStallWatchdog, cameraSampleFromStats } from "./cameraStallWatchdog";
 import { createLogger } from "@lib/logger";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("connection-stats");
 
@@ -168,7 +169,7 @@ function activeJitter(prev: AudioStreams, next: AudioStreams): number {
 
 /** Collect stats from both publisher and subscriber PeerConnections.
  *  RTT is typically on the subscriber PC in LiveKit's SFU model. */
-async function collectAllStats(room: Room): Promise<RTCStatsReport[]> {
+async function collectAllStats(room: VoiceRoom): Promise<RTCStatsReport[]> {
   try {
     // Use the SDK transport API: PCTransport owns a private _pc, not a
     // public `pc`. Keeping this typed makes SDK shape changes a build error.
@@ -284,7 +285,7 @@ function jitterMs(entry: Record<string, unknown>): number {
 }
 
 /** The local camera's publication, track and RTP sender, once it publishes. */
-function publishedCamera(room: Room) {
+function publishedCamera(room: VoiceRoom) {
   const pub = room.localParticipant?.getTrackPublication?.("camera" as Track.Source);
   const track = pub?.track;
   const sender = (track as { sender?: RTCRtpSender } | undefined)?.sender;
@@ -292,7 +293,9 @@ function publishedCamera(room: Room) {
   return { pub, track, sender };
 }
 
-export function createConnectionStatsPoller(getRoom: () => Room | null): ConnectionStatsPoller {
+export function createConnectionStatsPoller(
+  getRoom: () => VoiceRoom | null,
+): ConnectionStatsPoller {
   let current: ConnectionStats = EMPTY_STATS;
   let prev: PrevSnapshot = { timestamp: Date.now(), ...EMPTY_SNAPSHOT };
   let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -324,7 +327,7 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
     }
   }
 
-  async function sampleCamera(room: Room, now: number): Promise<void> {
+  async function sampleCamera(room: VoiceRoom, now: number): Promise<void> {
     const camera = publishedCamera(room);
     if (camera === null) {
       watchdog?.reset();
