@@ -83,14 +83,18 @@ function installTail(
   // Never install an empty window: if everything from the cached head
   // upward was deleted while away the trim would drop every row, so keep
   // the fetched range and let setMessages absorb the stale cached rows.
-  const messages = trimmed.length > 0 ? trimmed : fetched;
+  // When an older page landed meanwhile it is already on screen, so the whole
+  // fetched range goes in: only rows older than that range are kept, and a
+  // cached row the range no longer holds (deleted while away) drops out.
+  const splice = olderPageLanded(channelId, fetched, head);
+  const messages = splice ? fetched : trimmed.length > 0 ? trimmed : fetched;
   const hasMore = hasMoreBefore || messages.length < fetched.length;
   log.info("Messages loaded", {
     channelId,
     count: messages.length,
     hasMore,
   });
-  setMessages(channelId, messages, hasMore, olderPageLanded(channelId, fetched, head));
+  setMessages(channelId, messages, hasMore, splice);
 }
 
 /**
