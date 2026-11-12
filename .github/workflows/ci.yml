@@ -699,6 +699,11 @@ jobs:
       - name: Self-test the installer size budget
         run: node --test scripts/check-artifact-size.test.mjs
 
+      # The opt-in performance measurements never run in CI; their pure
+      # statistics and analyzer are tested here, on the PR that edits them.
+      - name: Self-test the performance analyzer
+        run: node --test scripts/perf-stats.test.mjs scripts/analyze-perf.test.mjs
+
       # D1: `tests/e2e/quarantine.json` is what keeps a known-flaky required test
       # out of the run. This is the guard that keeps the list honest — a
       # well-formed, unexpired entry naming a test that still exists — the same
