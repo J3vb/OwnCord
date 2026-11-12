@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -64,5 +65,41 @@ func TestRegister_CommittedSignUpReportsSuccessAfterTheDeadline(t *testing.T) {
 	res, err := svc.Register(reqCtx, RegisterInput{Username: "latecomer", Password: "securePass1", Device: "test", IP: "203.0.113.7"})
 	if err != nil || res == nil || res.Token == "" || res.User == nil {
 		t.Fatalf("sign-up whose deadline passed after the commit = %+v, %v; want a signed-in result", res, err)
+	}
+}
+
+// cancelBeforeSessionStore ends the request context just before the session insert, as a
+// request deadline passing after the second factor was spent would.
+type cancelBeforeSessionStore struct {
+	*db.DB
+	cancel context.CancelFunc
+}
+
+func (s *cancelBeforeSessionStore) CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error) {
+	s.cancel()
+	return s.DB.CreateSession(ctx, userID, tokenHash, device, ip)
+}
+
+func TestVerifyTOTP_SpentCodeStillStartsTheSessionAfterTheDeadline(t *testing.T) {
+	database := newTestDB(t)
+	uid := mustCreateUser(t, database, "lateverify", "$2a$12$x", 4)
+	secret, err := auth.GenerateTOTPSecret()
+	mustDo(t, "GenerateTOTPSecret", err)
+	key := make([]byte, 32)
+	enc, err := auth.EncryptTOTPSecret(key, secret)
+	mustDo(t, "EncryptTOTPSecret", err)
+	mustDo(t, "UpdateUserTOTPSecret", database.UpdateUserTOTPSecret(context.Background(), uid, &enc))
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc := NewAuthService(&cancelBeforeSessionStore{DB: database, cancel: cancel}, auth.NewRateLimiter(), key, nil)
+	token, err := svc.partial.Issue(reqCtx, uid, "device", "203.0.113.9")
+	mustDo(t, "Issue", err)
+	code, err := auth.GenerateTOTPCode(secret, time.Now().UTC())
+	mustDo(t, "GenerateTOTPCode", err)
+
+	res, err := svc.VerifyTOTP(reqCtx, token, code)
+	if err != nil || res == nil || res.Token == "" {
+		t.Fatalf("VerifyTOTP whose deadline passed after the code was spent = %+v, %v; want a session", res, err)
 	}
 }

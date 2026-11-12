@@ -311,7 +311,10 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		return nil, ErrTOTPChallengeInvalid
 	}
 
-	token, err := issueSession(ctx, s.st, user.ID, challenge.Device, challenge.IP)
+	// The code is spent by now: starting the session must not die with the request deadline.
+	tailCtx, cancel := postCommitContext(ctx)
+	defer cancel()
+	token, err := issueSession(tailCtx, s.st, user.ID, challenge.Device, challenge.IP)
 	if err != nil {
 		// The second factor was verified; a store fault must not discard it. The claim is atomic and first, so two
 		// verifies never both reach issueSession. Put the challenge
@@ -320,7 +323,7 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		if recoveryRemaining == nil {
 			s.usedCodes.Unmark(ctx, user.ID, code)
 		}
-		s.partial.Restore(ctx, partialToken, claimed)
+		s.partial.Restore(tailCtx, partialToken, claimed)
 		slog.Error("verify-totp: session issue failed", "err", err, "user_id", user.ID)
 		return nil, sessionIssueError(err)
 	}

@@ -318,10 +318,10 @@ func (s *accountRecovery) completeRecovery(ctx context.Context, in RecoverInput,
 		return nil, ErrRecoveryFailed
 	}
 	// The credential is spent: the rest must finish even if the request deadline passed.
-	ctx, cancel := postCommitContext(ctx)
+	tailCtx, cancel := postCommitContext(ctx)
 	defer cancel()
-	s.limiter.Reset(ctx, at.ipFail)
-	s.limiter.Reset(ctx, at.userFail)
+	s.limiter.Reset(tailCtx, at.ipFail)
+	s.limiter.Reset(tailCtx, at.userFail)
 
 	// Drop the revoked sessions' sockets now rather than at the hub's 30-second sweep; recovery is the takeover
 	// case.
@@ -332,12 +332,12 @@ func (s *accountRecovery) completeRecovery(ctx context.Context, in RecoverInput,
 	}
 
 	// Re-read first, so a failed read never leaves an unused session row behind.
-	fresh, err := s.st.GetUserByID(ctx, user.ID)
+	fresh, err := s.st.GetUserByID(tailCtx, user.ID)
 	if err != nil || fresh == nil {
 		slog.Error("recovery: re-reading the user after redeem failed", "err", err, "user_id", user.ID)
 		return nil, ErrRecoveredSignInRequired
 	}
-	token, err := issueSession(ctx, s.st, user.ID, in.Device, in.IP)
+	token, err := issueSession(tailCtx, s.st, user.ID, in.Device, in.IP)
 	if err != nil {
 		slog.Error("recovery: session issue failed after redeem", "err", err, "user_id", user.ID)
 		if errors.Is(err, db.ErrAccountErasing) {
