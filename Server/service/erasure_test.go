@@ -505,6 +505,13 @@ func TestModerationService_EraseUser(t *testing.T) {
 
 type recordingErasureHub struct {
 	calls []string
+	// messagePurges are the job ids PurgeErasedMessagesFromReplay was called for.
+	messagePurges []int64
+}
+
+func (h *recordingErasureHub) PurgeErasedMessagesFromReplay(_ context.Context, jobID int64) error {
+	h.messagePurges = append(h.messagePurges, jobID)
+	return nil
 }
 
 func (h *recordingErasureHub) DisconnectRevokedUser(userID int64) {

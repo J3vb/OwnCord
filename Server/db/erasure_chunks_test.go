@@ -119,10 +119,10 @@ func TestEraseAccount_CrashMidDrainResumesOnReopen(t *testing.T) {
 	sub := seedEraseSubject(t, database)
 	seedBulkErasure(t, database, sub.id, sub.other, sub.channel, n)
 
-	// Chunks 1-4 are the small tables and the uploaded attachments; the
-	// messages follow in 500s, so chunk 7 is the third of them.
-	db.SetErasureChunkHookForTest(database, func(stage string, chunk int) error {
-		if stage == "chunk" && chunk == 7 {
+	// The messages drain in 500s after the small tables, the uploaded attachments
+	// and the event windows; kill once the third chunk of them has committed.
+	db.SetErasureChunkHookForTest(database, func(stage string, _ int) error {
+		if stage == "chunk" && countRows(t, database, `SELECT COUNT(*) FROM messages WHERE user_id = ?`, sub.id) <= n-1500 {
 			return errors.New("killed mid-drain")
 		}
 		return nil

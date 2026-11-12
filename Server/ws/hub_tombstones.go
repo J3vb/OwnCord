@@ -54,6 +54,9 @@ type replayPurgeState struct {
 
 	unfinishedUsers    map[int64]struct{}
 	unfinishedMessages map[int64]struct{}
+	// unfinishedErasures is keyed by erasure job, not by message: the ring copies a failed
+	// first attempt dropped are gone, so a retry cannot rebuild their ids.
+	unfinishedErasures map[int64]struct{}
 }
 
 // lock takes mu for a purge, giving up when ctx ends. It polls rather than blocks so a purge can
@@ -77,7 +80,7 @@ func (t *replayPurgeState) tryColdRead() bool {
 	if t.waiting.Load() > 0 || !t.mu.TryRLock() {
 		return false
 	}
-	if t.waiting.Load() > 0 || len(t.unfinishedUsers) > 0 || len(t.unfinishedMessages) > 0 {
+	if t.waiting.Load() > 0 || len(t.unfinishedUsers) > 0 || len(t.unfinishedMessages) > 0 || len(t.unfinishedErasures) > 0 {
 		t.mu.RUnlock()
 		return false
 	}
@@ -208,7 +211,7 @@ func (h *Hub) dropsForTombstonesWith(msg []byte, pre *preParsedRefs) bool {
 		return true
 	}
 	if refs.messageIn(t.messages) {
-		slog.Info("hub: dropped a frame about a message retention removed")
+		slog.Info("hub: dropped a frame about a message that was removed")
 		return true
 	}
 	return false
@@ -238,6 +241,9 @@ type frameRefs struct {
 		Members []struct {
 			UserID int64 `json:"user_id"`
 		} `json:"members"`
+		Thread *struct {
+			OwnerID *int64 `json:"owner_id"`
+		} `json:"thread"`
 		Referenced *struct {
 			ID   int64 `json:"id"`
 			User *struct {
@@ -259,7 +265,7 @@ func parseFrameRefs(data []byte) (frameRefs, bool) {
 }
 
 // userIn returns the first user the frame names that is a key of set (user ids in the payload,
-// replied-to author, mentions, call participants, group_event target, updates[] and members[]).
+// replied-to author, mentions, call participants, group_event target, thread owner, updates[] and members[]).
 func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 	pl := &f.Payload
 	var ids []int64
@@ -274,6 +280,9 @@ func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 	}
 	if pl.Referenced != nil && pl.Referenced.User != nil {
 		ids = append(ids, pl.Referenced.User.ID)
+	}
+	if pl.Thread != nil && pl.Thread.OwnerID != nil {
+		ids = append(ids, *pl.Thread.OwnerID)
 	}
 	ids = append(ids, pl.Mentions...)
 	if pl.Call != nil {
@@ -313,6 +322,26 @@ func messageIn[V any](f *frameRefs, set map[int64]V) bool {
 		return true
 	}
 	return slices.ContainsFunc(pl.IDs, has)
+}
+
+// addMessageIDs adds the message ids a message-family frame names to set.
+func (f *frameRefs) addMessageIDs(set map[int64]struct{}) {
+	if _, ok := messageFamily[f.Type]; !ok {
+		return
+	}
+	pl := &f.Payload
+	if pl.ID != nil {
+		set[*pl.ID] = struct{}{}
+	}
+	if pl.MessageID != nil {
+		set[*pl.MessageID] = struct{}{}
+	}
+	if pl.Referenced != nil {
+		set[pl.Referenced.ID] = struct{}{}
+	}
+	for _, id := range pl.IDs {
+		set[id] = struct{}{}
+	}
 }
 
 func (f *frameRefs) messageIn(set map[int64]uint64) bool { return messageIn(f, set) }
