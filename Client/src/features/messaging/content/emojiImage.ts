@@ -3,8 +3,10 @@
  * operating system's emoji font (Segoe UI Emoji is slow to draw in bulk and
  * looks different on every system).
  *
- * The SVGs ship with the app (vite.config.ts, `twemojiAssets`), so nothing is
- * fetched from the internet. Each image carries the emoji itself as its alt
+ * The SVGs ship with the app, packed into a few JSON files of neighbouring
+ * names (vite.config.ts, `twemojiAssets`), so nothing is fetched from the
+ * internet. An image waits for its pack, then shows from a local blob URL;
+ * every later use of the same emoji gets that URL at once. Each image carries the emoji itself as its alt
  * text: a copied message gives the emoji back and a screen reader reads it. An
  * emoji with no image (newer than the set) falls back to the font text it
  * would have been anyway.
@@ -42,17 +44,93 @@ export function twemojiName(emoji: string): string {
   return points.join("-");
 }
 
-/** The inline image for one unicode emoji; on a missing file it turns back into text. */
+type Pack = Readonly<Record<string, string>>;
+
+let packStarts: Promise<readonly string[] | null> | null = null;
+const packs = new Map<number, Promise<Pack | null>>();
+const svgUrls = new Map<string, string>();
+
+async function fetchJson<T>(file: string): Promise<T | null> {
+  try {
+    const res = await fetch(`${TWEMOJI_BASE}${file}`);
+    return res.ok ? ((await res.json()) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One cached load per key; a failed load is forgotten so the next use retries. */
+function loadOnce<T>(
+  cache: Map<number, Promise<T | null>>,
+  key: number,
+  load: () => Promise<T | null>,
+): Promise<T | null> {
+  const cached = cache.get(key);
+  if (cached !== undefined) return cached;
+  const loading = load().then((value) => {
+    if (value === null) cache.delete(key);
+    return value;
+  });
+  cache.set(key, loading);
+  return loading;
+}
+
+function starts(): Promise<readonly string[] | null> {
+  packStarts ??= fetchJson<string[]>("index.json").then((list) => {
+    if (list === null) packStarts = null;
+    return list;
+  });
+  return packStarts;
+}
+
+/** The pack holding `name`: the last pack whose first name sorts at or before it. */
+export function packIndex(packFirstNames: readonly string[], name: string): number {
+  let index = 0;
+  packFirstNames.forEach((first, i) => {
+    if (first <= name) index = i;
+  });
+  return index;
+}
+
+/** The SVG text of a Twemoji image by its file name, or null when there is none. */
+export async function twemojiSvg(name: string): Promise<string | null> {
+  const list = await starts();
+  if (list === null) return null;
+  const i = packIndex(list, name);
+  const pack = await loadOnce(packs, i, () => fetchJson<Pack>(`pack-${i}.json`));
+  return pack?.[name] ?? null;
+}
+
+/** A local URL for a Twemoji image by its file name, or null when there is none. */
+export async function twemojiUrl(name: string): Promise<string | null> {
+  const ready = svgUrls.get(name);
+  if (ready !== undefined) return ready;
+  const svg = await twemojiSvg(name);
+  if (svg === null) return null;
+  const url = svgUrls.get(name) ?? URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  svgUrls.set(name, url);
+  return url;
+}
+
+/** The inline image for one unicode emoji; with no image it turns back into text. */
 export function buildEmojiImage(emoji: string): HTMLImageElement {
   const img = createElement("img", {
     class: "emoji-img",
     alt: emoji,
     draggable: "false",
     decoding: "async",
-    src: `${TWEMOJI_BASE}${twemojiName(emoji)}.svg`,
   });
-  img.addEventListener("error", () => img.replaceWith(document.createTextNode(emoji)), {
-    once: true,
+  const toText = (): void => img.replaceWith(document.createTextNode(emoji));
+  img.addEventListener("error", toText, { once: true });
+  const name = twemojiName(emoji);
+  const ready = svgUrls.get(name);
+  if (ready !== undefined) {
+    img.src = ready;
+    return img;
+  }
+  void twemojiUrl(name).then((url) => {
+    if (url === null) toText();
+    else img.src = url;
   });
   return img;
 }
