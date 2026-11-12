@@ -418,6 +418,12 @@
   min-width: 22px;
 }
 
+/* A unicode emoji image waits a moment for its pack (emojiImage.ts): keep its
+   box but hide the alt text until the picture is there. */
+.emoji-img:not([src]) {
+  opacity: 0;
+}
+
 /* A message that is nothing but emoji renders them large, Discord-style. The
    class sits on .msg-text so it sizes the unicode glyphs and the custom-emoji
    images together — nothing downstream needs to know. */

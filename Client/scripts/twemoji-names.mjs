@@ -22,3 +22,30 @@ export function twemojiFileName(nameOrEmoji) {
     .map((cp) => cp.toString(16))
     .join("-");
 }
+
+/** How many files the SVGs are packed into (vite.config.ts, `twemojiAssets`). */
+export const TWEMOJI_PACK_COUNT = 8;
+
+/**
+ * The SVGs grouped into TWEMOJI_PACK_COUNT packs of neighbouring names, so
+ * tone variants and related emoji share a file and compress together. Each
+ * pack maps a FE0F-free name to its SVG text; `starts` holds each pack's first
+ * name, which is how the client finds the pack an emoji lives in.
+ *
+ * @param {Map<string, string>} svgs FE0F-free name -> SVG text
+ * @returns {{ starts: string[], packs: Record<string, string>[] }}
+ */
+export function twemojiPacks(svgs) {
+  const names = [...svgs.keys()].sort();
+  const starts = [];
+  const packs = [];
+  for (let i = 0; i < TWEMOJI_PACK_COUNT; i++) {
+    const slice = names.slice(
+      Math.floor((i * names.length) / TWEMOJI_PACK_COUNT),
+      Math.floor(((i + 1) * names.length) / TWEMOJI_PACK_COUNT),
+    );
+    starts.push(slice[0] ?? "");
+    packs.push(Object.fromEntries(slice.map((name) => [name, svgs.get(name) ?? ""])));
+  }
+  return { starts, packs };
+}

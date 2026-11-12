@@ -120,6 +120,7 @@ release changes the database, and anything an operator must do first.)
 - **Moderation:** closing the ban dialog after a failed ban said the member was banned. It now says the ban could not be confirmed.
 - **Desktop UI:** animated avatars and banners kept old rows in memory after every channel switch. They no longer do.
 - **Direct messages:** the People view redrew every row on each presence change or new message on busy servers. It now updates only the rows that changed.
+- **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
 
 ### Messages & files
 
