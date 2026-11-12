@@ -270,9 +270,12 @@ describe("route button", () => {
       expect(sheet()).toBeNull();
     });
 
-    it("keeps the keyboard on the route in use when the routes change under it", async () => {
+    it("keeps the keyboard on the route it was on when the routes change under it", async () => {
       mount().click();
-      expect(document.activeElement).toBe(row("speaker"));
+      press("ArrowDown");
+      const before = row("earpiece");
+      expect(document.activeElement).toBe(before);
+      // A headset is plugged in and the call moves to it: the rows are drawn again.
       report({
         routes: [
           { kind: "speaker", name: "" },
@@ -282,8 +285,42 @@ describe("route button", () => {
         active: "wired",
       });
       await settle();
-      expect(document.activeElement).toBe(row("wired"));
-      expect(rows().map((r) => r.tabIndex)).toEqual([-1, -1, 0]);
+      expect(row("earpiece")).not.toBe(before);
+      expect(document.activeElement).toBe(row("earpiece"));
+      // The tab stop goes with the focus, not with the route in use.
+      expect(rows().map((r) => r.tabIndex)).toEqual([-1, 0, -1]);
+      expect(row("wired").getAttribute("aria-checked")).toBe("true");
+    });
+
+    it("moves the keyboard to the route in use when the row it was on is gone", async () => {
+      report({
+        routes: [
+          { kind: "speaker", name: "" },
+          { kind: "earpiece", name: "" },
+          { kind: "bluetooth", name: "" },
+        ],
+        active: "bluetooth",
+      });
+      mount().click();
+      expect(document.activeElement).toBe(row("bluetooth"));
+      // The headset goes, and with it the row the keyboard was on.
+      report({ active: "speaker" });
+      await settle();
+      expect(document.activeElement).toBe(row("speaker"));
+      expect(rows().map((r) => r.tabIndex)).toEqual([0, -1]);
+    });
+
+    it("takes no focus for a redraw while the keyboard is somewhere else", async () => {
+      const btn = mount();
+      btn.click();
+      const other = document.createElement("button");
+      document.body.appendChild(other);
+      other.focus();
+      report({ active: "earpiece" });
+      await settle();
+      expect(document.activeElement).toBe(other);
+      // The group still has its one tab stop, on the route in use.
+      expect(rows().map((r) => r.tabIndex)).toEqual([-1, 0]);
     });
 
     it("gives the group a tab stop when the route in use is not listed", () => {

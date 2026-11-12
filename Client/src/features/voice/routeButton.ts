@@ -74,6 +74,7 @@ function routeRow(route: AudioRoute, active: boolean): HTMLButtonElement {
     "aria-checked": String(active),
     // One tab stop for the group, on the route in use.
     tabindex: active ? "0" : "-1",
+    "data-route": route.kind,
     "data-testid": `route-${route.kind}`,
   });
   // A Bluetooth headset goes by its own name, with what it is underneath.
@@ -97,6 +98,12 @@ function routeRow(route: AudioRoute, active: boolean): HTMLButtonElement {
 /** The sheet's rows, as one comparable key: redrawn only when they change. */
 function rowsKey(host: MobileAudioState): string {
   return `${host.active}|${host.routes.map((r) => `${r.kind}:${r.name}`).join(",")}`;
+}
+
+/** The route whose row holds the focus, when a row of `list` does. */
+function focusedRoute(list: HTMLElement): string | null {
+  const at = document.activeElement;
+  return at !== null && list.contains(at) ? at.getAttribute("data-route") : null;
 }
 
 /** The route sheet. It follows the routes while it is open (a headset plugged
@@ -137,8 +144,10 @@ function openRouteSheet(opener: HTMLButtonElement, signal: AbortSignal): void {
     }
     const key = rowsKey(host);
     if (key === drawn) return;
-    // The first draw takes the focus; a later one keeps it if it was here.
-    const focused = drawn === null || list.contains(document.activeElement);
+    // The first draw takes the focus. A later one keeps it on the route it was
+    // on, and moves it to the one in use only when that row is gone.
+    const opening = drawn === null;
+    const from = focusedRoute(list);
     drawn = key;
     clearChildren(list);
     for (const route of host.routes) {
@@ -154,7 +163,14 @@ function openRouteSheet(opener: HTMLButtonElement, signal: AbortSignal): void {
       list.appendChild(row);
     }
     setRovingTabindex(list, ROW);
-    if (focused) list.querySelector<HTMLElement>("[tabindex='0']")?.focus({ focusVisible: false });
+    if (!opening && from === null) return;
+    const row =
+      (from === null ? null : list.querySelector<HTMLElement>(`[data-route='${from}']`)) ??
+      list.querySelector<HTMLElement>("[tabindex='0']");
+    // A sheet opened by a tap shows no focus ring; the keyboard's row keeps its own.
+    row?.focus(opening ? { focusVisible: false } : undefined);
+    // The tab stop goes with the focus.
+    setRovingTabindex(list, ROW);
   };
   const unsubs = [mobileRouteStore.subscribe(draw), voiceStore.subscribeSelector(voiceKey, draw)];
   sheet.signal.addEventListener(
