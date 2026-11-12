@@ -20,6 +20,7 @@ import { formatDiscordTimestamp, type TimestampStyle } from "./discordTimestamp"
 import {
   ANGLE_URL_RE,
   buildMatches,
+  type CloseMemo,
   codeSpanEnd,
   matchDelim,
   runLength,
@@ -158,12 +159,17 @@ function linkToken(
 }
 
 /** A delimiter pair opening at `i` and closing later, as nested style nodes. */
-function styledToken(src: string, i: number, depth: number): InlineToken | null {
+function styledToken(
+  src: string,
+  i: number,
+  depth: number,
+  closeMemo: CloseMemo,
+): InlineToken | null {
   if (depth >= MAX_DEPTH) return null;
   const d = matchDelim(src, i);
   if (d === null) return null;
   const innerStart = i + d.marker.length;
-  const close = scanClose(src, innerStart, d.marker);
+  const close = scanClose(src, innerStart, d.marker, closeMemo);
   if (close <= innerStart) return null;
   const children = parseInline(src.slice(innerStart, close), depth + 1);
   let node: InlineNode = { type: d.styles[d.styles.length - 1]!, children };
@@ -191,6 +197,7 @@ export function parseInline(src: string, depth = 0): InlineNode[] {
   // case for recursive calls into styled/link text.
   const bracketMatches = src.includes("[") ? buildMatches(src, "[", "]") : EMPTY_MATCHES;
   const parenMatches = src.includes("(") ? buildMatches(src, "(", ")") : EMPTY_MATCHES;
+  const closeMemo: CloseMemo = new Map();
 
   let i = 0;
   while (i < src.length) {
@@ -201,7 +208,7 @@ export function parseInline(src: string, depth = 0): InlineNode[] {
       angleToken(src, i, c) ??
       urlToken(src, i) ??
       linkToken(src, i, c, depth, bracketMatches, parenMatches) ??
-      styledToken(src, i, depth);
+      styledToken(src, i, depth, closeMemo);
     if (token === null) {
       buf += c;
       i++;

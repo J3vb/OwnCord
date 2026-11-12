@@ -62,22 +62,29 @@ export function urlEnd(src: string, i: number): number {
   if (!URL_START.test(src.slice(i, i + 8))) return i;
   let end = i;
   while (end < src.length && !/[\s<>"'`]/.test(src[end]!)) end++;
-  const min = i + 8;
-  for (;;) {
-    const tail = src.slice(min, end);
-    const run = /([*_~|])\1+$/.exec(tail);
-    if (run !== null) {
-      end -= run[0].length;
-      continue;
-    }
-    if (end > min && (src[end - 1] === "*" || src[end - 1] === "_")) {
-      end--;
-      continue;
-    }
-    break;
-  }
-  return end;
+  return stripTrailingDelims(src, i + 8, end);
 }
+
+/**
+ * Gives back trailing delimiter runs of 2+ (`**`, `~~`, `||`, `__`) and lone
+ * `*` or `_`, repeatedly, never below `min`. One backward walk, so a long
+ * tail of delimiters costs linear time.
+ */
+function stripTrailingDelims(src: string, min: number, end: number): number {
+  let e = end;
+  while (e > min) {
+    const last = src[e - 1]!;
+    if (!TRAILING_DELIMS.has(last)) break;
+    let k = e - 1;
+    while (k > min && src[k - 1] === last) k--;
+    if (e - k >= 2) e = k;
+    else if (last === "*" || last === "_") e--;
+    else break;
+  }
+  return e;
+}
+
+const TRAILING_DELIMS: ReadonlySet<string> = new Set(["*", "_", "~", "|"]);
 
 /** The delimiter opening at `i`, or null. */
 export function matchDelim(src: string, i: number): DelimSpec | null {
@@ -92,50 +99,68 @@ export function matchDelim(src: string, i: number): DelimSpec | null {
 }
 
 /**
+ * Closer results already found in one source string, per marker: position
+ * the scan reached -> the closer it ends at (or -1). The scan carries no state
+ * besides its position, so any later scan that reaches a recorded position
+ * ends the same way, and every position is walked at most once per marker.
+ */
+export type CloseMemo = Map<string, Map<number, number>>;
+
+/**
  * Index of the delimiter run that closes `marker`, searching from `from`, or
  * -1. Escapes, code spans and bare URLs are skipped so a closer hiding inside
- * them is not mistaken for the real one.
+ * them is not mistaken for the real one. Pass the same `memo` for every call
+ * on one `src` to keep a run of openers that never close linear.
  */
-export function scanClose(src: string, from: number, marker: string): number {
-  const ch = marker[0]!;
-  const len = marker.length;
-  let j = from;
-  while (j < src.length) {
-    const c = src[j]!;
-    if (c === "\\") {
-      j += 2;
-      continue;
-    }
-    if (c === "`") {
-      const end = codeSpanEnd(src, j);
-      if (end > 0) {
-        j = end;
-        continue;
-      }
-    }
-    if (c === "<") {
-      ANGLE_URL_RE.lastIndex = j;
-      const angle = ANGLE_URL_RE.exec(src);
-      if (angle !== null) {
-        j += angle[0].length;
-        continue;
-      }
-    }
-    const u = urlEnd(src, j);
-    if (u > j) {
-      j = u;
-      continue;
-    }
-    if (c === ch) {
-      const run = runLength(src, j, ch);
-      const usable = len > 1 ? run >= len : run === 1;
-      if (usable && (ch !== "_" || !isWordChar(src[j + len]))) return j;
-      j += run;
-      continue;
-    }
-    j++;
+export function scanClose(src: string, from: number, marker: string, memo?: CloseMemo): number {
+  let known = memo?.get(marker);
+  if (memo !== undefined && known === undefined) {
+    known = new Map();
+    memo.set(marker, known);
   }
-  return -1;
+  const visited: number[] = [];
+  let j = from;
+  let result = -1;
+  while (j < src.length) {
+    const hit = known?.get(j);
+    if (hit !== undefined) {
+      result = hit;
+      break;
+    }
+    visited.push(j);
+    const next = scanStep(src, j, marker);
+    if (next < 0) {
+      result = j;
+      break;
+    }
+    j = next;
+  }
+  if (known !== undefined) for (const v of visited) known.set(v, result);
+  return result;
+}
+
+/** Where the closer scan goes after `j`, or -1 when a usable closer sits at `j`. */
+function scanStep(src: string, j: number, marker: string): number {
+  const c = src[j]!;
+  if (c === "\\") return j + 2;
+  if (c === "`") {
+    const end = codeSpanEnd(src, j);
+    if (end > 0) return end;
+  }
+  if (c === "<") {
+    ANGLE_URL_RE.lastIndex = j;
+    const angle = ANGLE_URL_RE.exec(src);
+    if (angle !== null) return j + angle[0].length;
+  }
+  const u = urlEnd(src, j);
+  if (u > j) return u;
+  const ch = marker[0]!;
+  if (c !== ch) return j + 1;
+  const len = marker.length;
+  const run = runLength(src, j, ch);
+  const usable = len > 1 ? run >= len : run === 1;
+  if (usable && (ch !== "_" || !isWordChar(src[j + len]))) return -1;
+  return j + run;
 }
 
 /**
