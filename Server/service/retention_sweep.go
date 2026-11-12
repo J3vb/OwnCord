@@ -46,15 +46,22 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 			break
 		}
 		cutoff := s.cutoff(w.Days)
-		// Nothing due: no marker rewrite, writer transaction or swept record. The last marker still covers
-		// every earlier deletion.
+		// Nothing due: no marker rewrite, writer transaction or swept record, unless the marker and the swept
+		// record disagree, where the old path below repairs them so a restart does not replay a stale cutoff.
 		due, err := s.st.HasRetentionCandidates(ctx, w.ChannelID, cutoff)
 		if err != nil {
 			sweepErr = fmt.Errorf("retention probe for channel %d: %w", w.ChannelID, err)
 			break
 		}
 		if !due {
-			continue
+			settled, err := s.sweepSettled(ctx, w.ChannelID)
+			if err != nil {
+				sweepErr = err
+				break
+			}
+			if settled {
+				continue
+			}
 		}
 		// The marker is the durable intent that survives a restore. Write it before deleting: a crash after makes
 		// the next start finish the sweep, while a marker failure leaves the rows untouched instead of losing the
@@ -102,6 +109,26 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 		return rep, sweepErr
 	}
 	return rep, fileErr
+}
+
+// sweepSettled reports whether the channel's marker needs no repair: there is no marker store or marker, or
+// the database recorded finishing the marker's sweep.
+func (s *RetentionService) sweepSettled(ctx context.Context, channelID int64) (bool, error) {
+	if s.markers == nil {
+		return true, nil
+	}
+	sweep, err := s.markers.MessagesSweepID(ctx, channelID)
+	if err != nil {
+		return false, fmt.Errorf("retention marker sweep for channel %d: %w", channelID, err)
+	}
+	if sweep == "" {
+		return true, nil
+	}
+	done, ok, err := s.st.RetentionSwept(ctx, channelID)
+	if err != nil {
+		return false, fmt.Errorf("retention swept record for channel %d: %w", channelID, err)
+	}
+	return ok && done == sweep, nil
 }
 
 // noteSwept records that the channel finished the marker's sweep named sweep; without a marker store

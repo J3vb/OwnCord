@@ -106,3 +106,31 @@ func TestRetention_TickProbeFailureDeletesNothing(t *testing.T) {
 		t.Fatalf("sweeps=%d messages=%d after a probe failure", store.sweeps, countMessages(t, database, ch))
 	}
 }
+
+// A sweep whose swept record failed to save leaves the marker and the record disagreeing. The next tick
+// repairs that even when nothing is due, so a start-up replay never deletes at the older cutoff after the
+// window was lengthened.
+func TestRetention_IdleTickRepairsUnrecordedSweep(t *testing.T) {
+	ctx := context.Background()
+	f := newRetentionFixture(t)
+	_, err := f.database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp, pinned) VALUES (?, ?, 'kept', ?, 1)`,
+		f.channel, f.owner, retentionNow.Add(-40*24*time.Hour).Format("2006-01-02 15:04:05"))
+	mustDo(t, "insert pinned", err)
+	f.store.fail["record-swept"] = true
+	if _, err := f.svc.Tick(ctx); err != nil {
+		t.Fatalf("Tick = %v", err)
+	}
+	_, err = f.database.ExecContext(ctx, `UPDATE messages SET pinned = 0 WHERE channel_id = ?`, f.channel)
+	mustDo(t, "unpin", err)
+	mustDo(t, "SetChannelRetention", f.database.SetChannelRetention(ctx, f.channel, 90, f.owner))
+	delete(f.store.fail, "record-swept")
+	if _, err := f.svc.Tick(ctx); err != nil {
+		t.Fatalf("repair Tick = %v", err)
+	}
+	if n, err := f.svc.ReplayMarkers(ctx); err != nil || n != 0 {
+		t.Fatalf("ReplayMarkers = %d, %v; want 0 removed", n, err)
+	}
+	if got := countMessages(t, f.database, f.channel); got != 2 {
+		t.Fatalf("messages = %d, want the fresh and the unpinned one", got)
+	}
+}
