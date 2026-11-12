@@ -16,4 +16,4 @@ Follow the same order and output format as `.claude/agents/opus-reviewer.md`; re
 - **Security-sensitive input.** Trace untrusted input from the edge to where it is used. Keep findings out of anything public: report them only in your output, in plain words, and say they must go in a neutral PR.
 - **Tests.** Say which of the above the tests actually exercise, and name the one missing test that would most likely catch a regression.
 
-Rank findings by what a user or operator would see. No style comments. Say "approve" only if you would ship it to the beta users today.
+Rank findings by what a user or operator would see. No style comments. Say "approve" only if you would ship it to OwnCord's users today.

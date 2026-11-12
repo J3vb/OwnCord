@@ -21,7 +21,7 @@ Knowing the kind tells you how far to trust a page:
 | Run a server                        | [quick-start.md](quick-start.md)                            |
 | Run a server for real               | [deployment.md](deployment.md)                              |
 | Fix something that is wrong         | [hosting/troubleshooting.md](hosting/troubleshooting.md)    |
-| Know what the beta does not do      | [known-limitations.md](known-limitations.md)                |
+| Know what OwnCord does not do       | [known-limitations.md](known-limitations.md)                |
 | See the current release and plans   | [STATUS.md](STATUS.md)                                      |
 | Contribute a change                 | [contributing.md](contributing.md)                          |
 | Understand how it is built          | [architecture/](architecture/README.md)                     |
@@ -41,7 +41,7 @@ Knowing the kind tells you how far to trust a page:
 | [deployment.md](deployment.md)                         | Run a server: pick Docker, a Linux service or Windows, first run, next steps.                                                                                             |
 | [hosting/](hosting/)                                   | Short guides for server owners: Docker, Windows, TLS and proxies, backups, upgrades, monitoring, troubleshooting, and a technical reference.                              |
 | [linux-install.md](linux-install.md)                   | Install the desktop app on Linux: .deb, AppImage, tray, keyring, Wayland and uninstall.                                                                                   |
-| [known-limitations.md](known-limitations.md)           | What the beta does not do, and a short FAQ.                                                                                                                               |
+| [known-limitations.md](known-limitations.md)           | What OwnCord does not do, and a short FAQ.                                                                                                                                |
 | [moderation.md](moderation.md)                         | For owners, admins and moderators: roles, reports, actions, appeals and who can join.                                                                                     |
 | [accessibility.md](accessibility.md)                   | Keyboard, screen reader, text size, contrast and motion support, and the known gaps.                                                                                      |
 | [STATUS.md](STATUS.md)                                 | The current release, nightly test health and the roadmap.                                                                                                                 |

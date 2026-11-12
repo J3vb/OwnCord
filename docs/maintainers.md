@@ -13,8 +13,8 @@ This is the end-to-end procedure for cutting a release. Every step runs on
 (`release.yml`) stops on any missing input. In the examples below,
 `vX.Y.Z` stands for the version you are releasing. From 2.5.0 on, versions
 carry no `-beta.N` suffix: a release with new features bumps the minor number,
-a fixes-only release bumps the patch number. The project is still a beta; the
-release notes say so.
+a fixes-only release bumps the patch number. Everything before the first
+stable release was a beta; stable releases keep the hobby-project disclaimer.
 
 1. **Reconcile `main` into `dev` first, if the last release was squashed.**
    A release PR that was squash-merged makes `dev` and `main` drift apart. You
@@ -45,7 +45,7 @@ release notes say so.
      the end.
 
    The "How to write an entry" rules in `CHANGELOG.md` still apply. One early
-   beta's release page had to be rewritten after publishing because its
+   release page had to be rewritten after publishing because its
    section was internal prose. This step stops that from happening again.
 
    **Record the release in [`docs/STATUS.md`](STATUS.md)** in the same PR.
@@ -99,8 +99,8 @@ release notes say so.
    [Verifying a download](hosting/reference.md#verifying-a-download) commands from a
    machine that is not the CI runner: checksums, minisign on the server
    files, and `gh attestation verify` for the files and the container image.
-   - The Windows client installers are **unsigned**. Code signing was declined
-     for the beta. So first launch shows the SmartScreen "Windows protected
+   - The Windows client installers are **unsigned**: there is no code-signing
+     certificate yet. So first launch shows the SmartScreen "Windows protected
      your PC" prompt, and the quick-start note covers it for users.
    - The server files and every provenance and SBOM attestation are still
      signed and must verify.

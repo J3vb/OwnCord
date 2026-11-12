@@ -4,8 +4,8 @@ This page tells you how to report a security problem in OwnCord.
 
 ## Supported versions
 
-OwnCord is in beta. Only the **latest release** gets security fixes. Older
-releases do not get backported fixes.
+Only the **latest release** gets security fixes. Older releases do not get
+backported fixes, so update to the newest release to stay covered.
 
 | Version                                                                   | Supported |
 | ------------------------------------------------------------------------- | --------- |

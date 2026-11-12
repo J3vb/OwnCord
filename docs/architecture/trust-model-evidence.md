@@ -429,7 +429,7 @@ exact and narrower: the server never holds the room key, so an operator who
 **reads** — database, logs, relayed frames, backups — gets nothing, and a
 known peer's key cannot be swapped without a key-changed notice. A defence
 against a modified server needs authenticated membership or the client
-refusing unrecognised participants; neither exists in beta (see "What beta
+refusing unrecognised participants; neither exists today (see "What OwnCord
 does not claim").
 
 ## Account recovery
@@ -495,7 +495,7 @@ does not claim").
   appears to them as a key change that replaces the pin (with a notice), and
   your first device then does the same. Not per-device pinning.
 
-## What beta does not claim
+## What OwnCord does not claim
 
 - **No deniability, no metadata privacy.** The operator sees who talked to
   whom and when.
@@ -505,7 +505,7 @@ does not claim").
 - **No protection against a hostile operator, E2EE media included.** E2EE
   resists an operator who reads. A modified server controls call membership
   and can add a participant it holds the keys for; pins do not cover a member
-  that was never a known peer. Authenticated membership is not in beta.
+  that was never a known peer. Authenticated membership does not exist yet.
 - **Erasure is not undone by a restore, but the audit trail keeps a
   token.** Account erasure (B4-9, `Server/db/erasure.go`;
   `TestHP4_D1_ErasureLeavesNoClass`) hard-deletes every row attributable to

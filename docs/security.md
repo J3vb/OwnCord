@@ -172,5 +172,5 @@ your backups.
   still checked with OwnCord's own signature.
 - **Text chat is not end-to-end encrypted.** See
   [trust-model.md](trust-model.md).
-- The full list of what the beta does not do:
+- The full list of what OwnCord does not do:
   [known-limitations.md](known-limitations.md).

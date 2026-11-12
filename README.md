@@ -1,6 +1,6 @@
 [![CI](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml/badge.svg)](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/J3vb/OwnCord?include_prereleases&label=release)](https://github.com/J3vb/OwnCord/releases/latest)
-![Status](https://img.shields.io/badge/status-beta-orange)
+![Status](https://img.shields.io/badge/status-stable-brightgreen)
 ![Go](https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go&logoColor=white)
 ![Tauri](https://img.shields.io/badge/tauri-v2-24C8DB?logo=tauri&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20x64%20%7C%20Windows%20ARM64%20%7C%20Linux%20x64%20%7C%20Linux%20ARM64%20%7C%20Android-informational)
@@ -11,10 +11,15 @@
 OwnCord is a self-hosted chat app I build for me and my friends. It has text
 channels, voice and video, and a server you own.
 
-> **Beta, and a hobby project.**
+> **Stable, and still a hobby project.**
 > I build this for fun and run it for a small group of friends. It is not a
-> product. There is no support promise, and it is not production-ready. Expect
-> rough edges, fast changes and the odd breaking change.
+> product, and there is no support promise. What stable means:
+>
+> - Only the newest release gets fixes.
+> - The previous release's app keeps working with a newer server.
+> - Upgrades only go forward: you cannot go back to an older version without
+>   restoring a backup.
+> - Your data and settings carry over when you upgrade.
 >
 > Do not use it for anything sensitive.
 
@@ -48,20 +53,22 @@ You start the server, give your friends an invite code, and that is it.
 | Change a server setting                 | [docs/server-configuration.md](docs/server-configuration.md) |
 | Keep my server and members safe         | [docs/security.md](docs/security.md)                         |
 | Know how many people one server holds   | [docs/capacity.md](docs/capacity.md)                         |
-| Know what the beta does not do          | [docs/known-limitations.md](docs/known-limitations.md)       |
+| Know what OwnCord does not do           | [docs/known-limitations.md](docs/known-limitations.md)       |
 | Build it myself or contribute           | [docs/contributing.md](docs/contributing.md)                 |
 | See how it is built                     | [docs/architecture/](docs/architecture/README.md)            |
 | Find any other document                 | [docs/README.md](docs/README.md)                             |
 
 ## What works today
 
-| Area            | Status          |
-| --------------- | --------------- |
-| Text chat       | Working in beta |
-| Voice and video | Working in beta |
-| Admin panel     | Working in beta |
-| Browser client  | Working in beta |
-| Android app     | Experimental    |
+| Area            | Status       |
+| --------------- | ------------ |
+| Text chat       | Stable       |
+| Voice and video | Stable       |
+| Admin panel     | Stable       |
+| Browser client  | Stable       |
+| Windows app     | Stable       |
+| Linux app       | Stable       |
+| Android app     | Experimental |
 
 Security is reviewed in regular passes. Each review is a dated audit, listed in
 [docs/README.md](docs/README.md#audits).
