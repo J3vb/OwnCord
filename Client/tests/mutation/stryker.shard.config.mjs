@@ -318,6 +318,7 @@ export const shards = {
     "src/lib/wsConfig.ts",
   ],
   "lib-rest-1": [
+    "src/features/messaging/chatHeaderOverflow.ts",
     "src/features/messaging/historyWindows.ts",
     "src/features/messaging/reactionUsers.ts",
     "src/features/threads/threadNavigation.ts",
@@ -347,6 +348,10 @@ export const shards = {
   ],
   "lib-rest-4": [
     "src/features/developer-mode/developerTools.ts",
+    "src/features/messaging/content/emojiImage.ts",
+    "src/features/messaging/emojiPickerCells.ts",
+    "src/features/messaging/emojiSheets.ts",
+    "src/features/messaging/emojiSheetsData.ts",
     "src/features/messaging/pickerImages.ts",
     "src/features/messaging/pickerLazyGrids.ts",
     "src/features/share/shareIn.ts",

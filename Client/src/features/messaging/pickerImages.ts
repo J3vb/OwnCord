@@ -1,6 +1,7 @@
 /** Load visible picker images first, with a small buffer ahead of scrolling. */
 const PREFETCH_PX = 320;
-const MAX_ACTIVE = 4;
+/** Matches the native fetcher's own cap, so a page of GIFs fills every open connection. */
+const MAX_ACTIVE = 6;
 
 interface PendingImage {
   readonly load: () => Promise<string | null>;

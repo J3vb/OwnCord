@@ -21,6 +21,7 @@ import { test, expect } from "./fixtures";
 import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/accessibility";
 import {
   buildTauriMockScript,
+  dmChannel,
   emitWsMessage,
   mockTauriFullSessionWithVoice,
   navigateToMainPage,
@@ -1392,6 +1393,84 @@ for (const profile of PROFILES) {
       await page.locator("[data-testid='incoming-call-screen-accept']").tap();
       await expect(screen(page)).toHaveCount(0);
       await expect(banner(page)).toBeHidden();
+    });
+  });
+}
+
+const HEADER_DM = 120;
+const HEADER_DM_CHANNELS = [
+  dmChannel(HEADER_DM, {
+    id: 2,
+    username: "otheruser",
+    display_name: "Maximiliaan Vandenberghe-Wouters",
+  }),
+];
+
+for (const profile of PROFILES) {
+  test.describe(`mobile DM header, ${profile.name}`, () => {
+    test.use(profile.use);
+
+    const header = (page: Page) => page.locator("[data-testid='chat-header']");
+
+    async function openDm(page: Page): Promise<void> {
+      await page.addInitScript(
+        buildTauriMockScript({
+          httpRoutes: [
+            ...BASE_SESSION_ROUTES,
+            { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
+            { pattern: "GET /api/v1/dms", status: 200, body: { dm_channels: HEADER_DM_CHANNELS } },
+          ],
+          simulateWsFlow: true,
+          readyOverrides: { dm_channels: HEADER_DM_CHANNELS },
+        }),
+      );
+      await page.goto("/");
+      await navigateToMainPageReady(page);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await page.locator("[data-testid='server-rail-home']").tap();
+      await page.locator(`.dm-item[data-channel-id='${HEADER_DM}']`).tap();
+      await expect(page.locator("[data-testid='call-btn']")).toBeVisible();
+    }
+
+    /** Every visible header control ends inside the viewport. */
+    async function headerFits(page: Page, width: number): Promise<void> {
+      await page.setViewportSize({ width, height: 740 });
+      await noHorizontalScroll(page);
+      const controls = header(page).locator("button:visible");
+      const count = await controls.count();
+      expect(count).toBeGreaterThan(0);
+      for (let i = 0; i < count; i++) {
+        const box = await controls.nth(i).boundingBox();
+        expect(box, `header control ${i}`).not.toBeNull();
+        expect(box!.x).toBeGreaterThanOrEqual(0);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+        expect(box!.width).toBeGreaterThanOrEqual(44);
+      }
+    }
+
+    test("a DM header has no horizontal overflow at 360 px and 412 px", async ({ page }) => {
+      await openDm(page);
+      await headerFits(page, 360);
+      await headerFits(page, 412);
+      // The long name gives way with an ellipsis rather than pushing the tools out.
+      const name = page.locator("[data-testid='chat-header-name']");
+      const cut = await name.evaluate((el) => el.scrollWidth > el.clientWidth);
+      expect(cut).toBe(true);
+    });
+
+    test("pins and the profile toggle sit behind the header's More button", async ({ page }) => {
+      await openDm(page);
+      await page.setViewportSize({ width: 360, height: 740 });
+      await expect(page.locator("[data-testid='pin-btn']")).toBeHidden();
+      await expect(page.locator("[data-testid='dm-profile-btn']")).toBeHidden();
+      const more = page.locator("[data-testid='chat-header-more']");
+      await more.tap();
+      const sheet = page.locator("[data-testid='chat-header-more-sheet']");
+      await expect(sheet).toBeVisible();
+      await expect(sheet.locator("[data-testid='chat-header-more-dm-profile-btn']")).toBeVisible();
+      await sheet.locator("[data-testid='chat-header-more-pin-btn']").tap();
+      await expect(sheet).toHaveCount(0);
+      await expect(page.locator(".pinned-panel")).toBeVisible();
     });
   });
 }

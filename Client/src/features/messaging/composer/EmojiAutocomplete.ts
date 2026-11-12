@@ -17,6 +17,7 @@
 
 import { createElement, setText } from "@lib/dom";
 import { buildCustomEmojiImage } from "../content/customEmoji";
+import { buildEmojiImage, showsAsImage } from "../content/emojiImage";
 import { listCustomEmoji, type CustomEmoji } from "@stores/emoji.store";
 import { messagingText } from "../../../i18n/messaging";
 import { createInlineAutocomplete, type InlineAutocompleteComponent } from "./inlineAutocomplete";
@@ -73,6 +74,7 @@ function byLabel(a: EmojiSuggestion, b: EmojiSuggestion): number {
 function buildPreview(s: EmojiSuggestion): HTMLSpanElement {
   const preview = createElement("span", { class: "ea-preview" });
   if (s.emoji !== null) preview.appendChild(buildCustomEmojiImage(s.emoji));
+  else if (s.char !== null && showsAsImage(s.char)) preview.appendChild(buildEmojiImage(s.char));
   else setText(preview, s.char ?? "");
   return preview;
 }

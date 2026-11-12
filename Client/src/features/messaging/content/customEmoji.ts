@@ -34,18 +34,18 @@ export const EMOJI_TOKEN_REGEX = /:([A-Za-z0-9_]{2,32}):/g;
 export const MAX_JUMBO_EMOJI = 27;
 
 /** One unicode emoji, including skin tones, ZWJ sequences, flags and keycaps. */
-const UNICODE_EMOJI = new RegExp(
-  "^(?:" +
-    // Keycap: digit/#/* + optional VS16 + the combining enclosing keycap.
-    "[0-9#*]\\uFE0F?\\u{20E3}" +
-    "|" +
-    // Regional-indicator pair (flags) or any pictographic base.
-    "(?:[\\u{1F1E6}-\\u{1F1FF}]|\\p{Extended_Pictographic})" +
-    // Modifiers, variation selectors and ZWJ-joined continuations.
-    "(?:\\uFE0F|\\u{20E3}|[\\u{1F3FB}-\\u{1F3FF}]|\\u200D(?:[\\u{1F1E6}-\\u{1F1FF}]|\\p{Extended_Pictographic})(?:\\uFE0F|[\\u{1F3FB}-\\u{1F3FF}])*)*" +
-    ")",
-  "u",
-);
+export const UNICODE_EMOJI_PATTERN =
+  // Keycap: digit/#/* + optional VS16 + the combining enclosing keycap.
+  "[0-9#*]\\uFE0F?\\u{20E3}" +
+  "|" +
+  // Regional-indicator pair (a flag), a lone indicator, or any pictographic base.
+  "(?:[\\u{1F1E6}-\\u{1F1FF}]{1,2}|\\p{Extended_Pictographic})" +
+  // Modifiers, variation selectors and ZWJ-joined continuations.
+  "(?:\\uFE0F|\\u{20E3}|[\\u{1F3FB}-\\u{1F3FF}]|\\u200D(?:[\\u{1F1E6}-\\u{1F1FF}]|\\p{Extended_Pictographic})(?:\\uFE0F|[\\u{1F3FB}-\\u{1F3FF}])*)*" +
+  // Tag sequence: the England, Scotland and Wales flags.
+  "(?:[\\u{E0020}-\\u{E007E}]+\\u{E007F})?";
+
+const UNICODE_EMOJI = new RegExp(`^(?:${UNICODE_EMOJI_PATTERN})`, "u");
 
 /** A single `:shortcode:` anchored at the start of the remaining text. */
 const LEADING_EMOJI_TOKEN = /^:([A-Za-z0-9_]{2,32}):/;
