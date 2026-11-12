@@ -58,11 +58,13 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 }
 
 // heldMove is the membership a same-channel call move ended without a voice_leave, and
-// whether its row is still in place for the join's insert to replace.
+// whether its row is still in place for the join's insert to replace. flagsFromRow: the
+// moderator flags came off that row, which the upsert keeps, so they need no restore.
 type heldMove struct {
-	chID      int64
-	joinToken string
-	rowKept   bool
+	chID         int64
+	joinToken    string
+	rowKept      bool
+	flagsFromRow bool
 }
 
 // leaveForCallMove reads the moderator mute/deafen the old call carries and ends that call
@@ -81,6 +83,8 @@ func (h *Hub) leaveForCallMove(fctx, ctx context.Context, txn *voiceTxn, c, from
 	if prev != nil {
 		flags = modFlagStash{muted: prev.ServerMuted, deafened: prev.ServerDeafened, mutedBy: prev.ServerMutedBy}
 	}
+	fromRow := flags.muted || flags.deafened
+	defer func() { held.flagsFromRow = held.chID != 0 && fromRow }()
 	if from != nil {
 		if sm, sd, sby := h.takeUserModFlags(from); (sm || sd) && !flags.muted && !flags.deafened {
 			flags = modFlagStash{muted: sm, deafened: sd, mutedBy: sby}

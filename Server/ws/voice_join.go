@@ -57,8 +57,13 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 	}
 	leaveDone := time.Now()
 
-	state, ok := h.voiceJoinPersistWithModFlags(fctx, ctx, txn, c, capacity, channelID, reqID,
-		modFlagStash{muted: wasServerMuted, deafened: wasServerDeafened, mutedBy: wasServerMutedBy})
+	restore := modFlagStash{muted: wasServerMuted, deafened: wasServerDeafened, mutedBy: wasServerMutedBy}
+	if held.rowKept && held.flagsFromRow {
+		// The upsert keeps the row's flags as they are now, including a moderator's change
+		// since they were read; restoring the earlier read would undo it.
+		restore = modFlagStash{}
+	}
+	state, ok := h.voiceJoinPersistWithModFlags(fctx, ctx, txn, c, capacity, channelID, reqID, restore)
 	if !ok {
 		// The stash was consumed and nothing was persisted for voiceJoinRestoreModFlags to apply;
 		// put it back so a retried join still sees it.

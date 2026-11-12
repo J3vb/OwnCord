@@ -243,3 +243,47 @@ func TestMultiDevice_SameChannelMoveKeepsChannelAtLimit(t *testing.T) {
 		t.Fatal("a successful same-channel move announced a voice_leave")
 	}
 }
+
+// onStateAfterSlotCleared runs fn once, at the first State read made after the
+// old device's call slot is cleared: between the move's leave step and its insert.
+type onStateAfterSlotCleared struct {
+	VoiceStore
+	old *Client
+	fn  func()
+	ran atomic.Bool
+}
+
+func (s *onStateAfterSlotCleared) State(ctx context.Context, userID int64) (*db.VoiceState, error) {
+	if s.old.voice.channel() == 0 && s.ran.CompareAndSwap(false, true) {
+		s.fn()
+	}
+	return s.VoiceStore.State(ctx, userID)
+}
+
+// A moderator's unmute that lands while a same-channel move is in flight is
+// kept: the move does not re-apply the mute it read before.
+func TestMultiDevice_SameChannelMoveKeepsAnUnmuteThatLandsMidMove(t *testing.T) {
+	f, obs, a, b := newSameChannelMove(t)
+	ctx := context.Background()
+	if ok, err := f.hub.voice.SetServerMute(ctx, f.uid, f.voiceA, true); err != nil || !ok {
+		t.Fatalf("SetServerMute = %v, %v", ok, err)
+	}
+	var unmuted bool
+	store := &onStateAfterSlotCleared{VoiceStore: f.hub.voice, old: a.c, fn: func() {
+		unmuted, _, _ = f.hub.SetServerMuteLocked(ctx, f.uid, f.voiceA, false)
+	}}
+	f.hub.voice = store
+
+	takeOverSameChannel(t, f, obs, a, b)
+
+	if !store.ran.Load() || !unmuted {
+		t.Fatalf("the unmute did not land mid-move (ran=%v matched=%v)", store.ran.Load(), unmuted)
+	}
+	row := f.row(f.uid)
+	if row == nil || row.ChannelID != f.voiceA {
+		t.Fatalf("row after the move = %+v, want one in channel %d; B got %s", row, f.voiceA, b.types())
+	}
+	if row.ServerMuted {
+		t.Fatal("the move re-applied a mute the moderator had just lifted")
+	}
+}
