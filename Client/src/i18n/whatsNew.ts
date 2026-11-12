@@ -7,6 +7,8 @@ export const whatsNewText = defineCatalog("whatsNew", {
   "about.desktop": "Desktop app",
   "about.android": "Android app",
   "about.github": "OwnCord on GitHub",
+  "about.emojiCredit": "Emoji graphics: Twemoji, by Twitter, Inc. and other contributors.",
+  "about.emojiLicense": "Licensed under CC-BY 4.0",
   "about.notesFor": "What's new in {version}",
   "about.notesLabel": "Release notes",
   "about.history": "Version history",

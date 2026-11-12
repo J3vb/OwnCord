@@ -7,7 +7,10 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { buildCustomEmojiNode } from "./content/customEmoji";
-import { createPickerImages, type PickerImages } from "./pickerImages";
+import { buildEmojiImage } from "./content/emojiImage";
+import { sheetUrl, useSheet } from "./emojiSheets";
+import { buildEmojiSpan } from "./emojiPickerCells";
+import { createPickerImages } from "./pickerImages";
 import { trackPickerCategory } from "./pickerScroll";
 import { createLazyGrids } from "./pickerLazyGrids";
 import { messagingText } from "../../i18n/messaging";
@@ -63,6 +66,8 @@ type EmojiCategoryKey =
 interface EmojiCategory {
   readonly name: EmojiCategoryKey;
   readonly emoji: readonly string[];
+  /** The group's image sheet; `emoji` is then the group in sheet order. */
+  readonly sheet?: string;
 }
 
 /** The glyph each category shows in the side rail; Server uses its first emoji. */
@@ -87,37 +92,12 @@ function buildCategoryIcon(cat: EmojiCategory): Node {
     if (image !== null) return image;
     return document.createTextNode("⭐");
   }
-  return document.createTextNode(CATEGORY_ICONS[cat.name]);
+  return buildEmojiImage(CATEGORY_ICONS[cat.name]);
 }
 
 // ---------------------------------------------------------------------------
 // EmojiPicker
 // ---------------------------------------------------------------------------
-
-function buildEmojiSpan(emoji: string, images: PickerImages): HTMLSpanElement {
-  const span = createElement("span", {
-    class: "ep-emoji",
-    title: emoji,
-    role: "option",
-    // Mirrors the title (the character or :shortcode: token) — e2e specs
-    // select cells by title, so the accessible name must never diverge.
-    "aria-label": emoji,
-    // Read by the delegated click handler on scrollArea (see mount-time
-    // listener above) instead of a per-cell listener.
-    "data-emoji": emoji,
-  });
-  // A `:shortcode:` entry shows its image; everything else is the character
-  // itself. An unresolvable shortcode falls back to the text, which is what
-  // it would render as in a message anyway.
-  const image = buildCustomEmojiNode(emoji, images);
-  if (image !== null) {
-    span.classList.add("ep-emoji-custom");
-    span.appendChild(image);
-  } else {
-    setText(span, emoji);
-  }
-  return span;
-}
 
 /** Whether an emoji (or a custom `:shortcode:` token) matches the typed query. */
 function emojiMatchesQuery(
@@ -270,9 +250,11 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
 
     const tone = skinTone();
     for (const group of emojiCatalog()?.groups ?? []) {
+      const sheet = sheetUrl(group.key, tone);
       cats.push({
         name: `emoji.category.${group.key}`,
         emoji: group.emoji.map((e) => withSkinTone(e, tone)),
+        ...(sheet === null ? {} : { sheet }),
       });
     }
 
@@ -329,7 +311,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     }
   }
 
-  function appendCategory(cat: EmojiCategory, filtered: readonly string[]): void {
+  function appendCategory(cat: EmojiCategory, filtered: readonly number[]): void {
     const label = createElement("div", {
       class: "ep-category-label",
       "data-category": cat.name,
@@ -339,8 +321,14 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
 
     const grid = createElement("div", { class: "ep-grid" });
     grid.style.setProperty("--ep-rows", String(Math.ceil(filtered.length / GRID_COLUMNS)));
+    const count = cat.emoji.length;
+    if (cat.sheet !== undefined) useSheet(grid, cat.sheet, count);
     lazyGrids.place(grid, filtered.length, () => {
-      for (const emoji of filtered) grid.appendChild(buildEmojiSpan(emoji, images));
+      for (const index of filtered) {
+        const emoji = cat.emoji[index] ?? "";
+        const spot = cat.sheet === undefined ? undefined : { index, count };
+        grid.appendChild(buildEmojiSpan(emoji, images, spot));
+      }
     });
     scrollArea.appendChild(grid);
   }
@@ -377,9 +365,10 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     const byChar = emojiCatalog()?.byChar;
     for (const cat of categories) {
       if (cat.emoji.length === 0) continue;
-      const filtered = q
-        ? cat.emoji.filter((e) => emojiMatchesQuery(e, raw, q, byChar))
-        : cat.emoji;
+      const filtered: number[] = [];
+      cat.emoji.forEach((e, i) => {
+        if (!q || emojiMatchesQuery(e, raw, q, byChar)) filtered.push(i);
+      });
       if (filtered.length === 0) continue;
       appendCategory(cat, filtered);
     }
