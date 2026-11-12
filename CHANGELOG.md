@@ -125,6 +125,8 @@ release changes the database, and anything an operator must do first.)
 - **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.
 - **Typing just @ listed only 10 people**, so members who were offline or had not posted lately were missing until you typed part of their name. The list now holds up to 50 people and scrolls.
 - **A voice message, video or YouTube player stopped and went back to the start when anyone reacted to or pinned that message**, and a spoiler you had opened was covered again. A reaction or pin now only redraws the reactions and pin button; playback and opened spoilers stay.
+- **In a thread or forum post, clicking a reply quote did nothing.** It now jumps to the replied-to message, loading it if needed.
+- **Pin, edit and delete in a thread or forum post skipped the channel's safety checks**: a quick double click could pin and unpin at once, and an edit or delete lost to a bad connection vanished silently. They now behave like in a channel: one pin request at a time, and a failed edit puts your text back.
 - **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.
 
 ### Voice

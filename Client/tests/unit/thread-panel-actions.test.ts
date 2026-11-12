@@ -28,6 +28,7 @@ vi.mock("@lib/pendingMessages", async (importOriginal) => ({
 }));
 
 import { createThreadPanel } from "../../src/features/threads/ThreadPanel";
+import { WsErrorCode } from "@lib/protocolTypes";
 import { createThreadJump } from "../../src/features/threads/threadJump";
 import { renderReplyRef } from "../../src/features/messaging/message-list/renderReplyRef";
 import { messagingText } from "../../src/i18n/messaging";
@@ -285,6 +286,22 @@ describe("edit and delete in a thread", () => {
     ws.simulateStateChange("reconnecting");
     await flush();
     expect(fakeList.startEdit).not.toHaveBeenCalled();
+    panel.destroy?.();
+  });
+
+  it("settles a refused edit, so a later drop neither restores it again nor toasts", async () => {
+    const panel = mountPanel();
+    await flush();
+    listOpts().onEditSave?.(100, "changed");
+    const frame = sentOf("chat_edit")[0];
+    ws.simulate("error", { code: WsErrorCode.FORBIDDEN, message: "" }, frame!.id);
+    await flush();
+    expect(fakeList.startEdit).toHaveBeenCalledTimes(1);
+    ws.connect();
+    ws.simulateStateChange("reconnecting");
+    await flush();
+    expect(fakeList.startEdit).toHaveBeenCalledTimes(1);
+    expect(toast).not.toHaveBeenCalledWith(messagingText("toast.editFailedRestored"), "error");
     panel.destroy?.();
   });
 

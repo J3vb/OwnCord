@@ -47,6 +47,7 @@ import {
   restoreFailedEdits,
   sendTrackedDelete,
   sendTrackedEdit,
+  settleTrackedError,
   togglePin,
   type TrackedEdit,
 } from "../messaging/trackedActions";
@@ -313,6 +314,12 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     for (const unsub of bindTrackedFailures(tracked, ws, showToast, restoreEdits)) {
       disposable.addCleanup(unsub);
     }
+    // A refused edit restores the text; the dispatcher's own chain shows the one error.
+    disposable.addCleanup(
+      ws.on("error", (_payload, correlationId) => {
+        if (correlationId !== undefined) settleTrackedError(tracked, restoreEdits, correlationId);
+      }),
+    );
     disposable.addCleanup(() => {
       for (const timer of tracked.trackTimers.values()) window.clearTimeout(timer);
       tracked.trackTimers.clear();
