@@ -210,7 +210,8 @@ describe("an incoming call on the Android app", () => {
     expect(chimeNotes).toEqual([]);
   });
 
-  test("rings for a call that comes right after a message", async () => {
+  /** Otto sends a message, and rings 0.3 s later. */
+  async function messageThenRing(): Promise<void> {
     await desktop.notifier.showMessage("Otto", "you there?", {
       host: HOST,
       channelId: 50,
@@ -218,6 +219,10 @@ describe("an incoming call on the Android app", () => {
     });
     await pass(300);
     page.ring.incoming(otto);
+  }
+
+  test("rings for a call that comes right after a message", async () => {
+    await messageThenRing();
     await pass(4_000);
     expect(phone.asked).toEqual(["notify", "ring 50"]);
     expect(phone.up?.sounds).toBe(true);
@@ -237,13 +242,7 @@ describe("an incoming call on the Android app", () => {
   });
 
   test("sends a message that comes while a ring waits for its turn after that ring", async () => {
-    await desktop.notifier.showMessage("Otto", "you there?", {
-      host: HOST,
-      channelId: 50,
-      messageId: 1,
-    });
-    await pass(300);
-    page.ring.incoming(otto);
+    await messageThenRing();
     await pass(300);
     void desktop.notifier.showMessage("Mira", "hi", { host: HOST, channelId: 51, messageId: 2 });
     await pass(4_000);

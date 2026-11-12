@@ -107,6 +107,16 @@ const flush = async (): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, 0));
 };
 
+/** Android holds its answer, for a ring or for a notification, until the
+ *  returned function is called. */
+function hold(gate: "ringGate" | "notifyGate"): () => void {
+  let answer = (): void => {};
+  native[gate] = new Promise<void>((resolve) => {
+    answer = resolve;
+  });
+  return () => answer();
+}
+
 /** The user taps the notification with `id`, as the plugin and the tap plugin report it. */
 async function tap(id: number | null): Promise<void> {
   await flush();
@@ -334,10 +344,7 @@ describe("Android notifier", () => {
   });
 
   test("takes a ring down only once Android has answered for showing it", async () => {
-    let answer = (): void => {};
-    native.ringGate = new Promise<void>((resolve) => {
-      answer = resolve;
-    });
+    const answer = hold("ringGate");
     const up = notifier.showCall("Bob is calling", "Voice call", call, true);
     const down = notifier.clearCall(7);
     await flush();
@@ -365,6 +372,16 @@ describe("Android notifier", () => {
     afterEach(() => {
       vi.useRealTimers();
     });
+
+    /** A ring that waits goes out when the app's last alert is 1.2 s old, and
+     *  not a moment sooner. `sofar` is how many rings were sent before it. */
+    async function goesOutWhenTheGapIsOver(sofar: number, waiting: Promise<void>): Promise<void> {
+      await pass(1_199);
+      expect(rung()).toHaveLength(sofar);
+      await pass(1);
+      expect(rung()).toHaveLength(sofar + 1);
+      await waiting;
+    }
 
     test("shows the same ring again in place, so its time starts over", async () => {
       await ringing();
@@ -423,66 +440,39 @@ describe("Android notifier", () => {
     });
 
     test("counts a notification's alert from when Android answered for it", async () => {
-      let release = (): void => {};
-      native.notifyGate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
+      const release = hold("notifyGate");
       const shown = notifier.showMessage("a", "b", dm);
       await pass(1_000);
       release();
       await shown;
       const up = ringing();
-      await pass(1_199);
-      expect(rung()).toEqual([]);
-      await pass(1);
-      expect(rung()).toHaveLength(1);
-      await up;
+      await goesOutWhenTheGapIsOver(0, up);
     });
 
     test("counts a ring's alert from when Android answered for it", async () => {
-      let answer = (): void => {};
-      native.ringGate = new Promise<void>((resolve) => {
-        answer = resolve;
-      });
+      const answer = hold("ringGate");
       const first = ringing();
       await pass(1_000);
       answer();
       await first;
       const again = ringing();
-      await pass(1_199);
-      expect(rung()).toHaveLength(1);
-      await pass(1);
-      expect(rung()).toHaveLength(2);
-      await again;
+      await goesOutWhenTheGapIsOver(1, again);
     });
 
     test("holds a ring that is rung again while Android has not answered for the first", async () => {
-      let answer = (): void => {};
-      native.ringGate = new Promise<void>((resolve) => {
-        answer = resolve;
-      });
+      const answer = hold("ringGate");
       const first = ringing();
       const again = ringing();
       await pass(5_000);
       expect(rung()).toHaveLength(1);
       answer();
       await first;
-      await pass(1_199);
-      expect(rung()).toHaveLength(1);
-      await pass(1);
-      expect(rung()).toHaveLength(2);
-      await again;
+      await goesOutWhenTheGapIsOver(1, again);
     });
 
     test("holds that ring whatever else Android answered for meanwhile", async () => {
-      let shown = (): void => {};
-      native.notifyGate = new Promise<void>((resolve) => {
-        shown = resolve;
-      });
-      let answer = (): void => {};
-      native.ringGate = new Promise<void>((resolve) => {
-        answer = resolve;
-      });
+      const shown = hold("notifyGate");
+      const answer = hold("ringGate");
       // A notification Android is slow to answer for, then the ring: it goes
       // out when the time is up, and is rung again before Android answered.
       const slow = notifier.showMessage("a", "b", dm);
@@ -496,11 +486,7 @@ describe("Android notifier", () => {
       await pass(5_000);
       answer();
       await first;
-      await pass(1_199);
-      expect(rung()).toHaveLength(1);
-      await pass(1);
-      expect(rung()).toHaveLength(2);
-      await again;
+      await goesOutWhenTheGapIsOver(1, again);
     });
 
     test("does not wait for a notification Android has not answered for", async () => {
@@ -508,11 +494,7 @@ describe("Android notifier", () => {
       void notifier.showMessage("a", "b", dm);
       await pass(0);
       const up = ringing();
-      await pass(1_199);
-      expect(rung()).toEqual([]);
-      await pass(1);
-      expect(rung()).toHaveLength(1);
-      await up;
+      await goesOutWhenTheGapIsOver(0, up);
     });
 
     test("lets a ring without a sound take the place of one that waited", async () => {
@@ -555,10 +537,7 @@ describe("Android notifier", () => {
     });
 
     test("holds a notification back until Android answered for the ring on its way", async () => {
-      let answer = (): void => {};
-      native.ringGate = new Promise<void>((resolve) => {
-        answer = resolve;
-      });
+      const answer = hold("ringGate");
       const up = ringing();
       const later = notifier.showMessage("a", "b", dm);
       await pass(5_000);
@@ -587,10 +566,7 @@ describe("Android notifier", () => {
 
     /** A notification asked for while Android has not answered for a ring. */
     async function heldBehindARing(): Promise<{ answer: () => void; done: Promise<unknown> }> {
-      let answer = (): void => {};
-      native.ringGate = new Promise<void>((resolve) => {
-        answer = resolve;
-      });
+      const answer = hold("ringGate");
       const up = ringing();
       const held = notifier.showMessage("a", "b", dm);
       await pass(0);
@@ -662,10 +638,7 @@ describe("Android notifier", () => {
   });
 
   test("withdraws a notification only once Android has shown it", async () => {
-    let release = (): void => {};
-    native.notifyGate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const release = hold("notifyGate");
     const showing = notifier.showMessage("a", "b", dm);
     await flush();
     const clearing = notifier.clearMessages(7);
