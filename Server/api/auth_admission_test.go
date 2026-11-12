@@ -79,15 +79,25 @@ func TestChangePassword_RefusedWhenAuthBudgetExhausted(t *testing.T) {
 	}
 }
 
+// putPasswordFrom sends a change-password request from its own address, so the per-address
+// limit never decides the outcome of a test about the per-account budget.
+func putPasswordFrom(router http.Handler, token, addr, oldPassword string) *httptest.ResponseRecorder {
+	raw, _ := json.Marshal(map[string]string{"old_password": oldPassword, "new_password": "newSecure2"})
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/api/v1/users/me/password", bytes.NewReader(raw))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = addr + ":4000"
+	return serveRequest(router, req)
+}
+
 func TestChangePassword_BurstOfWrongPasswordsIsCapped(t *testing.T) {
-	const attempts = 5
+	const attempts = 12
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	limiter.SetAdmissionBudget(attempts)
 	router := chi.NewRouter()
 	api.MountProfileRoutes(router, service.New(database, limiter), nil, limiter, nil, nil, nil)
 	token := profileCreateToken(t, database, "budgeted", 4)
-	body := map[string]string{"old_password": "wrongPass9", "new_password": "newSecure2"}
 
 	codes := make([]int, attempts)
 	var wg sync.WaitGroup
@@ -95,7 +105,7 @@ func TestChangePassword_BurstOfWrongPasswordsIsCapped(t *testing.T) {
 	for i := range attempts {
 		wg.Go(func() {
 			<-start
-			codes[i] = putJSON(t, router, "/api/v1/users/me/password", token, body).Code
+			codes[i] = putPasswordFrom(router, token, "203.0.113."+strconv.Itoa(10+i), "wrongPass9").Code
 		})
 	}
 	close(start)
@@ -110,5 +120,37 @@ func TestChangePassword_BurstOfWrongPasswordsIsCapped(t *testing.T) {
 	// Three failures plus the one that trips the lockout, as a sequential guesser gets.
 	if want := service.PwConfirmFailureThreshold + 1; compared > want {
 		t.Fatalf("%d compares ran in one burst, want at most %d (codes %v)", compared, want, codes)
+	}
+}
+
+// A request refused because the budget is full ran no compare, so it must not use up the
+// account's attempts: after many such refusals the right password still goes through.
+func TestChangePassword_BusyRefusalsDoNotCountAsAttempts(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	limiter.SetAdmissionBudget(1)
+	router := chi.NewRouter()
+	api.MountProfileRoutes(router, service.New(database, limiter), nil, limiter, nil, nil, nil)
+	token := profileCreateToken(t, database, "refused", 4)
+	user, err := database.GetUserByUsername(context.Background(), "refused")
+	if err != nil || user == nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	release, ok := limiter.Admission().TryAcquire()
+	if !ok {
+		t.Fatal("could not take the budget's only slot")
+	}
+
+	for i := range 8 {
+		rr := putPasswordFrom(router, token, "203.0.113."+strconv.Itoa(50+i), "wrongPass9")
+		wantErr(t, rr, http.StatusTooManyRequests, "AUTH_BUSY", authBusyMessage)
+	}
+	release()
+
+	if rr := putPasswordFrom(router, token, "203.0.113.99", "securePass1"); rr.Code != http.StatusNoContent {
+		t.Fatalf("correct password after the refusals: status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+	if limiter.IsLockedOut(auth.Key("pw_confirm_lock", user.ID)) {
+		t.Fatal("password-confirmation lock set by refusals that ran no compare")
 	}
 }
