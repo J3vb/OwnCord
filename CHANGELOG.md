@@ -124,6 +124,7 @@ release changes the database, and anything an operator must do first.)
 - **Moderation:** closing the ban dialog after a failed ban said the member was banned. It now says the ban could not be confirmed.
 - **Desktop UI:** animated avatars and banners kept old rows in memory after every channel switch. They no longer do.
 - **Direct messages:** the People view redrew every row on each presence change or new message on busy servers. It now updates only the rows that changed.
+- **Admin:** `chatserver restore` on a symlinked database path wrote its message-retry cutoff where the server did not read it. The cutoff now sits beside the real database, and one left beside the link is still honoured.
 - **Linux:** while the camera or a screen share was being published on a slow connection, mute, push-to-talk release, deafen, volume changes and Leave waited for it (up to 10 seconds or more). They now act at once.
 - **Linux:** after a microphone device change landed during an unmute, you could show as unmuted while others heard nothing.
 - **Linux:** when the window's page process ends unexpectedly, the app now leaves your call and reloads the window instead of staying blank.
