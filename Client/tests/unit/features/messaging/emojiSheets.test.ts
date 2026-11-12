@@ -18,17 +18,12 @@ describe("emoji sheets", () => {
     expect(SHEETS_CATALOG_HASH).toBe(hash.slice(0, 16));
   });
 
-  it("cover every group, and every skin tone of a group with toneable emoji", () => {
-    for (const [group, rows] of EMOJI_GROUPS) {
-      expect(EMOJI_SHEETS[group], group).toBeDefined();
-      const toneable = rows.split("\n").some((row) => row.split("|")[1] !== "");
-      for (let tone = 1; tone <= 5; tone++) {
-        expect(sheetUrl(group, tone)).toBe(
-          toneable ? EMOJI_SHEETS[`${group}-${tone}`] : EMOJI_SHEETS[group],
-        );
-      }
-    }
-    expect(sheetUrl("nope", 0)).toBeNull();
+  it("cover every group, without skin tones", () => {
+    expect(Object.keys(EMOJI_SHEETS).toSorted()).toEqual(
+      EMOJI_GROUPS.map(([group]) => group).toSorted(),
+    );
+    for (const [group] of EMOJI_GROUPS) expect(sheetUrl(group)).toBe(EMOJI_SHEETS[group]);
+    expect(sheetUrl("nope")).toBeNull();
   });
 
   it("place an emoji in its cell from its index", () => {

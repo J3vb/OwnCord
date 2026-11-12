@@ -18,6 +18,7 @@ import {
   resolveMentionUserId,
   type MentionInfo,
 } from "@lib/text/mentions";
+import "../mentionNameLookups";
 import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode } from "./customEmoji";
 import { UNICODE_EMOJI_REGEX, buildEmojiImage, showsAsImage } from "./emojiImage";
 import { messagingText } from "../../../i18n/messaging";
