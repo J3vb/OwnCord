@@ -1,6 +1,6 @@
 # OwnCord
 
-Self-hosted chat platform (beta). `Server/` is a Go 1.27 REST + WebSocket
+Self-hosted chat platform (stable, hobby project). `Server/` is a Go 1.27 REST + WebSocket
 server over SQLite with LiveKit voice/video; `Client/` is a Tauri
 v2 desktop app (TypeScript frontend, thin Rust backend). Per-component detail
 lives in `Server/CLAUDE.md` and `Client/CLAUDE.md`; the protocol
@@ -56,7 +56,7 @@ change.
 
 ## AI Quality Guardrails & Engineering Standards
 
-OwnCord is in beta with real users, so the bar is zero known defects and no
+OwnCord is a stable release with real users, so the bar is zero known defects and no
 new hidden debt. These rules bind every agent and model working here. Where a
 linter or test enforces a rule, it is named; the rest is checked in review.
 

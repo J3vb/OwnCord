@@ -83,5 +83,5 @@ itself. To check a download by hand, see
 - [Run your server](deployment.md): start at boot, backups, upgrades.
 - [Server configuration](server-configuration.md): every setting, including
   the optional [GIF picker](server-configuration.md#gif-picker-gif).
-- [Known limitations](known-limitations.md): what the beta does not do yet.
+- [Known limitations](known-limitations.md): what OwnCord does not do yet.
 - Building it yourself: [contributing.md](contributing.md).

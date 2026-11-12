@@ -12,9 +12,10 @@ _Last updated 2026-11-12._
 
 ## Current release
 
-**v2.9.0**, published 2026-11-12. It is still a beta and a hobby project:
-Windows and Linux desktop (x64 and ARM64), plus a sideloaded Android app (arm64). Update the server and the
-desktop app together. From 2.5 on, version numbers drop the `-beta.N` suffix.
+**v2.9.0**, published 2026-11-12, for Windows and Linux desktop (x64 and
+ARM64), plus a sideloaded Android app (arm64). OwnCord is stable, and still a
+hobby project with no support promise; what stable means is in the
+[README](../README.md). Update the server and the desktop app together. From 2.5 on, version numbers drop the `-beta.N` suffix.
 
 ## Releases
 

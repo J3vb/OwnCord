@@ -1,4 +1,4 @@
-# Known limitations (beta)
+# Known limitations
 
 What OwnCord does not do yet, so you know before you run into it. Each item
 links to the page that covers it.

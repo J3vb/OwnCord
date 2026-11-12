@@ -611,8 +611,8 @@ describe("E2EEManager — adversarial membership and key-change rules", () => {
     //
     // This pins TODAY's behaviour. When authenticated membership (or
     // "refuse unrecognised participants") lands, this test goes RED and the
-    // expectations below invert. docs/trust-model.md §"What beta does not
-    // claim" names the gap.
+    // expectations below invert. docs/architecture/trust-model-evidence.md
+    // §"What OwnCord does not claim" names the gap.
     const INTRUDER = 99;
     mockMembers.set(INTRUDER, { identityPublicKey: "server-supplied-identity-b64" });
     expect(mockVoiceState.voiceUsers.size).toBe(0);

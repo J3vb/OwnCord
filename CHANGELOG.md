@@ -47,6 +47,15 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+**OwnCord is now stable.** This release drops the beta label. It brings no new features: it is the 2.9 line that ran two weeks on a real server, with its fixes. It is still a **hobby project** with no support promise: don't use it for anything sensitive.
+
+What stable means:
+
+- Only the newest release gets fixes.
+- The previous release's app keeps working with a newer server.
+- Upgrades only go forward: going back to an older version needs a backup.
+- Your data and settings carry over when you upgrade.
+
 ## v2.9.0
 
 **OwnCord 2.9** (the tenth public beta) is mostly about speed. The app starts sooner, scrolling through chat and long member lists is smoother, a screen share leaves your graphics card more room while you game, and Enhanced Noise Suppression gets the Silero VAD speech-detection model. Calls get a smarter layout: tiles take the shape of their picture, people without video move to a strip, and you can pin and resize tiles. On top of that come many voice fixes for switching channels and reconnecting, and fixes for threads, unread hints and multi-device sync.
