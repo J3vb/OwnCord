@@ -10,6 +10,7 @@ import type {
 } from "../platform/contracts/pendingMessages";
 import type { MessageUser } from "./types";
 import { createLogger } from "./logger";
+import { serverNow } from "./net/serverClock";
 
 const log = createLogger("pending-messages");
 export const PENDING_MESSAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -34,13 +35,15 @@ function sameOwner(a: PendingMessageOwner, b: PendingMessageOwner): boolean {
   return a.host === b.host && a.userId === b.userId;
 }
 
+/** A new logical id, stamped with the server's time (see serverClock). */
 export function newClientMessageId(floor = 0): string {
-  return `${Math.max(Date.now(), floor)}:${crypto.randomUUID()}`;
+  return `${Math.max(serverNow(), floor)}:${crypto.randomUUID()}`;
 }
 
+/** Whether the server would refuse `clientMessageId` by its age; `now` is server time. */
 export function pendingMessageExpired(
   clientMessageId: string,
-  now = Date.now(),
+  now = serverNow(),
   floor = 0,
 ): boolean {
   const createdAt = Number(clientMessageId.split(":", 1)[0]);
@@ -119,7 +122,7 @@ export class PendingMessageQueue {
         this.acknowledged.clear();
         return;
       }
-      for (const draft of decode(value, Date.now(), this.retryFloor)) {
+      for (const draft of decode(value, serverNow(), this.retryFloor)) {
         if (this.acknowledged.has(draft.clientMessageId)) continue;
         this.drafts.set(draft.clientMessageId, draft);
         onRecovered(draft);
@@ -151,12 +154,12 @@ export class PendingMessageQueue {
     await this.loaded;
     // i18n-exempt: internal persistence guard; the caller shows its own catalog toast
     if (!this.active) throw new Error("Session ended before saving the pending message");
-    if (pendingMessageExpired(draft.clientMessageId, Date.now(), this.retryFloor))
+    if (pendingMessageExpired(draft.clientMessageId, serverNow(), this.retryFloor))
       // i18n-exempt: internal persistence guard, never rendered
       throw new Error("Message retry window expired");
     const next = new Map(this.drafts);
     for (const [id] of next)
-      if (pendingMessageExpired(id, Date.now(), this.retryFloor)) next.delete(id);
+      if (pendingMessageExpired(id, serverNow(), this.retryFloor)) next.delete(id);
     next.set(draft.clientMessageId, draft);
     if (
       next.size > PENDING_MESSAGE_MAX_COUNT ||

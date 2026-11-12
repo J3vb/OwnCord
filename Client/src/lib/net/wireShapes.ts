@@ -72,7 +72,7 @@ export const SHAPES: readonly Shape[] = [
   [0,43],
   [2,["user_id","expires_at"],[1,0]],
   [0,45],
-  [2,["channels","members","voice_states","roles"],[23,34,36,38],["capabilities","listening","activities","threads","categories","dm_channels","notices","member_timeouts"],[14,16,18,30,32,42,44,46]],
+  [2,["channels","members","voice_states","roles"],[23,34,36,38],["capabilities","listening","activities","threads","categories","dm_channels","notices","member_timeouts","server_time_ms"],[14,16,18,30,32,42,44,46,1]],
   [2,["id","username"],[1,0],["avatar","display_name"],[6,6]],
   [4,48],
   [2,["name"],[0],["color"],[0]],

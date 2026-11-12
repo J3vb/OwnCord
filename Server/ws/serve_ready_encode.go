@@ -56,6 +56,10 @@ type readyTail struct {
 	Notices    []readyNoticePayload `json:"notices"`
 	Roles      []*db.Role           `json:"roles"`
 	ServerName string               `json:"server_name"`
+	// ServerTimeMS is the server's clock (Unix ms) when ready was built, so a client can stamp
+	// client_message_id from server time when its own clock is off. Sorts between "server_name"
+	// and "threads".
+	ServerTimeMS int64 `json:"server_time_ms"`
 	// Threads is the viewer's followed open threads, present whenever the server has the thread
 	// service (a pointer so an empty list encodes as []). Sorts between "server_name" and "voice_states".
 	Threads     *[]readyThreadPayload `json:"threads,omitempty"`
