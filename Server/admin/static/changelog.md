@@ -1,6 +1,6 @@
 ## v2.9.1
 
-**OwnCord 2.9.1** is a fix-only update to 2.9. It keeps you in your voice call after a reconnect, brings back thread replies that failed to send, and tightens a few voice and channel permission edge cases. Nothing new is added and the database does not change. It is still a **beta and a hobby project**: don't use it for anything sensitive. **Update the server and the desktop app together**: the reconnect fix needs both.
+**OwnCord 2.9.1** is a fix-only update to 2.9. It keeps you in your voice call after a reconnect, brings back thread replies that failed to send, loads GIFs in the picker faster, fits direct message headers on small phones, and tightens a few voice and channel permission edge cases. Nothing new is added and the database does not change. It is still a **beta and a hobby project**: don't use it for anything sensitive. **Update the server and the desktop app together**: the reconnect fix needs both.
 
 ### Fixed
 
@@ -10,6 +10,8 @@
 - **Channels:** a channel permission change on a busy server now always applies to every connected member.
 - **Threads:** a thread reply that failed to send was lost when you restarted the desktop app. It now comes back after a restart with Retry, like a channel message.
 - **Threads:** a thread reply whose delivery was never confirmed kept spinning. After 20 seconds it now shows as failed with Retry.
+- **Phone app:** on a small phone the buttons at the end of a direct message's header were off screen, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
+- **GIFs:** GIFs in the GIF picker showed up slowly in the desktop app. Thumbnails from the same site now share open connections, and six load at a time instead of four.
 
 ### Known issues
 
