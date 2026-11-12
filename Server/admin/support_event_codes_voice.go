@@ -32,6 +32,7 @@ func init() {
 		"voice move: could not read the moderator flags, move refused":                                    "voice_move_mod_flags_read_failed",
 		"voice switch: could not read the moderator flags, switch refused":                                "voice_switch_mod_flags_read_failed",
 		"voice call move: could not read the moderator flags, move refused":                               "voice_call_move_mod_flags_read_failed",
+		"voice call move: removing the kept row failed":                                                   "voice_call_move_kept_row_delete_failed",
 		"voice removed watch: removing participant failed, retrying next tick":                            "voice_removed_watch_remove_participant_failed",
 		"hub: evicting oldest connection over the per-user cap":                                           "hub_evicting_oldest_connection_over_cap",
 		"handleVoiceJoin: could not verify voice state cleared after move":                                "handlevoicejoin_could_not_verify_voice_state_after_move",
