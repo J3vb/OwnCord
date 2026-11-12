@@ -146,16 +146,22 @@ func (s *messageReads) searchScope(ctx context.Context, userID int64, channelID 
 			narrowed = append(narrowed, ch.ID)
 		}
 	}
-	// ListChannels carries guild channels only; a group DM in scope is matched by its own name.
+	// ListChannels carries guild channels only; group DMs in scope are matched by their own name, read in one go.
+	var nonGuild []int64
 	for _, id := range scope {
-		if guild[id] {
-			continue
+		if !guild[id] {
+			nonGuild = append(nonGuild, id)
 		}
-		ch, err := s.st.GetChannel(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("%w: failed to read channel: %w", ErrInternal, err)
-		}
-		if ch != nil && matches(ch.Name) {
+	}
+	if len(nonGuild) == 0 {
+		return narrowed, nil
+	}
+	dmNames, err := s.st.ListDMChannelNamesAmong(ctx, nonGuild)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to read DM channels: %w", ErrInternal, err)
+	}
+	for _, id := range nonGuild {
+		if name, ok := dmNames[id]; ok && matches(name) {
 			narrowed = append(narrowed, id)
 		}
 	}

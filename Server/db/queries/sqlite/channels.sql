@@ -32,6 +32,9 @@ ORDER BY c.position ASC, c.id ASC;
 -- name: ListDMChannelIDsAmong :many
 SELECT id FROM channels WHERE type = 'dm' AND id IN (sqlc.slice('ids'));
 
+-- name: ListDMChannelNamesAmong :many
+SELECT id, name FROM channels WHERE type = 'dm' AND id IN (sqlc.slice('ids'));
+
 -- name: GetChannel :one
 SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,

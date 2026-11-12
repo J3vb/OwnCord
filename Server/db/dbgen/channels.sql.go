@@ -607,6 +607,48 @@ func (q *Queries) ListDMChannelIDsAmong(ctx context.Context, ids []int64) ([]int
 	return items, nil
 }
 
+const listDMChannelNamesAmong = `-- name: ListDMChannelNamesAmong :many
+SELECT id, name FROM channels WHERE type = 'dm' AND id IN (/*SLICE:ids*/?)
+`
+
+type ListDMChannelNamesAmongRow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+func (q *Queries) ListDMChannelNamesAmong(ctx context.Context, ids []int64) ([]ListDMChannelNamesAmongRow, error) {
+	query := listDMChannelNamesAmong
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDMChannelNamesAmongRow{}
+	for rows.Next() {
+		var i ListDMChannelNamesAmongRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHeldRoleChannelOverrides = `-- name: ListHeldRoleChannelOverrides :many
 SELECT co.channel_id, co.role_id, co.allow, co.deny
 FROM channel_overrides co

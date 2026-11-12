@@ -104,6 +104,22 @@ func (d *DB) ListDMChannelIDsAmong(ctx context.Context, ids []int64) ([]int64, e
 	return out, nil
 }
 
+// ListDMChannelNamesAmong maps those of ids that are DM channels to their names.
+func (d *DB) ListDMChannelNamesAmong(ctx context.Context, ids []int64) (map[int64]string, error) {
+	out := make(map[int64]string)
+	// Chunked to stay under SQLite's bound-variable limit.
+	for chunk := range slices.Chunk(ids, 5000) {
+		rows, err := d.q.ListDMChannelNamesAmong(ctx, chunk)
+		if err != nil {
+			return nil, fmt.Errorf("ListDMChannelNamesAmong: %w", err)
+		}
+		for _, r := range rows {
+			out[r.ID] = r.Name
+		}
+	}
+	return out, nil
+}
+
 // GetChannel returns the channel with the given id, or nil if not found.
 func (d *DB) GetChannel(ctx context.Context, id int64) (*Channel, error) {
 	r, err := d.q.GetChannel(ctx, id)

@@ -33,4 +33,10 @@ func TestListChannels_LeavesDMRowsOut(t *testing.T) {
 	if len(seen) != 2 || !seen[oneToOne.ID] || !seen[group.ID] {
 		t.Errorf("ListDMChannelIDsAmong = %v, want the 1:1 %d and the group %d only", dms, oneToOne.ID, group.ID)
 	}
+
+	names, err := database.ListDMChannelNamesAmong(ctx, []int64{guild, oneToOne.ID, group.ID})
+	mustDo(t, "ListDMChannelNamesAmong", err)
+	if len(names) != 2 || names[group.ID] != "crew" {
+		t.Errorf("ListDMChannelNamesAmong = %v, want the two DMs with the group named crew", names)
+	}
 }
