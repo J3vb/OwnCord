@@ -68,6 +68,10 @@ and only when it changes something a contributor or fork holder must do
 - **Threads:** a thread reply that failed to send was lost when you restarted the desktop app. It now comes back after a restart with Retry, like a channel message.
 - **Threads:** a thread reply whose delivery was never confirmed kept spinning. After 20 seconds it now shows as failed with Retry.
 
+### Phone app
+
+- **On a small phone the buttons at the end of a direct message's header were off screen**, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

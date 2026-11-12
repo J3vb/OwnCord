@@ -214,6 +214,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     onRenameGroup: opts.onRenameGroup,
   });
   const chatHeaderName = chatHeader.refs.nameEl;
+  unsubscribers.push(chatHeader.destroy);
 
   // --- Chat area element ---
   const chatArea = createElement("div", {

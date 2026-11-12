@@ -318,6 +318,7 @@ export const shards = {
     "src/lib/wsConfig.ts",
   ],
   "lib-rest-1": [
+    "src/features/messaging/chatHeaderOverflow.ts",
     "src/features/messaging/historyWindows.ts",
     "src/features/messaging/reactionUsers.ts",
     "src/features/threads/threadNavigation.ts",

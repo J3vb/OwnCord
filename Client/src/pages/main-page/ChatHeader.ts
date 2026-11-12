@@ -10,6 +10,7 @@ import { requestsText } from "../../i18n/requests";
 import { shellText } from "../../i18n/shell";
 import { isTypedCharacter } from "@lib/ui/typeAhead";
 import { isImeCommit } from "@lib/text/ime";
+import { createChatHeaderOverflow } from "../../features/messaging/chatHeaderOverflow";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -96,6 +97,7 @@ export interface ChatHeaderDm {
 export function buildChatHeader(opts: ChatHeaderOptions): {
   element: HTMLDivElement;
   refs: ChatHeaderRefs;
+  destroy: () => void;
 } {
   const header = createElement("div", { class: "chat-header", "data-testid": "chat-header" });
 
@@ -314,6 +316,8 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     });
     searchBtn.addEventListener("click", () => onFocus());
   }
+  // On a phone the panel toggles fold into one More button.
+  const overflow = createChatHeaderOverflow([profileBtn, membersBtn, pinBtn, mediaBtn]);
   appendChildren(
     tools,
     searchInput,
@@ -327,6 +331,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     pinBtn,
     threadsBtn,
     mediaBtn,
+    overflow.button,
   );
 
   appendChildren(header, sidebarToggle, nameGroup, divider, topicEl, tools);
@@ -349,6 +354,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       sidebarToggle,
       nameGroupEl: nameGroup,
     },
+    destroy: overflow.destroy,
   };
 }
 
