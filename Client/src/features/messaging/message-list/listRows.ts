@@ -280,7 +280,15 @@ export function createListRows(st: ListState, api: ListApi) {
             }
           },
           onCancel: () => closeEdit(true),
-          onEmpty: () => st.options.onEmptyEdit(messageId),
+          onEmpty: () => {
+            // Text can go while a picture or file stays; only a message with nothing left offers delete.
+            const current = st.allMessages.find((row) => row.id === messageId);
+            if (current !== undefined && current.attachments.length > 0) {
+              if (st.options.onEditSave(messageId, "")) closeEdit(true);
+              return;
+            }
+            st.options.onEmptyEdit(messageId);
+          },
         });
         st.edit.session = session;
         replaceRenderedRow(messageId);

@@ -124,6 +124,7 @@ release changes the database, and anything an operator must do first.)
 - **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
 - **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.
 - **Large outside images and GIF pages were cut off on a slow connection** in the browser client. They now load in full as long as the connection keeps moving.
+- **The text on a message with a picture or file could not be removed.** Clearing it offered to delete the whole message. It now removes just the text and keeps the files.
 - **Typing just @ listed only 10 people**, so members who were offline or had not posted lately were missing until you typed part of their name. The list now holds up to 50 people and scrolls.
 - **A voice message, video or YouTube player stopped and went back to the start when anyone reacted to or pinned that message**, and a spoiler you had opened was covered again. A reaction or pin now only redraws the reactions and pin button; playback and opened spoilers stay.
 - **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.

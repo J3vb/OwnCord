@@ -282,7 +282,8 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		return nil, fmt.Errorf("%w: message_id must be positive integer", ErrBadRequest)
 	}
 
-	content, err := sanitizeContent(rawContent, false)
+	// Empty text is legal only for a message that keeps an attachment; the store decides that atomically.
+	content, err := sanitizeContent(rawContent, true)
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +309,11 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		// A store failure (busy database, spent deadline, I/O) is not a refusal: logged and answered
 		// INTERNAL, or REQUEST_TIMEOUT for a spent frame.
 		return nil, fmt.Errorf("%w: edit message: %w", ErrInternal, err)
+	}
+	if errors.Is(err, db.ErrNotFound) && content == "" {
+		if cur, gErr := s.st.GetMessage(ctx, msgID); gErr == nil && cur != nil && !cur.Deleted {
+			return nil, fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
+		}
 	}
 	if err != nil || msg == nil {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)

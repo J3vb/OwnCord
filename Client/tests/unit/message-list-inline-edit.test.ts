@@ -453,6 +453,19 @@ describe("inline message editor", () => {
       expect(list!.isEditing()).toBe(true);
     });
 
+    it("an emptied editor on a message with a file saves the empty text instead of offering delete", async () => {
+      const file = { id: "a", filename: "f.txt", size: 1, mime: "text/plain", url: "/f" };
+      mount([mine(1), mine(2, { attachments: [file] })]);
+      const textarea = await openEditor(2);
+      textarea.value = "   ";
+
+      key(textarea, "Enter");
+
+      expect(options.onEditSave).toHaveBeenCalledExactlyOnceWith(2, "");
+      expect(options.onEmptyEdit).not.toHaveBeenCalled();
+      expect(editor(2)).toBeNull();
+    });
+
     it("the delete confirm closing the edit is the host's cancelEdit", async () => {
       mount([mine(1)]);
       const textarea = await openEditor(1);

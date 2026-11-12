@@ -1436,7 +1436,9 @@ direct `mentions` hit is unaffected either way.
 }
 ```
 
-Own messages only. Max 4000 runes.
+Own messages only. Max 4000 runes. `content` may be empty only while the message still has
+at least one attachment (the text is removed and the files stay); otherwise an empty
+`content` is `BAD_REQUEST`.
 
 ### chat_edited (Server -> Client, broadcast)
 
