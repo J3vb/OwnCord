@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -57,15 +58,26 @@ func handleCreateInvite(svc *service.Services, limiter *auth.RateLimiter) http.H
 			return
 		}
 
-		if limiter != nil && !limiter.Allow(auth.Key("invite_create", user.ID), inviteCreatePerHour, time.Hour) {
-			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many invites created, please try again later")
-			return
-		}
-
 		// Cap invite expiration to 30 days.
 		if req.ExpiresInHours > service.MaxInviteExpiryHours() {
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("expires_in_hours cannot exceed %d (30 days)", service.MaxInviteExpiryHours()))
 			return
+		}
+
+		if req.MaxUses < 0 || req.ExpiresInHours < 0 {
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "max_uses and expires_in_hours must not be negative")
+			return
+		}
+
+		// Last check before the write, so a request that fails validation does not spend the budget.
+		if limiter != nil {
+			key := auth.Key("invite_create", user.ID)
+			if !limiter.Allow(key, inviteCreatePerHour, time.Hour) {
+				secs := max(int(math.Ceil(limiter.RetryAfter(key, inviteCreatePerHour, time.Hour).Seconds())), 1)
+				w.Header().Set("Retry-After", strconv.Itoa(secs))
+				writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many invites created, please try again later")
+				return
+			}
 		}
 
 		inv, err := svc.Invites.CreateInvite(r.Context(), user.ID, req.MaxUses, req.ExpiresInHours)

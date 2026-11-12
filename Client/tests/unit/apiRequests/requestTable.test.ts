@@ -549,6 +549,12 @@ describe("REST client requests", () => {
       path: "/invites/id/7",
     },
     {
+      name: "revokeInviteByCode",
+      call: (a) => a.revokeInviteByCode("abc123"),
+      method: "DELETE",
+      path: "/invites/abc123",
+    },
+    {
       name: "listEmoji",
       reply: "EmojiResponseList",
       call: (a) => a.listEmoji(),

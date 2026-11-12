@@ -26,10 +26,6 @@ function inviteUsable(inv){
   const t=utcDate(String(inv.expires_at).replace(' ','T')).getTime();
   return isNaN(t)||t>Date.now();
 }
-function inviteLive(inv){
-  if(!inviteUsable(inv))return false;
-  return inv.max_uses===null||inv.max_uses===undefined||inv.uses<inv.max_uses;
-}
 function inviteStatus(inv){
   if(inv.revoked)return'<span class="badge badge-red">Revoked</span>';
   if(!inviteUsable(inv))return'<span class="badge badge-muted">Expired</span>';
@@ -51,13 +47,18 @@ let inviteDeadCursor=0;
 
 async function renderInvites(){
   let list;
-  try{list=await inviteApi('GET','/')}catch(e){return'<div class="page-title">Invites</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
+  let deadPage;
+  try{
+    const live=await inviteApi('GET','/?state=live');
+    deadPage=await inviteApi('GET','/?state=dead&limit='+INVITE_DEAD_PAGE);
+    list=(Array.isArray(live)?live:[]).concat(Array.isArray(deadPage)?deadPage:[]);
+  }catch(e){return'<div class="page-title">Invites</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   if(!Array.isArray(list))list=[];
   if(!inviteKeepOlder){inviteOlder=[];inviteOlderMore=true}
   inviteKeepOlder=false;
   const seen=new Set(list.map(function(inv){return inv.id}));
   const olderRows=inviteOlder.filter(function(inv){return!seen.has(inv.id)});
-  const firstDead=list.filter(function(inv){return!inviteLive(inv)});
+  const firstDead=Array.isArray(deadPage)?deadPage:[];
   list=list.concat(olderRows);
   const deadIds=firstDead.concat(olderRows).map(function(inv){return inv.id});
   inviteDeadCursor=deadIds.length?Math.min.apply(null,deadIds):0;

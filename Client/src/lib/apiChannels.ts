@@ -392,6 +392,17 @@ export function createChannelsApi(t: ApiTransport) {
       return t.request("NoBody", "DELETE", `/invites/id/${id}`, undefined, signal);
     },
 
+    /** Revoke by code: only for a server that predates revoke by id. */
+    revokeInviteByCode(code: string, signal?: AbortSignal): Promise<void> {
+      return t.request(
+        "NoBody",
+        "DELETE",
+        `/invites/${encodeURIComponent(code)}`,
+        undefined,
+        signal,
+      );
+    },
+
     // ── Custom emoji ──────────────────────────────────────
     //
     // Reading is open to any member; upload and delete require MANAGE_SERVER

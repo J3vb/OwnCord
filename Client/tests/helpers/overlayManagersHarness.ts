@@ -32,6 +32,7 @@ export function makeMockApi(overrides: Record<string, unknown> = {}) {
     getInvites: vi.fn().mockResolvedValue([makeInviteResponse()]),
     createInvite: vi.fn().mockResolvedValue(makeInviteResponse({ code: "new123" })),
     revokeInvite: vi.fn().mockResolvedValue(undefined),
+    revokeInviteByCode: vi.fn().mockResolvedValue(undefined),
     getPins: vi.fn().mockResolvedValue({
       messages: [
         { id: 1, user: { username: "Alice" }, content: "Pinned msg", created_at: "2024-01-01" },

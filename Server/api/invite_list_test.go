@@ -106,7 +106,7 @@ func TestListInvites_DeadPagedByCursor(t *testing.T) {
 
 func TestListInvites_ExpiringInviteIsOnExactlyOneSide(t *testing.T) {
 	router, database, token, uid := inviteTestAdmin(t, "listadmin3")
-	soon := time.Now().Add(1100 * time.Millisecond)
+	soon := time.Now().Add(4 * time.Second)
 	code := mustInvite(t, database, uid, 0, &soon)
 	older := mustInvite(t, database, uid, 0, nil)
 	if err := database.RevokeInvite(context.Background(), older); err != nil {
@@ -117,20 +117,26 @@ func TestListInvites_ExpiringInviteIsOnExactlyOneSide(t *testing.T) {
 	if first[0].Code != code {
 		t.Fatalf("expiring invite should be live in the first read: %+v", first)
 	}
-	time.Sleep(2200 * time.Millisecond)
 
-	// Between the reads it expired: the dead page now carries it, so a client merging by id sees it once.
-	dead := listInvitesAt(t, router, token, "?state=dead")
-	live := listInvitesAt(t, router, token, "?state=live")
-	inDead, inLive := false, false
-	for _, inv := range dead {
-		inDead = inDead || inv.Code == code
+	// Poll until it expires; a slow runner only makes the wait longer.
+	contains := func(list []listedInvite) bool {
+		for _, inv := range list {
+			if inv.Code == code {
+				return true
+			}
+		}
+		return false
 	}
-	for _, inv := range live {
-		inLive = inLive || inv.Code == code
+	deadline := time.Now().Add(30 * time.Second)
+	for !contains(listInvitesAt(t, router, token, "?state=dead")) {
+		if time.Now().After(deadline) {
+			t.Fatal("expired invite never reached the dead list")
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
-	if !inDead || inLive {
-		t.Fatalf("expired invite: inDead=%v inLive=%v, want true/false", inDead, inLive)
+	// Between the reads it expired: it is now only in the dead list, so a client merging by id sees it once.
+	if contains(listInvitesAt(t, router, token, "?state=live")) {
+		t.Fatal("expired invite still in the live list")
 	}
 }
 
@@ -186,6 +192,11 @@ func TestCreateInvite_RateLimitedPerUser(t *testing.T) {
 	router, database, token, _ := inviteTestAdmin(t, "rateadmin1")
 	other := loginAndGetToken(t, router, database, "rateadmin2", 2)
 
+	// Requests that fail validation do not spend the budget.
+	for range 25 {
+		bad := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{"max_uses": -1})
+		expectStatus(t, bad, http.StatusBadRequest)
+	}
 	for i := range 20 {
 		rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
 		if rr.Code != http.StatusCreated {
@@ -194,6 +205,9 @@ func TestCreateInvite_RateLimitedPerUser(t *testing.T) {
 	}
 	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
 	expectStatus(t, rr, http.StatusTooManyRequests)
+	if rr.Header().Get("Retry-After") == "" {
+		t.Error("429 without Retry-After")
+	}
 	// Another user has their own budget.
 	expectStatus(t, postJSONWithToken(t, router, "/api/v1/invites", other, map[string]any{}), http.StatusCreated)
 }

@@ -11,6 +11,7 @@ import {
   makeMockApi,
   type RevokeInviteOpts,
 } from "../../helpers/overlayManagersHarness";
+import { ApiClientError } from "@lib/api";
 import { useMountContainer } from "../../helpers/mountContainer";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
@@ -122,6 +123,17 @@ describe("createInviteManagerController", () => {
 
     // Controller should log the error with context
     expect(mockLogError).toHaveBeenCalled();
+  });
+
+  it("onRevokeInvite falls back to revoke by code when the server has no by-id route", async () => {
+    const api = makeMockApi({
+      revokeInvite: vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "not found")),
+      revokeInviteByCode: vi.fn().mockResolvedValue(undefined),
+    });
+    await openInvites(api);
+    const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
+    await expect(opts.onRevokeInvite(7, "abc123xyz")).resolves.toBeUndefined();
+    expect(api.revokeInviteByCode).toHaveBeenCalledWith("abc123xyz");
   });
 
   it("onRevokeInvite succeeds normally when API works", async () => {
