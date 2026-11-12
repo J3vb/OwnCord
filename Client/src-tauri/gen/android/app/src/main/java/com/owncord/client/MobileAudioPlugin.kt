@@ -128,6 +128,16 @@ class AudioRouteArgs {
   var kind: String = ""
 }
 
+/** What the plugin asks of `CallAudio`. The plugin runs on every phone, so it
+ *  holds the Android 12+ half through this. */
+private interface CallRoutes {
+  fun setActive(next: Boolean)
+
+  fun pick(kind: String)
+
+  fun sync(): JSObject
+}
+
 // The Android 12+ half: the routes Android offers for calls, the user's pick,
 // and whether a phone call holds the audio. Main thread only.
 @RequiresApi(Build.VERSION_CODES.S)
@@ -137,7 +147,7 @@ private class CallAudio(
   private val canMute: Boolean,
   private val muteWebView: (Boolean) -> Unit,
   private val onChange: () -> Unit,
-) {
+) : CallRoutes {
   // The activity's own AudioManager: Android keeps device requests per
   // instance, so this one never replaces or clears the WebView's.
   private val audio: AudioManager = activity.getSystemService(AudioManager::class.java)
@@ -165,7 +175,7 @@ private class CallAudio(
    *  to one call, and the webview that began the last one may have been
    *  reloaded before it could end it. Ending a call also drops the device
    *  request and lifts a pause. */
-  fun setActive(next: Boolean) {
+  override fun setActive(next: Boolean) {
     manual = null
     asks.reset()
     if (active == next) return
@@ -184,7 +194,7 @@ private class CallAudio(
   }
 
   /** The user tapped a route. Outside a call there is nothing to route. */
-  fun pick(kind: String) {
+  override fun pick(kind: String) {
     if (!active) return
     manual = MobileAudioPolicy.pick(kind, kinds)
     asks.reset()
@@ -193,7 +203,7 @@ private class CallAudio(
 
   /** Bring the device request and the pause in line with Android's state now,
    *  and report the result. */
-  fun sync(): JSObject {
+  override fun sync(): JSObject {
     val mode = audio.mode
     val devices = audio.availableCommunicationDevices
     val routes = MobileAudioPolicy.routes(devices.map { it.type to it.productName.toString() })
@@ -284,7 +294,7 @@ private class CallAudio(
 class MobileAudioPlugin(private val activity: Activity) : Plugin(activity) {
   private val main = Handler(Looper.getMainLooper())
   private var webView: WebView? = null
-  private var callAudio: CallAudio? = null
+  private var callAudio: CallRoutes? = null
   private var destroyed = false
   private var published: String? = null
   private var seq = 0L
