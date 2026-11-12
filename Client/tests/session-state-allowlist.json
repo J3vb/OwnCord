@@ -560,6 +560,36 @@
       "reason": "How many mounted video grids draw a live picture; each grid takes its own report back when its last picture goes or it is destroyed, so a session reset has nothing to clear"
     },
     {
+      "file": "features/messaging/content/emojiImage.ts",
+      "binding": "packStarts",
+      "category": "pure-cache",
+      "reason": "Index of the bundled Twemoji packs, the same for every server; holds no server data"
+    },
+    {
+      "file": "features/messaging/content/emojiImage.ts",
+      "binding": "packs",
+      "category": "pure-cache",
+      "reason": "The bundled Twemoji packs, loaded once per page and the same for every server; holds no server data"
+    },
+    {
+      "file": "features/messaging/content/emojiImage.ts",
+      "binding": "svgUrls",
+      "category": "pure-cache",
+      "reason": "Blob URLs of bundled Twemoji images, one per emoji for the page's life; holds no server data"
+    },
+    {
+      "file": "features/messaging/toneSheets.ts",
+      "binding": "drawn",
+      "category": "pure-cache",
+      "reason": "Emoji picker skin-tone sheets drawn from the bundled Twemoji images; holds no server data"
+    },
+    {
+      "file": "features/messaging/toneSheets.ts",
+      "binding": "drawing",
+      "category": "transient",
+      "reason": "Tone sheets being drawn, each removed when its draw settles"
+    },
+    {
       "file": "features/messaging/message-list/rowRefresh.ts",
       "binding": "scopes",
       "category": "dom-owned",

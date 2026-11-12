@@ -5,6 +5,7 @@
  */
 
 import { makeReactionMessage, reactionOptions } from "../helpers/reactionFixtures";
+import { stubTwemoji } from "../helpers/twemojiStub";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
@@ -333,7 +334,8 @@ describe("reaction pills", () => {
     expect(chip?.textContent).toContain(":deleted_one:");
   });
 
-  it("shows a unicode reaction as its Twemoji image, with the emoji as alt text", () => {
+  it("shows a unicode reaction as its Twemoji image, with the emoji as alt text", async () => {
+    const restore = stubTwemoji({ "1f525": "<svg/>" });
     const el = renderReactions(
       makeReactionMessage("🔥"),
       reactionOptions(),
@@ -343,7 +345,8 @@ describe("reaction pills", () => {
     expect(chip?.querySelector("img.custom-emoji")).toBeNull();
     const img = chip?.querySelector<HTMLImageElement>("img.emoji-img");
     expect(img?.alt).toBe("🔥");
-    expect(img?.getAttribute("src")).toMatch(/\/1f525\.svg$/);
+    await vi.waitFor(() => expect(img?.getAttribute("src")).toMatch(/^blob:twemoji-/));
+    restore();
   });
 
   it("leaves a text-style symbol reaction as text", () => {

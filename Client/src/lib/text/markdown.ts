@@ -17,6 +17,7 @@
  */
 
 import { formatDiscordTimestamp, type TimestampStyle } from "./discordTimestamp";
+import { idMentionsToNames } from "./mentionNames";
 import {
   ANGLE_URL_RE,
   buildMatches,
@@ -315,6 +316,7 @@ function inlineText(nodes: readonly InlineNode[], spoilerLabel: string): string 
     .map((node) => {
       switch (node.type) {
         case "text":
+          return idMentionsToNames(node.value);
         case "code":
           return node.value;
         case "spoiler":

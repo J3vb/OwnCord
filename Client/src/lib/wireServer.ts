@@ -188,6 +188,11 @@ export interface ReadyPayload {
      * Absent means an older server: nothing is sent, no song shown.
      */
     readonly listening_activity?: boolean;
+    /**
+     * The server answers `GET /channels/{id}/media` and `/media/months`.
+     * Absent means an older server: no media gallery.
+     */
+    readonly channel_media?: boolean;
   };
   /**
    * The songs connected members are listening to, sorted by user id.
