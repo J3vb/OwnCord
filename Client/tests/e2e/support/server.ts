@@ -168,9 +168,11 @@ export async function startTestServer(
         await stopProcess(running.child);
         logs.push(running.log());
       },
-      async restart() {
+      /** `whileDown` runs after the old process has exited and before the new one starts. */
+      async restart(whileDown?: () => Promise<void>) {
         await stopProcess(running.child);
         logs.push(running.log());
+        await whileDown?.();
         running = startProcess(binary, [], directory, env);
         await ready();
         if (options.livekit) await waitForHttp(`http://127.0.0.1:${livekitPort}`, running);

@@ -120,6 +120,39 @@ holds the median to `Client/voice-join-budget.json`.
 Change the budget only with a CI measurement recorded in
 `docs/archive/plans/b7-0-client-baseline-2026-09-19.md`.
 
+### Performance baselines
+
+Three opt-in measurements run against the real server (and LiveKit, for
+media). They are tools, not gates: their `.measure.ts` names keep them out of
+every CI run, and they never change app behaviour or settings.
+
+| Command                        | Measures                                                                                                                                                                                                                                                                |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run test:e2e:stream-perf` | Watch click to first decoded, presented and full-size frame; steady call and watched-share cost on both ends (per-layer sender stats, receiver frame rate, freezes, loss, jitter, microphone and screen audio apart, main thread, heap); what stays alive after leaving |
+| `npm run test:e2e:chat-perf`   | Send to acknowledged and to the other user; channel switch to the right history, cold and warm; uploads of fixed-content files (hash recorded); server restart to the client being live again                                                                           |
+| `npm run test:e2e:media-cost`  | One pass over a call and a share, as rates per stream                                                                                                                                                                                                                   |
+
+The first two need the media prerequisites above and write one header line
+per run (commit, versions, machine, settings, seed) and one line per trial to
+`Client/test-results/perf/<suite>.jsonl`. Summarize any number of those files
+with `npm run perf:analyze -- <files> [--compare base,candidate]`: it reports
+p50, p95 and a 95% interval of the median that resamples whole runs, never
+single samples, and marks a scenario with a failed or unverified trial as not
+eligible to back a decision.
+
+Label what you measure with `OWNCORD_PERF_ARM` and repeat runs (not just
+trials) before comparing: trials inside one run share a server and a warm
+cache. `OWNCORD_PERF_TRIALS`, `OWNCORD_PERF_WINDOW_MS`, `OWNCORD_PERF_SEED`
+and the rest are listed at the top of each `.measure.ts` file. Set
+`OWNCORD_PERF_CHROMIUM` to run another Chromium build, such as a GPU
+machine's Chrome.
+
+The browser lane cannot see everything, and the files say so with
+`unverified` rows instead of leaving gaps: the Tauri/Rust voice backend,
+hardware encoders, shaped networks, SFU restarts and interrupted uploads.
+Its HTTP goes through the test IPC bridge, so upload times compare arms in
+this lane but are not the desktop app's absolute numbers.
+
 ### Server update tests
 
 These tests build two real server `main` packages. A Go overlay supplies a
