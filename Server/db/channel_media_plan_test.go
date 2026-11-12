@@ -66,7 +66,7 @@ func TestChannelMediaPagePlanSeeks(t *testing.T) {
 		if !strings.Contains(plan, "idx_messages_channel") || !strings.Contains(plan, "idx_attachments_message") {
 			t.Errorf("%s: plan does not walk the channel's messages and look attachments up by message:\n%s", name, plan)
 		}
-		for _, line := range strings.Split(plan, "\n") {
+		for line := range strings.SplitSeq(plan, "\n") {
 			if strings.HasPrefix(line, "SCAN a") || strings.HasPrefix(line, "SCAN attachments") {
 				t.Errorf("%s: plan scans every attachment: %s", name, line)
 			}
