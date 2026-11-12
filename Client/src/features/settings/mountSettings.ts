@@ -7,6 +7,7 @@
 import { ApiClientError, errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
+import { loadCredential, saveCredential } from "@lib/net/credentials";
 import type { UserStatus } from "@lib/types";
 import { createSettingsOverlay } from "./SettingsOverlay";
 import { showToast, showChangeOutcomeToast } from "@lib/ui/toast";
@@ -36,6 +37,26 @@ export interface SettingsMountDeps {
   readonly applyPresence: (status: UserStatus) => void;
 }
 
+/**
+ * Keep a remembered sign-in password in step with a password change made here:
+ * the stored copy would otherwise be refused by the server at the next
+ * one-click sign-in. Nothing is stored for a host that holds no password.
+ */
+async function refreshRememberedPassword(host: string, newPassword: string): Promise<void> {
+  const token = authStore.getState().token;
+  if (token === null) return;
+  try {
+    const stored = await loadCredential(host);
+    if (stored === null || !stored.hasPassword || authStore.getState().token !== token) return;
+    const saved = await saveCredential(host, stored.username, token, newPassword);
+    if (!saved) log.warn("The remembered password could not be updated after a password change");
+  } catch (err) {
+    log.warn("The remembered password could not be updated after a password change", {
+      error: String(err),
+    });
+  }
+}
+
 export function createAccountSettingsOverlay(
   deps: SettingsMountDeps,
 ): ReturnType<typeof createSettingsOverlay> {
@@ -52,6 +73,8 @@ export function createAccountSettingsOverlay(
     onChangePassword: async (oldPassword, newPassword, revokeApiTokens) => {
       try {
         const outcome = await api.changePassword(oldPassword, newPassword, revokeApiTokens);
+        const host = api.getConfig().host;
+        if (host) await refreshRememberedPassword(host, newPassword);
         showChangeOutcomeToast(outcome, account("toast.passwordChanged"));
         // The form shows the same outcome inline, so a partial success is
         // never a green "changed successfully" beside the warning toast.

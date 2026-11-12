@@ -25,6 +25,10 @@ import { shellText } from "../../../i18n/shell";
 import { formatUntil, safetyText } from "../../../i18n/safety";
 import { WsErrorCode } from "@lib/protocolTypes";
 import { log } from "./channelShared";
+import {
+  bindTrackedFailures,
+  settleTrackedError,
+} from "../../../features/messaging/trackedActions";
 import type { ChannelState, ChannelApi, MountScope } from "./channelState";
 
 export function mountComposer(st: ChannelState, cc: ChannelApi, ms: MountScope): void {
@@ -267,62 +271,8 @@ export function mountComposerGating(st: ChannelState, cc: ChannelApi, ms: MountS
     }),
   );
 
-  // The server's edit/delete echoes carry no envelope id, so a
-  // tracked frame is resolved by its channel + message (the same
-  // content-match reactions use). Only the server echo proves delivery.
   st.composerGatingUnsubs.push(
-    st.ws.on("chat_edited", (payload) => {
-      for (const [id, edit] of st.pendingEdits) {
-        if (edit.channelId === payload.channel_id && edit.messageId === payload.message_id) {
-          cc.untrack(st.pendingEdits, id);
-        }
-      }
-    }),
-  );
-
-  st.composerGatingUnsubs.push(
-    st.ws.on("chat_deleted", (payload) => {
-      for (const [id, del] of st.pendingDeletes) {
-        if (del.channelId === payload.channel_id && del.messageId === payload.message_id) {
-          cc.untrack(st.pendingDeletes, id);
-        }
-      }
-    }),
-  );
-
-  // A local transport failure never echoes, so the frame is gone: report
-  // one error (the dispatcher's generic handler ignores an id that matches
-  // no pending send/reaction) and put a failed edit's text back. A half-open
-  // socket does not reject the send (the frame buffers), so the reconnect
-  // transition below is what catches that case.
-  st.composerGatingUnsubs.push(
-    st.ws.onSendFailure((id) => {
-      const edit = cc.untrack(st.pendingEdits, id);
-      if (edit !== undefined) {
-        cc.failEdits([edit], true);
-        return;
-      }
-      if (cc.untrack(st.pendingDeletes, id) !== undefined) {
-        st.showToast(messagingText("toast.deleteFailed"), "error");
-      }
-    }),
-  );
-
-  // Leaving "connected" means an in-flight frame can never be echoed: the
-  // dispatcher only sweeps optimistic sends/reactions, so resolve the
-  // tracked edit/delete frames here too — one error, and an edit's text
-  // back — instead of leaving a false success and a leaked entry.
-  st.composerGatingUnsubs.push(
-    st.ws.onStateChange((state) => {
-      if (state === "connected") return;
-      if (st.pendingEdits.size > 0) cc.failEdits([...st.pendingEdits.values()], true);
-      st.pendingEdits.clear();
-      const hadDelete = st.pendingDeletes.size > 0;
-      st.pendingDeletes.clear();
-      for (const timer of st.trackTimers.values()) window.clearTimeout(timer);
-      st.trackTimers.clear();
-      if (hadDelete) st.showToast(messagingText("toast.deleteFailed"), "error");
-    }),
+    ...bindTrackedFailures(st, st.ws, st.showToast, (edits, toast) => cc.failEdits(edits, toast)),
   );
 
   // A refused send restarts the full window: the server's limiter is the
@@ -331,9 +281,7 @@ export function mountComposerGating(st: ChannelState, cc: ChannelApi, ms: MountS
   st.composerGatingUnsubs.push(
     st.ws.on("error", (payload, correlationId) => {
       if (correlationId !== undefined) {
-        const edit = cc.untrack(st.pendingEdits, correlationId);
-        if (edit !== undefined) cc.failEdits([edit], false);
-        cc.untrack(st.pendingDeletes, correlationId);
+        settleTrackedError(st, (edits, toast) => cc.failEdits(edits, toast), correlationId);
       }
       if (payload.code !== WsErrorCode.SLOW_MODE) return;
       if (!ms.sentToMountedChannel(correlationId)) return;

@@ -206,6 +206,29 @@ describe("bindAnimatedImage", () => {
     expect(img.src).toBe("blob:anim");
   });
 
+  it("forgets an image bound before it was mounted once it is removed", async () => {
+    const lone = document.createElement("img");
+    bindAnimatedImage(lone, "blob:anim", STILL, "always");
+    document.body.appendChild(lone);
+    document.documentElement.classList.add("reduced-motion");
+    await Promise.resolve();
+    expect(lone.src).toBe(STILL);
+    lone.remove();
+    document.documentElement.classList.remove("reduced-motion");
+    await Promise.resolve();
+    expect(lone.src).toBe(STILL);
+  });
+
+  it("watches the page root with one observer however many images are bound", () => {
+    const observe = vi.spyOn(MutationObserver.prototype, "observe");
+    for (let i = 0; i < 5; i++) {
+      bindAnimatedImage(document.createElement("img"), `blob:a${i}`, STILL, "always");
+    }
+    expect(
+      observe.mock.calls.filter(([n]) => n === document.documentElement).length,
+    ).toBeLessThanOrEqual(1);
+  });
+
   it("follows a source reloaded after eviction, so the next hover plays it", () => {
     bindAnimatedImage(img, "blob:old", STILL, { hover: row });
     row.dispatchEvent(new Event("pointerenter"));
@@ -217,6 +240,32 @@ describe("bindAnimatedImage", () => {
     expect(img.src).toBe(STILL);
     row.dispatchEvent(new Event("pointerenter"));
     expect(img.src).toBe("blob:new");
+  });
+
+  it("releases a replaced image's row listeners when the next image binds to that row", () => {
+    const remove = vi.spyOn(row, "removeEventListener");
+    bindAnimatedImage(img, "blob:anim", STILL, { hover: row });
+    const second = document.createElement("img");
+    bindAnimatedImage(second, "blob:anim", STILL, { hover: row });
+    img.replaceWith(second);
+    expect(remove).not.toHaveBeenCalled();
+    const third = document.createElement("img");
+    bindAnimatedImage(third, "blob:anim", STILL, { hover: row });
+    expect(remove).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps the listeners of images bound to one row before it is mounted", () => {
+    const fresh = document.createElement("div");
+    const first = document.createElement("img");
+    const second = document.createElement("img");
+    bindAnimatedImage(first, "blob:a", STILL, { hover: fresh });
+    bindAnimatedImage(second, "blob:b", STILL, { hover: fresh });
+    fresh.append(first, second);
+    document.body.appendChild(fresh);
+    fresh.dispatchEvent(new Event("pointerenter"));
+    expect(first.src).toBe("blob:a");
+    expect(second.src).toBe("blob:b");
+    fresh.remove();
   });
 
   it("drops its row listeners once the image is gone", () => {

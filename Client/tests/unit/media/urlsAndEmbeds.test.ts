@@ -7,6 +7,7 @@ import {
   extractUrls,
   renderUrlEmbeds,
   clearMediaCaches,
+  MAX_EMBEDS_PER_MESSAGE,
 } from "../../../src/features/messaging/content/media";
 import {
   oembedResponse,
@@ -324,6 +325,17 @@ describe("media.ts", () => {
       container.appendChild(fragment);
       const images = container.querySelectorAll(".msg-image");
       expect(images.length).toBe(1);
+    });
+
+    it("draws at most the per-message cap of embeds", () => {
+      loadPrefMock.mockImplementation((key: string, fallback: unknown) => fallback);
+
+      const urls = Array.from({ length: 9 }, (_, i) => `https://example.com/photo${i}.jpg`);
+      const fragment = renderUrlEmbeds(urls.join(" "));
+
+      const container = document.createElement("div");
+      container.appendChild(fragment);
+      expect(container.querySelectorAll(".msg-image").length).toBe(MAX_EMBEDS_PER_MESSAGE);
     });
 
     it("skips YouTube embed when showEmbeds is disabled", () => {

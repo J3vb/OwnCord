@@ -170,6 +170,8 @@ export const moderationText = defineCatalog("moderation", {
     one: "{name} is banned. Only {count} message was deleted before the dialog closed.",
     other: "{name} is banned. Only {count} messages were deleted before the dialog closed.",
   },
+  "banDialog.unconfirmed":
+    "Could not confirm that {name} was banned. Check the member list before trying again.",
   "nicknameDialog.title": "Change nickname for {name}",
   "nicknameDialog.body":
     "Everyone on this server will see this name instead of their own. Leave it empty or use Reset to remove it.",

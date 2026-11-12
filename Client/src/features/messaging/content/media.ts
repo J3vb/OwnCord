@@ -425,12 +425,19 @@ function refreshExternalItems(): void {
   }
 }
 
+/** The most embeds one message draws; further links stay plain text links. */
+export const MAX_EMBEDS_PER_MESSAGE = 5;
+
 /** Render URL embeds (YouTube players, generic link previews). */
 export function renderUrlEmbeds(content: string): DocumentFragment {
   const fragment = document.createDocumentFragment();
+  let drawn = 0;
   for (const url of new Set(extractUrls(content))) {
+    if (drawn >= MAX_EMBEDS_PER_MESSAGE) break;
     const el = renderUrlEmbed(url);
-    if (el !== null) fragment.appendChild(el);
+    if (el === null) continue;
+    fragment.appendChild(el);
+    drawn++;
   }
   return fragment;
 }

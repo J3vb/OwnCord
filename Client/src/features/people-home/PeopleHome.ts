@@ -3,10 +3,10 @@
  * a search), a Message button per person, and an Active now column of people
  * playing a game or sitting in voice.
  *
- * Rows are redrawn from the stores whenever the roster, presence, voice or
- * blocks change. The tabs and search box are built once, so typing and focus
- * survive an update; focus on a row's Message button moves to the same
- * person's new button.
+ * Rows are patched from the stores whenever the roster, presence, voice or
+ * blocks change: a row is kept by user id and only redrawn when what it shows
+ * changed, so focus and a click in progress survive an update. The tabs and
+ * search box are built once, so typing survives too.
  */
 
 import { appendChildren, createElement, setText } from "@lib/dom";
@@ -17,7 +17,7 @@ import { voiceStore } from "@stores/voice.store";
 import { peopleHomeText as t } from "../../i18n/peopleHome";
 import type { FeatureViewContext } from "../navigation/destinations";
 import { activeNow, peopleRows, type ActiveModel, type PeopleTab, type PersonModel } from "./model";
-import { peopleScope, personAvatar, watchPeople } from "./shared";
+import { peopleScope, personAvatar, refreshPersonAvatar, watchPeople } from "./shared";
 
 function textBlock(person: PersonModel, lines: readonly string[]): HTMLElement {
   const wrap = createElement("div", { class: "mi-text" });
@@ -36,6 +36,58 @@ function textBlock(person: PersonModel, lines: readonly string[]): HTMLElement {
     wrap.appendChild(el);
   });
   return wrap;
+}
+
+function labelMessage(msg: HTMLButtonElement, person: PersonModel): void {
+  msg.setAttribute("aria-label", t("message", { name: person.name }));
+  msg.title = t("message", { name: person.name });
+}
+
+function cardContents(person: ActiveModel, current: Element | null = null): Node[] {
+  const lines: string[] = [];
+  if (person.game !== null) lines.push(person.game);
+  if (person.voiceChannel !== null) lines.push(t("active.voice", { channel: person.voiceChannel }));
+  const shown: PersonModel = { ...person, lineIcon: person.game !== null ? "gamepad-2" : null };
+  return [refreshPersonAvatar(current, shown), textBlock(shown, lines)];
+}
+
+interface KeyedRow {
+  readonly el: HTMLLIElement;
+  sig: string;
+}
+
+/**
+ * Brings `container` to `items` in order, keeping each existing row element
+ * (and so its focus) and only moving the ones out of place.
+ */
+function reconcile<T extends { readonly id: number }, R extends KeyedRow>(
+  container: HTMLElement,
+  items: readonly T[],
+  rows: Map<number, R>,
+  create: (item: T, sig: string) => R,
+  update: (row: R, item: T) => void,
+): void {
+  const wanted = new Set<number>();
+  let cursor: ChildNode | null = container.firstChild;
+  for (const item of items) {
+    wanted.add(item.id);
+    const sig = JSON.stringify(item);
+    let row = rows.get(item.id);
+    if (row === undefined) {
+      row = create(item, sig);
+      rows.set(item.id, row);
+    } else if (row.sig !== sig) {
+      row.sig = sig;
+      update(row, item);
+    }
+    if (cursor === row.el) cursor = cursor.nextSibling;
+    else container.insertBefore(row.el, cursor);
+  }
+  for (const [id, row] of rows) {
+    if (wanted.has(id)) continue;
+    row.el.remove();
+    rows.delete(id);
+  }
 }
 
 export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): void {
@@ -117,7 +169,13 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
   );
   appendChildren(root, main, active);
 
-  function personRow(person: PersonModel): HTMLLIElement {
+  interface PersonRow extends KeyedRow {
+    readonly msg: HTMLButtonElement;
+  }
+  const personRows = new Map<number, PersonRow>();
+  const cardRows = new Map<number, KeyedRow>();
+
+  function personRow(person: PersonModel, sig: string): PersonRow {
     const li = createElement("li", {
       class: "member-item people-row",
       "data-testid": `people-row-${person.id}`,
@@ -125,11 +183,10 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
     const msg = createElement("button", {
       type: "button",
       class: "people-msg",
-      "aria-label": t("message", { name: person.name }),
-      title: t("message", { name: person.name }),
       "data-testid": `people-message-${person.id}`,
       "data-user-id": String(person.id),
     });
+    labelMessage(msg, person);
     msg.appendChild(createIcon("message-square", 16));
     msg.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -138,10 +195,19 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
     // The whole row opens the DM, as on Discord; the button is its keyboard stop.
     li.addEventListener("click", () => ctx.messageUser?.(person.id));
     appendChildren(li, personAvatar(person), textBlock(person, [person.line]), msg);
-    return li;
+    return { el: li, sig, msg };
   }
 
-  function activeCard(person: ActiveModel): HTMLLIElement {
+  function updatePersonRow(row: PersonRow, person: PersonModel): void {
+    labelMessage(row.msg, person);
+    // The Message button stays in place: detaching it would drop its focus.
+    const current = row.el.firstElementChild;
+    const avatar = refreshPersonAvatar(current, person);
+    if (avatar !== current) current?.replaceWith(avatar);
+    row.msg.previousElementSibling?.replaceWith(textBlock(person, [person.line]));
+  }
+
+  function activeCard(person: ActiveModel, sig: string): KeyedRow {
     const li = createElement("li", {
       class: "member-item people-card",
       role: "button",
@@ -155,14 +221,14 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
       e.preventDefault();
       ctx.messageUser?.(person.id);
     });
-    const lines: string[] = [];
-    if (person.game !== null) lines.push(person.game);
-    if (person.voiceChannel !== null)
-      lines.push(t("active.voice", { channel: person.voiceChannel }));
-    const shown: PersonModel = { ...person, lineIcon: person.game !== null ? "gamepad-2" : null };
     li.addEventListener("click", () => ctx.messageUser?.(person.id));
-    appendChildren(li, personAvatar(shown), textBlock(shown, lines));
-    return li;
+    li.append(...cardContents(person));
+    return { el: li, sig };
+  }
+
+  function updateCard(row: KeyedRow, person: ActiveModel): void {
+    row.el.setAttribute("aria-label", t("message", { name: person.name }));
+    row.el.replaceChildren(...cardContents(person, row.el.firstElementChild));
   }
 
   function focusedIds(): { focusedId: string | undefined; focusedCard: string | undefined } {
@@ -189,7 +255,7 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
       count,
       t(tab === "online" ? "count.online" : "count.all", { count: String(rows.length) }),
     );
-    list.replaceChildren(...rows.map(personRow));
+    reconcile(list, rows, personRows, personRow, updatePersonRow);
     empty.hidden = rows.length > 0;
     if (rows.length === 0) setText(empty, emptyText());
     if (focusedId !== undefined) {
@@ -209,7 +275,7 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
       channelsStore.getState().channels,
       sc,
     );
-    activeList.replaceChildren(...cards.map(activeCard));
+    reconcile(activeList, cards, cardRows, activeCard, updateCard);
     activeEmpty.hidden = cards.length > 0;
     if (focusedCard !== undefined) {
       (

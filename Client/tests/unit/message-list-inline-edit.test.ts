@@ -453,6 +453,19 @@ describe("inline message editor", () => {
       expect(list!.isEditing()).toBe(true);
     });
 
+    it("an emptied editor on a message with a file saves the empty text instead of offering delete", async () => {
+      const file = { id: "a", filename: "f.txt", size: 1, mime: "text/plain", url: "/f" };
+      mount([mine(1), mine(2, { attachments: [file] })]);
+      const textarea = await openEditor(2);
+      textarea.value = "   ";
+
+      key(textarea, "Enter");
+
+      expect(options.onEditSave).toHaveBeenCalledExactlyOnceWith(2, "");
+      expect(options.onEmptyEdit).not.toHaveBeenCalled();
+      expect(editor(2)).toBeNull();
+    });
+
     it("the delete confirm closing the edit is the host's cancelEdit", async () => {
       mount([mine(1)]);
       const textarea = await openEditor(1);
@@ -621,6 +634,7 @@ describe("inline message editor", () => {
   });
 
   it("a reply without referencedMessage reads 'deleted', not unknown, once its loaded parent is deleted live", () => {
+    options = { ...options, onJumpToMessage: vi.fn() };
     mount([mine(1), mine(2, { replyTo: 1, referencedMessage: undefined })]);
     expect(row(2)!.querySelector(".msg-reply-ref[role='button']")).not.toBeNull();
 

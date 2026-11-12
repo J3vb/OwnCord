@@ -21,6 +21,14 @@ function createReplyBar(
   opts: MessageRenderOptions,
   signal: AbortSignal,
 ): HTMLDivElement {
+  const onJump = opts.onJumpToMessage;
+  // Without a jump target the quote is plain text, like a pin row's.
+  if (onJump === undefined) {
+    return createElement("div", {
+      class: "msg-reply-ref",
+      "data-reply-to": String(replyToId),
+    });
+  }
   const bar = createElement("div", {
     class: "msg-reply-ref",
     role: "button",
@@ -28,7 +36,7 @@ function createReplyBar(
     "data-reply-to": String(replyToId),
     title: messagingText("reply.jumpTitle"),
   });
-  const jump = (): void => opts.onJumpToMessage?.(replyToId);
+  const jump = (): void => onJump(replyToId);
   bar.addEventListener("click", jump, { signal });
   bar.addEventListener(
     "keydown",
