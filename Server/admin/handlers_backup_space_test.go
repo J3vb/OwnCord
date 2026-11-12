@@ -96,7 +96,7 @@ func TestHandleBackup_RefreshesTheAttentionSignal(t *testing.T) {
 	svc := newTestServices(database)
 	svc.Attention = service.NewAttentionService(service.AttentionThresholds{}, service.AttentionSources{
 		BackupSchedule: func(context.Context) (string, error) { return "daily", nil },
-		LastBackup:     func() (time.Time, error) { return admin.NewestBackup(backupDir) },
+		LastBackup:     func() (time.Time, error) { return admin.NewestBackup(backupDir, "") },
 	})
 	svc.Attention.Evaluate(context.Background(), time.Now())
 	backupStatus := func() string {
