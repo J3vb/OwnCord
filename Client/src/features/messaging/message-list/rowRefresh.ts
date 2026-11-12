@@ -13,7 +13,7 @@ import { ensureActionsBar, hasShellBar, renderActionsBar } from "./messageAction
 
 /** The fields a row draws from its reactions and pin state; every other field
  *  is drawn into the row's body and rebuilds it when it differs. */
-const LIVE_FIELDS: ReadonlySet<string> = new Set(["reactions", "pinned"]);
+const LIVE_FIELDS: ReadonlySet<keyof Message> = new Set<keyof Message>(["reactions", "pinned"]);
 
 /**
  * Whether `was` and `now` differ only in reactions and/or pin state (and are an
@@ -24,11 +24,9 @@ export function differsOnlyInLiveFields(was: Message, now: Message): boolean {
   if (isServerRowKind(now.kind) || (now.user.id === 0 && now.user.username === "System")) {
     return false;
   }
-  const a = was as unknown as Record<string, unknown>;
-  const b = now as unknown as Record<string, unknown>;
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  const keys = new Set([...Object.keys(was), ...Object.keys(now)] as (keyof Message)[]);
   for (const key of keys) {
-    if (!LIVE_FIELDS.has(key) && a[key] !== b[key]) return false;
+    if (!LIVE_FIELDS.has(key) && was[key] !== now[key]) return false;
   }
   return true;
 }

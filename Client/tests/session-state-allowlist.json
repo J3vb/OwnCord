@@ -558,6 +558,12 @@
       "binding": "drawing",
       "category": "dom-owned",
       "reason": "How many mounted video grids draw a live picture; each grid takes its own report back when its last picture goes or it is destroyed, so a session reset has nothing to clear"
+    },
+    {
+      "file": "features/messaging/message-list/rowRefresh.ts",
+      "binding": "scopes",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by live message row elements; a scope is destroyed with its row's owner, and the entry goes with the row"
     }
   ]
 }
