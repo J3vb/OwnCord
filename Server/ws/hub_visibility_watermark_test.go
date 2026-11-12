@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -242,12 +243,7 @@ func TestMarkVisibilityWalkTimedOut_SettlesTheLiveClientOnly(t *testing.T) {
 }
 
 func hasTopic(h *Hub, c *Client, topic Topic) bool {
-	for _, got := range h.pubsub.TopicsForClient(c) {
-		if got == topic {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(h.pubsub.TopicsForClient(c), topic)
 }
 
 // stalledRoleReader blocks every role lookup until its context ends.

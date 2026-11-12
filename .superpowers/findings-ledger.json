@@ -13792,14 +13792,15 @@
       "file": "Server/ws/hub_visibility_refresh.go",
       "line": 125,
       "severity": "high",
-      "why": "When the walk after a channel override change ran past its budget, the clients it had not reached yet were only marked to resync and kept their place on the channel until they did.",
-      "repro": "See the test: a permission read that stalls past the budget, then check the unreached clients' channel topic and focus.",
+      "why": "A visibility walk after a channel override change that runs past its budget now treats every client it did not reach like one that lost the channel, and sends it to a full resync that gives the channel back where it is still allowed.",
+      "repro": "See the tests: a permission read that stalls past the budget.",
       "evidence": "Vault issue #150; Server/ws/hub_visibility_watermark_test.go (TestRefreshChannelVisibility_StalledReaderTimesOutAndMarksClients, TestMarkVisibilityWalkTimedOut_SettlesTheLiveClientOnly)",
-      "suggestedFix": "Take each unreached live client off the channel (topic, focus, held thread under it) before marking it to resync; the full ready gives the channel back to those who may still see it.",
+      "suggestedFix": "Take each unreached live client off the channel (topic, focus, held thread under it) before marking it to resync.",
+      "note": "Follow-up: a settled client resumes at its next sequenced frame; on a quiet server that can take a while (no loss, the full ready catches up).",
       "fix": {
         "commit": "pending",
         "test": "Server/ws/hub_visibility_watermark_test.go",
-        "revertProof": "fail (unreached clients keep the channel topic and focus)"
+        "revertProof": "fail"
       },
       "confidence": "medium",
       "status": "fixed",
