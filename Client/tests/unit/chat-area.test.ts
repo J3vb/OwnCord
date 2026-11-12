@@ -352,11 +352,11 @@ describe("createChatArea", () => {
 
   // --- Unsubscribers ---
 
-  it("includes cleanup functions for the jump handler, the three controllers and the consent watch", () => {
+  it("includes cleanup functions for the jump handler, the three controllers, the consent watch and the header", () => {
     const result = createChatArea(makeOptions());
 
-    // jump-handler unregister + pinned + media gallery + search + NSFW consent subscription
-    expect(result.unsubscribers.length).toBe(5);
+    // jump-handler unregister + pinned + media gallery + search + NSFW consent subscription + header More button
+    expect(result.unsubscribers.length).toBe(6);
     for (const unsub of result.unsubscribers) {
       expect(typeof unsub).toBe("function");
     }
