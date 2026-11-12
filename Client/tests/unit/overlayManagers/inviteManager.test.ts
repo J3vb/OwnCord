@@ -136,7 +136,7 @@ describe("createInviteManagerController", () => {
     expect(api.revokeInviteByCode).toHaveBeenCalledWith("abc123xyz");
   });
 
-  it("onRevokeInvite succeeds normally when API works", async () => {
+  it("onRevokeInvite revokes by id when the API works", async () => {
     const api = makeMockApi();
 
     await openInvites(api);
@@ -145,6 +145,8 @@ describe("createInviteManagerController", () => {
 
     await expect(opts.onRevokeInvite(7, "abc123xyz")).resolves.toBeUndefined();
     expect(mockLogError).not.toHaveBeenCalled();
+    expect(api.revokeInvite).toHaveBeenCalledWith(7);
+    expect(api.revokeInviteByCode).not.toHaveBeenCalled();
   });
 
   it("opening with no live invite creates exactly one (7 days, no limit) and features it", async () => {
@@ -615,16 +617,5 @@ describe("createInviteManagerController (additional)", () => {
 
     expect(createInviteManager).not.toHaveBeenCalled();
     expect(mockInviteManagerMount).not.toHaveBeenCalled();
-  });
-
-  it("onRevokeInvite revokes by id", async () => {
-    const api = makeMockApi();
-
-    await openInvites(api);
-
-    const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
-
-    await expect(opts.onRevokeInvite(7, "abc123xyz")).resolves.toBeUndefined();
-    expect(api.revokeInvite).toHaveBeenCalledWith(7);
   });
 });
