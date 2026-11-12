@@ -316,6 +316,7 @@ func (h *Hub) LegacyReadyForTest(database ReadySnapshotReader, userID int64, rol
 		"roles":           f.tail.Roles,
 		"dm_channels":     f.head.DMChannels,
 		"server_name":     f.tail.ServerName,
+		"server_time_ms":  f.tail.ServerTimeMS,
 		"motd":            f.tail.MOTD,
 		"notices":         f.tail.Notices,
 	}

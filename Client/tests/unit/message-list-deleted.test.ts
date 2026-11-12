@@ -293,7 +293,7 @@ describe("MessageList — deleted messages leave the list", () => {
       expect(row(4)!.classList.contains("grouped")).toBe(true);
     });
 
-    it("a reaction on a row re-renders that row and nothing around it", () => {
+    it("a reaction on a row redraws that row's reactions and nothing around it", () => {
       setMessages(
         CHANNEL_ID,
         [1, 2, 3].map((id) => buildMinuteMessage({ id })),
@@ -312,7 +312,7 @@ describe("MessageList — deleted messages leave the list", () => {
 
       expect(row(1)).toBe(row1);
       expect(row(3)).toBe(row3);
-      expect(row(2)).not.toBe(row2);
+      expect(row(2)).toBe(row2);
       expect(row(2)!.querySelector(".reaction-pill, [data-emoji]")).not.toBeNull();
     });
   });
