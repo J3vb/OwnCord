@@ -572,6 +572,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
     "voice_states": [ ... ],
     "roles": [ ... ],
     "server_name": "My Server",
+    "server_time_ms": 1794657600000,
     "motd": "Welcome!"
   }
 }
@@ -756,6 +757,8 @@ to reconstruct them:
 
 **voice_states[]:** All users currently in any voice channel: `channel_id`, `user_id`, `username`, `muted`, `deafened`, `server_muted`, `server_deafened`, `speaking`, `camera`, `screenshare`
 
+**server_time_ms:** The server's clock (Unix milliseconds) when it built this `ready`. A client keeps the difference from its own clock for the session and stamps a new `client_message_id` with server time (see the retry contract under `chat_send`), so a device clock that runs fast or slow does not get every send refused. An older server omits it, and the client then uses its own clock.
+
 **roles[]:** All server roles with `id`, `name`, `color`, `permissions` (bitfield), `position`, `is_default`, `hoist` (the role is its own member-list group; every role that existed before multi-role support starts `true`, a new role `false`) and `mentionable` (any member may ping the role). An absent `hoist` means an older server: treat every role as hoisted.
 
 ---
@@ -871,7 +874,7 @@ retry floor outside that database. The floor includes the permitted five-minute
 clock skew. A receipt-missing id older than that floor returns `BAD_REQUEST`
 with an instruction to review the draft; an existing matching receipt remains
 acknowledgeable. `ready.capabilities.message_retry_floor_ms` advertises the
-floor (0 before any restore). New logical ids use `max(Date.now(), floor)`,
+floor (0 before any restore). New logical ids use `max(server time, floor)`, where server time is the device clock corrected by `ready.server_time_ms` (the device clock when the server did not send it),
 while recovered pending ids remain unchanged. Sidecar read/write failures
 fail closed. This protects the supported admin restore path; replacing database
 and sidecar files manually can discard this history, so such recovery requires
