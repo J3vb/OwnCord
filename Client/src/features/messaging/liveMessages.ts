@@ -171,6 +171,8 @@ export function reduceMarkSendFailed(
   }
   const existing = prev.messagesByChannel.get(channelId);
   if (existing === undefined) return prev;
+  // A delivered row keeps its correlation id; a late failure must not undo it.
+  if (existing.some((m) => m.correlationId === correlationId && m.status === "sent")) return prev;
   const updatedList = existing.map((m) =>
     m.correlationId === correlationId ? { ...m, status: "failed" as const, errorCode } : m,
   );
