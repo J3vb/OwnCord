@@ -23,12 +23,12 @@ type previewData struct {
 	ImageHeight *uint32
 }
 
-// size is the cache weight of a preview: its strings plus a fixed overhead.
-func (p previewData) size() int64 {
-	n := int64(128 + len(p.ImageURL))
+// size is the payload weight of a preview: its strings and fixed fields.
+func (p previewData) size() int {
+	n := 32 + len(p.ImageURL)
 	for _, s := range []*string{p.Title, p.Description, p.SiteName} {
 		if s != nil {
-			n += int64(len(*s))
+			n += len(*s)
 		}
 	}
 	return n
