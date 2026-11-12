@@ -407,6 +407,35 @@ describe("ban dialog", () => {
     expect(text).not.toMatch(/retry/i);
   });
 
+  it("closing after a dropped connection does not claim the member is banned", async () => {
+    const { notify } = setup(vi.fn().mockRejectedValue(new TransportError("socket closed")));
+    q<HTMLSelectElement>("ban-delete-select").value = "3600";
+    confirm().click();
+    await vi.waitFor(() => expect(confirm().textContent).toBe("Retry"));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(notify).toHaveBeenCalledOnce();
+    const [text, type] = notify.mock.calls[0]!;
+    expect(type).toBe("warning");
+    expect(text).toContain("Could not confirm");
+    expect(text).not.toContain("is banned");
+  });
+
+  it("closing after a retry drops the connection keeps the confirmed wording", async () => {
+    const submit = vi
+      .fn()
+      .mockResolvedValueOnce({ purge: { deleted: 7, complete: false } })
+      .mockRejectedValueOnce(new TransportError("socket closed"));
+    const { notify } = setup(submit);
+    q<HTMLSelectElement>("ban-delete-select").value = "3600";
+    confirm().click();
+    await vi.waitFor(() => expect(confirm().textContent).toBe("Retry"));
+    confirm().click();
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(confirm().textContent).toBe("Retry"));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(notify.mock.calls[0]![0]).toContain("7 messages");
+  });
+
   describe("retry window", () => {
     afterEach(() => {
       vi.useRealTimers();
