@@ -70,13 +70,11 @@ and only when it changes something a contributor or fork holder must do
 - **Phone app:** on a small phone the buttons at the end of a direct message's header were off screen, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
 - **GIFs:** GIFs in the GIF picker showed up slowly in the desktop app. Thumbnails from the same site now share open connections, and six load at a time instead of four.
 - **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
+- **Mentions:** typing just @ listed only 10 people, so members who were offline or had not posted lately were missing until you typed part of their name. The list now holds up to 50 people and scrolls.
+- **Messages:** a very long message or code block could make the app hang for a moment while it was shown. It now shows without the wait.
 
 ### Changed
 
-- **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
-- **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
-- **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.
-- **Typing just @ listed only 10 people**, so members who were offline or had not posted lately were missing until you typed part of their name. The list now holds up to 50 people and scrolls.
 - **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.
 
 ### Known issues
