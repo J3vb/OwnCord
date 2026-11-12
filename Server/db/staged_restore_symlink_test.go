@@ -88,7 +88,77 @@ func TestApplyStagedRestore_RollbackThroughSymlinkKeepsLink(t *testing.T) {
 	}
 	assertStillLink(t, link, real)
 	assertRows(t, real, "live")
-	assertGone(t, real+restoreRollbackSuffix, real+restoreMarkerSuffix, link+restoreRollbackSuffix)
+	assertGone(t, real+restoreRollbackSuffix, real+restoreMarkerSuffix, link+restoreRollbackSuffix, link+restoreResultSuffix)
+	if !fileExists(real + restoreResultSuffix) {
+		t.Fatal("the result file is not beside the real database")
+	}
+	entries, err := os.ReadDir(filepath.Dir(link))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if n := e.Name(); n != "chat.db" && n != "backup.db" && n != "chat.db.message-retry-floor" {
+			t.Errorf("unexpected file beside the link: %s", n)
+		}
+	}
+}
+
+func TestApplyStagedRestore_SymlinkResumesAfterCrash(t *testing.T) {
+	for _, step := range []string{"aside-main", "aside"} {
+		t.Run(step, func(t *testing.T) {
+			link, real, backup := linkedFixture(t)
+			if err := StageRestore(context.Background(), link, backup, StagedRestoreMarker{Backup: "backup.db"}); err != nil {
+				t.Fatal(err)
+			}
+			crashAt(t, step)
+			if _, err := ApplyStagedRestore(link); err == nil {
+				t.Fatal("expected the simulated crash")
+			}
+			if fileExists(real) {
+				t.Fatal("expected the live file moved aside")
+			}
+			if err := RestorePending(link); err == nil {
+				t.Fatal("RestorePending missed the half-swapped restore")
+			}
+			noCrash(t)
+			res, err := ApplyStagedRestore(link)
+			if err != nil || res.Status != RestoreStatusApplied {
+				t.Fatalf("resume = %+v, %v", res, err)
+			}
+			assertStillLink(t, link, real)
+			assertRows(t, real, "backup")
+			assertGone(t, real+restoreMarkerSuffix, real+restoreStagedSuffix, real+restoreRollbackSuffix, link+restoreRollbackSuffix)
+		})
+	}
+}
+
+func TestApplyStagedRestore_SymlinkResumesInterruptedRollback(t *testing.T) {
+	link, real, backup := linkedFixture(t)
+	if err := StageRestore(context.Background(), link, backup, StagedRestoreMarker{Backup: "backup.db"}); err != nil {
+		t.Fatal(err)
+	}
+	prev := checkSwapped
+	checkSwapped = func(context.Context, string) error { return os.ErrInvalid }
+	t.Cleanup(func() { checkSwapped = prev })
+	crashAt(t, "swapped")
+	if _, err := ApplyStagedRestore(link); err == nil {
+		t.Fatal("expected the simulated crash")
+	}
+	// Killed inside the rollback, after the restored main file was removed.
+	if err := removeAll(real); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestorePending(link); err == nil {
+		t.Fatal("RestorePending missed the interrupted rollback")
+	}
+	noCrash(t)
+	res, err := ApplyStagedRestore(link)
+	if err != nil || res.Status != RestoreStatusRolledBack {
+		t.Fatalf("resume = %+v, %v", res, err)
+	}
+	assertStillLink(t, link, real)
+	assertRows(t, real, "live")
+	assertGone(t, real+restoreRollbackSuffix, real+restoreMarkerSuffix)
 }
 
 func TestApplyStagedRestore_FinishesRestoreStagedBesideLink(t *testing.T) {

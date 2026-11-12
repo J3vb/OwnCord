@@ -118,6 +118,7 @@ release changes the database, and anything an operator must do first.)
 - **Admin:** the `chatserver token` commands applied pending database updates themselves, skipping the safety copy an upgrade takes. They now stop and ask you to start the server once first.
 - **Linux:** on a desktop without a keyring service (no gnome-keyring or KWallet), the app now creates your voice identity key and saves unsent messages for recovery, instead of showing "Could not save this pending message" on every send.
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
+- **Admin:** restoring a backup from the admin panel on a symlinked database path replaced the link with a plain file. The link is now kept and the restore goes to the linked file.
 
 ### Messages & files
 
