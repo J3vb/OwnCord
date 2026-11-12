@@ -32,7 +32,6 @@ import {
   isWindowDetached,
   messagesStore,
   reattachToPresent,
-  setMessagePinned,
 } from "@stores/messages.store";
 import { getThread, threadsStore } from "@stores/threads.store";
 import { createConfirmModal } from "../dialogs/confirmModal";
@@ -41,6 +40,16 @@ import { formatUntil, safetyText } from "../../i18n/safety";
 import { threadComposerReason } from "./threadCommands";
 import { createMessageList, type MessageListComponent } from "../messaging/MessageList";
 import { createMessageInput, type MessageInputComponent } from "../messaging/MessageInput";
+import { createThreadJump } from "./threadJump";
+import {
+  bindTrackedFailures,
+  createTrackedStore,
+  restoreFailedEdits,
+  sendTrackedDelete,
+  sendTrackedEdit,
+  togglePin,
+  type TrackedEdit,
+} from "../messaging/trackedActions";
 import { createThreadSendQueue } from "./threadSendQueue";
 import { importedName } from "../messaging/importedAuthor";
 import type { MessageController } from "../../pages/main-page/MessageController";
@@ -169,12 +178,11 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
 
   // ── Delete a message ──────────────────────────────────────────────────────
 
+  const tracked = createTrackedStore();
+  const pinsInFlight = new Set<string>();
+
   function sendDelete(messageId: number): void {
-    if (uiStore.getState().connectionStatus !== "connected") {
-      showToast(messagingText("toast.deleteFailed"), "error");
-      return;
-    }
-    ws.send({ type: "chat_delete", payload: { message_id: messageId } });
+    sendTrackedDelete(tracked, ws, showToast, threadId, messageId);
   }
 
   function confirmDeleteMessage(messageId: number): void {
@@ -188,6 +196,26 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       onConfirm: () => sendDelete(messageId),
     });
   }
+
+  const jumpTo = createThreadJump({
+    api,
+    threadId,
+    signal,
+    getList: () => messageList,
+    showToast,
+  });
+
+  const restoreEdits = (edits: readonly TrackedEdit[], toast: boolean): void =>
+    restoreFailedEdits(
+      {
+        currentChannelId: () => threadId,
+        messageList: () => messageList,
+        messageInput: () => messageInput,
+        showToast,
+      },
+      edits,
+      toast,
+    );
 
   // ── Mount ─────────────────────────────────────────────────────────────────
 
@@ -237,12 +265,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       onEditSave: (messageId, content) => {
         const original = getChannelMessages(threadId).find((m) => m.id === messageId);
         if (original?.content === content) return true;
-        if (uiStore.getState().connectionStatus !== "connected") {
-          showToast(messagingText("toast.editFailed"), "error");
-          return false;
-        }
-        ws.send({ type: "chat_edit", payload: { message_id: messageId, content } });
-        return true;
+        return sendTrackedEdit(tracked, ws, showToast, threadId, messageId, content);
       },
       onEmptyEdit: (messageId) => {
         messageList?.cancelEdit();
@@ -254,16 +277,9 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
         else confirmDeleteMessage(messageId);
       },
       onReactionClick: (messageId, emoji) => reactions.handleReaction(messageId, emoji),
-      onPinClick: (messageId, channelId, currentlyPinned) => {
-        setMessagePinned(channelId, messageId, !currentlyPinned);
-        const request = currentlyPinned
-          ? api.unpinMessage(channelId, messageId)
-          : api.pinMessage(channelId, messageId);
-        request.catch(() => {
-          setMessagePinned(channelId, messageId, currentlyPinned);
-          showToast(messagingText("toast.pinFailed"), "error");
-        });
-      },
+      onPinClick: (messageId, channelId, currentlyPinned) =>
+        togglePin(pinsInFlight, api, showToast, messageId, channelId, currentlyPinned),
+      onJumpToMessage: (messageId) => void jumpTo(messageId),
       onRetry: (correlationId) => {
         if (!queue.retry(correlationId)) sender.retryDraft(correlationId);
       },
@@ -294,6 +310,13 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       dropZone: ".thread-panel",
     });
     sender.watchUnsentFiles(disposable);
+    for (const unsub of bindTrackedFailures(tracked, ws, showToast, restoreEdits)) {
+      disposable.addCleanup(unsub);
+    }
+    disposable.addCleanup(() => {
+      for (const timer of tracked.trackTimers.values()) window.clearTimeout(timer);
+      tracked.trackTimers.clear();
+    });
     messageInput.mount(inputSlot);
 
     header.paint();
