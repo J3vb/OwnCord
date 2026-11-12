@@ -291,8 +291,8 @@ func (s *ThreadService) UpdateChanged(ctx context.Context, p UpdateThreadParams)
 	if err != nil {
 		return nil, false, err
 	}
-	if err = threadUpdateDenied(cur, p, isOwner, isMod); err != nil {
-		return nil, false, err
+	if denied := threadUpdateDenied(cur, p, isOwner, isMod); denied != nil {
+		return nil, false, denied
 	}
 	if patch.TagIDs, err = s.postTagsPatch(ctx, cur, p.TagIDs); err != nil {
 		return nil, false, err
