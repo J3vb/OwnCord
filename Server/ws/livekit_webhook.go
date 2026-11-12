@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/livekit/protocol/auth"
@@ -217,6 +219,13 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 		"user_id", userID,
 		"channel_id", channelID)
 
+	// Asked before h.begin: the per-user voice lock is never held across an SFU RPC.
+	if h.webhookIdentityStillInRoom(ctx, channelID, p.Identity) {
+		slog.Info("livekit webhook: participant_left for a replaced session, identity still in room, keeping voice state",
+			"user_id", userID, "channel_id", channelID)
+		return
+	}
+
 	// Clean up if the user left LiveKit without a WS voice_leave (crash, network loss, reload).
 	txn := h.begin(userID)
 	defer txn.end()
@@ -229,6 +238,32 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 		// is not wiped. A grace entry parking this exact join dies with its row.
 		h.webhookLeftDeleteRow(ctx, txn, userID, channelID, joinToken, "client gone")
 	}
+}
+
+// webhookLeftPresenceTimeout bounds the SFU lookup so a slow SFU delays the webhook ack, never
+// wedges it; on expiry the teardown proceeds.
+const webhookLeftPresenceTimeout = 3 * time.Second
+
+// webhookIdentityStillInRoom reports whether the SFU lists this exact identity in the room. When
+// a client reconnects under the same identity, LiveKit closes the old session and posts its
+// participant_left before the new session's participant_joined, so a listed identity is the
+// successor and the member has not left. A listed identity is only ever the closed session's
+// successor or a removal still in flight; the latter is reaped by the reconciler, so the session
+// id is not compared. The identity carries the join token, so a reappearance under a new token
+// does not match. An unavailable SFU reads as "not present": cleanup is the safe failure.
+func (h *Hub) webhookIdentityStillInRoom(ctx context.Context, channelID int64, identity string) bool {
+	if h.livekit == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, webhookLeftPresenceTimeout)
+	defer cancel()
+	identities, err := h.livekit.ListParticipants(ctx, channelID)
+	if err != nil {
+		slog.Warn("livekit webhook: participant_left presence check failed, tearing down",
+			"error", err, "channel_id", channelID)
+		return false
+	}
+	return slices.Contains(identities, identity)
 }
 
 // webhookLeftCleanupClient is the still-connected-client stage: compare-and-clear the client's
