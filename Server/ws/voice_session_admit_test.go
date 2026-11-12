@@ -474,3 +474,24 @@ func TestAdmitVoiceSession_ChannelReadFailure(t *testing.T) {
 		t.Fatal("a failed channel read still issued a credential")
 	}
 }
+
+// A member who may no longer stay but is still in the room (the sweep has not
+// removed them yet) is still reached by a moderator mute: the media server gets
+// exactly one update, with the microphone off.
+func TestVoiceSession_ModerationStillReachesAMemberAboutToBeRemoved(t *testing.T) {
+	f := newAdmitFixture(t)
+	f.sessionStarts()
+	if _, err := f.db.ExecContext(context.Background(), `UPDATE roles SET permissions = ? WHERE id = ?`,
+		permissions.ReadMessages|permissions.SpeakVoice|permissions.UseVideo, harvestVoiceRoleID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	matched, _, err := f.hub.SetServerMuteLocked(context.Background(), f.alice.userID, f.chID, true)
+	if !matched || err != nil {
+		t.Fatalf("SetServerMuteLocked: matched=%v err=%v", matched, err)
+	}
+	updates := f.sfu.updatesFor(f.identity)
+	if len(updates) != 1 {
+		t.Fatalf("the mute sent %d updates, want exactly 1", len(updates))
+	}
+	assertVoicePermissionSources(t, updates[0], lkproto.TrackSource_CAMERA)
+}
