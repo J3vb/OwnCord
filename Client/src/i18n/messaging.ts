@@ -288,6 +288,7 @@ export const messagingText = defineCatalog("messaging", {
   "header.pins": "Pins",
   "header.media": "Media and files",
   "header.search": "Search...",
+  "header.more": "More options",
 
   "poll.button": "Poll",
   "poll.buttonTitle": "Create a poll",

@@ -480,16 +480,31 @@
   font-size: var(--font-size-md);
 }
 
-/* The header search box becomes an icon on a phone. */
-.chat-header .ch-tools .search-btn {
+/* The header search box becomes an icon on a phone, and the panel toggles
+   fold into the More button (features/messaging/chatHeaderOverflow.ts). */
+.chat-header .ch-tools .search-btn,
+.chat-header .ch-tools .ch-more-btn {
   display: none;
 }
 @media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
-  .chat-header .search-input {
+  .chat-header .search-input,
+  .chat-header .ch-tools .profile-btn:not(.call-chat-btn, .member-list-btn),
+  .chat-header .ch-tools .pins-btn,
+  .chat-header .ch-tools .media-btn {
     display: none;
   }
-  .chat-header .ch-tools .search-btn {
+  .chat-header .ch-tools .search-btn,
+  .chat-header .ch-tools .ch-more-btn {
     display: flex;
+  }
+  /* The name gives way before any control does. */
+  .chat-header .ch-name-group {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+  .chat-header .ch-tools {
+    flex-shrink: 0;
+    margin-left: auto;
   }
 }
 
