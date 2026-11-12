@@ -76,7 +76,8 @@ describe("AdminActions", () => {
             resolveChange = res;
           }),
       );
-      const { result } = makeMenu({ onChangeRole });
+      const onClosed = vi.fn();
+      const { result } = makeMenu({ onChangeRole, onClosed });
       const submenu = result.element.querySelector(".context-menu__submenu")!;
       const adminOption = Array.from(submenu.querySelectorAll(".context-menu__item")).find(
         (i) => i.textContent === "admin",
@@ -99,9 +100,8 @@ describe("AdminActions", () => {
         expect(adminOption.classList.contains("context-menu__item--pending")).toBe(false);
       });
 
-      // Settled: a new change may fire again.
-      modOption.click();
-      expect(onChangeRole).toHaveBeenCalledTimes(2);
+      // Settled: the menu closes rather than offering a stale choice.
+      await vi.waitFor(() => expect(onClosed).toHaveBeenCalledOnce());
       result.destroy();
     });
 
@@ -254,6 +254,27 @@ describe("AdminActions", () => {
       blockItem?.click();
       expect(onToggleBlock).toHaveBeenCalledOnce();
       result.destroy();
+    });
+
+    it("closes once a block or an unblock has settled", async () => {
+      for (const isBlocked of [false, true]) {
+        const onClosed = vi.fn();
+        const { result } = makeMenu({ showAdminActions: false, isBlocked, onClosed });
+        const blockItem = result.element.querySelector<HTMLElement>('[data-testid="block-toggle"]');
+        blockItem?.click();
+        if (!isBlocked) blockItem?.click();
+        await vi.waitFor(() => expect(onClosed).toHaveBeenCalledOnce());
+      }
+    });
+
+    it("closes once a role change has settled, so the ticked role is never stale", async () => {
+      const onClosed = vi.fn();
+      const { result } = makeMenu({ onClosed });
+      const adminOption = Array.from(
+        result.element.querySelectorAll<HTMLElement>(".context-menu__submenu .context-menu__item"),
+      ).find((i) => i.textContent === "admin")!;
+      adminOption.click();
+      await vi.waitFor(() => expect(onClosed).toHaveBeenCalledOnce());
     });
 
     it("admin menu also includes the Block item", () => {

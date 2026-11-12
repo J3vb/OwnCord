@@ -201,6 +201,7 @@ export function appendVoiceRows(
 
 export function buildBlockItem(
   options: MemberContextMenuOptions,
+  closeMenu: () => void,
   signal: AbortSignal,
 ): HTMLElement {
   const blockItem = buildMenuItem(
@@ -222,6 +223,8 @@ export function buildBlockItem(
           unblockRunning = false;
           blockItem.classList.remove("context-menu__item--pending");
           setText(blockItem, shellText("member.unblock"));
+          // The menu was built for the old block state: reopening shows the new one.
+          closeMenu();
         };
         void options.onToggleBlock().then(done, done);
       },
@@ -231,7 +234,7 @@ export function buildBlockItem(
     withConfirmation(
       blockItem,
       shellText("common.areYouSure"),
-      () => options.onToggleBlock(),
+      () => options.onToggleBlock().finally(closeMenu),
       signal,
       shellText("member.blocking"),
     );
