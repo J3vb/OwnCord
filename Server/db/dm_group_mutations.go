@@ -5,9 +5,17 @@ import (
 	"database/sql"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
+
+// groupDMReadBackTimeout bounds the read of a just-committed group, which no longer follows the
+// caller's context.
+const groupDMReadBackTimeout = 5 * time.Second
+
+// groupDMPostCommitHookForTest runs right after a group create commits.
+var groupDMPostCommitHookForTest func()
 
 // CreateGroupDMChannel creates a group DM with the given participants (creator
 // included) and opens it for all; ownerID must be one of them. It always creates, in
@@ -59,7 +67,15 @@ func (d *DB) CreateGroupDMChannel(ctx context.Context, name string, ownerID int6
 		return nil, fmt.Errorf("CreateGroupDMChannel commit: %w", err)
 	}
 
-	ch, err := d.GetChannel(ctx, channelID)
+	if hook := groupDMPostCommitHookForTest; hook != nil {
+		hook()
+	}
+
+	// Committed: a caller cancelled from here on must still get the channel, since reporting
+	// failure for a persisted group invites a retry that creates a second one.
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), groupDMReadBackTimeout)
+	defer cancel()
+	ch, err := d.GetChannel(readCtx, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("CreateGroupDMChannel fetch new: %w", err)
 	}

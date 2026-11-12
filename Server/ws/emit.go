@@ -187,13 +187,12 @@ func (h *Hub) emitUserTargeted(_ context.Context, _ int64, ev Event) bool {
 	}
 	// High priority: dm_channel_open is unsequenced and targeted, so replay can
 	// never deliver it and a mid-reconnect addressee would lack the DM channel.
-	// Bump the visibility watermark so a client resuming at or before the open
+	// Mark visibility changed so a client resuming at or before the open
 	// takes the full-ready path.
 	if _, isOpen := ev.(DMChannelOpenEvent); isOpen {
-		// Ratcheted upward only (bumpVisibilityWatermark): a plain
-		// Store(Load(&h.seq)) let a writer that read an older h.seq regress a
-		// higher concurrent watermark.
-		h.bumpVisibilityWatermark()
+		// Takes seqMu like the REST path, so the open either lands before a reconnect's
+		// watermark re-check or waits until that socket is registered and receives it.
+		h.MarkVisibilityChanged()
 	}
 	h.SendToUserHigh(e.TargetUserID(), e.Payload())
 	return true

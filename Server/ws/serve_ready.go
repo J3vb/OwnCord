@@ -246,13 +246,12 @@ func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader,
 	return dmChannels, nil
 }
 
-func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader, visibleChannels []db.Channel, dmChannels []db.DMChannelInfo, userID int64) []db.VoiceState {
+func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader, visibleChannels []db.Channel, dmChannels []db.DMChannelInfo, userID int64) ([]db.VoiceState, error) {
 	// Filter to visible channels plus the user's open DMs, as computeAllowedChannels does for
 	// replay; VisibleChannelIDs skips DMs.
 	allVoiceStates, err := database.GetAllVoiceStates(ctx)
 	if err != nil {
-		slog.Warn("buildReady GetAllVoiceStates", "err", err)
-		allVoiceStates = []db.VoiceState{}
+		return nil, fmt.Errorf("buildReady GetAllVoiceStates: %w", err)
 	}
 	visibleSet := make(map[int64]struct{}, len(visibleChannels)+len(dmChannels)+1)
 	for i := range visibleChannels {
@@ -274,7 +273,7 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader
 			voiceStates = append(voiceStates, allVoiceStates[i])
 		}
 	}
-	return voiceStates
+	return voiceStates, nil
 }
 
 // readyNSFWAcknowledgements resolves userID's acknowledgement for every labelled channel in
@@ -357,7 +356,10 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		return nil, err
 	}
 
-	voiceStates := h.readyVoiceStates(ctx, database, visibleChannels, dmChannels, userID)
+	voiceStates, err := h.readyVoiceStates(ctx, database, visibleChannels, dmChannels, userID)
+	if err != nil {
+		return nil, err
+	}
 	serverName, motd := h.getCachedSettings(ctx)
 
 	notices, err := readyNotices(ctx, database, userID)
@@ -382,12 +384,13 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 			MemberTimeouts: timeouts.entries,
 		},
 		tail: readyTail{
-			MOTD:        motd,
-			Notices:     notices,
-			Roles:       roles,
-			ServerName:  serverName,
-			Threads:     threads,
-			VoiceStates: voiceStates,
+			MOTD:         motd,
+			Notices:      notices,
+			Roles:        roles,
+			ServerName:   serverName,
+			ServerTimeMS: time.Now().UnixMilli(),
+			Threads:      threads,
+			VoiceStates:  voiceStates,
 		},
 		roster:       roster,
 		viewerID:     userID,
