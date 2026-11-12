@@ -241,11 +241,11 @@ func TestMessageDeliveryFloor_SymlinkSharesRealSideAndHonoursLinkSide(t *testing
 	if fileExists(link + messageDeliveryFloorSuffix) {
 		t.Fatal("cutoff written beside the link")
 	}
-	older := viaReal + 60_000
-	if err := os.WriteFile(link+messageDeliveryFloorSuffix, []byte(strconv.FormatInt(older, 10)+"\n"), 0o600); err != nil {
+	higher := viaReal + 60_000
+	if err := os.WriteFile(link+messageDeliveryFloorSuffix, []byte(strconv.FormatInt(higher, 10)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := readMessageDeliveryFloor(link); err != nil || got != older {
-		t.Fatalf("cutoff with a link-side file = %d, %v; want %d", got, err, older)
+	if got, err := readMessageDeliveryFloor(link); err != nil || got != higher {
+		t.Fatalf("cutoff with a link-side file = %d, %v; want %d", got, err, higher)
 	}
 }

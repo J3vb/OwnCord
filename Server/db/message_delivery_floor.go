@@ -84,6 +84,14 @@ func readMessageDeliveryFloor(dbPath string) (int64, error) {
 }
 
 func readMessageDeliveryFloorFile(path string) (int64, error) {
+	floor, err := parseMessageDeliveryFloorFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", path, err)
+	}
+	return floor, nil
+}
+
+func parseMessageDeliveryFloorFile(path string) (int64, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, nil // Existing installations have not restored through this gate.
