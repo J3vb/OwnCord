@@ -588,6 +588,12 @@
       "binding": "drawing",
       "category": "transient",
       "reason": "Tone sheets being drawn, each removed when its draw settles"
+    },
+    {
+      "file": "features/messaging/message-list/rowRefresh.ts",
+      "binding": "scopes",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by live message row elements; a scope is destroyed with its row's owner, and the entry goes with the row"
     }
   ]
 }

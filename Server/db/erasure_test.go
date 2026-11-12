@@ -839,6 +839,9 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 		// A role rename's batch names every member it lists.
 		{fmt.Sprintf(`{"seq":14,"type":"member_update_batch","payload":{"members":[{"user_id":%d,"role":"r"},{"user_id":%d,"role":"r","role_ids":[3]}]}}`, other, uid), true},
 		{fmt.Sprintf(`{"seq":15,"type":"member_update_batch","payload":{"members":[{"user_id":%d,"role":"r"}]}}`, other), false},
+		// A thread frame names its owner.
+		{fmt.Sprintf(`{"seq":16,"type":"thread_changed","payload":{"thread":{"id":5,"owner_id":%d}}}`, uid), true},
+		{fmt.Sprintf(`{"seq":17,"type":"thread_changed","payload":{"thread":{"id":6,"owner_id":%d}}}`, other), false},
 	}
 	for i, r := range rows {
 		if _, err := database.ExecContext(ctx, `INSERT INTO events (seq, event_type, payload, channel_id) VALUES (?, 'x', ?, 0)`, i+1, r.payload); err != nil {
@@ -847,17 +850,17 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 	}
 	var before int
 	mustDo(t, "count", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE `+db.EventNamesUserPredicate, uid).Scan(&before))
-	if before != 8 {
-		t.Errorf("predicate matched %d rows, want 8", before)
+	if before != 9 {
+		t.Errorf("predicate matched %d rows, want 9", before)
 	}
 	n, err := database.DeleteEventsForUser(ctx, uid)
 	mustDo(t, "DeleteEventsForUser", err)
-	if n != 8 {
-		t.Errorf("deleted %d rows, want 8", n)
+	if n != 9 {
+		t.Errorf("deleted %d rows, want 9", n)
 	}
 	var left int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 7 {
-		t.Errorf("rows left = %d (%v), want the 7 naming nobody or someone else", left, err)
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 8 {
+		t.Errorf("rows left = %d (%v), want the 8 naming nobody or someone else", left, err)
 	}
 }
 
