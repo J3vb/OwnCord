@@ -64,23 +64,7 @@ func (d *DB) ListChannelMedia(ctx context.Context, q ChannelMediaQuery) ([]Chann
 	if err != nil {
 		return nil, fmt.Errorf("ListChannelMedia: %w", err)
 	}
-	// Ordering on a.message_id with attachments as the outer loop (CROSS JOIN)
-	// walks idx_attachments_message in order and sorts only ties; without ANALYZE
-	// statistics the planner would start from the channel's messages and sort every
-	// attachment per page.
-	order := " ORDER BY a.message_id DESC, a.id ASC"
-	if q.Oldest {
-		order = " ORDER BY a.message_id ASC, a.id ASC"
-	}
-	//nolint:gosec // G202: filter and order are fixed fragments with ? placeholders
-	query := `SELECT a.id, a.filename, a.size, a.mime_type, a.width, a.height, a.duration_ms, a.waveform,
-		        m.id, m.timestamp, u.id, u.username, u.avatar
-		 FROM attachments a
-		 CROSS JOIN messages m ON m.id = a.message_id
-		 JOIN users u ON u.id = m.user_id
-		 WHERE m.channel_id = ? AND m.deleted = 0 AND m.kind = 0` + filter + order + ` LIMIT ?`
-	args = append([]any{q.ChannelID}, args...)
-	args = append(args, q.Limit)
+	query, args := channelMediaPageSQL(q, filter, args)
 
 	rows, err := d.reader.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -103,6 +87,25 @@ func (d *DB) ListChannelMedia(ctx context.Context, q ChannelMediaQuery) ([]Chann
 		return nil, fmt.Errorf("ListChannelMedia rows: %w", err)
 	}
 	return items, nil
+}
+
+// channelMediaPageSQL builds the page query. The channel's messages are the outer loop (CROSS JOIN pins the
+// order), walking idx_messages_channel in id order with attachments found by idx_attachments_message, so a page
+// reads the channel's rows only, however few of them match, and ties on the message sort by attachment id.
+func channelMediaPageSQL(q ChannelMediaQuery, filter string, filterArgs []any) (string, []any) {
+	order := " ORDER BY m.id DESC, a.id ASC"
+	if q.Oldest {
+		order = " ORDER BY m.id ASC, a.id ASC"
+	}
+	//nolint:gosec // G202: filter and order are fixed fragments with ? placeholders
+	query := `SELECT a.id, a.filename, a.size, a.mime_type, a.width, a.height, a.duration_ms, a.waveform,
+		        m.id, m.timestamp, u.id, u.username, u.avatar
+		 FROM messages m
+		 CROSS JOIN attachments a ON a.message_id = m.id
+		 JOIN users u ON u.id = m.user_id
+		 WHERE m.channel_id = ? AND m.deleted = 0 AND m.kind = 0` + filter + order + ` LIMIT ?`
+	args := append([]any{q.ChannelID}, filterArgs...)
+	return query, append(args, q.Limit)
 }
 
 // ChannelMediaBuckets counts matching attachments per UTC quarter hour; paging fields are ignored.
@@ -180,8 +183,9 @@ func (d *DB) channelMediaFilter(ctx context.Context, q ChannelMediaQuery, paging
 		if q.Oldest {
 			cmp = ">"
 		}
-		sb.WriteString(" AND (a.message_id " + cmp + " ? OR (a.message_id = ? AND a.id > ?))")
-		args = append(args, q.Cursor.MessageID, q.Cursor.MessageID, q.Cursor.AttachmentID)
+		// The plain bound lets the walk seek; the OR alone would not.
+		sb.WriteString(" AND m.id " + cmp + "= ? AND (m.id " + cmp + " ? OR (m.id = ? AND a.id > ?))")
+		args = append(args, q.Cursor.MessageID, q.Cursor.MessageID, q.Cursor.MessageID, q.Cursor.AttachmentID)
 	case !q.From.IsZero():
 		ts := q.From.UTC().Format(dbtime.SQLiteLayout)
 		cmp, tsCmp := "<", "<"
@@ -198,7 +202,7 @@ func (d *DB) channelMediaFilter(ctx context.Context, q ChannelMediaQuery, paging
 			if err != nil {
 				return "", nil, err
 			}
-			frag, fragArgs := idBound("a.message_id "+cmp, bound, native, importedInScope)
+			frag, fragArgs := idBound("m.id "+cmp, bound, native, importedInScope)
 			sb.WriteString(frag)
 			args = append(args, fragArgs...)
 		}

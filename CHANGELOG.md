@@ -118,6 +118,7 @@ release changes the database, and anything an operator must do first.)
 - **Linux:** on a desktop without a keyring service (no gnome-keyring or KWallet), the app now creates your voice identity key and saves unsent messages for recovery, instead of showing "Could not save this pending message" on every send.
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
 - **Retention:** the 15-minute clean-up no longer rewrites its records or holds the database for writing on channels and threads that have nothing old enough to remove.
+- **Channels:** opening the media gallery of a channel with few or no pictures no longer reads every attachment on the server, so it opens quickly on a large server.
 
 ### Messages & files
 
