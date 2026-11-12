@@ -83,7 +83,7 @@ describe("thread sender", () => {
     });
   });
 
-  it("sends a refused reply again as a plain message", () => {
+  it("sends a refused reply again as a plain message", async () => {
     setConnectionStatus("connected");
     const sender = makeSender();
     sender.sendText("answer", 7, true, []);
@@ -101,6 +101,8 @@ describe("thread sender", () => {
       ),
     }));
     sender.retryDraft(sent.id);
+    // As plain text it is saved for recovery before the frame goes.
+    await vi.waitFor(() => expect(frames()).toHaveLength(2));
     const again = frames()[1]!;
     expect(again.payload).toMatchObject({ content: "answer", reply_to: null });
     expect(again.payload).not.toHaveProperty("reply_ping");
