@@ -46,6 +46,16 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 			break
 		}
 		cutoff := s.cutoff(w.Days)
+		// Nothing due: no marker rewrite, writer transaction or swept record. The last marker still covers
+		// every earlier deletion.
+		due, err := s.st.HasRetentionCandidates(ctx, w.ChannelID, cutoff)
+		if err != nil {
+			sweepErr = fmt.Errorf("retention probe for channel %d: %w", w.ChannelID, err)
+			break
+		}
+		if !due {
+			continue
+		}
 		// The marker is the durable intent that survives a restore. Write it before deleting: a crash after makes
 		// the next start finish the sweep, while a marker failure leaves the rows untouched instead of losing the
 		// anti-resurrection guarantee.

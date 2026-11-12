@@ -24,6 +24,7 @@ type RetentionStore interface {
 	DeleteChannelRetention(ctx context.Context, channelID int64) (bool, error)
 	RetentionWindows(ctx context.Context) ([]db.RetentionWindow, error)
 	CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error)
+	HasRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (bool, error)
 	SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error)
 	RetentionSwept(ctx context.Context, channelID int64) (sweep string, ok bool, err error)
 	RecordRetentionSwept(ctx context.Context, channelID int64, sweep string) error

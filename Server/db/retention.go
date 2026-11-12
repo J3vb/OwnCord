@@ -173,6 +173,17 @@ func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cuto
 	return n, nil
 }
 
+// HasRetentionCandidates reports whether a sweep of channelID at cutoff would remove anything. It reads on
+// the reader pool, so a tick can skip a channel with nothing due without taking the write lock.
+func (d *DB) HasRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (bool, error) {
+	var found bool
+	if err := d.reader.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messages WHERE `+retentionCandidates+`)`,
+		channelID, cutoff.UTC().Format(dbtime.SQLiteLayout)).Scan(&found); err != nil {
+		return false, fmt.Errorf("HasRetentionCandidates: %w", err)
+	}
+	return found, nil
+}
+
 // SweepRetention hard-deletes up to limit of the oldest messages in channelID
 // older than cutoff (pinned exempt) in one transaction: mention counts are
 // reversed first, attachment rows go with their stored_as names returned for
