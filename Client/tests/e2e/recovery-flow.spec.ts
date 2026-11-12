@@ -87,8 +87,10 @@ test.describe("Account recovery", () => {
     const codes = page.locator("[data-testid='totp-regenerated-codes']");
     await expect(codes).toContainText(CODES[0]!);
 
-    // Leaving the section takes the codes out of the page.
+    // Leaving with the codes on screen asks first; Discard takes them out of the page.
     await page.keyboard.press("Escape");
+    await expect(page.locator("[data-testid='unsaved-confirm-dialog']")).toBeVisible();
+    await page.locator("[data-testid='unsaved-discard']").click();
     await expect(page.locator("[data-testid='settings-overlay']")).not.toHaveClass(/open/);
     await expect(page.locator("[data-testid='totp-regenerated-codes']")).toHaveCount(0);
     expect(await page.content()).not.toContain(CODES[1]!);
