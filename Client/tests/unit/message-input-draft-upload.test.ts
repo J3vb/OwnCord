@@ -183,6 +183,29 @@ describe("MessageInput upload in flight across a channel switch", () => {
     }
   });
 
+  it("puts a long draft sent as message.txt back when its upload fails after a channel switch", async () => {
+    const up = controlledUpload();
+    const opts = makeOptions({ onUploadFile: up.fn });
+    const first = createMessageInput(opts);
+    first.mount(container);
+    const longText = "y".repeat(4001);
+    const field = (): HTMLTextAreaElement => container.querySelector(".msg-textarea")!;
+    field().value = longText;
+    field().dispatchEvent(new Event("input"));
+    field().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    (container.querySelector('[data-testid="too-long-as-file"]') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(up.fn).toHaveBeenCalled());
+    expect(field().value).toBe("");
+    const draft = first.getDraft();
+    first.destroy?.();
+
+    const next = returnToChannel(container, opts, draft);
+    up.reject(new Error("offline"));
+    await vi.waitFor(() => expect(field().value).toBe(longText));
+    expect(container.querySelectorAll(".attachment-preview-item").length).toBe(0);
+    next.destroy?.();
+  });
+
   it("still cancels an in-flight upload on unmount when no draft took it", async () => {
     const up = controlledUpload();
     const comp = createMessageInput(makeOptions({ onUploadFile: up.fn }));
