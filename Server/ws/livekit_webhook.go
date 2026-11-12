@@ -219,7 +219,6 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 		"user_id", userID,
 		"channel_id", channelID)
 
-	// Asked before h.begin: the per-user voice lock is never held across an SFU RPC.
 	if h.webhookIdentityStillInRoom(ctx, channelID, p.Identity) {
 		slog.Info("livekit webhook: participant_left for a replaced session, identity still in room, keeping voice state",
 			"user_id", userID, "channel_id", channelID)
@@ -240,17 +239,12 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 	}
 }
 
-// webhookLeftPresenceTimeout bounds the SFU lookup so a slow SFU delays the webhook ack, never
-// wedges it; on expiry the teardown proceeds.
+// webhookLeftPresenceTimeout bounds the SFU lookup; on expiry the teardown proceeds.
 const webhookLeftPresenceTimeout = 3 * time.Second
 
-// webhookIdentityStillInRoom reports whether the SFU lists this exact identity in the room. When
-// a client reconnects under the same identity, LiveKit closes the old session and posts its
-// participant_left before the new session's participant_joined, so a listed identity is the
-// successor and the member has not left. A listed identity is only ever the closed session's
-// successor or a removal still in flight; the latter is reaped by the reconciler, so the session
-// id is not compared. The identity carries the join token, so a reappearance under a new token
-// does not match. An unavailable SFU reads as "not present": cleanup is the safe failure.
+// webhookIdentityStillInRoom reports whether the SFU still lists this exact identity. A same-identity
+// reconnect makes LiveKit post the old session's participant_left before the new one joins, so a
+// listed identity has not left. An unavailable SFU reads as absent: cleanup is the safe failure.
 func (h *Hub) webhookIdentityStillInRoom(ctx context.Context, channelID int64, identity string) bool {
 	if h.livekit == nil {
 		return false
