@@ -451,6 +451,7 @@ export const shards = {
     "src/features/updates/updateChecker.ts",
     "src/features/whats-new/seenVersion.ts",
     "src/lib/notifications.ts",
+    "src/lib/text/mentionNames.ts",
     "src/lib/text/pickedMentions.ts",
     "src/lib/ui/dialogOpen.ts",
   ],
