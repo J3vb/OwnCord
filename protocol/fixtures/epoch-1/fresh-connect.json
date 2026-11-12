@@ -212,6 +212,7 @@
               }
             ],
             "server_name": "OwnCord Server",
+            "server_time_ms": "<ts:number>",
             "threads": [],
             "voice_states": []
           },
@@ -527,6 +528,7 @@
               }
             ],
             "server_name": "OwnCord Server",
+            "server_time_ms": "<ts:number>",
             "threads": [],
             "voice_states": []
           },

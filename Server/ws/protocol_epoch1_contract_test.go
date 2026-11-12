@@ -144,7 +144,7 @@ func volatileClass(key string) (string, bool) {
 		// The LiveKit server address, deployment-specific: a loopback test
 		// server's ephemeral port otherwise makes the transcript unstable.
 		return "url", true
-	case strings.HasSuffix(key, "_at"), key == "timestamp", strings.HasSuffix(key, "_timestamp"), key == "ts", key == "last_seen":
+	case strings.HasSuffix(key, "_at"), key == "timestamp", strings.HasSuffix(key, "_timestamp"), key == "ts", key == "last_seen", key == "server_time_ms":
 		return "ts", true
 	case strings.Contains(key, "token"):
 		return "token", true
