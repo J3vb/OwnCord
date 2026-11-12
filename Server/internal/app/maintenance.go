@@ -26,6 +26,7 @@ type maintenance struct {
 	moderation *service.ModerationService
 	// backupDir is backup.dir as configured (empty = data/backups).
 	backupDir           string
+	dbFile              string
 	reportRetentionDays int
 	actionRetentionDays int
 	push                *service.PushService
@@ -56,6 +57,7 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 	m := &maintenance{
 		log: log, database: database,
 		backupDir:           cfg.Backup.Dir,
+		dbFile:              cfg.Database.Path,
 		reportRetentionDays: cfg.Moderation.ReportRetentionDays,
 		actionRetentionDays: cfg.Moderation.ActionRetentionDays,
 	}
@@ -259,7 +261,7 @@ func (m *maintenance) maintainBackups(ctx context.Context) error {
 	if m.settings == nil {
 		return nil
 	}
-	return admin.MaintainBackups(ctx, m.database, m.settings, admin.ResolveBackupDir(m.backupDir))
+	return admin.MaintainBackups(ctx, m.database, m.settings, admin.ResolveBackupDir(m.backupDir), m.dbFile)
 }
 
 // deletedAttachmentGrace is how long a deleted message's files stay on disk

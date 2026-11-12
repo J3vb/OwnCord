@@ -28,7 +28,7 @@ import (
 //
 // The returned error feeds the loop's circuit breaker; absent settings (fresh DB mid-migration) are not an
 // error.
-func MaintainBackups(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir string) error {
+func MaintainBackups(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir, dbFile string) error {
 	schedule, err := settings.Setting(ctx, "backup_schedule")
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -40,13 +40,13 @@ func MaintainBackups(ctx context.Context, database *db.DB, settings *service.Set
 	interval := service.BackupScheduleInterval(schedule)
 	var firstErr error
 	if interval > 0 {
-		if err := runScheduledBackup(ctx, database, backupDir, interval); err != nil {
+		if err := runScheduledBackup(ctx, database, backupDir, dbFile, interval); err != nil {
 			slog.Warn("scheduled backup failed", "error", err)
 			firstErr = err
 		}
 	}
 
-	if err := pruneExpiredBackups(ctx, database, settings, backupDir); err != nil {
+	if err := pruneExpiredBackups(ctx, database, settings, backupDir, dbFile); err != nil {
 		slog.Warn("backup retention pruning failed", "error", err)
 		if firstErr == nil {
 			firstErr = err
@@ -110,8 +110,8 @@ func freeBackupPath(backupDir, base string) (string, error) {
 }
 
 // runScheduledBackup takes a backup when the newest existing one is older than interval (or none exists).
-func runScheduledBackup(ctx context.Context, database *db.DB, backupDir string, interval time.Duration) error {
-	newest, _, err := scanBackups(backupDir)
+func runScheduledBackup(ctx context.Context, database *db.DB, backupDir, dbFile string, interval time.Duration) error {
+	newest, _, err := scanBackups(backupDir, dbFile)
 	if err != nil {
 		return err
 	}
@@ -270,7 +270,7 @@ func safetyCopiesNewestFirst(entries []os.DirEntry, prefix string) []string {
 
 // pruneExpiredBackups deletes *.db backups older than the backup_retention window (days), always keeping the
 // newest and never touching safety copies (scanBackups leaves them out).
-func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir string) error {
+func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir, dbFile string) error {
 	retStr, err := settings.Setting(ctx, "backup_retention")
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -286,7 +286,7 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 		return nil
 	}
 
-	newest, entries, err := scanBackups(backupDir)
+	newest, entries, err := scanBackups(backupDir, dbFile)
 	if err != nil || len(entries) == 0 {
 		return err
 	}
@@ -311,8 +311,8 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 
 // NewestBackup returns the newest scheduled or manual backup's mtime (a failed backup leaves no file), or the
 // zero time. Safety copies do not count.
-func NewestBackup(backupDir string) (time.Time, error) {
-	newest, _, err := scanBackups(backupDir)
+func NewestBackup(backupDir, dbFile string) (time.Time, error) {
+	newest, _, err := scanBackups(backupDir, dbFile)
 	return newest, err
 }
 
@@ -323,8 +323,9 @@ type backupFile struct {
 
 // scanBackups lists the backup history: every *.db except safety copies, which the schedule, health signal
 // and retention all leave out. It returns the newest mtime and all entries; a missing directory is "no
-// backups", not an error.
-func scanBackups(backupDir string) (newest time.Time, files []backupFile, err error) {
+// backups", not an error. The live database and its sidecars are never listed, whatever folder backup.dir
+// names.
+func scanBackups(backupDir, dbFile string) (newest time.Time, files []backupFile, err error) {
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -334,6 +335,9 @@ func scanBackups(backupDir string) (newest time.Time, files []backupFile, err er
 	}
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".db" || isSafetyCopy(e.Name()) {
+			continue
+		}
+		if isLiveDatabaseFile(filepath.Join(backupDir, e.Name()), dbFile) {
 			continue
 		}
 		info, infoErr := e.Info()
