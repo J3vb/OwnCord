@@ -56,6 +56,7 @@
     "perf:analyze": "node scripts/analyze-perf.mjs"
   },
   "devDependencies": {
+    "@discordapp/twemoji": "17.0.3",
     "@eslint/js": "^10.0.1",
     "@jitsi/rnnoise-wasm": "^0.2.1",
     "@playwright/test": "^1",
