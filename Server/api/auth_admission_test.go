@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -75,5 +76,39 @@ func TestChangePassword_RefusedWhenAuthBudgetExhausted(t *testing.T) {
 	release()
 	if rr := putJSON(t, router, "/api/v1/users/me/password", token, body); rr.Code != http.StatusNoContent {
 		t.Fatalf("password change after release: status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestChangePassword_BurstOfWrongPasswordsIsCapped(t *testing.T) {
+	const attempts = 5
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	limiter.SetAdmissionBudget(attempts)
+	router := chi.NewRouter()
+	api.MountProfileRoutes(router, service.New(database, limiter), nil, limiter, nil, nil, nil)
+	token := profileCreateToken(t, database, "budgeted", 4)
+	body := map[string]string{"old_password": "wrongPass9", "new_password": "newSecure2"}
+
+	codes := make([]int, attempts)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range attempts {
+		wg.Go(func() {
+			<-start
+			codes[i] = putJSON(t, router, "/api/v1/users/me/password", token, body).Code
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	compared := 0
+	for _, c := range codes {
+		if c == http.StatusForbidden {
+			compared++
+		}
+	}
+	// Three failures plus the one that trips the lockout, as a sequential guesser gets.
+	if want := service.PwConfirmFailureThreshold + 1; compared > want {
+		t.Fatalf("%d compares ran in one burst, want at most %d (codes %v)", compared, want, codes)
 	}
 }

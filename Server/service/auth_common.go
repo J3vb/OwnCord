@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -15,18 +16,37 @@ type authCommon struct {
 	broadcaster AuthBroadcaster
 }
 
-// confirmPassword is the password step the TOTP routes share: a missing or wrong password
-// counts against the pw_confirm budget and trips the lockout; a correct one resets it.
+// ReservePasswordAttempt counts one password attempt on failKey before the compare runs, so
+// concurrent requests cannot all pass a lockout check first. The budget is threshold+1: the
+// last failure trips the lockout via SettleFailedAttempt and a correct last password still
+// succeeds. refund takes the attempt back when no compare ran; ok is false when spent.
+func ReservePasswordAttempt(l *auth.RateLimiter, failKey string, threshold int, window time.Duration) (refund func(), ok bool) {
+	return l.Reserve(failKey, threshold+1, window)
+}
+
+// SettleFailedAttempt locks lockKey out once a failed compare used up the budget taken by
+// ReservePasswordAttempt. Check is read-only: the attempt is already counted.
+func SettleFailedAttempt(ctx context.Context, l *auth.RateLimiter, failKey, lockKey string, threshold int, window, lockout time.Duration) {
+	if !l.Check(failKey, threshold+1, window) {
+		l.Lockout(ctx, lockKey, lockout)
+	}
+}
+
+// confirmPassword is the password step the TOTP routes share: every attempt is counted before
+// the compare and trips the lockout once the budget is used; a correct password resets it.
 func (s *authCommon) confirmPassword(ctx context.Context, user *db.User, password, lockKey string) error {
 	failKey := auth.Key("pw_confirm_fail", user.ID)
+	refund, ok := ReservePasswordAttempt(s.limiter, failKey, PwConfirmFailureThreshold, PwConfirmFailureWindow)
+	if !ok {
+		return ErrTooManyAttempts
+	}
 	if err := s.requirePasswordConfirmation(user, password); err != nil {
 		if errors.Is(err, ErrAuthBusy) {
 			// Refused before any compare ran: not an attempt.
+			refund()
 			return err
 		}
-		if !s.limiter.Allow(failKey, PwConfirmFailureThreshold, PwConfirmFailureWindow) {
-			s.limiter.Lockout(ctx, lockKey, PwConfirmLockoutDuration)
-		}
+		SettleFailedAttempt(ctx, s.limiter, failKey, lockKey, PwConfirmFailureThreshold, PwConfirmFailureWindow, PwConfirmLockoutDuration)
 		return err
 	}
 	s.limiter.Reset(ctx, failKey)

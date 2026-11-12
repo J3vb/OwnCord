@@ -329,14 +329,17 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 	}
 
 	failKey := auth.Key("delete_fail", user.ID)
+	refund, ok := ReservePasswordAttempt(s.limiter, failKey, deleteAccountFailureThreshold, deleteAccountFailureWindow)
+	if !ok {
+		return ErrTooManyAttempts
+	}
 	matched, admitted := s.limiter.Admission().CheckPassword(user.PasswordHash, password)
 	if !admitted {
+		refund()
 		return ErrAuthBusy
 	}
 	if !matched {
-		if !s.limiter.Allow(failKey, deleteAccountFailureThreshold, deleteAccountFailureWindow) {
-			s.limiter.Lockout(ctx, lockKey, deleteAccountLockoutDuration)
-		}
+		SettleFailedAttempt(ctx, s.limiter, failKey, lockKey, deleteAccountFailureThreshold, deleteAccountFailureWindow, deleteAccountLockoutDuration)
 		return ErrIncorrectPassword
 	}
 	s.limiter.Reset(ctx, failKey)
