@@ -14,6 +14,7 @@
 
 import { createElement, appendChildren, clearChildren } from "../../lib/dom";
 import { createIcon, type IconName } from "../../lib/icons";
+import { enableRovingNavigation, setRovingTabindex } from "../../lib/ui/a11y";
 import { openBottomSheet } from "../../lib/ui/bottomSheet";
 import { voiceStore, type VoiceState } from "../../stores/voice.store";
 import { voiceText as t } from "../../i18n/voice";
@@ -32,6 +33,9 @@ const VARIANT: Readonly<Record<RouteVariant, { readonly cls: string; readonly ic
   call: { cls: "video-fs-btn", icon: 18 },
   dm: { cls: "dcp-btn", icon: 20 },
 };
+
+/** A row of the route sheet. */
+const ROW = "[role='radio']";
 
 const ROUTE_ICON: Readonly<Record<AudioRouteKind, IconName>> = {
   speaker: "volume-2",
@@ -68,6 +72,8 @@ function routeRow(route: AudioRoute, active: boolean): HTMLButtonElement {
     class: "route-row",
     role: "radio",
     "aria-checked": String(active),
+    // One tab stop for the group, on the route in use.
+    tabindex: active ? "0" : "-1",
     "data-testid": `route-${route.kind}`,
   });
   // A Bluetooth headset goes by its own name, with what it is underneath.
@@ -95,7 +101,8 @@ function rowsKey(host: MobileAudioState): string {
 
 /** The route sheet. It follows the routes while it is open (a headset plugged
  *  in shows up), and closes with a pick, with the call, and when the button
- *  that opened it goes. */
+ *  that opened it goes. The arrow keys move through the routes; a pick takes
+ *  Enter, Space or a tap, because it moves the call's sound at once. */
 function openRouteSheet(opener: HTMLButtonElement, signal: AbortSignal): void {
   const title = t("route.title");
   const list = createElement("div", {
@@ -119,6 +126,7 @@ function openRouteSheet(opener: HTMLButtonElement, signal: AbortSignal): void {
   });
   if (sheet.signal.aborted) return;
   opener.setAttribute("aria-expanded", "true");
+  enableRovingNavigation(list, ROW, sheet.signal, "vertical");
 
   let drawn: string | null = null;
   const draw = (): void => {
@@ -129,6 +137,8 @@ function openRouteSheet(opener: HTMLButtonElement, signal: AbortSignal): void {
     }
     const key = rowsKey(host);
     if (key === drawn) return;
+    // The first draw takes the focus; a later one keeps it if it was here.
+    const focused = drawn === null || list.contains(document.activeElement);
     drawn = key;
     clearChildren(list);
     for (const route of host.routes) {
@@ -143,6 +153,8 @@ function openRouteSheet(opener: HTMLButtonElement, signal: AbortSignal): void {
       );
       list.appendChild(row);
     }
+    setRovingTabindex(list, ROW);
+    if (focused) list.querySelector<HTMLElement>("[tabindex='0']")?.focus({ focusVisible: false });
   };
   const unsubs = [mobileRouteStore.subscribe(draw), voiceStore.subscribeSelector(voiceKey, draw)];
   sheet.signal.addEventListener(
@@ -154,7 +166,6 @@ function openRouteSheet(opener: HTMLButtonElement, signal: AbortSignal): void {
     { once: true },
   );
   draw();
-  list.querySelector<HTMLElement>("[aria-checked='true']")?.focus({ focusVisible: false });
 }
 
 export function createRouteButton(variant: RouteVariant, signal: AbortSignal): HTMLButtonElement {

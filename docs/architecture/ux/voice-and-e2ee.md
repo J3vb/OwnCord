@@ -188,13 +188,18 @@ pick another. It shows only where there is a choice: in a call, on Android 12
 or newer, with more than one route, a microphone and no phone call holding the
 call. With no pick the WebView routes the call by itself (a headset when one
 is connected, else the speaker). A pick lasts for the call, and goes when its
-device leaves or a headset is newly connected. While a pick is on, one extra
-microphone capture stays open, disabled and never sent: Android lets an app
-choose a call's device only while it captures for a call, and a mute closes
-the call's own capture. Android therefore shows the microphone as in use while
-the member is muted, which the sheet says. The app takes no audio focus, so
-music and games keep playing beside a call; only an answered or dialled phone
-call pauses it (the phone call hold above), and a ringing phone does not.
+device leaves or a headset is newly connected. Every call starts from no pick,
+also the first one after the app reloaded in the middle of a call. While a
+pick is on, one extra microphone capture stays open, disabled and never sent:
+Android lets an app choose a call's device only while it captures for a call,
+and a mute closes the call's own capture. Android therefore shows the
+microphone as in use while the member is muted, which the sheet says. A pick
+the phone will not keep (that capture cannot open, or Android refuses the
+device) goes back to the phone's own choice, and a toast says so. In the sheet
+the routes are one tab stop: the arrow keys move through them, and Enter,
+Space or a tap picks. The app takes no audio focus, so music and games keep
+playing beside a call; only an answered or dialled phone call pauses it (the
+phone call hold above), and a ringing phone does not.
 
 **The voice channel's chat beside the grid** (guild calls): opening the call
 view selects the voice channel you are in (`pages/main-page/callChat.ts`), so

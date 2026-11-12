@@ -26,6 +26,10 @@ export interface MobileAudioState {
   /** A phone call holds the audio. The host has silenced the call's sound; the
    *  microphone is the caller's to close. */
   readonly interrupted: boolean;
+  /** How many picks the host gave up because the phone would not keep them,
+   *  counted from the app's start. It only grows: a rise means a pick was just
+   *  lost, with `manual` back to null. */
+  readonly lost: number;
 }
 
 export interface MobileAudio {
@@ -35,11 +39,14 @@ export interface MobileAudio {
    *  reports nothing. */
   watch(signal: AbortSignal, onState: (state: MobileAudioState) => void): void;
   /** A call began (`active`) or ended. The host follows the routes, applies a
-   *  pick and watches for a phone call only during one. Calls reach the host
-   *  in the order they are made. */
+   *  pick and watches for a phone call only during one, and either way starts
+   *  from no pick. Said with `false` at start too: the host outlives a reload
+   *  of the page. Every command reaches the host after the ones made before
+   *  it. */
   setSession(active: boolean): void;
   /** Play the call through `kind`; null hands the choice back to the host. A
-   *  pick the host cannot keep comes back as `manual: null`. */
+   *  pick the host cannot keep comes back as `manual: null`, with `lost` one
+   *  higher when it was the phone that refused it. */
   setRoute(kind: AudioRouteKind | null): void;
   /** Ask for the state again, for a page that may have missed a change while
    *  it was in the background. */

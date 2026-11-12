@@ -1210,12 +1210,14 @@ for (const profile of PROFILES) {
       await expect(mute).toHaveAttribute("aria-pressed", "false");
       await expect(mute).toHaveAttribute("aria-label", "Mute");
 
-      // The host follows the phone's audio from join to leave.
+      // The host is told that no call runs when the app starts (it outlives a
+      // reload of the page), then follows the phone's audio from join to leave.
       await bar.locator("[data-testid='pcb-leave']").tap();
       await expect(bar).toBeHidden();
       await expect
         .poll(() => callAudioCommands(page))
         .toEqual([
+          'mobile_audio_set_session {"active":false}',
           'mobile_audio_set_session {"active":true}',
           'mobile_audio_set_session {"active":false}',
         ]);
@@ -1375,6 +1377,7 @@ const callControls = (page: Page): Locator =>
 const routeButton = (page: Page): Locator =>
   callControls(page).locator("[data-call-control='route']");
 const routeSheet = (page: Page): Locator => page.locator("[data-testid='route-sheet']");
+const ROUTE_LOST = "Couldn't keep that sound route. Back to automatic.";
 
 test.describe("call audio in the Android app", () => {
   test.use(pixel7);
@@ -1477,6 +1480,7 @@ test.describe("call audio in the Android app", () => {
     await expect(route).toHaveAttribute("aria-expanded", "false");
     await expect(route).toHaveAttribute("aria-label", "Sound output: Earpiece");
     expect(await callAudioCommands(page)).toEqual([
+      'mobile_audio_set_session {"active":false}',
       'mobile_audio_set_session {"active":true}',
       'mobile_audio_set_route {"kind":"earpiece"}',
     ]);
@@ -1492,6 +1496,12 @@ test.describe("call audio in the Android app", () => {
     await expect(routeSheet(page)).toHaveCount(0);
     await expect(callControls(page)).toBeVisible();
     await expect(page.locator("[data-testid='toast']")).toHaveCount(0);
+
+    // Android will not keep the earpiece and the phone gives the pick up: the
+    // app says so, and shows the phone's own choice again.
+    await reportCallAudio(page, { ...WITH_HEADSET, manual: null, lost: 1 });
+    await expect(page.locator("[data-testid='toast']", { hasText: ROUTE_LOST })).toBeVisible();
+    await expect(route).toHaveAttribute("aria-label", "Sound output: Bluetooth headset");
   });
 
   test("a pick the phone cannot keep goes back to automatic and says so", async ({ page }) => {
@@ -1505,15 +1515,12 @@ test.describe("call audio in the Android app", () => {
     await route.tap();
     await routeSheet(page).locator("[data-testid='route-earpiece']").tap();
 
-    await expect(
-      page.locator("[data-testid='toast']", {
-        hasText: "Couldn't keep that sound route. Back to automatic.",
-      }),
-    ).toBeVisible();
+    await expect(page.locator("[data-testid='toast']", { hasText: ROUTE_LOST })).toBeVisible();
     await expect(route).toHaveAttribute("aria-label", "Sound output: Speaker");
     await expect
       .poll(() => callAudioCommands(page))
       .toEqual([
+        'mobile_audio_set_session {"active":false}',
         'mobile_audio_set_session {"active":true}',
         'mobile_audio_set_route {"kind":"earpiece"}',
         'mobile_audio_set_route {"kind":""}',

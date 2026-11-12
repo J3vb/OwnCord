@@ -1,7 +1,9 @@
 // The host side of `mobileAudio`, loaded in the Android app only
 // (`src-tauri/src/mobile_audio.rs`, `MobileAudioPlugin.kt`). The plugin sends
 // its audio state as `state` events and as the answer to each command, every
-// one numbered, so whichever arrives late is dropped.
+// one numbered, so whichever arrives late is dropped. Commands go out one at a
+// time: the host runs each as a task of its own, and two on their way at once
+// could reach the plugin either way round.
 import { addPluginListener, type PluginListener } from "@tauri-apps/api/core";
 import { createLogger } from "@lib/logger";
 import { tryInvoke, type NativeResult } from "./nativeInvoke";
@@ -15,6 +17,8 @@ let generation = 0;
 /** The number of the newest state handed on. */
 let lastSeq = 0;
 let deliver: ((state: MobileAudioState) => void) | null = null;
+/** Settles when the last command made was answered; the next goes out then. */
+let answered: Promise<unknown> = Promise.resolve();
 
 function isKind(value: unknown): value is AudioRouteKind {
   return typeof value === "string" && KINDS.has(value);
@@ -29,7 +33,10 @@ function readRoute(raw: unknown): AudioRoute | null {
 /** The plugin's state and its number, or null for anything else. */
 function readState(raw: unknown): { seq: number; state: MobileAudioState } | null {
   if (typeof raw !== "object" || raw === null) return null;
-  const { seq, supported, routes, active, manual, interrupted } = raw as Record<string, unknown>;
+  const { seq, supported, routes, active, manual, interrupted, lost } = raw as Record<
+    string,
+    unknown
+  >;
   if (typeof seq !== "number" || typeof supported !== "boolean") return null;
   if (!Array.isArray(routes) || !isKind(active)) return null;
   return {
@@ -40,6 +47,7 @@ function readState(raw: unknown): { seq: number; state: MobileAudioState } | nul
       active,
       manual: isKind(manual) ? manual : null,
       interrupted: interrupted === true,
+      lost: typeof lost === "number" ? lost : 0,
     },
   };
 }
@@ -53,9 +61,13 @@ function accept(raw: unknown, mine: number): void {
   deliver(next.state);
 }
 
-/** Take a plugin command's answer: the state the command left. */
-function take(answer: Promise<NativeResult<unknown>>): void {
+/** Make a plugin command once the ones made before it were answered, and take
+ *  its answer: the state the command left. `tryInvoke` never rejects, so one
+ *  refused command does not hold up the next. */
+function send(command: () => Promise<NativeResult<unknown>>): void {
   const mine = generation;
+  const answer = answered.then(command);
+  answered = answer;
   void answer.then((result) => {
     if (result.ok) accept(result.value, mine);
     else log.warn(`${result.error.command} failed`, result.error.message);
@@ -90,7 +102,7 @@ export function watch(signal: AbortSignal, onState: (state: MobileAudioState) =>
       // States are handed on only from here: with the listener in, the state
       // asked for now and every change after it arrive, none in between lost.
       deliver = onState;
-      take(tryInvoke<unknown>("mobile_audio_state"));
+      send(() => tryInvoke<unknown>("mobile_audio_state"));
     },
     // Without its events a state would go stale: report nothing at all.
     (err: unknown) => log.warn("Call audio events unavailable; no route control", err),
@@ -98,13 +110,13 @@ export function watch(signal: AbortSignal, onState: (state: MobileAudioState) =>
 }
 
 export function setSession(active: boolean): void {
-  take(tryInvoke<unknown>("mobile_audio_set_session", { active }));
+  send(() => tryInvoke<unknown>("mobile_audio_set_session", { active }));
 }
 
 export function setRoute(kind: AudioRouteKind | null): void {
-  take(tryInvoke<unknown>("mobile_audio_set_route", { kind: kind ?? "" }));
+  send(() => tryInvoke<unknown>("mobile_audio_set_route", { kind: kind ?? "" }));
 }
 
 export function refresh(): void {
-  take(tryInvoke<unknown>("mobile_audio_state"));
+  send(() => tryInvoke<unknown>("mobile_audio_state"));
 }

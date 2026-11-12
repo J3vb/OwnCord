@@ -36,6 +36,7 @@ function audio(over: Partial<MobileAudioState> = {}): MobileAudioState {
     active: "speaker",
     manual: null,
     interrupted: false,
+    lost: 0,
     ...over,
   };
 }
@@ -55,6 +56,12 @@ const rows = (): HTMLElement[] => [
 ];
 const row = (kind: string): HTMLElement =>
   document.querySelector<HTMLElement>(`[data-testid='route-${kind}']`)!;
+/** A key pressed where the keyboard is. */
+function press(key: string): void {
+  document.activeElement!.dispatchEvent(
+    new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+  );
+}
 
 describe("route button", () => {
   let owner: AbortController;
@@ -231,6 +238,65 @@ describe("route button", () => {
       // A row drawn after the sheet opened still picks.
       row("earpiece").click();
       expect(host.setRoute.mock.calls).toEqual([["earpiece"]]);
+    });
+
+    it("is one tab stop, and the arrow keys move through the routes without picking", () => {
+      report({
+        routes: [
+          { kind: "speaker", name: "" },
+          { kind: "earpiece", name: "" },
+          { kind: "bluetooth", name: "" },
+        ],
+        active: "earpiece",
+      });
+      mount().click();
+      // Tab lands on the route in use.
+      expect(rows().map((r) => r.tabIndex)).toEqual([-1, 0, -1]);
+      expect(document.activeElement).toBe(row("earpiece"));
+
+      press("ArrowDown");
+      expect(document.activeElement).toBe(row("bluetooth"));
+      expect(rows().map((r) => r.tabIndex)).toEqual([-1, -1, 0]);
+      press("Home");
+      expect(document.activeElement).toBe(row("speaker"));
+      // Moving is looking: only Enter or Space picks.
+      expect(host.setRoute).not.toHaveBeenCalled();
+      expect(sheet()).not.toBeNull();
+
+      press("ArrowDown");
+      press("ArrowDown");
+      press("Enter");
+      expect(host.setRoute.mock.calls).toEqual([["bluetooth"]]);
+      expect(sheet()).toBeNull();
+    });
+
+    it("keeps the keyboard on the route in use when the routes change under it", async () => {
+      mount().click();
+      expect(document.activeElement).toBe(row("speaker"));
+      report({
+        routes: [
+          { kind: "speaker", name: "" },
+          { kind: "earpiece", name: "" },
+          { kind: "wired", name: "" },
+        ],
+        active: "wired",
+      });
+      await settle();
+      expect(document.activeElement).toBe(row("wired"));
+      expect(rows().map((r) => r.tabIndex)).toEqual([-1, -1, 0]);
+    });
+
+    it("gives the group a tab stop when the route in use is not listed", () => {
+      report({
+        routes: [
+          { kind: "earpiece", name: "" },
+          { kind: "bluetooth", name: "" },
+        ],
+        active: "speaker",
+      });
+      mount().click();
+      expect(rows().map((r) => r.tabIndex)).toEqual([0, -1]);
+      expect(document.activeElement).toBe(row("earpiece"));
     });
 
     it("leaves its rows alone through a report that changes none of them", async () => {

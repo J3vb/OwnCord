@@ -140,7 +140,9 @@ export async function restoreLocalVoiceState(
   // Always enforce mute at the track level even if no pipeline exists yet.
   // setMicrophoneEnabled(false) doesn't guarantee mediaStreamTrack.enabled=false,
   // and renegotiation when a new participant joins can bring a track back alive.
-  if (muted) {
+  // A phone call's hold is read now, not from the state above: it may have
+  // begun while the microphone was being opened.
+  if (muted || voiceStore.getState().phoneCallHold === true) {
     host
       .applyMicMuteState(true)
       .catch((e) => log.warn("applyMicMuteState failed in restoreLocalVoiceState", e));

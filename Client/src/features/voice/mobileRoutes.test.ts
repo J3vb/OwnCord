@@ -51,6 +51,7 @@ function audio(over: Partial<MobileAudioState> = {}): MobileAudioState {
     active: "speaker",
     manual: null,
     interrupted: false,
+    lost: 0,
     ...over,
   };
 }
@@ -116,20 +117,22 @@ describe("mobile call audio", () => {
   });
 
   describe("the call's start and end", () => {
-    it("watches the host, and says nothing while there is no call", () => {
+    it("watches the host, and tells it that no call runs: the host outlives a reload of the page", () => {
       startMobileRoutes(owner.signal);
       expect(host.watch).toHaveBeenCalledWith(owner.signal, expect.any(Function));
-      expect(host.setSession).not.toHaveBeenCalled();
+      // Without this the host would carry a call the last page never ended,
+      // and its pick, into this page's first call.
+      expect(host.setSession.mock.calls).toEqual([[false]]);
     });
 
     it("tells the host when a call begins and when it ends", async () => {
       startMobileRoutes(owner.signal);
       joinCall();
       await settle();
-      expect(host.setSession.mock.calls).toEqual([[true]]);
+      expect(host.setSession.mock.calls).toEqual([[false], [true]]);
       leaveCall();
       await settle();
-      expect(host.setSession.mock.calls).toEqual([[true], [false]]);
+      expect(host.setSession.mock.calls).toEqual([[false], [true], [false]]);
     });
 
     it("counts a join that is still connecting, and a call already running at start", async () => {
@@ -395,6 +398,54 @@ describe("mobile call audio", () => {
     });
   });
 
+  describe("a pick the phone would not keep", () => {
+    it("says so once, and closes the capture, when the host gives the pick up", async () => {
+      const kept = capture();
+      getUserMedia.mockResolvedValueOnce(kept.stream);
+      startMobileRoutes(owner.signal);
+      joinCall();
+      await settle();
+      await pick();
+      expect(host.showToast).not.toHaveBeenCalled();
+
+      report(audio({ lost: 1 }));
+      await settle();
+      expect(host.showToast.mock.calls).toEqual([[LOST, "error"]]);
+      expect(kept.track.stop).toHaveBeenCalledTimes(1);
+      // The host dropped it already: there is nothing to hand back.
+      expect(host.setRoute).not.toHaveBeenCalled();
+
+      // The same count again is the same loss.
+      report(audio({ lost: 1, active: "earpiece" }));
+      await settle();
+      expect(host.showToast).toHaveBeenCalledTimes(1);
+
+      report(audio({ lost: 2 }));
+      expect(host.showToast).toHaveBeenCalledTimes(2);
+    });
+
+    it("takes the first report's count as where it starts", () => {
+      // The host counts from the app's start, through a reload of the page.
+      startMobileRoutes(owner.signal);
+      report(audio({ lost: 3 }));
+      expect(host.showToast).not.toHaveBeenCalled();
+      report(audio({ lost: 3, active: "earpiece" }));
+      expect(host.showToast).not.toHaveBeenCalled();
+    });
+
+    it("stays quiet when a pick goes for another reason", async () => {
+      startMobileRoutes(owner.signal);
+      joinCall();
+      await settle();
+      await pick();
+      // Its device left, or a headset was connected: the host says so with
+      // the routes, not with the count.
+      report(audio({ routes: [{ kind: "speaker", name: "" }] }));
+      await settle();
+      expect(host.showToast).not.toHaveBeenCalled();
+    });
+  });
+
   describe("a page that comes back", () => {
     afterEach(() => Reflect.deleteProperty(document, "visibilityState"));
 
@@ -441,6 +492,7 @@ describe("mobile call audio", () => {
 
     it("ends no session when there was no call", async () => {
       startMobileRoutes(owner.signal);
+      host.setSession.mockClear();
       owner.abort();
       await settle();
       expect(host.setSession).not.toHaveBeenCalled();

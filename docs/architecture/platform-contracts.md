@@ -121,8 +121,12 @@ It also includes the three Android-only call audio registrations
 (`mobile_audio.rs`: `mobile_audio_set_session`, `mobile_audio_set_route` and
 `mobile_audio_state`). Their `owncord-mobile-audio` plugin delivers `state`
 events through an owned plugin listener, and every state carries a number, so
-an answer or event that arrives late is dropped. The `MobileAudio` platform
-contract reports nothing outside Android.
+an answer or event that arrives late is dropped. The webview sends these
+commands one at a time, each after the one before it was answered, so they
+reach the plugin in the order they were made. The plugin outlives a reload of
+the webview: the webview says that no call runs when it starts, and a call
+always starts from no picked route. The `MobileAudio` platform contract
+reports nothing outside Android.
 The handler count also covers the existing 115 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]`, and the forty-four `native_voice_*` commands

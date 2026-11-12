@@ -34,6 +34,7 @@ const NO_ROUTES: MobileAudioState = {
   active: "speaker",
   manual: null,
   interrupted: false,
+  lost: 0,
 };
 
 /** What the host last reported. The device's state, not a server's. */
@@ -140,11 +141,17 @@ export function pickRoute(kind: AudioRouteKind): void {
 export function startMobileRoutes(signal: AbortSignal): void {
   if (signal.aborted) return;
   desktop.mobileAudio.watch(signal, (state) => {
+    const before = mobileRouteStore.getState();
     mobileRouteStore.setState(() => state);
+    // The phone would not keep a pick and the host gave it up. The first
+    // report only says where the host's count stands.
+    if (before.supported && state.lost > before.lost) showToast(voiceText("route.lost"), "error");
     sync();
   });
   let calling = inCall(voiceStore.getState());
-  if (calling) desktop.mobileAudio.setSession(true);
+  // Said with no call too: the host outlives a reload of this page, and what
+  // the last page left running there is not this page's call.
+  desktop.mobileAudio.setSession(calling);
   const stop = voiceStore.subscribeSelector(inCall, (next) => {
     calling = next;
     desktop.mobileAudio.setSession(next);

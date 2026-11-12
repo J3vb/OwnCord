@@ -108,6 +108,7 @@ describe("native call audio", () => {
           active: "speaker",
           manual: null,
           interrupted: false,
+          lost: 0,
         },
       ],
     ]);
@@ -213,15 +214,16 @@ describe("native call audio", () => {
     await settle();
     mobileAudio.watch(owner.signal, onState);
     await settle();
-    expect(onState).toHaveBeenCalledTimes(1);
+    // The second watcher's own request waits its turn behind the first's.
+    expect(native.invoke).toHaveBeenCalledTimes(1);
 
     late.resolve(audio(7, { active: "bluetooth" }));
     emit[0]!(audio(8, { active: "wired" }));
     await settle();
     expect(first).not.toHaveBeenCalled();
-    expect(onState).toHaveBeenCalledTimes(1);
+    expect(onState.mock.calls).toEqual([[expect.objectContaining({ active: "speaker" })]]);
 
-    // The second watcher's own events still arrive, numbered from the start.
+    // The second watcher's own events arrive, numbered from the start.
     emit[1]!(audio(2, { active: "earpiece" }));
     expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ active: "earpiece" }));
   });
@@ -243,6 +245,42 @@ describe("native call audio", () => {
     ]);
     // With nobody watching, their answers are for nobody.
     expect(onState).not.toHaveBeenCalled();
+  });
+
+  it("sends a command only once the one before it was answered", async () => {
+    const first = createDeferred<unknown>();
+    native.invoke.mockReturnValueOnce(first.promise);
+    const mobileAudio = await load();
+    mobileAudio.setSession(false);
+    mobileAudio.setSession(true);
+    mobileAudio.setRoute("earpiece");
+    await settle();
+    // Two commands on their way at once could reach the plugin either way round.
+    expect(native.invoke.mock.calls).toEqual([["mobile_audio_set_session", { active: false }]]);
+
+    first.resolve(audio(1));
+    await settle();
+    expect(native.invoke.mock.calls).toEqual([
+      ["mobile_audio_set_session", { active: false }],
+      ["mobile_audio_set_session", { active: true }],
+      ["mobile_audio_set_route", { kind: "earpiece" }],
+    ]);
+  });
+
+  it("sends the next command after one the host refused", async () => {
+    native.invoke.mockRejectedValueOnce("call audio unavailable");
+    const mobileAudio = await load();
+    mobileAudio.setSession(true);
+    mobileAudio.setSession(false);
+    await settle();
+    expect(native.warn).toHaveBeenCalledWith(
+      "mobile_audio_set_session failed",
+      "call audio unavailable",
+    );
+    expect(native.invoke.mock.calls).toEqual([
+      ["mobile_audio_set_session", { active: true }],
+      ["mobile_audio_set_session", { active: false }],
+    ]);
   });
 
   it("takes a command's answer as the state the command left", async () => {
@@ -315,6 +353,17 @@ describe("native call audio", () => {
       active: "bluetooth",
       manual: null,
       interrupted: false,
+      lost: 0,
     });
+  });
+
+  it("hands on how many picks the host lost, and reads anything else as none", async () => {
+    const mobileAudio = await load();
+    mobileAudio.watch(owner.signal, onState);
+    await settle();
+    emit[0]!(audio(2, { lost: 2 }));
+    expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ lost: 2 }));
+    emit[0]!(audio(3, { lost: "two" }));
+    expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ lost: 0 }));
   });
 });

@@ -147,6 +147,9 @@ private class CallAudio(
   private var manual: String? = null
   private var requested = false
   private var interrupted = false
+  /** Picks given up because Android would not keep them. It only grows, so the
+   *  webview sees a loss in any state that reaches it after one. */
+  private var lost = 0
   private var kinds: Set<String> = emptySet()
   private val asks = MobileAudioPolicy.Budget()
   private val onDevice = AudioManager.OnCommunicationDeviceChangedListener { onChange() }
@@ -158,13 +161,15 @@ private class CallAudio(
       override fun onAudioDevicesRemoved(removed: Array<AudioDeviceInfo>) = onChange()
     }
 
-  /** A call began or ended. Ending it forgets the pick, drops the device
+  /** A call began or ended. Either way it starts from no pick: a route belongs
+   *  to one call, and the webview that began the last one may have been
+   *  reloaded before it could end it. Ending a call also drops the device
    *  request and lifts a pause. */
   fun setActive(next: Boolean) {
-    if (active == next) return
-    active = next
     manual = null
     asks.reset()
+    if (active == next) return
+    active = next
     if (next) {
       audio.addOnCommunicationDeviceChangedListener(executor, onDevice)
       audio.addOnModeChangedListener(executor, onMode)
@@ -204,6 +209,7 @@ private class CallAudio(
       put("active", MobileAudioPolicy.active(manual, current, now))
       put("manual", manual ?: JSONObject.NULL)
       put("interrupted", interrupted)
+      put("lost", lost)
     }
   }
 
@@ -228,6 +234,7 @@ private class CallAudio(
     if (asks.take(SystemClock.elapsedRealtime()) && ask(wanted)) return
     NativeLog.warn("[audio] the $kind route did not hold; back to automatic")
     manual = null
+    lost++
     release()
   }
 
@@ -339,6 +346,7 @@ class MobileAudioPlugin(private val activity: Activity) : Plugin(activity) {
       put("active", MobileAudioPolicy.SPEAKER)
       put("manual", JSONObject.NULL)
       put("interrupted", false)
+      put("lost", 0)
     }
 
   @Command
