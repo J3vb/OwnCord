@@ -15,8 +15,12 @@ import { channelsStore } from "@stores/channels.store";
 import { createInlineAutocomplete, type InlineAutocompleteComponent } from "./inlineAutocomplete";
 import { messagingText } from "../../../i18n/messaging";
 
-/** Maximum rows shown at once — the popup is a shortcut, not the member list. */
-export const MAX_MENTION_SUGGESTIONS = 10;
+/**
+ * Most rows the popup lists; .ma-list scrolls past the first few. High enough
+ * that a bare "@" on a typical self-hosted server lists every member, offline
+ * ones included, not only the recent chatters that sort first.
+ */
+export const MAX_MENTION_SUGGESTIONS = 50;
 
 export interface MentionSuggestion {
   /** Token inserted after the "@", e.g. "alice" or "everyone". */
