@@ -114,6 +114,7 @@ import { loadRequests, requestsApi } from "../../src/features/message-requests/s
 import type { DispatchApi } from "../../src/features/connection/dispatchContext";
 import type { GifFavoritesApi } from "../../src/lib/media/gifProvider";
 import type { ReadyMember } from "../../src/lib/types";
+import { applyServerTime, serverNow } from "../../src/lib/net/serverClock";
 
 interface Probe {
   /** The registry name this probe covers. */
@@ -573,6 +574,11 @@ const PROBES: readonly Probe[] = [
     name: "moderation:timeouts",
     mutate: () => setMemberTimeouts([{ user_id: 7, expires_at: "2099-01-01T00:00:00Z" }]),
     isInitial: () => memberTimeoutsStore.getState() === null,
+  },
+  {
+    name: "serverClock:offset",
+    mutate: () => applyServerTime(Date.now() - 3_600_000),
+    isInitial: () => Math.abs(serverNow() - Date.now()) < 1000,
   },
   {
     name: "messaging:forwardRequests",

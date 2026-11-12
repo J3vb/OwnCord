@@ -374,7 +374,7 @@ describe("MessageList", () => {
       messagesStore.flush();
     }
 
-    it("re-renders only the row a reaction changed and leaves focus where it was", () => {
+    it("redraws only the reactions of the row a reaction changed and leaves focus where it was", () => {
       setMessages(
         1,
         Array.from({ length: 40 }, (_, i) => ungrouped(i + 1)),
@@ -396,7 +396,7 @@ describe("MessageList", () => {
 
       expect(row(2)).toBe(row2);
       expect(row(10)).toBe(row10);
-      expect(row(5)).not.toBe(row5);
+      expect(row(5)).toBe(row5);
       expect(row(5)!.querySelector(".reaction-chip")).not.toBeNull();
       expect(document.activeElement).toBe(reply10);
     });
@@ -492,7 +492,8 @@ describe("MessageList", () => {
 
       replace(1, { reactions: [{ emoji: "👍", count: 1, me: false }] });
 
-      expect(row(1)).not.toBe(row1);
+      expect(row(1)).toBe(row1);
+      expect(row(1)!.querySelector(".reaction-chip")).not.toBeNull();
       expect(row(3)).toBe(row3);
     });
 

@@ -230,6 +230,12 @@ export interface ReadyPayload {
    * caller's own entry for anyone else. Absent from older servers.
    */
   readonly member_timeouts?: readonly MemberTimeoutEntry[];
+  /**
+   * The server's clock (Unix ms) when it built this ready. The client stamps
+   * `client_message_id` from it, so a device clock that runs fast or slow
+   * does not lock it out of sending. Absent from older servers.
+   */
+  readonly server_time_ms?: number;
 }
 
 /** One active timeout: who, and until when (RFC 3339). Never the reason or actor. */

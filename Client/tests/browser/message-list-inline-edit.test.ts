@@ -110,7 +110,13 @@ describe("MessageList inline editor in a real browser", () => {
     const current = messagesStore.getState().messagesByChannel.get(1)!;
     setRows(
       current.map((m) =>
-        m.id === id ? { ...m, reactions: [{ emoji: "🔥", count: 2, me: false }] } : m,
+        m.id === id
+          ? {
+              ...m,
+              reactions: [{ emoji: "🔥", count: 2, me: false }],
+              editedAt: "2024-01-15T13:00:00Z",
+            }
+          : m,
       ),
     );
     await messagesStore.flush();

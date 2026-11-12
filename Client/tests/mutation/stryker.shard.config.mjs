@@ -246,6 +246,7 @@ export const shards = {
     "src/lib/net/identity.ts",
     "src/lib/net/rateLimiter.ts",
     "src/lib/net/serverCapabilities.ts",
+    "src/lib/net/serverClock.ts",
     "src/lib/net/trustedDomains.ts",
     "src/lib/net/ws/wsLiveness.ts",
     "src/lib/prefs/gameActivityPrefs.ts",
