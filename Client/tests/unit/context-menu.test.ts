@@ -309,6 +309,17 @@ describe("showContextMenu", () => {
       }
     });
 
+    it("ties row click listeners to the menu, not the caller signal", () => {
+      const add = vi.spyOn(EventTarget.prototype, "addEventListener");
+      openMenu([{ label: "Action", onClick: vi.fn() }]);
+      const onCaller = add.mock.calls.filter(
+        ([type, , options]) =>
+          type === "click" && typeof options === "object" && options.signal === ac.signal,
+      );
+      add.mockRestore();
+      expect(onCaller).toHaveLength(0);
+    });
+
     it("cleans up immediately when the signal is already aborted before the menu is shown", () => {
       ac.abort();
 
