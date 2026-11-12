@@ -78,6 +78,7 @@ export function buildSessionsSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
   tokensChanged?: EventTarget,
+  sessionsChanged?: EventTarget,
 ): HTMLLIElement {
   const { row, icon, result, body } = createStatusRow(
     t("devices.sectionTitle"),
@@ -119,6 +120,8 @@ export function buildSessionsSection(
         setStatusIcon(icon, "warn");
       });
   }
+
+  sessionsChanged?.addEventListener("change", load, { signal });
 
   const revokeAllBtn = createElement(
     "button",

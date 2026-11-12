@@ -151,7 +151,10 @@ function applyStoredPreferences(
   }
 }
 
-export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
+export function buildAppearanceTab(
+  signal: AbortSignal,
+  onDirtyCheck?: (isDirty: () => boolean) => void,
+): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const activeThemeName = getActiveThemeName();
   const currentTheme =
@@ -401,7 +404,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   section.appendChild(
     buildSettingRow({ label: t("appearance.accentColor"), control: accentControl, stacked: true }),
   );
-  section.appendChild(buildCustomThemeSection(signal));
+  section.appendChild(buildCustomThemeSection(signal, onDirtyCheck));
 
   // An OS light/dark flip under "Sync with computer" changes the default
   // accent; with no stored accent the controls must follow it.

@@ -195,7 +195,7 @@ describe("browser notifier", () => {
     expect(FakeNotification.instances).toEqual([]);
   });
 
-  describe("unread badge without the Badging API", () => {
+  describe("unread badge in the tab title", () => {
     it("prefixes the tab title with the count and restores it at zero", async () => {
       const notifier = await load();
       setBadgeApi(false);
@@ -241,12 +241,15 @@ describe("browser notifier", () => {
       expect(document.title).toBe("(2) OwnCord");
     });
 
-    it("leaves the title alone when the Badging API took the count", async () => {
+    it("shows the count in the title as well when the Badging API took it", async () => {
       const notifier = await load();
       document.title = "OwnCord";
       await notifier.setUnreadBadge(2);
-      expect(document.title).toBe("OwnCord");
+      expect(document.title).toBe("(2) OwnCord");
       expect(badge).toEqual([2]);
+      await notifier.setUnreadBadge(0);
+      expect(document.title).toBe("OwnCord");
+      expect(badge).toEqual([2, 0]);
     });
   });
 });

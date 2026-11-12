@@ -307,7 +307,7 @@ export function showContextMenu(opts: ContextMenuOptions): void {
             closeMenu();
             item.onClick(e);
           },
-          { signal },
+          { signal: menuSignal },
         );
         return el;
       };

@@ -101,7 +101,10 @@ async function exportTheme(theme: CustomTheme): Promise<void> {
   }
 }
 
-export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
+export function buildCustomThemeSection(
+  signal: AbortSignal,
+  onDirtyCheck?: (isDirty: () => boolean) => void,
+): HTMLElement {
   const section = createElement("div", { class: "custom-themes" });
   const header = createElement("h3", {}, t("appearance.customThemes"));
   const desc = createElement(
@@ -186,6 +189,13 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
     editor.hidden = false;
     nameInput.focus();
   }
+
+  // Settings asks before a close or tab switch throws away a half-written theme.
+  onDirtyCheck?.(() => {
+    if (editor.hidden) return false;
+    const stored = editing === null ? null : loadCustomThemes().find((th) => th.id === editing);
+    return nameInput.value !== (stored?.name ?? "") || cssInput.value !== (stored?.css ?? "");
+  });
 
   function closeEditor(): void {
     editing = null;

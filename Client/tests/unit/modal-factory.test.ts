@@ -109,6 +109,20 @@ describe("createModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("Escape closes only the dialog on top of a stack", () => {
+    const lowerClose = vi.fn();
+    const upperClose = vi.fn();
+    createModal({ content: document.createElement("div"), onClose: lowerClose }, container);
+    createModal({ content: document.createElement("div"), onClose: upperClose }, container);
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(upperClose).toHaveBeenCalledTimes(1);
+    expect(lowerClose).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(lowerClose).toHaveBeenCalledTimes(1);
+  });
+
   it("Escape that cancels an IME candidate does not close; a plain Escape after it does", () => {
     const onClose = vi.fn();
     createModal({ content: document.createElement("div"), onClose }, container);

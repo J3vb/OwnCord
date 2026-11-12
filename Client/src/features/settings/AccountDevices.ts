@@ -66,6 +66,11 @@ export function buildSessionRow(
           );
         })
         .catch((err: unknown) => {
+          // 404: already signed out elsewhere or expired, so the row stays gone.
+          if (err instanceof ApiClientError && err.status === 404) {
+            onListChanged();
+            return;
+          }
           // The server kept the session, so the row comes back.
           if (next?.parentNode === list) list?.insertBefore(row, next);
           else list?.appendChild(row);

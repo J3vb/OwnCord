@@ -10,6 +10,7 @@
  *  - a real category's header dragged onto another category (reorders them).
  */
 
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { channelsStore } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
@@ -127,9 +128,36 @@ function retargetCategoryDrag(drag: CategoryDrag): boolean {
 
 // ── Shared document listeners ────────────────────────────────────────────
 
+/** Abandon the in-flight drag without dropping: the release never reached the
+ *  page (focus moved to another window mid-drag), or the user pressed Escape. */
+function cancelActiveDrag(): void {
+  const drag = activeDrag;
+  if (drag === null) {
+    return;
+  }
+  activeDrag = null;
+  drag.sourceEl.classList.remove("dragging");
+  document.body.classList.remove("channel-reordering");
+  clearIndicators();
+  if (drag.kind === "category") {
+    lastCategoryDragEnd = Date.now();
+  }
+}
+
+function onDocumentKeyDown(e: KeyboardEvent): void {
+  if (e.key === "Escape" && !isImeCommit(e)) {
+    cancelActiveDrag();
+  }
+}
+
 function onDocumentMouseMove(e: MouseEvent): void {
   const drag = activeDrag;
   if (drag === null) {
+    return;
+  }
+  // A move with no button down means the release was lost.
+  if (e.buttons === 0) {
+    cancelActiveDrag();
     return;
   }
   if (drag.kind === "category") {
@@ -224,6 +252,8 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
   globalDragOwner = new Disposable();
   document.addEventListener("mousemove", onDocumentMouseMove, { signal: globalDragOwner.signal });
   document.addEventListener("mouseup", onDocumentMouseUp, { signal: globalDragOwner.signal });
+  document.addEventListener("keydown", onDocumentKeyDown, { signal: globalDragOwner.signal });
+  window.addEventListener("blur", cancelActiveDrag, { signal: globalDragOwner.signal });
 }
 
 /** Make a channel element draggable via mousedown (MANAGE_CHANNELS only).

@@ -270,6 +270,27 @@ describe("AdvancedTab — Clear All Cache", () => {
     setChannelMutesHost(null);
   });
 
+  it.each([
+    "owncord:settings:inputMode",
+    "owncord:settings:pttVk",
+    "owncord:settings:mutedChannels:a.example",
+    "owncord:drafts:a.example:1",
+    "owncord:dm-note:7",
+    "owncord:dm-note-kept:7",
+    "owncord:server-rail-layout",
+  ])("keeps %s across Clear All, since it is not cache", async (key) => {
+    localStorage.setItem(key, "kept");
+    localStorage.setItem("owncord:settings:compactMode", "true");
+
+    const btn = getActionBtn("Clear & Restart");
+    btn.click();
+    btn.click();
+    await flush();
+
+    expect(localStorage.getItem(key)).toBe("kept");
+    expect(localStorage.getItem("owncord:settings:compactMode")).toBeNull();
+  });
+
   it("renders two-step confirmation for Clear All", () => {
     const btn = getActionBtn("Clear & Restart");
     expect(btn.textContent).toBe("Clear & Restart");

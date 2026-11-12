@@ -34,9 +34,19 @@ export function createSecretHold(): SecretHold {
   };
 }
 
+/** What would be lost, which decides the wording of the question. */
+export type UnsavedTopic = "profile" | "theme" | "secret";
+
+// The one that costs most comes first: it names the prompt when several apply.
+const TOPIC_ORDER: readonly UnsavedTopic[] = ["secret", "theme", "profile"];
+
 export interface UnsavedGuard {
-  /** Set by the tab on screen when it holds a form that can be left half-typed. */
-  setDirtyCheck(check: (() => boolean) | null): void;
+  /**
+   * Set by the tab on screen when it holds a form that can be left half-typed
+   * or a secret shown once. `topic` (profile by default) is the part it covers;
+   * with no topic, `null` drops every check.
+   */
+  setDirtyCheck(check: (() => boolean) | null, topic?: UnsavedTopic): void;
   isDirty(): boolean;
   /**
    * True when the open tab has unsaved edits: the user is asked first, and
@@ -53,22 +63,28 @@ export function createUnsavedGuard(
   signal: AbortSignal,
   getContainer: () => HTMLElement | undefined,
 ): UnsavedGuard {
-  let dirtyCheck: (() => boolean) | null = null;
+  const checks = new Map<UnsavedTopic, () => boolean>();
+  const dirtyTopic = (): UnsavedTopic | null =>
+    TOPIC_ORDER.find((topic) => checks.get(topic)?.() === true) ?? null;
   /** Closes the open "discard unsaved changes?" prompt; null when none is open. */
   let closeUnsavedPrompt: (() => void) | null = null;
   return {
-    setDirtyCheck: (check) => {
-      dirtyCheck = check;
+    setDirtyCheck: (check, topic) => {
+      if (check !== null) checks.set(topic ?? "profile", check);
+      else if (topic === undefined) checks.clear();
+      else checks.delete(topic);
     },
-    isDirty: () => dirtyCheck?.() === true,
+    isDirty: () => dirtyTopic() !== null,
     blockedByUnsaved: (retry) => {
-      if (dirtyCheck?.() !== true) return false;
+      const topic = dirtyTopic();
+      if (topic === null) return false;
       if (closeUnsavedPrompt !== null) return true;
       closeUnsavedPrompt = confirmDiscardUnsaved({
+        topic,
         signal,
         container: getContainer(),
         onDiscard: () => {
-          dirtyCheck = null;
+          checks.clear();
           retry();
         },
         onClosed: () => {

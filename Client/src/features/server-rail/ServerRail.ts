@@ -68,6 +68,11 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
   const newFolderId = options.newFolderId ?? defaultFolderId;
 
   let profiles: readonly ServerProfile[] = [];
+  // True once the saved servers were read. Until then the list is a guess, and
+  // saving a layout pruned to it would forget every folder and the order.
+  let serversKnown = false;
+  let loading = false;
+  let pendingLayout: RailLayout | null = null;
   let layout: RailLayout = loadLayout();
   // Set by the first switch/add click; the session is torn down right after,
   // so any later click on the same rail is a stale double-click.
@@ -111,6 +116,13 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
   }
 
   function commit(next: RailLayout): void {
+    if (!serversKnown) {
+      // Saving now could drop folders of servers the failed read did not list:
+      // keep the change until the list is in.
+      pendingLayout = next;
+      loadProfiles();
+      return;
+    }
     layout = next;
     saveLayout(layout);
     render();
@@ -440,16 +452,29 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     render();
     renderDms?.();
 
+    loadProfiles();
+  }
+
+  function loadProfiles(): void {
+    if (loading || signal.aborted) return;
+    loading = true;
     void options
       .loadServers()
       .then((loaded) => {
+        loading = false;
         if (signal.aborted) return;
         profiles = loaded;
-        render();
+        serversKnown = true;
+        const pending = pendingLayout;
+        pendingLayout = null;
+        if (pending !== null) commit(pending);
+        else render();
         return;
       })
       .catch(() => {
-        // loadServers resolves to [] on failure; the current server still shows.
+        // The current server still shows; the saved layout stays as it was
+        // and the next layout change tries the read again.
+        loading = false;
       });
   }
 

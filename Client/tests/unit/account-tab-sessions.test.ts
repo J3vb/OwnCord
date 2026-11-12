@@ -332,3 +332,47 @@ describe("Account tab — API tokens", () => {
     await vi.waitFor(() => expect(revokeOption(tab).hidden).toBe(true));
   });
 });
+
+describe("Account tab — devices after a sign-out or password change", () => {
+  const harness = useAccountTabHarness();
+
+  const rows = (tab: HTMLElement): string[] =>
+    [...tab.querySelectorAll<HTMLElement>('[data-testid="session-row"]')].map(
+      (r) => r.dataset["sessionId"] ?? "",
+    );
+
+  it("keeps the row gone when the device was already signed out", async () => {
+    const onRevokeSession = vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "gone"));
+    const tab = buildAccountTab(makeOptions({ onRevokeSession }), harness().signal);
+    document.body.appendChild(tab);
+    await vi.waitFor(() => expect(rows(tab)).toHaveLength(2));
+    tab.querySelector<HTMLButtonElement>('[data-testid="session-revoke"]')!.click();
+    await vi.waitFor(() => expect(onRevokeSession).toHaveBeenCalled());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(rows(tab)).toEqual([String(CURRENT.id)]);
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.any(String), "error");
+  });
+
+  it("reloads the device list after a password change", async () => {
+    const onListSessions = vi
+      .fn()
+      .mockResolvedValueOnce([OTHER, CURRENT])
+      .mockResolvedValue([CURRENT]);
+    const options = makeOptions({
+      onListSessions,
+      onChangePassword: vi.fn().mockResolvedValue(undefined),
+    });
+    const tab = buildAccountTab(options, harness().signal);
+    document.body.appendChild(tab);
+    await vi.waitFor(() => expect(rows(tab)).toHaveLength(2));
+    const inputs = tab.querySelectorAll<HTMLInputElement>("#pw-old, #pw-new, #pw-confirm");
+    inputs[0]!.value = "oldpass123";
+    inputs[1]!.value = "newpassword123";
+    inputs[2]!.value = "newpassword123";
+    [...tab.querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent === "Change Password")!
+      .click();
+    await vi.waitFor(() => expect(rows(tab)).toEqual([String(CURRENT.id)]));
+  });
+});

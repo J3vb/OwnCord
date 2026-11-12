@@ -125,13 +125,17 @@ function appendTopRows(
 }
 
 /** The Change Role flyout, one option per available role. */
-function buildRoleFlyout(options: MemberContextMenuOptions, signal: AbortSignal): HTMLElement {
+function buildRoleFlyout(
+  options: MemberContextMenuOptions,
+  closeMenu: () => void,
+  signal: AbortSignal,
+): HTMLElement {
   return buildFlyout(
     shellText("member.changeRole"),
     (roleSub) => {
-      // One guard across every option: `currentRole` only updates when the
-      // member_update echoes, so without it a double-click (or a second option
-      // clicked while the first PATCH is in flight) fires twice.
+      // One guard across every option: a double-click (or a second option
+      // clicked while the first PATCH is in flight) must not fire twice. The
+      // menu closes when the change settles, as its ticked role is the old one.
       let roleChangeRunning = false;
       for (const role of options.availableRoles) {
         const cls =
@@ -150,6 +154,7 @@ function buildRoleFlyout(options: MemberContextMenuOptions, signal: AbortSignal)
             const done = (): void => {
               roleChangeRunning = false;
               roleOption.classList.remove("context-menu__item--pending");
+              closeMenu();
             };
             options.onChangeRole(role).then(done, done);
           },
@@ -231,7 +236,7 @@ function appendManageRows(
   closeMenu: () => void,
   signal: AbortSignal,
 ): void {
-  if (gates.roles) manage.appendChild(buildRoleFlyout(options, signal));
+  if (gates.roles) manage.appendChild(buildRoleFlyout(options, closeMenu, signal));
 
   if (gates.nicknames && options.onChangeNickname !== undefined) {
     const onChangeNickname = options.onChangeNickname;
@@ -295,6 +300,7 @@ function appendBottomRows(
   bottom: Node,
   options: MemberContextMenuOptions,
   isSelf: boolean,
+  closeMenu: () => void,
   signal: AbortSignal,
 ): void {
   // Developer Mode: copy the member's ID, just above Block (self included).
@@ -309,7 +315,7 @@ function appendBottomRows(
 
   // Block / Unblock — available to every other member, not just admins. Blocking
   // is disruptive (kills DMs both ways) so it confirms; unblocking is one click.
-  if (!isSelf) bottom.appendChild(buildBlockItem(options, signal));
+  if (!isSelf) bottom.appendChild(buildBlockItem(options, closeMenu, signal));
 }
 
 function buildMemberMenu(
@@ -336,7 +342,7 @@ function buildMemberMenu(
   const gates = resolveGates(options, isSelf);
   appendManageRows(manage, options, gates, closeMenu, signal);
   appendDangerRows(danger, options, gates, closeMenu, signal);
-  appendBottomRows(bottom, options, isSelf, signal);
+  appendBottomRows(bottom, options, isSelf, closeMenu, signal);
 
   let first = true;
   for (const group of [top, voice, manage, danger, bottom]) {

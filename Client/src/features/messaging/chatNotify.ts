@@ -8,6 +8,7 @@ import { mentionsCurrentUser } from "../../lib/text/mentions";
 import { loadedThreadsStore } from "../../stores/threadsLoader";
 import { noteAwayUnread } from "@lib/readState";
 import "./mentionNameLookups";
+import { messagingText } from "../../i18n/messaging";
 import type { Payload, ReconnectClock } from "../connection/dispatchContext";
 
 /**
@@ -120,9 +121,13 @@ export function noteDmMessage(
   isAway: boolean,
 ): void {
   const isDmActive = payload.channel_id === activeId && !isAway;
+  // The list row shows the same text the conversation does for a blocked author.
+  const preview = blocksStore.getState().blockedByMe.has(payload.user.id)
+    ? messagingText("blocked.message")
+    : payload.content;
   if (isOwnMessage || isDmActive) {
     // Update last message preview but don't increment unread count.
-    updateDmLastMessagePreview(payload.channel_id, payload.id, payload.content, payload.timestamp);
+    updateDmLastMessagePreview(payload.channel_id, payload.id, preview, payload.timestamp);
     return;
   }
   // The DM badge reads dmStore's mentionCount (mute-immune, rendered
@@ -133,13 +138,7 @@ export function noteDmMessage(
   // double-count a mention redelivered between registerNow and
   // buildReady, since lastMessageId has already advanced by the time
   // any such follow-up call could check it.
-  updateDmLastMessage(
-    payload.channel_id,
-    payload.id,
-    payload.content,
-    payload.timestamp,
-    isMention,
-  );
+  updateDmLastMessage(payload.channel_id, payload.id, preview, payload.timestamp, isMention);
 }
 
 /**

@@ -19,6 +19,7 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { membersStore } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
+import { nameCollator } from "../members/memberModel";
 import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
 import { statusLabel } from "../../i18n/shell";
 import { authStore } from "@stores/auth.store";
@@ -212,7 +213,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       .toSorted(
         (a, b) =>
           reachable(a) - reachable(b) ||
-          memberLabel(a).localeCompare(memberLabel(b), undefined, { sensitivity: "base" }) ||
+          nameCollator.compare(memberLabel(a), memberLabel(b)) ||
           a.id - b.id,
       );
 
@@ -260,16 +261,18 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
 
     function applyFilter(): void {
       const q = searchInput.value.trim().toLowerCase();
-      const shown = rows.filter(
-        (r) =>
+      let shown = 0;
+      // Hide, don't detach: the selection marks stay on the elements, and a
+      // hidden row's avatar loads once the row shows again.
+      for (const r of rows) {
+        const match =
           q === "" ||
           r.label.toLowerCase().includes(q) ||
-          r.member.username.toLowerCase().includes(q),
-      );
-      // Hide, don't detach: a row filtered out before its avatar loads still
-      // gets its picture, and the selection marks stay on the elements.
-      for (const r of rows) r.item.hidden = !shown.includes(r);
-      emptyNotice.hidden = shown.length > 0;
+          r.member.username.toLowerCase().includes(q);
+        r.item.hidden = !match;
+        if (match) shown++;
+      }
+      emptyNotice.hidden = shown > 0;
       for (const r of rows) r.item.setAttribute("tabindex", "-1");
       setRovingTabindex(listContainer, VISIBLE_ROW);
     }
@@ -291,6 +294,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
         className: "dm-avatar dm-member-picker-avatar",
         background: pickAvatarColor(member.username),
         decorative: true,
+        deferUntilVisible: true,
       });
       const nameEl = createElement("span", {}, label);
       const statusEl = createElement(

@@ -4,8 +4,9 @@
  * lives here once.
  */
 
-import { channelsStore, updateChannelPosition, type Channel } from "../../stores/channels.store";
+import { channelsStore, type Channel } from "../../stores/channels.store";
 import type { ChannelReorderData } from "./channelSidebarTypes";
+import { applyOptimistic, planNeighbourSwap } from "./sidebar/dragPlan";
 
 export interface ChannelMoves {
   /** Null when the channel is already first in its group. */
@@ -32,22 +33,14 @@ export function channelMoves(
     .map((c) => live.get(c.id))
     .filter((c): c is Channel => c !== undefined && (c.type === "voice") === isVoice);
   const index = group.findIndex((c) => c.id === channel.id);
-  // Swap positions with the adjacent row. `group` is position-sorted, so
-  // this is the same visual move a drag onto that row produces. Equal
-  // positions (newly created channels share 0) get nudged apart.
+  // The same slot assignment a drag onto the neighbour makes, so rows that
+  // share a position (newly created channels) are nudged apart rather than
+  // jumping several places.
   const move = (delta: number): void => {
-    const self = group[index];
-    const other = group[index + delta];
-    if (self === undefined || other === undefined) return;
-    const mine = self.position;
-    let theirs = other.position;
-    if (theirs === mine) theirs = mine + delta;
-    updateChannelPosition(self.id, theirs);
-    updateChannelPosition(other.id, mine);
-    onReorder([
-      { channelId: self.id, newPosition: theirs, previousPosition: mine },
-      { channelId: other.id, newPosition: mine, previousPosition: other.position },
-    ]);
+    const reorders = planNeighbourSwap(group, index, delta);
+    if (reorders.length === 0) return;
+    applyOptimistic(reorders);
+    onReorder(reorders);
   };
   return {
     up: index > 0 ? () => move(-1) : null,
