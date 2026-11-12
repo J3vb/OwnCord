@@ -210,15 +210,19 @@ describe("Server/admin/static — AFK card", () => {
     expect(patchBody(calls)).toEqual({ server_upload_mbps: "100" });
   });
 
-  it("a stored upload value the panel cannot read shows empty, no hint, and is not rewritten", async () => {
-    for (const stored of ["fast", "1.5", "0"]) {
+  it.each(["fast", "1.5", "0"])(
+    "a stored upload value the panel cannot read (%s) shows empty, no hint, and is not rewritten",
+    async (stored) => {
       const calls: FetchCall[] = [];
       const { b, up } = await mountEmptyUpload(calls, stored);
       up.value = "50";
       fire(b.doc, up, "input");
       await saveNow(b);
       expect(patchBody(calls)).toEqual({ server_upload_mbps: "50" });
-    }
+    },
+  );
+
+  it("a typed decimal upload speed is saved as typed", async () => {
     const typedCalls: FetchCall[] = [];
     const typed = await boot(typedCalls, responder({ channels: CHANNELS, upload: "100" }));
     await mountSettings(typed.bridge, typed.doc);
@@ -227,6 +231,9 @@ describe("Server/admin/static — AFK card", () => {
     fire(typed.doc, typedUp, "input");
     await saveNow(typed);
     expect(patchBody(typedCalls)).toEqual({ server_upload_mbps: "12.5" });
+  });
+
+  it("a stored upload speed shows with its viewer hint", async () => {
     const ok = await boot([], responder({ channels: CHANNELS, upload: "250", videoCap: "10000" }));
     await mountSettings(ok.bridge, ok.doc);
     expect((ok.doc.getElementById("s-server_upload_mbps") as HTMLInputElement).value).toBe("250");
