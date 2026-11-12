@@ -49,9 +49,11 @@ prometheus:
 
 # Speaking-ring detection. These match what OwnCord writes for its own
 # generated config; LiveKit's defaults (400ms interval, 2 smoothing intervals,
-# active_level 35) light the ring late and only for loud speech.
+# active_level 35) light the ring late and only for loud speech. active_level
+# runs from 0 (loudest) to 127: a higher number lights the ring for softer
+# speech.
 audio:
-  active_level: 45
+  active_level: 60
   min_percentile: 30
   update_interval: 100
   smooth_intervals: 1
