@@ -821,6 +821,12 @@ impl NativeSession {
         self.capture_controls.set_input_gain(gain);
     }
 
+    /// The capture and playout settings that never wait on a device or the
+    /// SFU, for the commands that must not queue behind the session lock.
+    pub fn quick_controls(&self) -> (capture::Controls, playout::Controls) {
+        (self.capture_controls.clone(), self.playout_controls.clone())
+    }
+
     /// Publish any audio source as the microphone track. The app passes its
     /// capture's source; the interop example passes a synthetic sine.
     pub async fn publish_audio(

@@ -118,6 +118,8 @@ release changes the database, and anything an operator must do first.)
 - **Voice:** if the server could not read who is in voice while you connect, the connect now retries instead of showing voice channels as empty.
 - **Group DMs:** a group DM created just as your connection dropped is no longer reported as failed.
 - **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
+- **Linux:** while the camera or a screen share was being published on a slow connection, mute, push-to-talk release, deafen, volume changes and Leave waited for it (up to 10 seconds or more). They now act at once.
+- **Linux:** after a microphone device change landed during an unmute, you could show as unmuted while others heard nothing.
 - **Admin:** the `chatserver token` commands applied pending database updates themselves, skipping the safety copy an upgrade takes. They now stop and ask you to start the server once first.
 - **Linux:** on a desktop without a keyring service (no gnome-keyring or KWallet), the app now creates your voice identity key and saves unsent messages for recovery, instead of showing "Could not save this pending message" on every send.
 - **Threads:** thread edits (rename, archive, lock, tags) are now limited to 5 a second per user, and an edit that changes nothing is no longer announced.
