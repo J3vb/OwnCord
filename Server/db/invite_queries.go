@@ -14,27 +14,63 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// ListInvites returns invites newest first, limited to 200 rows.
-func (d *DB) ListInvites(ctx context.Context) ([]*Invite, error) {
-	rows, err := d.q.ListInvites(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ListInvites: %w", err)
+func inviteFromListRow(id int64, code string, createdBy int64, creator string, maxUses *int64, useCount int64, expiresAt *string, revoked int64, createdAt string) *Invite {
+	return &Invite{
+		ID:              id,
+		Code:            code,
+		CreatedBy:       createdBy,
+		CreatorUsername: creator,
+		Uses:            int(useCount),
+		MaxUses:         ptrI64toI(maxUses),
+		ExpiresAt:       expiresAt,
+		Revoked:         revoked != 0,
+		CreatedAt:       createdAt,
 	}
-	invites := make([]*Invite, 0, len(rows))
+}
+
+// ListInvites returns invites newest id first, with id below beforeID (0 starts from the newest). dead
+// selects revoked, used-up and expired invites; otherwise those that can still be redeemed.
+func (d *DB) ListInvites(ctx context.Context, dead bool, beforeID int64, limit int) ([]*Invite, error) {
+	invites := make([]*Invite, 0)
+	if dead {
+		rows, err := d.q.ListDeadInvites(ctx, dbgen.ListDeadInvitesParams{BeforeID: beforeID, RowLimit: int64(limit)})
+		if err != nil {
+			return nil, fmt.Errorf("ListInvites dead: %w", err)
+		}
+		for _, r := range rows {
+			invites = append(invites, inviteFromListRow(r.ID, r.Code, r.CreatedBy, r.CreatorUsername, r.MaxUses, r.UseCount, r.ExpiresAt, r.Revoked, r.CreatedAt))
+		}
+		return invites, nil
+	}
+	rows, err := d.q.ListLiveInvites(ctx, dbgen.ListLiveInvitesParams{BeforeID: beforeID, RowLimit: int64(limit)})
+	if err != nil {
+		return nil, fmt.Errorf("ListInvites live: %w", err)
+	}
 	for _, r := range rows {
-		invites = append(invites, &Invite{
-			ID:              r.ID,
-			Code:            r.Code,
-			CreatedBy:       r.CreatedBy,
-			CreatorUsername: r.CreatorUsername,
-			Uses:            int(r.UseCount),
-			MaxUses:         ptrI64toI(r.MaxUses),
-			ExpiresAt:       r.ExpiresAt,
-			Revoked:         r.Revoked != 0,
-			CreatedAt:       r.CreatedAt,
-		})
+		invites = append(invites, inviteFromListRow(r.ID, r.Code, r.CreatedBy, r.CreatorUsername, r.MaxUses, r.UseCount, r.ExpiresAt, r.Revoked, r.CreatedAt))
 	}
 	return invites, nil
+}
+
+// GetInviteByID returns the invite with the given id, or nil if not found.
+func (d *DB) GetInviteByID(ctx context.Context, id int64) (*Invite, error) {
+	r, err := d.q.GetInviteByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("GetInviteByID: %w", err)
+	}
+	return &Invite{
+		ID:        r.ID,
+		Code:      r.Code,
+		CreatedBy: r.CreatedBy,
+		Uses:      int(r.UseCount),
+		MaxUses:   ptrI64toI(r.MaxUses),
+		ExpiresAt: r.ExpiresAt,
+		Revoked:   r.Revoked != 0,
+		CreatedAt: r.CreatedAt,
+	}, nil
 }
 
 // InviteRedemption is one recorded use of an invite. UserID is nil when the redeemer's

@@ -197,6 +197,7 @@ var deadlineBound = []string{
 	"DELETE /api/v1/dms/{channelId}/members/{userId}",
 	"DELETE /api/v1/emoji/{id}",
 	"DELETE /api/v1/gif/favorites",
+	"DELETE /api/v1/invites/id/{id}",
 	"DELETE /api/v1/invites/{code}",
 	"DELETE /api/v1/moderation/channels/{id}",
 	"DELETE /api/v1/moderation/members/{id}/roles/{roleId}",

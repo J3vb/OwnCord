@@ -16,6 +16,7 @@ import { shellText } from "../../i18n/shell";
 // ---------------------------------------------------------------------------
 
 export interface InviteItem {
+  readonly id: number;
   readonly code: string;
   readonly createdBy: string;
   readonly createdAt: string;
@@ -43,7 +44,7 @@ export interface InviteManagerOptions {
   /** The shareable link for a code; defaults to the bare code. */
   formatLink?(code: string): string;
   onCreateInvite(params: InviteCreateParams): Promise<InviteItem>;
-  onRevokeInvite(code: string): Promise<void>;
+  onRevokeInvite(id: number, code: string): Promise<void>;
   onCopyLink(code: string): void;
   onClose(): void;
   onError?(message: string): void;
@@ -217,9 +218,9 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
           revokeBtn.disabled = true;
           revokeLabel.nodeValue = ` ${shellText("invite.revoking")}`;
           void options
-            .onRevokeInvite(invite.code)
+            .onRevokeInvite(invite.id, invite.code)
             .then(() => {
-              invites = invites.filter((i) => i.code !== invite.code);
+              invites = invites.filter((i) => i.id !== invite.id);
               renderList();
             })
             .catch((err: unknown) => {

@@ -6,8 +6,11 @@ import {
 } from "../../src/features/invites/InviteManager";
 import { useMountContainer } from "../helpers/mountContainer";
 
+let nextInviteId = 1;
+
 function makeInvite(overrides: Partial<InviteItem> = {}): InviteItem {
   return {
+    id: nextInviteId++,
     code: "abc123xyz",
     createdBy: "admin",
     createdAt: "2025-01-01T00:00:00Z",
@@ -154,7 +157,7 @@ describe("InviteManager", () => {
   });
 
   it("click revoke calls onRevokeInvite and removes from list on resolve", async () => {
-    const opts = makeOptions({ invites: [makeInvite({ code: "abc123xyz" })] });
+    const opts = makeOptions({ invites: [makeInvite({ id: 42, code: "abc123xyz" })] });
     const mgr = createInviteManager(opts);
     mgr.mount(container);
 
@@ -165,7 +168,7 @@ describe("InviteManager", () => {
     revokeBtn.click();
     expect(opts.onRevokeInvite).not.toHaveBeenCalled();
     revokeBtn.click();
-    expect(opts.onRevokeInvite).toHaveBeenCalledWith("abc123xyz");
+    expect(opts.onRevokeInvite).toHaveBeenCalledWith(42, "abc123xyz");
 
     await vi.waitFor(() => {
       expect(container.querySelectorAll(".invite-item").length).toBe(0);

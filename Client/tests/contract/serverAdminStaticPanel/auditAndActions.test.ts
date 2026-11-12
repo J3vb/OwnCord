@@ -100,7 +100,8 @@ describe("Server/admin/static — panel behaviour", () => {
       if (p === "/api/v1/admin/plugins/")
         return { json: [{ id: 1, name: "hello", version: "1.0.0", enabled: true }] };
       if (p === "/api/v1/emoji/") return { json: [{ id: 1, shortcode: "wave" }] };
-      if (p === "/api/v1/invites/")
+      if (p === "/api/v1/invites/?state=dead&limit=50") return { json: [] };
+      if (p === "/api/v1/invites/?state=live")
         return {
           json: [
             {

@@ -19,6 +19,9 @@ func scaledAuthLimit(n int) int { return auth.ScaledLimit(n) }
 const (
 	registerRateLimitPerMinute = 3
 
+	// Per user: invites are credentials into the server, so minting them is bounded.
+	inviteCreatePerHour = 20
+
 	loginRateLimitPerMinute = 5
 
 	verifyTOTPRateLimitPerMinute = 10

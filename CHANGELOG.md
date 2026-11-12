@@ -113,6 +113,7 @@ release changes the database, and anything an operator must do first.)
 
 ### Fixed
 
+- **Invites:** the list shows all usable invites first and pages older ones; invites can be revoked by id (an older server still works through a fallback to the code); creating invites is limited to 20 per user per hour.
 - **Accounts:** an account recovery, sign-up, two-factor sign-in or report that already went through no longer asks you to try again just because the request ran long.
 - **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.

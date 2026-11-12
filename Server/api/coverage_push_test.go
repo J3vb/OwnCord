@@ -600,7 +600,7 @@ func buildCombinedRouter(t *testing.T) (http.Handler, *auth.RateLimiter, string)
 	svc := service.New(database, limiter)
 	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
 	api.MountProfileRoutes(r, svc, nil, limiter, nil, nil, nil)
-	api.MountInviteRoutes(r, svc)
+	api.MountInviteRoutes(r, svc, limiter)
 
 	token := loginAndGetToken(t, r, database, "combined1", 2)
 	return r, limiter, token
