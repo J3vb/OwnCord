@@ -711,7 +711,7 @@ async fn a_new_partition_starts_with_no_open_connections() {
 fn a_changed_address_set_gets_its_own_client() {
     let b = broker();
     drop(b.enter("p"));
-    let url = Url::parse("https://cdn.example/x.gif").unwrap();
+    let url = Url::parse("https://cdn.example.com/x.gif").unwrap();
     let a: SocketAddr = "93.184.216.34:443".parse().unwrap();
     let c: SocketAddr = "93.184.216.35:443".parse().unwrap();
     b.client_for("p", &url, vec![a]).unwrap();
@@ -732,21 +732,21 @@ fn the_client_cache_is_bounded_oldest_first() {
     drop(b.enter("p"));
     let addr: SocketAddr = "93.184.216.34:443".parse().unwrap();
     for i in 0..=MAX_CLIENTS {
-        let url = Url::parse(&format!("https://h{i}.example/")).unwrap();
+        let url = Url::parse(&format!("https://h{i}.example.com/")).unwrap();
         b.client_for("p", &url, vec![addr]).unwrap();
     }
     let clients = crate::sync::lock(&b.clients);
     assert_eq!(clients.by_key.len(), MAX_CLIENTS);
     assert!(!clients
         .by_key
-        .contains_key(&("h0.example".to_string(), 443, vec![addr])));
+        .contains_key(&("h0.example.com".to_string(), 443, vec![addr])));
 }
 
 #[test]
 fn a_fetch_for_an_old_partition_leaves_no_client_behind() {
     let b = broker();
     drop(b.enter("new"));
-    let url = Url::parse("https://cdn.example/x.gif").unwrap();
+    let url = Url::parse("https://cdn.example.com/x.gif").unwrap();
     let addr: SocketAddr = "93.184.216.34:443".parse().unwrap();
     b.client_for("old", &url, vec![addr]).unwrap();
     assert!(
@@ -760,7 +760,7 @@ fn a_used_client_moves_to_the_back_of_the_eviction_order() {
     let b = broker();
     drop(b.enter("p"));
     let addr: SocketAddr = "93.184.216.34:443".parse().unwrap();
-    let url = |i: usize| Url::parse(&format!("https://h{i}.example/")).unwrap();
+    let url = |i: usize| Url::parse(&format!("https://h{i}.example.com/")).unwrap();
     for i in 0..MAX_CLIENTS {
         b.client_for("p", &url(i), vec![addr]).unwrap();
     }
@@ -769,8 +769,8 @@ fn a_used_client_moves_to_the_back_of_the_eviction_order() {
     let clients = crate::sync::lock(&b.clients);
     assert!(clients
         .by_key
-        .contains_key(&("h0.example".to_string(), 443, vec![addr])));
+        .contains_key(&("h0.example.com".to_string(), 443, vec![addr])));
     assert!(!clients
         .by_key
-        .contains_key(&("h1.example".to_string(), 443, vec![addr])));
+        .contains_key(&("h1.example.com".to_string(), 443, vec![addr])));
 }
