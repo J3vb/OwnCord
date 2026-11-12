@@ -9,6 +9,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
+// postCommitTimeout bounds the steps that finish an already committed sign-in or sign-up.
+const postCommitTimeout = 5 * time.Second
+
+// postCommitContext outlives the request's deadline: once the write committed, a request that
+// timed out meanwhile must still report success, not a retry that finds the work done.
+func postCommitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), postCommitTimeout)
+}
+
 // authCommon is what the auth parts share: the limiter, broadcaster and password step.
 // One value is handed to every part by pointer so all see the same limiter.
 type authCommon struct {

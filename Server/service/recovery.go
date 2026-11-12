@@ -317,6 +317,9 @@ func (s *accountRecovery) completeRecovery(ctx context.Context, in RecoverInput,
 		slog.Error("recovery: redeem failed", "err", err, "user_id", user.ID)
 		return nil, ErrRecoveryFailed
 	}
+	// The credential is spent: the rest must finish even if the request deadline passed.
+	ctx, cancel := postCommitContext(ctx)
+	defer cancel()
 	s.limiter.Reset(ctx, at.ipFail)
 	s.limiter.Reset(ctx, at.userFail)
 

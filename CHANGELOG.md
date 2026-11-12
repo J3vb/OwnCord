@@ -111,6 +111,7 @@ release changes the database, and anything an operator must do first.)
 
 ### Fixed
 
+- **Accounts:** an account recovery or sign-up that went through no longer answers "server busy, try again" when the request ran out of time just after it finished.
 - **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
 - **Channels:** a channel permission change on a busy server now always applies to every connected member.
