@@ -164,6 +164,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/messaging/message-list/listInput.ts",
   "src/features/messaging/message-list/listRender.ts",
   "src/features/messaging/message-list/listPatch.ts",
+  "src/features/messaging/message-list/rowRefresh.ts",
   "src/features/messaging/message-list/listResize.ts",
   "src/features/messaging/message-list/listRows.ts",
   "src/features/messaging/message-list/listScroll.ts",
