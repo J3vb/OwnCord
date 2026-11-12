@@ -4,7 +4,7 @@
 // service's own notification (`show_call_ring`, `clear_call_ring`). A phone
 // has no window to flash and draws its own launcher badge, so those suite
 // tests are skipped and pinned as no-ops below.
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { RING_TIMEOUT_MS } from "../../../src/lib/voice/callRing";
 import type { Notifier, NotificationTarget } from "../../../src/platform/contracts/notifications";
 import { describeNotifierSuite } from "./notifier.suite";
@@ -258,10 +258,10 @@ describe("Android notifier", () => {
   });
 
   test("withdraws a channel's messages and missed calls, and never a ring", async () => {
+    await notifier.showCall("Bob is calling", "Voice call", call, true);
     await notifier.showMessage("a", "b", dm);
     await notifier.showMessage("c", "d", other);
     await notifier.showCall("Missed call from Bob", "Voice call", call);
-    await notifier.showCall("Bob is calling", "Voice call", call, true);
     const [first, second, missed] = notified();
     await notifier.clearMessages(7);
     expect(removed()).toEqual([first!.id, missed!.id]);
@@ -318,13 +318,6 @@ describe("Android notifier", () => {
     expect(timeoutMs - RING_TIMEOUT_MS).toBeLessThanOrEqual(10_000);
   });
 
-  test("shows the same ring again in place, so its time starts over", async () => {
-    await notifier.showCall("Bob is calling", "Voice call", call, true);
-    await notifier.showCall("Bob is calling", "Voice call", call, true);
-    expect(rung().map((ring) => ring.channelId)).toEqual([7, 7]);
-    expect(ringsTakenDown()).toEqual([]);
-  });
-
   test("takes a ring down by its conversation, the host knowing which one is up", async () => {
     await notifier.clearCall(9);
     expect(ringsTakenDown()).toEqual([9]);
@@ -353,6 +346,234 @@ describe("Android notifier", () => {
     await Promise.all([up, down]);
     const order = invoke.mock.calls.map(([command]) => command);
     expect(order).toEqual(["show_call_ring", "clear_call_ring"]);
+  });
+
+  // Android lets an app alert once a second and mutes what comes sooner; a
+  // ring it mutes makes no sound, and one it mutes when shown again stops.
+  describe("around Android's one alert a second", () => {
+    const pass = (ms: number): Promise<unknown> => vi.advanceTimersByTimeAsync(ms);
+    const ringing = (quiet = false): Promise<void> =>
+      notifier.showCall("Bob is calling", "Voice call", call, true, quiet);
+    const commands = (): string[] =>
+      invoke.mock.calls
+        .map(([command]) => command)
+        .filter((command) => command !== "android_notification_channels");
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    test("shows the same ring again in place, so its time starts over", async () => {
+      await ringing();
+      await pass(5_000);
+      await ringing();
+      expect(rung().map((ring) => ring.channelId)).toEqual([7, 7]);
+      expect(ringsTakenDown()).toEqual([]);
+    });
+
+    test("holds a ring back until the app's last alert is over a second old", async () => {
+      await notifier.showMessage("a", "b", dm);
+      const up = ringing();
+      await pass(1_000);
+      expect(rung()).toEqual([]);
+      await pass(200);
+      expect(rung()).toHaveLength(1);
+      await up;
+    });
+
+    test("sends a ring at once when the app's last alert is old enough", async () => {
+      await notifier.showMessage("a", "b", dm);
+      await pass(1_200);
+      const up = ringing();
+      await pass(0);
+      expect(rung()).toHaveLength(1);
+      await up;
+    });
+
+    test("does not hold back a ring that makes no sound", async () => {
+      await notifier.showMessage("a", "b", dm);
+      await ringing(true);
+      expect(rung()).toEqual([expect.objectContaining({ quiet: true })]);
+    });
+
+    test("holds a ring that is rung again back until its own alert is over a second old", async () => {
+      await ringing();
+      await pass(300);
+      const again = ringing();
+      await pass(899);
+      expect(rung()).toHaveLength(1);
+      await pass(1);
+      expect(rung()).toHaveLength(2);
+      await again;
+    });
+
+    test("shows a ring once that was rung again while it waited", async () => {
+      await notifier.showMessage("a", "b", dm);
+      const first = ringing();
+      // A notification that waits for the ring waits for the newest one.
+      const held = notifier.showMessage("c", "d", other);
+      await pass(500);
+      const again = ringing();
+      await pass(5_000);
+      await Promise.all([first, again, held]);
+      expect(commands()).toEqual(["android_notify", "show_call_ring", "android_notify"]);
+    });
+
+    test("counts a notification's alert from when Android answered for it", async () => {
+      let release = (): void => {};
+      native.notifyGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const shown = notifier.showMessage("a", "b", dm);
+      await pass(1_000);
+      release();
+      await shown;
+      const up = ringing();
+      await pass(1_199);
+      expect(rung()).toEqual([]);
+      await pass(1);
+      expect(rung()).toHaveLength(1);
+      await up;
+    });
+
+    test("counts a ring's alert from when Android answered for it", async () => {
+      let answer = (): void => {};
+      native.ringGate = new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      const first = ringing();
+      await pass(1_000);
+      answer();
+      await first;
+      const again = ringing();
+      await pass(1_199);
+      expect(rung()).toHaveLength(1);
+      await pass(1);
+      expect(rung()).toHaveLength(2);
+      await again;
+    });
+
+    test("holds a ring that is rung again while Android has not answered for the first", async () => {
+      let answer = (): void => {};
+      native.ringGate = new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      const first = ringing();
+      const again = ringing();
+      await pass(5_000);
+      expect(rung()).toHaveLength(1);
+      answer();
+      await first;
+      await pass(1_199);
+      expect(rung()).toHaveLength(1);
+      await pass(1);
+      expect(rung()).toHaveLength(2);
+      await again;
+    });
+
+    test("holds that ring whatever else Android answered for meanwhile", async () => {
+      let shown = (): void => {};
+      native.notifyGate = new Promise<void>((resolve) => {
+        shown = resolve;
+      });
+      let answer = (): void => {};
+      native.ringGate = new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      // A notification Android is slow to answer for, then the ring: it goes
+      // out when the time is up, and is rung again before Android answered.
+      const slow = notifier.showMessage("a", "b", dm);
+      await pass(0);
+      const first = ringing();
+      await pass(1_200);
+      expect(rung()).toHaveLength(1);
+      shown();
+      await slow;
+      const again = ringing();
+      await pass(5_000);
+      answer();
+      await first;
+      await pass(1_199);
+      expect(rung()).toHaveLength(1);
+      await pass(1);
+      expect(rung()).toHaveLength(2);
+      await again;
+    });
+
+    test("does not wait for a notification Android has not answered for", async () => {
+      native.notifyGate = new Promise<void>(() => {});
+      void notifier.showMessage("a", "b", dm);
+      await pass(0);
+      const up = ringing();
+      await pass(1_199);
+      expect(rung()).toEqual([]);
+      await pass(1);
+      expect(rung()).toHaveLength(1);
+      await up;
+    });
+
+    test("lets a ring without a sound take the place of one that waited", async () => {
+      await notifier.showMessage("a", "b", dm);
+      const loud = ringing();
+      await ringing(true);
+      await pass(5_000);
+      await loud;
+      expect(rung()).toEqual([expect.objectContaining({ quiet: true })]);
+    });
+
+    test("never shows a ring that ended while it waited, and still takes it down", async () => {
+      await notifier.showMessage("a", "b", dm);
+      const up = ringing();
+      const down = notifier.clearCall(7);
+      await pass(5_000);
+      await Promise.all([up, down]);
+      expect(rung()).toEqual([]);
+      expect(ringsTakenDown()).toEqual([7]);
+    });
+
+    test("leaves a waiting ring alone when another conversation's is taken down", async () => {
+      await notifier.showMessage("a", "b", dm);
+      const up = ringing();
+      await notifier.clearCall(9);
+      await pass(1_200);
+      await up;
+      expect(rung()).toHaveLength(1);
+    });
+
+    test("sends a notification asked for while a ring waits after that ring", async () => {
+      await notifier.showMessage("a", "b", dm);
+      const up = ringing();
+      const later = notifier.showMessage("c", "d", other);
+      await pass(1_199);
+      expect(commands()).toEqual(["android_notify"]);
+      await pass(1);
+      await Promise.all([up, later]);
+      expect(commands()).toEqual(["android_notify", "show_call_ring", "android_notify"]);
+    });
+
+    test("holds a notification back until Android answered for the ring on its way", async () => {
+      let answer = (): void => {};
+      native.ringGate = new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      const up = ringing();
+      const later = notifier.showMessage("a", "b", dm);
+      await pass(5_000);
+      expect(commands()).toEqual(["show_call_ring"]);
+      answer();
+      await Promise.all([up, later]);
+      expect(commands()).toEqual(["show_call_ring", "android_notify"]);
+    });
+
+    test("lets the next notification through after a ring Android refused", async () => {
+      native.refuseRing = true;
+      await expect(ringing()).rejects.toThrow("call ring: notifications are off");
+      await notifier.showMessage("a", "b", dm);
+      expect(notified()).toHaveLength(1);
+    });
   });
 
   test("leaves a missed call as a notification whose tap opens the conversation", async () => {

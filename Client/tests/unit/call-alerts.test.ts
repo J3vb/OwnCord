@@ -587,6 +587,34 @@ describe("on a host whose call notification rings by itself", () => {
     expect(frequencies).toEqual([]);
   });
 
+  it("does not keep a refusal that came after its ring's sound stopped for the next ring", async () => {
+    const late = createDeferred();
+    showCall.mockReturnValueOnce(late.promise);
+    ringStarts();
+    // The page's order at a ring's end: the sound stops at once, the
+    // notification is withdrawn a moment later. The refusal lands in between.
+    stopRingChime();
+    late.reject(new Error("call ring: notifications are off"));
+    await hostAnswered();
+    clearIncomingCall(ring);
+
+    startRingChime();
+    expect(frequencies).toEqual([]);
+  });
+
+  it("makes a ring that takes another's place wait for its own word", () => {
+    appInFront();
+    ringStarts();
+    expect(frequencies.length).toBeGreaterThan(0);
+    // The newer ring asks for its sound before the older one is withdrawn.
+    stopRingChime();
+    frequencies.length = 0;
+    startRingChime();
+    expect(frequencies).toEqual([]);
+    clearIncomingCall(ring);
+    expect(frequencies).toEqual([]);
+  });
+
   it("holds the outgoing ringback back while the host rings, and gives it back after", () => {
     vi.useFakeTimers();
     try {

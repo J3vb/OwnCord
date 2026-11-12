@@ -10,6 +10,19 @@ object CallActions {
   const val OPEN = "com.owncord.client.call.OPEN"
   const val EXTRA_CHANNEL = "channel"
   const val EXTRA_TOKEN = "token"
+
+  private val ALL = setOf(MUTE, UNMUTE, LEAVE, ACCEPT, DECLINE, OPEN)
+
+  // Whether an intent's action is one of the buttons at all.
+  fun names(action: String?): Boolean = action in ALL
+
+  // The request code of a button's pending intent. Android keeps one pending
+  // intent per action and request code, and writing it again changes what the
+  // one already on screen sends. So the buttons of one conversation's ring
+  // have their own, and a ring that takes another's place leaves the buttons
+  // of the notification it replaces as they were. Buttons that name no
+  // conversation (Mute, Unmute, Leave) share one.
+  fun requestCode(channelId: Long?): Int = channelId?.hashCode() ?: 0
 }
 
 // A button pressed on one of the call notifications, as the webview hears it.
@@ -62,8 +75,12 @@ class CallButtons(private val newToken: () -> String) {
   private var lastRing: Long? = null
   private var token: String? = null
 
-  // A ring goes up, or up again: the token its buttons carry from now on.
+  // A ring goes up: the token its buttons carry. One that is up already (the
+  // call was rung again) keeps its token, so a press that is on its way while
+  // it is shown again still counts.
   fun ringUp(channelId: Long): String {
+    val kept = token
+    if (ringing == channelId && kept != null) return kept
     val next = newToken()
     ringing = channelId
     lastRing = channelId

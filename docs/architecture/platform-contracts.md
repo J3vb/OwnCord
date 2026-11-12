@@ -368,7 +368,12 @@ handing over the id of the notification the user tapped, which
 tauri-plugin-notification's tap event leaves out) have one caller,
 `src/platform/desktop/androidNotifications.ts`, the Android `Notifier`. They
 show messages and missed calls on one channel; a call that rings is the call
-service's notification above. That notifier says `ringsCalls`: while the app
+service's notification above. Android mutes an app's alert that comes less
+than a second after its last one, which would leave a ring without a sound, so
+the notifier sends a ring that makes a sound only when the app's last alert is
+over a second old and Android has answered for the ring before it, and sends a
+notification asked for meanwhile after that ring. That notifier says
+`ringsCalls`: while the app
 is out of sight the phone rings for a call and the app's own chime stays
 quiet, and with the app in front, or when Android will not show the
 notification, the app rings as it does on a desktop

@@ -112,6 +112,9 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   private fun pressed(intent: Intent, throughActivity: Boolean) {
+    // Every intent that reaches the activity comes by here: one that is not a
+    // call button is not this plugin's to read.
+    if (!CallActions.names(intent.action)) return
     val channelId =
       if (intent.hasExtra(CallActions.EXTRA_CHANNEL)) intent.getLongExtra(CallActions.EXTRA_CHANNEL, 0)
       else null

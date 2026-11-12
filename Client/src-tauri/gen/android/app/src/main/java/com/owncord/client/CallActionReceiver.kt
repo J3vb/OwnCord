@@ -27,12 +27,16 @@ class CallActionReceiver : BroadcastReceiver() {
     var sink: ((Intent) -> Unit)? = null
 
     // What a button sends here when it is pressed. The action tells the
-    // buttons apart, so each keeps an intent of its own.
+    // buttons apart, and the request code the conversations, so each keeps an
+    // intent of its own.
     fun press(context: Context, action: String, channelId: Long? = null): PendingIntent {
       val intent = Intent(action).setClass(context, CallActionReceiver::class.java)
       if (channelId != null) intent.putExtra(CallActions.EXTRA_CHANNEL, channelId)
       return PendingIntent.getBroadcast(
-        context, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        context,
+        CallActions.requestCode(channelId),
+        intent,
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
       )
     }
 

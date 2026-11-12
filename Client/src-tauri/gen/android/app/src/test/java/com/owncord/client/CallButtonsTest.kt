@@ -2,6 +2,7 @@ package com.owncord.client
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -78,11 +79,29 @@ class CallButtonsTest {
     val second = buttons.ringUp(9)
     assertNull(opened(CallActions.ACCEPT, 7, first))
     assertEquals(9L, opened(CallActions.ACCEPT, 9, second)?.channelId)
+  }
 
-    // Shown again for the same call (a redial): the buttons carry the new one.
-    val again = buttons.ringUp(9)
-    assertNull(opened(CallActions.ACCEPT, 9, second))
-    assertEquals(CallEvent.ACCEPT, opened(CallActions.ACCEPT, 9, again)?.kind)
+  @Test
+  fun aRingShownAgainKeepsItsToken() {
+    val first = buttons.ringUp(7)
+    // Rung again while it is up: a press already on its way still counts.
+    assertEquals(first, buttons.ringUp(7))
+    assertEquals(CallEvent.ACCEPT, opened(CallActions.ACCEPT, 7, first)?.kind)
+
+    // The same conversation calls again after that ring came down: a new ring.
+    assertTrue(buttons.ringDown(7))
+    val later = buttons.ringUp(7)
+    assertNotEquals(first, later)
+    assertNull(opened(CallActions.ACCEPT, 7, first))
+    assertEquals(CallEvent.ACCEPT, opened(CallActions.ACCEPT, 7, later)?.kind)
+  }
+
+  @Test
+  fun eachConversationsRingKeepsButtonsOfItsOwn() {
+    assertNotEquals(CallActions.requestCode(7), CallActions.requestCode(9))
+    assertEquals(CallActions.requestCode(7), CallActions.requestCode(7))
+    // The call's own buttons name no conversation and share one.
+    assertEquals(0, CallActions.requestCode(null))
   }
 
   @Test
@@ -98,6 +117,14 @@ class CallButtonsTest {
     assertNull(received(null))
     assertNull(received("android.intent.action.MAIN"))
     assertNull(opened("android.intent.action.SEND", 7, "token-1"))
+    assertFalse(CallActions.names(null))
+    assertFalse(CallActions.names("android.intent.action.MAIN"))
+    for (action in listOf(
+      CallActions.MUTE, CallActions.UNMUTE, CallActions.LEAVE,
+      CallActions.ACCEPT, CallActions.DECLINE, CallActions.OPEN,
+    )) {
+      assertTrue(CallActions.names(action))
+    }
   }
 
   @Test

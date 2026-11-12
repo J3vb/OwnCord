@@ -17,7 +17,7 @@
 // notifications, so those members do nothing.
 import { createLogger } from "@lib/logger";
 import { connectText } from "../../i18n/connect";
-import { clearRing, showRing } from "./callServiceHost";
+import { clearRing, showRing, type CallRing } from "./callServiceHost";
 import { invokeOrThrow, tryInvoke } from "./nativeInvoke";
 import type { Notifier, NotificationTarget } from "../contracts/notifications";
 
@@ -31,6 +31,72 @@ const CALL_SERVICE_NOTIFICATION_ID = 4101;
  *  it down: a little longer than a ring lasts (`RING_TIMEOUT_MS`), so it never
  *  outlasts a page that is gone. Showing it again starts the time over. */
 const RING_NOTIFICATION_MS = 35_000;
+
+/** Android lets an app alert once a second and mutes what comes sooner. A
+ *  ring it mutes as it goes up makes no sound for as long as it rings, and one
+ *  it mutes when it is shown again stops ringing. So a ring that makes a sound
+ *  goes out only when the app's last alert is this old, and a notification
+ *  asked for meanwhile goes out after the ring. */
+const ALERT_GAP_MS = 1_200;
+
+/** Runs while the app's last alert is younger than `ALERT_GAP_MS`. */
+let alertGap: ReturnType<typeof setTimeout> | null = null;
+
+/** Android has not answered yet for a ring that makes a sound: its alert is
+ *  still to come, so the next ring waits for the answer first. */
+let ringOut = false;
+
+/** The ring that waits for its turn, if one does. */
+let waitingRing: {
+  readonly channelId: number;
+  readonly send: () => void;
+  readonly drop: () => void;
+} | null = null;
+
+/** Settles when Android has answered for the ring last sent its way, or that
+ *  ring was dropped while it waited. */
+let ringAnswered: Promise<unknown> = Promise.resolve();
+
+/** Android was just asked for an alert, or just answered for one. */
+function alerted(): void {
+  if (alertGap !== null) clearTimeout(alertGap);
+  alertGap = setTimeout(() => {
+    alertGap = null;
+    if (!ringOut) waitingRing?.send();
+  }, ALERT_GAP_MS);
+}
+
+/** Show a ring that makes a sound, as soon as Android will let it sound. */
+function ringAloud(ring: CallRing): Promise<void> {
+  const shownNow = new Promise<void>((resolve, reject) => {
+    const send = (): void => {
+      waitingRing = null;
+      ringOut = true;
+      showRing(ring)
+        .finally(() => {
+          ringOut = false;
+          alerted();
+        })
+        .then(resolve, reject);
+    };
+    const drop = (): void => {
+      waitingRing = null;
+      resolve();
+    };
+    if (alertGap === null && !ringOut) send();
+    else waitingRing = { channelId: ring.channelId, send, drop };
+  });
+  ringAnswered = shownNow.catch(() => undefined);
+  return shownNow;
+}
+
+/** A ring on its way goes first: a notification's alert just before it would
+ *  mute it. Waits for a ring that was asked for meanwhile too. */
+async function afterRing(): Promise<void> {
+  const seen = ringAnswered;
+  await seen;
+  if (seen !== ringAnswered) await afterRing();
+}
 
 // Notifications asked for and not yet confirmed by the host, by id: a
 // withdrawal waits for them, so its removal never reaches Android before the
@@ -78,8 +144,10 @@ async function present(
   target: NotificationTarget | null,
 ): Promise<void> {
   await ensureChannels();
+  await afterRing();
   const id = takeId();
   shown.set(id, target);
+  alerted();
   const shownNow = invokeOrThrow("android_notify", {
     id,
     title,
@@ -94,6 +162,7 @@ async function present(
     throw err;
   } finally {
     showing.delete(id);
+    alerted();
   }
 }
 
@@ -154,20 +223,28 @@ export const androidNotifier: Notifier = {
   },
   async showCall(title: string, body: string, target, ringing = false, quiet = false) {
     if (ringing) {
-      // One ring at a time, and the same one again starts its time over.
-      await showRing({
+      // One ring at a time, and the same one again starts its time over. One
+      // that still waits is this ring's earlier self, or a call it took the
+      // place of: the newest is the one to show.
+      waitingRing?.drop();
+      const ring = {
         channelId: target.channelId,
         title,
         text: body,
         quiet,
         timeoutMs: RING_NOTIFICATION_MS,
-      });
+      };
+      await (quiet ? showRing(ring) : ringAloud(ring));
       return;
     }
     // A call that was missed: a tap opens its conversation, at no message.
     await present(title, body, { host: target.host, channelId: target.channelId });
   },
-  clearCall: (channelId: number): Promise<void> => clearRing(channelId),
+  clearCall(channelId: number): Promise<void> {
+    // A ring that ended while it waited is never shown.
+    if (waitingRing?.channelId === channelId) waitingRing.drop();
+    return clearRing(channelId);
+  },
   clearMessages: (channelId?: number): Promise<void> => withdraw(channelId),
   onMessageActivated(handler: (target: NotificationTarget) => void): () => void {
     let active = true;

@@ -614,10 +614,18 @@ ends, however it ends, and Android takes it down by itself a few seconds after
 a ring's 30 if the app is gone. A press that lands after the ring ended (Accept
 as the caller hangs up) opens the conversation and joins nothing; a press on a
 ring this page did not put there, or one from another server, does nothing. A
-ring rung again is shown again, so its time starts over. A missed call leaves
-an ordinary notification whose tap opens the conversation. A ring that started
-with the app in front is not handed to the phone when the member leaves the app
-while it rings.
+ring rung again is shown again, so its time starts over; it goes on ringing
+(Android 12 and older start the ringtone over) and its buttons stay the same.
+A missed call leaves an ordinary notification whose tap opens the conversation.
+A ring that started with the app in front is not handed to the phone when the
+member leaves the app while it rings.
+
+Android lets an app alert once a second and mutes what comes sooner, and a
+ring it mutes makes no sound for as long as it is up. So a ring that comes
+within about a second of another alert of the app (a message just before the
+call, or the same call rung twice in a row) is shown that much later, and a
+notification that comes while a ring is on its way is shown after the ring
+(`platform/desktop/androidNotifications.ts`).
 
 Call is on the DM chat header and in another member's profile popup. The
 popup's Call opens the 1:1 DM with that member (creating it if needed) and then

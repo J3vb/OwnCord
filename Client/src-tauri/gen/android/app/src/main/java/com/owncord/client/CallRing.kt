@@ -39,6 +39,11 @@ class ClearRingArgs {
 //
 // Android takes it down by itself after `timeoutMs`: a ring must never
 // outlast a webview that is gone.
+//
+// Shown again (the call was rung again), it must alert again: Android stops
+// the ringtone of a ring whose update makes no sound. So it never sets "only
+// alert once". Android 13 and newer then let the ringtone play on; older ones
+// start it over.
 object CallRing {
   private const val NOTIFICATION_ID = 4102
   private const val CHANNEL = "ring"
@@ -91,7 +96,6 @@ object CallRing {
       .setContentText(args.text)
       .setCategory(Notification.CATEGORY_CALL)
       .setOngoing(true)
-      .setOnlyAlertOnce(true)
       .setContentIntent(intoApp(context, CallActions.OPEN, args.channelId, token))
       // Screen off: Android lights it and brings the app up, behind the lock
       // screen if there is one. Screen on: the notification stays on top.
@@ -120,7 +124,8 @@ object CallRing {
 
   // Accept, and a tap on the ring itself, open the app. Android does not let
   // a receiver do that for a notification, so these two go to the activity,
-  // with the ring's token (see CallButtons).
+  // with the ring's token (see CallButtons). Each conversation's ring keeps
+  // intents of its own (CallActions.requestCode).
   private fun intoApp(context: Context, action: String, channelId: Long, token: String): PendingIntent {
     val intent = Intent(action)
       .setClass(context, MainActivity::class.java)
@@ -128,7 +133,10 @@ object CallRing {
       .putExtra(CallActions.EXTRA_CHANNEL, channelId)
       .putExtra(CallActions.EXTRA_TOKEN, token)
     return PendingIntent.getActivity(
-      context, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+      context,
+      CallActions.requestCode(channelId),
+      intent,
+      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
   }
 
