@@ -282,7 +282,9 @@ export function createThreadSender(options: {
     }).then(
       () => true,
       () => {
-        if (!signal.aborted) showToast(messagingText("toast.pendingSaveFailed"), "error");
+        if (!signal.aborted && currentUserId() === owner.userId) {
+          showToast(messagingText("toast.pendingSaveFailed"), "error");
+        }
         return false;
       },
     );

@@ -18,12 +18,15 @@ import { resetAuthState } from "../helpers/storeSeeds";
 
 // The encrypted native store is the only thing that outlives the process.
 const disk = vi.hoisted(() => new Map<string, string>());
+/** A save waits on this while a test holds it, like a slow encrypted write. */
+const slowSave = vi.hoisted(() => ({ gate: null as Promise<void> | null }));
 vi.mock("../../src/platform/desktop/pendingMessages", () => {
   const key = (owner: PendingMessageOwner) => `${owner.host}|${owner.userId}`;
   return {
     pendingMessages: {
       load: async (owner: PendingMessageOwner) => disk.get(key(owner)) ?? null,
       save: async (owner: PendingMessageOwner, value: string) => {
+        if (slowSave.gate !== null) await slowSave.gate;
         disk.set(key(owner), value);
       },
       delete: async (owner: PendingMessageOwner) => {
@@ -82,7 +85,10 @@ async function settle(): Promise<void> {
 
 const frames = (ws: Ws) => ws.getSentMessages() as unknown as Frame[];
 
-beforeEach(() => disk.clear());
+beforeEach(() => {
+  disk.clear();
+  slowSave.gate = null;
+});
 afterEach(async () => {
   vi.useRealTimers();
   deactivatePendingMessages({ discard: true });
@@ -221,5 +227,24 @@ describe("a failed thread reply across an app restart", () => {
     await settle();
     expect(frames(ws)).toHaveLength(0);
     expect(disk.size).toBe(0);
+  });
+
+  it("a reply sent while plain text is still being saved does not overtake it", async () => {
+    await launch();
+    setConnectionStatus("connected");
+    let release!: () => void;
+    slowSave.gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ws = createMockWsClient();
+    const sender = openThread(ws);
+    sender.sendText("first", null, false, []);
+    sender.sendText("second, a reply", 42, true, []);
+    await settle();
+    expect(frames(ws)).toHaveLength(0);
+
+    release();
+    await vi.waitFor(() => expect(frames(ws)).toHaveLength(2));
+    expect(frames(ws).map((f) => f.payload.content)).toEqual(["first", "second, a reply"]);
   });
 });
