@@ -95,6 +95,12 @@ class MockAudioContext {
 
 const ring: RingState = { channelId: 50, fromUserId: 10, fromUsername: "Otto" };
 
+/** A setting was saved while the app runs: its value, and the word of it. */
+function saved(key: string, value: unknown): void {
+  testPrefs.set(key, value);
+  window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key } }));
+}
+
 beforeEach(() => {
   testPrefs.clear();
   frequencies.length = 0;
@@ -382,17 +388,11 @@ describe("the ringback", () => {
       startRingback();
       frequencies.length = 0;
 
-      testPrefs.set("userStatus", "dnd");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", { detail: { key: "userStatus" } }),
-      );
+      saved("userStatus", "dnd");
       vi.advanceTimersByTime(6_000);
       expect(frequencies).not.toContain(440);
 
-      testPrefs.set("userStatus", "online");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", { detail: { key: "userStatus" } }),
-      );
+      saved("userStatus", "online");
       expect(frequencies).toContain(440);
     } finally {
       stopRingback();
@@ -408,17 +408,11 @@ describe("the ringback", () => {
       startRingback();
       frequencies.length = 0;
 
-      testPrefs.set("callSounds", false);
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", { detail: { key: "callSounds" } }),
-      );
+      saved("callSounds", false);
       vi.advanceTimersByTime(6_000);
       expect(frequencies).not.toContain(440);
 
-      testPrefs.set("callSounds", true);
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", { detail: { key: "callSounds" } }),
-      );
+      saved("callSounds", true);
       expect(frequencies).toContain(440);
     } finally {
       stopRingback();
@@ -554,6 +548,8 @@ describe("on a host whose call notification rings by itself", () => {
   it("shows a ring that is rung again on the host again, so its time starts over", () => {
     ringStarts();
     alertRedial(ring);
+    // That ring only: another call rung again is not the one the host has.
+    alertRedial(other);
     expect(showCall.mock.calls).toEqual([
       [...HOST_RING, true, false],
       [...HOST_RING, true, false],
@@ -643,6 +639,116 @@ describe("on a host whose call notification rings by itself", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // What the member switches off while the phone rings holds for that ring at
+  // once, as it would for the app's own chime.
+  describe("when a setting is saved while the host rings", () => {
+    const LOUD = [...HOST_RING, true, false];
+    const QUIET = [...HOST_RING, true, true];
+    const refusal = (): Error => new Error("call ring: notifications are off");
+
+    it.each(["callSounds", "soundRing"])(
+      "shows the ring again without a sound once %s is off, and stays quiet itself",
+      async (pref) => {
+        ringStarts();
+        saved(pref, false);
+        expect(showCall.mock.calls).toEqual([LOUD, QUIET]);
+        expect(clearCall).not.toHaveBeenCalled();
+        await hostAnswered();
+        expect(frequencies).toEqual([]);
+      },
+    );
+
+    it("shows a ring without a sound once, and does not start it when the sound comes back", () => {
+      ringStarts();
+      saved("soundRing", false);
+      saved("callSounds", false);
+      saved("callSounds", true);
+      saved("soundRing", true);
+      expect(showCall.mock.calls).toEqual([LOUD, QUIET]);
+    });
+
+    it("leaves the ring as it is for a setting that says nothing about it", () => {
+      ringStarts();
+      saved("theme", "dark");
+      expect(showCall).toHaveBeenCalledOnce();
+      expect(clearCall).not.toHaveBeenCalled();
+    });
+
+    it("takes the ring down and rings by itself once notifications are off in the app", () => {
+      ringStarts();
+      saved("desktopNotifications", false);
+      expect(clearCall.mock.calls).toEqual([[50]]);
+      expect(showCall).toHaveBeenCalledOnce();
+      expect(frequencies.length).toBeGreaterThan(0);
+    });
+
+    it("takes the ring down and rings nowhere once do not disturb is on", async () => {
+      ringStarts();
+      saved("userStatus", "dnd");
+      await hostAnswered();
+      expect(clearCall.mock.calls).toEqual([[50]]);
+      expect(showCall).toHaveBeenCalledOnce();
+      expect(frequencies).toEqual([]);
+    });
+
+    it("keeps a ring it took back: rung again, or with notifications back on, it stays the app's", () => {
+      ringStarts();
+      saved("desktopNotifications", false);
+      saved("desktopNotifications", true);
+      alertRedial(ring);
+      expect(showCall).toHaveBeenCalledOnce();
+      expect(clearCall).toHaveBeenCalledOnce();
+    });
+
+    it("asks again whether it may show a ring that is rung again", () => {
+      ringStarts();
+      // Switched off without a word of it reaching this page.
+      testPrefs.set("desktopNotifications", false);
+      alertRedial(ring);
+      expect(showCall).toHaveBeenCalledOnce();
+      expect(clearCall.mock.calls).toEqual([[50]]);
+      expect(frequencies.length).toBeGreaterThan(0);
+    });
+
+    it("follows a setting once for a ring that was rung again", () => {
+      ringStarts();
+      alertRedial(ring);
+      saved("soundRing", false);
+      expect(showCall.mock.calls).toEqual([LOUD, LOUD, QUIET]);
+    });
+
+    it("follows no setting once the ring ended", () => {
+      ringStarts();
+      ringEnds();
+      clearCall.mockClear();
+      saved("soundRing", false);
+      saved("desktopNotifications", false);
+      expect(showCall).toHaveBeenCalledOnce();
+      expect(clearCall).not.toHaveBeenCalled();
+    });
+
+    it("follows no setting for a ring the host refused", async () => {
+      showCall.mockRejectedValueOnce(refusal());
+      ringStarts();
+      await hostAnswered();
+      saved("desktopNotifications", false);
+      expect(showCall).toHaveBeenCalledOnce();
+      expect(clearCall).not.toHaveBeenCalled();
+    });
+
+    it("keeps the ring it showed again when the host refuses the first showing late", async () => {
+      const late = createDeferred();
+      showCall.mockReturnValueOnce(late.promise);
+      ringStarts();
+      saved("soundRing", false);
+      late.reject(refusal());
+      await hostAnswered();
+      // Still the host's: rung again, it is shown there again.
+      alertRedial(ring);
+      expect(showCall.mock.calls).toEqual([LOUD, QUIET, QUIET]);
+    });
   });
 
   describe("whose notification a press is about", () => {

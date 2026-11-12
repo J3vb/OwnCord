@@ -11,8 +11,10 @@
  * phone's ringtone, and has Accept and Decline (`Notifier.ringsCalls`). There
  * this module says for every ring who sounds it: the host, when it was asked
  * to show the ring, or the app's own chime, when it was not or would not.
+ * A ring the host shows follows the app's settings for as long as it rings.
  */
-import { loadPref } from "../../lib/prefs/preferences";
+import { Disposable } from "../../lib/disposable";
+import { loadPref, onPrefChange } from "../../lib/prefs/preferences";
 import { loadUserStatus } from "../../lib/presence/userStatus";
 import { getChannelMutesHost } from "../../lib/prefs/channelMutes";
 import { ringSoundOn, setHostRinging } from "../../lib/media/notificationSound";
@@ -26,9 +28,23 @@ import { dmStore, dmDisplayName } from "../../stores/dm.store";
 
 const log = createLogger("call-alerts");
 
+/** A ring the host was asked to show, and the watch this attempt keeps on the
+ *  app's settings. */
+interface HostRing {
+  readonly channelId: number;
+  readonly settings: Disposable;
+}
+
 /** The ring the host was asked to show and ring for. Its identity is the
  *  attempt: an answer that comes back for an earlier one changes nothing. */
-let hostRing: { readonly channelId: number } | null = null;
+let hostRing: HostRing | null = null;
+
+/** The host has `next` from here on, or no ring: the attempt before it is
+ *  over, and its watch on the settings with it. */
+function hold(next: HostRing | null): void {
+  hostRing?.settings.destroy();
+  hostRing = next;
+}
 
 /** What the host was last asked to ring for. It stays after that ring ended,
  *  because a press on its notification can still be on its way, and it names
@@ -74,6 +90,23 @@ function popup(title: string, ring: RingState, ringing: boolean): void {
   );
 }
 
+/** Take the host's notification of the ring in `channelId` down. */
+function withdraw(channelId: number): void {
+  desktop.notifier
+    .clearCall(channelId)
+    .catch((err: unknown) => log.debug("Call notification not withdrawn", err));
+}
+
+/**
+ * The host shows `ring` no longer and the app's own chime has it from here,
+ * as it has a ring that comes in while OS notifications are not allowed.
+ */
+function handBack(ring: RingState): void {
+  hold(null);
+  setHostRinging(false);
+  withdraw(ring.channelId);
+}
+
 /**
  * Ask a host that rings by itself to show `ring`, or to show it again so its
  * time starts over. Until it refuses, the host sounds this ring and the app's
@@ -81,16 +114,29 @@ function popup(title: string, ring: RingState, ringing: boolean): void {
  * without a sound.
  */
 function ringOnHost(title: string, ring: RingState): void {
-  const mine = { channelId: ring.channelId };
-  hostRing = mine;
+  const loud = ringSoundOn();
+  const mine = { channelId: ring.channelId, settings: new Disposable() };
+  hold(mine);
   lastHostRing = { host: signedInHost(), channelId: ring.channelId };
   setHostRinging(true);
-  showCall(title, ring, true, !ringSoundOn()).catch((err: unknown) => {
+  // What is switched off while the host rings holds for this ring at once:
+  // without OS notifications the ring is the app's own, and without the ring
+  // sound the host shows it again, which stops its ringtone. A ring that went
+  // up without a sound stays so until it is rung again.
+  onPrefChange(
+    "any",
+    () => {
+      if (!popupsOn()) handBack(ring);
+      else if (loud && !ringSoundOn()) ringOnHost(title, ring);
+    },
+    mine.settings.signal,
+  );
+  showCall(title, ring, true, !loud).catch((err: unknown) => {
     log.debug("Call notification not available", err);
     // A refusal that comes back after this ring ended, or after it was shown
     // again, is not this ring's any more.
     if (hostRing !== mine) return;
-    hostRing = null;
+    hold(null);
     setHostRinging(false);
   });
 }
@@ -141,10 +187,13 @@ export function alertSupersededCall(ring: RingState): void {
 /**
  * The ring on screen was rung again, so its 30s started over. A notification
  * the host takes down by itself after a set time is shown again, or it would
- * go while the call still rings.
+ * go while the call still rings. Whether it may be shown at all is asked
+ * again, as it is for every ring.
  */
 export function alertRedial(ring: RingState): void {
-  if (hostRing?.channelId === ring.channelId) ringOnHost(ringTitle(ring), ring);
+  if (hostRing?.channelId !== ring.channelId) return;
+  if (popupsOn()) ringOnHost(ringTitle(ring), ring);
+  else handBack(ring);
 }
 
 /**
@@ -160,9 +209,7 @@ export function isHostRing(channelId: number): boolean {
 /** The ring ended, however it ended: withdraw its notification, which would
  *  otherwise sit in the notification centre offering a call that is over. */
 export function clearIncomingCall(ring: RingState): void {
-  if (hostRing?.channelId === ring.channelId) hostRing = null;
+  if (hostRing?.channelId === ring.channelId) hold(null);
   if (desktop.notifier.ringsCalls === true) setHostRinging(null);
-  desktop.notifier
-    .clearCall(ring.channelId)
-    .catch((err: unknown) => log.debug("Call notification not withdrawn", err));
+  withdraw(ring.channelId);
 }
