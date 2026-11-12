@@ -118,7 +118,7 @@ describe("createInviteManagerController", () => {
     const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
 
     // The callback should re-throw so InviteManager's catch prevents optimistic removal
-    await expect(opts.onRevokeInvite("abc123xyz")).rejects.toThrow("network error");
+    await expect(opts.onRevokeInvite(7, "abc123xyz")).rejects.toThrow("network error");
 
     // Controller should log the error with context
     expect(mockLogError).toHaveBeenCalled();
@@ -131,7 +131,7 @@ describe("createInviteManagerController", () => {
 
     const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
 
-    await expect(opts.onRevokeInvite("abc123xyz")).resolves.toBeUndefined();
+    await expect(opts.onRevokeInvite(7, "abc123xyz")).resolves.toBeUndefined();
     expect(mockLogError).not.toHaveBeenCalled();
   });
 
@@ -605,14 +605,14 @@ describe("createInviteManagerController (additional)", () => {
     expect(mockInviteManagerMount).not.toHaveBeenCalled();
   });
 
-  it("onRevokeInvite passes invite code directly to API", async () => {
+  it("onRevokeInvite revokes by id", async () => {
     const api = makeMockApi();
 
     await openInvites(api);
 
     const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
 
-    await expect(opts.onRevokeInvite("abc123xyz")).resolves.toBeUndefined();
-    expect(api.revokeInvite).toHaveBeenCalledWith("abc123xyz");
+    await expect(opts.onRevokeInvite(7, "abc123xyz")).resolves.toBeUndefined();
+    expect(api.revokeInvite).toHaveBeenCalledWith(7);
   });
 });

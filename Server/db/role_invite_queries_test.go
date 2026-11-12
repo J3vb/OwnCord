@@ -96,7 +96,7 @@ func TestListRoles_OrderedByPositionDesc(t *testing.T) {
 func TestListInvites_Empty(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 
-	invites, err := database.ListInvites(context.Background())
+	invites, err := listAllInvites(t, database)
 	mustDo(t, "ListInvites empty", err)
 	if len(invites) != 0 {
 		t.Errorf("ListInvites empty = %d items, want 0", len(invites))
@@ -111,7 +111,7 @@ func TestListInvites_Multiple(t *testing.T) {
 	_, _ = database.CreateInvite(context.Background(), uid, 5, nil)
 	_, _ = database.CreateInvite(context.Background(), uid, 0, nil)
 
-	invites, err := database.ListInvites(context.Background())
+	invites, err := listAllInvites(t, database)
 	mustDo(t, "ListInvites multiple", err)
 	if len(invites) != 3 {
 		t.Errorf("ListInvites count = %d, want 3", len(invites))
@@ -126,7 +126,7 @@ func TestListInvites_IncludesRevokedInvites(t *testing.T) {
 	_ = database.RevokeInvite(context.Background(), code)
 	_, _ = database.CreateInvite(context.Background(), uid, 0, nil) // active
 
-	invites, err := database.ListInvites(context.Background())
+	invites, err := listAllInvites(t, database)
 	mustDo(t, "ListInvites with revoked", err)
 	if len(invites) != 2 {
 		t.Errorf("ListInvites count = %d, want 2", len(invites))
@@ -169,4 +169,18 @@ func TestInvite_Expired(t *testing.T) {
 			}
 		})
 	}
+}
+
+// listAllInvites returns every invite, live ones first, the way the list endpoint orders them.
+func listAllInvites(t *testing.T, d *db.DB) ([]*db.Invite, error) {
+	t.Helper()
+	live, err := d.ListInvites(context.Background(), false, 0, 1000)
+	if err != nil {
+		return nil, err
+	}
+	dead, err := d.ListInvites(context.Background(), true, 0, 1000)
+	if err != nil {
+		return nil, err
+	}
+	return append(live, dead...), nil
 }

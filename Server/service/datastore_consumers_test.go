@@ -40,7 +40,7 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[DMService]():             18,
 	reflect.TypeFor[groupManagement]():       11,
 	reflect.TypeFor[GIFFavoriteService]():    3,
-	reflect.TypeFor[InviteService]():         6,
+	reflect.TypeFor[InviteService]():         7,
 	reflect.TypeFor[MessageRequestService](): 7,
 	reflect.TypeFor[MessageService]():        20,
 	reflect.TypeFor[messageReads]():          17,

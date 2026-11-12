@@ -55,7 +55,7 @@ export type SelectChannelOpts = { onSelectChannel: (channelId: number) => void }
 export type SelectResultOpts = {
   onSelectResult: (result: { channel_id: number; message_id: number }) => void;
 };
-export type RevokeInviteOpts = { onRevokeInvite: (code: string) => Promise<void> };
+export type RevokeInviteOpts = { onRevokeInvite: (id: number, code: string) => Promise<void> };
 export type UnpinOpts = { onUnpin: (msgId: number) => void };
 export type SearchQueryOpts = {
   onSearch: (query: string, chId: number | undefined, signal?: AbortSignal) => Promise<unknown[]>;

@@ -13,7 +13,8 @@ type inviteStore interface {
 	db.Auditor
 	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
 	GetInvite(ctx context.Context, code string) (*db.Invite, error)
-	ListInvites(ctx context.Context) ([]*db.Invite, error)
+	GetInviteByID(ctx context.Context, id int64) (*db.Invite, error)
+	ListInvites(ctx context.Context, dead bool, beforeID int64, limit int) ([]*db.Invite, error)
 	RevokeInvite(ctx context.Context, code string) error
 	ListInviteRedemptions(ctx context.Context, inviteID int64, limit int) ([]*db.InviteRedemption, error)
 }
@@ -72,13 +73,56 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 	return invite, nil
 }
 
-// ListInvites returns all invites.
-func (s *InviteService) ListInvites(ctx context.Context) ([]*db.Invite, error) {
-	invites, err := s.st.ListInvites(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list invites: %w", ErrInternal, err)
+// Invite list bounds: every live invite is returned (up to the cap) and never pushed out by dead ones,
+// which are paged.
+const (
+	InviteLiveListCap     = 500
+	InviteDeadPageDefault = 50
+	InviteDeadPageMax     = 200
+)
+
+// Invite list selectors for ListInvites.
+const (
+	InviteStateAll  = ""
+	InviteStateLive = "live"
+	InviteStateDead = "dead"
+)
+
+// ListInvites returns live invites first (newest id first), then dead ones. state selects both
+// (InviteStateAll, the first page of each), only live or only dead; beforeID continues a single list past
+// the last id of its previous page and is ignored for InviteStateAll. deadLimit bounds the dead rows and is
+// clamped to [1, InviteDeadPageMax]; zero means InviteDeadPageDefault.
+func (s *InviteService) ListInvites(ctx context.Context, state string, beforeID int64, deadLimit int) ([]*db.Invite, error) {
+	if state != InviteStateAll && state != InviteStateLive && state != InviteStateDead {
+		return nil, fmt.Errorf("%w: state must be live or dead", ErrBadRequest)
 	}
-	return invites, nil
+	if beforeID < 0 || deadLimit < 0 {
+		return nil, fmt.Errorf("%w: before and limit must not be negative", ErrBadRequest)
+	}
+	if deadLimit == 0 {
+		deadLimit = InviteDeadPageDefault
+	}
+	deadLimit = min(deadLimit, InviteDeadPageMax)
+	if state == InviteStateAll {
+		beforeID = 0
+	}
+
+	out := make([]*db.Invite, 0)
+	if state != InviteStateDead {
+		live, err := s.st.ListInvites(ctx, false, beforeID, InviteLiveListCap)
+		if err != nil {
+			return nil, fmt.Errorf("%w: failed to list invites: %w", ErrInternal, err)
+		}
+		out = append(out, live...)
+	}
+	if state != InviteStateLive {
+		dead, err := s.st.ListInvites(ctx, true, beforeID, deadLimit)
+		if err != nil {
+			return nil, fmt.Errorf("%w: failed to list invites: %w", ErrInternal, err)
+		}
+		out = append(out, dead...)
+	}
+	return out, nil
 }
 
 // ListInviteRedemptions returns who redeemed an invite, newest first, so an owner can
@@ -106,4 +150,17 @@ func (s *InviteService) RevokeInvite(ctx context.Context, actorID int64, code st
 	}
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "invite_revoke", "invite", invite.ID, "")
 	return nil
+}
+
+// RevokeInviteByID revokes an invite by its id on behalf of actorID. Revoking an already revoked invite
+// succeeds again.
+func (s *InviteService) RevokeInviteByID(ctx context.Context, actorID int64, id int64) error {
+	invite, err := s.st.GetInviteByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("%w: failed to load invite: %w", ErrInternal, err)
+	}
+	if invite == nil {
+		return fmt.Errorf("%w: invite not found", ErrNotFound)
+	}
+	return s.RevokeInvite(ctx, actorID, invite.Code)
 }

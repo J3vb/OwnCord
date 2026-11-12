@@ -35,6 +35,7 @@ export function mapInviteResponse(r: InviteResponse): InviteItem {
         : "";
   const uses = r.use_count ?? r.uses ?? 0;
   return {
+    id: r.id,
     code: r.code,
     createdBy: creatorUsername !== "" ? creatorUsername : shellText("invite.unknownCreator"),
     // created_at is when the invite was made; expires_at is when it lapses.
@@ -152,9 +153,9 @@ export function createInviteManagerController(opts: {
           });
           return mapInviteResponse(created);
         },
-        onRevokeInvite: async (code: string) => {
+        onRevokeInvite: async (id: number, code: string) => {
           try {
-            await opts.api.revokeInvite(code);
+            await opts.api.revokeInvite(id);
           } catch (err) {
             log.error("Invite revoke failed", { code, error: String(err) });
             throw err;

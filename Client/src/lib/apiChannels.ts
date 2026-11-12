@@ -387,8 +387,9 @@ export function createChannelsApi(t: ApiTransport) {
       return t.request("InviteResponse", "POST", "/invites", data, signal);
     },
 
-    revokeInvite(code: string, signal?: AbortSignal): Promise<void> {
-      return t.request("NoBody", "DELETE", `/invites/${code}`, undefined, signal);
+    /** Revokes by id: the list shows only live invites, and an id never travels in a log line the way a code does. */
+    revokeInvite(id: number, signal?: AbortSignal): Promise<void> {
+      return t.request("NoBody", "DELETE", `/invites/id/${id}`, undefined, signal);
     },
 
     // ── Custom emoji ──────────────────────────────────────

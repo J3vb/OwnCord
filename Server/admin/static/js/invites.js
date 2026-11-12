@@ -26,6 +26,10 @@ function inviteUsable(inv){
   const t=utcDate(String(inv.expires_at).replace(' ','T')).getTime();
   return isNaN(t)||t>Date.now();
 }
+function inviteLive(inv){
+  if(!inviteUsable(inv))return false;
+  return inv.max_uses===null||inv.max_uses===undefined||inv.uses<inv.max_uses;
+}
 function inviteStatus(inv){
   if(inv.revoked)return'<span class="badge badge-red">Revoked</span>';
   if(!inviteUsable(inv))return'<span class="badge badge-muted">Expired</span>';
@@ -37,10 +41,27 @@ function inviteUses(inv){
   return max===null?inv.uses+' uses':inv.uses+' / '+max+' uses';
 }
 
+/* The server lists live invites first, then the newest dead ones; older dead
+   invites are fetched on demand and kept here across the re-render. */
+const INVITE_DEAD_PAGE=50;
+let inviteOlder=[];
+let inviteOlderMore=true;
+let inviteKeepOlder=false;
+let inviteDeadCursor=0;
+
 async function renderInvites(){
   let list;
   try{list=await inviteApi('GET','/')}catch(e){return'<div class="page-title">Invites</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   if(!Array.isArray(list))list=[];
+  if(!inviteKeepOlder){inviteOlder=[];inviteOlderMore=true}
+  inviteKeepOlder=false;
+  const seen=new Set(list.map(function(inv){return inv.id}));
+  const olderRows=inviteOlder.filter(function(inv){return!seen.has(inv.id)});
+  const firstDead=list.filter(function(inv){return!inviteLive(inv)});
+  list=list.concat(olderRows);
+  const deadIds=firstDead.concat(olderRows).map(function(inv){return inv.id});
+  inviteDeadCursor=deadIds.length?Math.min.apply(null,deadIds):0;
+  const more=inviteOlderMore&&(inviteOlder.length>0||firstDead.length>=INVITE_DEAD_PAGE);
 
   let html='<div class="page-title">Invites</div><div class="page-desc">Create codes people use to join this server, and see who redeemed each one</div>';
 
@@ -64,10 +85,23 @@ async function renderInvites(){
     html+='<td>'+fmtLocal(inv.created_at)+'</td>';
     html+='<td class="col-actions"><div class="act-group">';
     html+='<button class="btn btn-outline" data-action="openInviteRedemptions" data-args="'+actArgs(inv.code,inv.uses)+'">Redeemed by<span class="sr-only"> for invite '+esc(inv.code)+'</span></button>';
-    if(inviteUsable(inv))html+='<button class="btn btn-outline member-btn danger" data-action="revokeInvite" data-args="'+actArgs(inv.code)+'">Revoke<span class="sr-only"> invite '+esc(inv.code)+'</span></button>';
+    if(inviteUsable(inv))html+='<button class="btn btn-outline member-btn danger" data-action="revokeInvite" data-args="'+actArgs(inv.code,inv.id)+'">Revoke<span class="sr-only"> invite '+esc(inv.code)+'</span></button>';
     html+='</div></td></tr>';
   });
-  return html+'</tbody></table></div></div>';
+  html+='</tbody></table>';
+  if(more)html+='<div style="padding:12px;text-align:center"><button class="btn btn-ghost" data-action="loadOlderInvites">Load older invites</button></div>';
+  return html+'</div></div>';
+}
+
+async function loadOlderInvites(){
+  try{
+    const page=await inviteApi('GET','/?state=dead&limit='+INVITE_DEAD_PAGE+(inviteDeadCursor?'&before='+inviteDeadCursor:''));
+    const rows=Array.isArray(page)?page:[];
+    inviteOlder=inviteOlder.concat(rows);
+    if(rows.length<INVITE_DEAD_PAGE)inviteOlderMore=false;
+    inviteKeepOlder=true;
+    await renderContent();
+  }catch(e){showToast(e.message,'error')}
 }
 
 async function createInvite(){
@@ -96,13 +130,13 @@ async function copyInviteText(code){
   catch(e){showToast('Couldn\u2019t copy the invite code — copy it manually','warning')}
 }
 
-function revokeInvite(code){
+function revokeInvite(code,id){
   openModal('<div class="modal-header"><h3>Revoke invite</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
     +'<div class="modal-body"><p style="color:var(--text-muted)">Revoke <code>'+esc(code)+'</code>? Anyone who has not redeemed it yet will no longer be able to.</p></div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmRevokeInvite" data-args="'+actArgs(code)+'">Revoke</button></div>');
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmRevokeInvite" data-args="'+actArgs(code,id)+'">Revoke</button></div>');
 }
-async function confirmRevokeInvite(code){
-  try{await inviteApi('DELETE','/'+code);closeModal();showToast('Invite revoked');renderContent()}
+async function confirmRevokeInvite(code,id){
+  try{await inviteApi('DELETE','/id/'+encodeURIComponent(id));closeModal();showToast('Invite revoked');renderContent()}
   catch(e){showToast(e.message,'error')}
 }
 
@@ -126,4 +160,4 @@ async function openInviteRedemptions(code,uses){
     +'<div class="modal-footer"><button class="btn btn-primary" data-action="closeModal">Close</button></div>');
 }
 
-Object.assign(ACTIONS,{createInvite,revokeInvite,confirmRevokeInvite,copyInvite,openInviteRedemptions});
+Object.assign(ACTIONS,{createInvite,revokeInvite,confirmRevokeInvite,loadOlderInvites,copyInvite,openInviteRedemptions});
