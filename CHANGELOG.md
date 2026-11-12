@@ -136,6 +136,8 @@ release changes the database, and anything an operator must do first.)
 
 ### Messages & files
 
+- **Search never found text written in a thread or a forum post.** Search now covers the threads and forum posts of every channel you can read (a forum post follows its forum's permissions and NSFW acknowledgement), and picking such a result opens it in the thread panel. Search hits gain a `thread_parent_id` field; an older desktop client lists these hits but cannot open them.
+- **An open thread could close and disappear after a reconnect when the server was slow to answer.** It now stays and can be reloaded.
 - **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
 - **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
 - **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.
@@ -143,7 +145,15 @@ release changes the database, and anything an operator must do first.)
 - **The text on a message with a picture or file could not be removed.** Clearing it offered to delete the whole message. It now removes just the text and keeps the files.
 - **Typing just @ listed only 10 people**, so members who were offline or had not posted lately were missing until you typed part of their name. The list now holds up to 50 people and scrolls.
 - **A voice message, video or YouTube player stopped and went back to the start when anyone reacted to or pinned that message**, and a spoiler you had opened was covered again. A reaction or pin now only redraws the reactions and pin button; playback and opened spoilers stay.
+- **In a thread or forum post, clicking a reply quote did nothing.** It now jumps to the replied-to message, loading it if needed.
+- **Pin, edit and delete in a thread or forum post skipped the channel's safety checks**: a quick double click could pin and unpin at once, and an edit or delete lost to a bad connection vanished silently. They now behave like in a channel: one pin request at a time, and a failed edit puts your text back.
 - **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.
+- **An edit, delete or pin that arrived while older history or a jump was loading was undone when it finished.** It now stays applied.
+- **A message posted at the moment you jumped back to the present could be missing until you reopened the channel.** It is now fetched right after the jump lands.
+- **A message the server refused showed its real reason for only 20 seconds**, then changed to "Delivery not confirmed". It now keeps the reason.
+- **A too-long message sent as a text file was lost when its upload failed after you switched channel.** The text now comes back in the composer.
+- **A voice message that hit the 5-minute limit and failed to stop froze the recording bar.** The bar now closes and shows "Recording failed".
+- **Link previews are limited to five per message**; further links stay plain links.
 
 ### Voice
 

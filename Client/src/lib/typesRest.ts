@@ -11,6 +11,8 @@ export interface SearchResultItem {
   readonly message_id: number;
   readonly channel_id: number;
   readonly channel_name: string;
+  /** The parent channel's id when the hit is in a thread or forum post. */
+  readonly thread_parent_id?: number;
   readonly user: MessageUser;
   readonly content: string;
   readonly timestamp: string;

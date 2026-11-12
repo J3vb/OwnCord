@@ -10,12 +10,17 @@ import { shellText } from "../../i18n/shell";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { setChannelWarmHandler } from "@lib/nav/channelNavigation";
+import {
+  newestSentId,
+  recoverAfterReattach,
+  recoverRefusedTail,
+  withLoadJournal,
+} from "../../features/messaging/historyFetch";
 import { createChannelWarmup } from "../../features/messaging/channelWarmup";
 import {
   setMessages,
   prependMessages,
   appendNewerMessages,
-  mergeTailMessages,
   invalidateChannelMessageWindow,
   isChannelLoaded,
   getChannelMessages,
@@ -32,12 +37,6 @@ const PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 /** Revisit paging bound: five pages span the 500-row per-channel window. */
 const MAX_REVISIT_PAGES = 5;
-
-/** Newest delivered row of the window (optimistic rows carry id 0): the cursor
- *  an `after` page continues from. */
-function newestSentId(channelId: number): number {
-  return getChannelMessages(channelId).findLast((m) => m.id > 0)?.id ?? 0;
-}
 
 // ---------------------------------------------------------------------------
 // Message Controller
@@ -159,6 +158,7 @@ export function createMessageController(opts: MessageControllerOptions): Message
     // shows its in-region loading placeholder from the very first render. A
     // revisit's cached rows stay on screen instead, and setMessages below
     // reconciles the refetched page into them.
+    const wasDetached = isWindowDetached(channelId);
     setChannelLoading(channelId);
     try {
       const { first, warmed } = await firstPage(channelId, limit, cached.length === 0, signal);
@@ -178,6 +178,11 @@ export function createMessageController(opts: MessageControllerOptions): Message
       // the race is discarded instead of clobbering the jump's window.
       if (!signal.aborted && !isChannelLoaded(channelId)) {
         installTail(channelId, fetched, hasMoreBefore, cached, head);
+        // A live message refused while the window was detached is in neither
+        // the page nor the list: fetch what follows the newest row.
+        recoverAfterReattach(api, channelId, wasDetached, signal, () =>
+          loadMessages(channelId, signal),
+        );
         // The page was read before channel_focus left, so a message posted, edited
         // or deleted in between reached neither the page nor the live feed: the
         // revisit refetch reconciles the rows just shown, off the paint path.
@@ -251,10 +256,17 @@ export function createMessageController(opts: MessageControllerOptions): Message
     }
   }
 
-  async function loadOlderMessages(channelId: number, signal: AbortSignal): Promise<void> {
-    const messages = getChannelMessages(channelId);
-    if (messages.length === 0) return;
-    const oldest = messages[0]!;
+  function loadOlderMessages(channelId: number, signal: AbortSignal): Promise<void> {
+    const oldest = getChannelMessages(channelId)[0];
+    if (oldest === undefined) return Promise.resolve();
+    return withLoadJournal(channelId, () => fetchOlderPage(channelId, oldest, signal));
+  }
+
+  async function fetchOlderPage(
+    channelId: number,
+    oldest: { readonly id: number },
+    signal: AbortSignal,
+  ): Promise<void> {
     try {
       const resp = await api.getMessages(
         channelId,
@@ -294,39 +306,18 @@ export function createMessageController(opts: MessageControllerOptions): Message
     }
   }
 
-  // The window was detached while the final page was in flight, so a live
-  // message committed after the server's read was refused and is in neither
-  // that page nor the list. One tail fetch after the re-attach fills the hole.
-  // Runs detached from the page load (its own catch: nothing rejects). If it
-  // fails or is aborted the hole would persist on an attached, "loaded"
-  // window, so the window is invalidated and the next visit refetches the tail.
-  async function recoverRefusedTail(
-    channelId: number,
-    after: number,
-    signal: AbortSignal,
-  ): Promise<void> {
-    try {
-      const tail = await api.getMessages(channelId, { after, limit: PAGE_SIZE }, signal);
-      if (!signal.aborted) {
-        if (tail.has_more) {
-          // Too much arrived to patch: reload the live tail instead.
-          invalidateChannelMessageWindow(channelId);
-          await loadMessages(channelId, signal);
-        } else {
-          mergeTailMessages(channelId, tail.messages);
-        }
-        return;
-      }
-    } catch (err) {
-      log.error("Failed to recover the tail after a newer page", { channelId, error: String(err) });
-    }
-    invalidateChannelMessageWindow(channelId);
+  /** After a re-attach: fetch what a live message refused meanwhile left out. */
+  function recoverTail(channelId: number, after: number, signal: AbortSignal): Promise<void> {
+    return recoverRefusedTail(api, channelId, after, signal, () => loadMessages(channelId, signal));
   }
 
-  async function loadNewerMessages(channelId: number, signal: AbortSignal): Promise<void> {
-    if (!isWindowDetached(channelId)) return;
+  function loadNewerMessages(channelId: number, signal: AbortSignal): Promise<void> {
+    if (!isWindowDetached(channelId) || newestSentId(channelId) === 0) return Promise.resolve();
+    return withLoadJournal(channelId, () => fetchNewerPage(channelId, signal));
+  }
+
+  async function fetchNewerPage(channelId: number, signal: AbortSignal): Promise<void> {
     const newest = newestSentId(channelId);
-    if (newest === 0) return;
     try {
       const resp = await api.getMessages(channelId, { after: newest, limit: PAGE_SIZE }, signal);
       // The window can be replaced while this fetch is in flight (a new jump
@@ -337,7 +328,7 @@ export function createMessageController(opts: MessageControllerOptions): Message
       if (!signal.aborted && isWindowDetached(channelId) && newestSentId(channelId) === newest) {
         appendNewerMessages(channelId, resp.messages, resp.has_more);
         if (!resp.has_more) {
-          void recoverRefusedTail(channelId, resp.messages.at(-1)?.id ?? newest, signal);
+          void recoverTail(channelId, resp.messages.at(-1)?.id ?? newest, signal);
         }
       }
     } catch (err) {

@@ -114,9 +114,9 @@ func (s *mentionState) readAtLatestIsCurrent(ctx context.Context, userID, channe
 // admitReadPointer is admitReadState for commands that move a pointer without focusing: a thread is admitted
 // through its parent, as thread_focus does.
 func admitReadPointer(ctx context.Context, st readAdmitStore, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
-	ch, err := st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, st, channelID)
+	if err != nil {
+		return nil, err
 	}
 	if !ch.IsThread() {
 		return admitReadState(ctx, st, perms, userID, channelID)

@@ -5,4 +5,6 @@ package admin
 // folds them in.
 func init() {
 	supportEventCodes["MessageService.GetMessagesAfter"] = "messageservice_getmessagesafter"
+	supportEventCodes["service: channel lookup timed out"] = "service_channel_lookup_timed_out"
+	supportEventCodes["service: channel lookup failed"] = "service_channel_lookup_failed"
 }

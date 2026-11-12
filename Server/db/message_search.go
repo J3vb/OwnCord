@@ -130,7 +130,7 @@ func scanSearchResults(rows *sql.Rows, label string) ([]MessageSearchResult, err
 		var everyone int
 		if scanErr := rows.Scan(&r.MessageID, &r.ChannelID, &r.ChannelName,
 			&r.User.ID, &r.User.Username, &r.User.Avatar,
-			&r.Content, &r.Timestamp, &everyone); scanErr != nil {
+			&r.Content, &r.Timestamp, &everyone, &r.ThreadParentID); scanErr != nil {
 			return nil, fmt.Errorf("%s scan: %w", label, scanErr)
 		}
 		r.MentionsEveryone = everyone != 0

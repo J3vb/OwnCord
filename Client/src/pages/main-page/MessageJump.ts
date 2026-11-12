@@ -20,8 +20,14 @@ import {
   setAroundMessages,
   hasMessageLoaded,
   isChannelLoaded,
+  isWindowDetached,
   getChannelMessages,
 } from "@stores/messages.store";
+import {
+  newestSentId,
+  recoverRefusedTail,
+  withLoadJournal,
+} from "../../features/messaging/historyFetch";
 import { NSFW_ACKNOWLEDGEMENT_REQUIRED } from "../../features/content-consent/nsfw";
 import type { ChannelController } from "./ChannelController";
 import { messagingText } from "../../i18n/messaging";
@@ -118,7 +124,15 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
     // it loaded and detached, and the next visit would open on this old
     // window instead of the live tail.
     if (opts.getChannelCtrl()?.currentChannelId !== channelId) return false;
+    const wasDetached = isWindowDetached(channelId);
     setAroundMessages(channelId, resp.messages, resp.has_more_before, resp.has_more_after);
+    // A live message refused while the window was detached is in neither the
+    // window nor the list when this one reaches the newest message.
+    // A recovery that lands after a channel switch only merges by id into
+    // that channel's cached window.
+    if (wasDetached && !isWindowDetached(channelId)) {
+      void recoverRefusedTail(opts.api, channelId, newestSentId(channelId));
+    }
     return true;
   }
 
@@ -146,10 +160,15 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
     // Not in the loaded window (or the fresh channel is still fetching) —
     // replace the window with one centred on the target.
     try {
-      const resp = await opts.api.getMessagesAround(channelId, messageId, {
-        limit: AROUND_WINDOW,
+      // Held so an edit, delete or pin that arrives while the window is in
+      // flight is replayed onto it instead of undone.
+      const installed = await withLoadJournal(channelId, async () => {
+        const resp = await opts.api.getMessagesAround(channelId, messageId, {
+          limit: AROUND_WINDOW,
+        });
+        return installAroundWindow(gen, channelId, resp);
       });
-      if (!installAroundWindow(gen, channelId, resp)) return false;
+      if (!installed) return false;
     } catch (err) {
       reportWindowFetchFailure(err, channelId, messageId);
       return false;

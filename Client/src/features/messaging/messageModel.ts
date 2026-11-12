@@ -162,6 +162,12 @@ export interface MessagesState {
    * like loadWatermark.
    */
   readonly loadJournal?: ReadonlyMap<number, readonly JournalEntry[]>;
+  /** channelId -> how many older, newer, tail or around fetches hold that
+   *  channel's journal open; it stays while any does. Optional like loadJournal. */
+  readonly loadJournalHolds?: ReadonlyMap<number, number>;
+  /** channelId -> how many journal entries predate the running first-page
+   *  load; that page replays from there. Absent means from the start. */
+  readonly loadJournalStart?: ReadonlyMap<number, number>;
 }
 
 // -----------------------------------------------------------------------------
@@ -259,4 +265,6 @@ export const INITIAL_STATE: MessagesState = {
   detachedChannels: new Set(),
   loadWatermark: new Map(),
   loadJournal: new Map(),
+  loadJournalHolds: new Map(),
+  loadJournalStart: new Map(),
 };
