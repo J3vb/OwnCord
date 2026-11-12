@@ -149,7 +149,12 @@ func resolveDangling(p string) string {
 			return p
 		}
 		if !filepath.IsAbs(target) {
-			target = filepath.Join(filepath.Dir(cur), target)
+			// The kernel resolves ".." from the directory the link really lives in.
+			dir, derr := filepath.EvalSymlinks(filepath.Dir(cur))
+			if derr != nil {
+				return p
+			}
+			target = filepath.Join(dir, target)
 		}
 		cur = target
 	}

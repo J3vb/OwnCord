@@ -186,3 +186,40 @@ func TestApplyStagedRestore_FinishesRestoreStagedBesideLink(t *testing.T) {
 	assertGone(t, link+restoreMarkerSuffix, link+restoreStagedSuffix, link+restoreRollbackSuffix)
 	assertRows(t, real, "live")
 }
+
+func TestApplyStagedRestore_SymlinkResumesThroughRelativeTargetInLinkedDir(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "x", "y"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "x", "disk"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(root, "cfg")
+	if err := os.Symlink(filepath.Join(root, "x", "y"), cfg); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	real := filepath.Join(root, "x", "disk", "real.db")
+	link := filepath.Join(cfg, "chat.db")
+	backup := filepath.Join(root, "backup.db")
+	writeTestDB(t, real, "live")
+	writeTestDB(t, backup, "backup")
+	target := filepath.Join("..", "disk", "real.db")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := StageRestore(context.Background(), link, backup, StagedRestoreMarker{Backup: "backup.db"}); err != nil {
+		t.Fatal(err)
+	}
+	crashAt(t, "aside")
+	if _, err := ApplyStagedRestore(link); err == nil {
+		t.Fatal("expected the simulated crash")
+	}
+	noCrash(t)
+	res, err := ApplyStagedRestore(link)
+	if err != nil || res.Status != RestoreStatusApplied {
+		t.Fatalf("resume = %+v, %v", res, err)
+	}
+	assertStillLink(t, link, target)
+	assertRows(t, real, "backup")
+}
