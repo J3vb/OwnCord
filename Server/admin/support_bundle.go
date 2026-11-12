@@ -238,6 +238,8 @@ func (s *supportBundles) collect(ctx context.Context) (supportSnapshot, error) {
 		}
 	}
 	created := s.now().UTC()
+	health := supportHealth(s.hub, created)
+	health.DatabaseReadable = snapErr == nil
 	data := []struct {
 		name    string
 		classes []int
@@ -246,7 +248,7 @@ func (s *supportBundles) collect(ctx context.Context) (supportSnapshot, error) {
 		{"build.json", []int{}, supportBuild(s.version)},
 		{"configuration.json", []int{}, supportConfig(s.config)},
 		{"database.json", databaseClasses, database},
-		{"health.json", []int{}, supportHealth(s.hub, created)},
+		{"health.json", []int{}, health},
 		{"events.json", []int{22}, events},
 	}
 	var buffer bytes.Buffer

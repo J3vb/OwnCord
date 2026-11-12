@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +69,9 @@ func TestSupportBundle_SnapshotErrorDegradesDatabaseItem(t *testing.T) {
 	})
 	if !strings.Contains(string(files["database.json"]), `"unavailable"`) {
 		t.Fatalf("database.json = %s", files["database.json"])
+	}
+	if !regexp.MustCompile(`"database_readable":\s*false`).Match(files["health.json"]) {
+		t.Fatalf("health.json = %s", files["health.json"])
 	}
 	for _, name := range []string{"build.json", "configuration.json", "health.json", "events.json", "manifest.json"} {
 		if len(files[name]) == 0 {
