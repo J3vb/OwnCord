@@ -223,6 +223,8 @@ describe("ThreadPanel", () => {
     await flush();
     textarea().value = "hello thread";
     textarea().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    // Plain text is saved for recovery before the frame goes.
+    await flush();
     const sent = ws.getSentMessages() as unknown as {
       type: string;
       payload: Record<string, unknown>;
@@ -1032,6 +1034,7 @@ describe("ThreadPanel detached window", () => {
     textarea().value = "from the past";
     textarea().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(loadMessages).toHaveBeenCalledWith(THREAD, expect.any(AbortSignal));
+    await flush();
     const sent = ws.getSentMessages() as unknown as { type: string }[];
     expect(sent.some((m) => m.type === "chat_send")).toBe(true);
   });

@@ -100,6 +100,11 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Messages & files
+
+- **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
+- **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.
