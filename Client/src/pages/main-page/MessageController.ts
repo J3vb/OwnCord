@@ -90,7 +90,25 @@ function installTail(
     count: messages.length,
     hasMore,
   });
-  setMessages(channelId, messages, hasMore);
+  setMessages(channelId, messages, hasMore, olderPageLanded(channelId, fetched, head));
+}
+
+/**
+ * Whether the reader scrolled up while the refetch was in flight and an older
+ * page landed above the cached head. That page was read after this load began,
+ * so it is as fresh as the refetch: when the fetched range reaches the head
+ * (no gap between them), the window keeps it instead of dropping it as stale
+ * cached rows. Dropping it pulled the page out from under the reader, moved
+ * the row they were reading and sent the same older request again.
+ */
+function olderPageLanded(
+  channelId: number,
+  fetched: readonly MessageResponse[],
+  head: number,
+): boolean {
+  const oldestFetched = fetched[fetched.length - 1]?.id;
+  if (head === 0 || oldestFetched === undefined || oldestFetched > head) return false;
+  return getChannelMessages(channelId).some((m) => m.status === "sent" && m.id < head);
 }
 
 export function createMessageController(opts: MessageControllerOptions): MessageController {
