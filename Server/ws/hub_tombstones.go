@@ -54,6 +54,9 @@ type replayPurgeState struct {
 
 	unfinishedUsers    map[int64]struct{}
 	unfinishedMessages map[int64]struct{}
+	// unfinishedErasures is keyed by erasure job, not by message: the ring copies a failed
+	// first attempt dropped are gone, so a retry cannot rebuild their ids.
+	unfinishedErasures map[int64]struct{}
 }
 
 // lock takes mu for a purge, giving up when ctx ends. It polls rather than blocks so a purge can
@@ -77,7 +80,7 @@ func (t *replayPurgeState) tryColdRead() bool {
 	if t.waiting.Load() > 0 || !t.mu.TryRLock() {
 		return false
 	}
-	if t.waiting.Load() > 0 || len(t.unfinishedUsers) > 0 || len(t.unfinishedMessages) > 0 {
+	if t.waiting.Load() > 0 || len(t.unfinishedUsers) > 0 || len(t.unfinishedMessages) > 0 || len(t.unfinishedErasures) > 0 {
 		t.mu.RUnlock()
 		return false
 	}

@@ -202,10 +202,11 @@ const EventNamesOwnMessagePredicate = `(event_type IN ` + replayMessageFrameType
 	   OR EXISTS (SELECT 1 FROM messages WHERE messages.id = json_extract(payload, '$.payload.message_id') AND messages.user_id = ?1)))`
 
 // DeleteOrphanMessageEvents removes the message frames written since the erasure job's
-// lock whose message no longer exists and returns the message ids they named. Only
-// erasure and retention hard-delete messages, so such a frame is always safe to drop.
-// It catches what reached the table after the drain passed (an edit in flight at the
-// lock, the persister's queue), and runs again from the replay purge after a restart.
+// lock whose message no longer exists and returns the message ids they named. A frame
+// whose message is gone is always safe to drop. It catches what reached the table after
+// the drain passed, and runs again from the replay purge after a restart. A frame
+// sequenced after the persister flush and missing from the first ring read can survive
+// in the ring; after the finish stage no producer can make one.
 func (d *DB) DeleteOrphanMessageEvents(ctx context.Context, jobID int64) ([]int64, error) {
 	rows, err := d.writer.QueryContext(ctx, `DELETE FROM events
 	 WHERE created_at >= (SELECT created_at FROM erasure_jobs WHERE id = ?1)

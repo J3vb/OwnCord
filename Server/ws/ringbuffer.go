@@ -77,13 +77,15 @@ func (rb *EventRingBuffer) RemoveWhere(drop func(data []byte) bool) int {
 // them still exist.
 func (rb *EventRingBuffer) MessageIDs() []int64 {
 	rb.mu.RLock()
-	defer rb.mu.RUnlock()
-	seen := map[int64]struct{}{}
+	frames := make([][]byte, 0, rb.count)
 	for i := range rb.count {
-		data := rb.entries[(rb.pos-rb.count+rb.size+i)%rb.size].data
-		if data == nil {
-			continue
+		if data := rb.entries[(rb.pos-rb.count+rb.size+i)%rb.size].data; data != nil {
+			frames = append(frames, data)
 		}
+	}
+	rb.mu.RUnlock()
+	seen := map[int64]struct{}{}
+	for _, data := range frames {
 		if refs, ok := parseFrameRefs(data); ok {
 			refs.addMessageIDs(seen)
 		}
