@@ -160,7 +160,9 @@ The policy: [SECURITY.md](../SECURITY.md).
 
 - **Branch from `dev`, and open your pull request against `dev`.** `dev` is
   where all work comes together.
-- `main` only holds releases. A release merges `dev` into `main`.
+- `main` only holds releases. A release merges `dev` into `main`. During the
+  2.9.x fix-only period, `main` takes only fixes that already landed on `dev`;
+  see [Fix-only period](maintainers.md#fix-only-period-29x).
 
 `dev` only takes pull requests. The required checks must pass, but no review
 approval is needed, so you can merge your own PR once CI is green.
