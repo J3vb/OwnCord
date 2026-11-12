@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  acknowledgePendingMessage,
   activatePendingMessages,
   deactivatePendingMessages,
   newClientMessageId,
@@ -7,10 +8,9 @@ import {
   type PendingMessageOwner,
 } from "@lib/pendingMessages";
 import { runSessionResets } from "@lib/net/sessionRegistry";
-import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
 import { authStore } from "@stores/auth.store";
-import { messagesStore, resetMessagesStore } from "@stores/messages.store";
+import { confirmSend, messagesStore, resetMessagesStore } from "@stores/messages.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { createThreadSender } from "../../src/features/threads/threadSender";
 import { createMockWsClient } from "../helpers/mock-ws";
@@ -67,7 +67,7 @@ const rows = (channelId: number) => messagesStore.getState().messagesByChannel.g
 /** What a thread panel builds when it opens. */
 const openThread = (ws: Ws) =>
   createThreadSender({
-    ws: ws as unknown as WsClient,
+    ws: ws,
     api: { getConfig: () => ({ host: HOST }) } as unknown as ApiClient,
     threadId: THREAD,
     signal: new AbortController().signal,
@@ -136,6 +136,7 @@ describe("a failed thread reply across an app restart", () => {
     const row = rows(THREAD).find((m) => m.content === "thread reply");
     expect(row?.correlationId).toBeDefined();
     sender.retryDraft(row!.correlationId!);
+    await settle();
 
     expect(frames(ws)).toHaveLength(1);
     expect(frames(ws)[0]!.payload).toMatchObject({
@@ -151,10 +152,74 @@ describe("a failed thread reply across an app restart", () => {
     setConnectionStatus("connected");
     const ws = createMockWsClient();
     openThread(ws).sendText("lost ack", null, false, []);
+    await settle();
     expect(frames(ws)).toHaveLength(1);
 
     await vi.advanceTimersByTimeAsync(60_000);
     const row = rows(THREAD).find((m) => m.content === "lost ack");
     expect(row?.status).toBe("failed");
+  });
+
+  it("an acknowledged reply is neither failed by the timer nor brought back after a restart", async () => {
+    vi.useFakeTimers();
+    await launch();
+    setConnectionStatus("connected");
+    const ws = createMockWsClient();
+    openThread(ws).sendText("delivered", null, false, []);
+    await settle();
+    const frame = frames(ws)[0]!;
+    const id = frame.payload.client_message_id as string;
+    expect(disk.size).toBe(1);
+
+    // What the dispatcher does with chat_send_ok.
+    confirmSend(frame.id, 501, new Date().toISOString(), id);
+    acknowledgePendingMessage(id);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(rows(THREAD).find((m) => m.content === "delivered")?.status).toBe("sent");
+
+    await launch();
+    expect(rows(THREAD).some((m) => m.content === "delivered")).toBe(false);
+  });
+
+  it("Discard on a recovered thread reply keeps it from coming back at the next start", async () => {
+    await launch();
+    setConnectionStatus("disconnected");
+    openThread(createMockWsClient()).sendText("never mind", null, false, []);
+    await settle();
+
+    await launch();
+    const row = rows(THREAD).find((m) => m.content === "never mind");
+    expect(row?.correlationId).toBeDefined();
+    openThread(createMockWsClient()).discardDraft(row!.correlationId!);
+    expect(rows(THREAD).some((m) => m.content === "never mind")).toBe(false);
+    await settle();
+
+    await launch();
+    expect(rows(THREAD).some((m) => m.content === "never mind")).toBe(false);
+  });
+
+  it("a logout while the reply is still being saved leaves nothing for the next start", async () => {
+    await launch();
+    setConnectionStatus("disconnected");
+    openThread(createMockWsClient()).sendText("signed out", null, false, []);
+    deactivatePendingMessages({ discard: true });
+    resetAuthState();
+    await settle();
+    expect(disk.size).toBe(0);
+
+    await launch();
+    expect(rows(THREAD).some((m) => m.content === "signed out")).toBe(false);
+  });
+
+  it("a sign-out while an online reply is still being saved sends nothing into the next session", async () => {
+    await launch();
+    setConnectionStatus("connected");
+    const ws = createMockWsClient();
+    openThread(ws).sendText("too late", null, false, []);
+    deactivatePendingMessages({ discard: true });
+    runSessionResets("user");
+    await settle();
+    expect(frames(ws)).toHaveLength(0);
+    expect(disk.size).toBe(0);
   });
 });

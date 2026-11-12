@@ -7,9 +7,14 @@
 
 import { WsErrorCode } from "@lib/protocolTypes";
 import {
+  acknowledgePendingMessage,
   newClientMessageId,
+  pendingMessageExpired,
   pendingMessageRetryFloor,
+  recoveredPendingText,
+  savePendingText,
   supportsMessageDeduplication,
+  type PendingMessageOwner,
 } from "@lib/pendingMessages";
 import type { Disposable } from "@lib/disposable";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
@@ -26,6 +31,7 @@ import {
 } from "@stores/messages.store";
 import { findSticker } from "@stores/stickers.store";
 import type { SentAttachment } from "../messaging/MessageInput";
+import { messagingText } from "../../i18n/messaging";
 import { stickersText } from "../../i18n/stickers";
 
 /** What a failed optimistic send needs to be sent again. */
@@ -45,7 +51,72 @@ interface SendDraft {
  * panel closing and reopening, and its Retry needs the draft that is held here.
  */
 const draftsByThread = new Map<number, Map<string, SendDraft>>();
-void registerSessionReset("threads:sendDrafts", () => draftsByThread.clear()); // app-lifetime
+
+/** How long a sent reply may wait for the server before its row offers Retry. */
+export const THREAD_SEND_UNCONFIRMED_MS = 20_000;
+
+/** The unconfirmed timer of each sent row, kept beyond one panel like the drafts. */
+const sendTimers = new Map<string, number>();
+
+/**
+ * Each thread's sends in order: a reply whose text is still being saved holds
+ * back the sends after it, so a quick second send cannot overtake it.
+ */
+const sendChains = new Map<number, { tail: Promise<void>; depth: number }>();
+
+/** Bumped by each session reset, so a send still waiting on its save never reaches the next session. */
+let sessionEpoch = 0;
+
+void registerSessionReset("threads:sendDrafts", () => {
+  sessionEpoch += 1;
+  draftsByThread.clear();
+  for (const timer of sendTimers.values()) window.clearTimeout(timer);
+  sendTimers.clear();
+  sendChains.clear();
+}); // app-lifetime
+
+function clearSendTimer(correlationId: string): void {
+  const timer = sendTimers.get(correlationId);
+  if (timer === undefined) return;
+  sendTimers.delete(correlationId);
+  window.clearTimeout(timer);
+}
+
+/** A live socket can lose an acknowledgement without closing: end the spinner honestly. */
+function startSendTimer(threadId: number, correlationId: string, userId: number): void {
+  clearSendTimer(correlationId);
+  const timer = window.setTimeout(() => {
+    sendTimers.delete(correlationId);
+    if (currentUserId() !== userId) return;
+    const row = getChannelMessages(threadId).find((m) => m.correlationId === correlationId);
+    if (row?.status === "pending") markSendFailed(correlationId, "UNCONFIRMED");
+  }, THREAD_SEND_UNCONFIRMED_MS);
+  sendTimers.set(correlationId, timer);
+}
+
+/** Run `send` after the thread's earlier sends and after `persist`, when there is one. */
+function enqueueSend(
+  threadId: number,
+  persist: (() => Promise<unknown>) | undefined,
+  send: () => void,
+): void {
+  const busy = sendChains.get(threadId);
+  if (persist === undefined && busy === undefined) {
+    send();
+    return;
+  }
+  const chain = busy ?? { tail: Promise.resolve(), depth: 0 };
+  sendChains.set(threadId, chain);
+  chain.depth += 1;
+  chain.tail = chain.tail
+    .then(() => persist?.())
+    .then(send)
+    .catch(() => undefined)
+    .finally(() => {
+      chain.depth -= 1;
+      if (chain.depth === 0 && sendChains.get(threadId) === chain) sendChains.delete(threadId);
+    });
+}
 
 /** The thread's drafts, without those whose row is gone (settled while the panel was closed). */
 function draftsFor(threadId: number): Map<string, SendDraft> {
@@ -70,6 +141,16 @@ export const holdsThreadDrafts = (threadId: number): boolean =>
   (draftsByThread.get(threadId)?.size ?? 0) > 0;
 
 type StickerRef = { readonly id: number; readonly name: string };
+
+/**
+ * The id under which the encrypted outbox keeps a send: plain text only, the
+ * same set the channel composer saves.
+ */
+function outboxId(draft: SendDraft): string | undefined {
+  const plain =
+    draft.replyTo === null && draft.attachments.length === 0 && draft.sticker === undefined;
+  return plain ? draft.clientMessageId : undefined;
+}
 
 export const currentUserId = (): number => authStore.getState().user?.id ?? 0;
 
@@ -149,21 +230,72 @@ export function createThreadSender(options: {
       ...(sticker === undefined ? {} : { sticker }),
     };
     const row = optimisticRow(content, sticker);
+    const persistId = outboxId(draft);
+    const persist =
+      persistId === undefined ? undefined : () => persistText(owner, persistId, content);
     if (uiStore.getState().connectionStatus !== "connected") {
-      const cid = crypto.randomUUID();
-      addOptimisticMessage({
-        correlationId: cid,
-        clientMessageId,
-        channelId: threadId,
-        user,
-        ...row,
-        replyTo,
-        timestamp,
-      });
-      drafts.set(cid, draft);
-      markSendFailed(cid, "OFFLINE");
+      sendOffline(user, draft, row, timestamp, persist);
       return;
     }
+    // Saved before the frame goes, so a crash after the server stores it but
+    // before the acknowledgement brings back the same logical message.
+    const epoch = sessionEpoch;
+    enqueueSend(threadId, persist, () => {
+      if (epoch !== sessionEpoch || currentUserId() !== user.id) return;
+      sendNow(draft, row, timestamp);
+    });
+  }
+
+  /** Composer gating normally prevents this: keep a failed row with Retry rather than drop it. */
+  function sendOffline(
+    user: MessageUser,
+    draft: SendDraft,
+    row: ReturnType<typeof optimisticRow>,
+    timestamp: string,
+    persist: (() => Promise<boolean>) | undefined,
+  ): void {
+    const cid = crypto.randomUUID();
+    addOptimisticMessage({
+      correlationId: cid,
+      clientMessageId: draft.clientMessageId,
+      channelId: threadId,
+      user,
+      ...row,
+      replyTo: draft.replyTo,
+      timestamp,
+    });
+    drafts.set(cid, draft);
+    markSendFailed(cid, "OFFLINE");
+    // Never handed to a socket: a failed save means it is gone at restart.
+    void persist?.().then((saved) => {
+      if (!saved && currentUserId() === user.id) markSendFailed(cid, "OFFLINE_NO_RECOVERY");
+    });
+  }
+
+  /** Resolves false when the save did not land; the toast says so. */
+  function persistText(owner: PendingMessageOwner, id: string, content: string): Promise<boolean> {
+    return savePendingText(owner, {
+      clientMessageId: id,
+      channelId: threadId,
+      content,
+      createdAt: Number(id.split(":", 1)[0]),
+    }).then(
+      () => true,
+      () => {
+        if (!signal.aborted) showToast(messagingText("toast.pendingSaveFailed"), "error");
+        return false;
+      },
+    );
+  }
+
+  function sendNow(
+    draft: SendDraft,
+    row: ReturnType<typeof optimisticRow>,
+    timestamp: string,
+  ): void {
+    const { content, replyTo, replyPing, attachments: files, clientMessageId, sticker } = draft;
+    const user = currentUser();
+    if (user === null) return;
     const cid = ws.send({
       type: "chat_send",
       payload: {
@@ -186,11 +318,49 @@ export function createThreadSender(options: {
       timestamp,
     });
     drafts.set(cid, draft);
+    startSendTimer(threadId, cid, user.id);
+  }
+
+  /** The held draft, else the text the encrypted outbox brought back after a restart. */
+  function draftFor(correlationId: string): SendDraft | undefined {
+    const held = drafts.get(correlationId);
+    if (held !== undefined) return held;
+    const user = currentUser();
+    if (user === null) return undefined;
+    const recovered = recoveredPendingText(
+      { host: api.getConfig?.().host ?? "", userId: user.id },
+      correlationId,
+    );
+    return recovered === undefined
+      ? undefined
+      : {
+          content: recovered.content,
+          replyTo: null,
+          replyPing: false,
+          clientMessageId: recovered.clientMessageId,
+          attachments: [],
+        };
+  }
+
+  /** Why a keyed retry must not go, as a toast; null when it may. */
+  function retryRefusal(clientMessageId: string | undefined): string | null {
+    if (clientMessageId === undefined) return null;
+    const owner = { host: api.getConfig?.().host ?? "", userId: currentUserId() };
+    if (pendingMessageExpired(clientMessageId, Date.now(), pendingMessageRetryFloor(owner))) {
+      return messagingText("toast.retryExpired");
+    }
+    if (!supportsMessageDeduplication(owner)) return messagingText("toast.retryUnsupported");
+    return null;
   }
 
   function retryDraft(correlationId: string): void {
-    const draft = drafts.get(correlationId);
+    const draft = draftFor(correlationId);
     if (draft === undefined) return;
+    const refusal = retryRefusal(draft.clientMessageId);
+    if (refusal !== null) {
+      showToast(refusal, "error");
+      return;
+    }
     // A refused reply may point at a message deleted outside the loaded
     // window: nothing was stored, so it goes again as a plain message.
     const refusedReply =
@@ -198,6 +368,7 @@ export function createThreadSender(options: {
       getChannelMessages(threadId).find((m) => m.correlationId === correlationId)?.errorCode ===
         WsErrorCode.BAD_REQUEST;
     drafts.delete(correlationId);
+    clearSendTimer(correlationId);
     removeOptimistic(correlationId);
     sendText(
       draft.content,
@@ -210,8 +381,14 @@ export function createThreadSender(options: {
   }
 
   function discardDraft(correlationId: string): void {
+    const id =
+      drafts.get(correlationId)?.clientMessageId ??
+      getChannelMessages(threadId).find((m) => m.correlationId === correlationId)?.clientMessageId;
     drafts.delete(correlationId);
+    clearSendTimer(correlationId);
     removeOptimistic(correlationId);
+    // Dismissed on purpose: the outbox must not bring it back at the next start.
+    acknowledgePendingMessage(id ?? undefined);
   }
 
   function watchUnsentFiles(owner: Disposable): void {
