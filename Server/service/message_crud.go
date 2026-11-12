@@ -310,13 +310,8 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		// INTERNAL, or REQUEST_TIMEOUT for a spent frame.
 		return nil, fmt.Errorf("%w: edit message: %w", ErrInternal, err)
 	}
-	if errors.Is(err, db.ErrNotFound) && content == "" {
-		if cur, gErr := s.st.GetMessage(ctx, msgID); gErr == nil && cur != nil && !cur.Deleted {
-			return nil, fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
-		}
-	}
 	if err != nil || msg == nil {
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+		return nil, s.editRefusal(ctx, msgID, content, err)
 	}
 
 	editedAt := ""
@@ -364,6 +359,17 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 
 	slog.Debug("message edited", "user_id", userID, "msg_id", msgID, "channel_id", msg.ChannelID)
 	return result, nil
+}
+
+// editRefusal names why the store wrote nothing: an empty result on a live message means it has no
+// attachment to keep, anything else is the opaque refusal.
+func (s *MessageService) editRefusal(ctx context.Context, msgID int64, content string, storeErr error) error {
+	if errors.Is(storeErr, db.ErrNotFound) && content == "" {
+		if cur, err := s.st.GetMessage(ctx, msgID); err == nil && cur != nil && !cur.Deleted {
+			return fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
+		}
+	}
+	return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 }
 
 func (s *MessageService) loadEditTarget(ctx context.Context, msgID int64) (*db.Message, *db.Channel, error) {
