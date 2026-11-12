@@ -45,7 +45,68 @@ ownership, dependency automation — gets **at most a short block at the end**,
 and only when it changes something a contributor or fork holder must do
 (a moved directory, a renamed module, a new required command).
 
+### Known issues are required
+
+Every release section after v2.9.0 carries a `### Known issues` list with at
+least one bullet; `release.yml` refuses to publish without it
+(`scripts/release/verify-release-notes.mjs`). Keep the running list under
+**Unreleased**: add a line when a user-visible problem is accepted for a
+release, remove it when the fix merges. At release time, check each line is
+still true, then carry the list into the new section. With nothing to report,
+write one bullet that says no issues are known. Where the lines come from:
+the previous release's list, open ledger entries a user can run into, and
+anything the hands-on checks for this release did not cover.
+
+### Release section template
+
+Copy this under the new tag heading and delete the headings you do not need,
+except **Known issues**. A fix-only release usually needs only the intro,
+**Fixed**, **Known issues** and **Under the hood**.
+
+```markdown
+## vX.Y.Z
+
+**OwnCord X.Y** (what kind of release: features, fixes only) gives you … One
+short paragraph in plain words.
+
+It is still a **beta and a hobby project**: don't use it for anything
+sensitive. Update the server and the desktop app together. (Say here if this
+release changes the database, and anything an operator must do first.)
+
+### Highlights
+
+- **The thing**: what a user gets.
+
+### Added
+
+- …
+
+### Changed
+
+- …
+
+### Fixed
+
+- What was broken. What it does now.
+
+### Known issues
+
+- **What still goes wrong**, who it hits, and what to do about it.
+
+### Under the hood
+
+- Internal, CI and test-only changes, short.
+```
+
 ## Unreleased
+
+### Known issues
+
+- **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.
+- **Linux: this release was not checked by hand on X11, GNOME Wayland and KDE Plasma Wayland.** It works, but it is less tested than Windows.
+- **Scrolling far back in a long channel while it reloads can make the list jump** to another spot. Scroll back to where you were; nothing is lost.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
+- **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
 
 ## v2.9.0
 
