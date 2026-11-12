@@ -7,15 +7,16 @@
 // OWNCORD_CHROMIUM names another Chromium binary):
 //   node scripts/gen-emoji-sheets.mjs
 //
-// One sheet per catalog group, plus one per skin tone for every group that has
-// toneable emoji. A sheet holds its group's emoji in catalog order, eight to a
+// One sheet per catalog group, without skin tones: the picker draws a toned
+// sheet itself the first time someone picks that tone (toneSheets.ts), which
+// keeps the installer small. A sheet holds its group's emoji in catalog order, eight to a
 // row (the picker's own grid), CELL px square, so the picker finds an emoji's
 // cell from its index alone and needs no position table. The generated module
 // records a hash of the catalog: emojiSheets.test.ts fails when the catalog
 // changes without the sheets being regenerated.
 //
 // Re-run after bumping @discordapp/twemoji or regenerating emojiData.ts. The
-// script fails if a catalog emoji has no Twemoji image.
+// script fails if a catalog emoji, in any skin tone, has no Twemoji image.
 
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -29,7 +30,7 @@ const { chromium } = require("playwright");
 
 const CELL = 48;
 const COLUMNS = 8;
-const QUALITY = 0.92;
+const QUALITY = 0.8;
 const SKIN_TONES = ["", "\u{1F3FB}", "\u{1F3FC}", "\u{1F3FD}", "\u{1F3FE}", "\u{1F3FF}"];
 
 const SVG_DIR = fileURLToPath(
@@ -67,7 +68,7 @@ for (const [group, rows] of EMOJI_GROUPS) {
       if (file === undefined) throw new Error(`no Twemoji image for ${emoji}`);
       return readFileSync(SVG_DIR + file, "utf8");
     });
-    sheets.push({ name: tone === 0 ? group : `${group}-${tone}`, svgs });
+    if (tone === 0) sheets.push({ name: group, svgs });
   }
 }
 
@@ -118,7 +119,7 @@ ${imports}
 /** Hash of the emoji catalog the sheets were drawn from (see emojiSheets.test.ts). */
 export const SHEETS_CATALOG_HASH = "${hash}";
 
-/** Each sheet's URL by name: a group key, or \`<group>-<tone>\` for a skin tone. */
+/** Each group's sheet URL, by group key. */
 export const EMOJI_SHEETS: Readonly<Record<string, string>> = {
 ${entries}
 };

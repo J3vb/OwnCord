@@ -8,7 +8,8 @@ import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { buildCustomEmojiNode } from "./content/customEmoji";
 import { buildEmojiImage } from "./content/emojiImage";
-import { sheetUrl, useSheet } from "./emojiSheets";
+import { useSheet } from "./emojiSheets";
+import { groupSheetUrl } from "./toneSheets";
 import { buildEmojiSpan } from "./emojiPickerCells";
 import { createPickerImages } from "./pickerImages";
 import { trackPickerCategory } from "./pickerScroll";
@@ -250,10 +251,11 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
 
     const tone = skinTone();
     for (const group of emojiCatalog()?.groups ?? []) {
-      const sheet = sheetUrl(group.key, tone);
+      const emoji = group.emoji.map((e) => withSkinTone(e, tone));
+      const sheet = groupSheetUrl(group.key, tone, group.emoji, emoji);
       cats.push({
         name: `emoji.category.${group.key}`,
-        emoji: group.emoji.map((e) => withSkinTone(e, tone)),
+        emoji,
         ...(sheet === null ? {} : { sheet }),
       });
     }
