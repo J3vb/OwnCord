@@ -76,10 +76,31 @@ describe("channel context menu - Move Up / Move Down", () => {
 
     (document.querySelector('[data-testid="ctx-move-down"]') as HTMLElement).click();
 
-    expect(onReorder).toHaveBeenCalledWith([
-      { channelId: 1, newPosition: 1, previousPosition: 0 },
-      { channelId: 2, newPosition: 0, previousPosition: 0 },
-    ]);
+    expect(onReorder).toHaveBeenCalledWith([{ channelId: 1, newPosition: 1, previousPosition: 0 }]);
+  });
+
+  it("moves one place among three rows that share a position", () => {
+    const rows = [channel(1, 0), channel(2, 0), channel(3, 0)];
+    const onReorder = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
+    openMove(rows, rows[0]!, onReorder);
+
+    (document.querySelector('[data-testid="ctx-move-down"]') as HTMLElement).click();
+
+    const positions = (id: number): number | undefined =>
+      channelsStore.getState().channels.get(id)?.position;
+    expect([positions(2), positions(1), positions(3)]).toEqual([0, 1, 2]);
+  });
+
+  it("moves the last of three tied rows up by one place, without a negative position", () => {
+    const rows = [channel(1, 0), channel(2, 0), channel(3, 0)];
+    const onReorder = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
+    openMove(rows, rows[2]!, onReorder);
+
+    (document.querySelector('[data-testid="ctx-move-up"]') as HTMLElement).click();
+
+    const positions = (id: number): number | undefined =>
+      channelsStore.getState().channels.get(id)?.position;
+    expect([positions(1), positions(3), positions(2)]).toEqual([0, 1, 2]);
   });
 });
 
