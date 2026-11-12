@@ -69,6 +69,11 @@ and only when it changes something a contributor or fork holder must do
 - **Threads:** a thread reply whose delivery was never confirmed kept spinning. After 20 seconds it now shows as failed with Retry.
 - **Phone app:** on a small phone the buttons at the end of a direct message's header were off screen, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
 - **GIFs:** GIFs in the GIF picker showed up slowly in the desktop app. Thumbnails from the same site now share open connections, and six load at a time instead of four.
+- **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
+- **Mentions:** typing just @ listed only 10 people, so members who were offline or had not posted lately were missing until you typed part of their name. The list now holds up to 50 people and scrolls.
+- **Messages:** a very long message or code block could make the app hang for a moment while it was shown. It now shows without the wait.
+- **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
+- **Link previews:** the outside-content cache now keeps closer to its memory limit.
 
 ### Changed
 

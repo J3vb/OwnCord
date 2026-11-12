@@ -56,6 +56,7 @@ const clientTrusted: Record<string, string> = {
   "audioVolumePrefs.parseStoredVolume": "this client's settings",
   "credentials.parseCredential": "this client's browser credential store",
   "settings.load": "this client's browser settings",
+  "emojiImage.fetchJson": "the Twemoji packs bundled with this client's own build",
 };
 
 const parseTests = "src-tauri/crates/owncord-parse/tests";

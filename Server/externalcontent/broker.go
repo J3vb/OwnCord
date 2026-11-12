@@ -58,8 +58,6 @@ const (
 	// failureTTL is how long a failed fetch is answered from cache, so a dead host costs one fetch per
 	// five minutes, not one per viewer per render.
 	failureTTL = 5 * time.Minute
-	// failureEntryBytes is a remembered failure's cache weight beside its key.
-	failureEntryBytes = 64
 	// handlesPerUser is how many preview image handles one member holds.
 	handlesPerUser = 256
 	// maxURLBytes bounds any URL the broker is asked for or mints a handle for.
@@ -190,7 +188,7 @@ func (b *Broker) cachedPreview(ctx context.Context, key, rawURL string) (preview
 		if reduceErr != nil {
 			return nil, b.rememberFailure(key, reduceErr)
 		}
-		b.cache.put(&cacheEntry{key: key, preview: data, size: data.size()})
+		b.cache.put(previewEntry(key, data))
 		return data, nil
 	})
 	if err != nil {
@@ -236,7 +234,7 @@ func (b *Broker) Image(ctx context.Context, owner int64, handleID, rawURL string
 			// The declared type is only a claim: the bytes have to agree.
 			return nil, b.rememberFailure(key, fail(WrongType))
 		}
-		entry := &cacheEntry{key: key, image: resp.Body, media: media, size: int64(len(resp.Body))}
+		entry := imageEntry(key, media, resp.Body)
 		b.cache.put(entry)
 		return entry, nil
 	})
@@ -256,7 +254,7 @@ func (b *Broker) rememberFailure(key string, err error) error {
 	}
 	switch e.Failure {
 	case TooManyRedirects, Oversized, WrongType, Unavailable:
-		b.cache.putFor(&cacheEntry{key: key, failure: e.Failure, size: int64(len(key)) + failureEntryBytes}, failureTTL)
+		b.cache.putFor(failureEntry(key, e.Failure), failureTTL)
 	case BlockedDestination, ExpiredHandle:
 	}
 	return err

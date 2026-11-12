@@ -353,6 +353,7 @@ export const shards = {
     "src/features/messaging/emojiSheets.ts",
     "src/features/messaging/emojiSheetsData.ts",
     "src/features/messaging/pickerImages.ts",
+    "src/features/messaging/toneSheets.ts",
     "src/features/messaging/pickerLazyGrids.ts",
     "src/features/share/shareIn.ts",
     "src/lib/disposable.ts",
