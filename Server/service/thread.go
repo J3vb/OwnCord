@@ -280,9 +280,6 @@ func (s *ThreadService) UpdateChanged(ctx context.Context, p UpdateThreadParams)
 	if err != nil {
 		return nil, false, err
 	}
-	if p.Name == nil && p.Archived == nil && p.Locked == nil && p.AutoArchiveMinutes == nil && p.TagIDs == nil {
-		return nil, false, fmt.Errorf("%w: nothing to update", ErrBadRequest)
-	}
 	patch, err := cleanThreadPatch(p)
 	if err != nil {
 		return nil, false, err
@@ -294,13 +291,8 @@ func (s *ThreadService) UpdateChanged(ctx context.Context, p UpdateThreadParams)
 	if err != nil {
 		return nil, false, err
 	}
-	switch {
-	case !isOwner && !isMod:
-		return nil, false, fmt.Errorf("%w: only the thread's creator or a moderator can change it", ErrForbidden)
-	case p.Locked != nil && !isMod:
-		return nil, false, fmt.Errorf("%w: only a moderator can lock a thread", ErrForbidden)
-	case cur.Locked && !isMod:
-		return nil, false, denial(permissions.ErrThreadLocked)
+	if err = threadUpdateDenied(cur, p, isOwner, isMod); err != nil {
+		return nil, false, err
 	}
 	if patch.TagIDs, err = s.postTagsPatch(ctx, cur, p.TagIDs); err != nil {
 		return nil, false, err
@@ -316,6 +308,18 @@ func (s *ThreadService) UpdateChanged(ctx context.Context, p UpdateThreadParams)
 		s.archiveWake()
 	}
 	return out, true, nil
+}
+
+func threadUpdateDenied(cur *db.ThreadInfo, p UpdateThreadParams, isOwner, isMod bool) error {
+	switch {
+	case !isOwner && !isMod:
+		return fmt.Errorf("%w: only the thread's creator or a moderator can change it", ErrForbidden)
+	case p.Locked != nil && !isMod:
+		return fmt.Errorf("%w: only a moderator can lock a thread", ErrForbidden)
+	case cur.Locked && !isMod:
+		return denial(permissions.ErrThreadLocked)
+	}
+	return nil
 }
 
 func (s *ThreadService) postTags(ctx context.Context, cur *db.ThreadInfo, ids []int64) ([]int64, error) {

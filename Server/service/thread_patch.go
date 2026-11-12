@@ -12,6 +12,9 @@ import (
 // thread and is postTagsPatch.
 func cleanThreadPatch(p UpdateThreadParams) (db.ThreadPatch, error) {
 	patch := db.ThreadPatch{Archived: p.Archived, Locked: p.Locked}
+	if p.Name == nil && p.Archived == nil && p.Locked == nil && p.AutoArchiveMinutes == nil && p.TagIDs == nil {
+		return patch, fmt.Errorf("%w: nothing to update", ErrBadRequest)
+	}
 	if p.Name != nil {
 		name, err := cleanThreadName(*p.Name)
 		if err != nil {
