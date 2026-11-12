@@ -57,9 +57,10 @@ func TestRollback074_Rehearsal(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = database.writer.Exec(`PRAGMA foreign_keys = ON`) })
 
-	// Newest first, as rollback.Order runs them: 075 (forums) rebuilt the
-	// thread triggers 074 created, so it has to be reversed before 074 can be.
-	for _, name := range []string{"075_forums.down.sql", "074_threads.down.sql"} {
+	// Newest first, as rollback.Order runs them: 092 indexes a 075 column, and
+	// 075 (forums) rebuilt the thread triggers 074 created, so it has to be
+	// reversed before 074 can be.
+	for _, name := range []string{"092_delete_lookup_indexes.down.sql", "075_forums.down.sql", "074_threads.down.sql"} {
 		raw, err := rollback.FS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)

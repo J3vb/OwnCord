@@ -150,7 +150,8 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
       HASH_COMMENT,
       DQ_STRING,
       SQ_STRING,
-      { re: /\$(?:\{[^}\n]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9?@#*])/y, cls: "keyword" },
+      // "${" scans only to the next "{", so a line of unclosed "${" stays linear.
+      { re: /\$(?:\{[^{}\n]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9?@#*])/y, cls: "keyword" },
       NUMBER,
     ],
     keywords: kw(
@@ -165,7 +166,8 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
       SQ_STRING,
       { re: /@[-a-zA-Z]+/y, cls: "keyword" },
       { re: /!important/y, cls: "keyword" },
-      { re: /[-a-zA-Z]+(?= *:)/y, cls: "keyword" },
+      // A property starts only at the start of a run, which keeps long runs linear.
+      { re: /(?<![-a-zA-Z])[-a-zA-Z]+(?= *:)/y, cls: "keyword" },
       { re: /#[0-9a-fA-F]{3,8}\b/y, cls: "number" },
       {
         re: /-?\d[\d.]*(?:px|em|rem|ex|ch|%|vh|vw|vmin|vmax|s|ms|deg|turn|fr|pt)?/y,

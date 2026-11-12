@@ -114,12 +114,14 @@ release changes the database, and anything an operator must do first.)
 - **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
 - **Channels:** a channel permission change on a busy server now always applies to every connected member.
+- **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
 
 ### Messages & files
 
 - **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
 - **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
 - **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.
+- **Typing just @ listed only 10 people**, so members who were offline or had not posted lately were missing until you typed part of their name. The list now holds up to 50 people and scrolls.
 - **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.
 
 ### Voice
@@ -130,6 +132,10 @@ release changes the database, and anything an operator must do first.)
 
 - **On a small phone the buttons at the end of a direct message's header were off screen**, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
 - **In a call, the round controls were stacked in two short rows.** They now sit in one row.
+
+### Under the hood
+
+- Database change 092: eight indexes for the lookups a message or channel delete runs. The first start after the update builds them, which takes a little longer on a large database. Deleting a busy channel, a thread or a group DM, and retention clean-up, are much faster on a server with many channels (a 20,000-message channel on a server with 5,000 channels: 23 s before, under 1 s after).
 
 ### Known issues
 

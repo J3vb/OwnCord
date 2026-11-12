@@ -337,3 +337,11 @@ func AdmitAllVoiceSessionsForTest(context.Context, string) (ws.VoiceSessionTicke
 		Confirm: func(context.Context) error { return nil },
 	}, nil
 }
+
+// Group creation limits, for tests that fill the daily budget without waiting out the minute one.
+const (
+	DMGroupCreatePerMinute = dmGroupCreatePerMinute
+	DMGroupCreatePerDay    = dmGroupCreatePerDay
+	DMGroupCreateMinuteKey = dmGroupCreateMinuteKey
+	DMGroupCreateDayKey    = dmGroupCreateDayKey
+)
