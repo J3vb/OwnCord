@@ -1,6 +1,7 @@
 package externalcontent
 
 import (
+	"bytes"
 	"container/list"
 	"crypto/rand"
 	"encoding/hex"
@@ -30,6 +31,33 @@ type resultCache struct {
 	bytes   int64
 	order   *list.List // front = most recently used
 	entries map[string]*list.Element
+}
+
+// entryOverhead is the fixed cost of one cache entry beyond its key and payload: the struct, the list
+// element and the map slot.
+const entryOverhead = 384
+
+// entryWeight is the cache weight of an entry under key holding payload bytes; every entry kind goes
+// through it so the kinds cannot drift apart.
+func entryWeight(key string, payload int) int64 {
+	return int64(len(key)) + int64(payload) + entryOverhead
+}
+
+func previewEntry(key string, data previewData) *cacheEntry {
+	return &cacheEntry{key: key, preview: data, size: entryWeight(key, data.size())}
+}
+
+// imageEntry keeps a right-sized copy when body's backing array is much larger than its length, so the
+// weight matches the memory held.
+func imageEntry(key, media string, body []byte) *cacheEntry {
+	if cap(body)-len(body) > len(body)/4 {
+		body = bytes.Clone(body)
+	}
+	return &cacheEntry{key: key, image: body, media: media, size: entryWeight(key, len(body))}
+}
+
+func failureEntry(key string, failure Failure) *cacheEntry {
+	return &cacheEntry{key: key, failure: failure, size: entryWeight(key, 0)}
 }
 
 func newResultCache(limit int64, ttl time.Duration) *resultCache {
@@ -66,15 +94,23 @@ func (c *resultCache) put(entry *cacheEntry) {
 
 // putFor is put with its own time-to-live.
 func (c *resultCache) putFor(entry *cacheEntry, ttl time.Duration) {
-	if entry.size > c.limit {
-		return
-	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	now := c.now()
 	if el, ok := c.entries[entry.key]; ok {
 		c.removeLocked(el)
 	}
-	entry.expires = c.now().Add(ttl)
+	// Stale entries at the oldest end go now, not when weight eviction reaches them.
+	for el := c.order.Back(); el != nil; el = c.order.Back() {
+		if old, _ := el.Value.(*cacheEntry); now.Before(old.expires) {
+			break
+		}
+		c.removeLocked(el)
+	}
+	if entry.size > c.limit {
+		return
+	}
+	entry.expires = now.Add(ttl)
 	c.entries[entry.key] = c.order.PushFront(entry)
 	c.bytes += entry.size
 	for c.bytes > c.limit {
