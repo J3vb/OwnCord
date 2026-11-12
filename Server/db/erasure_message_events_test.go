@@ -3,7 +3,7 @@ package db_test
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -121,7 +121,7 @@ func TestEraseAccountDrain_ResumedAfterCrashRemovesEditEvents(t *testing.T) {
 	if n := countSeededEvents(t, database); n != 2 {
 		t.Errorf("seeded events left = %d, want 2 (the other user's)", n)
 	}
-	sort.Slice(seen, func(i, j int) bool { return seen[i] < seen[j] })
+	slices.Sort(seen)
 	if fmt.Sprint(seen) != fmt.Sprint(own) {
 		t.Errorf("drain reported messages %v, want %v", seen, own)
 	}
