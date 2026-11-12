@@ -184,15 +184,45 @@ export function createVoiceRows(
     }
     // Watching a stream needs a live LiveKit room -- join first.
     if (voiceStore.getState().currentChannelId !== channelId) {
+      if (safetyStore.getState().timeout !== null) return;
+      if (isPhoneLayout()) {
+        openJoinSheet(channelId, row, () => joinAndWatch(channelId, user));
+        return;
+      }
+    }
+    joinAndWatch(channelId, user);
+  }
+
+  /** Join the room when not in it, then watch the participant's stream. */
+  function joinAndWatch(channelId: number, user: VoiceUser): void {
+    if (voiceStore.getState().currentChannelId !== channelId) {
       // Read before the join: it refuses inside the wait, and an accepted switch arms one.
       const refused = joinRetryInMs() > 0;
       onVoiceJoin(channelId);
       if (refused) return;
     }
-    const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
     const voice = voiceStore.getState();
+    const live = voice.voiceUsers.get(channelId)?.get(user.userId);
+    if (live === undefined || (!live.camera && !live.screenshare)) return;
+    const tileId = live.screenshare ? live.userId + SCREENSHARE_TILE_ID_OFFSET : live.userId;
     if (voice.switchingTo === channelId) watchAfterSwitch(channelId, tileId);
     else if (voice.currentChannelId === channelId) onWatchStream?.(tileId);
+  }
+
+  /** The phone's confirming sheet: a stray tap in the drawer should not put
+   *  you in a call. */
+  function openJoinSheet(channelId: number, anchor: HTMLElement, onJoin: () => void): void {
+    void joinSheetScreen
+      .load(() => !lifetimeSignal.aborted)
+      .then((m) => {
+        if (m === null || lifetimeSignal.aborted) return;
+        m.openVoiceJoinSheet({
+          channelId,
+          onJoin,
+          signal: lifetimeSignal,
+          fallbackFocus: () => anchor,
+        });
+      });
   }
 
   // Ends the wait below; set while a clicked stream waits for a switch.
@@ -361,18 +391,11 @@ export function createVoiceRows(
       if (status === "joining" || status === "securing") return;
       onOpenCall();
     } else if (isPhoneLayout()) {
-      // A stray tap in the drawer should not put you in a call: ask first.
-      void joinSheetScreen
-        .load(() => !lifetimeSignal.aborted)
-        .then((m) => {
-          if (m === null || lifetimeSignal.aborted) return;
-          m.openVoiceJoinSheet({
-            channelId,
-            onJoin: onVoiceJoin,
-            signal: lifetimeSignal,
-            fallbackFocus: () => wrapper.querySelector<HTMLElement>(":scope > .channel-item"),
-          });
-        });
+      openJoinSheet(
+        channelId,
+        wrapper.querySelector<HTMLElement>(":scope > .channel-item") ?? wrapper,
+        () => onVoiceJoin(channelId),
+      );
     } else {
       onVoiceJoin(channelId);
     }
