@@ -638,9 +638,9 @@ jobs:
             # refusal from it is retried, anything else fails the seeding.
             # tokens.txt stays in the run directory and is never uploaded.
             # Both run inside xargs' `bash -c`, which shellcheck cannot follow.
-            # shellcheck disable=SC2317
+            # shellcheck disable=SC2317,SC2329
             scale_address() { echo "10.$((($1 >> 16) & 255)).$((($1 >> 8) & 255)).$(($1 & 255))"; }
-            # shellcheck disable=SC2317
+            # shellcheck disable=SC2317,SC2329
             register_one() {
               local i=$1 out code
               for _ in 1 2 3 4 5; do
