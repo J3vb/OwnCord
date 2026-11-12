@@ -4,9 +4,22 @@ import { channelsStore } from "../../../src/stores/channels.store";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { usePhone } from "../../helpers/phoneMedia";
-import { SELF, OTTO, DM, vu, setVoice, mount, q, panel } from "../../helpers/dmCallPanelHarness";
+import {
+  SELF,
+  OTTO,
+  DM,
+  vu,
+  setVoice,
+  patchVoice,
+  mount,
+  q,
+  panel,
+} from "../../helpers/dmCallPanelHarness";
+import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
+import { routeButtonMock, routeButtonsMade } from "../../helpers/routeButtonStub";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/routeButton", () => routeButtonMock());
 vi.mock("../../../src/features/voice/peerVerification", (importOriginal) =>
   mocks.voicePeerVerificationMock(importOriginal),
 );
@@ -103,6 +116,119 @@ describe("DmCallPanel on a phone", () => {
     q(root, "dcp-collapse")!.click();
     setVoice(DM, [vu(SELF), vu(OTTO, { speaking: true })]);
     expect(root.classList.contains("dm-call-panel--collapsed")).toBe(true);
+  });
+});
+
+describe("DmCallPanel while a phone call holds the call", () => {
+  const status = (root: HTMLElement): HTMLElement =>
+    root.querySelector<HTMLElement>(".dcp-status")!;
+
+  it("says the call is paused in amber, and takes it back when the phone call ends", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    expect(status(root).textContent).toBe("Voice Connected");
+    expect(status(root).classList.contains("dcp-status--warn")).toBe(false);
+
+    patchVoice({ phoneCallHold: true });
+    expect(status(root).textContent).toBe("Call paused");
+    expect(status(root).classList.contains("dcp-status--warn")).toBe(true);
+
+    patchVoice({ phoneCallHold: false });
+    expect(status(root).textContent).toBe("Voice Connected");
+    expect(status(root).classList.contains("dcp-status--warn")).toBe(false);
+  });
+
+  it("says so in the collapsed bar too, drawn while the hold is on", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    patchVoice({ phoneCallHold: true });
+    q(root, "dcp-collapse")!.click();
+    expect(root.classList.contains("dm-call-panel--collapsed")).toBe(true);
+    expect(status(root).textContent).toBe("Call paused");
+    expect(status(root).classList.contains("dcp-status--warn")).toBe(true);
+  });
+
+  it("locks the mic and says why, and gives your own mute back as it was", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    patchVoice({ localMuted: true, phoneCallHold: true });
+    const mute = q(root, "dcp-mute")!;
+    expect(mute.disabled).toBe(true);
+    expect(mute.getAttribute("aria-pressed")).toBe("true");
+    expect(mute.title).toBe("Muted while paused");
+    expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+    expect(q(root, "dcp-leave")!.disabled).toBe(false);
+
+    patchVoice({ phoneCallHold: false });
+    expect(mute.disabled).toBe(false);
+    expect(mute.getAttribute("aria-pressed")).toBe("true");
+    expect(mute.title).toBe("Mute");
+
+    patchVoice({ localMuted: false });
+    expect(mute.getAttribute("aria-pressed")).toBe("false");
+    expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic");
+  });
+
+  it("names the hold before a moderator's mute", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    patchVoice({ localServerMuted: true, phoneCallHold: true });
+    expect(q(root, "dcp-mute")!.title).toBe("Muted while paused");
+    patchVoice({ phoneCallHold: false });
+    expect(q(root, "dcp-mute")!.title).toBe("You were muted by a moderator");
+  });
+
+  it("says paused before it says who left", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    setVoice(DM, [vu(SELF)]);
+    expect(status(root).textContent).toBe("Otto left the call");
+    patchVoice({ phoneCallHold: true });
+    expect(status(root).textContent).toBe("Call paused");
+    patchVoice({ phoneCallHold: false });
+    expect(status(root).textContent).toBe("Otto left the call");
+  });
+
+  it("holds nothing in a DM whose call you are not in", () => {
+    setVoice(null, [vu(OTTO)]);
+    const { root } = mount();
+    patchVoice({ phoneCallHold: true });
+    expect(root.textContent).not.toContain("Call paused");
+  });
+});
+
+describe("DmCallPanel's sound route button", () => {
+  beforeEach(() => {
+    routeButtonsMade.length = 0;
+  });
+  afterEach(() => clearHost());
+
+  it("sits after Camera in the Android app, the same button through a redraw", async () => {
+    hostAndroidApp();
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    await vi.waitFor(() => expect(q(root, "route-button-dm")).not.toBeNull());
+    const route = q(root, "route-button-dm")!;
+    expect(route.parentElement!.classList.contains("dcp-controls")).toBe(true);
+    expect(q(root, "dcp-camera")!.nextElementSibling).toBe(route);
+
+    // Collapsing draws the controls again: the button moves, it is not rebuilt.
+    q(root, "dcp-collapse")!.click();
+    expect(q(root, "route-button-dm")).toBe(route);
+    expect(q(root, "dcp-camera")!.nextElementSibling).toBe(route);
+    expect(routeButtonsMade.map((made) => made.variant)).toEqual(["dm"]);
+
+    panel!.destroy?.();
+    expect(routeButtonsMade[0]!.signal.aborted).toBe(true);
+  });
+
+  it("is left out off the Android app", async () => {
+    hostDesktopApp();
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(routeButtonsMade).toEqual([]);
+    expect(q(root, "route-button-dm")).toBeNull();
   });
 });
 

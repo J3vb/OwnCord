@@ -144,9 +144,8 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
  *  describes the signed-in user it also mirrors the moderator-imposed flags
  *  into localServerMuted/localServerDeafened, which gate the widget controls. */
 export function updateVoiceState(payload: VoiceStatePayload): void {
-  const currentUserId = authStore.getState().user?.id ?? 0;
   voiceRosterRevision++;
-  voiceStore.setState((prev) => withVoiceState(prev, payload, currentUserId));
+  voiceStore.setState((prev) => withVoiceState(prev, payload, ownUserId()));
 }
 
 /** Patch a user's username in every voice channel they currently occupy.
@@ -195,8 +194,7 @@ export function setSwitchingTo(channelId: number | null): void {
 
 /** Clear the current voice channel and remove current user from voice users. */
 export function leaveVoiceChannel(): void {
-  const currentUserId = authStore.getState().user?.id ?? 0;
-  voiceStore.setState((prev) => withLeftChannel(prev, currentUserId));
+  voiceStore.setState((prev) => withLeftChannel(prev, ownUserId()));
 }
 
 /** Set the voice-session lifecycle status. Single-writer from livekitSession.ts
@@ -271,6 +269,13 @@ export function restoreSavedSelfVoiceState(): void {
 export function setPttGated(gated: boolean): void {
   voiceStore.setState((prev) =>
     prev.pttGated === gated ? prev : withLocalRing({ ...prev, pttGated: gated }, ownUserId()),
+  );
+}
+
+/** A phone call began or ended holding the call (see VoiceState.phoneCallHold). */
+export function setPhoneCallHold(held: boolean): void {
+  voiceStore.setState((prev) =>
+    (prev.phoneCallHold === true) === held ? prev : { ...prev, phoneCallHold: held },
   );
 }
 
@@ -475,11 +480,7 @@ export function getPeerVerification(userId: number): PeerVerification | null {
 
 /** Selector: get all voice users in a specific channel. */
 export function getChannelVoiceUsers(channelId: number): readonly VoiceUser[] {
-  return voiceStore.select((s) => {
-    const channelUsers = s.voiceUsers.get(channelId);
-    if (!channelUsers) return [];
-    return Array.from(channelUsers.values());
-  });
+  return voiceStore.select((s) => Array.from(s.voiceUsers.get(channelId)?.values() ?? []));
 }
 
 // Re-tells the server our own mute/deafen when its row for us can differ from

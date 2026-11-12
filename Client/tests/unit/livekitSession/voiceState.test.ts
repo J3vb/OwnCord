@@ -772,6 +772,47 @@ describe("LiveKitSession", () => {
       teardownSpy.mockRestore();
     });
 
+    describe("a gate no mic control drives (a phone call's hold)", () => {
+      const micCalls = (): unknown[] =>
+        mockRoom.localParticipant.setMicrophoneEnabled.mock.calls.map(([on]) => on);
+
+      it("closes the microphone when the hold begins and opens it when it ends", async () => {
+        mockVoiceState.phoneCallHold = true;
+        session.syncMicrophoneGate();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(micCalls()).toEqual([false]);
+
+        mockVoiceState.phoneCallHold = false;
+        session.syncMicrophoneGate();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(micCalls()).toEqual([false, true]);
+        // The user's own mute and the saved state were never written.
+        expect(setLocalMuted).not.toHaveBeenCalled();
+        expect(setLocalDeafened).not.toHaveBeenCalled();
+      });
+
+      it("keeps the microphone closed when the hold ends on a muted call", async () => {
+        mockVoiceState.localMuted = true;
+        session.syncMicrophoneGate();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(micCalls()).not.toContain(true);
+      });
+
+      it("opens no microphone in a call joined without one", async () => {
+        mockVoiceState.listenOnly = true;
+        session.syncMicrophoneGate();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(micCalls()).toEqual([]);
+      });
+
+      it("opens no microphone on a call that is over", async () => {
+        mockVoiceState.currentChannelId = null;
+        session.syncMicrophoneGate();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(micCalls()).toEqual([]);
+      });
+    });
+
     it("setPttGated records the store flag and forwards to the pipeline gate", () => {
       const gateSpy = vi.spyOn((session as any)._audioPipeline, "setPttGated");
 

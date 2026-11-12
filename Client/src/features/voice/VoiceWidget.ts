@@ -10,7 +10,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { voiceStore, type VoiceStatus } from "@stores/voice.store";
+import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { uiStore } from "@stores/ui.store";
@@ -23,7 +23,7 @@ import { enhancedNoiseSuppressionEnabled } from "@lib/voice/audioPipeline";
 import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "@lib/voice/livekitSession";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../../i18n/voice";
-import { formatElapsed, headerStatusText, isConnecting } from "./voiceStatusText";
+import { callStatusText, formatElapsed, isConnecting, isPhoneCallHold } from "./voiceStatusText";
 import { shareBlockReason } from "./shareGate";
 import { canPublishScreen } from "./native/platform";
 import { createSecuredBadge, type SecuredBadge } from "./securedBadge";
@@ -156,13 +156,15 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
    *  voiceStatus alone reaches "connected" in that case, so the badge must
    *  never claim "Secured" from voiceStatus in isolation: it renders a
    *  distinct, still-visible not-secured warning instead of just hiding. */
-  function updateStatus(status: VoiceStatus, encryptionDegraded: boolean): void {
+  function updateStatus(voice: VoiceState): void {
+    const status = voice.voiceStatus;
     if (statusLabel !== null) {
-      setText(statusLabel, headerStatusText(status));
+      setText(statusLabel, callStatusText(voice));
       statusLabel.classList.toggle("vw-securing", status === "securing");
       statusLabel.classList.toggle("vw-reconnecting", status === "reconnecting");
+      statusLabel.classList.toggle("vw-paused", isPhoneCallHold(voice));
     }
-    securedBadge?.sync(status === "connected", encryptionDegraded);
+    securedBadge?.sync(status === "connected", voice.encryptionDegraded === true);
   }
 
   /** A live control's tooltip: what a press does next. */
@@ -278,7 +280,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     root.classList.add("visible");
     startStatsPoller();
     startElapsedTimer();
-    updateStatus(voice.voiceStatus, voice.encryptionDegraded === true);
+    updateStatus(voice);
     updateFrozen(uiStore.getState().connectionStatus);
     renderChannelName(channelId);
     renderModStatus(voice.localServerMuted === true, voice.localServerDeafened === true);

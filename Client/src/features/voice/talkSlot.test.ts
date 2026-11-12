@@ -86,5 +86,7 @@ describe("talk slot", () => {
     slot.clear();
     await settle();
     expect(el.querySelector("button")).toBeNull();
+    // Nor was one built for a slot that no longer wants it.
+    expect(made.count).toBe(1);
   });
 });

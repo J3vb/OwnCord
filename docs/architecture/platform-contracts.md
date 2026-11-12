@@ -102,9 +102,9 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 28    |
-| Distinct `invoke` command names called from `Client/src/`  | 114   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 117   |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 29    |
+| Distinct `invoke` command names called from `Client/src/`  | 117   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 120   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
@@ -117,6 +117,16 @@ The handler count includes the Android-only `is_metered` registration
 Data saver stores `owncord:settings:dataSaver` as `off` (default), `mobile`,
 or `always`; media renderers read it with the device's current network cost.
 An existing deferred element keeps its own tap requirement through a handover.
+It also includes the three Android-only call audio registrations
+(`mobile_audio.rs`: `mobile_audio_set_session`, `mobile_audio_set_route` and
+`mobile_audio_state`). Their `owncord-mobile-audio` plugin delivers `state`
+events through an owned plugin listener, and every state carries a number, so
+an answer or event that arrives late is dropped. The webview sends these
+commands one at a time, each after the one before it was answered, so they
+reach the plugin in the order they were made. The plugin outlives a reload of
+the webview: the webview says that no call runs when it starts, and a call
+always starts from no picked route. The `MobileAudio` platform contract
+reports nothing outside Android.
 The handler count also covers the existing 115 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]`, and the forty-four `native_voice_*` commands
@@ -124,10 +134,11 @@ and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
 files dragged in or copied from the file manager) behind
 `#[cfg(target_os = "linux")]` (`read_staged_file` also on Android, where it
 reads the files another app shared), so a default build (no `devtools`)
-registers 103 on Linux and 58 elsewhere, plus eleven Android-only ones:
+registers 103 on Linux and 58 elsewhere, plus fourteen Android-only ones:
 `set_call_service`, `save_file`, `share_file`, `share_text`, `read_staged_file`,
-`take_shared` (`share_in.rs`, the share another app sent to OwnCord) and the
-five notification commands in `android_notifications.rs`. The one environment-detection helper is
+`take_shared` (`share_in.rs`, the share another app sent to OwnCord), the
+five notification commands in `android_notifications.rs` and the three call
+audio commands in `mobile_audio.rs`. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -178,6 +189,9 @@ load_credential
 load_identity_key
 load_pending_messages
 login_with_saved_password
+mobile_audio_set_route
+mobile_audio_set_session
+mobile_audio_state
 native_voice_build_info
 native_voice_camera_support
 native_voice_change_camera
@@ -308,7 +322,13 @@ tauri-plugin-notification's tap event leaves out) have one caller,
 `take_shared` (Android only, `src-tauri/src/share_in.rs`) hands over a share
 from another app once, its files staged for `read_staged_file`; its caller is
 `src/platform/desktop/androidShareIn.ts`, loaded lazily behind the
-`ShareSheet` contract's `onReceived`.
+`ShareSheet` contract's `onReceived`. The three call audio commands (Android
+only, `src-tauri/src/mobile_audio.rs`) tell the host that a call runs, pick
+where its sound plays (speaker, earpiece, a wired or Bluetooth headset) and
+read the audio state: the routes there are, the one in use, the user's pick
+and whether a phone call holds the audio. Their caller is
+`src/platform/desktop/mobileAudioHost.ts`, loaded lazily behind the
+`MobileAudio` contract (`mobileAudio.ts`), and the web build reports nothing.
 
 There is no `window.__TAURI__` access, and the only environment branching is
 the SDK `isTauri` guard in `lib/pendingMessages.ts` (imported, not global), which is

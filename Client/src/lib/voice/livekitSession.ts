@@ -65,6 +65,7 @@ export const retryMicPermission = session.retryMicPermission.bind(session);
 export const cleanupAll = session.cleanupAll.bind(session);
 export const setMuted = session.setMuted.bind(session);
 export const setDeafened = session.setDeafened.bind(session);
+export const syncMicrophoneGate = session.syncMicrophoneGate.bind(session);
 export const enableCamera = session.enableCamera.bind(session);
 export const disableCamera = session.disableCamera.bind(session);
 export const enableScreenshare = session.enableScreenshare.bind(session);

@@ -9,8 +9,9 @@
  *
  * Mute and Leave are the voice widget's own callbacks, so the rate limits and
  * the moderator guards are the same. The timer runs only while the bar shows.
- * In the Android app's Push to Talk mode the bar also holds a hold-to-talk
- * button.
+ * In the Android app the bar also holds a hold-to-talk button in Push to Talk
+ * mode, and while a phone call holds the call the bar turns amber and says the
+ * call is paused.
  */
 
 import { Disposable } from "@lib/disposable";
@@ -29,6 +30,7 @@ import {
   formatElapsed,
   headerStatusText,
   isConnecting,
+  isPhoneCallHold,
   micControlKey,
   micControlState,
 } from "./voiceStatusText";
@@ -50,12 +52,14 @@ export interface PhoneCallBar extends MountableComponent {
 
 const MAX_AVATARS = 3;
 
-/** The second line: the call's status while it connects, else who and how long. */
+/** The second line: paused for a phone call, the call's status while it
+ *  connects, else who and how long. */
 function detailText(count: number): string {
   const voice = voiceStore.getState();
   const status = voice.voiceStatus;
-  if (isConnecting(status) || status === "reconnecting") return headerStatusText(status);
   const elapsed = voice.joinedAt === null ? 0 : Math.max(0, Date.now() - voice.joinedAt);
+  if (isPhoneCallHold(voice)) return t("callBar.paused", { time: formatElapsed(elapsed) });
+  if (isConnecting(status) || status === "reconnecting") return headerStatusText(status);
   return t("callBar.detail", {
     // You are in it, even before your own voice_state has landed.
     people: t("callBar.people", { count: Math.max(1, count) }),
@@ -69,6 +73,7 @@ export function createPhoneCallBar(options: PhoneCallBarOptions): PhoneCallBar {
   let avatarsEl: HTMLSpanElement;
   let nameEl: HTMLSpanElement;
   let detailEl: HTMLSpanElement;
+  let hintEl: HTMLSpanElement;
   let openBtn: HTMLButtonElement;
   let muteBtn: HTMLButtonElement;
   let avatarsKey = "";
@@ -158,6 +163,9 @@ export function createPhoneCallBar(options: PhoneCallBarOptions): PhoneCallBar {
     drawName(channelId, dm);
     drawPeople(channelId);
     drawMute(voice);
+    const paused = isPhoneCallHold(voice);
+    root.classList.toggle("phone-call-bar--paused", paused);
+    hintEl.hidden = !paused;
   }
 
   function mount(container: Element): void {
@@ -200,7 +208,15 @@ export function createPhoneCallBar(options: PhoneCallBarOptions): PhoneCallBar {
     leaveBtn.appendChild(createIcon("phone-off", 20));
     disposable.onEvent(leaveBtn, "click", () => options.onLeave());
 
-    appendChildren(root, openBtn, muteBtn, leaveBtn);
+    // Under the row while a phone call holds the call.
+    hintEl = createElement(
+      "span",
+      { class: "pcb-hint", "data-testid": "pcb-hint" },
+      t("callBar.pausedHint"),
+    );
+    hintEl.hidden = true;
+
+    appendChildren(root, openBtn, muteBtn, leaveBtn, hintEl);
     container.appendChild(root);
     // Push to Talk in the Android app: a hold-to-talk button before Mute.
     const talkSlot = createTalkSlot("bar");

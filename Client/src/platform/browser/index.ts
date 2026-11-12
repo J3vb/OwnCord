@@ -29,6 +29,7 @@ import type {
   ExternalContentBroker,
   GameDetector,
   MediaDetector,
+  MobileAudio,
   NativeFiles,
   GlobalShortcuts,
   HttpClient,
@@ -74,6 +75,14 @@ const appAudio: AppAudio = {
 // A browser tab has no service to keep a call alive in the background.
 const callService: CallService = {
   update: () => undefined,
+};
+
+// A tab plays a call wherever the browser does, and hears of no phone call.
+const mobileAudio: MobileAudio = {
+  watch: () => undefined,
+  setSession: () => undefined,
+  setRoute: () => undefined,
+  refresh: () => undefined,
 };
 
 // No share sheet in a tab: callers offer no Share.
@@ -338,6 +347,7 @@ export const browser: Platform = {
     isMetered: () => false,
     start: async () => undefined,
   },
+  mobileAudio,
   deepLinks,
   devTools,
   fileSaver,

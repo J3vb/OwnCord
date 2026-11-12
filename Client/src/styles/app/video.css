@@ -665,6 +665,28 @@ video[hidden] + .video-surface {
   width: 24px;
   margin-left: -6px;
 }
+/* A phone call holds the call (the Android app): said above the controls,
+   where the hold-to-talk button is otherwise. */
+.video-fs-paused {
+  order: -2;
+  flex: 1 0 100%;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--yellow);
+  color: var(--on-warning);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  text-align: center;
+}
+.video-fs-paused[hidden] {
+  display: none;
+}
+.video-fs-calls--paused {
+  flex-wrap: wrap;
+  justify-content: center;
+  width: max-content;
+  max-width: calc(100% - 16px);
+}
 /* The quality chip shows on the stream you are watching. */
 .video-quality {
   flex-shrink: 0;
@@ -786,9 +808,13 @@ video[hidden] + .video-surface {
 @media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
   /* Thumb-sized round controls in one row: mic, deafen, camera, flip, view
      options, chat, leave. The camera menu is the desktop's choice of device;
-     flip is the phone's. The gap keeps all seven inside a 360 px screen. */
+     flip is the phone's. The gap keeps all seven inside a 360 px screen. The
+     bar is as wide as its controls, up to the screen: left to shrink to fit
+     (it starts at the middle) a bar that wraps would take half the screen and
+     stack its controls. */
   .video-fs-calls {
     bottom: max(12px, env(safe-area-inset-bottom));
+    width: max-content;
     max-width: calc(100% - 16px);
     gap: 4px;
   }
@@ -807,6 +833,26 @@ video[hidden] + .video-surface {
   .video-fs-btn--chat,
   .video-fs-btn--views {
     display: inline-flex;
+  }
+  /* The Android app's sound route button is an eighth control once the camera
+     is on (flip shows), more than a 360 px screen holds at full size. The row
+     then spans the screen and its controls start from 36 px and grow together
+     into the room there is, up to their own size, so they keep one row. */
+  .video-fs-calls:has(> .route-btn:not([hidden])) {
+    width: calc(100% - 16px);
+    justify-content: center;
+    align-items: center;
+  }
+  .video-fs-calls:has(> .route-btn:not([hidden])) > .video-fs-btn {
+    flex: 1 1 36px;
+    max-width: 44px;
+    height: auto;
+    aspect-ratio: 1;
+  }
+  .video-fs-calls:has(> .route-btn:not([hidden])) > .video-fs-btn--leave {
+    flex: 1.28 1 46px;
+    max-width: 56px;
+    aspect-ratio: 14 / 11;
   }
   /* Room above the control row for the hold-to-talk button (see
      CALL_BAR_SPACE_PHONE). */

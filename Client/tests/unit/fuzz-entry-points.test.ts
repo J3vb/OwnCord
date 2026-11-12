@@ -146,6 +146,7 @@ const commandPassThrough: Record<string, string> = {
   native_voice_set_volume: "participant id used as a lookup key",
   native_voice_set_screenshare_volume: "participant id used as a lookup key",
   set_gpu_adapter: "card id matched against the listed cards",
+  mobile_audio_set_route: "route kind matched against the phone's own routes",
 };
 
 /** "<file name>.<function>" for every JSON.parse / Response.json() call in text. */

@@ -133,6 +133,9 @@ export interface CallState {
   readonly offline?: "reconnecting" | "disconnected";
   /** Why share is inert (no permission, video limit), when it is. */
   readonly shareBlock?: string;
+  /** A phone call holds the call (the Android app): the mic control is inert
+   *  and the bar says the call is paused. */
+  readonly phoneHold?: boolean;
 }
 
 export interface VideoGridComponent extends MountableComponent {

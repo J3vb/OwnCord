@@ -259,6 +259,25 @@ describe("talk button", () => {
       expect(session.setPttGated).toHaveBeenLastCalledWith(true);
     });
 
+    it("goes away while a phone call holds the call, closing a held gate, and comes back", async () => {
+      joinCall(true);
+      const btn = createTalkButton("bar", owner.signal);
+      btn.dispatchEvent(pointer("pointerdown"));
+      await settle();
+      expect(session.setPttGated).toHaveBeenLastCalledWith(false);
+
+      voiceStore.setState((s) => ({ ...s, phoneCallHold: true }));
+      await settle();
+      expect(btn.hidden).toBe(true);
+      expect(session.setPttGated).toHaveBeenLastCalledWith(true);
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
+
+      voiceStore.setState((s) => ({ ...s, phoneCallHold: false }));
+      await settle();
+      expect(btn.hidden).toBe(false);
+      expect(btn.disabled).toBe(false);
+    });
+
     it("taking the button down while it is held closes the gate", async () => {
       joinCall(true);
       const own = new AbortController();

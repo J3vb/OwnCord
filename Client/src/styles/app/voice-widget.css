@@ -38,9 +38,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* In-progress lifecycle states use amber; the call is not yet secured/live. */
+/* In-progress lifecycle states use amber; the call is not yet secured/live.
+   So does a call a phone call holds (the Android app). */
 .vw-connected.vw-securing,
-.vw-connected.vw-reconnecting {
+.vw-connected.vw-reconnecting,
+.vw-connected.vw-paused {
   color: var(--text-warning);
 }
 /* A small chip: shield icon + "Secured", on a faint green tint. */

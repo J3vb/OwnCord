@@ -96,6 +96,13 @@ export interface VoiceState {
    *  corrupt the mute toggle's state. Always written by the store; optional
    *  only for the same fixture reason as localServerMuted. */
   readonly pttGated?: boolean;
+  /** A phone call holds the device's audio (the Android app): the call is
+   *  paused, with the microphone closed, until the phone call ends. Its own
+   *  flag, like pttGated: the pause never writes the user's mute or deafen, so
+   *  both are as they were when the call resumes, and the server is told
+   *  nothing. Written only by features/voice/mobileRoutes.ts; optional for the
+   *  fixture reason above. */
+  readonly phoneCallHold?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
   /** Bumped when the live camera's capture is replaced without the camera
@@ -186,6 +193,7 @@ export function createVoiceState(): VoiceState {
     moderatorDeafened: false,
     mutedBeforeDeafen: false,
     pttGated: false,
+    phoneCallHold: false,
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,

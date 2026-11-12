@@ -702,6 +702,22 @@ export function buildTauriMockScript(opts: {
     // assert side effects with no DOM footprint (pin writes, restart calls).
     window.__invokeLog = [];
 
+    // The Android app's call audio (the plugin behind mobile_audio_*): the
+    // phone's routes and its pause for a phone call. With nothing set the phone
+    // reports no route control. A spec sets the state with
+    // window.__mobileAudioPush(state), which also sends it as the plugin's
+    // "state" event; every state is numbered, as the host numbers them.
+    let __mobileAudio = { supported: false, routes: [], active: "speaker", manual: null, interrupted: false, lost: 0 };
+    let __mobileAudioSeq = 0;
+    let __mobileAudioChannel = null;
+    let __mobileAudioIndex = 0;
+    const __mobileAudioState = () => ({ ...__mobileAudio, seq: ++__mobileAudioSeq });
+    window.__mobileAudioPush = (state) => {
+      __mobileAudio = { ...__mobileAudio, ...state };
+      const cb = __mobileAudioChannel === null ? undefined : window["__tcb_" + __mobileAudioChannel];
+      if (cb) cb({ message: __mobileAudioState(), index: __mobileAudioIndex++ });
+    };
+
     // -----------------------------------------------------------------------
     // HTTP mock state
     // -----------------------------------------------------------------------
@@ -1029,6 +1045,25 @@ export function buildTauriMockScript(opts: {
         if (cmd === "is_metered") return { metered: false };
         if (["plugin:owncord-metered-network|register_listener",
              "plugin:owncord-metered-network|remove_listener"].includes(cmd)) return null;
+        // The Android app's call audio (see __mobileAudio above). A picked route
+        // becomes the one in use; the one the phone would pick itself (a headset
+        // when there is one, else the speaker) and an empty pick count as no
+        // pick, and a call's start and its end forget the pick, as on the host.
+        if (cmd === "plugin:owncord-mobile-audio|register_listener") {
+          __mobileAudioChannel = args?.handler?.id ?? null;
+          __mobileAudioIndex = 0;
+          return null;
+        }
+        if (cmd === "plugin:owncord-mobile-audio|remove_listener") return null;
+        if (cmd === "mobile_audio_set_route" || cmd === "mobile_audio_set_session") {
+          const kinds = __mobileAudio.routes.map((r) => r.kind);
+          const auto = ["wired", "bluetooth"].find((k) => kinds.includes(k)) ?? "speaker";
+          const picked = cmd === "mobile_audio_set_route" && kinds.includes(args?.kind);
+          const kind = picked ? args.kind : auto;
+          __mobileAudio = { ...__mobileAudio, active: kind, manual: kind === auto ? null : kind };
+        }
+        if (["mobile_audio_state", "mobile_audio_set_session", "mobile_audio_set_route"].includes(cmd))
+          return __mobileAudioState();
         if (cmd === "ptt_polling_supported") return false;
         // Windows per-app share audio (6.7): no WASAPI host, no picker switch.
         if (cmd === "app_audio_available") return false;

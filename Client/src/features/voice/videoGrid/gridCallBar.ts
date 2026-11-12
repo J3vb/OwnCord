@@ -10,7 +10,9 @@ import { loadPref, savePref } from "@lib/prefs/preferences";
 import { voiceText } from "../../../i18n/voice";
 import { canPublishScreen, isAndroidApp } from "../native/platform";
 import { openPopoutWindow } from "../popout";
+import { createRouteSlot } from "../routeSlot";
 import { createTalkSlot } from "../talkSlot";
+import { createPausedNote, drawPausedNote } from "./gridPhoneHold";
 import { VIEW_PREFS, type ViewToggle, log, callButton } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
 import type { VideoGridCallbacks } from "./VideoGrid";
@@ -30,9 +32,12 @@ export function createGridCallBar(st: GridState, api: GridApi) {
   const talkSlot = createTalkSlot("call");
   /** The same for a full-screen tile's bar, which covers the call view's. */
   const fullscreenTalkSlot = createTalkSlot("call");
+  /** The call view's sound route button (Android app only). */
+  const routeSlot = createRouteSlot("call");
   st.gridListeners.addCleanup(() => {
     talkSlot.clear();
     fullscreenTalkSlot.clear();
+    routeSlot.clear();
   });
 
   /** `inCallView` is the call view's own bar (not a full-screen tile's): on a
@@ -116,6 +121,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
       );
       views.setAttribute("aria-haspopup", "menu");
       bar.appendChild(views);
+      routeSlot.attach(bar, views);
     }
     const showChat = st.callbacks.onExitGrid;
     if (inCallView && showChat !== undefined) {
@@ -146,6 +152,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     (inCallView ? talkSlot : fullscreenTalkSlot).attach(bar, bar.firstChild, () =>
       bar.classList.add("video-fs-calls--talk"),
     );
+    bar.appendChild(createPausedNote());
     drawCallState(bar);
     return bar;
   }
@@ -153,15 +160,21 @@ export function createGridCallBar(st: GridState, api: GridApi) {
   function drawMuteControl(bar: Element): void {
     const mute = bar.querySelector<HTMLButtonElement>("[data-call-control='mute']");
     if (mute === null) return;
-    mute.setAttribute("aria-pressed", String(st.callState.muted));
-    setIcon(mute, st.callState.muted || st.callState.listenOnly ? "mic-off" : "mic");
-    mute.disabled = st.callState.listenOnly || st.callState.serverMuted === true;
+    const { muted, listenOnly } = st.callState;
+    const serverMuted = st.callState.serverMuted === true;
+    // A phone call holds the call: the mic is closed until it ends.
+    const held = st.callState.phoneHold === true;
+    mute.setAttribute("aria-pressed", String(muted || held));
+    setIcon(mute, muted || listenOnly || held ? "mic-off" : "mic");
+    mute.disabled = listenOnly || serverMuted || held;
     mute.title = voiceText(
-      st.callState.serverMuted === true
-        ? "widget.mutedByModerator"
-        : st.callState.listenOnly
-          ? "widget.control.listenOnly"
-          : "widget.control.mute",
+      held
+        ? "widget.control.phoneCallHold"
+        : serverMuted
+          ? "widget.mutedByModerator"
+          : listenOnly
+            ? "widget.control.listenOnly"
+            : "widget.control.mute",
     );
   }
 
@@ -211,6 +224,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
   }
 
   function drawCallState(bar: Element): void {
+    drawPausedNote(bar, st.callState.phoneHold === true);
     drawMuteControl(bar);
     drawDeafenControl(bar);
     drawCameraControls(bar);
@@ -445,6 +459,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     }
     if (!on && st.callBar !== null) {
       talkSlot.clear();
+      routeSlot.clear();
       st.callBar.remove();
       st.callBar = null;
     }

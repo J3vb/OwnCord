@@ -118,15 +118,16 @@ switch profiles (HFP to A2DP), which is audible in playback. Muting has to stop
 the OS capture rather than only mute the publication, so the profile switch is
 the accepted cost.
 
-| Control state  | Presentation                                                                                                                                                                                                                                                                           |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| mic muted      | Mic-slash icon on self tile + control bar                                                                                                                                                                                                                                              |
-| deafened       | Headphone-slash alone (deafen implies mute, so no mic-slash beside it); a moderator mute or deafen gives it the server-muted class and title                                                                                                                                           |
-| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `features/channels/voiceSidebarRows.ts`, `features/voice/UserBar.ts`                               |
-| listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                                                       |
-| camera on      | Self video tile in the grid                                                                                                                                                                                                                                                            |
-| screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                                                                    |
-| speaking       | Green ring on the speaking user's tile/avatar, and on your own user-panel avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers, held 200 ms after they drop out; a mute or disconnect clears it at once, and leaving a channel clears its rings) |
+| Control state   | Presentation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| mic muted       | Mic-slash icon on self tile + control bar                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| deafened        | Headphone-slash alone (deafen implies mute, so no mic-slash beside it); a moderator mute or deafen gives it the server-muted class and title                                                                                                                                                                                                                                                                                                                                                               |
+| server muted    | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `features/channels/voiceSidebarRows.ts`, `features/voice/UserBar.ts`                                                                                                                                                                                                                                                   |
+| listen-only     | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                                                                                                                                                                                                                                                                           |
+| phone call hold | The Android app, while a phone call holds the phone's audio (`VoiceState.phoneCallHold`, written only by `features/voice/mobileRoutes.ts`): the mic is closed and every mic control is disabled, reads mic-off and is titled "Muted while paused"; the call bar turns amber and reads "Paused for a phone call", and the call view, the DM call and the voice widget say the same. The member's own mute and deafen are not written and nothing is sent, so the call is as it was when the phone call ends |
+| camera on       | Self video tile in the grid                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| screenshare on  | Screen tile; a stop-share affordance always visible                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| speaking        | Green ring on the speaking user's tile/avatar, and on your own user-panel avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers, held 200 ms after they drop out; a mute or disconnect clears it at once, and leaving a channel clears its rings)                                                                                                                                                                                                                     |
 
 **DM call panel on a phone** (`features/direct-messages/DmCallPanel.ts`,
 `styles/app/dm-call.css`): the open call is the call view and takes the chat
@@ -178,6 +179,27 @@ app window; leaving the call closes it. Show chat and the camera picker arrow
 are hidden there and the tile menu has no Profile row (each opens in the app
 window), and starting a share brings the call back first so its picker is in
 view.
+
+**Sound route in the Android app** (`features/voice/routeButton.ts`,
+`features/voice/mobileRoutes.ts`, the `mobileAudio` platform member): a round
+control in the call view's row and in the open DM call shows where the call
+plays (speaker, earpiece, a wired or a Bluetooth headset) and opens a sheet to
+pick another. It shows only where there is a choice: in a call, on Android 12
+or newer, with more than one route, a microphone and no phone call holding the
+call. With no pick the WebView routes the call by itself (a headset when one
+is connected, else the speaker). A pick lasts for the call, and goes when its
+device leaves or a headset is newly connected. Every call starts from no pick,
+also the first one after the app reloaded in the middle of a call. While a
+pick is on, one extra microphone capture stays open, disabled and never sent:
+Android lets an app choose a call's device only while it captures for a call,
+and a mute closes the call's own capture. Android therefore shows the
+microphone as in use while the member is muted, which the sheet says. A pick
+the phone will not keep (that capture cannot open, or Android refuses the
+device) goes back to the phone's own choice, and a toast says so. In the sheet
+the routes are one tab stop: the arrow keys move through them, and Enter,
+Space or a tap picks. The app takes no audio focus, so music and games keep
+playing beside a call; only an answered or dialled phone call pauses it (the
+phone call hold above), and a ringing phone does not.
 
 **The voice channel's chat beside the grid** (guild calls): opening the call
 view selects the voice channel you are in (`pages/main-page/callChat.ts`), so
@@ -607,5 +629,6 @@ never silences message chimes for the rest of the session.
 `src/features/channels/voiceSidebarRows.ts` (voice rows, join freeze on WS reconnect,
 and the E2EE verification badge), `src/features/voice/videoGrid/VideoGrid.ts`,
 `src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,
+`src-tauri/src/mobile_audio.rs` and `MobileAudioPlugin.kt` (the Android app's call audio),
 `src/lib/net/e2eeCrypto.ts`, `src/lib/net/identity.ts`; and the structural map in
 [../voice-e2ee.md](../voice-e2ee.md).

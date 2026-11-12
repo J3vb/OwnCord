@@ -15,6 +15,9 @@ export const mockVoiceState = {
   pttGated: false,
   // The AFK channel is listen-only: no microphone is published there.
   inAfkChannel: false,
+  // A phone call's hold keeps the microphone closed until it ends.
+  phoneCallHold: false,
+  listenOnly: false,
   // OC-0009: the real store's currentChannelId is set by joinVoiceChannel()
   // before the voice_join/voice_token round trip that produces the token a
   // test then hands to handleVoiceToken — default it to the channel id used

@@ -132,9 +132,10 @@ export function startTalkButton(signal: AbortSignal): void {
 
 /** Whether the button can open the mic: in a call, in Push to Talk mode, and
  *  not muted, deafened, listen-only, muted by a moderator or in the AFK
- *  channel (where the gate opening would send nothing). */
+ *  channel (where the gate opening would send nothing). A phone call that
+ *  holds the call takes the button away until it ends. */
 function talkState(state: VoiceState): { shown: boolean; disabled: boolean } {
-  const shown = talkMode() && state.currentChannelId !== null;
+  const shown = talkMode() && state.currentChannelId !== null && state.phoneCallHold !== true;
   const disabled =
     state.localMuted ||
     state.localDeafened ||
@@ -228,6 +229,7 @@ export function createTalkButton(variant: TalkVariant, signal: AbortSignal): HTM
           s.listenOnly,
           s.localServerMuted === true,
           s.inAfkChannel === true,
+          s.phoneCallHold === true,
         ].join("|"),
       paint,
     ),

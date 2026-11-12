@@ -51,6 +51,7 @@ import { createDmCallRefresh } from "./dm-call/dmCallRefresh";
 import { createDmCallRebuild } from "./dm-call/dmCallRebuild";
 import { createDmCallResize } from "./dm-call/dmCallResize";
 import { createDmCallVerify, identitiesOf } from "./dm-call/dmCallVerify";
+import { createRouteSlot } from "../voice/routeSlot";
 import { createTalkSlot } from "../voice/talkSlot";
 
 export { absentMembers, deriveCallView } from "./DmCallViewModel";
@@ -131,6 +132,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     disposable,
     unsubs: [],
     talkSlot: createTalkSlot("bar"),
+    routeSlot: createRouteSlot("dm"),
     incoming: null,
     outgoing: null,
     collapsed: false,
@@ -178,6 +180,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     focusedShield: null,
   };
   disposable.addCleanup(() => st.talkSlot.clear());
+  disposable.addCleanup(() => st.routeSlot.clear());
   const dc = {} as DmCallApi;
   Object.assign(dc, createDmCallRender(st, dc), createDmCallVerify(st, dc), { update });
 

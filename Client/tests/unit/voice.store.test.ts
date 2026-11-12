@@ -12,6 +12,7 @@ import {
   setLocalMuted,
   setLocalDeafened,
   setPttGated,
+  setPhoneCallHold,
   setLocalCamera,
   setLocalScreenshare,
   setListenOnly,
@@ -528,6 +529,35 @@ describe("voice store", () => {
       const before = voiceStore.getState();
       setPttGated(true);
       expect(voiceStore.getState()).toBe(before);
+    });
+  });
+
+  describe("setPhoneCallHold", () => {
+    it("follows the hold on and off, and a fresh store starts with none", () => {
+      resetVoiceStore();
+      expect(voiceStore.getState().phoneCallHold).toBe(false);
+      setPhoneCallHold(true);
+      expect(voiceStore.getState().phoneCallHold).toBe(true);
+      setPhoneCallHold(false);
+      expect(voiceStore.getState().phoneCallHold).toBe(false);
+    });
+
+    it("never writes the user's own mute or deafen, so the call resumes as it was", () => {
+      setLocalMuted(true);
+      setLocalDeafened(true);
+      setPhoneCallHold(true);
+      setPhoneCallHold(false);
+      expect(voiceStore.getState()).toMatchObject({ localMuted: true, localDeafened: true });
+    });
+
+    it("is a no-op (same state reference) when the value hasn't changed", () => {
+      const before = voiceStore.getState();
+      setPhoneCallHold(false);
+      expect(voiceStore.getState()).toBe(before);
+      setPhoneCallHold(true);
+      const held = voiceStore.getState();
+      setPhoneCallHold(true);
+      expect(voiceStore.getState()).toBe(held);
     });
   });
 

@@ -135,6 +135,7 @@ function voiceControlsKey(s: VoiceState): string {
     s.listenOnly,
     s.pttGated === true,
     s.inAfkChannel === true,
+    s.phoneCallHold === true,
   ].join("|");
 }
 

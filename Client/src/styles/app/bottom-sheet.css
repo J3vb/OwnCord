@@ -480,6 +480,76 @@
   font-size: var(--font-size-md);
 }
 
+/* Where a call plays (features/voice/routeButton.ts): the routes as one radio
+   group, the one in use filled green, then why the mic can show as in use. */
+.route-sheet {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px 16px;
+  overflow-y: auto;
+}
+.route-sheet-title {
+  padding: 4px 14px 10px;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.route-sheet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.route-row {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text-normal);
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  text-align: left;
+}
+.route-row:active {
+  background: var(--bg-modifier-active);
+}
+.route-row[aria-checked="true"] {
+  background: var(--success-fill);
+  color: var(--on-fill);
+  font-weight: 600;
+}
+.route-row > svg {
+  flex-shrink: 0;
+}
+.route-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.route-row-detail {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+}
+/* Muted grey would not read on the green fill. */
+.route-row[aria-checked="true"] .route-row-detail {
+  color: inherit;
+}
+.route-sheet-note {
+  margin: 10px 14px 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+
 /* The header search box becomes an icon on a phone, and the panel toggles
    fold into the More button (features/messaging/chatHeaderOverflow.ts). */
 .chat-header .ch-tools .search-btn,

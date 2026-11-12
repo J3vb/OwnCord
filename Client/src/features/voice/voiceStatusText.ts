@@ -31,29 +31,48 @@ export function formatElapsed(ms: number): string {
   return h > 0 ? `${String(h).padStart(2, "0")}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+/** A phone call holds the call you are in (the Android app): the mic is closed
+ *  and the sound silenced until the phone call ends. */
+export function isPhoneCallHold(voice: VoiceState): boolean {
+  return voice.currentChannelId !== null && voice.phoneCallHold === true;
+}
+
+/** A call's status line, which is short: paused while a phone call holds it,
+ *  else the state of its session. */
+export function callStatusText(voice: VoiceState): string {
+  return isPhoneCallHold(voice) ? t("call.paused") : headerStatusText(voice.voiceStatus);
+}
+
 /** What a mic button shows for the voice state, shared by every one of them. */
 export interface MicControlState {
   readonly userMuted: boolean;
   readonly listenOnly: boolean;
   readonly pttGated: boolean;
-  /** The mic reads as off: muted, listen-only or locked in the AFK channel. */
+  /** A phone call holds the call: the mic is closed until it ends. */
+  readonly phoneHold: boolean;
+  /** The mic reads as off: muted, listen-only, locked in the AFK channel or
+   *  held by a phone call. */
   readonly micOff: boolean;
-  /** aria-pressed: the mute the user asked for, or the AFK lock. */
+  /** aria-pressed: the mute the user asked for, the AFK lock or the hold. */
   readonly pressed: boolean;
-  /** A moderator's mute, listen-only and the AFK lock are not ours to lift. */
+  /** A moderator's mute, listen-only, the AFK lock and a phone call's hold
+   *  are not ours to lift. */
   readonly disabled: boolean;
   readonly title: string;
 }
 
-/** The mic button's label: the first state that applies, a moderator's mute
- *  before the AFK lock before listen-only before an idle push-to-talk key. */
+/** The mic button's label: the first state that applies, a phone call's hold
+ *  before a moderator's mute before the AFK lock before listen-only before an
+ *  idle push-to-talk key. */
 function micTitle(
+  phoneHold: boolean,
   serverMuted: boolean,
   afkLocked: boolean,
   listenOnly: boolean,
   pttGated: boolean,
   userMuted: boolean,
 ): string {
+  if (phoneHold) return t("widget.control.phoneCallHold");
   if (serverMuted) return t("widget.mutedByModerator");
   if (afkLocked) return t("widget.control.afkLocked");
   if (listenOnly) return t("widget.control.listenOnly");
@@ -70,19 +89,22 @@ export function micControlState(voice: VoiceState): MicControlState {
   const inCall = voice.currentChannelId !== null;
   const userMuted = isSelfMuted(voice);
   const serverMuted = voice.localServerMuted === true;
+  const phoneHold = isPhoneCallHold(voice);
   // The AFK channel is listen-only for everyone: the mic reads muted and is locked.
   const afkLocked = inCall && voice.inAfkChannel === true;
   const listenOnly = inCall && voice.listenOnly && !serverMuted && !afkLocked;
-  const pttGated = inCall && voice.pttGated === true && !userMuted && !listenOnly && !afkLocked;
-  const title = micTitle(serverMuted, afkLocked, listenOnly, pttGated, userMuted);
+  // Closed whatever the user's own mute says, and not theirs to open.
+  const locked = listenOnly || afkLocked || phoneHold;
+  const pttGated = inCall && voice.pttGated === true && !userMuted && !locked;
   return {
     userMuted,
     listenOnly,
     pttGated,
-    micOff: userMuted || listenOnly || afkLocked,
-    pressed: userMuted || afkLocked,
-    disabled: serverMuted || listenOnly || afkLocked,
-    title,
+    phoneHold,
+    micOff: userMuted || locked,
+    pressed: userMuted || afkLocked || phoneHold,
+    disabled: serverMuted || locked,
+    title: micTitle(phoneHold, serverMuted, afkLocked, listenOnly, pttGated, userMuted),
   };
 }
 
@@ -95,5 +117,6 @@ export function micControlKey(s: VoiceState): string {
     s.listenOnly,
     s.pttGated === true,
     s.inAfkChannel === true,
+    s.phoneCallHold === true,
   ].join("|");
 }

@@ -9,18 +9,21 @@
  * profiles run on Chromium (the iPhone profile's default WebKit is dropped).
  *
  * The call screen on a phone: 44 px controls with Chat and Leave, tap to focus a
- * tile, full screen with Back, and a full-screen ring for a DM call.
+ * tile, full screen with Back, and a full-screen ring for a DM call. In the
+ * Android app a call also has a sound route button (speaker, earpiece, a
+ * headset) and pauses while a phone call holds the phone's audio.
  *
  * The drawer on a phone: the server rail on its left, a search
  * button, the Back button (the Pixel 7 profile has an Android user agent and
  * the Tauri mock, which is the Android app; the iPhone profile is a phone
  * browser) and swipes made with touch pointer events.
  */
-import { devices, type Page } from "@playwright/test";
+import { devices, type Locator, type Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/accessibility";
 import {
   buildTauriMockScript,
+  connectVoiceSession,
   dmChannel,
   emitWsMessage,
   mockTauriFullSessionWithVoice,
@@ -100,6 +103,56 @@ async function noHorizontalScroll(page: Page): Promise<void> {
     return Math.max(el.scrollWidth, document.body.scrollWidth) - el.clientWidth;
   });
   expect(overflow).toBeLessThanOrEqual(0);
+}
+
+/**
+ * What the Android app's call audio reports from here on (the Tauri mock's
+ * plugin): the phone's routes, the one in use, a phone call holding the audio.
+ * A phone browser has no host that listens to it.
+ */
+async function reportCallAudio(page: Page, state: Record<string, unknown>): Promise<void> {
+  await page.evaluate(
+    (s) => (window as unknown as { __mobileAudioPush(s: unknown): void }).__mobileAudioPush(s),
+    state,
+  );
+}
+
+/** The call audio commands the page has sent its host, in order. */
+function callAudioCommands(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    (window as unknown as { __invokeLog: Array<{ cmd: string; args?: unknown }> }).__invokeLog
+      .filter((e) => e.cmd === "mobile_audio_set_session" || e.cmd === "mobile_audio_set_route")
+      .map((e) => `${e.cmd} ${JSON.stringify(e.args)}`),
+  );
+}
+
+/** How far apart the visible round controls of a call's control row sit
+ *  vertically: under a pixel when they share one row. */
+function controlRowSpread(bar: Locator): Promise<number> {
+  return bar.evaluate((el) => {
+    const centres = [...el.querySelectorAll<HTMLElement>("[data-call-control]")]
+      .map((control) => control.getBoundingClientRect())
+      .filter((box) => box.width > 0)
+      .map((box) => box.top + box.height / 2);
+    return Math.max(...centres) - Math.min(...centres);
+  });
+}
+
+/** Join the voice channel on a phone and open its call view. */
+async function joinAndOpenCallView(page: Page): Promise<void> {
+  await mockTauriFullSessionWithVoice(page);
+  await page.goto("/");
+  await navigateToMainPage(page);
+  await page.locator("[data-testid='sidebar-toggle']").tap();
+  await page.locator(".channel-item.voice", { hasText: "Voice Chat" }).tap();
+  await page.getByRole("button", { name: "Join Voice" }).tap();
+  await page.evaluate(() =>
+    (
+      window as unknown as { __owncord: { setVoiceStatus(s: string): void } }
+    ).__owncord.setVoiceStatus("connected"),
+  );
+  await page.locator("[data-testid='phone-call-bar'] [data-testid='pcb-open']").tap();
+  await expect(page.locator("[data-testid='video-grid']")).toBeVisible();
 }
 
 for (const profile of PROFILES) {
@@ -1099,6 +1152,76 @@ for (const profile of PROFILES) {
       await expect(page.locator("[data-testid='phone-call-bar']")).toBeHidden();
       await expect(page.locator("[data-testid='voice-widget']")).not.toBeVisible();
     });
+
+    test("a phone call pauses the call in the Android app, and it comes back by itself", async ({
+      page,
+    }) => {
+      await openDrawerAndTapVoice(page);
+      await page.getByRole("button", { name: "Join Voice" }).tap();
+      await markConnected(page);
+      const bar = page.locator("[data-testid='phone-call-bar']");
+      const detail = bar.locator("[data-testid='pcb-detail']");
+      const hint = bar.locator("[data-testid='pcb-hint']");
+      const mute = bar.locator("[data-testid='pcb-mute']");
+      const running = /^\d+ (person|people) · \d\d:\d\d$/;
+      await expect(bar).toBeVisible();
+      await expect(detail).toHaveText(running);
+      await expect(hint).toBeHidden();
+
+      // A phone call is answered.
+      await reportCallAudio(page, { supported: true, interrupted: true });
+      if (profile.name !== "Pixel 7") {
+        // A phone browser has no host to tell it: nothing pauses.
+        await expect(detail).toHaveText(running);
+        await expect(bar).not.toHaveClass(/phone-call-bar--paused/);
+        await expect(hint).toBeHidden();
+        await expect(mute).toBeEnabled();
+        expect(await callAudioCommands(page)).toEqual([]);
+        return;
+      }
+      await expect(bar).toHaveClass(/phone-call-bar--paused/);
+      await expect(detail).toHaveText(/^Paused for a phone call · \d\d:\d\d$/);
+      await expect(hint).toHaveText("Your mic and sound come back when the phone call ends.");
+      // The mic is closed and not the user's to open; Leave still is.
+      await expect(mute).toBeDisabled();
+      await expect(mute).toHaveAttribute("aria-label", "Muted while paused");
+      await expect(bar.locator("[data-testid='pcb-leave']")).toBeEnabled();
+      // The hint has its own line under the row, inside the bar.
+      const barBox = (await bar.boundingBox())!;
+      const hintBox = (await hint.boundingBox())!;
+      const muteBox = (await mute.boundingBox())!;
+      expect(hintBox.y).toBeGreaterThanOrEqual(muteBox.y + muteBox.height);
+      expect(hintBox.y + hintBox.height).toBeLessThanOrEqual(barBox.y + barBox.height);
+      expect(muteBox.width).toBeGreaterThanOrEqual(44);
+      expect(muteBox.height).toBeGreaterThanOrEqual(44);
+      for (const text of [bar.locator("[data-testid='pcb-name']"), detail, hint]) {
+        expect((await textContrast(text)).ratio).toBeGreaterThanOrEqual(Q1.text);
+      }
+      expect(await findUnnamedControls(bar)).toEqual([]);
+      await noHorizontalScroll(page);
+
+      // The phone call ends: the call is as it was before, with the mic the
+      // user's own again and not muted.
+      await reportCallAudio(page, { interrupted: false });
+      await expect(bar).not.toHaveClass(/phone-call-bar--paused/);
+      await expect(detail).toHaveText(running);
+      await expect(hint).toBeHidden();
+      await expect(mute).toBeEnabled();
+      await expect(mute).toHaveAttribute("aria-pressed", "false");
+      await expect(mute).toHaveAttribute("aria-label", "Mute");
+
+      // The host is told that no call runs when the app starts (it outlives a
+      // reload of the page), then follows the phone's audio from join to leave.
+      await bar.locator("[data-testid='pcb-leave']").tap();
+      await expect(bar).toBeHidden();
+      await expect
+        .poll(() => callAudioCommands(page))
+        .toEqual([
+          'mobile_audio_set_session {"active":false}',
+          'mobile_audio_set_session {"active":true}',
+          'mobile_audio_set_session {"active":false}',
+        ]);
+    });
   });
 }
 
@@ -1114,22 +1237,6 @@ for (const profile of PROFILES) {
     const tile = (page: Page, id: number) =>
       page.locator(`#call-grid-host .video-cell[data-user-id='${id}']`);
 
-    async function joinAndOpenCallView(page: Page): Promise<void> {
-      await mockTauriFullSessionWithVoice(page);
-      await page.goto("/");
-      await navigateToMainPage(page);
-      await page.locator("[data-testid='sidebar-toggle']").tap();
-      await page.locator(".channel-item.voice", { hasText: "Voice Chat" }).tap();
-      await page.getByRole("button", { name: "Join Voice" }).tap();
-      await page.evaluate(() =>
-        (
-          window as unknown as { __owncord: { setVoiceStatus(s: string): void } }
-        ).__owncord.setVoiceStatus("connected"),
-      );
-      await page.locator("[data-testid='phone-call-bar'] [data-testid='pcb-open']").tap();
-      await expect(page.locator("[data-testid='video-grid']")).toBeVisible();
-    }
-
     test("the call view has 44 px controls in one row, and Chat and Leave work", async ({
       page,
     }) => {
@@ -1143,6 +1250,7 @@ for (const profile of PROFILES) {
       }
       // The camera menu is the desktop's way to pick a device: flip is the phone's.
       await expect(bar.locator("[data-call-control='camera-device']")).toBeHidden();
+      expect(await controlRowSpread(bar)).toBeLessThan(1);
       const barBox = (await bar.boundingBox())!;
       const viewport = page.viewportSize()!;
       expect(barBox.x).toBeGreaterThanOrEqual(0);
@@ -1250,6 +1358,267 @@ for (const profile of PROFILES) {
   });
 }
 
+const SPEAKER_AND_EARPIECE = {
+  supported: true,
+  routes: [
+    { kind: "speaker", name: "" },
+    { kind: "earpiece", name: "" },
+  ],
+  active: "speaker",
+};
+/** A Bluetooth headset connected, and the phone moved the call to it. */
+const WITH_HEADSET = {
+  supported: true,
+  routes: [...SPEAKER_AND_EARPIECE.routes, { kind: "bluetooth", name: "WH-1000XM5" }],
+  active: "bluetooth",
+};
+const callControls = (page: Page): Locator =>
+  page.locator("[data-testid='video-grid'] .video-grid__controls");
+const routeButton = (page: Page): Locator =>
+  callControls(page).locator("[data-call-control='route']");
+const routeSheet = (page: Page): Locator => page.locator("[data-testid='route-sheet']");
+const ROUTE_LOST = "Couldn't keep that sound route. Back to automatic.";
+
+test.describe("call audio in the Android app", () => {
+  test.use(pixel7);
+
+  /** The names of the round controls that show, in the row's order. */
+  const shownControls = (page: Page): Promise<string[]> =>
+    callControls(page).evaluate((el) =>
+      [...el.querySelectorAll<HTMLElement>("[data-call-control]")]
+        .filter((control) => control.getBoundingClientRect().width > 0)
+        .map((control) => control.dataset.callControl ?? ""),
+    );
+
+  async function controlsStayOnScreen(page: Page): Promise<void> {
+    const bar = (await callControls(page).boundingBox())!;
+    const viewport = page.viewportSize()!;
+    expect(bar.x).toBeGreaterThanOrEqual(0);
+    expect(bar.x + bar.width).toBeLessThanOrEqual(viewport.width);
+    expect(bar.y + bar.height).toBeLessThanOrEqual(viewport.height);
+    await noHorizontalScroll(page);
+  }
+
+  test("a route button says where the call plays, once there is a choice", async ({ page }) => {
+    await joinAndOpenCallView(page);
+    const route = routeButton(page);
+    // In the row from the start, hidden until the phone reports a choice.
+    await expect(route).toHaveCount(1);
+    await expect(route).toBeHidden();
+    await reportCallAudio(page, {
+      ...SPEAKER_AND_EARPIECE,
+      routes: [{ kind: "speaker", name: "" }],
+    });
+    await expect(route).toBeHidden();
+
+    await reportCallAudio(page, SPEAKER_AND_EARPIECE);
+    await expect(route).toBeVisible();
+    await expect(route).toHaveAttribute("aria-label", "Sound output: Speaker");
+    const box = (await route.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    const shown = await shownControls(page);
+    expect(shown.indexOf("route")).toBe(shown.indexOf("views") - 1);
+    expect(await controlRowSpread(callControls(page))).toBeLessThan(1);
+    await controlsStayOnScreen(page);
+    expect(await findUnnamedControls(callControls(page))).toEqual([]);
+    await page.keyboard.press("Shift");
+    await route.focus();
+    expect((await focusIndicator(page)).problems).toEqual([]);
+
+    // A headset connects and the phone moves the call to it.
+    await reportCallAudio(page, WITH_HEADSET);
+    await expect(route).toHaveAttribute("aria-label", "Sound output: Bluetooth headset");
+  });
+
+  test("the route sheet lists the phone's routes, and a pick reaches the phone", async ({
+    page,
+  }) => {
+    // A picked route holds one microphone capture open; the test browser has
+    // no microphone to give.
+    await page.addInitScript(() => {
+      navigator.mediaDevices.getUserMedia = () =>
+        Promise.resolve(new AudioContext().createMediaStreamDestination().stream);
+    });
+    await joinAndOpenCallView(page);
+    await reportCallAudio(page, WITH_HEADSET);
+    const route = routeButton(page);
+    await route.tap();
+    const sheet = routeSheet(page);
+    await expect(sheet).toBeVisible();
+    await expect(route).toHaveAttribute("aria-expanded", "true");
+
+    const rows = sheet.getByRole("radio");
+    await expect(rows).toHaveCount(3);
+    await expect(sheet.getByRole("radio", { checked: true })).toHaveCount(1);
+    const headset = sheet.locator("[data-testid='route-bluetooth']");
+    await expect(headset).toHaveAttribute("aria-checked", "true");
+    await expect(headset).toBeFocused();
+    // A headset goes by its own name, with what it is underneath.
+    await expect(headset.locator(".route-row-label")).toHaveText("WH-1000XM5");
+    await expect(headset.locator(".route-row-detail")).toHaveText("Bluetooth headset");
+    await expect(sheet.locator("[data-testid='route-speaker']")).toHaveText("Speaker");
+    const earpiece = sheet.locator("[data-testid='route-earpiece']");
+    await expect(earpiece).toHaveText("Earpiece");
+    for (const row of await rows.all()) {
+      expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    }
+    for (const text of [
+      headset.locator(".route-row-label"),
+      headset.locator(".route-row-detail"),
+      earpiece.locator(".route-row-label"),
+      sheet.locator(".route-sheet-title"),
+      sheet.locator(".route-sheet-note"),
+    ]) {
+      expect((await textContrast(text)).ratio).toBeGreaterThanOrEqual(Q1.text);
+    }
+    expect(await findUnnamedControls(sheet)).toEqual([]);
+    await noHorizontalScroll(page);
+
+    await earpiece.tap();
+    await expect(sheet).toHaveCount(0);
+    await expect(route).toHaveAttribute("aria-expanded", "false");
+    await expect(route).toHaveAttribute("aria-label", "Sound output: Earpiece");
+    expect(await callAudioCommands(page)).toEqual([
+      'mobile_audio_set_session {"active":false}',
+      'mobile_audio_set_session {"active":true}',
+      'mobile_audio_set_route {"kind":"earpiece"}',
+    ]);
+
+    // The pick held: the sheet shows it as the route in use, and Back closes
+    // the sheet with the call view still up.
+    await route.tap();
+    await expect(routeSheet(page).locator("[data-testid='route-earpiece']")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await page.goBack();
+    await expect(routeSheet(page)).toHaveCount(0);
+    await expect(callControls(page)).toBeVisible();
+    await expect(page.locator("[data-testid='toast']")).toHaveCount(0);
+
+    // Android will not keep the earpiece and the phone gives the pick up: the
+    // app says so, and shows the phone's own choice again.
+    await reportCallAudio(page, { ...WITH_HEADSET, manual: null, lost: 1 });
+    await expect(page.locator("[data-testid='toast']", { hasText: ROUTE_LOST })).toBeVisible();
+    await expect(route).toHaveAttribute("aria-label", "Sound output: Bluetooth headset");
+  });
+
+  test("a pick the phone cannot keep goes back to automatic and says so", async ({ page }) => {
+    await page.addInitScript(() => {
+      navigator.mediaDevices.getUserMedia = () =>
+        Promise.reject(new DOMException("no microphone", "NotFoundError"));
+    });
+    await joinAndOpenCallView(page);
+    await reportCallAudio(page, SPEAKER_AND_EARPIECE);
+    const route = routeButton(page);
+    await route.tap();
+    await routeSheet(page).locator("[data-testid='route-earpiece']").tap();
+
+    await expect(page.locator("[data-testid='toast']", { hasText: ROUTE_LOST })).toBeVisible();
+    await expect(route).toHaveAttribute("aria-label", "Sound output: Speaker");
+    await expect
+      .poll(() => callAudioCommands(page))
+      .toEqual([
+        'mobile_audio_set_session {"active":false}',
+        'mobile_audio_set_session {"active":true}',
+        'mobile_audio_set_route {"kind":"earpiece"}',
+        'mobile_audio_set_route {"kind":""}',
+      ]);
+  });
+
+  test("eight controls keep one row on a 360 px wide phone", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 780 });
+    // The Android WebView, unlike this browser, has no screen capture to offer.
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator.mediaDevices, "getDisplayMedia", { value: undefined });
+    });
+    await joinAndOpenCallView(page);
+    await reportCallAudio(page, SPEAKER_AND_EARPIECE);
+    await expect(routeButton(page)).toBeVisible();
+    // A camera that is on brings the flip button. The mocked call has no
+    // camera to turn on, so the button is shown the way the app would show it.
+    await page.addStyleTag({
+      content: "[data-call-control='camera-flip'][hidden] { display: inline-flex !important; }",
+    });
+    expect(await shownControls(page)).toEqual([
+      "mute",
+      "deafen",
+      "camera",
+      "camera-flip",
+      "route",
+      "views",
+      "chat",
+      "leave",
+    ]);
+
+    expect(await controlRowSpread(callControls(page))).toBeLessThan(1);
+    await controlsStayOnScreen(page);
+    const boxes = await callControls(page).evaluate((el) =>
+      [...el.querySelectorAll<HTMLElement>("[data-call-control]")]
+        .map((control) => control.getBoundingClientRect())
+        .filter((box) => box.width > 0)
+        .map((box) => ({ left: box.left, right: box.right, height: box.height })),
+    );
+    for (const [i, box] of boxes.entries()) {
+      // Smaller than on a wider phone, and still a thumb's target apart.
+      expect(box.right - box.left, `control ${i}`).toBeGreaterThanOrEqual(36);
+      expect(box.height, `control ${i}`).toBeGreaterThanOrEqual(36);
+      if (i > 0) expect(box.left, `control ${i}`).toBeGreaterThanOrEqual(boxes[i - 1]!.right);
+    }
+  });
+
+  test("a phone call pauses the call view and closes the route sheet", async ({ page }) => {
+    await joinAndOpenCallView(page);
+    await reportCallAudio(page, SPEAKER_AND_EARPIECE);
+    const bar = callControls(page);
+    const route = routeButton(page);
+    const note = bar.locator(".video-fs-paused");
+    const mute = bar.locator("[data-call-control='mute']");
+    await expect(note).toBeHidden();
+    await route.tap();
+    await expect(routeSheet(page)).toBeVisible();
+
+    // A phone call is answered.
+    await reportCallAudio(page, { interrupted: true });
+    await expect(routeSheet(page)).toHaveCount(0);
+    await expect(route).toBeHidden();
+    await expect(note).toBeVisible();
+    await expect(note).toHaveText("Paused for a phone call");
+    expect((await textContrast(note)).ratio).toBeGreaterThanOrEqual(Q1.text);
+    await expect(mute).toBeDisabled();
+    await expect(mute).toHaveAttribute("title", "Muted while paused");
+    await expect(bar.locator("[data-call-control='leave']")).toBeEnabled();
+    // The note has its own line above the controls, which keep their row.
+    const noteBox = (await note.boundingBox())!;
+    const muteBox = (await mute.boundingBox())!;
+    expect(noteBox.y + noteBox.height).toBeLessThanOrEqual(muteBox.y);
+    expect(await controlRowSpread(bar)).toBeLessThan(1);
+    await controlsStayOnScreen(page);
+
+    // The phone call ends.
+    await reportCallAudio(page, { interrupted: false });
+    await expect(note).toBeHidden();
+    await expect(mute).toBeEnabled();
+    await expect(mute).toHaveAttribute("aria-pressed", "false");
+    await expect(route).toBeVisible();
+  });
+});
+
+test.describe("call audio in a phone browser", () => {
+  test.use(iphone14);
+
+  test("there is no route button and no pause: a browser has no host to ask", async ({ page }) => {
+    await joinAndOpenCallView(page);
+    await reportCallAudio(page, { ...WITH_HEADSET, interrupted: true });
+    await expect(callControls(page).locator("[data-call-control='leave']")).toBeVisible();
+    await expect(routeButton(page)).toHaveCount(0);
+    await expect(callControls(page).locator(".video-fs-paused")).toBeHidden();
+    await expect(callControls(page).locator("[data-call-control='mute']")).toBeEnabled();
+    expect(await callAudioCommands(page)).toEqual([]);
+  });
+});
+
 const RING_DM = 100;
 const RING_MEMBERS = [
   { id: 1, username: "testuser", avatar: "", status: "online", role: "admin" },
@@ -1273,6 +1642,26 @@ const RING_DM_CHANNELS = [
   },
 ];
 
+/** Signed in with one DM (Otto), and a voice join that gets its token. */
+async function signInWithDm(page: Page): Promise<void> {
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        ...BASE_SESSION_ROUTES,
+        { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
+        { pattern: "GET /api/v1/dms", status: 200, body: { dm_channels: RING_DM_CHANNELS } },
+      ],
+      simulateWsFlow: true,
+      wsHandlers: voiceJoinWithTokenHandlers(),
+      readyOverrides: { members: RING_MEMBERS, dm_channels: RING_DM_CHANNELS },
+    }),
+  );
+  await parkLiveKitSocket(page);
+  await page.goto("/");
+  await navigateToMainPage(page);
+  await waitForWsReady(page);
+}
+
 for (const profile of PROFILES) {
   test.describe(`mobile ring screen, ${profile.name}`, () => {
     test.use(profile.use);
@@ -1283,22 +1672,7 @@ for (const profile of PROFILES) {
       profile.name === "Pixel 7" ? { width: 915, height: 412 } : { width: 844, height: 390 };
 
     async function boot(page: Page): Promise<void> {
-      await page.addInitScript(
-        buildTauriMockScript({
-          httpRoutes: [
-            ...BASE_SESSION_ROUTES,
-            { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
-            { pattern: "GET /api/v1/dms", status: 200, body: { dm_channels: RING_DM_CHANNELS } },
-          ],
-          simulateWsFlow: true,
-          wsHandlers: voiceJoinWithTokenHandlers(),
-          readyOverrides: { members: RING_MEMBERS, dm_channels: RING_DM_CHANNELS },
-        }),
-      );
-      await parkLiveKitSocket(page);
-      await page.goto("/");
-      await navigateToMainPage(page);
-      await waitForWsReady(page);
+      await signInWithDm(page);
       await expect(banner(page)).toBeAttached();
     }
 
@@ -1474,3 +1848,79 @@ for (const profile of PROFILES) {
     });
   });
 }
+
+test.describe("a DM call's audio in the Android app", () => {
+  // The narrowest phone the layout is made for.
+  test.use({ ...pixel7, viewport: { width: 360, height: 780 } });
+
+  test("the call panel has the route button on its one row, and a phone call pauses it", async ({
+    page,
+  }) => {
+    await signInWithDm(page);
+    await page.locator("[data-testid='sidebar-toggle']").tap();
+    await page.locator("[data-testid='server-rail-home']").tap();
+    await page.locator(".dm-conversation-list .dm-item").first().tap();
+    await page.locator("[data-testid='call-btn']").tap();
+    await connectVoiceSession(page);
+    await emitWsMessage(page, {
+      type: "voice_state",
+      payload: {
+        user_id: 2,
+        channel_id: RING_DM,
+        username: "otheruser",
+        muted: false,
+        deafened: false,
+        speaking: false,
+        camera: false,
+        screenshare: false,
+      },
+    });
+    const panel = page.locator("[data-testid='dm-call-panel']");
+    await expect(panel).toHaveAttribute("data-state", "connected");
+    const route = panel.locator("[data-testid='route-button-dm']");
+    const mute = panel.locator("[data-testid='dcp-mute']");
+    const collapse = panel.locator("[data-testid='dcp-collapse']");
+    const status = panel.locator(".dcp-status");
+    await expect(route).toHaveCount(1);
+    await expect(route).toBeHidden();
+
+    await reportCallAudio(page, SPEAKER_AND_EARPIECE);
+    await expect(route).toBeVisible();
+    await expect(route).toHaveAttribute("aria-label", "Sound output: Speaker");
+    // One row with Leave on it, every control a full touch target.
+    const boxes = await panel.locator(".dcp-controls").evaluate((el) =>
+      [...el.querySelectorAll("button")]
+        .map((button) => button.getBoundingClientRect())
+        .filter((box) => box.width > 0)
+        .map((box) => ({ centre: box.top + box.height / 2, width: box.width, right: box.right })),
+    );
+    const centres = boxes.map((box) => box.centre);
+    expect(Math.max(...centres) - Math.min(...centres)).toBeLessThan(1);
+    for (const box of boxes) {
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.right).toBeLessThanOrEqual(360);
+    }
+    expect(await panel.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+    expect(await findUnnamedControls(panel)).toEqual([]);
+
+    // Collapsed, the panel keeps Mute and Leave; the route is one tap away.
+    await collapse.tap();
+    await expect(mute).toBeVisible();
+    await expect(route).toBeHidden();
+    await collapse.tap();
+    await expect(route).toBeVisible();
+
+    // A phone call is answered, then ends.
+    await reportCallAudio(page, { interrupted: true });
+    await expect(status).toHaveText("Call paused");
+    await expect(status).toHaveClass(/dcp-status--warn/);
+    expect((await textContrast(status)).ratio).toBeGreaterThanOrEqual(Q1.text);
+    await expect(mute).toBeDisabled();
+    await expect(mute).toHaveAttribute("title", "Muted while paused");
+    await expect(route).toBeHidden();
+    await reportCallAudio(page, { interrupted: false });
+    await expect(status).not.toHaveClass(/dcp-status--warn/);
+    await expect(mute).toBeEnabled();
+    await expect(route).toBeVisible();
+  });
+});
