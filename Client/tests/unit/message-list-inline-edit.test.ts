@@ -634,6 +634,7 @@ describe("inline message editor", () => {
   });
 
   it("a reply without referencedMessage reads 'deleted', not unknown, once its loaded parent is deleted live", () => {
+    options = { ...options, onJumpToMessage: vi.fn() };
     mount([mine(1), mine(2, { replyTo: 1, referencedMessage: undefined })]);
     expect(row(2)!.querySelector(".msg-reply-ref[role='button']")).not.toBeNull();
 

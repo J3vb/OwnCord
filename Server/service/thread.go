@@ -248,9 +248,9 @@ func (s *ThreadService) threadActor(ctx context.Context, ts ThreadStore, userID,
 	if info == nil {
 		return nil, false, false, fmt.Errorf("%w: thread not found", ErrNotFound)
 	}
-	ch, err := s.st.GetChannel(ctx, threadID)
-	if err != nil || ch == nil {
-		return nil, false, false, fmt.Errorf("%w: thread not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, s.st, threadID)
+	if err != nil {
+		return nil, false, false, err
 	}
 	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, false)
 	if err != nil {
@@ -326,9 +326,9 @@ func (s *ThreadService) postTags(ctx context.Context, cur *db.ThreadInfo, ids []
 	if cur.Post == nil {
 		return nil, fmt.Errorf("%w: only forum posts take tags", ErrBadRequest)
 	}
-	forum, err := s.st.GetChannel(ctx, cur.ParentID)
-	if err != nil || forum == nil {
-		return nil, fmt.Errorf("%w: thread not found", ErrNotFound)
+	forum, err := lookupChannel(ctx, s.st, cur.ParentID)
+	if err != nil {
+		return nil, err
 	}
 	return cleanPostTags(forum, ids)
 }

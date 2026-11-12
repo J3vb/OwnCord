@@ -130,7 +130,11 @@ func (s *MessageService) forwardSource(ctx context.Context, p ForwardParams) (*f
 	if ch == nil {
 		return nil, notFound
 	}
-	if err := permissions.CanReadContent(readSubject(ctx, s.st, s.perms, p.UserID, ch)); err != nil {
+	sub, subErr := readSubject(ctx, s.st, s.perms, p.UserID, ch)
+	if subErr != nil {
+		return nil, subErr
+	}
+	if err := permissions.CanReadContent(sub); err != nil {
 		return nil, notFound
 	}
 	// A poll cannot be forwarded: a copy would carry only the fallback text and drop the
@@ -261,7 +265,11 @@ func (s *MessageService) forwardStillReadable(ctx context.Context, userID, chann
 	if ch == nil {
 		return fmt.Errorf("%w: message not found", ErrNotFound)
 	}
-	if err := permissions.CanReadContent(readSubject(ctx, s.st, s.perms, userID, ch)); err != nil {
+	sub, subErr := readSubject(ctx, s.st, s.perms, userID, ch)
+	if subErr != nil {
+		return subErr
+	}
+	if err := permissions.CanReadContent(sub); err != nil {
 		return fmt.Errorf("%w: message not found", ErrNotFound)
 	}
 	return nil

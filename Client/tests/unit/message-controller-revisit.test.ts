@@ -58,8 +58,12 @@ function rows(from: number, to: number): MessageResponse[] {
 /** The server's history, oldest-first; GET /messages semantics, limit clamped to 100. */
 let server: MessageResponse[] = [];
 const getMessages = vi.fn(
-  async (_channelId: number, opts?: { before?: number; limit?: number }) => {
+  async (_channelId: number, opts?: { before?: number; after?: number; limit?: number }) => {
     const limit = Math.min(opts?.limit ?? 50, 100);
+    if (opts?.after !== undefined) {
+      const following = server.filter((m) => m.id > opts.after!);
+      return { messages: following.slice(0, limit), has_more: following.length > limit };
+    }
     const before = opts?.before ?? 0;
     const eligible = server.filter((m) => before === 0 || m.id < before);
     return {
@@ -290,7 +294,10 @@ describe("revisit keeps and revalidates older loaded history", () => {
 
     await controller().loadMessages(CH, new AbortController().signal);
 
-    expect(limitAsked()).toBe(50);
+    // The first request is the page itself; the re-attach then asks what follows it.
+    expect(getMessages).toHaveBeenCalledTimes(2);
+    expect(getMessages.mock.calls[0]?.[1]?.limit).toBe(50);
+    expect(getMessages.mock.calls[1]?.[1]?.after).toBe(ids().at(-1));
     expect(ids()[0]).toBe(151);
   });
 

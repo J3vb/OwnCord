@@ -17,11 +17,14 @@ func (s *messageReads) requireChannelRead(ctx context.Context, userID, channelID
 	if channelID <= 0 {
 		return fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, s.st, channelID)
+	if err != nil {
+		return err
 	}
-	sub := readSubject(ctx, s.st, s.perms, userID, ch)
+	sub, err := readSubject(ctx, s.st, s.perms, userID, ch)
+	if err != nil {
+		return err
+	}
 	return readContentDenial(permissions.CanReadContent(sub))
 }
 
@@ -85,9 +88,9 @@ func (s *messageReads) GetMessagesAfter(ctx context.Context, userID, channelID, 
 // requireSearchChannelAccess is SearchMessages' single-channel gate. Search keeps its own error codes (a DM
 // non-participant is ErrForbidden here), so the NSFW check is repeated or search becomes a leak path.
 func (s *messageReads) requireSearchChannelAccess(ctx context.Context, userID, channelID int64) error {
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, s.st, channelID)
+	if err != nil {
+		return err
 	}
 	switch {
 	case ch.Type == "dm":

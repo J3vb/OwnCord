@@ -16,6 +16,7 @@ import { uiStore, setSidebarMode, setActiveDmUser } from "@stores/ui.store";
 import { dmStore, addDmToChannelsStore } from "@stores/dm.store";
 import { navigateToChannel } from "@lib/nav/channelNavigation";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
+import { requestOpenThread } from "../../features/threads/threadNavigation";
 import { shellText } from "../../i18n/shell";
 import { dialogOpen } from "@lib/ui/dialogOpen";
 import { holdTypeAhead } from "@lib/ui/typeAhead";
@@ -298,6 +299,12 @@ export function createSearchOverlayController(opts: {
         }
       },
       onSelectResult: (result) => {
+        // A thread or forum post is no channel of the sidebar: its panel opens
+        // beside the parent instead of a channel jump.
+        if (result.thread_parent_id !== undefined && result.thread_parent_id > 0) {
+          requestOpenThread(result.channel_id, result.thread_parent_id);
+          return;
+        }
         if (opts.onJumpToMessage === undefined) {
           setActiveChannel(result.channel_id);
           return;

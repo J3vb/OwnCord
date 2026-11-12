@@ -90,6 +90,7 @@ export function createInputDraft(st: InputState, api: InputApi) {
         file: handle.file,
       };
       if (handle.refreshing !== null) pending.uploadedAt = handle.refreshing.uploadedAt;
+      if (handle.draftText !== undefined) pending.draftText = handle.draftText;
       st.pendingAttachments.push(pending);
       void api.followUpload(pending, handle);
     }

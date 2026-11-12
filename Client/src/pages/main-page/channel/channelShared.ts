@@ -16,9 +16,7 @@ import { messagingText } from "../../../i18n/messaging";
 
 export const log = createLogger("channel-ctrl");
 
-/** Longer than ws.ts's 60 s server-silence deadline, so a half-open socket is
- *  declared dead (and the entry failed) before the entry can expire. */
-export const TRACKED_ACTION_EXPIRY_MS = 90_000;
+export type { TrackedEdit } from "../../../features/messaging/trackedActions";
 
 /** How long typing must pause before the draft is written to storage. */
 export const DRAFT_SAVE_DELAY_MS = 750;
@@ -112,10 +110,4 @@ export function renderDeletePreview(msg: Message): HTMLElement {
 export function abortQueued(entry: QueuedSend): void {
   entry.cancelled = true;
   for (const item of entry.items) item.upload?.owner.destroy();
-}
-
-export interface TrackedEdit {
-  readonly channelId: number;
-  readonly messageId: number;
-  readonly content: string;
 }
