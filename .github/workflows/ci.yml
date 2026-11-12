@@ -896,6 +896,11 @@ jobs:
       - name: Self-test the release status gate
         run: node --test scripts/release/verify-release-status.test.mjs
 
+      # The release-notes gate in release.yml, on fixtures and on the real
+      # CHANGELOG.md's Unreleased list, for the same reason.
+      - name: Self-test the release notes gate
+        run: node --test scripts/release/verify-release-notes.test.mjs
+
       - name: Self-test the Claude Code Bash hook
         run: node --test scripts/claude-hook.test.mjs
 

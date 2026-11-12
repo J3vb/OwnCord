@@ -44,7 +44,20 @@ release notes say so.
    - internal, CI and test-only changes in a short **Under the hood** list at
      the end.
 
-   The "How to write an entry" rules in `CHANGELOG.md` still apply. One early
+   **Known issues is required.** Every release after 2.9.0, fix-only patches
+   included, lists at least one bullet under `### Known issues`;
+   `release.yml`'s `release-status` job refuses the tag otherwise
+   (`scripts/release/verify-release-notes.mjs`). The running list lives under
+   `## Unreleased`, and a test keeps it there. Before you rename Unreleased:
+   - check each line is still true (open ledger entries, the Linux crash, what
+     the hands-on checks did not cover) and drop what a merged fix closed;
+   - carry the list into the new section, and copy it back under the fresh
+     `## Unreleased`;
+   - for a patch release cut from `main`, copy the list from `dev`'s
+     Unreleased into the release section on the release branch.
+
+   The section template is under "Release section template" in
+   `CHANGELOG.md`. The "How to write an entry" rules there still apply. One early
    beta's release page had to be rewritten after publishing because its
    section was internal prose. This step stops that from happening again.
 

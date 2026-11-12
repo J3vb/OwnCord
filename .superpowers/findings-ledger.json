@@ -1,5 +1,5 @@
 {
-  "nextId": 595,
+  "nextId": 598,
   "findings": [
     {
       "id": "OC-0001",
@@ -13731,6 +13731,60 @@
       "lens": "correctness",
       "finder": "nightly-bughunt",
       "fixedDate": "2026-11-12"
+    },
+    {
+      "id": "OC-0595",
+      "title": "A revisit's tail refetch that keeps an older page trims the rows the reader is looking at when the window passes the 500-row cap",
+      "file": "Client/src/pages/main-page/MessageController.ts",
+      "line": 97,
+      "severity": "low",
+      "why": "installTail calls setMessages with splice but no anchorId. When the kept older rows plus the fetched range pass MAX_MESSAGES_PER_CHANNEL, capMerged has no anchor to protect, so it trims the oldest rows, which is where a reader who scrolled up during the refetch is reading. The full-ready resync already passes readingAnchor for this case and keeps the head instead.",
+      "repro": "Open a busy channel with more than 400 cached rows, switch away while new messages arrive, switch back and scroll to the top while the revisit refetch is in flight so an older page lands: when the refetch installs, the rows at the top are cut and the view jumps.",
+      "evidence": "MessageController.ts installTail: setMessages(channelId, messages, hasMore, splice) with no anchor; historyWindows.ts capMerged keeps the head only when anchorId is in the overflow; readyResync.ts passes readingAnchor(activeAfterReady).",
+      "suggestedFix": "Pass readingAnchor(channelId) from installTail when splice is true, as readyResync does, and add a unit test at the cap.",
+      "confidence": "high",
+      "status": "open",
+      "found": "2026-11-12",
+      "hunt": "release-review-2.9.0",
+      "lens": "client-state",
+      "finder": "claude",
+      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
+    },
+    {
+      "id": "OC-0596",
+      "title": "Older rows kept above a spliced refetch are the cached copies, so an edit, delete or reaction made while away does not show on them until the next visit",
+      "file": "Client/src/features/messaging/historyWindows.ts",
+      "line": 116,
+      "severity": "low",
+      "why": "olderThanPage keeps the previous store rows older than the fetched page as they are. Nothing refetched them, so a change made to those rows while the reader was away or offline stays invisible until the channel is refetched again. setMessages documents this as a caveat; it is still a visible staleness.",
+      "repro": "Load a long channel and scroll up so older rows are loaded, go offline (or switch away), have another user edit or delete one of those older rows, come back so a spliced refetch runs: the old text (or the deleted row) is still shown above the fresh page.",
+      "evidence": "historyWindows.ts olderThanPage returns previous.filter(sent && id < minSnapshotId); messages.store.ts setMessages doc: 'They may still show an edit, delete or reaction missed while offline until the next visit refetches them.'",
+      "suggestedFix": "After the splice installs, revalidate the kept rows off the paint path (one around/before fetch over their id range), or drop kept rows older than what the refetch can reach.",
+      "confidence": "high",
+      "status": "open",
+      "found": "2026-11-12",
+      "hunt": "release-review-2.9.0",
+      "lens": "client-state",
+      "finder": "claude",
+      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
+    },
+    {
+      "id": "OC-0597",
+      "title": "A full-ready resync that lands during a revisit's tail refetch can still drop an older page the reader loaded meanwhile",
+      "file": "Client/src/features/messaging/readyResync.ts",
+      "line": 68,
+      "severity": "low",
+      "why": "The older-page fix (#3353) covers a revisit refetch racing an older page. A full-ready resync that starts while that refetch is in flight resets the loading watermark and refetches its own 50-row page; reported in review as still able to drop the older page, so the reader's rows move. Exact interleaving not yet reproduced.",
+      "repro": "Not yet reproduced. Suspected: revisit a channel, scroll up so an older page loads while the tail refetch is in flight, and force a reconnect that ends in a full ready at the same moment.",
+      "evidence": "Review note on #3353 (2.9.0 release prep, 2026-11-12). readyResync.ts calls setChannelLoading and invalidateLoadedMessageWindows before its own refetch; MessageController.installTail is skipped once that refetch marks the channel loaded.",
+      "suggestedFix": "Write a unit test that interleaves the resync refetch with a pending revisit tail and an older page; if it drops rows, carry the older page through the resync splice the same way installTail does.",
+      "confidence": "medium",
+      "status": "open",
+      "found": "2026-11-12",
+      "hunt": "release-review-2.9.0",
+      "lens": "client-state",
+      "finder": "claude",
+      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
     }
   ]
 }
