@@ -109,10 +109,19 @@ function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal)
 // Main tab builder
 // ---------------------------------------------------------------------------
 
+/** Tell the overlay whether a recovery secret is on screen in `section`. */
+function reportSecretCheck(
+  section: HTMLElement,
+  onSecretCheck: ((isShowing: () => boolean) => void) | undefined,
+): void {
+  onSecretCheck?.(() => section.querySelector("[data-secret-showing]") !== null);
+}
+
 export function buildAccountTab(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
   onDirtyCheck?: (isDirty: () => boolean) => void,
+  onSecretCheck?: (isShowing: () => boolean) => void,
 ): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const user = authStore.getState().user;
@@ -301,6 +310,9 @@ export function buildAccountTab(
       typed !== (authStore.getState().user?.username ?? "")
     );
   });
+
+  // A recovery kit or code set on screen is shown once; closing wipes it.
+  reportSecretCheck(section, onSecretCheck);
 
   // Security state first, then status, retention and the danger zone.
   section.appendChild(buildSecurityCard(options, signal));

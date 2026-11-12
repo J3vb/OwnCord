@@ -859,6 +859,8 @@ describe("TOTP Settings", () => {
               container.querySelectorAll(".settings-sidebar > button.settings-nav-item"),
             ).find((b) => b.textContent === "Appearance") as HTMLElement
           ).click();
+          // Leaving with a secret on screen asks first; the wipe follows Discard.
+          byTestId<HTMLElement>("unsaved-discard").click();
         }
         expect(container.innerHTML).not.toContain(SECRET);
         expect(container.innerHTML).not.toContain("ZZZZZ-YYYYY");

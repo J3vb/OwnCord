@@ -32,6 +32,10 @@ export const settingsShellEntries = {
   "unsaved.body": "Your profile changes have not been saved. Discard them?",
   "unsaved.discard": "Discard",
   "unsaved.keep": "Keep editing",
+  "unsaved.themeBody": "Your custom theme has not been saved. Discard it?",
+  "unsaved.secretBody":
+    "The recovery secret on screen is shown only once and cannot be shown again. Close without saving it?",
+  "unsaved.keepSecret": "Go back",
   "shell.esc": "ESC",
   "shell.back": "Back to settings",
   "search.label": "Search settings",

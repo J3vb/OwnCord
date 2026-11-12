@@ -368,7 +368,10 @@ describe("SettingsOverlay", () => {
       pending.resolve(result);
       await vi.waitFor(() => expect(container.textContent).toMatch(/KIT-SECRET|CODE-ONE/));
 
+      // Once shown, the secret is the one copy: closing asks first.
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(defaultOptions.onClose).not.toHaveBeenCalled();
+      byId("unsaved-discard").click();
       expect(defaultOptions.onClose).toHaveBeenCalled();
       overlay.destroy?.();
     });

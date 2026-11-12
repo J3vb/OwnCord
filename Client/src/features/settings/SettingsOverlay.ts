@@ -97,7 +97,7 @@ export function createSettingsOverlay(
   const TAB_BUILDERS = createTabBuilders({
     options,
     holdOpen,
-    setDirtyCheck: (isDirty) => unsaved.setDirtyCheck(isDirty),
+    setDirtyCheck: (isDirty, topic) => unsaved.setDirtyCheck(isDirty, topic),
     buildVoiceTab: (signal) => voiceTab.build(signal),
     buildLogsTab: (signal) => logsTab.build(signal),
     markSearchHits: () => markSearchHits(),
