@@ -46,7 +46,7 @@ export async function recoverRefusedTail(
   api: Pick<ApiClient, "getMessages">,
   channelId: number,
   after: number,
-  signal: AbortSignal,
+  signal?: AbortSignal,
   reload?: () => Promise<void>,
 ): Promise<void> {
   // An empty window has no cursor, and the server refuses after=0.
@@ -54,7 +54,7 @@ export async function recoverRefusedTail(
   try {
     await withLoadJournal(channelId, async () => {
       const tail = await api.getMessages(channelId, { after, limit: RECOVERY_PAGE_SIZE }, signal);
-      if (signal.aborted) throw new DOMException("aborted", "AbortError");
+      if (signal?.aborted === true) throw new DOMException("aborted", "AbortError");
       if (tail.has_more) {
         invalidateChannelMessageWindow(channelId);
         await reload?.();
@@ -64,7 +64,7 @@ export async function recoverRefusedTail(
     });
     return;
   } catch (err) {
-    if (!signal.aborted) {
+    if (signal?.aborted !== true) {
       log.error("Failed to recover the tail after a re-attach", { channelId, error: String(err) });
     }
   }
@@ -77,7 +77,7 @@ export function recoverAfterReattach(
   api: Pick<ApiClient, "getMessages">,
   channelId: number,
   wasDetached: boolean,
-  signal: AbortSignal,
+  signal?: AbortSignal,
   reload?: () => Promise<void>,
 ): void {
   if (!wasDetached || isWindowDetached(channelId)) return;

@@ -53,7 +53,7 @@ export function resumeThreadFocus(
     (resp) => {
       if (!current()) return;
       setMessages(threadId, resp.messages, resp.has_more, true);
-      recoverAfterReattach({ getMessages }, threadId, wasDetached, new AbortController().signal);
+      recoverAfterReattach({ getMessages }, threadId, wasDetached);
     },
     (err: unknown) => {
       if (!current()) return;

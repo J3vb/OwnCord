@@ -62,7 +62,6 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
       // around the message at the top of the list, so it stays where it is;
       // with no list showing it, the tail is refetched instead.
       const wasDetached = isWindowDetached(activeAfterReady);
-      const noAbort = new AbortController().signal;
       const anchor = wasDetached ? readingAnchor(activeAfterReady) : null;
       // Mark the active channel loading BEFORE invalidating: it records the
       // watermark the splice checks the page against, and a channel with no
@@ -90,7 +89,7 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
                 resp.has_more_after,
                 true,
               );
-              recoverAfterReattach({ getMessages }, activeAfterReady, wasDetached, noAbort);
+              recoverAfterReattach({ getMessages }, activeAfterReady, wasDetached);
             })
           : getMessages(activeAfterReady, { limit: 50 }).then((resp) => {
               if (!stillActive()) return;
@@ -101,7 +100,7 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
                 true,
                 readingAnchor(activeAfterReady),
               );
-              recoverAfterReattach({ getMessages }, activeAfterReady, wasDetached, noAbort);
+              recoverAfterReattach({ getMessages }, activeAfterReady, wasDetached);
             });
       refetch.catch((err: unknown) => {
         log.warn("Failed to reload message history after resync", { error: String(err) });

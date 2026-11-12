@@ -13,7 +13,6 @@
 
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { channelsStore } from "@stores/channels.store";
 import { ApiClientError } from "@lib/api";
 import { showToast } from "@lib/ui/toast";
 import { findChannelById, navigateToChannel } from "@lib/nav/channelNavigation";
@@ -129,15 +128,10 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
     setAroundMessages(channelId, resp.messages, resp.has_more_before, resp.has_more_after);
     // A live message refused while the window was detached is in neither the
     // window nor the list when this one reaches the newest message.
+    // A recovery that lands after a channel switch only merges by id into
+    // that channel's cached window.
     if (wasDetached && !isWindowDetached(channelId)) {
-      // A channel switch abandons the recovery.
-      const abort = new AbortController();
-      const unsubscribe = channelsStore.subscribe((s) => {
-        if (s.activeChannelId !== channelId) abort.abort();
-      });
-      void recoverRefusedTail(opts.api, channelId, newestSentId(channelId), abort.signal).finally(
-        unsubscribe,
-      );
+      void recoverRefusedTail(opts.api, channelId, newestSentId(channelId));
     }
     return true;
   }
