@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -191,10 +192,58 @@ func TestRefreshChannelVisibility_StalledReaderTimesOutAndMarksClients(t *testin
 		t.Errorf("watermark = %d, want above %d", got, before)
 	}
 	for _, id := range ids {
-		if !f.clients[id].cseq.lossPending.Load() {
+		c := f.clients[id]
+		if !c.cseq.lossPending.Load() {
 			t.Errorf("user %d was not marked to resync", id)
 		}
+		// Not judged means treated as having lost the channel until the full ready says otherwise.
+		if hasTopic(f.hub, c, ChannelTopic(f.chA)) {
+			t.Errorf("user %d still receives the channel after the walk ran out of time", id)
+		}
+		if got := c.getChannelID(); got != 0 {
+			t.Errorf("user %d still focuses channel %d after the walk ran out of time", id, got)
+		}
+		if !hasTopic(f.hub, c, UserTopic(id)) {
+			t.Errorf("user %d lost its own topic, want only the channel taken away", id)
+		}
 	}
+}
+
+// A client that reconnected after the walk took its snapshot is the one taken off the channel; the
+// stale socket it replaced is left alone, and a channel other than the walk's is untouched.
+func TestMarkVisibilityWalkTimedOut_SettlesTheLiveClientOnly(t *testing.T) {
+	f := newRRFixture(t, false)
+	id := f.addUser("vis-to-live", rrModRole, f.chA)
+	stale := f.clients[id]
+	u, err := f.database.GetUserByID(context.Background(), id)
+	if err != nil || u == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	live := NewTestClientWithTokenHash(f.hub, u, stale.tokenHash, f.chA, make(chan []byte, 16))
+	f.hub.mu.Lock()
+	f.hub.clients[id] = []*Client{live}
+	f.hub.mu.Unlock()
+	f.hub.pubsub.Subscribe(live, ChannelTopic(f.chA))
+	f.hub.pubsub.Subscribe(live, ChannelTopic(f.chB))
+
+	f.hub.markVisibilityWalkTimedOut(context.Background(), f.chA, []*Client{stale})
+
+	if hasTopic(f.hub, live, ChannelTopic(f.chA)) || live.getChannelID() != 0 {
+		t.Errorf("the live client kept channel %d (focus %d)", f.chA, live.getChannelID())
+	}
+	if !hasTopic(f.hub, live, ChannelTopic(f.chB)) {
+		t.Errorf("the live client lost channel %d, which the walk was not about", f.chB)
+	}
+	if !live.cseq.lossPending.Load() {
+		t.Error("the live client was not marked to resync")
+	}
+	if stale.cseq.lossPending.Load() {
+		t.Error("the replaced socket was marked, want the live one only")
+	}
+}
+
+func hasTopic(h *Hub, c *Client, topic Topic) bool {
+	return slices.Contains(h.pubsub.TopicsForClient(c), topic)
 }
 
 // stalledRoleReader blocks every role lookup until its context ends.

@@ -15,6 +15,7 @@ var (
 	channelVisibilityBaseBudget      = 5 * time.Second
 	channelVisibilityPerClientBudget = 2 * time.Millisecond
 	channelVisibilityMaxBudget       = 30 * time.Second
+	visibilityTimeoutSettleBudget    = time.Second
 )
 
 func channelVisibilityBudget(clients int) time.Duration {
@@ -64,7 +65,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		if ctx.Err() != nil {
 			// Out of time: this client and the rest were not judged, so move the watermark and send
 			// each to a resync.
-			h.markVisibilityWalkTimedOut(ch.ID, clients[i:])
+			h.markVisibilityWalkTimedOut(ctx, ch.ID, clients[i:])
 			return
 		}
 		if err != nil {
@@ -100,7 +101,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 			if ctx.Err() != nil {
 				// The affordances may have failed closed on the expiry, so this client's frame is
 				// not trustworthy either.
-				h.markVisibilityWalkTimedOut(ch.ID, clients[i:])
+				h.markVisibilityWalkTimedOut(ctx, ch.ID, clients[i:])
 				return
 			}
 			continue
@@ -117,22 +118,40 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 }
 
 // markVisibilityWalkTimedOut handles a walk that ran out of time: it moves the visibility watermark
-// so a resume across the change takes the full ready and marks each unreached live client to resync
-// by its next sequenced frame.
-func (h *Hub) markVisibilityWalkTimedOut(channelID int64, unreached []*Client) {
+// so a resume across the change takes the full ready, takes each unreached live client off the
+// channel as if it had lost access (its focus, topic and held thread under it), and marks it to
+// resync by its next sequenced frame. The full ready gives the channel back to a client that may
+// still see it, and its next focus is checked again.
+func (h *Hub) markVisibilityWalkTimedOut(ctx context.Context, channelID int64, unreached []*Client) {
 	h.bumpVisibilityWatermark()
-	n := 0
+	settled := make([]*Client, 0, len(unreached))
 	for _, c := range unreached {
 		if c.user == nil {
 			continue
 		}
-		if live := h.sessionClient(c.userID, c.tokenHash); live != nil {
-			h.markClientLoss(live)
-			n++
+		live := h.sessionClient(c.userID, c.tokenHash)
+		if live == nil {
+			continue
 		}
+		h.pubsub.Unsubscribe(live, ChannelTopic(channelID))
+		live.mu.Lock()
+		if live.channelID == channelID {
+			live.channelID = 0
+		}
+		live.mu.Unlock()
+		h.markClientLoss(live)
+		settled = append(settled, live)
+	}
+	// Held threads need a lookup, so they go second, after every client is off the channel. The
+	// walk's own budget is spent; these lookups share a short one, and a lookup that fails releases
+	// the thread.
+	tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), visibilityTimeoutSettleBudget)
+	defer cancel()
+	for _, live := range settled {
+		h.revokeHeldThread(tctx, live, channelID)
 	}
 	slog.Warn("hub: RefreshChannelVisibility timed out, unreached clients marked for resync",
-		"channel_id", channelID, "unreached", n)
+		"channel_id", channelID, "unreached", len(settled))
 }
 
 // refreshChannelVisibilityAffordances recomputes the five ready-payload affordance verdicts for one
