@@ -2178,7 +2178,7 @@ Errors: `THREAD_EXISTS` (the message already has a thread that the caller did no
 
 ### thread_update (Client -> Server)
 
-`{ "thread_id": 91, "name"?: string, "archived"?: bool, "locked"?: bool, "auto_archive_minutes"?: int, "tag_ids"?: int[] }`; an absent field is unchanged. `tag_ids` replaces a forum post's tags (at most 5, all tags of that forum, at least one when the forum requires a tag) and is `BAD_REQUEST` on any other thread; the owner or a user with `MANAGE_MESSAGES` may set it. The thread's owner may rename, archive, unarchive and change the idle period. Only a user with `MANAGE_MESSAGES` may set `locked`. A locked thread belongs to moderators: the owner's change is `THREAD_LOCKED`. Answered with `thread_update_ok` (`{ "thread_id": 91 }`); the new state reaches everyone as `thread_changed`. A patch that changes nothing is still answered with `thread_update_ok` but announces nothing.
+`{ "thread_id": 91, "name"?: string, "archived"?: bool, "locked"?: bool, "auto_archive_minutes"?: int, "tag_ids"?: int[] }`; an absent field is unchanged. `tag_ids` replaces a forum post's tags (at most 5, all tags of that forum, at least one when the forum requires a tag) and is `BAD_REQUEST` on any other thread; the owner or a user with `MANAGE_MESSAGES` may set it. The thread's owner may rename, archive, unarchive and change the idle period. Only a user with `MANAGE_MESSAGES` may set `locked`. A locked thread belongs to moderators: the owner's change is `THREAD_LOCKED`. Answered with `thread_update_ok` (`{ "thread_id": 91 }`); the new state reaches everyone as `thread_changed`. A patch that changes nothing is still answered with `thread_update_ok` but announces nothing and does not reset the idle period.
 
 ### thread_delete (Client -> Server)
 
