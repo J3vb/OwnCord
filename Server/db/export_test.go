@@ -15,6 +15,13 @@ func SetEventPruneStatementHookForTest(fn func()) {
 	eventPruneStatementHookForTest = fn
 }
 
+// SetGroupDMPostCommitHookForTest installs (or, with nil, clears) the hook
+// CreateGroupDMChannel runs right after its commit. Exported for db_test's
+// cancel-after-commit test; production code never calls this.
+func SetGroupDMPostCommitHookForTest(fn func()) {
+	groupDMPostCommitHookForTest = fn
+}
+
 // SetModerationActionPreInsertHookForTest installs (or, with nil, clears)
 // the barrier moderationActionPreInsertHook runs inside recordModerationAction's
 // transaction, after the rank check and before the insert. Exported for

@@ -255,8 +255,11 @@ describe("inline message editor", () => {
       const before = row(2)!;
 
       expect(list!.startEdit(2)).toBe(true);
-      // Before the lazy chunk lands, a reaction rebuilds the row.
-      patch(2, { reactions: [{ emoji: "👍", count: 1, me: false }] });
+      // Before the lazy chunk lands, a change beyond reactions rebuilds the row.
+      patch(2, {
+        reactions: [{ emoji: "👍", count: 1, me: false }],
+        editedAt: "2024-01-15T13:00:00Z",
+      });
       const rebuilt = row(2)!;
       expect(rebuilt).not.toBe(before);
       expect(editor(2)).toBeNull();
@@ -265,6 +268,20 @@ describe("inline message editor", () => {
       expect(row(2)!.contains(editor(2))).toBe(true);
       expect(container.querySelectorAll(".msg-inline-edit")).toHaveLength(1);
       // Reactions stay under the editor.
+      expect(row(2)!.querySelector(".reaction-chip")).not.toBeNull();
+    });
+
+    it("a reaction while the chunk loads keeps the row, and the editor still arrives", async () => {
+      mount([mine(1), mine(2)]);
+      const before = row(2)!;
+
+      expect(list!.startEdit(2)).toBe(true);
+      patch(2, { reactions: [{ emoji: "👍", count: 1, me: false }] });
+      expect(row(2)).toBe(before);
+
+      await vi.waitFor(() => expect(editor(2)).not.toBeNull());
+      expect(row(2)!.contains(editor(2))).toBe(true);
+      expect(container.querySelectorAll(".msg-inline-edit")).toHaveLength(1);
       expect(row(2)!.querySelector(".reaction-chip")).not.toBeNull();
     });
 
@@ -565,8 +582,8 @@ describe("inline message editor", () => {
 
       patch(2, { reactions: [{ emoji: "🔥", count: 2, me: false }] });
 
-      // The row was drawn again around the same textarea node.
-      expect(row(2)).not.toBe(rowBefore);
+      // A reaction keeps the row, so the editor is never moved.
+      expect(row(2)).toBe(rowBefore);
       expect(editor(2)).toBe(textarea);
       expect(row(2)!.contains(textarea)).toBe(true);
       expect(row(2)!.querySelector(".reaction-chip")).not.toBeNull();

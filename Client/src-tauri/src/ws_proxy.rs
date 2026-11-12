@@ -558,6 +558,16 @@ pub async fn ws_disconnect(
     Ok(())
 }
 
+/// The page process ended: close the proxied connection it owned, as its
+/// `ws_disconnect` would have, so the server stops seeing it online. Runs
+/// before the page reloads, so it never touches the reloaded page's socket.
+#[cfg(target_os = "linux")]
+pub(crate) async fn drop_for_dead_page<R: Runtime>(app: &AppHandle<R>) {
+    app.state::<WsState>().begin_connection().await;
+    app.state::<crate::active_session::ActiveSession>()
+        .clear_active();
+}
+
 /// Ask the user, in a native dialog, to confirm pinning `fingerprint` for
 /// `host`. Runs from an async command, off Tauri's main thread, so
 /// `blocking_show` (which dispatches onto the main thread) cannot deadlock.

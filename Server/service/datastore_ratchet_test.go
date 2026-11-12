@@ -34,7 +34,7 @@ const (
 	// service starts or stops calling a method. It was 309 while Store listed
 	// its methods itself; it fell to 288 when each service declared its own
 	// interface and the methods no service calls left Store.
-	storeMethodBaseline = 296
+	storeMethodBaseline = 298
 
 	// modelsJSONTagBaseline is the number of struct fields in db/models.go
 	// whose tag carries a json: key, json:"-" included.
@@ -79,7 +79,7 @@ const (
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included. It closes the
 	// gap the source count leaves for growth inside a cross-package embed.
-	storeFullSurfaceBaseline = 307
+	storeFullSurfaceBaseline = 309
 )
 
 // storeCrossPackageEmbeds names every interface embedded in Store that is
