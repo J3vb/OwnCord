@@ -95,6 +95,17 @@ describe("message text", () => {
     expect(isEmojiOnlyMessage("🇧🇪")).toBe(true);
   });
 
+  it("draws a tag-sequence flag as one image", () => {
+    const england = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+    expect(twemojiName(england)).toBe("1f3f4-e0067-e0062-e0065-e006e-e0067-e007f");
+    const host = render(`go ${england}!`);
+    expect([...host.querySelectorAll<HTMLImageElement>("img.emoji-img")].map((i) => i.alt)).toEqual(
+      [england],
+    );
+    expect(host.textContent).toBe("go !");
+    expect(isEmojiOnlyMessage(england)).toBe(true);
+  });
+
   it("keeps emoji inside code as text", () => {
     const host = render("`😀` and\n```\n🔥\n```");
     expect(host.querySelector("img.emoji-img")).toBeNull();

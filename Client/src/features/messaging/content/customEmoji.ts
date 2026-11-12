@@ -41,7 +41,9 @@ export const UNICODE_EMOJI_PATTERN =
   // Regional-indicator pair (a flag), a lone indicator, or any pictographic base.
   "(?:[\\u{1F1E6}-\\u{1F1FF}]{1,2}|\\p{Extended_Pictographic})" +
   // Modifiers, variation selectors and ZWJ-joined continuations.
-  "(?:\\uFE0F|\\u{20E3}|[\\u{1F3FB}-\\u{1F3FF}]|\\u200D(?:[\\u{1F1E6}-\\u{1F1FF}]|\\p{Extended_Pictographic})(?:\\uFE0F|[\\u{1F3FB}-\\u{1F3FF}])*)*";
+  "(?:\\uFE0F|\\u{20E3}|[\\u{1F3FB}-\\u{1F3FF}]|\\u200D(?:[\\u{1F1E6}-\\u{1F1FF}]|\\p{Extended_Pictographic})(?:\\uFE0F|[\\u{1F3FB}-\\u{1F3FF}])*)*" +
+  // Tag sequence: the England, Scotland and Wales flags.
+  "(?:[\\u{E0020}-\\u{E007E}]+\\u{E007F})?";
 
 const UNICODE_EMOJI = new RegExp(`^(?:${UNICODE_EMOJI_PATTERN})`, "u");
 
