@@ -590,22 +590,24 @@ call):
 | Decline                    | `call_decline` sent → the ringer's panel says "declined" in a 1:1, and in a group that callee drops off the ringing list. Another callee's ring stops when its own ringer declines (`call_declined`) or when a `voice_leave` for that channel leaves the room empty, whoever left; the ringer leaving while others stay in does not stop it. A caller who is not looking at that DM (another channel, settings or another view) gets one toast instead: "<name> declined"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Timeout / caller leaves    | Timeout: the callee's ring clears with a "Missed call from _X_" toast (plus an OS notification when the window is not focused; the ringer hanging up before the timeout is reported the same way, but an accept, decline or newer call is not a miss), and the caller's panel says "didn't answer", draws only the caller's own tile, and stays in the call with Ring again / Leave call; a caller who is not looking at the DM gets a "No answer" toast. Caller leaves: the call simply ends, the caller's outgoing ring clears, and the callees' rings clear once the room is empty, with the same "Missed call" notice. In a 1:1, when the other person hangs up and you are left alone, the connected panel's status reads "<name> left the call" with Ring again                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
-**An incoming call in the Android app** (`features/direct-messages/callAlerts.ts`,
-the `Notifier`'s `ringsCalls`, `CallRing.kt`): a ring that arrives while the
-app is out of sight (another app in front, or the screen off) is shown by the
-phone, as an incoming-call notification with Accept and Decline over whatever
-is on screen and on the lock screen. It rings with the phone's own ringtone, so
-the phone's ring volume, silent mode and Do Not Disturb apply, and the app's
-chime stays quiet for that ring. With the app in front the ring is the app's
-own, as on a desktop, and the phone shows nothing. Each ring has one voice: if
-Android will not show the notification (notifications are off for the app or
-for that channel), the app rings by itself after all. With the ring sound off
-in the app (the Incoming Call Sound toggle or the ring's own switch) the
-notification goes on a second channel that makes no sound. Under OwnCord's own
-Do Not Disturb there is no notification and no ring, as on a desktop. All of it
-needs a page that runs: Android freezes a background app that has no call after
-a while (how long differs per phone and Android version), and a frozen app
-hears no ring until it is opened again.
+**An incoming call in the Android app**
+(`features/direct-messages/callAlerts.ts`, the `Notifier`'s `ringsCalls`,
+`CallRing.kt`): a ring that arrives while the app is out of sight (another app
+in front, or the screen off) is shown by the phone, as an incoming-call
+notification with Accept and Decline over whatever is on screen and on the lock
+screen. It rings with the phone's own ringtone, so the phone's ring volume,
+silent mode and Do Not Disturb apply, and the app's chime stays quiet for that
+ring. With the app in front the ring is the app's own, as on a desktop, and the
+phone shows nothing. Each ring has one voice: if Android will not show the
+notification (notifications are off for the app or for that channel), the app
+rings by itself after all (Android 17 silences an app that is out of sight and
+has no call, so there that ring is heard only once the app is on screen). With
+the ring sound off in the app (the Incoming Call Sound toggle or the ring's own
+switch) the notification goes on a second channel that makes no sound. Under
+OwnCord's own Do Not Disturb there is no notification and no ring, as on a
+desktop. All of it needs a page that runs: Android freezes a background app
+that has no call after a while (how long differs per phone and Android
+version), and a frozen app hears no ring until it is opened again.
 
 Accept opens the app, after the unlock on a locked phone, and answers the ring.
 Decline declines without opening the app. A tap on the notification opens the
@@ -614,18 +616,31 @@ ends, however it ends, and Android takes it down by itself a few seconds after
 a ring's 30 if the app is gone. A press that lands after the ring ended (Accept
 as the caller hangs up) opens the conversation and joins nothing; a press on a
 ring this page did not put there, or one from another server, does nothing. A
-ring rung again is shown again, so its time starts over; it goes on ringing
-(Android 12 and older start the ringtone over) and its buttons stay the same.
-A missed call leaves an ordinary notification whose tap opens the conversation.
-A ring that started with the app in front is not handed to the phone when the
-member leaves the app while it rings.
+ring rung again is shown again, so its time starts over; it goes on ringing and
+its buttons stay the same. Android 12 and older stop the ringtone of a ring
+that is shown again in place, so there the notification comes down and goes up
+again, and the ringtone starts over. A missed call leaves an ordinary
+notification whose tap opens the conversation. A ring that started with the app
+in front is not handed to the phone when the member leaves the app while it
+rings (on Android 17 the app's own ring goes silent then).
 
-Android lets an app alert once a second and mutes what comes sooner, and a
-ring it mutes makes no sound for as long as it is up. So a ring that comes
-within about a second of another alert of the app (a message just before the
-call, or the same call rung twice in a row) is shown that much later, and a
-notification that comes while a ring is on its way is shown after the ring
-(`platform/desktop/androidNotifications.ts`).
+Android lets an app alert once a second and mutes what comes sooner, and a ring
+it mutes makes no sound for as long as it is up. So a ring that comes within
+about a second of another alert of the app (a message just before the call, or
+the same call rung twice in a row) is shown a second or two later (a page that
+is out of sight runs its timers once a second), and a notification that comes
+while a ring is on its way is shown after the ring, unless it was withdrawn
+meanwhile (`platform/desktop/androidNotifications.ts`).
+
+Because the ringtone is the notification's own sound, two more of Android's
+rules apply to it, and the app cannot lift either. A phone with the
+notification cooldown (Android 16, and Android 15 on some phones; a switch
+under Notifications in the system settings, on by default) turns an app's
+alerts down when they follow each other: a ring within a minute of another
+OwnCord alert, such as the message before the call, can play at a lower volume,
+and one that follows two alerts within seconds can make no sound. On Android 9
+and 10 another notification that makes a sound while the phone rings takes the
+ringtone's place. The notification with Accept and Decline shows in both cases.
 
 Call is on the DM chat header and in another member's profile popup. The
 popup's Call opens the 1:1 DM with that member (creating it if needed) and then

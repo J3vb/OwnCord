@@ -42,8 +42,10 @@ class ClearRingArgs {
 //
 // Shown again (the call was rung again), it must alert again: Android stops
 // the ringtone of a ring whose update makes no sound. So it never sets "only
-// alert once". Android 13 and newer then let the ringtone play on; older ones
-// start it over.
+// alert once". Android 13 and newer then let the ringtone play on. Android 12
+// and older mute what is posted while a ringtone loops, the ring's own update
+// included, so there the ring that is up comes down first and the new one
+// starts the ringtone over.
 object CallRing {
   private const val NOTIFICATION_ID = 4102
   private const val CHANNEL = "ring"
@@ -112,6 +114,7 @@ object CallRing {
     val notification = builder.build()
     // Rings until it is answered or taken down, as a phone call does.
     if (!args.quiet) notification.flags = notification.flags or Notification.FLAG_INSISTENT
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) manager(context).cancel(NOTIFICATION_ID)
     manager(context).notify(NOTIFICATION_ID, notification)
   }
 

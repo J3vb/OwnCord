@@ -372,7 +372,8 @@ service's notification above. Android mutes an app's alert that comes less
 than a second after its last one, which would leave a ring without a sound, so
 the notifier sends a ring that makes a sound only when the app's last alert is
 over a second old and Android has answered for the ring before it, and sends a
-notification asked for meanwhile after that ring. That notifier says
+notification asked for meanwhile after that ring (one that is withdrawn while
+it waits is never shown). That notifier says
 `ringsCalls`: while the app
 is out of sight the phone rings for a call and the app's own chime stays
 quiet, and with the app in front, or when Android will not show the

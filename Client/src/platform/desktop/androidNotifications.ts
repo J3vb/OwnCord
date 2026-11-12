@@ -143,10 +143,27 @@ async function present(
   body: string,
   target: NotificationTarget | null,
 ): Promise<void> {
-  await ensureChannels();
-  await afterRing();
+  // On the list before it waits: a withdrawal meanwhile takes it off, and it
+  // is then never shown.
   const id = takeId();
   shown.set(id, target);
+  try {
+    await ensureChannels();
+    await afterRing();
+    if (!shown.has(id)) return;
+    await deliver(id, title, body, target);
+  } catch (err) {
+    shown.delete(id);
+    throw err;
+  }
+}
+
+async function deliver(
+  id: number,
+  title: string,
+  body: string,
+  target: NotificationTarget | null,
+): Promise<void> {
   alerted();
   const shownNow = invokeOrThrow("android_notify", {
     id,
@@ -157,9 +174,6 @@ async function present(
   showing.set(id, shownNow);
   try {
     await shownNow;
-  } catch (err) {
-    shown.delete(id);
-    throw err;
   } finally {
     showing.delete(id);
     alerted();

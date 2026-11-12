@@ -574,6 +574,51 @@ describe("Android notifier", () => {
       await notifier.showMessage("a", "b", dm);
       expect(notified()).toHaveLength(1);
     });
+
+    test("lets the next ring through after a ring Android refused", async () => {
+      native.refuseRing = true;
+      await expect(ringing()).rejects.toThrow("call ring: notifications are off");
+      native.refuseRing = false;
+      const up = ringing();
+      await pass(1_200);
+      expect(rung()).toHaveLength(2);
+      await up;
+    });
+
+    /** A notification asked for while Android has not answered for a ring. */
+    async function heldBehindARing(): Promise<{ answer: () => void; done: Promise<unknown> }> {
+      let answer = (): void => {};
+      native.ringGate = new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      const up = ringing();
+      const held = notifier.showMessage("a", "b", dm);
+      await pass(0);
+      return { answer, done: Promise.all([up, held]) };
+    }
+
+    test.each([
+      ["its conversation was read", (): Promise<void> => notifier.clearMessages(7)],
+      ["everything was withdrawn", (): Promise<void> => notifier.clearMessages()],
+    ])(
+      "never shows a notification that waited for a ring when %s meanwhile",
+      async (_, withdraw) => {
+        const { answer, done } = await heldBehindARing();
+        await withdraw();
+        answer();
+        await done;
+        await pass(5_000);
+        expect(notified()).toEqual([]);
+      },
+    );
+
+    test("still shows it when another conversation's were withdrawn meanwhile", async () => {
+      const { answer, done } = await heldBehindARing();
+      await notifier.clearMessages(9);
+      answer();
+      await done;
+      expect(notified()).toEqual([expect.objectContaining({ title: "a", body: "b" })]);
+    });
   });
 
   test("leaves a missed call as a notification whose tap opens the conversation", async () => {
@@ -595,6 +640,13 @@ describe("Android notifier", () => {
   test("does not track a notification Android refused", async () => {
     native.failNotify = true;
     await expect(notifier.showMessage("a", "b", dm)).rejects.toThrow("notify refused");
+    await notifier.clearMessages(7);
+    expect(calls("android_clear_notifications")).toEqual([]);
+  });
+
+  test("does not track a notification whose channel could not be made", async () => {
+    invoke.mockRejectedValueOnce(new Error("no channels"));
+    await expect(notifier.showMessage("a", "b", dm)).rejects.toThrow("no channels");
     await notifier.clearMessages(7);
     expect(calls("android_clear_notifications")).toEqual([]);
   });
