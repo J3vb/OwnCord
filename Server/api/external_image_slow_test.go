@@ -10,14 +10,17 @@ import (
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/api"
 )
 
 // A reader that keeps taking bytes but needs longer than the server's write timeout must still get the
 // whole image.
 func TestExternalContent_SlowReaderGetsWholeImage(t *testing.T) {
+	api.SetTransferProgressTimeoutForTest(t, 500*time.Millisecond)
 	database := newAuthTestDB(t)
 	token := profileCreateToken(t, database, "slowviewer", 4)
-	gif := append(append([]byte{}, externalGIF...), bytes.Repeat([]byte{0}, 1<<20)...)
+	gif := append(append([]byte{}, externalGIF...), bytes.Repeat([]byte{0}, 2<<20)...)
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/gif")
 		_, _ = w.Write(gif)
@@ -55,7 +58,7 @@ func TestExternalContent_SlowReaderGetsWholeImage(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	slow := &slowReader{r: resp.Body, chunk: 32 << 10, pause: 40 * time.Millisecond}
+	slow := &slowReader{r: resp.Body, chunk: 32 << 10, pause: 10 * time.Millisecond}
 	got, err := io.ReadAll(slow)
 	if err != nil || len(got) != len(gif) {
 		t.Fatalf("read %d of %d bytes, err = %v", len(got), len(gif), err)

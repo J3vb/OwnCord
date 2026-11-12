@@ -24,6 +24,9 @@ var newExternalBroker = func() *externalcontent.Broker {
 	return externalcontent.MustNew(externalcontent.DefaultPagePolicy, externalcontent.DefaultImagePolicy)
 }
 
+// externalImageWriteChunk is the piece size an image is written in.
+const externalImageWriteChunk = 32 << 10
+
 // externalImageMaxAge is how long the viewer's browser may reuse an image.
 const externalImageMaxAge = time.Hour
 
@@ -110,6 +113,14 @@ func handleExternalImage(broker *externalcontent.Broker) http.HandlerFunc {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(body) //nolint:gosec // G705: sniffed raster bytes, served nosniff under a sandbox CSP
+		// One Write would be one blocking socket write, so the deadline would move once; pieces let each
+		// accepted chunk push it out.
+		for len(body) > 0 {
+			n := min(len(body), externalImageWriteChunk)
+			if _, err := w.Write(body[:n]); err != nil { //nolint:gosec // G705: sniffed raster bytes, served nosniff under a sandbox CSP
+				return
+			}
+			body = body[n:]
+		}
 	}
 }

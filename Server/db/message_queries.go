@@ -127,10 +127,12 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 }
 
 // EditMessage updates the content, sets edited_at and returns the row via
-// RETURNING; ErrNotFound if the message does not exist, is deleted or userID is
-// not the owner, or the content is empty and the message has no attachment. The
-// UPDATE carries `AND deleted = 0` because a delete can commit between the ownership read and the write; otherwise the tombstone
-// would be rewritten and chat_edited broadcast for a replaced message.
+// RETURNING. ErrNotFound if the message does not exist, is deleted, cannot be
+// edited, or the content is empty and the message has no attachment;
+// ErrForbidden if userID is not the owner. The UPDATE carries `AND deleted = 0`
+// because a delete can commit between the ownership read and the write;
+// otherwise the tombstone would be rewritten and chat_edited broadcast for a
+// replaced message.
 func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) (*Message, error) {
 	msg, err := d.GetMessage(ctx, id)
 	if err != nil {
