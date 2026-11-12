@@ -66,6 +66,8 @@ export interface GridState {
   /** Bumped by every show and hide, so a mini-player still loading opens
    *  only if nothing has changed the request since. */
   miniRequest: number;
+  /** A live picture is drawn, as last reported (`videoOnScreen.ts`). */
+  onScreen: boolean;
 }
 
 /** Every function the grid's modules share, filled in once by createVideoGrid. */
@@ -138,6 +140,8 @@ export interface GridApi {
   toggleStats(tileId: number, chip: HTMLButtonElement): void;
   viewOf(id: number, entry: CellEntry): VideoView;
   syncViews(): void;
+  /** Report whether a live picture is drawn, when that changed. */
+  syncOnScreen(): void;
   scheduleViewSync(): void;
   togglePopout(tileId: number): void;
   bringBack(entry: CellEntry, byUser: boolean): void;

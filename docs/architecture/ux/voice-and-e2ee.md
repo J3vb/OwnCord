@@ -201,6 +201,17 @@ Space or a tap picks. The app takes no audio focus, so music and games keep
 playing beside a call; only an answered or dialled phone call pauses it (the
 phone call hold above), and a ringing phone does not.
 
+**Screen stays on in the Android app** (`features/voice/videoOnScreen.ts`,
+`features/voice/backgroundCall.ts`, the `callService` platform member): while a
+call has a live picture on screen, the app keeps the phone from dimming and
+locking. A picture is a camera or a stream, yours or someone else's, drawn in a
+tile of the call view or in the mini-player; the video grid reports it
+(`syncOnScreen` in `features/voice/videoGrid/gridWatch.ts`). A stream still
+behind **Watch stream**, a call view that is closed with no mini-player, and a
+call with no video leave the screen to the phone's own timeout, and the screen
+may sleep again as soon as the last picture goes or the call ends. The power
+button turns the screen off as always.
+
 **The voice channel's chat beside the grid** (guild calls): opening the call
 view selects the voice channel you are in (`pages/main-page/callChat.ts`), so
 its chat mounts as for any channel, and the grid sits left of it with the chat
@@ -630,5 +641,6 @@ never silences message chimes for the rest of the session.
 and the E2EE verification badge), `src/features/voice/videoGrid/VideoGrid.ts`,
 `src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,
 `src-tauri/src/mobile_audio.rs` and `MobileAudioPlugin.kt` (the Android app's call audio),
+`src-tauri/src/call_service.rs` and `CallServicePlugin.kt` (the Android app's call service and screen-on),
 `src/lib/net/e2eeCrypto.ts`, `src/lib/net/identity.ts`; and the structural map in
 [../voice-e2ee.md](../voice-e2ee.md).

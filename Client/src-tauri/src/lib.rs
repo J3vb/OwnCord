@@ -42,6 +42,8 @@ mod gpu_adapter;
 mod http_pool;
 mod http_proxy;
 mod idle;
+#[cfg(target_os = "android")]
+mod idle_android;
 #[cfg(target_os = "linux")]
 mod idle_wayland;
 mod json_store;
@@ -238,6 +240,7 @@ pub fn run() {
         .plugin(call_service::init())
         .plugin(metered_network::init())
         .plugin(mobile_audio::init())
+        .plugin(idle_android::init())
         .plugin(exit_info::init())
         .plugin(files::init())
         .plugin(share_in::init())
@@ -367,7 +370,12 @@ pub fn run() {
             http_proxy::stop_http_proxy,
             external_content::external_preview,
             external_content::external_image,
+            #[cfg(not(target_os = "android"))]
             idle::system_idle_ms,
+            #[cfg(target_os = "android")]
+            idle_android::system_idle_ms,
+            #[cfg(target_os = "android")]
+            idle_android::system_idle_follow,
             region::system_region_locale,
             game_activity::detect_game,
             game_activity::list_running_programs,

@@ -4,6 +4,7 @@ const host = vi.hoisted(() => ({ update: vi.fn() }));
 vi.mock("../../platform/desktop", () => ({ desktop: { callService: { update: host.update } } }));
 
 import { startBackgroundCall } from "./backgroundCall";
+import { isVideoOnScreen, reportVideoOnScreen } from "./videoOnScreen";
 import { resetVoiceStore, voiceStore, type VoiceStatus } from "../../stores/voice.store";
 
 function setCall(channel: number | null, status: VoiceStatus, camera = false): void {
@@ -16,6 +17,15 @@ function setCall(channel: number | null, status: VoiceStatus, camera = false): v
   voiceStore.flush();
 }
 
+/** A video grid starts drawing a picture, or stops; the report lands in a microtask. */
+async function setVideo(on: boolean): Promise<void> {
+  if (on !== isVideoOnScreen()) reportVideoOnScreen(on);
+  await Promise.resolve();
+}
+
+const call = (camera: boolean, videoOnScreen = false) => [{ active: true, camera, videoOnScreen }];
+const NO_CALL = [{ active: false, camera: false, videoOnScreen: false }];
+
 describe("background call service", () => {
   let owner: AbortController;
 
@@ -25,7 +35,22 @@ describe("background call service", () => {
     owner = new AbortController();
   });
 
-  afterEach(() => owner.abort());
+  afterEach(async () => {
+    owner.abort();
+    await setVideo(false);
+  });
+
+  it("says where it stands as it starts: the host side outlives a reload of the page", () => {
+    startBackgroundCall(owner.signal);
+    expect(host.update.mock.calls).toEqual([NO_CALL]);
+  });
+
+  it("says nothing for an owner that is already gone", () => {
+    owner.abort();
+    startBackgroundCall(owner.signal);
+    setCall(7, "connected");
+    expect(host.update).not.toHaveBeenCalled();
+  });
 
   it("starts at joining, follows the camera, and stops on leave", () => {
     startBackgroundCall(owner.signal);
@@ -35,10 +60,11 @@ describe("background call service", () => {
     setCall(7, "connected", false);
     setCall(null, "idle");
     expect(host.update.mock.calls).toEqual([
-      [{ active: true, camera: false }],
-      [{ active: true, camera: true }],
-      [{ active: true, camera: false }],
-      [{ active: false, camera: false }],
+      NO_CALL,
+      call(false),
+      call(true),
+      call(false),
+      NO_CALL,
     ]);
   });
 
@@ -51,24 +77,68 @@ describe("background call service", () => {
     voiceStore.setState((s) => ({ ...s, currentChannelId: null, voiceStatus: "idle" }));
     voiceStore.setState((s) => ({ ...s, currentChannelId: 9, voiceStatus: "joining" }));
     voiceStore.flush();
-    expect(host.update.mock.calls).toEqual([[{ active: true, camera: true }]]);
+    expect(host.update.mock.calls).toEqual([NO_CALL, call(true)]);
   });
 
   it("never reports a camera outside a call", () => {
     startBackgroundCall(owner.signal);
     setCall(null, "idle", true);
-    expect(host.update).not.toHaveBeenCalled();
+    expect(host.update.mock.calls).toEqual([NO_CALL]);
   });
 
   it("stops a running service when its owner goes away", () => {
     setCall(7, "connected");
     startBackgroundCall(owner.signal);
-    expect(host.update.mock.calls).toEqual([[{ active: true, camera: false }]]);
+    expect(host.update.mock.calls).toEqual([call(false)]);
     owner.abort();
     setCall(null, "idle");
-    expect(host.update.mock.calls).toEqual([
-      [{ active: true, camera: false }],
-      [{ active: false, camera: false }],
-    ]);
+    expect(host.update.mock.calls).toEqual([call(false), NO_CALL]);
+  });
+
+  describe("screen stays on while a picture shows", () => {
+    it("says so while a camera or a stream is on screen, and takes it back when it goes", async () => {
+      startBackgroundCall(owner.signal);
+      setCall(7, "connected");
+      await setVideo(true);
+      await setVideo(false);
+      expect(host.update.mock.calls).toEqual([
+        NO_CALL,
+        call(false),
+        call(false, true),
+        call(false),
+      ]);
+    });
+
+    it("reports a picture that was already on screen when the call service starts", async () => {
+      setCall(7, "connected", true);
+      await setVideo(true);
+      startBackgroundCall(owner.signal);
+      expect(host.update.mock.calls).toEqual([call(true, true)]);
+    });
+
+    it("lets the screen sleep when the call ends with the picture still up", async () => {
+      startBackgroundCall(owner.signal);
+      setCall(7, "connected");
+      await setVideo(true);
+      // The leave reaches the store before the grid drops its tiles.
+      setCall(null, "idle");
+      await setVideo(false);
+      expect(host.update.mock.calls).toEqual([NO_CALL, call(false), call(false, true), NO_CALL]);
+    });
+
+    it("never keeps the screen on outside a call", async () => {
+      startBackgroundCall(owner.signal);
+      await setVideo(true);
+      expect(host.update.mock.calls).toEqual([NO_CALL]);
+    });
+
+    it("lets the screen sleep when its owner goes away", async () => {
+      startBackgroundCall(owner.signal);
+      setCall(7, "connected");
+      await setVideo(true);
+      owner.abort();
+      await setVideo(false);
+      expect(host.update.mock.calls).toEqual([NO_CALL, call(false), call(false, true), NO_CALL]);
+    });
   });
 });

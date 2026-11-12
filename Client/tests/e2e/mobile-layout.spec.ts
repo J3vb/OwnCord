@@ -126,6 +126,15 @@ function callAudioCommands(page: Page): Promise<string[]> {
   );
 }
 
+/** The call states the page has sent its host's call service, in order. */
+function callServiceStates(page: Page): Promise<unknown[]> {
+  return page.evaluate(() =>
+    (window as unknown as { __invokeLog: Array<{ cmd: string; args?: unknown }> }).__invokeLog
+      .filter((e) => e.cmd === "set_call_service")
+      .map((e) => e.args),
+  );
+}
+
 /** How far apart the visible round controls of a call's control row sit
  *  vertically: under a pixel when they share one row. */
 function controlRowSpread(bar: Locator): Promise<number> {
@@ -1091,25 +1100,14 @@ for (const profile of PROFILES) {
       await expect(bar).toBeHidden();
 
       // The Android app keeps the call alive in the background with a host
-      // service from join to leave; a phone browser has no host to ask.
-      const callService = (): Promise<Array<{ active: boolean; camera: boolean }>> =>
-        page.evaluate(() =>
-          (
-            window as unknown as {
-              __invokeLog: Array<{ cmd: string; args?: { active: boolean; camera: boolean } }>;
-            }
-          ).__invokeLog
-            .filter((e) => e.cmd === "set_call_service")
-            .map((e) => ({ active: e.args!.active, camera: e.args!.camera })),
-        );
+      // service from join to leave, and says "no call" as the page starts; a
+      // phone browser has no host to ask.
+      const noCall = { active: false, camera: false, videoOnScreen: false };
       const expected =
         profile.name === "Pixel 7"
-          ? [
-              { active: true, camera: false },
-              { active: false, camera: false },
-            ]
+          ? [noCall, { active: true, camera: false, videoOnScreen: false }, noCall]
           : [];
-      await expect.poll(callService).toEqual(expected);
+      await expect.poll(() => callServiceStates(page)).toEqual(expected);
     });
 
     test("the join sheet and the call bar meet the shared accessibility checks", async ({
@@ -1305,6 +1303,28 @@ for (const profile of PROFILES) {
       // The call bar has one too, beside Mute.
       await page.locator("[data-call-control='chat']").tap();
       await expect(page.locator("[data-testid='talk-button-bar']")).toBeVisible();
+    });
+
+    test("a stream on screen in a call keeps the Android app's screen on, until the picture goes", async ({
+      page,
+    }) => {
+      await joinAndOpenCallView(page);
+      test.skip(!(await mountCallGrid(page, STREAMS)), "needs the dev server's modules");
+      await expect(tile(page, 3).locator("video")).toBeVisible();
+      if (profile.name !== "Pixel 7") {
+        // A phone browser has no host to ask: its screen is the browser's.
+        expect(await callServiceStates(page)).toEqual([]);
+        return;
+      }
+      const noCall = { active: false, camera: false, videoOnScreen: false };
+      const joined = { active: true, camera: false, videoOnScreen: false };
+      const watching = { active: true, camera: false, videoOnScreen: true };
+      await expect.poll(() => callServiceStates(page)).toEqual([noCall, joined, watching]);
+
+      await page.evaluate(() =>
+        (window as unknown as { __callGrid: { clearStreams(): void } }).__callGrid.clearStreams(),
+      );
+      await expect.poll(() => callServiceStates(page)).toEqual([noCall, joined, watching, joined]);
     });
 
     test("tapping a tile focuses it, and tapping it again unfocuses it", async ({ page }) => {

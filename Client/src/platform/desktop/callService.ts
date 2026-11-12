@@ -1,24 +1,12 @@
-// The Android call service (`src-tauri/src/call_service.rs`, `CallService.kt`).
-// Desktop hosts keep running in the background on their own, so only the
-// Android app talks to the host.
-import { isAndroidHost } from "@lib/hostPlatform";
-import { createLogger } from "@lib/logger";
-import { tryInvoke } from "./nativeInvoke";
+// The Android call service (`src-tauri/src/call_service.rs`, `CallService.kt`):
+// a facade that loads the host side (`./callServiceHost.ts`) on first use
+// (`./androidHost.ts`). Desktop hosts keep running in the background on their
+// own, so only the Android app has a host to talk to.
+import { androidHost } from "./androidHost";
 import type { CallService } from "../contracts/callService";
 
-const log = createLogger("callService");
+const withHost = androidHost("callService", () => import("./callServiceHost"));
 
 export const callService: CallService = {
-  update(state) {
-    if (!isAndroidHost()) return;
-    void tryInvoke<void>("set_call_service", { active: state.active, camera: state.camera }).then(
-      (result) => {
-        if (!result.ok)
-          log.warn(
-            "Call service refused; the call may stop in the background",
-            result.error.message,
-          );
-      },
-    );
-  },
+  update: (state) => withHost((host) => host.update(state)),
 };
