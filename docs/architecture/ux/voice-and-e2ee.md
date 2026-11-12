@@ -605,9 +605,14 @@ has no call, so there that ring is heard only once the app is on screen). With
 the ring sound off in the app (the Incoming Call Sound toggle or the ring's own
 switch) the notification goes on a second channel that makes no sound. Under
 OwnCord's own Do Not Disturb there is no notification and no ring, as on a
-desktop. All of it needs a page that runs: Android freezes a background app
-that has no call after a while (how long differs per phone and Android
-version), and a frozen app hears no ring until it is opened again.
+desktop. What is switched off while the phone rings holds for that ring at
+once: with the ring sound off the notification is shown again without a sound,
+which stops the ringtone, and under Do Not Disturb or with notifications off in
+the app it comes down and the ring is the app's own from there. A ring that
+went up without a sound stays so until it is rung again, and a ring rung again
+asks all of it again. All of it needs a page that runs: Android freezes a
+background app that has no call after a while (how long differs per phone and
+Android version), and a frozen app hears no ring until it is opened again.
 
 Accept opens the app, after the unlock on a locked phone, and answers the ring.
 Decline declines without opening the app. A tap on the notification opens the

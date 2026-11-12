@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { followCallActions } from "../../../src/features/direct-messages/callNotificationActions";
 import { startRingChime, stopRingChime } from "../../../src/lib/media/notificationSound";
 import { setChannelMutesHost } from "../../../src/lib/prefs/channelMutes";
+import { savePref } from "../../../src/lib/prefs/preferences";
 import { createRingController, type RingController } from "../../../src/lib/voice/callRing";
 import { desktop } from "../../../src/platform/desktop";
 // What the app loads on first use: in before a test's clock is a fake one.
@@ -185,6 +186,7 @@ describe("an incoming call on the Android app", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     setChannelMutesHost(null);
+    localStorage.clear();
   });
 
   test("rings on the phone and nowhere else, and leaves a missed call behind", async () => {
@@ -287,6 +289,31 @@ describe("an incoming call on the Android app", () => {
     chimeNotes.length = 0;
     await pass(4_000);
     expect(chimeNotes).toEqual([]);
+    expect(phone.asked).toEqual(["ring 50", "clear 50"]);
+  });
+
+  test("stops ringing on the phone once the ring sound is switched off in the app", async () => {
+    page.ring.incoming(otto);
+    await pass(4_000);
+    savePref("soundRing", false);
+    await pass(1_000);
+    expect(phone.asked).toEqual(["ring 50", "ring 50"]);
+    expect(phone.up).toEqual({ channelId: 50, token: "token-1", sounds: false });
+    expect(chimeNotes).toEqual([]);
+  });
+
+  test("comes down on the phone once notifications are switched off in the app, and the app rings", async () => {
+    page.ring.incoming(otto);
+    await pass(4_000);
+    savePref("desktopNotifications", false);
+    await pass(1_000);
+    expect(phone.asked).toEqual(["ring 50", "clear 50"]);
+    expect(phone.up).toBeNull();
+    expect(chimeNotes.length).toBeGreaterThan(0);
+
+    // Rung again, it stays the app's own.
+    page.ring.incoming(otto);
+    await pass(4_000);
     expect(phone.asked).toEqual(["ring 50", "clear 50"]);
   });
 
