@@ -26,15 +26,15 @@ func userMessageIDs(t *testing.T, database *db.DB, uid int64) []int64 {
 }
 
 // seedMessageEvents writes an edit frame (no author on the wire) for each of the
-// subject's messages and one for another user's message, and returns the other's
-// frame count (seq of the first survivor).
+// subject's messages, one for another user's message and a thread frame owned by
+// another user; those last two must survive an erasure.
 func seedMessageEvents(t *testing.T, database *db.DB, sub eraseSubject, own []int64, otherMsg int64) {
 	t.Helper()
 	seq := 1000
 	insert := func(payload string) {
 		seq++
 		_, err := database.ExecContext(context.Background(),
-			`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (?, 'x', ?, ?)`, seq, payload, sub.channel)
+			`INSERT INTO events (seq, event_type, payload, channel_id) VALUES (?1, json_extract(?2, '$.type'), ?2, ?3)`, seq, payload, sub.channel)
 		mustDo(t, "seed event", err)
 	}
 	for _, id := range own {
@@ -81,7 +81,7 @@ func TestEraseAccount_RemovesEditEventsOfErasedMessages(t *testing.T) {
 }
 
 // A drain that stops after it has deleted some messages and is run again still
-// leaves no edit frame for any of them, and reports every deleted id once.
+// leaves no edit frame for any of them.
 func TestEraseAccountDrain_ResumedAfterCrashRemovesEditEvents(t *testing.T) {
 	defer db.SetErasureChunkSizesForTest(1, 10)()
 	database := openMigratedMemory(t)
@@ -106,23 +106,58 @@ func TestEraseAccountDrain_ResumedAfterCrashRemovesEditEvents(t *testing.T) {
 		}
 		return nil
 	})
-	var seen []int64
-	collect := func(ids []int64) { seen = append(seen, ids...) }
-	if _, err := database.EraseAccountDrainWith(ctx, sub.id, time.Time{}, collect); err == nil {
+	if _, err := database.EraseAccountDrain(ctx, sub.id, time.Time{}); err == nil {
 		t.Fatal("first drain did not stop mid-messages")
 	}
 	if left := len(userMessageIDs(t, database, sub.id)); left == 0 || left == len(own) {
 		t.Fatalf("messages left after the interrupted drain = %d of %d, want a partial drain", left, len(own))
 	}
 	db.SetErasureChunkHookForTest(database, nil)
-	if done, err := database.EraseAccountDrainWith(ctx, sub.id, time.Time{}, collect); err != nil || !done {
+	if done, err := database.EraseAccountDrain(ctx, sub.id, time.Time{}); err != nil || !done {
 		t.Fatalf("resumed drain = %v, %v", done, err)
 	}
 	if n := countSeededEvents(t, database); n != 2 {
 		t.Errorf("seeded events left = %d, want 2 (the other user's)", n)
 	}
-	slices.Sort(seen)
-	if fmt.Sprint(seen) != fmt.Sprint(own) {
-		t.Errorf("drain reported messages %v, want %v", seen, own)
+}
+
+// Edit frames that reach the table after the drain passed (an edit in flight at the
+// lock, a persister queue flushed late) are removed by the orphan sweep, which needs
+// nothing from the drain, so it works after a restart. Frames of messages that still
+// exist, and frames from before the lock, are left to their own rules.
+func TestDeleteOrphanMessageEvents_SweepsOnlyFramesOfGoneMessages(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	sub := seedEraseSubject(t, database)
+	own := userMessageIDs(t, database, sub.id)
+	otherMsg := otherMessageID(t, database, sub)
+	job, err := database.EraseAccountLock(ctx, sub.id, true)
+	mustDo(t, "EraseAccountLock", err)
+	done, err := database.EraseAccountDrain(ctx, sub.id, time.Time{})
+	if err != nil || !done {
+		t.Fatalf("Drain = %v, %v", done, err)
+	}
+	// Written after the drain: seeded now, so created_at is not before the lock.
+	seedMessageEvents(t, database, sub, own, otherMsg)
+	if n := countSeededEvents(t, database); n != 2*len(own)+2 {
+		t.Fatalf("seeded %d late events, want %d", n, 2*len(own)+2)
+	}
+	ids, err := database.DeleteOrphanMessageEvents(ctx, job.ID)
+	mustDo(t, "DeleteOrphanMessageEvents", err)
+	if len(ids) != 2*len(own) {
+		t.Errorf("swept ids = %v, want %d (two frames per erased message)", ids, 2*len(own))
+	}
+	for _, id := range ids {
+		if !slices.Contains(own, id) {
+			t.Errorf("swept id %d is not one of the erased user's messages %v", id, own)
+		}
+	}
+	if n := countSeededEvents(t, database); n != 2 {
+		t.Errorf("events left = %d, want the other user's edit and thread frames (2)", n)
+	}
+	missing, err := database.MissingMessageIDs(ctx, append(slices.Clone(own), otherMsg))
+	mustDo(t, "MissingMessageIDs", err)
+	if !slices.Equal(missing, own) {
+		t.Errorf("missing ids = %v, want %v", missing, own)
 	}
 }

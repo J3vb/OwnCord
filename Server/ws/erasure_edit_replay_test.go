@@ -79,19 +79,44 @@ func TestErasure_PurgesEditFramesOfErasedMessages(t *testing.T) {
 	waitFor(t, waitTimeout, func() bool { return editFramesFor(hub, subjectMsg) > 0 && editFramesFor(hub, observerMsg) > 0 },
 		"both edit frames to reach the ring buffer")
 
+	if err := persister.Flush(ctx); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	storedEdits := func(msgID int64) int {
+		var n int
+		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_type = 'chat_edited' AND (json_extract(payload, '$.payload.id') = ?1 OR json_extract(payload, '$.payload.message_id') = ?1)`, msgID).Scan(&n); err != nil {
+			t.Fatalf("count stored edits: %v", err)
+		}
+		return n
+	}
+	if n := storedEdits(subjectMsg); n != 1 {
+		t.Fatalf("stored edits for the erased user's message before the erasure = %d, want 1 (positive control)", n)
+	}
+
 	if err := svc.Erasure.Erase(ctx, subject.ID); err != nil {
 		t.Fatalf("Erase: %v", err)
 	}
 	if n := editFramesFor(hub, subjectMsg); n != 0 {
 		t.Errorf("ring still holds %d edit frames for the erased user's message", n)
 	}
-	if err := persister.Flush(ctx); err != nil {
-		t.Fatalf("Flush: %v", err)
+	if n := storedEdits(subjectMsg); n != 0 {
+		t.Errorf("stored edit events for the erased user's message = %d, want 0", n)
 	}
-	var stored int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_type = 'chat_edited' AND payload LIKE ?`,
-		fmt.Sprintf(`%%"message_id":%d,%%`, subjectMsg)).Scan(&stored); err != nil || stored != 0 {
-		t.Errorf("stored edit events for the erased user's message = %d (%v), want 0", stored, err)
+	// A frame for the erased message that reaches the table after the erasure (a queue
+	// flushed late) goes when the replay purge runs again, with no state from the first run.
+	var jobID int64
+	if err := database.QueryRowContext(ctx, `SELECT id FROM erasure_jobs WHERE user_id = ?`, subject.ID).Scan(&jobID); err != nil {
+		t.Fatalf("job id: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO events (seq, event_type, payload, channel_id) VALUES (999999, 'chat_edited', ?, ?)`,
+		fmt.Sprintf(`{"seq":999999,"type":"chat_edited","payload":{"id":%d,"content":"late"}}`, subjectMsg), chID); err != nil {
+		t.Fatalf("late event: %v", err)
+	}
+	if err := hub.PurgeErasedMessagesFromReplay(ctx, jobID); err != nil {
+		t.Fatalf("PurgeErasedMessagesFromReplay: %v", err)
+	}
+	if n := storedEdits(subjectMsg); n != 0 {
+		t.Errorf("late stored edit for the erased message = %d after the purge, want 0", n)
 	}
 	if n := editFramesFor(hub, observerMsg); n != 1 {
 		t.Errorf("ring edit frames for the other user's message = %d, want 1", n)

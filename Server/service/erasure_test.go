@@ -505,12 +505,12 @@ func TestModerationService_EraseUser(t *testing.T) {
 
 type recordingErasureHub struct {
 	calls []string
-	// messageIDs are the ids PurgeMessagesFromReplay was given, in call order.
-	messageIDs []int64
+	// messagePurges are the job ids PurgeErasedMessagesFromReplay was called for.
+	messagePurges []int64
 }
 
-func (h *recordingErasureHub) PurgeMessagesFromReplay(_ context.Context, ids []int64) error {
-	h.messageIDs = append(h.messageIDs, ids...)
+func (h *recordingErasureHub) PurgeErasedMessagesFromReplay(_ context.Context, jobID int64) error {
+	h.messagePurges = append(h.messagePurges, jobID)
 	return nil
 }
 

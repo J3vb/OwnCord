@@ -208,7 +208,7 @@ func (h *Hub) dropsForTombstonesWith(msg []byte, pre *preParsedRefs) bool {
 		return true
 	}
 	if refs.messageIn(t.messages) {
-		slog.Info("hub: dropped a frame about a message retention removed")
+		slog.Info("hub: dropped a frame about a message that was removed")
 		return true
 	}
 	return false
@@ -319,6 +319,26 @@ func messageIn[V any](f *frameRefs, set map[int64]V) bool {
 		return true
 	}
 	return slices.ContainsFunc(pl.IDs, has)
+}
+
+// addMessageIDs adds the message ids a message-family frame names to set.
+func (f *frameRefs) addMessageIDs(set map[int64]struct{}) {
+	if _, ok := messageFamily[f.Type]; !ok {
+		return
+	}
+	pl := &f.Payload
+	if pl.ID != nil {
+		set[*pl.ID] = struct{}{}
+	}
+	if pl.MessageID != nil {
+		set[*pl.MessageID] = struct{}{}
+	}
+	if pl.Referenced != nil {
+		set[pl.Referenced.ID] = struct{}{}
+	}
+	for _, id := range pl.IDs {
+		set[id] = struct{}{}
+	}
 }
 
 func (f *frameRefs) messageIn(set map[int64]uint64) bool { return messageIn(f, set) }

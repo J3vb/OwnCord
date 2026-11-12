@@ -25,11 +25,11 @@ var erasureDrainSteps = []drainStep{
 	// delete, so no reader sees old counts at a newer version.
 	pollVotesStep(),
 	{label: "attachments uploaded", run: drainUploadedAttachments},
-	// Before messages: the predicate asks the messages table whose a frame is.
-	windowStep("message events", "events", "seq", EventNamesOwnMessagePredicate),
+	// Events go before messages: an edit frame names its message, not its author, so
+	// the predicate asks the messages table whose it is while the rows still exist.
+	windowStep("events", "events", "seq", EventNamesUserPredicate+" OR "+EventNamesOwnMessagePredicate),
 	{label: "messages", run: drainMessages},
 	windowStep("reactions", "reactions", "id", `user_id = ?1`),
-	windowStep("events", "events", "seq", EventNamesUserPredicate),
 }
 
 func limitStep(label, query string) drainStep {
@@ -151,7 +151,7 @@ func drainMessages(ctx context.Context, tx *sql.Tx, userID, _ int64) (drainResul
 	if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE id IN (`+in+`)`, args...); err != nil { //nolint:gosec // G202: placeholders only
 		return drainResult{}, fmt.Errorf("delete: %w", err)
 	}
-	return drainResult{done: len(ids) < erasureChunk, files: files, messageIDs: ids}, nil
+	return drainResult{done: len(ids) < erasureChunk, files: files}, nil
 }
 
 // erasureReverseMentionCountsFor is erasureReverseMentionCounts for an explicit
