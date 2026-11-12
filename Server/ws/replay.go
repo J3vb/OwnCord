@@ -128,11 +128,11 @@ func (h *Hub) reconnectPrecheck(
 	// Use the configured seam, never a caller-supplied handle, so an instrumented reader intercepts the
 	// reads.
 	database := h.readers.Visibility
-	// Replay cannot repair a missed visibility change, a shed content frame or a dropped presence frame: full
-	// ready.
-	if h.mustFullResync(lastSeq) || h.presenceResyncPending(c.userID, c.tokenHash) {
-		slog.Info("ws replay skipped (resync watermark at or past last_seq, or presence dropped), sending full ready",
-			"user_id", c.userID, "last_seq", lastSeq)
+	// Replay cannot repair a missed visibility change, a shed content frame, a dropped presence frame or a
+	// frame the client could not read (full_state): full ready.
+	if c.fullStateAsked || h.mustFullResync(lastSeq) || h.presenceResyncPending(c.userID, c.tokenHash) {
+		slog.Info("ws replay skipped (full state asked, resync watermark at or past last_seq, or presence dropped), sending full ready",
+			"user_id", c.userID, "last_seq", lastSeq, "full_state", c.fullStateAsked)
 		h.stats.ReconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
 		return nil, nil, false

@@ -55,6 +55,10 @@ type Client struct {
 	// handleReconnect and handleFreshConnect promote it to channelID only after
 	// checking it against the freshly computed allowed-channel set.
 	authChannelID int64
+	// fullStateAsked is the auth frame's full_state: a resume (lastSeq > 0) that wants the
+	// full ready instead of a replay. It still counts as a resume of the same session, so
+	// the fallback keeps that session's voice membership. Set before registration, no lock.
+	fullStateAsked bool
 	// features is what the auth frame declared; set once during the handshake
 	// before the client is visible, so no lock.
 	features      clientFeatures
