@@ -58,7 +58,7 @@ type routeGroup struct {
 
 // routeGroups is every feature's routes, mounted in this order after the middleware and health routes.
 var routeGroups = []routeGroup{
-	{"invites", func(r chi.Router, d *routeDeps) { MountInviteRoutes(r, d.svc) }},
+	{"invites", func(r chi.Router, d *routeDeps) { MountInviteRoutes(r, d.svc, d.limiter) }},
 	{"gif", func(r chi.Router, d *routeDeps) { mountGIF(r, d.cfg, d.svc, d.limiter) }},
 	// Link previews and outside images for the browser client; only mounted when the browser client is.
 	{"externalContent", func(r chi.Router, d *routeDeps) {

@@ -20,6 +20,7 @@ import {
 import {
   alertIncomingCall,
   alertMissedCall,
+  alertRedial,
 } from "../../../src/features/direct-messages/callAlerts";
 import {
   FakeWsClient,
@@ -735,19 +736,20 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "call_decline" }));
   });
 
-  it("a ring raises one call alert, and a redial of the same ring none", async () => {
+  it("a ring raises one call alert, and a redial of the same ring only says it rang again", async () => {
     const ws = fakeWs();
     m.page = mountPage(m.container, ws);
     vi.mocked(alertIncomingCall).mockClear();
+    vi.mocked(alertRedial).mockClear();
 
     incomingCall(ws);
     incomingCall(ws);
 
-    await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(alertIncomingCall).mock.calls[0]![0]).toMatchObject({
-      channelId: 50,
-      fromUserId: 10,
-    });
+    const ring = { channelId: 50, fromUserId: 10 };
+    await vi.waitFor(() => expect(alertRedial).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(alertRedial).mock.calls[0]![0]).toMatchObject(ring);
+    expect(alertIncomingCall).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(alertIncomingCall).mock.calls[0]![0]).toMatchObject(ring);
   });
 
   it("a ring that times out reports one missed call; one the ringer cancelled reports none", async () => {

@@ -1,7 +1,7 @@
 /** The invite manager overlay: its data mapping and the controller that opens it. */
 
 import type { ApiClient } from "@lib/api";
-import { errorText } from "@lib/api";
+import { ApiClientError, errorText } from "@lib/api";
 import { canManageInvites } from "@lib/permissions";
 import { createLogger } from "@lib/logger";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
@@ -35,6 +35,7 @@ export function mapInviteResponse(r: InviteResponse): InviteItem {
         : "";
   const uses = r.use_count ?? r.uses ?? 0;
   return {
+    id: r.id,
     code: r.code,
     createdBy: creatorUsername !== "" ? creatorUsername : shellText("invite.unknownCreator"),
     // created_at is when the invite was made; expires_at is when it lapses.
@@ -152,9 +153,15 @@ export function createInviteManagerController(opts: {
           });
           return mapInviteResponse(created);
         },
-        onRevokeInvite: async (code: string) => {
+        onRevokeInvite: async (id: number, code: string) => {
           try {
-            await opts.api.revokeInvite(code);
+            try {
+              await opts.api.revokeInvite(id);
+            } catch (err) {
+              // A server that predates revoke by id has no such route.
+              if (!(err instanceof ApiClientError) || err.status !== 404) throw err;
+              await opts.api.revokeInviteByCode(code);
+            }
           } catch (err) {
             log.error("Invite revoke failed", { code, error: String(err) });
             throw err;

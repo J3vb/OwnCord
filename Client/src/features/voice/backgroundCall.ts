@@ -7,29 +7,49 @@
 // (a camera or a stream, as the video grid reports it), so watching with
 // hands off the phone does not dim and lock it.
 //
+// The service's notification has a Mute or Unmute button, so the state also
+// says how the microphone stands, and the notification follows a mute made
+// anywhere within a moment.
+//
 // The host side outlives a reload of the page, so the page says where it
 // stands as it starts, "no call" included: a service or a lit screen left
 // from before the reload ends there.
 
 import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { desktop } from "../../platform/desktop";
-import type { CallServiceState } from "../../platform/contracts/callService";
+import type { CallMic, CallServiceState } from "../../platform/contracts/callService";
 import { isVideoOnScreen, onVideoOnScreenChange } from "./videoOnScreen";
 
-const NO_CALL: CallServiceState = { active: false, camera: false, videoOnScreen: false };
+const NO_CALL: CallServiceState = {
+  active: false,
+  camera: false,
+  videoOnScreen: false,
+  mic: "live",
+};
 
 function inCall(state: VoiceState): boolean {
   return state.currentChannelId !== null || state.voiceStatus !== "idle";
 }
 
-/** A camera and a picture count only inside a call. */
+/** A moderator's mute is not the member's to lift, whatever their own was. */
+function micOf(voice: VoiceState): CallMic {
+  if (voice.localServerMuted === true) return "locked";
+  return voice.localMuted ? "muted" : "live";
+}
+
+/** A camera, a picture and the microphone count only inside a call. */
 function callState(voice: VoiceState, videoOnScreen: boolean): CallServiceState {
   if (!inCall(voice)) return NO_CALL;
-  return { active: true, camera: voice.localCamera, videoOnScreen };
+  return { active: true, camera: voice.localCamera, videoOnScreen, mic: micOf(voice) };
 }
 
 function same(a: CallServiceState, b: CallServiceState): boolean {
-  return a.active === b.active && a.camera === b.camera && a.videoOnScreen === b.videoOnScreen;
+  return (
+    a.active === b.active &&
+    a.camera === b.camera &&
+    a.videoOnScreen === b.videoOnScreen &&
+    a.mic === b.mic
+  );
 }
 
 /** Follow the voice store and the video grid until `signal` aborts, then stop

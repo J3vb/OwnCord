@@ -1,6 +1,7 @@
-//! Android message and call notifications, over tauri-plugin-notification's
-//! mobile side. The desktop host shows its own (`message_notification.rs`),
-//! which is not built here.
+//! Android message and missed-call notifications, over
+//! tauri-plugin-notification's mobile side. The desktop host shows its own
+//! (`message_notification.rs`), which is not built here. A call that rings
+//! has a notification of its own, with buttons (`call_service.rs`).
 //!
 //! The plugin reports that a notification was tapped but not which one, so
 //! `NotificationTapPlugin.kt` keeps the id from the tap intent and
@@ -15,10 +16,8 @@ use tauri::plugin::{Builder, PermissionState, PluginApi, PluginHandle, TauriPlug
 use tauri::{AppHandle, Manager, Wry};
 use tauri_plugin_notification::{Channel, Importance, NotificationExt, Visibility};
 
-/// Messages and mentions: a banner over the app and a sound.
+/// Messages, mentions and missed calls: a banner over the app and a sound.
 const MESSAGES_CHANNEL: &str = "messages";
-/// A DM call ringing while the app is open but not in front.
-const INCOMING_CALLS_CHANNEL: &str = "incoming-calls";
 
 struct NotificationTapHandle(PluginHandle<Wry>);
 
@@ -34,63 +33,50 @@ pub(crate) fn init() -> TauriPlugin<Wry> {
         .build()
 }
 
-/// The channel names Android lists in the app's notification settings, in
-/// the webview's language.
+/// The channel's name as Android lists it in the app's notification
+/// settings, in the webview's language.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelNames {
     messages: String,
     messages_description: String,
-    calls: String,
-    calls_description: String,
 }
 
-/// Create the two channels. Android keeps a channel's importance and sound
-/// from its first creation, so a later call only renames them and never
-/// undoes what the user changed.
+/// Create the channel. Android keeps a channel's importance and sound from
+/// its first creation, so a later call only renames it and never undoes what
+/// the user changed.
 #[tauri::command]
 pub async fn android_notification_channels(
     app: AppHandle,
     names: ChannelNames,
 ) -> Result<(), String> {
-    let notification = app.notification();
-    for (id, name, description) in [
-        (MESSAGES_CHANNEL, names.messages, names.messages_description),
-        (INCOMING_CALLS_CHANNEL, names.calls, names.calls_description),
-    ] {
-        let channel = Channel::builder(id, name)
-            .description(description)
-            .importance(Importance::High)
-            .visibility(Visibility::Private)
-            .vibration(true)
-            .build();
-        notification
-            .create_channel(channel)
-            .map_err(|e| format!("notification channel {id}: {e}"))?;
-    }
-    Ok(())
+    let channel = Channel::builder(MESSAGES_CHANNEL, names.messages)
+        .description(names.messages_description)
+        .importance(Importance::High)
+        .visibility(Visibility::Private)
+        .vibration(true)
+        .build();
+    app.notification()
+        .create_channel(channel)
+        .map_err(|e| format!("notification channel {MESSAGES_CHANNEL}: {e}"))
 }
 
-/// Show one notification on one of the two channels; `group` stacks a
-/// server's notifications together. The webview picks `id`, so it can
-/// withdraw the notification and recognise its tap.
+/// Show one notification; `group` stacks a server's notifications together.
+/// The webview picks `id`, so it can withdraw the notification and recognise
+/// its tap.
 #[tauri::command]
 pub async fn android_notify(
     app: AppHandle,
     id: i32,
-    channel: String,
     title: String,
     body: String,
     group: Option<String>,
 ) -> Result<(), String> {
-    if channel != MESSAGES_CHANNEL && channel != INCOMING_CALLS_CHANNEL {
-        return Err(format!("unknown notification channel {channel}"));
-    }
     let mut builder = app
         .notification()
         .builder()
         .id(id)
-        .channel_id(channel)
+        .channel_id(MESSAGES_CHANNEL)
         .title(title)
         .body(body)
         .auto_cancel();

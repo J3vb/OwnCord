@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -97,7 +98,7 @@ func TestApplyStagedRestore_RollbackThroughSymlinkKeepsLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if n := e.Name(); n != "chat.db" && n != "backup.db" && n != "chat.db.message-retry-floor" {
+		if n := e.Name(); n != "chat.db" && n != "backup.db" {
 			t.Errorf("unexpected file beside the link: %s", n)
 		}
 	}
@@ -222,4 +223,29 @@ func TestApplyStagedRestore_SymlinkResumesThroughRelativeTargetInLinkedDir(t *te
 	}
 	assertStillLink(t, link, target)
 	assertRows(t, real, "backup")
+}
+
+func TestMessageDeliveryFloor_SymlinkSharesRealSideAndHonoursLinkSide(t *testing.T) {
+	link, real, _ := linkedFixture(t)
+	if err := AdvanceMessageDeliveryFloorForRestore(real); err != nil {
+		t.Fatal(err)
+	}
+	viaReal, err := readMessageDeliveryFloor(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaLink, err := readMessageDeliveryFloor(link)
+	if err != nil || viaLink != viaReal {
+		t.Fatalf("cutoff via link = %d, %v; via real path %d", viaLink, err, viaReal)
+	}
+	if fileExists(link + messageDeliveryFloorSuffix) {
+		t.Fatal("cutoff written beside the link")
+	}
+	higher := viaReal + 60_000
+	if err := os.WriteFile(link+messageDeliveryFloorSuffix, []byte(strconv.FormatInt(higher, 10)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := readMessageDeliveryFloor(link); err != nil || got != higher {
+		t.Fatalf("cutoff with a link-side file = %d, %v; want %d", got, err, higher)
+	}
 }

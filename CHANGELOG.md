@@ -107,10 +107,13 @@ release changes the database, and anything an operator must do first.)
 - Calls have a sound route button, in the call view and in a DM call: pick Speaker, Earpiece, or a wired or Bluetooth headset. A headset you connect is used by itself, and the call goes back to the speaker when it disconnects. Needs Android 12 or newer.
 - A phone call now pauses your OwnCord call: your mic closes and the call goes silent, and both come back by themselves when the phone call ends. Your own mute and deafen stay as you left them.
 - The screen stays on while a call shows a camera or a stream, and may sleep again once no picture is on screen.
+- The "In a call" notification has Mute and Leave buttons, so you can mute, unmute or hang up without opening the app. It also says when you are muted.
+- A direct message call that comes in while the app is not on screen rings like a phone call: a notification with Accept and Decline and your phone's ringtone, on the lock screen too. Accept joins the call (after you unlock, on a locked phone). A call you missed leaves a notification that opens the conversation. The app has to be running for this: a phone that has stopped the app in the background does not ring yet. On a phone with Android's notification cooldown switched on, a call that comes right after a message can ring more quietly.
 - Your status goes Idle once the app has been out of view for ten minutes (in the background, or the screen off) and back to Online as soon as you open it. A phone that sleeps can take several minutes longer, and a phone that stops the app in the background shows you as offline instead.
 
 ### Fixed
 
+- **Invites:** the list shows all usable invites first and pages older ones; invites can be revoked by id (an older server still works through a fallback to the code); creating invites is limited to 20 per user per hour.
 - **Accounts:** an account recovery, sign-up, two-factor sign-in or report that already went through no longer asks you to try again just because the request ran long.
 - **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
@@ -124,6 +127,7 @@ release changes the database, and anything an operator must do first.)
 - **Moderation:** closing the ban dialog after a failed ban said the member was banned. It now says the ban could not be confirmed.
 - **Desktop UI:** animated avatars and banners kept old rows in memory after every channel switch. They no longer do.
 - **Direct messages:** the People view redrew every row on each presence change or new message on busy servers. It now updates only the rows that changed.
+- **Admin:** `chatserver restore` on a symlinked database path wrote its message-retry cutoff where the server did not read it. The cutoff now sits beside the real database, and one left beside the link is still honoured.
 - **Linux:** while the camera or a screen share was being published on a slow connection, mute, push-to-talk release, deafen, volume changes and Leave waited for it (up to 10 seconds or more). They now act at once.
 - **Linux:** after a microphone device change landed during an unmute, you could show as unmuted while others heard nothing.
 - **Linux:** when the window's page process ends unexpectedly, the app now leaves your call and reloads the window instead of staying blank.

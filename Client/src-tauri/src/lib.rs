@@ -330,6 +330,10 @@ pub fn run() {
             #[cfg(target_os = "android")]
             call_service::set_call_service,
             #[cfg(target_os = "android")]
+            call_service::show_call_ring,
+            #[cfg(target_os = "android")]
+            call_service::clear_call_ring,
+            #[cfg(target_os = "android")]
             metered_network::is_metered,
             #[cfg(target_os = "android")]
             mobile_audio::mobile_audio_set_session,

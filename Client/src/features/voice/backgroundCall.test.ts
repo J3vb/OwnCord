@@ -6,6 +6,7 @@ vi.mock("../../platform/desktop", () => ({ desktop: { callService: { update: hos
 import { startBackgroundCall } from "./backgroundCall";
 import { isVideoOnScreen, reportVideoOnScreen } from "./videoOnScreen";
 import { resetVoiceStore, voiceStore, type VoiceStatus } from "../../stores/voice.store";
+import type { CallMic } from "../../platform/contracts/callService";
 
 function setCall(channel: number | null, status: VoiceStatus, camera = false): void {
   voiceStore.setState((s) => ({
@@ -23,8 +24,16 @@ async function setVideo(on: boolean): Promise<void> {
   await Promise.resolve();
 }
 
-const call = (camera: boolean, videoOnScreen = false) => [{ active: true, camera, videoOnScreen }];
-const NO_CALL = [{ active: false, camera: false, videoOnScreen: false }];
+const call = (camera: boolean, videoOnScreen = false, mic: CallMic = "live") => [
+  { active: true, camera, videoOnScreen, mic },
+];
+const NO_CALL = [{ active: false, camera: false, videoOnScreen: false, mic: "live" }];
+
+/** The member mutes or unmutes, or a moderator does. */
+function setMic(muted: boolean, byModerator = false): void {
+  voiceStore.setState((s) => ({ ...s, localMuted: muted, localServerMuted: byModerator }));
+  voiceStore.flush();
+}
 
 describe("background call service", () => {
   let owner: AbortController;
@@ -93,6 +102,50 @@ describe("background call service", () => {
     owner.abort();
     setCall(null, "idle");
     expect(host.update.mock.calls).toEqual([call(false), NO_CALL]);
+  });
+
+  describe("the notification's microphone", () => {
+    it("follows a mute and its lift, wherever they were made", () => {
+      startBackgroundCall(owner.signal);
+      setCall(7, "connected");
+      setMic(true);
+      setMic(false);
+      expect(host.update.mock.calls).toEqual([
+        NO_CALL,
+        call(false),
+        call(false, false, "muted"),
+        call(false),
+      ]);
+    });
+
+    it("is locked under a moderator's mute, whatever the member's own was", () => {
+      startBackgroundCall(owner.signal);
+      setCall(7, "connected");
+      setMic(false, true);
+      // The member's own mute changes under it: still not theirs to lift.
+      setMic(true, true);
+      setMic(true);
+      expect(host.update.mock.calls).toEqual([
+        NO_CALL,
+        call(false),
+        call(false, false, "locked"),
+        call(false, false, "muted"),
+      ]);
+    });
+
+    it("is the state a call starts in, when the member joins muted", () => {
+      setMic(true);
+      startBackgroundCall(owner.signal);
+      setCall(7, "joining");
+      expect(host.update.mock.calls).toEqual([NO_CALL, call(false, false, "muted")]);
+    });
+
+    it("says nothing of a mute outside a call", () => {
+      startBackgroundCall(owner.signal);
+      setMic(true);
+      setMic(false, true);
+      expect(host.update.mock.calls).toEqual([NO_CALL]);
+    });
   });
 
   describe("screen stays on while a picture shows", () => {

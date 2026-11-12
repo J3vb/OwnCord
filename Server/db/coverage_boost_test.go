@@ -737,7 +737,7 @@ func TestCreateUserWithInvite_ExpiredInvite(t *testing.T) {
 func TestListInvites_DB_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	invites, err := database.ListInvites(context.Background())
+	invites, err := listAllInvites(t, database)
 	mustDo(t, "ListInvites", err)
 	if len(invites) != 0 {
 		t.Errorf("expected 0 invites, got %d", len(invites))
@@ -751,7 +751,7 @@ func TestListInvites_DB_ReturnsAll(t *testing.T) {
 	_, _ = database.CreateInvite(context.Background(), creatorID, 5, nil)
 	_, _ = database.CreateInvite(context.Background(), creatorID, 0, nil)
 
-	invites, err := database.ListInvites(context.Background())
+	invites, err := listAllInvites(t, database)
 	mustDo(t, "ListInvites", err)
 	if len(invites) != 2 {
 		t.Errorf("expected 2 invites, got %d", len(invites))

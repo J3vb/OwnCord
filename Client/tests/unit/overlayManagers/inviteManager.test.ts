@@ -11,6 +11,7 @@ import {
   makeMockApi,
   type RevokeInviteOpts,
 } from "../../helpers/overlayManagersHarness";
+import { ApiClientError } from "@lib/api";
 import { useMountContainer } from "../../helpers/mountContainer";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
@@ -118,21 +119,34 @@ describe("createInviteManagerController", () => {
     const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
 
     // The callback should re-throw so InviteManager's catch prevents optimistic removal
-    await expect(opts.onRevokeInvite("abc123xyz")).rejects.toThrow("network error");
+    await expect(opts.onRevokeInvite(7, "abc123xyz")).rejects.toThrow("network error");
 
     // Controller should log the error with context
     expect(mockLogError).toHaveBeenCalled();
   });
 
-  it("onRevokeInvite succeeds normally when API works", async () => {
+  it("onRevokeInvite falls back to revoke by code when the server has no by-id route", async () => {
+    const api = makeMockApi({
+      revokeInvite: vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "not found")),
+      revokeInviteByCode: vi.fn().mockResolvedValue(undefined),
+    });
+    await openInvites(api);
+    const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
+    await expect(opts.onRevokeInvite(7, "abc123xyz")).resolves.toBeUndefined();
+    expect(api.revokeInviteByCode).toHaveBeenCalledWith("abc123xyz");
+  });
+
+  it("onRevokeInvite revokes by id when the API works", async () => {
     const api = makeMockApi();
 
     await openInvites(api);
 
     const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
 
-    await expect(opts.onRevokeInvite("abc123xyz")).resolves.toBeUndefined();
+    await expect(opts.onRevokeInvite(7, "abc123xyz")).resolves.toBeUndefined();
     expect(mockLogError).not.toHaveBeenCalled();
+    expect(api.revokeInvite).toHaveBeenCalledWith(7);
+    expect(api.revokeInviteByCode).not.toHaveBeenCalled();
   });
 
   it("opening with no live invite creates exactly one (7 days, no limit) and features it", async () => {
@@ -603,16 +617,5 @@ describe("createInviteManagerController (additional)", () => {
 
     expect(createInviteManager).not.toHaveBeenCalled();
     expect(mockInviteManagerMount).not.toHaveBeenCalled();
-  });
-
-  it("onRevokeInvite passes invite code directly to API", async () => {
-    const api = makeMockApi();
-
-    await openInvites(api);
-
-    const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
-
-    await expect(opts.onRevokeInvite("abc123xyz")).resolves.toBeUndefined();
-    expect(api.revokeInvite).toHaveBeenCalledWith("abc123xyz");
   });
 });

@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 263 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 264 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -204,6 +204,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/info`                                                       |
 | GET     | `/api/v1/invites/`                                                   |
 | POST    | `/api/v1/invites/`                                                   |
+| DELETE  | `/api/v1/invites/id/{id}`                                            |
 | DELETE  | `/api/v1/invites/{code}`                                             |
 | GET     | `/api/v1/invites/{code}/redemptions`                                 |
 | GET     | `/api/v1/livekit/health`                                             |
@@ -2712,7 +2713,7 @@ Create a new invite code.
 }
 ```
 
-Both fields are optional. An empty body (or `0`) creates an invite with unlimited uses and no expiry; a negative value is `400 BAD_REQUEST`.
+Both fields are optional. An empty body (or `0`) creates an invite with unlimited uses and no expiry; a negative value is `400 BAD_REQUEST`. Each user may create 20 invites per hour; past that the reply is `429 RATE_LIMITED` with `Retry-After`.
 
 #### Response 201 Created
 
@@ -2733,20 +2734,39 @@ Both fields are optional. An empty body (or `0`) creates an invite with unlimite
 
 ### GET /api/v1/invites
 
-List all invites (active, expired, and revoked).
+List invites: live ones first, then dead ones (revoked, used up or expired).
 
 **Auth:** Required
 **Permission:** `MANAGE_INVITES`
 
+| Query    | Description                                                                                                                          |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `state`  | Optional `live` or `dead`: return only that list. Omitted: the first page of both, live first.                                       |
+| `before` | Optional invite id: only invites with a smaller id, newest id first. Pass the last id of the previous page. Ignored without `state`. |
+| `limit`  | Optional size of the dead list, default 50, at most 200. The live list is never cut by dead invites; it holds at most 500 per page.  |
+
+A client pages the rest with `?state=dead&before=<last id>&limit=<n>` until a page comes back shorter than `limit`; a live list of 500 continues with `?state=live&before=<last id>`. An invite can expire between two reads and then appear in both a live and a later dead page, so merge pages by `id`. With no query the reply is the same array old clients already read.
+
 #### Response 200 OK
 
-Returns a JSON array of invite objects, newest first (at most 200). Each carries `creator_username`, the creator's username (empty once that account is erased); the create response leaves it empty.
+Returns a JSON array of invite objects, ordered as above. Each carries `creator_username`, the creator's username (empty once that account is erased); the create response leaves it empty.
 
 ---
 
 ### DELETE /api/v1/invites/{code}
 
 Revoke an invite by its code string.
+
+**Auth:** Required
+**Permission:** `MANAGE_INVITES`
+
+#### Response 204 No Content
+
+---
+
+### DELETE /api/v1/invites/id/{id}
+
+Revoke an invite by its numeric `id` (as listed). Revoking an already revoked invite is `204` again; an unknown or malformed id is `404 NOT_FOUND`.
 
 **Auth:** Required
 **Permission:** `MANAGE_INVITES`

@@ -262,7 +262,8 @@ describe("Server/admin/static — panel behaviour", () => {
   it("manages invites and shows a redemption history per code (O1)", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p) => {
-      if (p === "/api/v1/invites/")
+      if (p === "/api/v1/invites/?state=dead&limit=50") return { json: [] };
+      if (p === "/api/v1/invites/?state=live")
         return {
           json: [
             {
@@ -330,14 +331,15 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(create?.body).toEqual({ max_uses: 3, expires_in_hours: 48 });
     expect(create?.headers["Content-Type"]).toBe("application/json");
 
-    // Revoke deletes the code on the member API.
+    // Revoke deletes by id on the member API.
     calls.length = 0;
-    await (booted.bridge.actions.confirmRevokeInvite as (c: string) => Promise<void>)(
+    await (booted.bridge.actions.confirmRevokeInvite as (c: string, id: number) => Promise<void>)(
       "leaked-code",
+      1,
     );
-    expect(
-      calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/invites/leaked-code"),
-    ).toBe(true);
+    expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/invites/id/1")).toBe(
+      true,
+    );
   });
 
   // OC-0355. The hotkey used to preventDefault whenever a .filter-search

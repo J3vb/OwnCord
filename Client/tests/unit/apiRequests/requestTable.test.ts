@@ -544,7 +544,13 @@ describe("REST client requests", () => {
     },
     {
       name: "revokeInvite",
-      call: (a) => a.revokeInvite("abc123"),
+      call: (a) => a.revokeInvite(7),
+      method: "DELETE",
+      path: "/invites/id/7",
+    },
+    {
+      name: "revokeInviteByCode",
+      call: (a) => a.revokeInviteByCode("abc123"),
       method: "DELETE",
       path: "/invites/abc123",
     },

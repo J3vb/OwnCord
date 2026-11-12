@@ -72,9 +72,11 @@ const appAudio: AppAudio = {
   stop: async () => undefined,
 };
 
-// A browser tab has no service to keep a call alive in the background.
+// A browser tab has no service to keep a call alive in the background, and
+// no call notification with buttons.
 const callService: CallService = {
   update: () => undefined,
+  onAction: () => undefined,
 };
 
 // A tab plays a call wherever the browser does, and hears of no phone call.

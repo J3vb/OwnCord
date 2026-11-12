@@ -41,6 +41,9 @@ export interface RingControllerOptions {
   /** A new ring began: not a redial of the ring already on screen. The OS
    *  notification and the attention request hang off this, once per ring. */
   readonly onRingStart?: (state: RingState) => void;
+  /** The ring on screen was rung again and its 30s started over, so whatever
+   *  shows it for a set time can start over too. */
+  readonly onRedial?: (state: RingState) => void;
   /** The ring ended with nobody answering: the timeout, or the ringer
    *  hanging up first. An accept, a decline or a newer call is not a miss. */
   readonly onMissed?: (state: RingState) => void;
@@ -112,7 +115,8 @@ export function createRingController(opts: RingControllerOptions): RingControlle
     }, RING_TIMEOUT_MS);
     opts.onRingStateChange(next);
     opts.onChime(true);
-    if (!redial) opts.onRingStart?.(next);
+    if (redial) opts.onRedial?.(next);
+    else opts.onRingStart?.(next);
   }
 
   function accept(): void {
