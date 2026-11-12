@@ -283,6 +283,14 @@ describe("the view", () => {
     expect(after.querySelector(".mi-custom-status")?.textContent).toBe("Idle");
   });
 
+  it("keeps the avatar element when only the status changed", () => {
+    const avatar = root.querySelector("[data-testid='people-row-2'] .mi-avatar");
+    setRoster(member(ME, "me", "online"), member(2, "amy", "idle"), member(3, "bob", "offline"));
+    const row = root.querySelector("[data-testid='people-row-2']")!;
+    expect(row.querySelector(".mi-avatar")).toBe(avatar);
+    expect(row.querySelector(".mi-status")?.getAttribute("aria-label")).toMatch(/idle/i);
+  });
+
   it("keeps rows by identity while others join, leave and reorder", () => {
     setRoster(
       member(ME, "me", "online"),

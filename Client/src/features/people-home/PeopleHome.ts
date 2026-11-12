@@ -17,7 +17,7 @@ import { voiceStore } from "@stores/voice.store";
 import { peopleHomeText as t } from "../../i18n/peopleHome";
 import type { FeatureViewContext } from "../navigation/destinations";
 import { activeNow, peopleRows, type ActiveModel, type PeopleTab, type PersonModel } from "./model";
-import { peopleScope, personAvatar, watchPeople } from "./shared";
+import { peopleScope, personAvatar, refreshPersonAvatar, watchPeople } from "./shared";
 
 function textBlock(person: PersonModel, lines: readonly string[]): HTMLElement {
   const wrap = createElement("div", { class: "mi-text" });
@@ -43,12 +43,12 @@ function labelMessage(msg: HTMLButtonElement, person: PersonModel): void {
   msg.title = t("message", { name: person.name });
 }
 
-function cardContents(person: ActiveModel): Node[] {
+function cardContents(person: ActiveModel, current: Element | null = null): Node[] {
   const lines: string[] = [];
   if (person.game !== null) lines.push(person.game);
   if (person.voiceChannel !== null) lines.push(t("active.voice", { channel: person.voiceChannel }));
   const shown: PersonModel = { ...person, lineIcon: person.game !== null ? "gamepad-2" : null };
-  return [personAvatar(shown), textBlock(shown, lines)];
+  return [refreshPersonAvatar(current, shown), textBlock(shown, lines)];
 }
 
 interface KeyedRow {
@@ -201,7 +201,9 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
   function updatePersonRow(row: PersonRow, person: PersonModel): void {
     labelMessage(row.msg, person);
     // The Message button stays in place: detaching it would drop its focus.
-    row.el.firstElementChild?.replaceWith(personAvatar(person));
+    const current = row.el.firstElementChild;
+    const avatar = refreshPersonAvatar(current, person);
+    if (avatar !== current) current?.replaceWith(avatar);
     row.msg.previousElementSibling?.replaceWith(textBlock(person, [person.line]));
   }
 
@@ -226,7 +228,7 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
 
   function updateCard(row: KeyedRow, person: ActiveModel): void {
     row.el.setAttribute("aria-label", t("message", { name: person.name }));
-    row.el.replaceChildren(...cardContents(person));
+    row.el.replaceChildren(...cardContents(person, row.el.firstElementChild));
   }
 
   function focusedIds(): { focusedId: string | undefined; focusedCard: string | undefined } {

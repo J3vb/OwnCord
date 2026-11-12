@@ -240,6 +240,26 @@ function followMotion(img: HTMLImageElement, settle: () => void): void {
   }
 }
 
+interface HoverBinding {
+  readonly img: HTMLImageElement;
+  readonly release: () => void;
+  /** Seen in the document: only such an image counts as removed once it is not. */
+  seen: boolean;
+}
+
+// A row that stays mounted while its avatar is replaced would otherwise keep
+// every earlier image's hover listeners until the next hover.
+const hoverBindings = new WeakMap<Element, Set<HoverBinding>>();
+
+function releaseDetachedHovers(target: Element): void {
+  const bound = hoverBindings.get(target);
+  if (bound === undefined) return;
+  for (const binding of bound) {
+    if (binding.img.isConnected) binding.seen = true;
+    else if (binding.seen) binding.release();
+  }
+}
+
 /**
  * Show `still` on `img` and play `animatedUrl` as `mode` says, following the
  * reduced-motion setting live. Listeners on a hover row that outlives the
@@ -283,14 +303,26 @@ export function bindAnimatedImage(
   followMotion(img, settle);
 
   if (target === null) return;
+  releaseDetachedHovers(target);
   const handlers: Array<[string, () => void]> = [];
+  const release = (): void => {
+    for (const [t, h] of handlers) target.removeEventListener(t, h);
+    hoverBindings.get(target)?.delete(binding);
+  };
+  const binding: HoverBinding = { img, release, seen: img.isConnected };
+  let bound = hoverBindings.get(target);
+  if (bound === undefined) {
+    bound = new Set();
+    hoverBindings.set(target, bound);
+  }
+  bound.add(binding);
   const on = (type: string, fn: () => void): void => {
     const handler = (): void => {
       if (img.isConnected) {
         fn();
         return;
       }
-      for (const [t, h] of handlers) target.removeEventListener(t, h);
+      release();
     };
     handlers.push([type, handler]);
     target.addEventListener(type, handler);

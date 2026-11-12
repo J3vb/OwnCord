@@ -31,11 +31,32 @@ export function personAvatar(person: PersonModel): HTMLElement {
       deferUntilVisible: true,
     },
   );
+  avatar.dataset["avatarKey"] = avatarKey(person);
   const dot = createElement("div", { class: "mi-status" });
   dot.setAttribute("aria-label", applyStatusIndicator(dot, person.status, person.mobile));
   dot.setAttribute("role", "img");
   avatar.appendChild(dot);
   return avatar;
+}
+
+function avatarKey(person: PersonModel): string {
+  return `${person.username}\n${person.avatar ?? ""}`;
+}
+
+/**
+ * The avatar for `person`, reusing `current` when it shows the same picture
+ * (only its status dot is redrawn): a new picture element per presence
+ * update would rebind an animated avatar on every change.
+ */
+export function refreshPersonAvatar(current: Element | null, person: PersonModel): HTMLElement {
+  if (current instanceof HTMLElement && current.dataset["avatarKey"] === avatarKey(person)) {
+    const dot = current.querySelector<HTMLElement>(".mi-status");
+    if (dot !== null) {
+      dot.setAttribute("aria-label", applyStatusIndicator(dot, person.status, person.mobile));
+      return current;
+    }
+  }
+  return personAvatar(person);
 }
 
 /** The names of the server's channels, which Active now shows beside a voice seat. */

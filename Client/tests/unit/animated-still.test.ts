@@ -242,6 +242,32 @@ describe("bindAnimatedImage", () => {
     expect(img.src).toBe("blob:new");
   });
 
+  it("releases a replaced image's row listeners when the next image binds to that row", () => {
+    const remove = vi.spyOn(row, "removeEventListener");
+    bindAnimatedImage(img, "blob:anim", STILL, { hover: row });
+    const second = document.createElement("img");
+    bindAnimatedImage(second, "blob:anim", STILL, { hover: row });
+    img.replaceWith(second);
+    expect(remove).not.toHaveBeenCalled();
+    const third = document.createElement("img");
+    bindAnimatedImage(third, "blob:anim", STILL, { hover: row });
+    expect(remove).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps the listeners of images bound to one row before it is mounted", () => {
+    const fresh = document.createElement("div");
+    const first = document.createElement("img");
+    const second = document.createElement("img");
+    bindAnimatedImage(first, "blob:a", STILL, { hover: fresh });
+    bindAnimatedImage(second, "blob:b", STILL, { hover: fresh });
+    fresh.append(first, second);
+    document.body.appendChild(fresh);
+    fresh.dispatchEvent(new Event("pointerenter"));
+    expect(first.src).toBe("blob:a");
+    expect(second.src).toBe("blob:b");
+    fresh.remove();
+  });
+
   it("drops its row listeners once the image is gone", () => {
     bindAnimatedImage(img, "blob:anim", STILL, { hover: row });
     img.remove();
