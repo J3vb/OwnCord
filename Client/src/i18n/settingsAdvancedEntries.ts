@@ -18,7 +18,7 @@ export const settingsAdvancedEntries = {
   "advanced.clearLogs.desc": "Remove persisted client log files from disk.",
   "advanced.clearAll.label": "Clear All Cache & Restart",
   "advanced.clearAll.desc":
-    "Remove all cached data (images, logs, WebView storage) and restart the app. Display and behaviour settings are reset. Server profiles, credentials, themes, notification levels, Push to Talk, muted channels, drafts, notes and server folders are kept.",
+    "Remove all cached data (images, logs, WebView storage) and restart the app. Display and behaviour settings are reset. Server profiles, credentials, themes, notification levels, voice input mode and key, muted channels, drafts, notes and server folders are kept.",
   "advanced.button.clear": "Clear",
   "advanced.button.clearing": "Clearing...",
   "advanced.button.cleared": "Cleared!",

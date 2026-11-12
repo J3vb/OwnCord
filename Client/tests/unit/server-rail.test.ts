@@ -377,6 +377,28 @@ describe("ServerRail", () => {
       expect(JSON.parse(localStorage.getItem(RAIL_LAYOUT_KEY) ?? "null")).toEqual(saved);
     });
 
+    it("reads the servers again on the next layout action and then applies it", async () => {
+      localStorage.setItem(RAIL_LAYOUT_KEY, JSON.stringify(saved));
+      const loadServers = vi
+        .fn<() => Promise<ReturnType<typeof profile>[]>>()
+        .mockRejectedValueOnce(new Error("store down"))
+        .mockResolvedValue([
+          profile("Alpha", "a.example"),
+          profile("Beta", "b.example"),
+          profile("Gamma", "c.example"),
+        ]);
+      await mountRail({ loadServers });
+
+      document.querySelector<HTMLElement>('[data-testid="server-rail-folder-toggle"]')!.click();
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+
+      expect(loadServers).toHaveBeenCalledTimes(2);
+      const stored = JSON.parse(localStorage.getItem(RAIL_LAYOUT_KEY) ?? "[]") as Array<{
+        collapsed?: boolean;
+      }>;
+      expect(stored[0]?.collapsed).toBe(true);
+    });
+
     it("saves layout actions once the servers have loaded", async () => {
       localStorage.setItem(RAIL_LAYOUT_KEY, JSON.stringify(saved));
       await mountRail({

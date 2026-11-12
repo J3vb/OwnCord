@@ -144,7 +144,7 @@ export const notifier: Notifier = {
   async requestAttention(): Promise<void> {},
   async setUnreadBadge(count: number): Promise<void> {
     const shown = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
-    await badge(shown);
     renderTitle(shown);
+    await badge(shown);
   },
 };

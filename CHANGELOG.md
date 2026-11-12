@@ -133,6 +133,16 @@ release changes the database, and anything an operator must do first.)
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
 - **Admin:** restoring a backup from the admin panel on a symlinked database path replaced the link with a plain file. The link is now kept and the restore goes to the linked file.
 - **Accounts:** erasing an account now also removes the erased user's messages from stored reconnect history, including later edits and reactions on them.
+- **Settings:** closing Settings while a recovery code or a half-written custom theme was on screen lost it without asking. It now asks first.
+- **Settings:** the Devices list kept signed-out devices after a password change, and signing out a device that was already gone put it back with an error. Both now stay in step.
+- **Settings:** "Clear All Cache & Restart" also wiped Push to Talk, muted channels, drafts, notes and server folders. It now keeps them.
+- **Server rail:** when the saved-server list could not be read, a folder or order change could drop folders. The rail now waits for the list.
+- **Channels:** Move Up / Move Down jumped two places when channels shared a position, and a channel drag whose mouse release was lost stayed armed. Both fixed.
+- **Members:** the member right-click menu kept its old state after Block, Unblock or a role change. It now closes when the action is done.
+- **Direct messages:** the New DM and Add people picker opens and filters faster on large servers.
+- **Desktop UI:** one Escape (or Android back) closed every stacked dialog. It now closes only the top one.
+- **Desktop UI:** after the daily log limit was reached, Clear logs left the app writing no log lines until the next day. Logging now resumes.
+- **Browser client:** Chrome and Edge never showed the unread count in the tab title. They now do.
 
 ### Messages & files
 

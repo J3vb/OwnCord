@@ -10,6 +10,7 @@
  *  - a real category's header dragged onto another category (reorders them).
  */
 
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { channelsStore } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
@@ -144,7 +145,7 @@ function cancelActiveDrag(): void {
 }
 
 function onDocumentKeyDown(e: KeyboardEvent): void {
-  if (e.key === "Escape") {
+  if (e.key === "Escape" && !isImeCommit(e)) {
     cancelActiveDrag();
   }
 }
