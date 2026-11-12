@@ -115,6 +115,7 @@ release changes the database, and anything an operator must do first.)
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
 - **Channels:** a channel permission change on a busy server now always applies to every connected member.
 - **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
+- **Admin:** the `chatserver token` commands applied pending database updates themselves, skipping the safety copy an upgrade takes. They now stop and ask you to start the server once first.
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
 
 ### Messages & files
