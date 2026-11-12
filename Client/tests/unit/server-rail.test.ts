@@ -28,6 +28,7 @@ function profile(name: string, host: string, color = "#5865f2"): ServerProfile {
 
 interface Opts {
   profiles?: ServerProfile[];
+  loadServers?: () => Promise<readonly ServerProfile[]>;
   currentHost?: string;
   currentName?: string;
   joinInvite?: (t: string) => boolean;
@@ -44,7 +45,7 @@ async function mountRail(o: Opts = {}) {
   const rail = createServerRail({
     currentHost: o.currentHost ?? "a.example",
     currentName: o.currentName ?? "Alpha",
-    loadServers: () => Promise.resolve(o.profiles ?? []),
+    loadServers: o.loadServers ?? (() => Promise.resolve(o.profiles ?? [])),
     switchServer,
     addServer,
     joinInvite,
@@ -352,6 +353,48 @@ describe("ServerRail", () => {
       profiles: [profile("Alpha", "a.example"), profile("New", "new.example")],
     });
     expect(servers().map((b) => b.dataset["host"])).toEqual(["a.example", "new.example"]);
+  });
+
+  describe("when the saved servers could not be read", () => {
+    const saved = [
+      {
+        kind: "folder",
+        id: "f1",
+        name: "Work",
+        color: "#fff",
+        collapsed: false,
+        hosts: ["a.example", "b.example"],
+      },
+      { kind: "server", host: "c.example" },
+    ];
+
+    it("keeps the stored folders and order through a layout action", async () => {
+      localStorage.setItem(RAIL_LAYOUT_KEY, JSON.stringify(saved));
+      await mountRail({ loadServers: () => Promise.reject(new Error("store down")) });
+
+      document.querySelector<HTMLElement>('[data-testid="server-rail-folder-toggle"]')!.click();
+
+      expect(JSON.parse(localStorage.getItem(RAIL_LAYOUT_KEY) ?? "null")).toEqual(saved);
+    });
+
+    it("saves layout actions once the servers have loaded", async () => {
+      localStorage.setItem(RAIL_LAYOUT_KEY, JSON.stringify(saved));
+      await mountRail({
+        profiles: [
+          profile("Alpha", "a.example"),
+          profile("Beta", "b.example"),
+          profile("Gamma", "c.example"),
+        ],
+      });
+
+      document.querySelector<HTMLElement>('[data-testid="server-rail-folder-toggle"]')!.click();
+
+      const stored = JSON.parse(localStorage.getItem(RAIL_LAYOUT_KEY) ?? "[]") as Array<{
+        collapsed?: boolean;
+      }>;
+      expect(stored[0]?.collapsed).toBe(true);
+      expect(stored).toHaveLength(2);
+    });
   });
 
   it("context menu groups with the next server and shows a folder", async () => {

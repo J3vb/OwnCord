@@ -68,6 +68,9 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
   const newFolderId = options.newFolderId ?? defaultFolderId;
 
   let profiles: readonly ServerProfile[] = [];
+  // True once the saved servers were read. Until then the list is a guess, and
+  // saving a layout pruned to it would forget every folder and the order.
+  let serversKnown = false;
   let layout: RailLayout = loadLayout();
   // Set by the first switch/add click; the session is torn down right after,
   // so any later click on the same rail is a stale double-click.
@@ -111,6 +114,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
   }
 
   function commit(next: RailLayout): void {
+    if (!serversKnown) return;
     layout = next;
     saveLayout(layout);
     render();
@@ -445,11 +449,12 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       .then((loaded) => {
         if (signal.aborted) return;
         profiles = loaded;
+        serversKnown = true;
         render();
         return;
       })
       .catch(() => {
-        // loadServers resolves to [] on failure; the current server still shows.
+        // The current server still shows; the saved layout stays as it was.
       });
   }
 
