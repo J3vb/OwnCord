@@ -51,10 +51,31 @@ func TestCreateGroupDM_MinuteLimitPerUser(t *testing.T) {
 	// Another user keeps their own budget.
 	requireStatus(t, postGroup(t, router, tokens[1], []int64{1, 3}), http.StatusCreated)
 
-	// Creating groups does not spend the budget the other group routes share.
+}
+
+func TestCreateGroupDM_BudgetSeparateFromGroupChanges(t *testing.T) {
+	router, limiter, tokens := createGroupLimitFixture(t)
+
 	group := decodeDMInfo(t, postGroup(t, router, tokens[1], []int64{1, 3}))
-	rr := dmPatch(t, router, fmt.Sprintf("/api/v1/dms/%d", group.ChannelID), tokens[0], map[string]any{"name": "still allowed"})
-	requireStatus(t, rr, http.StatusOK)
+	path := fmt.Sprintf("/api/v1/dms/%d", group.ChannelID)
+
+	// A spent creation budget leaves every group change available.
+	for range api.DMGroupCreatePerMinute {
+		requireStatus(t, postGroup(t, router, tokens[0], []int64{2, 3}), http.StatusCreated)
+	}
+	for i := range 20 {
+		rr := dmPatch(t, router, path, tokens[0], map[string]any{"name": fmt.Sprintf("name %d", i)})
+		requireStatus(t, rr, http.StatusOK)
+	}
+
+	// A spent group-change budget leaves creation available.
+	requireStatus(t, dmPatch(t, router, path, tokens[1], map[string]any{"name": "bob"}), http.StatusOK)
+	mutationKey := auth.Key("dm_group", 2)
+	for range 20 {
+		limiter.Allow(mutationKey, 20, time.Minute)
+	}
+	requireStatus(t, dmPatch(t, router, path, tokens[1], map[string]any{"name": "bob again"}), http.StatusTooManyRequests)
+	requireStatus(t, postGroup(t, router, tokens[1], []int64{1, 3}), http.StatusCreated)
 }
 
 func TestCreateGroupDM_DailyCeilingKeepsMinuteSlot(t *testing.T) {
