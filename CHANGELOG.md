@@ -129,6 +129,10 @@ release changes the database, and anything an operator must do first.)
 - **On a small phone the buttons at the end of a direct message's header were off screen**, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
 - **In a call, the round controls were stacked in two short rows.** They now sit in one row.
 
+### Under the hood
+
+- Database change 092: eight indexes for the lookups a message or channel delete runs. The first start after the update builds them, which takes a little longer on a large database. Deleting a busy channel, a thread or a group DM, and retention clean-up, are much faster on a server with many channels (a 20,000-message channel on a server with 5,000 channels: 23 s before, under 1 s after).
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

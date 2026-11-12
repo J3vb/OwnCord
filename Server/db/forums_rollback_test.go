@@ -67,14 +67,15 @@ func schemaSnapshot(t *testing.T, database *DB) map[string]string {
 func TestForumsRollback(t *testing.T) {
 	ctx := context.Background()
 
-	// The baseline: every migration except 075.
+	// The baseline: every migration except 075 and 092, which indexes a 075
+	// column.
 	without075 := fstest.MapFS{}
 	entries, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".sql") || e.Name() == "075_forums.sql" {
+		if !strings.HasSuffix(e.Name(), ".sql") || e.Name() == "075_forums.sql" || e.Name() == "092_delete_lookup_indexes.sql" {
 			continue
 		}
 		raw, err := fs.ReadFile(migrations.FS, e.Name())
@@ -170,6 +171,7 @@ func TestForumsRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = database.writer.Exec(`PRAGMA foreign_keys = ON`) })
+	applyRollbackFile(t, database, "092_delete_lookup_indexes.down.sql")
 	applyRollbackFile(t, database, "075_forums.down.sql")
 
 	got := schemaSnapshot(t, database)

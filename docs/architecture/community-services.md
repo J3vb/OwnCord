@@ -137,7 +137,10 @@ holding the id of the retention sweep it last finished (the marker file gives ea
 a channel's sweeps a random id in `deletion_markers.sweep_id`). It is server
 bookkeeping with no member data, written only by the retention sweep, deleted with the
 channel, and restored with a backup on purpose (an older backup carries an older id,
-so the start-up replay still runs for it); no new data class. Other historical
+so the start-up replay still runs for it); no new data class. **Amended 2026-11-12 (delete lookups):** `092_delete_lookup_indexes.sql` adds
+eight indexes on `channels`, `message_requests`, `read_states`, `dm_open_state`,
+`nsfw_acknowledgements`, `message_calls` and `import_jobs`; like 089 and 090 they store
+no data of their own, so no table, column or data class. Other historical
 status statements retain their `cbebd37c` baseline.
 **Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
 `poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a
