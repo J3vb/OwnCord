@@ -142,9 +142,12 @@ func (s *MessageService) EndPoll(ctx context.Context, userID, msgID int64) (*Pol
 	if err != nil {
 		return nil, err
 	}
-	ch, err := s.st.GetChannel(ctx, msg.ChannelID)
-	if err != nil || ch == nil {
+	ch, err := lookupChannel(ctx, s.st, msg.ChannelID)
+	if errors.Is(err, ErrNotFound) {
 		return nil, errPollNotFound()
+	}
+	if err != nil {
+		return nil, err
 	}
 	if err := requireChannelWritable(ch); err != nil {
 		return nil, err

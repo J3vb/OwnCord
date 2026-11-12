@@ -180,6 +180,8 @@ describe("INITIAL_STATE", () => {
       "hasMore",
       "historyLoadState",
       "loadJournal",
+      "loadJournalHolds",
+      "loadJournalStart",
       "loadWatermark",
       "loadedChannels",
       "messagePinRevision",

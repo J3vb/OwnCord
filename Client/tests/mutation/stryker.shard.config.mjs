@@ -329,6 +329,8 @@ export const shards = {
     "src/features/messaging/historyWindows.ts",
     "src/features/messaging/reactionUsers.ts",
     "src/features/threads/threadNavigation.ts",
+    "src/features/threads/threadJump.ts",
+    "src/features/messaging/trackedActions.ts",
     "src/features/unread-badge/permissionAsk.ts",
     "src/lib/media/gifPager.ts",
     "src/lib/media/gifProvider.ts",
@@ -541,6 +543,7 @@ export const shards = {
   ],
   "stores-1": [
     "src/features/channels/categoryActions.ts",
+    "src/features/messaging/historyFetch.ts",
     "src/features/messaging/loadJournal.ts",
     "src/features/messaging/loadJournalReplay.ts",
     "src/features/messaging/readingAnchor.ts",

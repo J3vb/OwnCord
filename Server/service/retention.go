@@ -216,9 +216,7 @@ func (s *RetentionService) Channels(ctx context.Context) ([]RetentionChannel, er
 	}
 	out := make([]RetentionChannel, 0, len(all))
 	for i := range all {
-		if all[i].Type != "dm" {
-			out = append(out, RetentionChannel{ID: all[i].ID, Name: all[i].Name})
-		}
+		out = append(out, RetentionChannel{ID: all[i].ID, Name: all[i].Name})
 	}
 	return out, nil
 }

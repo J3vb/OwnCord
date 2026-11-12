@@ -3,8 +3,8 @@
 //! Scopes credential and identity commands to the server the app is signed
 //! into now. The proxy records the host only when it relays the server's
 //! `auth_ok` over the pinned socket (no renderer command can set it), and
-//! clears it when that connection ends or on `ws_disconnect` (logout, server
-//! switch).
+//! clears it when that connection ends, on `ws_disconnect` (logout, server
+//! switch) or when the Linux page process ends.
 //!
 //! The same `auth_ok` records every host a login was verified for during this
 //! app run. That set survives `ws_disconnect`, a dropped connection and a

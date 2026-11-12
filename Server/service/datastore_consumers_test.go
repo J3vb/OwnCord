@@ -43,7 +43,7 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[InviteService]():         6,
 	reflect.TypeFor[MessageRequestService](): 7,
 	reflect.TypeFor[MessageService]():        20,
-	reflect.TypeFor[messageReads]():          17,
+	reflect.TypeFor[messageReads]():          18,
 	reflect.TypeFor[mentionState]():          18,
 	reflect.TypeFor[dmDelivery]():            8,
 	reflect.TypeFor[messagePins]():           10,

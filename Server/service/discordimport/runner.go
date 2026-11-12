@@ -256,7 +256,7 @@ type runState struct {
 	account, channelID, jobID int64
 	// discordChannel is the export's channel id: a reply only links when it points into this channel.
 	discordChannel string
-	ids            map[string]int64
+	ids            *knownIDs
 	chunk          []db.ImportMessage
 	chunks         int
 	lastID         int64
@@ -269,7 +269,7 @@ type runState struct {
 }
 
 func (r *Runner) run(ctx, stop context.Context, ex Export, account, channelID, jobID int64, discordChannel string) Result {
-	st := &runState{stop: stop, account: account, channelID: channelID, jobID: jobID, discordChannel: discordChannel, ids: map[string]int64{}}
+	st := &runState{stop: stop, account: account, channelID: channelID, jobID: jobID, discordChannel: discordChannel, ids: newKnownIDs()}
 	err := r.execute(ctx, ex, st)
 	if err == nil {
 		return Result{Status: db.ImportDone, Imported: st.prog.Imported, Skipped: st.prog.Skipped, SkippedAttachments: st.prog.SkippedAttachments}
@@ -422,13 +422,13 @@ func (r *Runner) flush(ctx context.Context, st *runState) error {
 	pr.Imported += int64(len(st.chunk))
 	ids, err := r.cfg.Store.ImportChunk(ctx, db.ImportChunkParams{
 		JobID: st.jobID, ChannelID: st.channelID, AuthorID: st.account,
-		Messages: st.chunk, KnownIDs: st.ids, Progress: pr,
+		Messages: st.chunk, KnownIDs: st.ids.forReplies(st.chunk), Progress: pr,
 	})
 	if err != nil {
 		return err
 	}
 	for k, v := range ids {
-		st.ids[k] = v
+		st.ids.put(k, v)
 		st.lastID = max(st.lastID, v)
 	}
 	st.prog = pr

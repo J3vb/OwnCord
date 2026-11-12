@@ -95,7 +95,8 @@ export function isAwayStatus(status: UserStatus): boolean {
   return status === "offline" || status === "invisible";
 }
 
-const nameCollator = new Intl.Collator(undefined, { sensitivity: "base" });
+/** One shared collator: building the locale rules per comparison costs far more than comparing. */
+export const nameCollator = new Intl.Collator(undefined, { sensitivity: "base" });
 
 export function compareEntries(a: Entry, b: Entry): number {
   return (

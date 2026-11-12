@@ -63,7 +63,7 @@ export interface VoiceComposerOptions {
   readonly onActiveChange?: (active: boolean) => void;
   /** Tests build the recorder from fakes. */
   readonly createRecorder?: (
-    hooks: Pick<VoiceRecorderOptions, "onLevel" | "onLimit" | "onDeviceLost">,
+    hooks: Pick<VoiceRecorderOptions, "onLevel" | "onLimit" | "onLimitFailed" | "onDeviceLost">,
   ) => VoiceRecorder;
 }
 
@@ -273,6 +273,12 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
     setStatus(voiceMessagesText("bar.limit"), "info");
   }
 
+  function onLimitFailed(): void {
+    if (!alive || phase !== "recording") return;
+    reset(true);
+    options.onError(voiceMessagesText("error.recordingFailed"));
+  }
+
   function onDeviceLost(): void {
     if (!alive || bar === null || phase !== "recording") return;
     reset(true);
@@ -297,7 +303,12 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
     }
     options.onClearError();
     phase = "starting";
-    const rec = (options.createRecorder ?? createVoiceRecorder)({ onLevel, onLimit, onDeviceLost });
+    const rec = (options.createRecorder ?? createVoiceRecorder)({
+      onLevel,
+      onLimit,
+      onLimitFailed,
+      onDeviceLost,
+    });
     recorder = rec;
     void rec.start().then(
       () => {

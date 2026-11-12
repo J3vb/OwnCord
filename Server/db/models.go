@@ -187,6 +187,7 @@ type MessageSearchResult struct {
 	MentionsEveryone bool                `json:"mentions_everyone"`
 	Sticker          *MessageStickerInfo `json:"sticker,omitempty"`
 	ImportedBy
+	SearchThreadRef
 }
 
 // SearchPage selects one page of full-text search results; the zero value is best match first, no cursor.

@@ -46,9 +46,9 @@ func (s *messagePins) SetMessagePinned(ctx context.Context, userID, channelID, m
 	if channelID <= 0 || msgID <= 0 {
 		return nil, fmt.Errorf("%w: invalid IDs", ErrBadRequest)
 	}
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, s.st, channelID)
+	if err != nil {
+		return nil, err
 	}
 	// Archived channels are read-only. This path skips checkSendPermission, so it needs the gate directly.
 	if err := requireChannelWritable(ch); err != nil {

@@ -1,15 +1,18 @@
 // Re-focusing the open thread after a reconnect. The thread panel's
 // host registers this with the dispatcher's hook (stores/threadsLoader) while
 // it is mounted, so none of it weighs on startup.
+import { recoverAfterReattach } from "./historyFetch";
 import { removeThread, setFocusedThread, threadsStore } from "@stores/threads.store";
 import {
   getChannelMessages,
+  isWindowDetached,
   setChannelLoadError,
   setChannelLoading,
   setMessages,
 } from "@stores/messages.store";
 import { ApiClientError, type ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
+import { RestErrorCode } from "@lib/protocolTypes";
 import { showToast } from "@lib/ui/toast";
 import type { WsClient } from "@lib/ws";
 import { connectText } from "../../i18n/connect";
@@ -28,7 +31,7 @@ let resumeGeneration = 0;
  * `thread_focus` is not carried across a connection: after every authenticated
  * (re)connect, if a panel is open, say so again and refetch its history, because
  * the thread's frames were not delivered while the socket was down. A thread
- * that is gone (404) or no longer readable (403) closes the panel.
+ * that is gone (404 NOT_FOUND) or no longer readable (403) closes the panel.
  */
 export function resumeThreadFocus(
   ws: Pick<WsClient, "send">,
@@ -44,16 +47,25 @@ export function resumeThreadFocus(
     attempt === resumeGeneration && threadsStore.getState().focusedThreadId === threadId;
   // Marks the fetch so a change that lands while it is in flight is kept when
   // the page is installed.
+  const wasDetached = isWindowDetached(threadId);
   setChannelLoading(threadId);
   getMessages(threadId, { limit: 50 }).then(
     (resp) => {
-      if (current()) setMessages(threadId, resp.messages, resp.has_more, true);
+      if (!current()) return;
+      setMessages(threadId, resp.messages, resp.has_more, true);
+      recoverAfterReattach({ getMessages }, threadId, wasDetached);
     },
     (err: unknown) => {
       if (!current()) return;
       // Ends the fetch's journal on every failure, including a gone thread.
       setChannelLoadError(threadId);
-      if (err instanceof ApiClientError && err.status === 404) {
+      // Only the server's own NOT_FOUND means the thread is gone; any other
+      // 404 (a proxy, a stray route) is a transient fault and keeps it.
+      if (
+        err instanceof ApiClientError &&
+        err.status === 404 &&
+        err.code === RestErrorCode.NOT_FOUND
+      ) {
         removeThread(threadId);
         return;
       }
