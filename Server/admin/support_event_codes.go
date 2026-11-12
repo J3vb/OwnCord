@@ -211,6 +211,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"livekit webhook: missing Authorization header":                                                                "livekit_webhook_missing_authorization_header",
 	"livekit webhook: participant_joined bad identity":                                                             "livekit_webhook_participant_joined_bad_identity",
 	"livekit webhook: participant_joined bad room":                                                                 "livekit_webhook_participant_joined_bad_room",
+	"livekit webhook: participant_left presence check failed, tearing down":                                        "livekit_webhook_participant_left_presence_check_failed",
 	"livekit webhook: participant_left bad identity":                                                               "livekit_webhook_participant_left_bad_identity",
 	"livekit webhook: participant_left bad room":                                                                   "livekit_webhook_participant_left_bad_room",
 	"livekit webhook: rogue participant_joined — no matching voice state, removing":                                "livekit_webhook_rogue_participant_joined",

@@ -113,6 +113,7 @@ release changes the database, and anything an operator must do first.)
 
 - **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
+- **Voice:** with LiveKit webhooks on, a voice reconnect no longer drops the member from the call.
 - **Channels:** a channel permission change on a busy server now always applies to every connected member.
 - **Voice:** if the server could not read who is in voice while you connect, the connect now retries instead of showing voice channels as empty.
 - **Group DMs:** a group DM created just as your connection dropped is no longer reported as failed.
