@@ -52,8 +52,7 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 		return
 	}
 	if held.rowKept {
-		// A same-channel move replaces the user's own row, which still holds the slot under
-		// the member lock: never refused as full, and never a slot another join could take.
+		// The upsert replaces the kept row, which holds the slot under the member lock.
 		capacity = 0
 	}
 	leaveDone := time.Now()

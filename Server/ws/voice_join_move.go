@@ -16,10 +16,8 @@ const voiceMovedReason = "Call moved to another device"
 // device with a targeted voice_disconnected, queued BEFORE anything the join produces so
 // the old device clears its local call before it sees a voice_state naming its own user. A
 // move into the channel the old device is in announces no voice_leave: it would tear down
-// the new join on the connection that sent it, and keeps the user's row, which the join's
-// insert replaces in one write. That membership is returned as held, so the caller can
-// insert without the capacity check while the kept row still holds the slot, and remove the
-// row and announce the leave if the join then fails (releaseUnconfirmedMove). moved is false
+// the new join on the connection that sent it, and keeps the user's row for the join's
+// insert to replace; it is returned as held (see releaseUnconfirmedMove). moved is false
 // when there is no call elsewhere. When moved is true, ok=false means the join must not
 // proceed (error sent) and the flag results are the moderator mute/deafen to re-apply to
 // the new row. The caller holds txn.
@@ -41,8 +39,7 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 	}
 	wasServerMuted, wasServerDeafened, wasServerMutedBy = flags.muted, flags.deafened, flags.mutedBy
 
-	// Same check as a channel switch: the old row must be gone before the new one is inserted,
-	// except the row a same-channel move kept, which the insert replaces.
+	// As for a channel switch the old row must be gone, unless this move kept it.
 	vs, err := h.voice.State(fctx, c.userID)
 	if err != nil {
 		slog.Warn("handleVoiceJoin: could not verify voice state cleared after move",
@@ -60,9 +57,8 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 	return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, true, held
 }
 
-// heldMove is the membership a same-channel call move ended without a voice_leave: the
-// channel (0 when there was none), the old join's token, and whether its row was confirmed
-// still in place for the join's insert to replace.
+// heldMove is the membership a same-channel call move ended without a voice_leave, and
+// whether its row is still in place for the join's insert to replace.
 type heldMove struct {
 	chID      int64
 	joinToken string
@@ -120,9 +116,8 @@ func (h *Hub) leaveForCallMove(fctx, ctx context.Context, txn *voiceTxn, c, from
 }
 
 // releaseUnconfirmedMove ends the membership a same-channel move held, for a join that then
-// failed: it removes the kept row (scoped to the old join, so a row the join already replaced
-// is untouched and left to the join's own rollback) and sends the voice_leave the move left
-// out, so every roster drops the user. A zero held is a no-op. The caller holds txn.
+// failed: it removes the kept row (scoped to the old join token, so a replaced row is left to
+// the join's rollback) and sends the voice_leave the move left out. The caller holds txn.
 func (h *Hub) releaseUnconfirmedMove(ctx context.Context, txn *voiceTxn, c *Client, held heldMove) {
 	if held.chID == 0 {
 		return

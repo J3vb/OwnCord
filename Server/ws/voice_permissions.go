@@ -79,18 +79,16 @@ func (h *Hub) currentVoiceGrants(ctx context.Context, userID, channelID int64, j
 	return grants, live, err
 }
 
-// sessionVoiceGrants is currentVoiceGrants for a session the media server is about to start:
-// live is also false when the member may no longer stay in the channel
-// (permissions.CanStayInVoice, as the token refresh and the sweep apply it). Moderation and
-// reconcile keep using currentVoiceGrants, so they still reach a member the sweep has yet to remove.
+// sessionVoiceGrants is currentVoiceGrants for a session about to start: live is also false
+// when permissions.CanStayInVoice refuses. Moderation and reconcile keep currentVoiceGrants,
+// so they still reach a member the sweep has yet to remove.
 func (h *Hub) sessionVoiceGrants(ctx context.Context, userID, channelID int64, joinToken string) (voicePublishGrants, bool, error) {
 	grants, live, mayStay, err := h.voiceGrantsAndStay(ctx, userID, channelID, joinToken)
 	return grants, live && mayStay, err
 }
 
-// voiceGrantsAndStay reads the join, the channel and the live channel subject once and returns
-// the publish grants, whether the row is this join, and whether the member may stay in the
-// channel. A missing channel is not live.
+// voiceGrantsAndStay reads the join, the channel and its live subject once. A missing
+// channel is not live.
 func (h *Hub) voiceGrantsAndStay(ctx context.Context, userID, channelID int64, joinToken string) (grants voicePublishGrants, live, mayStay bool, err error) {
 	state, err := h.voice.State(ctx, userID)
 	if err != nil {

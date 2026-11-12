@@ -104,6 +104,7 @@ release changes the database, and anything an operator must do first.)
 
 - **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
+- **Channels:** a channel permission change on a busy server now always applies to every connected member.
 
 ### Known issues
 
