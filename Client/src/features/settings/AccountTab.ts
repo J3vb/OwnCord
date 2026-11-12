@@ -91,12 +91,14 @@ function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal)
   // The password form and the token list both change the account's tokens;
   // each reloads when the other does.
   const tokensChanged = new EventTarget();
+  // A password change signs the other devices out, so the device list reloads.
+  const sessionsChanged = new EventTarget();
   appendChildren(
     list,
     buildTotpSection(options, signal, report("totp")),
     buildRecoveryKitSection(options, signal, report("recovery")),
-    buildPasswordSection(options, signal, tokensChanged),
-    buildSessionsSection(options, signal, tokensChanged),
+    buildPasswordSection(options, signal, tokensChanged, sessionsChanged),
+    buildSessionsSection(options, signal, tokensChanged, sessionsChanged),
   );
   paintNextStep();
   appendChildren(card, head, list);
