@@ -12,6 +12,7 @@ import {
   type FullscreenApi,
 } from "../../helpers/videoGridHarness";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
+import { routeButtonMock, routeButtonsMade } from "../../helpers/routeButtonStub";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -31,6 +32,8 @@ vi.mock("../../../src/lib/ui/backHistory", () => ({
     };
   },
 }));
+
+vi.mock("../../../src/features/voice/routeButton", () => routeButtonMock());
 
 const SHARE = 2 + 1_000_000;
 const shareCfg: TileConfig = { isSelf: false, audioUserId: 2, isScreenshare: true, name: "Otto" };
@@ -180,6 +183,128 @@ describe("VideoGrid on a phone", () => {
       grid.setExitVisible(true);
       await new Promise((r) => setTimeout(r, 0));
       expect(callBar().querySelector("[data-testid='talk-button-call']")).toBeNull();
+    });
+  });
+
+  describe("the sound route button", () => {
+    beforeEach(() => {
+      routeButtonsMade.length = 0;
+    });
+    afterEach(() => clearHost());
+
+    function openCallView(): void {
+      usePhone(true);
+      grid.setCallbacks({
+        callControls: {
+          onMuteToggle: vi.fn(),
+          onDeafenToggle: vi.fn(),
+          onLeave: vi.fn(),
+          onCameraToggle: vi.fn(),
+        },
+        onExitGrid: vi.fn(),
+      });
+      grid.setExitVisible(true);
+    }
+
+    it("sits before View options in the Android app's call view, and goes with it", async () => {
+      hostAndroidApp();
+      openCallView();
+      await vi.waitFor(() => expect(callControls(callBar())).toContain("route"));
+      expect(callControls(callBar())).toEqual([
+        "mute",
+        "deafen",
+        "camera",
+        "route",
+        "views",
+        "chat",
+        "leave",
+      ]);
+      expect(routeButtonsMade.map((made) => made.variant)).toEqual(["call"]);
+
+      grid.setExitVisible(false);
+      expect(routeButtonsMade[0]!.signal.aborted).toBe(true);
+    });
+
+    it("stays out of a full-screen tile's controls", async () => {
+      hostAndroidApp();
+      openCallView();
+      grid.addStream(SHARE, "Otto (Screen)", fakeStream(), shareCfg);
+      cell(SHARE).querySelector<HTMLButtonElement>("[data-tile-control='fullscreen']")!.click();
+      // Its talk button is in: whatever loads lazily for that bar has loaded.
+      await vi.waitFor(() =>
+        expect(
+          cell(SHARE).querySelector(".video-fs-calls [data-testid='talk-button-call']"),
+        ).not.toBeNull(),
+      );
+      expect(callControls(cell(SHARE).querySelector(".video-fs-calls")!)).not.toContain("route");
+      expect(routeButtonsMade).toHaveLength(1);
+    });
+
+    it("is left out off the Android app", async () => {
+      hostDesktopApp();
+      openCallView();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(routeButtonsMade).toEqual([]);
+      expect(callControls(callBar())).not.toContain("route");
+    });
+  });
+
+  describe("while a phone call holds the call", () => {
+    const state = { muted: false, deafened: false, listenOnly: false };
+    const note = (): HTMLElement => callBar().querySelector<HTMLElement>(".video-fs-paused")!;
+    const mute = (): HTMLButtonElement =>
+      callBar().querySelector<HTMLButtonElement>("[data-call-control='mute']")!;
+
+    beforeEach(() => {
+      usePhone(true);
+      grid.setCallbacks({
+        callControls: { onMuteToggle: vi.fn(), onDeafenToggle: vi.fn(), onLeave: vi.fn() },
+      });
+      grid.setExitVisible(true);
+    });
+
+    it("says nothing while the call runs", () => {
+      grid.setCallState(state);
+      expect(note().hidden).toBe(true);
+      expect(note().textContent).toBe("");
+      expect(callBar().classList.contains("video-fs-calls--paused")).toBe(false);
+    });
+
+    it("says the call is paused above the controls, and takes it back after", () => {
+      grid.setCallState({ ...state, phoneHold: true });
+      expect(note().hidden).toBe(false);
+      expect(note().getAttribute("role")).toBe("status");
+      expect(note().textContent).toBe("Paused for a phone call");
+      expect(callBar().classList.contains("video-fs-calls--paused")).toBe(true);
+
+      grid.setCallState(state);
+      expect(note().hidden).toBe(true);
+      expect(note().textContent).toBe("");
+      expect(callBar().classList.contains("video-fs-calls--paused")).toBe(false);
+    });
+
+    it("locks the mic control and says why, with Leave still there", () => {
+      grid.setCallState({ ...state, phoneHold: true });
+      expect(mute().disabled).toBe(true);
+      expect(mute().getAttribute("aria-pressed")).toBe("true");
+      expect(mute().title).toBe("Muted while paused");
+      expect(mute().querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+      expect(
+        callBar().querySelector<HTMLButtonElement>("[data-call-control='leave']")!.disabled,
+      ).toBe(false);
+
+      // The mute you set yourself is what comes back.
+      grid.setCallState({ ...state, muted: true });
+      expect(mute().disabled).toBe(false);
+      expect(mute().getAttribute("aria-pressed")).toBe("true");
+      expect(mute().title).toBe("Mute");
+    });
+
+    it("names the hold before a moderator's mute", () => {
+      grid.setCallState({ ...state, serverMuted: true, phoneHold: true });
+      expect(mute().title).toBe("Muted while paused");
+      grid.setCallState({ ...state, serverMuted: true });
+      expect(mute().title).toBe("You were muted by a moderator");
     });
   });
 

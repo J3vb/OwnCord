@@ -32,6 +32,7 @@ describe("browser platform registry", () => {
         "logFiles",
         "mediaDetector",
         "meteredNetwork",
+        "mobileAudio",
         "nativeFiles",
         "nativeProxies",
         "nativeVoice",
@@ -172,6 +173,13 @@ describe("browser platform registry", () => {
     expect(await b.mediaDetector.detect({ hidden: [] })).toEqual({ state: "none" });
     expect(() => b.trayStatus.onStatusChange(() => undefined)()).not.toThrow();
     expect(b.callService.update({ active: true, camera: true })).toBeUndefined();
+    // No call audio to follow in a tab: nothing is ever reported.
+    const onAudioState = vi.fn();
+    expect(b.mobileAudio.watch(new AbortController().signal, onAudioState)).toBeUndefined();
+    expect(b.mobileAudio.setSession(true)).toBeUndefined();
+    expect(b.mobileAudio.setRoute("earpiece")).toBeUndefined();
+    expect(b.mobileAudio.refresh()).toBeUndefined();
+    expect(onAudioState).not.toHaveBeenCalled();
     // No share sheet in a tab: Share is not offered, and a call refuses.
     expect(b.shareSheet.available).toBe(false);
     await expect(b.shareSheet.shareText("x")).rejects.toThrow();

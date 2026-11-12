@@ -100,6 +100,13 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Added
+
+**Android**
+
+- Calls have a sound route button, in the call view and in a DM call: pick Speaker, Earpiece, or a wired or Bluetooth headset. A headset you connect is used by itself, and the call goes back to the speaker when it disconnects. Needs Android 12 or newer.
+- A phone call now pauses your OwnCord call: your mic closes and the call goes silent, and both come back by themselves when the phone call ends. Your own mute and deafen stay as you left them.
+
 ### Fixed
 
 - **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
@@ -118,6 +125,7 @@ release changes the database, and anything an operator must do first.)
 ### Phone app
 
 - **On a small phone the buttons at the end of a direct message's header were off screen**, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
+- **In a call, the round controls were stacked in two short rows.** They now sit in one row.
 
 ### Known issues
 

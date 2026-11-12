@@ -459,8 +459,18 @@ button.dcp-verify:focus-visible {
     flex-wrap: nowrap;
   }
   .dm-call-panel--collapsed
-    :is([data-testid="dcp-deafen"], [data-testid="dcp-camera"], [data-testid="dcp-share"]) {
+    :is(
+      [data-testid="dcp-deafen"],
+      [data-testid="dcp-camera"],
+      [data-testid="dcp-share"],
+      [data-testid="route-button-dm"]
+    ) {
     display: none;
+  }
+  /* The Android app's sound route button is one control more: closer together,
+     so Leave stays on their row on a 360 px screen. */
+  .dcp-controls:has(> .route-btn:not([hidden])) {
+    gap: 6px;
   }
   .dm-call-panel--collapsed .dcp-collapse {
     min-width: 44px;

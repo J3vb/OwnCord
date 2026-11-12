@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { voiceStore, type VoiceState, type VoiceUser } from "@stores/voice.store";
-import { syncVideoGrid, type GridSyncDeps, type GridSyncMemo } from "./videoGridSync";
+import {
+  syncGridCallState,
+  syncVideoGrid,
+  type GridSyncDeps,
+  type GridSyncMemo,
+} from "./videoGridSync";
 
 const user = (userId: number, over: Partial<VoiceUser> = {}): VoiceUser => ({
   userId,
@@ -103,5 +108,32 @@ describe("syncVideoGrid", () => {
     expect(deps.checkVideoMode).toHaveBeenCalledTimes(1);
     syncVideoGrid(voiceState(6, []), m, deps);
     expect(deps.checkVideoMode).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** A grid that records the call state it is given, and that sync's memo. */
+function callStateSetup() {
+  const setCallState = vi.fn();
+  const grid = () => ({ setCallState }) as unknown as ReturnType<GridSyncDeps["grid"]>;
+  return { setCallState, grid, seen: { prevCallState: "" } };
+}
+
+describe("syncGridCallState", () => {
+  it("tells the grid when a phone call holds the call, once, and when it ends", () => {
+    const { setCallState, grid, seen } = callStateSetup();
+    syncGridCallState(voiceState(1, [], { phoneCallHold: true }), seen, grid);
+    expect(setCallState).toHaveBeenLastCalledWith(expect.objectContaining({ phoneHold: true }));
+    syncGridCallState(voiceState(1, [], { phoneCallHold: true }), seen, grid);
+    expect(setCallState).toHaveBeenCalledTimes(1);
+
+    syncGridCallState(voiceState(1, [], { phoneCallHold: false }), seen, grid);
+    expect(setCallState).toHaveBeenCalledTimes(2);
+    expect(setCallState.mock.calls[1]![0]).not.toHaveProperty("phoneHold");
+  });
+
+  it("holds nothing where there is no call", () => {
+    const { setCallState, grid, seen } = callStateSetup();
+    syncGridCallState(voiceState(null, [], { phoneCallHold: true }), seen, grid);
+    expect(setCallState.mock.calls[0]![0]).not.toHaveProperty("phoneHold");
   });
 });

@@ -42,6 +42,7 @@ export const shards = {
   "livekit-3": [
     "src/features/voice/autoPlayCameras.ts",
     "src/features/voice/backgroundCamera.ts",
+    "src/features/voice/mobileRoutes.ts",
     "src/features/voice/native/devices.ts",
     "src/features/voice/native/nativeRoomModel.ts",
     "src/features/voice/sileroDetection.ts",
@@ -51,6 +52,7 @@ export const shards = {
   ],
   "livekit-4": [
     "src/features/voice/mediaLostNotice.ts",
+    "src/features/voice/routeButton.ts",
     "src/features/voice/screenshareChange.ts",
     "src/features/voice/securedBadge.ts",
     "src/features/voice/sessionMedia.ts",
@@ -98,12 +100,15 @@ export const shards = {
   ],
   "livekit-9": [
     "src/features/voice-messages/mime.ts",
+    "src/features/voice/controlSlot.ts",
     "src/features/voice/decodeCaps.ts",
     "src/features/voice/joinFailures.ts",
     "src/features/voice/native/nativeCaptureStops.ts",
     "src/features/voice/remoteTracks.ts",
+    "src/features/voice/routeSlot.ts",
     "src/features/voice/shareHostLinks.ts",
     "src/features/voice/talkButton.ts",
+    "src/features/voice/videoGrid/gridPhoneHold.ts",
   ],
   "livekit-10": [
     "src/features/voice/dragMove.ts",

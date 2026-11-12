@@ -161,6 +161,7 @@ beforeEach(() => {
     localScreenshare: false,
     joinedAt: null,
     voiceStatus: "idle",
+    phoneCallHold: false,
   }));
   setConnectionStatus("connected");
   for (const s of [authStore, membersStore, dmStore, channelsStore, voiceStore]) s.flush();

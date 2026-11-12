@@ -45,6 +45,7 @@ export const voiceText = defineCatalog("voice", {
   "talk.hold": "Hold to talk",
   "widget.control.listenOnly": "Listening only — no microphone access",
   "widget.control.afkLocked": "You can't speak in the AFK channel",
+  "widget.control.phoneCallHold": "Muted while paused",
   "widget.control.deafen": "Deafen",
   "widget.control.undeafen": "Undeafen",
   "widget.control.camera": "Camera",
@@ -98,6 +99,20 @@ export const voiceText = defineCatalog("voice", {
   "callBar.people": { one: "{count} person", other: "{count} people" },
   "callBar.detail": "{people} · {time}",
   "callBar.leave": "Leave call",
+  "callBar.paused": "Paused for a phone call · {time}",
+  "callBar.pausedHint": "Your mic and sound come back when the phone call ends.",
+  "call.pausedForPhoneCall": "Paused for a phone call",
+  "call.paused": "Call paused",
+
+  "route.title": "Play sound through",
+  "route.button": "Sound output: {route}",
+  "route.speaker": "Speaker",
+  "route.earpiece": "Earpiece",
+  "route.wired": "Wired headset",
+  "route.bluetooth": "Bluetooth headset",
+  "route.micNote":
+    "While a route you picked is on, Android shows the mic as in use, even when you are muted. Nothing is sent while you are muted.",
+  "route.lost": "Couldn't keep that sound route. Back to automatic.",
 
   "joinSheet.label": "Join {name}",
   "joinSheet.inHere": { one: "{count} person in here", other: "{count} people in here" },

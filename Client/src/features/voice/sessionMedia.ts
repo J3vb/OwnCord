@@ -3,9 +3,13 @@
 // each delegating to MediaControl or AudioPipeline.
 import type { MediaControl } from "./mediaControl";
 import type { AudioPipeline } from "@lib/voice/audioPipeline";
+import { isMicPolicyGated } from "@lib/voice/deviceManager";
+import { createLogger } from "@lib/logger";
 import type { StreamQuality } from "./screenShare";
-import { setPttGated as setPttGatedState } from "@stores/voice.store";
+import { voiceStore, setPttGated as setPttGatedState } from "@stores/voice.store";
 import { SessionShare } from "./sessionShare";
+
+const log = createLogger("livekitSession");
 
 export abstract class SessionMedia extends SessionShare {
   protected abstract readonly _media: MediaControl;
@@ -28,6 +32,18 @@ export abstract class SessionMedia extends SessionShare {
 
   protected async applyMicMuteState(muted: boolean): Promise<void> {
     return this._media.applyMicMuteState(muted);
+  }
+
+  /** A gate no mic control drives changed (a phone call's hold began or
+   *  ended): close the microphone, or open it again if nothing else keeps it
+   *  closed. The user's mute, the saved state and the server hear nothing. A
+   *  call joined listen-only has no microphone to open, and neither has one
+   *  that is over. */
+  syncMicrophoneGate(): void {
+    const gated = isMicPolicyGated();
+    const voice = voiceStore.getState();
+    if (!gated && (voice.listenOnly || voice.currentChannelId === null)) return;
+    this.applyMicMuteState(gated).catch((e) => log.warn("Microphone gate sync failed", e));
   }
 
   async enableCamera(): Promise<void> {

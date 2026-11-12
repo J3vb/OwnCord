@@ -737,6 +737,26 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("says the call is paused while a phone call holds it, then the session's state again", () => {
+    setVoiceChannel(1, []);
+    const widget = mountVoiceWidget();
+    setVoiceStatus("connected");
+    const status = container.querySelector('[data-testid="vw-status"]') as HTMLElement;
+    expect(status.classList.contains("vw-paused")).toBe(false);
+
+    voiceStore.setState((prev) => ({ ...prev, phoneCallHold: true }));
+    voiceStore.flush();
+    expect(status.textContent).toBe("Call paused");
+    expect(status.classList.contains("vw-paused")).toBe(true);
+
+    voiceStore.setState((prev) => ({ ...prev, phoneCallHold: false }));
+    voiceStore.flush();
+    expect(status.textContent).toBe("Voice Connected");
+    expect(status.classList.contains("vw-paused")).toBe(false);
+
+    widget.destroy?.();
+  });
+
   // --- Freeze controls during WS reconnect (docs/architecture/ux/README.md §3) ---
 
   it("keeps local hangup available while freezing WS controls during reconnect", () => {

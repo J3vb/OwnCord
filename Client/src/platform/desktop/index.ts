@@ -11,6 +11,7 @@ import { appProcess } from "./appProcess";
 import { autostart } from "./autostart";
 import { callService } from "./callService";
 import { meteredNetwork } from "./meteredNetwork";
+import { mobileAudio } from "./mobileAudio";
 import { credentials } from "./credentials";
 import { deepLinks } from "./deepLinks";
 import { devTools } from "./devTools";
@@ -51,6 +52,7 @@ export const desktop: Platform = {
   autostart,
   callService,
   meteredNetwork,
+  mobileAudio,
   credentials,
   deepLinks,
   devTools,

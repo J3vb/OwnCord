@@ -7,6 +7,7 @@ import type { DmChannel } from "@stores/dm.store";
 import type { GridPerson } from "../../voice/videoGrid/VideoGrid";
 import type { AvatarRef, ControlRefs, DmCallView } from "../DmCallViewModel";
 import type { DmCallPanelOptions } from "../DmCallPanel";
+import type { ControlSlot } from "../../voice/controlSlot";
 import type { TalkSlot } from "../../voice/talkSlot";
 import type { SecuredBadge } from "../../voice/securedBadge";
 
@@ -62,6 +63,8 @@ export interface DmCallState {
   /** Push to Talk in the Android app: a hold-to-talk button first in the
    *  controls, moved into each redrawn bar. */
   readonly talkSlot: TalkSlot;
+  /** The Android app's sound route button, after the camera. */
+  readonly routeSlot: ControlSlot;
 }
 
 /** Every function the DM call panel's modules share, filled in once by createDmCallPanel. */

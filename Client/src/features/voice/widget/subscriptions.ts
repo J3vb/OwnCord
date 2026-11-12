@@ -20,6 +20,7 @@ export function subscribeVoiceWidget(render: () => void): Array<() => void> {
         listenOnly: s.listenOnly,
         voiceStatus: s.voiceStatus,
         encryptionDegraded: s.encryptionDegraded === true,
+        phoneCallHold: s.phoneCallHold === true,
         shareBlock: shareBlockReason(s),
       }),
       render,
@@ -33,6 +34,7 @@ export function subscribeVoiceWidget(render: () => void): Array<() => void> {
         a.listenOnly === b.listenOnly &&
         a.voiceStatus === b.voiceStatus &&
         a.encryptionDegraded === b.encryptionDegraded &&
+        a.phoneCallHold === b.phoneCallHold &&
         a.shareBlock === b.shareBlock,
     ),
   );

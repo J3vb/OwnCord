@@ -60,6 +60,17 @@ describe("LiveKitSession", () => {
       expect(setListenOnly).not.toHaveBeenCalledWith(true);
     });
 
+    it("publishes no microphone while a phone call holds the call, and keeps the session up", async () => {
+      mockVoiceState.phoneCallHold = true;
+      await joinSession(session);
+
+      const enabled = mockRoom.localParticipant.setMicrophoneEnabled.mock.calls.map(([on]) => on);
+      expect(enabled).not.toContain(true);
+      expect(mockRoom.disconnect).not.toHaveBeenCalled();
+      // The microphone is there, only closed: not a listen-only join.
+      expect(setListenOnly).not.toHaveBeenCalledWith(true);
+    });
+
     it("refuses to unmute in the AFK channel", async () => {
       mockVoiceState.inAfkChannel = true;
       mockVoiceState.localMuted = true;

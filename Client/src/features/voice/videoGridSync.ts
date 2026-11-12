@@ -6,7 +6,7 @@ import type { CallState } from "./videoGrid/VideoGrid";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { uiStore } from "@stores/ui.store";
 import { isSelfMuted, streamViewers, type VoiceState, type VoiceUser } from "@stores/voice.store";
-import { isConnecting } from "./voiceStatusText";
+import { isConnecting, isPhoneCallHold } from "./voiceStatusText";
 import { shareBlockReason } from "./shareGate";
 import type { PageState, MountScope } from "../../pages/main-page/pageState";
 
@@ -59,6 +59,7 @@ export function syncGridCallState(
     serverDeafened: state.localServerDeafened === true,
     ...(socket === "connected" ? {} : { offline: socket }),
     ...(shareBlock === null ? {} : { shareBlock }),
+    ...(isPhoneCallHold(state) ? { phoneHold: true } : {}),
   };
   const callKey = JSON.stringify(callState);
   if (callKey === memo.prevCallState) return;

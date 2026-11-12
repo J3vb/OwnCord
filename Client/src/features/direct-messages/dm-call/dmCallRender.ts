@@ -5,10 +5,10 @@
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
 import { createAvatarElement } from "../../profiles/avatar";
-import { voiceStore, type VoiceStatus } from "@stores/voice.store";
+import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName, type DmChannel } from "@stores/dm.store";
-import { headerStatusText } from "../../voice/voiceStatusText";
+import { callStatusText, isPhoneCallHold } from "../../voice/voiceStatusText";
 import { voiceText as t } from "../../../i18n/voice";
 import { dmCallText as d } from "../../../i18n/dmCall";
 import { canPublishScreen } from "../../voice/native/platform";
@@ -36,14 +36,15 @@ export function unansweredText(
   return status ? d("noAnswerStatus") : d("noAnswer", { name });
 }
 
-/** The header status: who left once alone in a live call, else the voice state. */
+/** The header status: who left once alone in a live call, else the call's
+ *  own state (a phone call's hold, or the session's). */
 export function connectedStatus(
   v: Extract<DmCallView, { kind: "connected" }>,
-  status: VoiceStatus,
+  voice: VoiceState,
 ): string {
-  return v.peerLeft && status !== "reconnecting"
+  return v.peerLeft && voice.voiceStatus !== "reconnecting" && !isPhoneCallHold(voice)
     ? d("leftStatus", { name: callName(v.dm, currentUserId()) })
-    : headerStatusText(status);
+    : callStatusText(voice);
 }
 
 export function createDmCallRender(st: DmCallState, dc: DmCallApi) {
@@ -160,6 +161,7 @@ export function createDmCallRender(st: DmCallState, dc: DmCallApi) {
     bar.appendChild(
       roundButton(d("leave"), "phone-off", "dcp-btn--hang", "dcp-leave", st.options.onLeave),
     );
+    st.routeSlot.attach(bar, st.controls.camera!.nextSibling);
     return bar;
   }
 
@@ -387,7 +389,7 @@ export function createDmCallRender(st: DmCallState, dc: DmCallApi) {
   }
 
   function renderConnected(v: Extract<DmCallView, { kind: "connected" }>): void {
-    const status = headerStatusText(voiceStore.getState().voiceStatus);
+    const status = callStatusText(voiceStore.getState());
     if (st.collapsed) {
       renderCollapsed(v.dm, v.inRoom, status);
       return;
@@ -413,11 +415,7 @@ export function createDmCallRender(st: DmCallState, dc: DmCallApi) {
     );
     const controlsEl = callControls(false);
     controlsEl.prepend(ringAgain);
-    fill(
-      topBar(connectedStatus(v, voiceStore.getState().voiceStatus), "", true, true),
-      stage,
-      controlsEl,
-    );
+    fill(topBar(connectedStatus(v, voiceStore.getState()), "", true, true), stage, controlsEl);
   }
 
   function renderCollapsed(dm: DmChannel, ids: readonly number[], status: string): void {

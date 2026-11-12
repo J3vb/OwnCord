@@ -546,6 +546,12 @@
       "binding": "filledRows",
       "category": "dom-owned",
       "reason": "Rows whose hover bar is built; keyed by the row element and dropped with it"
+    },
+    {
+      "file": "features/voice/mobileRoutes.ts",
+      "binding": "mobileRouteStore",
+      "category": "app-lifetime",
+      "reason": "The phone's own audio routes and phone-call pause, as the device reports them; nothing per-server, and the end of a call clears the pick and the pause"
     }
   ]
 }

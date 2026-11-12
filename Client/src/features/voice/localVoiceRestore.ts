@@ -106,7 +106,10 @@ export async function restoreLocalVoiceState(
   // The AFK channel is listen-only: publish nothing there, and do not read
   // the empty mic as a failure (no listen-only notice, nothing to retry).
   // enableMicrophone(false) is a no-op publish, so nothing can be refused.
-  const shouldEnableMicrophone = !muted && state.inAfkChannel !== true;
+  // A phone call's hold keeps the mic closed the same way; the hold's end
+  // opens it (syncMicrophoneGate).
+  const shouldEnableMicrophone =
+    !muted && state.inAfkChannel !== true && state.phoneCallHold !== true;
 
   try {
     await host.media.enableMicrophone(room, shouldEnableMicrophone);
