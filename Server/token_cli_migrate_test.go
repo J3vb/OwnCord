@@ -51,20 +51,14 @@ func recordedVersions(t *testing.T, dbPath string) []string {
 		t.Fatalf("OpenShared: %v", err)
 	}
 	defer d.Close() //nolint:errcheck
-	rows, err := d.SQLDb().Query("SELECT version FROM schema_versions ORDER BY version")
-	if err != nil {
+	var joined string
+	if err := d.SQLDb().QueryRow("SELECT COALESCE(group_concat(version, ','), '') FROM (SELECT version FROM schema_versions ORDER BY version)").Scan(&joined); err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	defer rows.Close() //nolint:errcheck
-	var out []string
-	for rows.Next() {
-		var v string
-		if err := rows.Scan(&v); err != nil {
-			t.Fatal(err)
-		}
-		out = append(out, v)
+	if joined == "" {
+		return nil
 	}
-	return out
+	return strings.Split(joined, ",")
 }
 
 func allButLastMigration(t *testing.T) fstest.MapFS {
