@@ -160,6 +160,8 @@ type drainResult struct {
 	done  bool
 	next  int64
 	files []string
+	// messageIDs are the messages a chunk deleted, for the caller's in-memory replay purge.
+	messageIDs []int64
 }
 
 type drainStep struct {
@@ -171,6 +173,13 @@ type drainStep struct {
 // erasureStatements order. It stops early with done=false once deadline has passed
 // between chunks (zero never stops). Safe to repeat.
 func (d *DB) EraseAccountDrain(ctx context.Context, userID int64, deadline time.Time) (bool, error) {
+	return d.EraseAccountDrainWith(ctx, userID, deadline, nil)
+}
+
+// EraseAccountDrainWith is EraseAccountDrain that hands onMessages the ids of each chunk of
+// messages once the chunk has committed (nil skips it), so the caller can purge the in-memory
+// replay frames about them.
+func (d *DB) EraseAccountDrainWith(ctx context.Context, userID int64, deadline time.Time, onMessages func([]int64)) (bool, error) {
 	chunks := 0
 	for _, step := range erasureDrainSteps {
 		cursor := int64(0)
@@ -188,6 +197,9 @@ func (d *DB) EraseAccountDrain(ctx context.Context, userID int64, deadline time.
 				return false, err
 			}
 			chunks++
+			if onMessages != nil && len(res.messageIDs) > 0 {
+				onMessages(res.messageIDs)
+			}
 			cursor = res.next
 			if err := d.erasureHook("chunk", chunks); err != nil {
 				return false, err

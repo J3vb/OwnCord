@@ -505,6 +505,13 @@ func TestModerationService_EraseUser(t *testing.T) {
 
 type recordingErasureHub struct {
 	calls []string
+	// messageIDs are the ids PurgeMessagesFromReplay was given, in call order.
+	messageIDs []int64
+}
+
+func (h *recordingErasureHub) PurgeMessagesFromReplay(_ context.Context, ids []int64) error {
+	h.messageIDs = append(h.messageIDs, ids...)
+	return nil
 }
 
 func (h *recordingErasureHub) DisconnectRevokedUser(userID int64) {

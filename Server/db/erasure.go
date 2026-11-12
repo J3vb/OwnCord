@@ -171,7 +171,8 @@ var erasureStatements = []struct {
 // `{"seq":...,"type":...,"payload":{...}}` (ws.wrapWithSeq), so every lookup
 // goes through $.payload: user_id on state frames, user.id on message frames,
 // mentions, call.participants, group_event.target_user_id, from_user_id,
-// presence_batch updates[].user_id and member_update_batch members[].user_id.
+// presence_batch updates[].user_id, member_update_batch members[].user_id and
+// thread.owner_id on thread frames.
 // ws.eventNamesUser is the same rule over the ring buffer's bytes; the two
 // must stay in step.
 const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?1
@@ -181,8 +182,18 @@ const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE json_each.value = ?1)
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.call.participants') WHERE json_each.value = ?1)
 	 OR json_extract(payload, '$.payload.group_event.target_user_id') = ?1
+	 OR json_extract(payload, '$.payload.thread.owner_id') = ?1
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.updates') WHERE json_extract(json_each.value, '$.user_id') = ?1)
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.members') WHERE json_extract(json_each.value, '$.user_id') = ?1))`
+
+// EventNamesOwnMessagePredicate is the SQL deciding whether a persisted replay
+// event is a message-family frame about a message the user (?1) authored. Edit
+// frames carry no author, so only the messages table can say whose they are: the
+// drain runs this window step before the messages are deleted, and the messages
+// drain hands the ids to the replay purge for the in-memory tier.
+const EventNamesOwnMessagePredicate = `(json_extract(payload, '$.type') IN ('chat_message', 'chat_edited', 'chat_deleted', 'chat_bulk_deleted', 'reaction_update', 'poll_update')
+	 AND (EXISTS (SELECT 1 FROM messages WHERE messages.id = json_extract(payload, '$.payload.id') AND messages.user_id = ?1)
+	   OR EXISTS (SELECT 1 FROM messages WHERE messages.id = json_extract(payload, '$.payload.message_id') AND messages.user_id = ?1)))`
 
 // DeleteEventsForUser removes every persisted replay event naming userID and returns
 // rows deleted. It runs again after the member_ban broadcast and persister flush so

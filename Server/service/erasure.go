@@ -28,6 +28,9 @@ type StorageLister interface {
 type ErasureHub interface {
 	BroadcastMemberBan(userID int64)
 	PurgeUserFromReplay(ctx context.Context, userID int64) error
+	// PurgeMessagesFromReplay drops every frame about the messages the drain deleted: an edit
+	// frame names its message, not its author.
+	PurgeMessagesFromReplay(ctx context.Context, ids []int64) error
 	// DisconnectRevokedUser drops the live socket right after the lock stage revoked
 	// sessions, so a half-erased account is not left connected during the drain.
 	DisconnectRevokedUser(userID int64)
@@ -82,6 +85,11 @@ type ErasureService struct {
 	// or while mu is held.
 	inFlightMu syncutil.Mutex
 	inFlight   map[int64]struct{}
+	// drainedMu guards drained: the messages each subject's drain deleted, kept until the
+	// replay purge has taken their frames out of the ring and the cold tier. A leaf lock.
+	// A restart loses the ring with it, and the drain already removed the persisted frames.
+	drainedMu syncutil.Mutex
+	drained   map[int64][]int64
 	// wake carries one pending request (buffered, size one) so the loop resumes jobs now, not at the next tick.
 	wake chan struct{}
 }
@@ -91,7 +99,7 @@ type ErasureService struct {
 func NewErasureService(st ErasureStore) *ErasureService {
 	return &ErasureService{
 		st: st, floorProbeCeiling: db.SequenceFloorProbeCeiling,
-		inFlight: map[int64]struct{}{}, wake: make(chan struct{}, 1),
+		inFlight: map[int64]struct{}{}, drained: map[int64][]int64{}, wake: make(chan struct{}, 1),
 	}
 }
 
@@ -349,10 +357,49 @@ func (s *ErasureService) runJob(ctx context.Context, job *db.ErasureJob) error {
 // the persisted rows alone (start-up replay, tests), since nothing is buffered yet.
 func (s *ErasureService) purgeReplay(ctx context.Context, userID int64) error {
 	if s.hub != nil {
-		return s.hub.PurgeUserFromReplay(ctx, userID)
+		if err := s.hub.PurgeUserFromReplay(ctx, userID); err != nil {
+			return err
+		}
+		return s.purgeDrainedMessages(ctx, userID)
 	}
 	_, err := s.st.DeleteEventsForUser(ctx, userID)
 	return err
+}
+
+// noteDrainedMessages is the drain's per-chunk callback: it remembers the deleted message ids
+// for purgeDrainedMessages. Without a hub there is no ring to purge.
+func (s *ErasureService) noteDrainedMessages(userID int64) func([]int64) {
+	if s.hub == nil {
+		return nil
+	}
+	return func(ids []int64) {
+		s.drainedMu.Lock()
+		defer s.drainedMu.Unlock()
+		s.drained[userID] = append(s.drained[userID], ids...)
+	}
+}
+
+// drainedPurgeBatch bounds the ids one replay purge carries.
+const drainedPurgeBatch = 2000
+
+// purgeDrainedMessages takes every frame about the subject's drained messages out of the
+// replay pipeline; ids a failed batch did not cover stay for the retry.
+func (s *ErasureService) purgeDrainedMessages(ctx context.Context, userID int64) error {
+	s.drainedMu.Lock()
+	ids := s.drained[userID]
+	delete(s.drained, userID)
+	s.drainedMu.Unlock()
+	for len(ids) > 0 {
+		n := min(len(ids), drainedPurgeBatch)
+		if err := s.hub.PurgeMessagesFromReplay(ctx, ids[:n]); err != nil {
+			s.drainedMu.Lock()
+			s.drained[userID] = append(ids, s.drained[userID]...)
+			s.drainedMu.Unlock()
+			return fmt.Errorf("erasure: purge replay for messages: %w", err)
+		}
+		ids = ids[n:]
+	}
+	return nil
 }
 
 func (s *ErasureService) finish(ctx context.Context, job *db.ErasureJob, removed int) error {

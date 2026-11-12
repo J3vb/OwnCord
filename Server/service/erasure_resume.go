@@ -19,7 +19,7 @@ var eraseInlineBudget = 12 * time.Second
 // transactions (EraseAccountLock, Drain, Finish); the file half is journaled in erasure_jobs.
 type ErasureStageStore interface {
 	EraseAccountLock(ctx context.Context, userID int64, guard bool) (*db.ErasureJob, error)
-	EraseAccountDrain(ctx context.Context, userID int64, deadline time.Time) (bool, error)
+	EraseAccountDrainWith(ctx context.Context, userID int64, deadline time.Time, onMessages func([]int64)) (bool, error)
 	EraseAccountFinish(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
 	GetErasureJob(ctx context.Context, id int64) (*db.ErasureJob, error)
 }
@@ -141,7 +141,7 @@ func (s *ErasureService) lockBehindBarrier(ctx context.Context, userID int64) er
 }
 
 func (s *ErasureService) driveToFinish(ctx context.Context, userID int64, token string, deadline time.Time) (*db.ErasureJob, error) {
-	done, err := s.st.EraseAccountDrain(ctx, userID, deadline)
+	done, err := s.st.EraseAccountDrainWith(ctx, userID, deadline, s.noteDrainedMessages(userID))
 	if err != nil {
 		return nil, fmt.Errorf("erasure: drain: %w", err)
 	}
