@@ -29,6 +29,9 @@ type resumeHint struct {
 	// IdentityKey is the validated device identity public key ("" if none or invalid), relayed
 	// to peers in this connection's voice announces, which verify it against the announce signature.
 	IdentityKey string
+	// FullState asks for a full ready in place of a replay while LastSeq still marks this as a
+	// resume of the same session. UNTRUSTED; it can only make the server send more state.
+	FullState bool
 }
 
 // authenticateConn reads the first WebSocket message and validates the session token,
@@ -66,6 +69,9 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		Wake bool `json:"wake"`
 		// Features declares optional client capabilities (client_features.go); absent means none.
 		Features []string `json:"features"`
+		// FullState asks a resume (LastSeq > 0) for the full ready: the client could not read a
+		// sequenced frame, so replaying from LastSeq would skip it.
+		FullState bool `json:"full_state"`
 		// IdentityPublicKey is this device's E2EE identity public key (base64). Never fatal: kept
 		// raw so a wrongly typed value cannot fail the whole frame parse.
 		IdentityPublicKey json.RawMessage `json:"identity_public_key"`
@@ -108,6 +114,7 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		ChannelID:   p.ActiveChannelID,
 		Features:    parseClientFeatures(p.Features),
 		IdentityKey: authIdentityKey(user.ID, p.IdentityPublicKey),
+		FullState:   p.FullState,
 	}, nil
 }
 
@@ -188,6 +195,7 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	c.remoteAddr = clientAddr
 	c.authChannelID = hint.ChannelID
 	c.features = hint.Features
+	c.fullStateAsked = hint.FullState
 	// Set once before registerNow makes c reachable and never written again, so reads need no lock.
 	c.identityKey = hint.IdentityKey
 	if hint.IdentityKey != "" {

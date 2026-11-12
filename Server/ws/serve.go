@@ -107,7 +107,7 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 				}
 				return
 			}
-			slog.Info("ws replay failed (seq too old), sending full ready", "user_id", c.userID, "last_seq", lastSeq)
+			slog.Info("ws replay not possible or not asked for, sending full ready", "user_id", c.userID, "last_seq", lastSeq)
 		}
 
 		if err := hub.handleFreshConnect(ctx, conn, c); err != nil {

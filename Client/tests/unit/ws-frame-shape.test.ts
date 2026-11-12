@@ -19,6 +19,7 @@ import {
   emitAuthOk,
   expectAuthLastSeq,
   openSocket,
+  sentAuthMessage,
   trackStates,
   wsConnectCalls,
 } from "../helpers/wsSuiteHarness";
@@ -30,6 +31,13 @@ function emit(frame: unknown): void {
 // Each server frame is checked against the shape its type promises before any
 // listener sees it. A frame that fails is dropped whole and only its type and
 // field name are logged; a bad handshake frame ends the connect.
+// last_seq 0 would read as a reload, and the server ends a reloaded session's
+// voice call: the resume keeps its last_seq and sets full_state.
+function expectFullStateResume(lastSeq: number): void {
+  expectAuthLastSeq(lastSeq);
+  expect((sentAuthMessage().payload as { full_state?: boolean }).full_state).toBe(true);
+}
+
 describe("ws frame shape check", () => {
   let client: ReturnType<typeof createWsClient>;
   useWsClientFixture((created) => {
@@ -114,7 +122,7 @@ describe("ws frame shape check", () => {
     expect(events).toHaveLength(0);
   });
 
-  it("a bad sequenced frame redials as a fresh connect, so the server answers with a full state", async () => {
+  it("a bad sequenced frame redials asking for the full state, keeping its last_seq", async () => {
     await connectAndAuth(client);
     const bad = withoutContent("x") as { type: string; payload: unknown };
     emit({ ...bad, seq: 7 });
@@ -124,19 +132,20 @@ describe("ws frame shape check", () => {
     await vi.advanceTimersByTimeAsync(5_001);
     expect(wsConnectCalls()).toHaveLength(1);
     emitTauriEvent("ws-state", "open");
-    expectAuthLastSeq(0);
+    expectFullStateResume(7);
   });
 
-  it("a socket that drops before that redial still reconnects as a fresh connect", async () => {
+  it("a socket that drops before that redial still asks for the full state", async () => {
     await connectAndAuth(client);
     const bad = withoutContent("x") as { type: string; payload: unknown };
     emit({ ...bad, seq: 7 });
     expectConsole("warn", /Invalid WS frame, dropping/);
 
+    mockInvoke.mockClear();
     emitTauriEvent("ws-state", "closed");
     await vi.advanceTimersByTimeAsync(60_000);
     emitTauriEvent("ws-state", "open");
-    expectAuthLastSeq(0);
+    expectFullStateResume(7);
   });
 
   it("the same bad frame right after the fresh state waits longer before the next redial", async () => {

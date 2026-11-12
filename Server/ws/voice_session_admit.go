@@ -83,14 +83,14 @@ func (h *Hub) AdmitVoiceSession(ctx context.Context, presented string) (VoiceSes
 	if err != nil {
 		return VoiceSessionTicket{}, err
 	}
-	grants, live, err := h.currentVoiceGrants(ctx, claim.userID, claim.channelID, claim.joinToken)
+	grants, live, err := h.sessionVoiceGrants(ctx, claim.userID, claim.channelID, claim.joinToken)
 	if err != nil {
 		select {
 		case <-ctx.Done():
 			return VoiceSessionTicket{}, fmt.Errorf("admitting voice session: %w", ctx.Err())
 		case <-time.After(voiceAdmitRetryDelay):
 		}
-		grants, live, err = h.currentVoiceGrants(ctx, claim.userID, claim.channelID, claim.joinToken)
+		grants, live, err = h.sessionVoiceGrants(ctx, claim.userID, claim.channelID, claim.joinToken)
 	}
 	if err != nil {
 		return VoiceSessionTicket{}, fmt.Errorf("admitting voice session: %w", err)
@@ -121,7 +121,7 @@ func (h *Hub) AdmitVoiceSession(ctx context.Context, presented string) (VoiceSes
 func (h *Hub) confirmVoiceSession(ctx context.Context, claim voiceJoinClaim) error {
 	unlock := h.voiceHub.mod.Lock(claim.userID)
 	defer unlock()
-	grants, live, err := h.currentVoiceGrants(ctx, claim.userID, claim.channelID, claim.joinToken)
+	grants, live, err := h.sessionVoiceGrants(ctx, claim.userID, claim.channelID, claim.joinToken)
 	if err != nil {
 		return fmt.Errorf("confirming voice session: %w", err)
 	}

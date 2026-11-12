@@ -36,6 +36,13 @@ export interface AuthPayload {
    * when the key is unavailable or for an older client.
    */
   readonly identity_public_key?: string;
+  /**
+   * Asks a resume for the full `ready` instead of a replay, set after this
+   * client could not read a sequenced frame. `last_seq` stays the real resume
+   * point, so the server still treats the dial as the same session (a live
+   * voice call is kept). Omitted unless set.
+   */
+  readonly full_state?: boolean;
 }
 
 export interface ChatSendPayload {
