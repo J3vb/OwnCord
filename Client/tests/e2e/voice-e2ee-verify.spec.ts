@@ -265,7 +265,10 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     const badge = peerBadge(page);
     await expect(badge).toBeVisible({ timeout: 10_000 });
     await expect(badge).toHaveClass(/changed/);
-    await expect(badge).toHaveAttribute("title", /^New device · Safety number: /);
+    await expect(badge).toHaveAttribute(
+      "title",
+      /^Key changed, not yet confirmed · Safety number: /,
+    );
     // The new key joined the pin set; the old one stays trusted.
     const pins = await invokesOf(page, "store_identity_pin");
     expect(pins).toHaveLength(1);
@@ -275,7 +278,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     // The notice names the peer and is sticky: only a sticky toast carries a
     // close button (toast.test.ts pins that it outlives the auto-dismiss).
     const notice = page.locator(".toast-warning", { hasText: "moderator1" });
-    await expect(notice).toContainText("is using a new device");
+    await expect(notice).toContainText("is using a key you haven't seen before");
     await notice.locator(".toast-close").click();
     await expect(notice).toBeHidden();
   });
@@ -299,14 +302,15 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     expect(await invokesOf(page, "store_identity_pin")).toHaveLength(0);
   });
 
-  test("mismatch modal journey — Trust New Key re-pins the displayed key and clears the block", async ({
+  test("mismatch modal journey — Trust this key as well re-pins the displayed key and clears the block", async ({
     page,
   }) => {
     const { peer, oldPin, badge } = await blockedPeerBadge(page);
     await badge.click();
     await expect(page.locator("h3", { hasText: "Identity Warning" })).toBeVisible();
 
-    await page.locator(".modal-footer button", { hasText: "Trust New Key" }).click();
+    await expect(page.locator(".identity-accept-note")).toContainText("stay trusted");
+    await page.locator(".modal-footer button", { hasText: "Trust this key as well" }).click();
 
     await expect(page.locator("h3", { hasText: "Identity Warning" })).toBeHidden();
     // The EXACT displayed key joined the pin set as the newest entry
@@ -323,6 +327,38 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     const pins = await invokesOf(page, "store_identity_pin");
     expect(pins).toHaveLength(1);
     expect(pins[0]).toMatchObject({ userId: "2", pin: `${oldPin}_${peer.identityPublicKeyB64}` });
+  });
+
+  test("the trusted keys panel lists the peer's keys and forgets an older one", async ({
+    page,
+  }) => {
+    const peer = await makePeerCrypto(2);
+    const oldPin = (await makePeerCrypto(2)).identityPublicKeyB64;
+    await joinAnnouncedPeer(page, peer, {
+      peerIdentityKeyB64: peer.identityPublicKeyB64,
+      identityPins: { "2": oldPin },
+    });
+    const badge = peerBadge(page);
+    await expect(badge).toHaveClass(/changed/, { timeout: 10_000 });
+
+    await badge.click();
+    const panel = page.locator(".tk-modal");
+    await expect(panel.locator("h3")).toHaveText("Keys you trust for moderator1");
+    const rows = panel.locator(".tk-row");
+    await expect(rows).toHaveCount(2);
+    // Newest first: the key in the call, which can't be forgotten.
+    await expect(rows.nth(0)).toContainText("In this call · key changed, not yet confirmed");
+    await expect(rows.nth(0).locator(".tk-forget")).toHaveCount(0);
+    await expect(rows.nth(1)).toContainText("Older key");
+
+    await rows.nth(1).locator(".tk-forget").click();
+    await expect(rows).toHaveCount(1);
+    await expect(rows.nth(0).locator(".tk-forget")).toHaveCount(0);
+    const pins = await invokesOf(page, "store_identity_pin");
+    expect(pins.at(-1)).toMatchObject({ userId: "2", pin: peer.identityPublicKeyB64 });
+
+    await panel.locator(".modal-footer button", { hasText: "Done" }).click();
+    await expect(panel).toBeHidden();
   });
 
   test("an unreadable pin store fails closed: distinct 'could not check' badge, nothing pinned", async ({

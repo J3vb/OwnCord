@@ -12,7 +12,7 @@ import (
 
 // ─── B5 Condition 6: withdrawn authority never reaches a later attempt ──────
 //
-// The R3 tests in push_dispatch_test.go pin each per-attempt recheck on its
+// The R3 tests in push_dispatch_recheck_test.go pin each per-attempt recheck on its
 // own, withdrawing through raw DB writes at a single boundary. This file
 // is the Condition 6 proof: the withdrawal goes through the services a user
 // actually reaches (PushService.Revoke, BlockService.BlockUser), the message
@@ -50,14 +50,10 @@ func TestPushDispatch_Condition6_WithdrawnAuthorityGovernsEveryAttempt(t *testin
 			if err != nil || len(rows) != 1 {
 				t.Fatalf("List(%d) = %v, %v; want the one subscription", withdrawn, rows, err)
 			}
-			if err := f.push.Revoke(ctx, withdrawn, rows[0].ID); err != nil {
-				t.Fatalf("Revoke: %v", err)
-			}
+			mustDo(t, "Revoke", f.push.Revoke(ctx, withdrawn, rows[0].ID))
 		},
 		"recipient blocks author": func(t *testing.T, ctx context.Context, f *pushDispatchFixture) {
-			if err := NewBlockService(f.database).BlockUser(ctx, withdrawn, author); err != nil {
-				t.Fatalf("BlockUser: %v", err)
-			}
+			mustDo(t, "BlockUser", NewBlockService(f.database).BlockUser(ctx, withdrawn, author))
 		},
 	}
 	// withdrawAfter is how many attempts the withdrawn recipient has already

@@ -7,7 +7,7 @@ import { setConnectionStatus } from "@stores/ui.store";
 import { isForwardRequest } from "../../src/features/messaging/forwardRequests";
 import type { ApiClient } from "@lib/api";
 import { initToast, teardownToast } from "@lib/ui/toast";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import type { WsClient } from "@lib/ws";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { FORUM, makePost, seedForum } from "../helpers/forum-fixtures";
@@ -285,6 +285,26 @@ describe("New Post attachments", () => {
     await flush();
     submit();
     expect(sent()[0]!.payload["attachments"]).toEqual(["up-1"]);
+  });
+
+  it("attaches a pasted screenshot and leaves pasted text alone", async () => {
+    uploadFile.mockResolvedValue({ id: "up-1", url: "/f/1", filename: "shot.png" });
+    open();
+    const box = byId<HTMLTextAreaElement>("forum-post-message");
+    const paste = (items: unknown[]): Event => {
+      const ev = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, "clipboardData", { value: { items } });
+      box.dispatchEvent(ev);
+      return ev;
+    };
+    expect(paste([{ kind: "string", getAsFile: () => null }]).defaultPrevented).toBe(false);
+    const shot = new File(["png"], "shot.png", { type: "image/png" });
+    expect(paste([{ kind: "file", getAsFile: () => shot }]).defaultPrevented).toBe(true);
+    await flush();
+    expect(uploadFile).toHaveBeenCalledWith(shot, expect.any(AbortSignal));
+    fill("Screenshot", "");
+    submit();
+    expect(sent()[0]!.payload).toMatchObject({ attachments: ["up-1"] });
   });
 
   it("releases an upload that is removed, and every upload when the dialog is cancelled", async () => {

@@ -30,12 +30,7 @@ func (s *countingReadStateStore) MarkChannelReadAtLatest(ctx context.Context, us
 // must write again.
 func TestHandleChannelFocus_SkipsNoOpReadStateWrite(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 

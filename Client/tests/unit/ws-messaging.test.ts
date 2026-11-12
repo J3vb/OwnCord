@@ -72,6 +72,16 @@ describe("message handling edge cases", () => {
     expect(messages).toHaveLength(0);
   });
 
+  it("drops a frame whose payload is not an object without logging its contents", async () => {
+    await openSocket(client);
+
+    const messages = collect(client, "chat_message");
+
+    emitTauriEvent("ws-message", JSON.stringify({ type: "chat_message", payload: "secret-body" }));
+    expectConsole("warn", /Invalid WS message: missing type or payload(?!.*secret-body).*String/);
+    expect(messages).toHaveLength(0);
+  });
+
   it("tracks highest seq number (ignores lower seq)", async () => {
     await openSocket(client);
 
@@ -287,7 +297,13 @@ describe("handleMessage size boundary", () => {
         // Padding well past `limit` — a real `ready` grows unbounded with the
         // server's member/channel/DM counts and carries no seq, so unlike a
         // sequenced frame nothing ever re-requests it after a drop.
-        members: Array.from({ length: 20 }, (_, i) => ({ id: i, username: `user${i}` })),
+        members: Array.from({ length: 20 }, (_, i) => ({
+          id: i,
+          username: `user${i}`,
+          avatar: null,
+          role: "member",
+          status: "online",
+        })),
         voice_states: [],
         roles: [],
       },

@@ -26,7 +26,8 @@
 //!   RAM; Windows: build, RAM, WebView2 version).
 //! - For a run that ended without a word, what the system recorded of it
 //!   (`system_crash_report`): the kernel and systemd-coredump on Linux, the
-//!   Application event log on Windows.
+//!   Application event log on Windows. On Linux also the run's last stderr
+//!   lines (`stderr_capture`), where a library that calls `_exit()` says why.
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -128,6 +129,8 @@ fn now() -> i64 {
 pub fn start<R: Runtime>(app: &AppHandle<R>, log_dir: &Path, version: &str) {
     platform::log_session();
     report_previous_runs(log_dir, std::process::id());
+    #[cfg(target_os = "linux")]
+    platform::capture_stderr(log_dir);
     let watch = Arc::new(Watch::new(
         run_file_path(log_dir, std::process::id()),
         version,
@@ -218,6 +221,8 @@ fn watchdog<R: Runtime>(app: &AppHandle<R>, watch: &Arc<Watch>) {
             last_beat = t;
             log_memory_step(watch);
             write_run_file(watch);
+            #[cfg(target_os = "linux")]
+            platform::trim_stderr();
             #[cfg(windows)]
             crate::exception_log::follow_rotation();
         }
@@ -383,7 +388,7 @@ fn report_previous_runs(dir: &Path, own_pid: u32) {
             log::warn!("[exit] stale run file not removed: {e}");
         }
     }
-    platform::report_ended(ended);
+    platform::report_ended(dir, ended);
 }
 
 /// A file's modification time as a Unix second: a run file's is its last

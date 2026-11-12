@@ -1,19 +1,12 @@
 package livekitproc
 
-// Auto-download of the companion livekit-server binary.
-//
-// When voice.auto_download_livekit is enabled and no voice.livekit_binary is
-// configured, the server fetches a pinned livekit-server release from the
-// official LiveKit GitHub releases, verifies it against the release's
-// checksums.txt, and stores it under <data_dir>/livekit/. The version is
-// pinned (overridable via voice.livekit_version) so a boot never silently
-// picks up a new upstream release.
+// Auto-download of the companion livekit-server: when voice.auto_download_livekit
+// is on and no voice.livekit_binary is set, a pinned release (overridable via
+// voice.livekit_version, so a boot never silently takes a new upstream) is
+// fetched, checked against checksums.txt and stored under <data_dir>/livekit/.
 
 import (
-	"archive/tar"
-	"archive/zip"
 	"bufio"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -25,30 +18,27 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/J3vb/OwnCord/Server/internal/archivebin"
 )
 
-// DefaultVersion is the livekit-server release the server downloads
-// when voice.livekit_version is not set. Bump deliberately with releases.
-// Every other place that pins this version is listed in
-// TestLiveKitPinsAgreeEverywhere (Server/docker_image_test.go); bump them all
-// and run that test.
+// DefaultVersion is the livekit-server release downloaded when voice.livekit_version is unset. Every other
+// place pinning it is listed in TestLiveKitPinsAgreeEverywhere (Server/docker_image_test.go); bump them all
+// and run it.
 const DefaultVersion = "1.13.11"
 
-// livekitDownloadBase is the release download URL prefix. Package variable so
-// tests can point it at a local httptest server.
+// livekitDownloadBase is the release URL prefix; a variable so tests can use an httptest server.
 var livekitDownloadBase = "https://github.com/livekit/livekit/releases/download"
 
 const (
-	// maxLiveKitArchiveSize caps the archive download (the real archive is
-	// ~40 MB compressed).
+	// maxLiveKitArchiveSize caps the archive download (the real one is ~40 MB).
 	maxLiveKitArchiveSize = 200 * 1024 * 1024
 	// maxChecksumsSize caps the checksums.txt download.
 	maxChecksumsSize = 1 * 1024 * 1024
 )
 
-// livekitAssetName maps GOOS/GOARCH to the release asset file name, following
-// LiveKit's goreleaser config (linux/windows on amd64/arm64/armv7; archives
-// are tar.gz except zip on windows; checksum file is "checksums.txt").
+// livekitAssetName maps GOOS/GOARCH to the release asset name per LiveKit's
+// goreleaser config (tar.gz, zip on windows; checksums in "checksums.txt").
 func livekitAssetName(version, goos, goarch string) (string, error) {
 	var arch string
 	switch goarch {
@@ -69,9 +59,8 @@ func livekitAssetName(version, goos, goarch string) (string, error) {
 	}
 }
 
-// livekitBinaryFilename is the versioned name the extracted binary is stored
-// under. Embedding the version means a bumped pin downloads fresh instead of
-// reusing a stale cached binary.
+// livekitBinaryFilename is the versioned stored name, so a bumped pin downloads fresh instead of reusing a
+// stale binary.
 func livekitBinaryFilename(version string) string {
 	name := "livekit-server-" + version
 	if runtime.GOOS == "windows" {
@@ -80,9 +69,8 @@ func livekitBinaryFilename(version string) string {
 	return name
 }
 
-// EnsureBinary returns the path to a verified livekit-server binary
-// for the given release version (empty = DefaultVersion), downloading
-// and extracting it into <dataDir>/livekit/ if it is not already cached.
+// EnsureBinary returns the path to a verified livekit-server binary for a
+// release version (empty = DefaultVersion), downloading it into <dataDir>/livekit/ if not cached.
 func EnsureBinary(ctx context.Context, dataDir, version string) (string, error) {
 	version = strings.TrimPrefix(version, "v")
 	if version == "" {
@@ -115,8 +103,8 @@ func EnsureBinary(ctx context.Context, dataDir, version string) (string, error) 
 		return "", err
 	}
 
-	// Download the archive next to the destination so the final rename stays
-	// on one filesystem. O_EXCL via downloadTo refuses pre-planted files.
+	// Download beside the destination so the rename stays on one filesystem; O_EXCL via downloadTo refuses
+	// pre-planted files.
 	archivePath := dest + ".download"
 	_ = os.Remove(archivePath)
 	defer os.Remove(archivePath) //nolint:errcheck // best-effort cleanup
@@ -125,8 +113,7 @@ func EnsureBinary(ctx context.Context, dataDir, version string) (string, error) 
 		return "", fmt.Errorf("downloading %s: %w", asset, err)
 	}
 
-	// Verify and extract through one open handle so the bytes verified are
-	// the bytes extracted even if the path is swapped in between (TOCTOU).
+	// Verify and extract through one handle so the verified bytes are the extracted bytes (TOCTOU).
 	f, err := os.Open(archivePath) //nolint:gosec // G304: path constructed from trusted config
 	if err != nil {
 		return "", fmt.Errorf("opening archive: %w", err)
@@ -152,9 +139,8 @@ func EnsureBinary(ctx context.Context, dataDir, version string) (string, error) 
 	return dest, nil
 }
 
-// ensureLiveKitStageBinary extracts the already-verified archive f (asset's
-// suffix picks zip vs tar.gz) into a temp file beside dest, makes it
-// executable and renames it into place. Every failure removes the temp file.
+// ensureLiveKitStageBinary extracts the verified archive f (asset's suffix picks
+// zip vs tar.gz) into a temp file beside dest and renames it into place; failure removes the temp file.
 func ensureLiveKitStageBinary(f *os.File, size int64, asset, dest string) error {
 	tmpBin := dest + ".tmp"
 	_ = os.Remove(tmpBin)
@@ -182,83 +168,34 @@ func ensureLiveKitStageBinary(f *os.File, size int64, asset, dest string) error 
 	return nil
 }
 
-// livekitBinaryEntry reports whether an archive entry name is the
-// livekit-server binary (archives contain it at the top level plus LICENSE).
+// livekitBinaryEntry reports whether an archive entry is the top-level livekit-server binary.
 func livekitBinaryEntry(name string) bool {
 	base := filepath.Base(filepath.ToSlash(name))
 	return base == "livekit-server" || base == "livekit-server.exe"
 }
 
+// maxLiveKitBytes bounds the staged binary; it only stops a damaged archive filling the disk.
+const maxLiveKitBytes = 512 << 20
+
 // extractLiveKitFromTarGz extracts the livekit-server entry to destPath
 // (created O_EXCL so a pre-planted file fails the extraction).
 func extractLiveKitFromTarGz(r io.Reader, destPath string) error {
-	gr, err := gzip.NewReader(r)
-	if err != nil {
-		return fmt.Errorf("gzip: %w", err)
+	if _, err := archivebin.FromTarGz(r, destPath, livekitBinaryEntry, maxLiveKitBytes); err != nil {
+		return fmt.Errorf("livekit-server from archive: %w", err)
 	}
-	defer gr.Close() //nolint:errcheck
-
-	tr := tar.NewReader(gr)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return fmt.Errorf("archive contains no livekit-server binary")
-		}
-		if err != nil {
-			return fmt.Errorf("tar: %w", err)
-		}
-		if hdr.Typeflag != tar.TypeReg || strings.Contains(hdr.Name, "..") || !livekitBinaryEntry(hdr.Name) {
-			continue
-		}
-		return writeExact(destPath, io.LimitReader(tr, hdr.Size), hdr.Size)
-	}
+	return nil
 }
 
 // extractLiveKitFromZip extracts the livekit-server entry to destPath
 // (created O_EXCL). r must be positioned over the verified archive bytes.
 func extractLiveKitFromZip(r io.ReaderAt, size int64, destPath string) error {
-	zr, err := zip.NewReader(r, size)
-	if err != nil {
-		return fmt.Errorf("zip: %w", err)
-	}
-	for _, entry := range zr.File {
-		if entry.FileInfo().IsDir() || strings.Contains(entry.Name, "..") || !livekitBinaryEntry(entry.Name) {
-			continue
-		}
-		rc, err := entry.Open()
-		if err != nil {
-			return fmt.Errorf("opening zip entry: %w", err)
-		}
-		//nolint:gosec // G110: size is bounded by the verified archive's cap
-		writeErr := writeExact(destPath, rc, int64(entry.UncompressedSize64)) //nolint:gosec // G115: size fits int64
-		_ = rc.Close()
-		return writeErr
-	}
-	return fmt.Errorf("archive contains no livekit-server binary")
-}
-
-// writeExact writes exactly size bytes from r to destPath, O_EXCL.
-func writeExact(destPath string, r io.Reader, size int64) error {
-	out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600) //nolint:gosec // G304: trusted path
-	if err != nil {
-		return err
-	}
-	n, copyErr := io.Copy(out, r)
-	closeErr := out.Close()
-	if copyErr != nil {
-		return fmt.Errorf("writing binary: %w", copyErr)
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if n != size {
-		return fmt.Errorf("incomplete archive entry (%d of %d bytes)", n, size)
+	if _, err := archivebin.FromZip(r, size, destPath, livekitBinaryEntry, maxLiveKitBytes); err != nil {
+		return fmt.Errorf("livekit-server from archive: %w", err)
 	}
 	return nil
 }
 
-// parseChecksumLine finds the sha256 for filename in a goreleaser-style
-// checksums file ("<hex>  <filename>" per line).
+// parseChecksumLine finds filename's sha256 in a goreleaser-style checksums file.
 func parseChecksumLine(data []byte, filename string) (string, error) {
 	sc := bufio.NewScanner(strings.NewReader(string(data)))
 	for sc.Scan() {
@@ -315,7 +252,6 @@ func downloadTo(ctx context.Context, url, destPath string, limit int64) error {
 	}
 	n, copyErr := io.Copy(out, io.LimitReader(resp.Body, limit))
 	if copyErr == nil && n == limit {
-		// Probe one more byte to distinguish exactly-at-limit from over-limit.
 		var probe [1]byte
 		if extra, _ := resp.Body.Read(probe[:]); extra > 0 {
 			copyErr = fmt.Errorf("download exceeds maximum size of %d bytes", limit)
@@ -333,8 +269,7 @@ func downloadTo(ctx context.Context, url, destPath string, limit int64) error {
 	return nil
 }
 
-// cleanupOldLiveKitBinaries best-effort removes previously downloaded
-// livekit-server versions other than keep.
+// cleanupOldLiveKitBinaries best-effort removes downloaded versions other than keep.
 func cleanupOldLiveKitBinaries(dir, keep string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

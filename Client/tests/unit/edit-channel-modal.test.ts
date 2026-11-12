@@ -6,8 +6,11 @@ import {
   formatSlowMode,
   MAX_SLOW_MODE_SECONDS,
   MAX_VOICE_LIMIT,
-} from "@components/EditChannelModal";
-import type { EditChannelModalOptions, EditChannelData } from "@components/EditChannelModal";
+} from "../../src/features/channels/editChannelDialog";
+import type {
+  EditChannelModalOptions,
+  EditChannelData,
+} from "../../src/features/channels/editChannelDialog";
 import { channelsStore, setChannels, updateChannel } from "@stores/channels.store";
 import {
   checkBackdropClickCloses,
@@ -121,6 +124,17 @@ describe("EditChannelModal", () => {
     await vi.waitFor(() => {
       expect(onSave).toHaveBeenCalledWith({ name: "renamed-channel" });
     });
+    modal.destroy?.();
+  });
+
+  it("caps the name at the server's 100 characters and shows the limit", () => {
+    const { modal } = makeModal({});
+    const name = container.querySelector<HTMLInputElement>(
+      "[data-testid='edit-channel-name-input']",
+    )!;
+    expect(name.maxLength).toBe(200);
+    const hintId = name.getAttribute("aria-describedby")!.split(" ").at(-1)!;
+    expect(container.querySelector(`#${hintId}`)?.textContent).toContain("100 characters");
     modal.destroy?.();
   });
 

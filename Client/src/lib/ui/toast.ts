@@ -5,7 +5,7 @@
  * Then import `showToast` anywhere to display notifications.
  */
 
-import type { ToastAction, ToastContainer, ToastType } from "@components/Toast";
+import type { ToastAction, ToastContainer, ToastType } from "@lib/ui/toastContainer";
 import type { PartialSuccessResponse } from "@lib/types";
 
 let instance: ToastContainer | null = null;

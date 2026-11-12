@@ -180,12 +180,23 @@ func profileImageRoutes(t *testing.T) []profileImageRoute {
 	}
 }
 
+// slowUploadIdle is the idle rule for the slow-upload test. Once the last byte
+// arrives the handler has only this long to decode, store and answer: a loaded
+// Windows runner with the race detector took past 500 ms there, and an expired
+// deadline both cancels the request and cuts the answer. slowUploadPad makes
+// the body take about twice the rule at postSlow's pace (4 KiB every 40 ms),
+// so it still only arrives if each chunk re-arms the deadline.
+const (
+	slowUploadIdle = 2 * time.Second
+	slowUploadPad  = 400 << 10
+)
+
 func TestProfileImageUploads_SlowProgressingBodySurvivesRequestTimeout(t *testing.T) {
-	api.SetTransferProgressTimeoutForTest(t, testTransferIdle)
+	api.SetTransferProgressTimeoutForTest(t, slowUploadIdle)
 	for _, route := range profileImageRoutes(t) {
 		t.Run(route.name, func(t *testing.T) {
 			srv := startTransferServer(t, route.handler)
-			body, contentType := paddedImageForm(t, makePNGBytes(t, 64, 64), 48<<10)
+			body, contentType := paddedImageForm(t, makePNGBytes(t, 64, 64), slowUploadPad)
 			resp := postSlow(t, srv.URL+route.path, route.token, contentType, body)
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
@@ -221,9 +232,7 @@ func TestServeFile_StalledClientClosesWithContentLengthMismatch(t *testing.T) {
 
 	content := bytes.Repeat([]byte("d"), 8<<20)
 	rr := doUpload(t, router, token, "file", "big.bin", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("fixture upload: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	var up struct {
 		ID string `json:"id"`
 	}
@@ -297,8 +306,7 @@ func TestUploadAvatar_InFlightUploadsPerUserCapped(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.RemoteAddr = "127.0.0.1:9999"
 		go func() {
-			rr := httptest.NewRecorder()
-			router.ServeHTTP(rr, req)
+			rr := serveRequest(router, req)
 			done <- rr
 		}()
 		// The write returns once the handler has read it: the upload holds its slot.

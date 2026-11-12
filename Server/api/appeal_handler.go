@@ -153,9 +153,8 @@ func handleWithdrawAppeal(svc *service.Services) http.HandlerFunc {
 
 func handleAppealQueueList(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
+		actorID, ok := requireUserID(w, r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		rows, err := svc.Appeals.Queue(r.Context(), actorID, r.URL.Query().Get("state"))
@@ -178,9 +177,8 @@ func handleAppealQueueList(svc *service.Services) http.HandlerFunc {
 
 func handleAppealQueueGet(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
+		actorID, ok := requireUserID(w, r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		publicID := chi.URLParam(r, "id")
@@ -210,9 +208,8 @@ func handleAppealQueueGet(svc *service.Services) http.HandlerFunc {
 // frame.
 func handleAppealQueueAssign(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
+		actorID, ok := requireUserID(w, r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		publicID := chi.URLParam(r, "id")
@@ -230,9 +227,8 @@ func handleAppealQueueAssign(svc *service.Services) http.HandlerFunc {
 // frame.
 func handleAppealQueueDecide(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
+		actorID, ok := requireUserID(w, r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		publicID := chi.URLParam(r, "id")

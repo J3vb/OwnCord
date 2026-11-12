@@ -59,8 +59,7 @@ func TestThreadList_PaginationArchivedAndGate(t *testing.T) {
 	}
 	get := func(path string) (int, page) {
 		rr := chGet(t, r, path, token)
-		var p page
-		_ = json.NewDecoder(rr.Body).Decode(&p)
+		p := decodeBody[page](t, rr)
 		return rr.Code, p
 	}
 	base := "/api/v1/channels/" + itoa(parent) + "/threads"
@@ -151,8 +150,7 @@ func TestThreadList_ForumSortTagAndPaging(t *testing.T) {
 	base := "/api/v1/channels/" + itoa(forum) + "/threads"
 	get := func(q string) (int, forumListPage) {
 		rr := chGet(t, r, base+q, token)
-		var p forumListPage
-		_ = json.NewDecoder(rr.Body).Decode(&p)
+		p := decodeBody[forumListPage](t, rr)
 		return rr.Code, p
 	}
 	ids := func(p forumListPage) []int64 {

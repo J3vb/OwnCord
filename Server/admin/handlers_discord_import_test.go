@@ -78,14 +78,7 @@ type importFixture struct {
 // real runner. maxBytes 0 keeps the default cap.
 func newImportFixture(t *testing.T, maxBytes int64) *importFixture {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	files, err := storage.New(t.TempDir(), 10)
 	if err != nil {
 		t.Fatal(err)
@@ -167,9 +160,7 @@ func (f *importFixture) waitStatus(t *testing.T, id int64) jobBody {
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		w := f.do(t, http.MethodGet, "/discord-imports/"+strconv.FormatInt(id, 10), f.token, nil)
-		if w.Code != http.StatusOK {
-			t.Fatalf("status route = %d: %s", w.Code, w.Body.String())
-		}
+		requireStatus(t, w, http.StatusOK)
 		if j := decodeJob(t, w); j.Status != db.ImportRunning {
 			return j
 		}
@@ -207,9 +198,7 @@ func TestDiscordImport_JSONUploadEndsInAPublishedChannel(t *testing.T) {
 	f := newImportFixture(t, 0)
 	f.open()
 	w := f.upload(t, "filename=general.json&category_id=0", readFixture(t))
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("upload = %d: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusAccepted)
 	job := decodeJob(t, w)
 	got := f.waitStatus(t, job.ID)
 	if got.Status != db.ImportDone || got.Imported != 4 || got.Skipped != 3 || got.Error != nil {
@@ -267,9 +256,7 @@ func TestDiscordImport_ZipUploadIsAccepted(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := f.upload(t, "filename=export.ZIP", buf.Bytes())
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("upload = %d: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusAccepted)
 	if got := f.waitStatus(t, decodeJob(t, w).ID); got.Status != db.ImportDone || got.Imported != 4 {
 		t.Fatalf("job = %+v", got)
 	}
@@ -324,9 +311,7 @@ func TestDiscordImport_OverTheCapIs413AndLeavesNothing(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+f.token)
 		w := httptest.NewRecorder()
 		f.handler.ServeHTTP(w, req)
-		if w.Code != http.StatusRequestEntityTooLarge {
-			t.Fatalf("status = %d, want 413: %s", w.Code, w.Body.String())
-		}
+		requireStatus(t, w, http.StatusRequestEntityTooLarge)
 		f.waitEmptyDir(t)
 	})
 }
@@ -334,9 +319,7 @@ func TestDiscordImport_OverTheCapIs413AndLeavesNothing(t *testing.T) {
 func TestDiscordImport_SecondImportWhileRunningIs409(t *testing.T) {
 	f := newImportFixture(t, 0)
 	w := f.upload(t, "filename=a.json", readFixture(t))
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("first upload = %d: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusAccepted)
 	first := decodeJob(t, w)
 	<-f.gate.reached
 
@@ -357,9 +340,7 @@ func TestDiscordImport_SecondImportWhileRunningIs409(t *testing.T) {
 func TestDiscordImport_CancelEndsTheJobAndRemovesTheChannel(t *testing.T) {
 	f := newImportFixture(t, 0)
 	w := f.upload(t, "filename=a.json", readFixture(t))
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("upload = %d: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusAccepted)
 	job := decodeJob(t, w)
 	<-f.gate.reached
 

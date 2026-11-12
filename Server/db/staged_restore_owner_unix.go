@@ -9,10 +9,9 @@ import (
 	"syscall"
 )
 
-// matchLiveOwner gives the staged copy the live database's mode and owner, so
-// the renamed-in file stays usable by the service account when an operator
-// runs the offline restore as another user (root, say). No live database
-// leaves the copy as created.
+// matchLiveOwner gives the staged copy the live database's mode and owner, so the
+// renamed-in file stays usable by the service account when an operator restores as
+// another user. No live database leaves the copy as created.
 func matchLiveOwner(livePath string, f *os.File) error {
 	info, err := os.Stat(livePath)
 	if errors.Is(err, os.ErrNotExist) {

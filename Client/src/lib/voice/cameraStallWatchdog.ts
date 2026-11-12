@@ -1,6 +1,7 @@
 // Notices when the local camera stops sending frames and when it starts again,
 // from the sender stats the connection-stats poll already reads. Records raw
-// facts only (camera.stalled / camera.resumed); deciding why is not its job.
+// facts only (camera.stalled / camera.resumed, and track.layers_changed when
+// the number of active layers moves); deciding why is not its job.
 //
 // A layer the server paused because nobody watches (dynacast) is inactive and
 // does not count, so a camera nobody is watching never looks stalled.
@@ -65,6 +66,8 @@ export function createCameraStallWatchdog(): CameraStallWatchdog {
   let frames = new Map<string, number>();
   let lastProgressAt = 0;
   let stalled = false;
+  // Active layer count of the live camera; null while it is off.
+  let layerCount: number | null = null;
 
   function reset(): void {
     frames = new Map();
@@ -73,6 +76,16 @@ export function createCameraStallWatchdog(): CameraStallWatchdog {
 
   function sample(now: number, input: CameraSample): void {
     const active = input.layers.filter((l) => l.active);
+    if (!input.live || input.layers.length === 0) {
+      layerCount = null;
+    } else {
+      // Dynacast turns layers on and off as viewers come and go; 0 means
+      // nobody watches, which also explains a camera that sends no frames.
+      if (layerCount !== null && active.length !== layerCount) {
+        recordEvent("track.layers_changed", { source: "camera", active_layers: active.length });
+      }
+      layerCount = active.length;
+    }
     if (!input.live || active.length === 0) {
       reset();
       return;

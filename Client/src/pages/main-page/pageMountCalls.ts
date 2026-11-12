@@ -3,23 +3,27 @@
  * the DM call panel, and the video grid's wiring to voice.
  */
 import { desktop } from "../../platform/desktop";
-import type { CallState } from "@components/VideoGrid";
-import { isConnecting } from "../../features/voice/voiceStatusText";
 import { showToast } from "@lib/ui/toast";
-import { dmCallText } from "../../i18n/dmCall";
 import { shellText } from "../../i18n/shell";
-import { shareBlockReason } from "../../features/voice/shareGate";
+import {
+  syncVideoGrid,
+  syncGridCallState,
+  type GridSyncDeps,
+} from "../../features/voice/videoGridSync";
+import { toastOutgoingCallOutcome } from "../../features/direct-messages/outgoingCallFeedback";
+import {
+  inRoomOnAnyDevice,
+  syncCallsWithVoice,
+} from "../../features/direct-messages/callVoiceSync";
 import { uiStore } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
-import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { watchGroupDmExits } from "../../features/direct-messages/groupExitWatch";
-import { voiceStore, isSelfMuted, streamViewers, type VoiceState } from "@stores/voice.store";
+import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import {
   setOnRemoteVideo,
   setOnRemoteVideoRemoved,
   clearOnRemoteVideo,
-  enableCamera,
   getRemoteVideoStats,
   getLocalScreenshareStats,
   setRemoteVideoView,
@@ -27,7 +31,7 @@ import {
   forgetRemoteVideoWatch,
 } from "@lib/voice/livekitSession";
 import { createSidebarVoiceCallbacks } from "./VoiceCallbacks";
-import { createIncomingCallBanner } from "@components/IncomingCallBanner";
+import { createIncomingCallBanner } from "../../features/direct-messages/IncomingCallBanner";
 import { createRingController, createOutgoingCall } from "@lib/voice/callRing";
 import {
   startRingChime,
@@ -75,37 +79,7 @@ export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
   st.outgoingCall = createOutgoingCall({
     onChange: (state) => {
       st.callPanel?.setOutgoing(state);
-      // The panel is the caller's feedback only while their DM is on screen;
-      // elsewhere the ringback and a toast are all they get.
-      if (state !== null && state.phase !== "ringing") {
-        const ui = uiStore.getState();
-        const panelShows =
-          ui.activeView === null &&
-          !ui.settingsOpen &&
-          channelsStore.getState().activeChannelId === state.channelId;
-        if (!panelShows) {
-          const dm = dmStore.getState().channels.find((c) => c.channelId === state.channelId);
-          // The same name the call panel would show: a 1:1 DM resolves the
-          // recipient through the members store (the nickname every other
-          // identity surface uses), a group uses the DM's own name.
-          let name = dm !== undefined ? dmDisplayName(dm) : "";
-          if (dm !== undefined && !dm.isGroup) {
-            const member = membersStore.getState().members.get(dm.recipient.id);
-            name =
-              (member !== undefined ? memberDisplayName(member) : "") ||
-              (dm.recipient.displayName ?? "") ||
-              dm.recipient.username ||
-              name;
-          }
-          const text =
-            state.phase === "declined"
-              ? dmCallText("declinedStatus", { name })
-              : state.phase === "offline"
-                ? dmCallText("offline", { name })
-                : dmCallText("noAnswerStatus");
-          showToast(text, "info", 6000);
-        }
-      }
+      toastOutgoingCallOutcome(state);
     },
     onRingback: (playing) => (playing ? startRingback() : stopRingback()),
   });
@@ -173,31 +147,7 @@ export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
   // however you got there; and "Join with video" turns the camera on as
   // soon as the accepted call is connected.
   st.unsubscribers.push(
-    voiceStore.subscribe((state) => {
-      const ring = st.ringCtrl?.current() ?? null;
-      if (ring !== null && state.currentChannelId === ring.channelId) {
-        st.ringCtrl?.cancel(ring.channelId);
-      }
-      const out = st.outgoingCall?.current() ?? null;
-      if (out !== null) {
-        const roster = state.voiceUsers.get(out.channelId);
-        const self = getCurrentUserId();
-        const answered = roster !== undefined && [...roster.keys()].some((id) => id !== self);
-        if (state.currentChannelId !== out.channelId || answered) st.outgoingCall?.clear();
-      }
-      if (st.cameraOnJoin !== null) {
-        if (state.currentChannelId !== st.cameraOnJoin) {
-          st.cameraOnJoin = null;
-        } else if (state.voiceStatus === "connected") {
-          st.cameraOnJoin = null;
-          if (!state.localCamera) {
-            enableCamera().catch((err: unknown) => {
-              log.error("Camera on join failed", { error: String(err) });
-            });
-          }
-        }
-      }
-    }),
+    voiceStore.subscribe((state) => syncCallsWithVoice(state, st, getCurrentUserId)),
   );
 
   // Losing a group (left, or removed) ends its ring without a missed call:
@@ -217,6 +167,9 @@ export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
         // Being in the room already answers the ring (a redial from
         // someone in the call re-rings everyone else in the DM).
         if (voiceStore.getState().currentChannelId === payload.channel_id) return;
+        // Likewise when another device of this account is already in the room.
+        if (inRoomOnAnyDevice(voiceStore.getState(), payload.channel_id, getCurrentUserId()))
+          return;
         // A call in the DM you are already sitting in still rings: the
         // channel being open does not mean the app has focus, and Discord
         // rings there too.
@@ -245,6 +198,11 @@ export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
       // The caller hears about it too: in a 1:1 a decline ends the ring,
       // in a group it takes that callee off the list.
       st.outgoingCall?.declined(payload.channel_id, payload.from_user);
+      // This account declined on another device: stop ringing here too.
+      if (payload.from_user === getCurrentUserId()) {
+        st.ringCtrl?.cancel(payload.channel_id);
+        return;
+      }
       const ringing = st.ringCtrl?.current();
       if (ringing === null || ringing === undefined) return;
       if (payload.from_user === ringing.fromUserId) {
@@ -403,28 +361,7 @@ export function mountVideo(st: PageState, pg: PageApi, ms: MountScope): void {
 
   ms.prevCallState = "";
 
-  /** Your call state for the grid's call controls, from the voice store and
-   *  the chat socket (camera and share freeze while it is down). */
-  ms.syncCallState = (state: VoiceState): void => {
-    const socket = uiStore.getState().connectionStatus;
-    const shareBlock = shareBlockReason(state);
-    const callState: CallState = {
-      muted: isSelfMuted(state),
-      deafened: state.localDeafened,
-      listenOnly: state.listenOnly,
-      camera: state.localCamera,
-      screenshare: state.localScreenshare,
-      connecting: isConnecting(state.voiceStatus),
-      serverMuted: state.localServerMuted === true,
-      serverDeafened: state.localServerDeafened === true,
-      ...(socket === "connected" ? {} : { offline: socket }),
-      ...(shareBlock === null ? {} : { shareBlock }),
-    };
-    const callKey = JSON.stringify(callState);
-    if (callKey === ms.prevCallState) return;
-    ms.prevCallState = callKey;
-    st.videoGrid?.setCallState(callState);
-  };
+  ms.syncCallState = (state: VoiceState): void => syncGridCallState(state, ms, () => st.videoGrid);
 
   st.unsubscribers.push(
     uiStore.subscribeSelector(
@@ -442,112 +379,18 @@ export function mountVideo(st: PageState, pg: PageApi, ms: MountScope): void {
 
   // Subscribe to voice store for camera/screenshare state changes, voice
   // channel switches, remote-tile identity changes and who is speaking.
+  const gridSync: GridSyncDeps = {
+    grid: () => st.videoGrid,
+    ensureLoaded: () => ms.chatAreaResult.videoGrid.ensureLoaded(),
+    checkVideoMode: () => st.videoModeCtrl?.checkVideoMode(),
+    tileLabel,
+    personName,
+    syncCallState: (state) => ms.syncCallState(state),
+  };
   st.unsubscribers.push(
     voiceStore.subscribe((state) => {
       try {
-        const channelId = state.currentChannelId;
-        // The grid's code loads on a join, so the import overlaps the
-        // connect. Once per channel: a failed import retries on the next
-        // join, not on every voice update (speaking changes fire often).
-        if (channelId !== ms.gridLoadChannel) {
-          ms.gridLoadChannel = channelId;
-          if (channelId !== null) ms.chatAreaResult.videoGrid.ensureLoaded();
-        }
-        // Speaking rings on the video tiles: only when who is speaking
-        // changes, not on every store update.
-        const talking = new Set<number>();
-        for (const u of channelId !== null
-          ? (state.voiceUsers.get(channelId)?.values() ?? [])
-          : []) {
-          if (u.speaking && !u.muted) talking.add(u.userId);
-        }
-        const speakingKey = [...talking].join(",");
-        if (speakingKey !== ms.prevSpeaking) {
-          ms.prevSpeaking = speakingKey;
-          st.videoGrid?.setSpeaking(talking);
-        }
-        // Mute/deafen badges on the camera tiles, from the same roster state.
-        let audioKey = "";
-        const audioState = new Map<number, { muted: boolean; deafened: boolean }>();
-        for (const u of channelId !== null
-          ? (state.voiceUsers.get(channelId)?.values() ?? [])
-          : []) {
-          if (u.muted || u.deafened) {
-            audioState.set(u.userId, { muted: u.muted, deafened: u.deafened });
-            audioKey += `${String(u.userId)}:${String(u.muted)}${String(u.deafened)};`;
-          }
-        }
-        if (audioKey !== ms.prevAudioState) {
-          ms.prevAudioState = audioKey;
-          st.videoGrid?.setUserAudioState(audioState);
-        }
-        // Eye + count on each screen-share tile: the other members watching it.
-        let viewersKey = "";
-        const viewerNames = new Map<number, readonly string[]>();
-        const roster = channelId !== null ? state.voiceUsers.get(channelId) : undefined;
-        for (const u of roster?.values() ?? []) {
-          if (!u.screenshare) continue;
-          const names = streamViewers(u.userId, false, state).flatMap((id) => {
-            const name = roster?.get(id)?.username;
-            return name === undefined ? [] : [name];
-          });
-          if (names.length === 0) continue;
-          viewerNames.set(u.userId, names);
-          viewersKey += `${String(u.userId)}:${names.join("\u0000")};`;
-        }
-        if (viewersKey !== ms.prevViewers) {
-          ms.prevViewers = viewersKey;
-          st.videoGrid?.setStreamViewers(viewerNames);
-        }
-        ms.syncCallState(state);
-
-        // Seed the signature with the channel id so ANY voice-channel
-        // switch changes it, even one where the camera/screenshare flags
-        // happen to be identical on both sides (e.g. both channels empty).
-        // Without this, VideoModeController.checkVideoMode() — the only
-        // writer of its own lastChannelId — never runs for that switch,
-        // so lastChannelId is still the old channel the next time it runs
-        // (e.g. right after setOnRemoteVideo adds a fresh remote tile),
-        // and it clears the grid it was just given.
-        let sig =
-          `${String(channelId)}|` +
-          (state.localCamera ? `c${String(state.localCameraRev ?? 0)}` : "") +
-          (state.localScreenshare ? `s${String(state.localShareRev ?? 0)}` : "");
-        if (channelId !== null) {
-          const users = state.voiceUsers.get(channelId);
-          if (users) {
-            for (const [uid, u] of users) {
-              // Everyone in the call: the call view draws an avatar tile each.
-              sig += `:u${uid}`;
-              if (u.camera) sig += `:c${uid}`;
-              if (u.screenshare) sig += `:s${uid}`;
-              // Relabel an already-open remote tile whose display name
-              // changed (mid-call rename) — addStream only runs once per
-              // tile, so nothing else keeps its label in sync.
-              // setLabel() no-ops for a tile that isn't open yet.
-              const name = personName(uid) || undefined;
-              if (u.camera) {
-                const label = tileLabel(uid, false);
-                if (ms.prevTileLabels.get(uid) !== label) {
-                  ms.prevTileLabels.set(uid, label);
-                  st.videoGrid?.setLabel(uid, label, name);
-                }
-              }
-              if (u.screenshare) {
-                const tileId = uid + SCREENSHARE_TILE_ID_OFFSET;
-                const label = tileLabel(uid, true);
-                if (ms.prevTileLabels.get(tileId) !== label) {
-                  ms.prevTileLabels.set(tileId, label);
-                  st.videoGrid?.setLabel(tileId, label, name);
-                }
-              }
-            }
-          }
-        }
-        if (sig !== ms.prevVideoSignature) {
-          ms.prevVideoSignature = sig;
-          st.videoModeCtrl?.checkVideoMode();
-        }
+        syncVideoGrid(state, ms, gridSync);
       } catch (err) {
         log.error("Voice store subscription error", err);
       }

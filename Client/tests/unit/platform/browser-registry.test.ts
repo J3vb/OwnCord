@@ -31,6 +31,7 @@ describe("browser platform registry", () => {
         "identity",
         "logFiles",
         "mediaDetector",
+        "meteredNetwork",
         "nativeFiles",
         "nativeProxies",
         "nativeVoice",
@@ -42,11 +43,13 @@ describe("browser platform registry", () => {
         "shareSheet",
         "socket",
         "systemIdle",
+        "systemRegion",
         "trayStatus",
         "updater",
         "urlOpener",
         "window",
         "windowPrefs",
+        "gpuAdapter",
       ].sort(),
     );
   });
@@ -91,6 +94,9 @@ describe("browser platform registry", () => {
     await expect(b.pendingMessages.delete(owner)).resolves.toBeUndefined();
     expect(await b.windowPrefs.load()).toBeNull();
     expect(await b.windowPrefs.set("minimizeToTray", true)).toBe(false);
+    expect(b.gpuAdapter.available).toBe(false);
+    expect(await b.gpuAdapter.list()).toBeNull();
+    expect(await b.gpuAdapter.set("auto")).toBe(false);
 
     // Transport: refuses.
     await expect(b.http.fetch("https://example.invalid/")).rejects.toThrow();
@@ -157,6 +163,7 @@ describe("browser platform registry", () => {
       vi.unstubAllGlobals();
     }
     expect(await b.systemIdle.idleMs()).toBeNull();
+    expect(await b.systemRegion.localeTag()).toBeNull();
     // The web build scans nothing: no game, and the setting stays hidden.
     expect(b.gameDetector.available).toBe(false);
     expect(await b.gameDetector.detect()).toBeNull();
@@ -284,6 +291,7 @@ describe("browser platform registry", () => {
       () => v.stopScreen(1, 1),
       () => v.changeScreen(1, "s", cap),
       () => v.setScreenQuality(1, 1, cap, publish),
+      () => v.setVideoBitrate(1, "camera", "s", 1),
       () => v.changeCamera(1, "c", cap),
       () => v.debugInfo(),
       () => v.listDevices(),

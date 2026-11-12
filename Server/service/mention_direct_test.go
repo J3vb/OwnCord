@@ -55,13 +55,9 @@ func TestMentionReadersAmong_MatchesFullWalkFilteredToNamedUsers(t *testing.T) {
 			}
 			switch rng.IntN(5) {
 			case 0:
-				if err := database.UpsertChannelUserOverride(ctx, chID, uid, permissions.ReadMessages, 0); err != nil {
-					t.Fatalf("user allow: %v", err)
-				}
+				mustDo(t, "user allow", database.UpsertChannelUserOverride(ctx, chID, uid, permissions.ReadMessages, 0))
 			case 1:
-				if err := database.UpsertChannelUserOverride(ctx, chID, uid, 0, permissions.ReadMessages); err != nil {
-					t.Fatalf("user deny: %v", err)
-				}
+				mustDo(t, "user deny", database.UpsertChannelUserOverride(ctx, chID, uid, 0, permissions.ReadMessages))
 			}
 		}
 		svc := NewMessageService(database, NewPermissionService(database, permissions.NewChecker(database)), nil)

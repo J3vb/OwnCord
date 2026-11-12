@@ -1,10 +1,11 @@
+import { hoverRow } from "./hoverRows";
 import { expect, vi, beforeEach, afterEach } from "vitest";
-import { renderMessage, setServerHost } from "../../src/components/message-list/renderers";
+import { renderMessage, setServerHost } from "../../src/features/messaging/message-list/renderers";
 import type { Message } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
-import type { MessageListOptions } from "../../src/components/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import {
   clearExternalImageCache,
   closeActiveLightbox,
@@ -130,6 +131,8 @@ export function mountMessage(
   const ac = new AbortController();
   const el = renderMessage(msg, false, [msg], opts, ac.signal);
   container.appendChild(el);
+  // A pointer over the row builds its whole hover bar.
+  hoverRow(el);
   return { el, ac };
 }
 

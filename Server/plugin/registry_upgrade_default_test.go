@@ -14,17 +14,11 @@ import (
 // wazero-tagged build brings the plugin back up, exactly as activateAll would
 // have at startup.
 func TestRegistry_InstallFromZip_RuntimeUnavailable_PreservesEnabledFlag(t *testing.T) {
-	r, store, dir := newRegistryWithDir(t)
 	ctx := context.Background()
-	writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	r, store, _ := loadedAlphaRegistry(t)
 	inst := r.List()[0]
 
-	if err := store.EnablePlugin(ctx, inst.ID); err != nil {
-		t.Fatalf("EnablePlugin (setup): %v", err)
-	}
+	mustDo(t, "EnablePlugin (setup)", store.EnablePlugin(ctx, inst.ID))
 	r.mu.Lock()
 	inst.Enabled = true
 	r.mu.Unlock()
@@ -39,9 +33,7 @@ func TestRegistry_InstallFromZip_RuntimeUnavailable_PreservesEnabledFlag(t *test
 
 	newInst := r.List()[0]
 	row, err := store.GetPlugin(ctx, newInst.ID)
-	if err != nil {
-		t.Fatalf("GetPlugin: %v", err)
-	}
+	mustDo(t, "GetPlugin", err)
 	if !row.Enabled {
 		t.Error("store row flipped to disabled by an upgrade on a runtime-less build — " +
 			"the enabled intent must survive until a wazero-tagged start can actually activate")

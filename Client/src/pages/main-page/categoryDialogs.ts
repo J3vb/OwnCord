@@ -8,7 +8,7 @@
  * `channel_update` / `channel_categories` frames.
  */
 
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { CategoryRef } from "@stores/channels.store";
 import {
@@ -23,7 +23,7 @@ import {
 
 const categoryModalsScreen = createLazyScreen(
   "category-modals",
-  () => import("@components/CategoryModals"),
+  () => import("../../features/channels/CategoryModals"),
 );
 
 /** The sidebar's single modal slot, shared with the channel dialogs. */
@@ -51,7 +51,7 @@ export function createCategoryDialogs(deps: {
   /** Load the dialogs module while a placeholder holds the slot, then mount what `build` makes. */
   function open(
     build: (
-      screen: typeof import("@components/CategoryModals"),
+      screen: typeof import("../../features/channels/CategoryModals"),
       close: () => void,
     ) => MountableComponent,
   ): void {

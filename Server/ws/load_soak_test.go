@@ -208,10 +208,7 @@ func TestTheLoadTest(t *testing.T) {
 					c := ws.NewTestClientWithUser(hub, user, chID, send)
 					hub.Register(c)
 
-					focusPayload, _ := json.Marshal(map[string]any{
-						"type":    "channel_focus",
-						"payload": map[string]any{"channel_id": focusChID},
-					})
+					focusPayload := envelope("channel_focus", map[string]any{"channel_id": focusChID})
 					hub.HandleMessageForTest(c, focusPayload)
 
 					target := mentionNames[(ui+round)%len(mentionNames)]
@@ -227,10 +224,7 @@ func TestTheLoadTest(t *testing.T) {
 					hub.HandleMessageForTest(c, chatPayload)
 
 					status := []string{"online", "idle", "dnd"}[round%3]
-					presPayload, _ := json.Marshal(map[string]any{
-						"type":    "presence_update",
-						"payload": map[string]any{"status": status},
-					})
+					presPayload := envelope("presence_update", map[string]any{"status": status})
 					hub.HandleMessageForTest(c, presPayload)
 
 					hub.Unregister(c)

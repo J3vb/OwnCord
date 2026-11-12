@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 // handleLogStream's backfill loop does a DB round-trip per entry between
@@ -73,18 +71,7 @@ func TestHandleLogStream_EntryWrittenDuringBackfillIsDelivered(t *testing.T) {
 	logBuf.Write(LogEntry{Timestamp: "2026-08-07T10:00:00Z", Level: "info", Message: "backfill-one", Source: "test"})
 	logBuf.Write(LogEntry{Timestamp: "2026-08-07T10:00:01Z", Level: "info", Message: "backfill-two", Source: "test"})
 
-	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	_, _, tokenHash := ownerSession(t, database)
 	ticket, err := logTickets.issue(tokenHash)
 	if err != nil {
 		t.Fatalf("issue ticket: %v", err)

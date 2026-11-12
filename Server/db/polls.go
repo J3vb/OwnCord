@@ -9,16 +9,14 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// PollAnswerInput is one answer of a poll being created. Emoji is nil for
-// none.
+// PollAnswerInput is one answer of a poll being created.
 type PollAnswerInput struct {
 	Text  string
 	Emoji *string
 }
 
-// PollInput is the validated poll of a send, as an input to
-// CreateMessageDelivery. The service has already sanitised and bounded every
-// field. It has no json tags: the wire shape is PollInfo.
+// PollInput is the validated poll of a send, input to CreateMessageDelivery; no json
+// tags (wire shape is PollInfo).
 type PollInput struct {
 	Question         string
 	Answers          []PollAnswerInput
@@ -36,8 +34,7 @@ type PollMeta struct {
 	Version          int64
 }
 
-// PollAnswer is one answer of the poll block. AnswerID counts from 1 in input
-// order.
+// PollAnswer is one answer of the poll block.
 type PollAnswer struct {
 	AnswerID int64   `json:"answer_id"`
 	Text     string  `json:"text"`
@@ -50,10 +47,9 @@ type PollCount struct {
 	Count    int64 `json:"count"`
 }
 
-// PollResults are the computed tallies of a poll. Counts are never stored: they
-// are read from the vote rows each time, so they cannot drift. Version orders
-// updates that arrive out of sequence. Me is the viewer's own answer ids, never
-// nil, and empty for a viewer who has not voted or for the shared live frame.
+// PollResults are the tallies of a poll, read from the vote rows each time so they
+// cannot drift. Version orders out-of-sequence updates. Me is the viewer's own answer
+// ids, never nil, empty for a non-voter or the shared live frame.
 type PollResults struct {
 	Version     int64       `json:"version"`
 	TotalVoters int64       `json:"total_voters"`
@@ -61,9 +57,8 @@ type PollResults struct {
 	Me          []int64     `json:"me"`
 }
 
-// PollInfo is the poll block of a history row and of a live chat_message
-// frame. It is omitted on ordinary messages. Ended is true when the poll was
-// ended or its expiry has passed by the database clock.
+// PollInfo is the poll block of a history row and live frame; Ended is true when ended
+// or expired by the database clock.
 type PollInfo struct {
 	Question         string       `json:"question"`
 	Answers          []PollAnswer `json:"answers"`
@@ -89,9 +84,7 @@ func (d *DB) GetPollMeta(ctx context.Context, messageID int64) (*PollMeta, error
 	}, nil
 }
 
-// GetPollInfo returns the poll block of messageID as viewerID sees it, or nil
-// when the message is not a poll. A viewer of 0 matches nobody, which is the
-// shared shape of the live frame.
+// GetPollInfo returns the poll block as viewerID sees it, or nil; viewer 0 matches nobody.
 func (d *DB) GetPollInfo(ctx context.Context, messageID, viewerID int64) (*PollInfo, error) {
 	infos, err := d.pollInfos(ctx, []int64{messageID}, viewerID)
 	if err != nil {
@@ -100,9 +93,8 @@ func (d *DB) GetPollInfo(ctx context.Context, messageID, viewerID int64) (*PollI
 	return infos[messageID], nil
 }
 
-// insertPollRows is the poll step of CreateMessageDelivery: the poll row and
-// its answers, after the message exists, in the same transaction. expires_at
-// is computed by the statement from the new message's own timestamp.
+// insertPollRows is the poll step of CreateMessageDelivery: poll row and answers after
+// the message; expires_at comes from the message timestamp.
 func insertPollRows(ctx context.Context, q *dbgen.Queries, messageID int64, p *PollInput) error {
 	if err := q.InsertPoll(ctx, dbgen.InsertPollParams{
 		Question: p.Question, AllowMultiselect: b2i64(p.AllowMultiselect),
@@ -120,9 +112,8 @@ func insertPollRows(ctx context.Context, q *dbgen.Queries, messageID int64, p *P
 	return nil
 }
 
-// attachPolls fills Poll on every ordinary, live row in msgs that is a poll,
-// with batched reads, for viewerID. A page with no candidate rows costs no
-// query. The block is computed at read time, so it is current on every read.
+// attachPolls fills Poll on every live ordinary poll row in msgs with batched reads,
+// computed at read time.
 func (d *DB) attachPolls(ctx context.Context, msgs []MessageAPIResponse, viewerID int64) error {
 	var ids []int64
 	for i := range msgs {
@@ -148,8 +139,7 @@ func (d *DB) attachPolls(ctx context.Context, msgs []MessageAPIResponse, viewerI
 	return nil
 }
 
-// pollInfos builds the poll block of each id that is a poll. Ids that are not
-// polls are absent from the result.
+// pollInfos builds the poll block of each id that is a poll; others are absent.
 func (d *DB) pollInfos(ctx context.Context, ids []int64, viewerID int64) (map[int64]*PollInfo, error) {
 	polls, err := d.q.GetPollsByMessageIDs(ctx, padIDs(ids))
 	if err != nil {
@@ -185,8 +175,8 @@ func (d *DB) pollInfos(ctx context.Context, ids []int64, viewerID int64) (map[in
 	return out, nil
 }
 
-// fillPollTallies adds the vote counts, the distinct voters and the viewer's
-// own selection to blocks whose answers are already in place.
+// fillPollTallies adds counts, distinct voters and the viewer's selection to blocks
+// whose answers are in place.
 func (d *DB) fillPollTallies(ctx context.Context, out map[int64]*PollInfo, pollIDs []int64, viewerID int64) error {
 	counts, err := d.q.GetPollAnswerCountsByMessageIDs(ctx, padIDs(pollIDs))
 	if err != nil {

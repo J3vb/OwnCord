@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { CHANNEL_TYPES, createCreateChannelModal } from "@components/CreateChannelModal";
-import type { CreateChannelModalOptions } from "@components/CreateChannelModal";
+import {
+  CHANNEL_TYPES,
+  createCreateChannelModal,
+} from "../../src/features/channels/CreateChannelModal";
+import type { CreateChannelModalOptions } from "../../src/features/channels/CreateChannelModal";
 import { NO_CATEGORY, setChannels, type CategoryRef } from "@stores/channels.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import {
@@ -293,6 +296,18 @@ describe("CreateChannelModal", () => {
       const topic = q<HTMLInputElement>("channel-topic-input");
       expect(topic.getAttribute("maxlength")).toBe("1024");
       expect(container.querySelector("label[for='create-channel-topic']")).not.toBeNull();
+      modal.destroy?.();
+    });
+
+    it("caps the name at the server's 100 characters and shows the limit", () => {
+      const { modal } = makeModal("Chat");
+      const name = q<HTMLInputElement>("channel-name-input");
+      expect(name.maxLength).toBe(200);
+      const hintId = name.getAttribute("aria-describedby")!.split(" ").at(-1)!;
+      expect(container.querySelector(`#${hintId}`)?.textContent).toContain("100 characters");
+      name.value = "n".repeat(120);
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(name.value).toHaveLength(100);
       modal.destroy?.();
     });
 

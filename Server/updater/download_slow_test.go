@@ -31,16 +31,12 @@ func TestDownloadFile_SlowButProgressingSurvivesMetadataTimeout(t *testing.T) {
 
 	dest := filepath.Join(t.TempDir(), "asset")
 	start := time.Now()
-	if err := u.downloadFile(context.Background(), srv.URL+"/asset", dest); err != nil {
-		t.Fatalf("downloadFile: %v", err)
-	}
+	mustDo(t, "downloadFile", u.downloadFile(context.Background(), srv.URL+"/asset", dest))
 	if time.Since(start) <= u.httpClient.Timeout {
 		t.Fatalf("test did not outlast the metadata timeout")
 	}
 	got, err := os.ReadFile(dest)
-	if err != nil {
-		t.Fatalf("reading: %v", err)
-	}
+	mustDo(t, "reading", err)
 	if len(got) != chunks*10 {
 		t.Errorf("downloaded %d bytes, want %d", len(got), chunks*10)
 	}

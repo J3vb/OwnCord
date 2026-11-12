@@ -20,9 +20,7 @@ func TestBootMarker_RecordsStartAndCleanShutdown(t *testing.T) {
 
 	started := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
 	marker, err := openBootMarker(path, started)
-	if err != nil {
-		t.Fatalf("openBootMarker: %v", err)
-	}
+	mustDo(t, "openBootMarker", err)
 
 	// A run in progress reads back as unclean: the marker is still armed.
 	st := readBootMarker(path)
@@ -38,9 +36,7 @@ func TestBootMarker_RecordsStartAndCleanShutdown(t *testing.T) {
 	}
 
 	// A clean shutdown clears the unclean flag but keeps the record.
-	if err := marker.close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
+	mustDo(t, "close", marker.close())
 	st = readBootMarker(path)
 	if !st.Recorded || st.Unclean {
 		t.Fatalf("after a clean close: %+v, want recorded and clean", st)
@@ -55,9 +51,7 @@ func TestBootMarker_RecordsStartAndCleanShutdown(t *testing.T) {
 // evidence, and reporting "clean" would hide the crash that tore it.
 func TestBootMarker_CorruptFileIsNotClean(t *testing.T) {
 	path := filepath.Join(t.TempDir(), bootMarkerRelPath)
-	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+	mustDo(t, "write", os.WriteFile(path, []byte("{not json"), 0o600))
 	st := readBootMarker(path)
 	if !st.Recorded || !st.Unclean {
 		t.Fatalf("corrupt marker read as %+v, want recorded+unclean", st)

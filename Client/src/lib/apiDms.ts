@@ -6,11 +6,11 @@ import type {
   GroupDmResponse,
   BlockedUsersResponse,
   DmRequestListResponse,
-  VoiceCredentialsResponse,
   HealthResponse,
   ServerInfoResponse,
 } from "./types";
 import { type DmRequestDecision, type DmRequestDecisionResult, ApiClientError } from "./apiShared";
+import { preloadReplyShapes, readReply } from "./apiReply";
 import { SessionScope } from "./net/sessionScope";
 import { ensureHttpProxy } from "./net/httpProxy";
 import { desktop } from "../platform/desktop";
@@ -23,12 +23,12 @@ export function createDmsApi(t: ApiTransport) {
 
     /** List user's open DM channels. */
     getDmChannels(signal?: AbortSignal): Promise<DmChannelsResponse> {
-      return t.request<DmChannelsResponse>("GET", "/dms", undefined, signal);
+      return t.request("DmChannelsResponse", "GET", "/dms", undefined, signal);
     },
 
     /** Create or get a DM channel with a user. */
     createDm(recipientId: number, signal?: AbortSignal): Promise<CreateDmResponse> {
-      return t.request<CreateDmResponse>("POST", "/dms", { recipient_id: recipientId }, signal);
+      return t.request("CreateDmResponse", "POST", "/dms", { recipient_id: recipientId }, signal);
     },
 
     /** Create a group DM with 2..8 other users (3..10 total). */
@@ -37,7 +37,8 @@ export function createDmsApi(t: ApiTransport) {
       name?: string,
       signal?: AbortSignal,
     ): Promise<GroupDmResponse> {
-      return t.request<GroupDmResponse>(
+      return t.request(
+        "GroupDmResponse",
         "POST",
         "/dms/group",
         { recipient_ids: [...recipientIds], name: name ?? "" },
@@ -47,7 +48,7 @@ export function createDmsApi(t: ApiTransport) {
 
     /** Set or clear a group DM's name. Any participant may; 1:1 DMs refuse. */
     renameGroupDm(channelId: number, name: string, signal?: AbortSignal): Promise<GroupDmResponse> {
-      return t.request<GroupDmResponse>("PATCH", `/dms/${channelId}`, { name }, signal);
+      return t.request("GroupDmResponse", "PATCH", `/dms/${channelId}`, { name }, signal);
     },
 
     /**
@@ -60,7 +61,8 @@ export function createDmsApi(t: ApiTransport) {
       userIds: readonly number[],
       signal?: AbortSignal,
     ): Promise<GroupDmResponse | undefined> {
-      return t.request<GroupDmResponse | undefined>(
+      return t.request(
+        "GroupDmOrNone",
         "POST",
         `/dms/${channelId}/members`,
         { user_ids: [...userIds] },
@@ -81,13 +83,9 @@ export function createDmsApi(t: ApiTransport) {
     ): Promise<GroupDmResponse | undefined> {
       const formData = new FormData();
       formData.append("file", file);
-      return t.request<GroupDmResponse | undefined>(
-        "POST",
-        `/dms/${channelId}/icon`,
-        formData,
-        signal,
-        { multipart: true },
-      );
+      return t.request("GroupDmOrNone", "POST", `/dms/${channelId}/icon`, formData, signal, {
+        multipart: true,
+      });
     },
 
     /** Remove a group DM's icon. Any member; a no-op when none is set. 200 carries the summary, 204 none. */
@@ -95,17 +93,18 @@ export function createDmsApi(t: ApiTransport) {
       channelId: number,
       signal?: AbortSignal,
     ): Promise<GroupDmResponse | undefined> {
-      return t.request<GroupDmResponse | undefined>(
-        "DELETE",
-        `/dms/${channelId}/icon`,
-        undefined,
-        signal,
-      );
+      return t.request("GroupDmOrNone", "DELETE", `/dms/${channelId}/icon`, undefined, signal);
     },
 
     /** Remove another member from a group DM. Owner only; removing yourself is a leave (closeDm). */
     removeGroupDmMember(channelId: number, userId: number, signal?: AbortSignal): Promise<void> {
-      return t.request<void>("DELETE", `/dms/${channelId}/members/${userId}`, undefined, signal);
+      return t.request(
+        "NoBody",
+        "DELETE",
+        `/dms/${channelId}/members/${userId}`,
+        undefined,
+        signal,
+      );
     },
 
     /** Hand a group DM to another member. Owner only. 200 carries the summary, 204 none. */
@@ -114,7 +113,8 @@ export function createDmsApi(t: ApiTransport) {
       userId: number,
       signal?: AbortSignal,
     ): Promise<GroupDmResponse | undefined> {
-      return t.request<GroupDmResponse | undefined>(
+      return t.request(
+        "GroupDmOrNone",
         "PUT",
         `/dms/${channelId}/owner`,
         { user_id: userId },
@@ -128,17 +128,17 @@ export function createDmsApi(t: ApiTransport) {
      * the caller comes out of the participant list and cannot return unaided.
      */
     closeDm(channelId: number, signal?: AbortSignal): Promise<void> {
-      return t.request<void>("DELETE", `/dms/${channelId}`, undefined, signal);
+      return t.request("NoBody", "DELETE", `/dms/${channelId}`, undefined, signal);
     },
 
     /** List recipient user IDs the current user has blocked. */
     listBlocks(signal?: AbortSignal): Promise<BlockedUsersResponse> {
-      return t.request<BlockedUsersResponse>("GET", "/blocks", undefined, signal);
+      return t.request("BlockedUsersResponse", "GET", "/blocks", undefined, signal);
     },
 
     /** The pending Message Requests inbox. */
     listDmRequests(signal?: AbortSignal): Promise<DmRequestListResponse> {
-      return t.request<DmRequestListResponse>("GET", "/dm-requests", undefined, signal);
+      return t.request("DmRequestListResponse", "GET", "/dm-requests", undefined, signal);
     },
 
     /** Decide a pending Message Request. 409: no longer pending; 404: not the caller's. */
@@ -147,7 +147,8 @@ export function createDmsApi(t: ApiTransport) {
       decision: DmRequestDecision,
       signal?: AbortSignal,
     ): Promise<DmRequestDecisionResult> {
-      return t.request<DmRequestDecisionResult>(
+      return t.request(
+        "DmRequestDecisionResult",
         "POST",
         `/dm-requests/${id}/${decision}`,
         undefined,
@@ -157,18 +158,12 @@ export function createDmsApi(t: ApiTransport) {
 
     /** Block a user (prevents DMs in both directions). */
     blockUser(userId: number, signal?: AbortSignal): Promise<void> {
-      return t.request<void>("PUT", `/blocks/${userId}`, undefined, signal);
+      return t.request("NoBody", "PUT", `/blocks/${userId}`, undefined, signal);
     },
 
     /** Unblock a previously blocked user. */
     unblockUser(userId: number, signal?: AbortSignal): Promise<void> {
-      return t.request<void>("DELETE", `/blocks/${userId}`, undefined, signal);
-    },
-
-    // ── Voice ─────────────────────────────────────────────
-
-    getVoiceCredentials(signal?: AbortSignal): Promise<VoiceCredentialsResponse> {
-      return t.request<VoiceCredentialsResponse>("GET", "/voice/credentials", undefined, signal);
+      return t.request("NoBody", "DELETE", `/blocks/${userId}`, undefined, signal);
     },
 
     // ── Health ────────────────────────────────────────────
@@ -192,6 +187,7 @@ export function createDmsApi(t: ApiTransport) {
       const transport = new AbortController();
       const releaseTransport = owner.addCleanup(() => transport.abort());
       const timer = setTimeout(() => owner.dispose(), timeoutMs);
+      preloadReplyShapes();
       try {
         owner.assertCurrent();
         const origin = await owner.run(ensureHttpProxy(targetHost));
@@ -204,11 +200,13 @@ export function createDmsApi(t: ApiTransport) {
           // i18n-exempt: internal ApiClientError diagnostic; the connect page shows a fixed status, not this message
           throw new ApiClientError(res.status, "HEALTH_CHECK_FAILED", "Health check failed");
         }
-        const data = await owner
-          .run(res.json() as Promise<HealthResponse>)
-          .finally(releaseTransport);
+        const data = await owner.run(res.json() as Promise<unknown>).finally(releaseTransport);
         owner.assertCurrent();
-        return data;
+        const checked = await owner.run(
+          readReply("HealthResponse", data, { method: "GET", path: "/health", status: res.status }),
+        );
+        owner.assertCurrent();
+        return checked;
       } finally {
         clearTimeout(timer);
         owner.dispose();
@@ -234,6 +232,7 @@ export function createDmsApi(t: ApiTransport) {
       const transport = new AbortController();
       const releaseTransport = owner.addCleanup(() => transport.abort());
       const timer = setTimeout(() => owner.dispose(), timeoutMs);
+      preloadReplyShapes();
       try {
         owner.assertCurrent();
         const origin = await owner.run(ensureHttpProxy(targetHost));
@@ -246,11 +245,17 @@ export function createDmsApi(t: ApiTransport) {
           // i18n-exempt: internal ApiClientError diagnostic; the connect page shows a fixed status, not this message
           throw new ApiClientError(res.status, "SERVER_INFO_FAILED", "Server info check failed");
         }
-        const data = await owner
-          .run(res.json() as Promise<ServerInfoResponse>)
-          .finally(releaseTransport);
+        const data = await owner.run(res.json() as Promise<unknown>).finally(releaseTransport);
         owner.assertCurrent();
-        return data;
+        const checked = await owner.run(
+          readReply("ServerInfoResponse", data, {
+            method: "GET",
+            path: "/server-info",
+            status: res.status,
+          }),
+        );
+        owner.assertCurrent();
+        return checked;
       } finally {
         clearTimeout(timer);
         owner.dispose();

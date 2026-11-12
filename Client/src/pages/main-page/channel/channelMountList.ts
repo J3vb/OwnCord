@@ -4,11 +4,11 @@
  */
 import { createElement } from "@lib/dom";
 import { createConfirmModal } from "../../../features/dialogs/confirmModal";
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../../features/messaging/MessageList";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
 import { setInlineImageDecorator } from "../../../features/messaging/content/media";
-import { WAVE_CONTENT } from "@components/message-list/welcomeRows";
-import { gifFavoriteStar } from "@components/message-list/gifFavoriteStar";
+import { WAVE_CONTENT } from "../../../features/messaging/message-list/welcomeRows";
+import { gifFavoriteStar } from "../../../features/messaging/message-list/gifFavoriteStar";
 import { endPoll, votePoll } from "../../../features/messaging/pollSend";
 import {
   messagesStore,
@@ -247,7 +247,7 @@ export function mountMessageList(st: ChannelState, cc: ChannelApi, ms: MountScop
       );
     },
     onForwardClick: (msgId: number) => {
-      import("../../../components/ForwardPicker").then(
+      import("../../../features/messaging/ForwardPicker").then(
         ({ openForwardPicker }) => {
           if (ms.signal.aborted) return;
           // Focus goes back to the composer: the menu that opened it is gone.
@@ -268,7 +268,7 @@ export function mountMessageList(st: ChannelState, cc: ChannelApi, ms: MountScop
     onPollEnd: (messageId) => endPoll(st.ws, messageId, ms.signal),
     ...(st.threadHost !== null && {
       onCreateThreadClick: (msgId: number) => {
-        import("../../../components/CreateThreadDialog").then(
+        import("../../../features/threads/CreateThreadDialog").then(
           ({ openCreateThreadDialog }) => {
             if (ms.signal.aborted) return;
             openCreateThreadDialog({

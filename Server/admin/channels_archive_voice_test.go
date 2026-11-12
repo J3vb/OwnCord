@@ -18,19 +18,14 @@ import (
 // voice_states row, VoiceTopic subscription and LiveKit session in a room
 // nothing shows any more.
 func TestAdminAPI_PatchChannel_ArchiveCleansVoice(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, hub, handler, token := newAdminHarnessWithHub(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "archive-voice", "voice", "", "", 0)
 
 	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, map[string]any{
 		"archived": true,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	if len(hub.voiceCleanupIDs) != 1 || hub.voiceCleanupIDs[0] != chID {
 		t.Fatalf("CleanupVoiceForChannel calls = %v, want exactly [%d]", hub.voiceCleanupIDs, chID)
@@ -45,10 +40,7 @@ func TestAdminAPI_PatchChannel_ArchiveCleansVoice(t *testing.T) {
 // coming back out of the archive has no live participants to evict and
 // should not falsely report a cleanup call.
 func TestAdminAPI_PatchChannel_UnarchiveDoesNotCleanVoice(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, hub, handler, token := newAdminHarnessWithHub(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "unarchive-voice", "voice", "", "", 0)
 	// AdminUpdateChannel replaces the full row, so the seed must carry the
@@ -62,9 +54,7 @@ func TestAdminAPI_PatchChannel_UnarchiveDoesNotCleanVoice(t *testing.T) {
 	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, map[string]any{
 		"archived": false,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	if len(hub.voiceCleanupIDs) != 0 {
 		t.Fatalf("CleanupVoiceForChannel calls = %v, want none on unarchive", hub.voiceCleanupIDs)
@@ -87,10 +77,7 @@ func TestAdminAPI_PatchChannel_UnarchiveDoesNotCleanVoice(t *testing.T) {
 // AdminUpdateChannel commit — exactly the window the repro describes a
 // browser abort landing in — instead of relying on wall-clock timing.
 func TestAdminAPI_PatchChannel_ArchiveSurvivesContextCancelAfterCommit(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, hub, handler, token := newAdminHarnessWithHub(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "archive-cancel-race", "voice", "", "", 0)
 
@@ -108,9 +95,7 @@ func TestAdminAPI_PatchChannel_ArchiveSurvivesContextCancelAfterCommit(t *testin
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (patch must survive a caller cancellation that arrives after the archive already committed); body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	ch, err := database.GetChannel(context.Background(), chID)
 	if err != nil {
@@ -136,10 +121,7 @@ func TestAdminAPI_PatchChannel_ArchiveSurvivesContextCancelAfterCommit(t *testin
 // siblings. The hook fires synchronously right after the commit so the window
 // is hit deterministically instead of by wall-clock timing.
 func TestAdminAPI_CreateChannel_SurvivesContextCancelAfterCommit(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, hub, handler, token := newAdminHarnessWithHub(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	restore := admin.SetCreateChannelPostCommitHook(func() {
@@ -155,9 +137,7 @@ func TestAdminAPI_CreateChannel_SurvivesContextCancelAfterCommit(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (create must survive a caller cancellation that arrives after the row already committed); body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusCreated)
 	if len(hub.channelCreates) != 1 {
 		t.Fatalf("BroadcastChannelCreate called %d times, want 1 — the row committed, so connected clients must be told", len(hub.channelCreates))
 	}

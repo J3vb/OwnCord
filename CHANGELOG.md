@@ -47,6 +47,130 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+## v2.9.0
+
+**OwnCord 2.9** (the tenth public beta) is mostly about speed. The app starts sooner, scrolling through chat and long member lists is smoother, a screen share leaves your graphics card more room while you game, and Enhanced Noise Suppression gets the Silero VAD speech-detection model. Calls get a smarter layout: tiles take the shape of their picture, people without video move to a strip, and you can pin and resize tiles. On top of that come many voice fixes for switching channels and reconnecting, and fixes for threads, unread hints and multi-device sync.
+
+It is still a **beta and a hobby project**: don't use it for anything sensitive. Update the server and the desktop app together. **This release changes the database.** The server upgrades it on first start and keeps a safety copy first; you cannot go back to 2.8 without restoring that copy. **If you run your own LiveKit server**, list only OwnCord's key under `keys:` in `livekit.yaml` before you update; with more than one key there, voice reconnects are refused after about 5 minutes.
+
+### Highlights
+
+- **Faster and smoother**: a quicker start, channels that open sooner, smoother scrolling in chat, a member list that keeps up on big servers, and lighter emoji and GIF pickers.
+- **Better noise suppression**: Enhanced Noise Suppression now uses the Silero VAD speech-detection model (v5) that keeps keyboard clicks and background noise out while you're not talking.
+- **Lighter screen shares**: a Medium or High share sends one stream instead of two, and a stream you muted is no longer sent to you at all.
+- **Smart call layout**: tiles in the shape of their picture, a participant strip for people without video, and Small, Medium, Large and Pin on every tile.
+- **Steadier voice**: switching channels, rejoining and reconnecting no longer leave you in the wrong channel or with no call.
+- **Admin video cap**: limit how much video one member may send, live, with a hint of how many viewers your upload can carry.
+
+### Faster
+
+- The app starts faster: the code for a signed-in session loads in the background while the sign-in screen shows, and more parts of the app load only when you first need them.
+- Scrolling through chat does less work per frame: the message hover bar is built only for the message under your mouse, and page-wide style rules that slowed every new message are gone.
+- A channel you haven't opened yet opens sooner: the app starts loading it when you press the mouse button, instead of when you let go.
+- Fast scrolling through a long member list no longer downloads every profile picture it passes; pictures load once the list slows down.
+- The emoji picker builds only the categories you can see.
+- The sign-in screen's logo glow no longer makes the whole page redraw every frame.
+- Moderators: the banned-members list asks the server for banned members only, instead of loading everyone.
+- The server sends live updates to many people with less work.
+- Voice: muting a stream's sound (or deafening) now stops the server sending it to you, instead of only silencing it on your side. That saves about 140 kbps per muted stream; unmuting brings the sound back.
+- Voice: a Medium or High screen share now sends one stream instead of two, which leaves your graphics card more room while gaming. A viewer on a slow connection may see stutters instead of a softer 720p picture; turn on Settings > Voice & Video > **Send a backup copy for slow connections** to send the 720p copy again.
+- Emoji and GIF pickers load the previews you can see first, fetch the next GIF page earlier, and scroll the emoji list more smoothly.
+
+### Added
+
+**Calls**
+
+- Video tiles take the shape of their picture, so a 21:9 or 32:9 screen share fills an ultrawide window instead of sitting in a 16:9 box with black bars, and the other tiles use the space left beside or below it.
+- People without a camera or screen share sit in a compact strip (along the bottom, or down the side on a window wider than 21:9) while someone has video on. With nobody on video they stay in the main area as before.
+- Each video tile has **Small**, **Medium** and **Large** buttons and **Pin**, on hover and in its right-click menu. A pinned tile is drawn large and stays put when people join or leave. Sizes and pins last for the current call.
+- Focusing a tile now pins it and draws the other video tiles small in the same grid. **Back to grid** puts every tile back; **Show participant strip** hides or shows the strip.
+- Zooming a screen share (Ctrl+scroll) shows a small overview you can drag to move around, with the zoom level and a Reset button.
+- Enhanced Noise Suppression uses the Silero VAD speech-detection model (v5.1.2) to decide when you are talking: background noise and clicks stay out while you're quiet. The new **Voice Buffer** slider tunes the microphone delay during a call.
+
+**Windows**
+
+- Settings > Voice & Video > **Graphics card for video** picks which graphics card OwnCord uses for video, applied after a restart. Auto (the default) leaves the choice to Windows. If OwnCord cannot start on the chosen card, the next start goes back to Auto.
+
+**Android**
+
+- Data saver in Text & Images: defer images, GIFs and preview images until tapped on mobile data, or on every network.
+
+**Server admin**
+
+- Settings > Voice has **Max video upload per person** (default No limit), the most one member may send for camera and screen share together. Apps follow a change live, with no rejoin.
+- Settings > Voice has **Server upload speed (Mbit/s)**. The page then shows, under the video cap, about how many people can watch one stream at the same time.
+- After the built-in LiveKit crashed 10 times in a row, voice used to stay off until the server restarted. OwnCord now tries again every 10 minutes, and System health has a **Restart voice server** button.
+- An opt-in `voice.restrict_data_publishing` setting issues voice grants without the right to send data packets through the media server. Voice, video and screen share work the same. Off by default.
+- On Linux, a crash report after an unexpected exit includes the app's last error output.
+
+### Changed
+
+- The server now makes each voice connection to the voice server itself, for a member who is in the channel at that moment and with the rights they hold then. Nothing changes for members. With your own LiveKit server, list only OwnCord's key under `keys:`.
+- The app checks each server reply before using it. A reply it cannot read (from a much older or newer server, or a proxy answering in its place) shows "The server sent a reply this version of OwnCord cannot read" instead of half-loading.
+- The microphone gate starts closed and keeps its state when you change the sensitivity.
+- The admin Server configuration page has plain titles, a fixed order (Server, TLS, Uploads, Voice, Backup, Logging, Integrations, Advanced), and a jump bar and filter box that stay at the top. Settings and Dashboard link there instead of telling you to edit config.yaml.
+- The admin Live log no longer fills with the panel's own request lines, and a viewer that falls behind sees how many lines were skipped.
+- Settings rows on Appearance and Notifications look the same everywhere: name and description on the left, the control on the right; choices turn into a dropdown on a narrow screen.
+- In-app dialogs (invite link, rename prompts, new DM picker, nickname, new thread) use the same Save and Cancel buttons as Create Channel.
+- A file attached to a draft is kept for a day instead of an hour, so a message written across a laptop sleep still sends its files. Unsent uploads count against storage quota until then.
+- Desktop: an upload that keeps moving is no longer cut by the app after 10 minutes, and an upload ended by the server's time limit says it took too long for this connection.
+- Desktop: the update button installs only the version the banner showed.
+- Desktop: the app's daily log file stops at about 20 MB, and the support bundle keeps the newest 4 MB of each log.
+- In Open and Approval registration, a refused attempt (username taken, server busy, queue full) no longer uses up one of the address's 5 registrations per day.
+- A voice-channel password attempt refused because the whole server is busy no longer counts against the member's own attempts.
+- Privacy & Safety shows a failed load the same way in every section, with Retry beside it.
+- Small polish across pickers, prompts, the chat header and phone sheets.
+
+### Fixed
+
+**Voice**
+
+- Clicking between voice channels quickly, switching while connecting, or switching right after muting or toggling the camera could leave you listed in a channel your app did not show, or with no call. The switch now completes, and the app tells the server to end any call it left behind.
+- Clicking a password-protected or full voice channel while in a call ended your call. You now stay in it until the switch goes through.
+- Leaving a voice channel and rejoining it right away could leave you with no call.
+- A join whose answer was lost stayed on "Connecting…" until you pressed Disconnect. It now ends after 15 seconds with a message.
+- A reconnect could get stuck on "Reconnecting voice…" or show you connected with no audio. It now carries on or ends with "Voice connection lost" so you can rejoin.
+- Taking your call over on a second device in the same channel could end the call on both; a full channel no longer refuses your own take-over.
+- A server mute given while a member was being moved or switching channel, or a failed join while muted, could be lost. The mute now follows the member.
+- A webcam using H.264 could quietly fall back to the slow software encoder. Webcams now switch to VP8 when that happens.
+- Linux: voice controls no longer wait while switching audio devices, muting, or stopping a camera or share.
+- Desktop: signing out, switching servers or accepting a changed server certificate closes the voice tunnel right away.
+
+**Messages, threads and sync**
+
+- A thread that lost its newest replies now recovers: Jump to present reloads them, and new replies from others appear again. A failed reply can still be retried after you reopen the thread.
+- A thread renamed, locked, archived or deleted while you were elsewhere now shows its current state when you return.
+- A message edited, deleted or pinned just as you opened a channel no longer shows its old state.
+- Reading old messages while a thread was open no longer throws you to the newest messages after a server restart.
+- An app that reconnected at the moment a channel was renamed or someone joined or left voice could miss that change. It now receives it.
+- After one of your devices disconnected while switching channels quickly, your other devices could stop showing activity for one channel.
+- A status chosen on one device is adopted by your other devices, blocking reaches them after a reconnect, and a DM call answered on one device stops ringing on the others.
+- Deleting a message that mentioned you no longer makes the mention badge one too low.
+- In slow mode, a message that failed to send no longer starts your wait.
+- After you blocked, unblocked and then wrote to someone, their reply arrives in the conversation instead of as a message request.
+- A forum set to "Require a tag" with no tags could not be posted in.
+- After a database restore, forwarding and polls work again right away.
+- After saving your profile, the fields show what the server stored, and Settings no longer asks to discard saved changes.
+- Desktop and Android: switching to another saved server for the first time since start showed "Auto-login failed". It now signs in with the saved login.
+- Desktop and Android: saved logins, notifications, file saving and updates no longer hold up the app when the system is slow to answer.
+
+**Server**
+
+- Two admins editing the same channel at once no longer undo each other's changes.
+- After turning message retention off or making it longer, an unpinned old message could be deleted on the next server start. The server now remembers which clean-up each channel finished.
+- Going back to the pre-restore safety copy no longer leaves messages with missing files.
+- Backups and updates failed when the server's folder path held characters such as an accented letter, brackets, `+`, `@` or an apostrophe. Those paths now work.
+- An allowed web origin saved with a trailing slash never matched. The slash is now dropped.
+- A group DM icon could never be deleted after its uploader left the group.
+- Android: the app stops its file-saving and sharing work cleanly when Android recreates the app screen.
+
+### Under the hood
+
+- Database change 091: the server records which retention clean-up each channel finished.
+- Large client and server files split under 500 lines, thinner Go comments, and plain complexity limits.
+- An opt-in media cost measurement, secret scanning on every pull request, and steadier nightly tests.
+- Dependency updates: Go modules (including the SQLite driver), the Go Docker image, the Rust `log` crate, and the client's test and build tools (vitest, Playwright, vite).
+
 ## v2.8.0
 
 **OwnCord 2.8** (the ninth public beta) makes the Android app feel at home on a phone: share photos and files to OwnCord from other apps, notifications while the app is open, a People page with Active now, swipes in the image viewer, and calls that keep running in the background with the camera pausing cleanly. Admins get a **System health** page and a **LiveKit card** on the Dashboard, and the support bundle now removes private details before you share it. Calls no longer freeze when the call key changes.

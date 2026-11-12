@@ -7,6 +7,7 @@
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { deriveCompatibility, type Compatibility } from "@lib/presence/profiles";
+import { statusForLatency } from "@lib/presence/latency";
 import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
 import type { SessionScope } from "@lib/net/sessionScope";
 import type { ServerInfoResponse } from "@lib/types";
@@ -105,7 +106,7 @@ export async function checkHealth(
     owner.assertCurrent();
     const elapsed = Math.round(performance.now() - start);
     connectPage.updateHealthStatus(host, {
-      status: elapsed > 1500 ? "slow" : "online",
+      status: statusForLatency(elapsed),
       latencyMs: elapsed,
       version: health.version ?? null,
       onlineUsers: health.online_users ?? null,

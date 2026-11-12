@@ -23,15 +23,11 @@ type classifyVector struct {
 func loadClassifyVectors(t *testing.T) []classifyVector {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "classify_vectors.json"))
-	if err != nil {
-		t.Fatalf("read corpus: %v", err)
-	}
+	mustDo(t, "read corpus", err)
 	var corpus struct {
 		Vectors []classifyVector `json:"vectors"`
 	}
-	if err := json.Unmarshal(raw, &corpus); err != nil {
-		t.Fatalf("parse corpus: %v", err)
-	}
+	mustDo(t, "parse corpus", json.Unmarshal(raw, &corpus))
 	if len(corpus.Vectors) == 0 {
 		t.Fatal("corpus has no vectors")
 	}

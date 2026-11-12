@@ -25,14 +25,38 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 )
 
-func TestGenerateSelfSignedCreatesFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-	certFile := filepath.Join(tmpDir, "cert.pem")
-	keyFile := filepath.Join(tmpDir, "key.pem")
+// captureDebugLog routes the default logger into the returned buffer for the
+// test and restores it afterwards.
+func captureDebugLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
 
-	if err := auth.GenerateSelfSigned(certFile, keyFile); err != nil {
-		t.Fatalf("GenerateSelfSigned() error: %v", err)
+// certKeyPaths names a cert and key file in a fresh temp dir; neither exists yet.
+func certKeyPaths(t *testing.T) (certFile, keyFile string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	return filepath.Join(tmpDir, "cert.pem"), filepath.Join(tmpDir, "key.pem")
+}
+
+// acmeTestConfig is an ACME config whose cache lives in a fresh temp dir.
+func acmeTestConfig(t *testing.T) config.TLSConfig {
+	t.Helper()
+	return config.TLSConfig{
+		Mode:         "acme",
+		Domain:       "chat.example.com",
+		AcmeCacheDir: filepath.Join(t.TempDir(), "acme_certs"),
 	}
+}
+
+func TestGenerateSelfSignedCreatesFiles(t *testing.T) {
+	certFile, keyFile := certKeyPaths(t)
+
+	mustDo(t, "GenerateSelfSigned() error", auth.GenerateSelfSigned(certFile, keyFile))
 
 	if _, err := os.Stat(certFile); os.IsNotExist(err) {
 		t.Error("cert.pem not created")
@@ -43,25 +67,17 @@ func TestGenerateSelfSignedCreatesFiles(t *testing.T) {
 }
 
 func TestGenerateSelfSignedProducesValidCert(t *testing.T) {
-	tmpDir := t.TempDir()
-	certFile := filepath.Join(tmpDir, "cert.pem")
-	keyFile := filepath.Join(tmpDir, "key.pem")
+	certFile, keyFile := certKeyPaths(t)
 
-	if err := auth.GenerateSelfSigned(certFile, keyFile); err != nil {
-		t.Fatalf("GenerateSelfSigned() error: %v", err)
-	}
+	mustDo(t, "GenerateSelfSigned() error", auth.GenerateSelfSigned(certFile, keyFile))
 
 	// Load the generated cert/key pair.
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		t.Fatalf("tls.LoadX509KeyPair error: %v", err)
-	}
+	mustDo(t, "tls.LoadX509KeyPair error", err)
 
 	// Parse the leaf certificate.
 	leaf, err := x509.ParseCertificate(cert.Certificate[0])
-	if err != nil {
-		t.Fatalf("x509.ParseCertificate error: %v", err)
-	}
+	mustDo(t, "x509.ParseCertificate error", err)
 
 	// Verify validity period is ~2 years (not the old 10y).
 	minExpiry := time.Now().Add(1 * 365 * 24 * time.Hour)
@@ -101,9 +117,7 @@ func TestGenerateSelfSignedInvalidKeyPath(t *testing.T) {
 }
 
 func TestLoadOrGenerateSelfSigned(t *testing.T) {
-	tmpDir := t.TempDir()
-	certFile := filepath.Join(tmpDir, "cert.pem")
-	keyFile := filepath.Join(tmpDir, "key.pem")
+	certFile, keyFile := certKeyPaths(t)
 
 	cfg := config.TLSConfig{
 		Mode:     "self_signed",
@@ -112,9 +126,7 @@ func TestLoadOrGenerateSelfSigned(t *testing.T) {
 	}
 
 	result, err := auth.LoadOrGenerate(cfg)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate() error: %v", err)
-	}
+	mustDo(t, "LoadOrGenerate() error", err)
 	if result.TLSConfig == nil {
 		t.Fatal("LoadOrGenerate() returned nil TLSConfig")
 	}
@@ -127,14 +139,10 @@ func TestLoadOrGenerateSelfSigned(t *testing.T) {
 }
 
 func TestLoadOrGenerateLoadsExistingCert(t *testing.T) {
-	tmpDir := t.TempDir()
-	certFile := filepath.Join(tmpDir, "cert.pem")
-	keyFile := filepath.Join(tmpDir, "key.pem")
+	certFile, keyFile := certKeyPaths(t)
 
 	// Generate a cert first.
-	if err := auth.GenerateSelfSigned(certFile, keyFile); err != nil {
-		t.Fatalf("GenerateSelfSigned() error: %v", err)
-	}
+	mustDo(t, "GenerateSelfSigned() error", auth.GenerateSelfSigned(certFile, keyFile))
 
 	cfg := config.TLSConfig{
 		Mode:     "self_signed",
@@ -144,9 +152,7 @@ func TestLoadOrGenerateLoadsExistingCert(t *testing.T) {
 
 	// Load the existing cert (should not regenerate).
 	result, err := auth.LoadOrGenerate(cfg)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate() error: %v", err)
-	}
+	mustDo(t, "LoadOrGenerate() error", err)
 	if len(result.TLSConfig.Certificates) == 0 {
 		t.Error("LoadOrGenerate() returned no certificates")
 	}
@@ -156,9 +162,7 @@ func TestLoadOrGenerateModeOff(t *testing.T) {
 	cfg := config.TLSConfig{Mode: "off"}
 
 	result, err := auth.LoadOrGenerate(cfg)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate(mode=off) error: %v", err)
-	}
+	mustDo(t, "LoadOrGenerate(mode=off) error", err)
 	if result.TLSConfig != nil {
 		t.Error("LoadOrGenerate(mode=off) should return nil TLSConfig")
 	}
@@ -178,14 +182,10 @@ func TestLoadOrGenerateModeManualMissingFiles(t *testing.T) {
 }
 
 func TestLoadOrGenerateModeManualValidFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-	certFile := filepath.Join(tmpDir, "cert.pem")
-	keyFile := filepath.Join(tmpDir, "key.pem")
+	certFile, keyFile := certKeyPaths(t)
 
 	// Pre-generate cert files.
-	if err := auth.GenerateSelfSigned(certFile, keyFile); err != nil {
-		t.Fatalf("GenerateSelfSigned() error: %v", err)
-	}
+	mustDo(t, "GenerateSelfSigned() error", auth.GenerateSelfSigned(certFile, keyFile))
 
 	cfg := config.TLSConfig{
 		Mode:     "manual",
@@ -194,9 +194,7 @@ func TestLoadOrGenerateModeManualValidFiles(t *testing.T) {
 	}
 
 	result, err := auth.LoadOrGenerate(cfg)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate(mode=manual) error: %v", err)
-	}
+	mustDo(t, "LoadOrGenerate(mode=manual) error", err)
 	if len(result.TLSConfig.Certificates) == 0 {
 		t.Error("LoadOrGenerate(mode=manual) returned no certificates")
 	}
@@ -231,9 +229,7 @@ func TestLeafFingerprint(t *testing.T) {
 // statically loaded certificate carry the fingerprint into TLSResult, and
 // that TLS off and ACME do not claim one they cannot know at start-up.
 func TestLoadOrGenerate_PublishesFingerprint(t *testing.T) {
-	tmpDir := t.TempDir()
-	certFile := filepath.Join(tmpDir, "cert.pem")
-	keyFile := filepath.Join(tmpDir, "key.pem")
+	certFile, keyFile := certKeyPaths(t)
 
 	for _, mode := range []string{"self_signed", "manual"} {
 		cfg := config.TLSConfig{Mode: mode, CertFile: certFile, KeyFile: keyFile}
@@ -250,9 +246,7 @@ func TestLoadOrGenerate_PublishesFingerprint(t *testing.T) {
 	}
 
 	off, err := auth.LoadOrGenerate(config.TLSConfig{Mode: "off"})
-	if err != nil {
-		t.Fatalf("LoadOrGenerate(mode=off): %v", err)
-	}
+	mustDo(t, "LoadOrGenerate(mode=off)", err)
 	if off.Fingerprint != "" {
 		t.Errorf("mode=off Fingerprint = %q, want empty", off.Fingerprint)
 	}
@@ -316,9 +310,7 @@ func TestLoadOrGenerateACME_ValidDomain(t *testing.T) {
 	}
 
 	result, err := auth.LoadOrGenerate(cfg)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate(acme) error: %v", err)
-	}
+	mustDo(t, "LoadOrGenerate(acme) error", err)
 	if result.TLSConfig == nil {
 		t.Fatal("ACME mode should return non-nil TLSConfig")
 	}
@@ -336,17 +328,10 @@ func TestLoadOrGenerateACME_ValidDomain(t *testing.T) {
 }
 
 func TestLoadOrGenerateACME_HTTPRedirect(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfg := config.TLSConfig{
-		Mode:         "acme",
-		Domain:       "chat.example.com",
-		AcmeCacheDir: filepath.Join(tmpDir, "acme_certs"),
-	}
+	cfg := acmeTestConfig(t)
 
 	result, err := auth.LoadOrGenerate(cfg)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate(acme) error: %v", err)
-	}
+	mustDo(t, "LoadOrGenerate(acme) error", err)
 
 	// Non-challenge requests should redirect to HTTPS.
 	req := httptest.NewRequest(http.MethodGet, "http://chat.example.com/some/path", nil)
@@ -372,9 +357,7 @@ func TestLoadOrGenerateACME_HTTPRedirectNonDefaultPort(t *testing.T) {
 	}
 
 	result, err := auth.LoadOrGenerate(cfg)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate(acme) error: %v", err)
-	}
+	mustDo(t, "LoadOrGenerate(acme) error", err)
 
 	req := httptest.NewRequest(http.MethodGet, "http://chat.example.com/some/path", nil)
 	rec := httptest.NewRecorder()
@@ -387,17 +370,10 @@ func TestLoadOrGenerateACME_HTTPRedirectNonDefaultPort(t *testing.T) {
 }
 
 func TestLoadOrGenerateACME_HTTPRedirectKeepsEscapedPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfg := config.TLSConfig{
-		Mode:         "acme",
-		Domain:       "chat.example.com",
-		AcmeCacheDir: filepath.Join(tmpDir, "acme_certs"),
-	}
+	cfg := acmeTestConfig(t)
 
 	result, err := auth.LoadOrGenerate(cfg)
-	if err != nil {
-		t.Fatalf("LoadOrGenerate(acme) error: %v", err)
-	}
+	mustDo(t, "LoadOrGenerate(acme) error", err)
 
 	req := httptest.NewRequest(http.MethodGet, "http://chat.example.com/x/a%2Fb%3Bc?q=1", nil)
 	rec := httptest.NewRecorder()
@@ -446,10 +422,7 @@ func TestLoadACME_IPErrorNamesTheRealLimit(t *testing.T) {
 // The failure is injected. Reaching a real ACME directory from a test would
 // make this depend on network topology, which this milestone's plan forbids.
 func TestLoadACME_LogsIssuanceFailureWithReachabilityCause(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	buf := captureDebugLog(t)
 
 	boom := errors.New("acme/autocert: unable to satisfy authorization")
 	wrapped := auth.LogCertificateFailuresForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -480,10 +453,7 @@ func TestLoadACME_LogsIssuanceFailureWithReachabilityCause(t *testing.T) {
 
 // TestLoadACME_SuccessIsNotLogged — a working certificate path stays quiet.
 func TestLoadACME_SuccessIsNotLogged(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	buf := captureDebugLog(t)
 
 	wrapped := auth.LogCertificateFailuresForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 		return &tls.Certificate{}, nil
@@ -506,10 +476,7 @@ func TestLoadACME_SuccessIsNotLogged(t *testing.T) {
 // bytes in the operator's log. Neither happens: the throttle is a single
 // timestamp, and only the configured domain is logged.
 func TestLoadACME_IssuanceFailureLogIsBoundedAndIgnoresSNI(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	buf := captureDebugLog(t)
 
 	wrapped := auth.LogCertificateFailuresForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 		return nil, errors.New("acme/autocert: unable to satisfy authorization")
@@ -544,10 +511,7 @@ func TestLoadACME_IssuanceFailureLogIsBoundedAndIgnoresSNI(t *testing.T) {
 // for a name that is not the configured domain must neither log nor spend the
 // throttle window, or a real client's failure would be swallowed behind it.
 func TestLogCertificateFailures_ForeignSNIDoesNotConsumeThrottle(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	buf := captureDebugLog(t)
 
 	wrapped := auth.LogCertificateFailuresForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 		return nil, errors.New("acme/autocert: host not configured")
@@ -571,9 +535,7 @@ func TestLogCertificateFailures_ForeignSNIDoesNotConsumeThrottle(t *testing.T) {
 func selfSignedLeaf(t *testing.T, notAfter time.Time, withLeaf bool) *tls.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GenerateKey", err)
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject:      pkix.Name{CommonName: "chat.example.com"},
@@ -581,9 +543,7 @@ func selfSignedLeaf(t *testing.T, notAfter time.Time, withLeaf bool) *tls.Certif
 		NotAfter:     notAfter,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateCertificate", err)
 	cert := &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 	if withLeaf {
 		if cert.Leaf, err = x509.ParseCertificate(der); err != nil {
@@ -596,9 +556,7 @@ func selfSignedLeaf(t *testing.T, notAfter time.Time, withLeaf bool) *tls.Certif
 // The modes with a statically loaded certificate report it as served from
 // start-up, with its expiry; TLS off serves none (a reverse proxy owns it).
 func TestLoadOrGenerate_ServedCertificate(t *testing.T) {
-	tmpDir := t.TempDir()
-	certFile := filepath.Join(tmpDir, "cert.pem")
-	keyFile := filepath.Join(tmpDir, "key.pem")
+	certFile, keyFile := certKeyPaths(t)
 
 	for _, mode := range []string{"self_signed", "manual"} {
 		result, err := auth.LoadOrGenerate(config.TLSConfig{Mode: mode, CertFile: certFile, KeyFile: keyFile})
@@ -606,9 +564,7 @@ func TestLoadOrGenerate_ServedCertificate(t *testing.T) {
 			t.Fatalf("LoadOrGenerate(mode=%s): %v", mode, err)
 		}
 		leaf, err := x509.ParseCertificate(result.TLSConfig.Certificates[0].Certificate[0])
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "ParseCertificate", err)
 		got := result.Served.Current()
 		if got.Fingerprint != result.Fingerprint || got.Fingerprint == "" {
 			t.Errorf("mode=%s served fingerprint = %q, want %q", mode, got.Fingerprint, result.Fingerprint)
@@ -619,9 +575,7 @@ func TestLoadOrGenerate_ServedCertificate(t *testing.T) {
 	}
 
 	off, err := auth.LoadOrGenerate(config.TLSConfig{Mode: "off"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LoadOrGenerate", err)
 	if got := off.Served.Current(); got != (auth.ServedCert{}) {
 		t.Errorf("mode=off served = %+v, want zero", got)
 	}
@@ -696,9 +650,7 @@ func TestTrackServed_IgnoresACMERSALeaf(t *testing.T) {
 	ecdsaLeaf := selfSignedLeaf(t, time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC), true)
 
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GenerateKey", err)
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
 		Subject:      pkix.Name{CommonName: "chat.example.com"},
@@ -706,9 +658,7 @@ func TestTrackServed_IgnoresACMERSALeaf(t *testing.T) {
 		NotAfter:     time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &rsaKey.PublicKey, rsaKey)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateCertificate", err)
 	rsaLeaf := &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: rsaKey}
 
 	serve := ecdsaLeaf

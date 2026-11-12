@@ -22,6 +22,7 @@ vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 const {
   mockSwitchVideoDevice,
   mockSetVoiceSensitivity,
+  mockSetSileroBufferMs,
   mockReapplyAudioProcessing,
   mockReapplyEnhancedNoiseSuppression,
   mockApplyInputMode,
@@ -41,11 +42,38 @@ describe("VoiceAudioTab UI structure", () => {
     const { ac, el } = mountTab();
 
     const settingRows = el.querySelectorAll(
-      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='mic-test']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera'])",
+      ".setting-row:not([data-testid='voice-buffer']):not([data-testid='auto-sensitivity']):not([data-testid='mic-test']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera']):not([data-testid='screen-backup-layer'])",
     );
     // 4 toggles: echo cancellation, noise suppression, auto gain control, enhanced NS
     expect(settingRows.length).toBe(4);
     ac.abort();
+  });
+
+  it("saves a fine buffer adjustment and applies it without reopening the microphone", async () => {
+    stubNavigator();
+    const { ac, el } = mountTab();
+    try {
+      const slider = el.querySelector<HTMLInputElement>('input[aria-label="Voice Buffer"]')!;
+      expect(slider.disabled).toBe(true);
+      expect([slider.min, slider.max, slider.step, slider.value]).toEqual(["0", "300", "1", "200"]);
+      el.querySelector<HTMLElement>(
+        "[role='switch'][aria-label='Enhanced Noise Suppression']",
+      )!.click();
+      expect(slider.disabled).toBe(false);
+      await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled());
+      const requests = vi.mocked(navigator.mediaDevices.getUserMedia).mock.calls.length;
+
+      slider.value = "137";
+      slider.dispatchEvent(new Event("input"));
+      expect(slider.getAttribute("aria-valuetext")).toBe("137 ms");
+      slider.dispatchEvent(new Event("change"));
+      expect(localStorage.getItem("owncord:settings:sileroBufferMs")).toBe("137");
+      expect(mockSetSileroBufferMs).toHaveBeenCalledWith(137);
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(requests);
+      expect(mockReapplyAudioProcessing).not.toHaveBeenCalled();
+    } finally {
+      ac.abort();
+    }
   });
 
   it("Automatically play cameras is on by default and saves its choice", () => {
@@ -82,7 +110,7 @@ describe("VoiceAudioTab UI structure", () => {
 
     // Toggles are divs with class "toggle" (not buttons)
     const toggleDiv = el.querySelector(
-      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera']) .toggle",
+      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera']):not([data-testid='screen-backup-layer']) .toggle",
     ) as HTMLElement;
     expect(toggleDiv).not.toBeNull();
     toggleDiv.click();

@@ -8,6 +8,26 @@
 // without path, a version, or a short token from a vocabulary the browser or OS
 // defines (codec, encoder, exception code). Anything else is dropped.
 
+import {
+  PLATFORMS,
+  INT,
+  MS,
+  TOKEN,
+  WS_TIMERS,
+  WS_LIVENESS,
+  EXIT_WATCH,
+  CRASH_LOG,
+  EXCEPTION_LOG,
+  SYSTEM_CRASH,
+  ANDROID_EXITS,
+  ANDROID_CRASH,
+  ANDROID_WEBVIEW,
+  EVENT_LOG,
+  APP_EVENTS,
+} from "./eventCodesShared";
+import { MEDIA_EVENT_CODES } from "./eventCodesMedia";
+import { VOICE_NET_EVENT_CODES } from "./eventCodesVoice";
+
 /** How a field's value is checked before it is stored. */
 export type FieldSpec =
   | { readonly type: "enum"; readonly values: readonly string[] }
@@ -99,74 +119,6 @@ export const EVENT_LOG_CAPS = {
  */
 export const CAMERA_STALL_THRESHOLD_MS = 2000;
 
-const SOURCES = {
-  type: "enum",
-  values: ["camera", "microphone", "screen_share", "screen_share_audio", "unknown"],
-} as const;
-const PLATFORMS = {
-  type: "enum",
-  values: ["windows", "linux", "macos", "android", "browser", "unknown"],
-} as const;
-const QUALITY_LIMITATION = {
-  type: "enum",
-  values: ["none", "cpu", "bandwidth", "other", "unknown"],
-} as const;
-const MEDIA_ERRORS = {
-  type: "enum",
-  values: [
-    "not_allowed",
-    "not_found",
-    "not_readable",
-    "overconstrained",
-    "abort",
-    "security",
-    "type",
-    "unknown",
-  ],
-} as const;
-const STOP_REASONS = {
-  type: "enum",
-  values: ["user", "ended", "error", "left_voice", "replaced", "unknown"],
-} as const;
-const GEN = { type: "int" } as const;
-const INT = { type: "int" } as const;
-const MS = { type: "ms" } as const;
-const BOOL = { type: "bool" } as const;
-const TOKEN = { type: "token" } as const;
-const HASH = { type: "hash" } as const;
-
-const WS = "src/lib/ws.ts";
-const MEDIA = "src/features/voice/mediaControl.ts";
-const DEVICES = "src/lib/voice/deviceManager.ts";
-const ROOM_EVENTS = "src/lib/voice/roomEventHandlers.ts";
-const LIFECYCLE = "src/features/voice/roomLifecycle.ts";
-const SCREEN = "src/lib/voice/screenShare.ts";
-const MAIN = "src/main.ts";
-const EXIT_WATCH = "src-tauri/src/exit_watch.rs";
-const CRASH_LOG = "src-tauri/src/crash_log.rs";
-const EXCEPTION_LOG = "src-tauri/src/exception_log.rs";
-const SYSTEM_CRASH = "src-tauri/src/system_crash_report.rs";
-const ANDROID_DIR = "src-tauri/gen/android/app/src/main/java/com/owncord/client";
-const ANDROID_EXITS = `${ANDROID_DIR}/ExitInfoPlugin.kt`;
-const ANDROID_CRASH = `${ANDROID_DIR}/NativeLog.kt`;
-const ANDROID_WEBVIEW = `${ANDROID_DIR}/RenderGoneClient.kt`;
-const EVENT_LOG = "src/lib/diagnostics/eventLog.ts";
-const APP_EVENTS = "src/lib/diagnostics/appEvents.ts";
-const VOICE_LOG = "src/lib/voice/voiceEventLog.ts";
-const WATCHDOG = "src/lib/voice/cameraStallWatchdog.ts";
-const DIAGNOSTICS = "src/lib/voice/livekitDiagnostics.ts";
-
-const CAMERA_STATS = {
-  frames_sent: INT,
-  encoder: TOKEN,
-  hardware_encoder: BOOL,
-  quality_limitation: QUALITY_LIMITATION,
-  width: INT,
-  height: INT,
-  fps: INT,
-  active_layers: INT,
-} as const;
-
 export const EVENT_CODES = {
   "app.started": {
     label: "App started", // i18n-exempt: support bundle text, never shown in the app
@@ -178,29 +130,28 @@ export const EVENT_CODES = {
       webview_version: { type: "version" },
     },
   },
-  "app.suspended": { label: "Computer went to sleep", owners: [MAIN], dataClasses: [], fields: {} }, // i18n-exempt: support bundle text, never shown in the app
   "app.resumed": {
     label: "Computer woke up", // i18n-exempt: support bundle text, never shown in the app
-    owners: [MAIN],
+    owners: [WS_TIMERS],
     dataClasses: [],
     fields: { asleep_ms: MS },
   },
   "app.visibility": {
     label: "Window shown or hidden", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
+    owners: [WS_LIVENESS],
     dataClasses: [],
     fields: { state: { type: "enum", values: ["visible", "hidden", "minimized", "restored"] } },
   },
   "app.network": {
     label: "Network went online or offline", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
+    owners: [WS_LIVENESS],
     dataClasses: [],
     fields: { state: { type: "enum", values: ["online", "offline"] } },
   },
 
   "native.crash": {
     label: "App crashed last time", // i18n-exempt: support bundle text, never shown in the app
-    owners: [CRASH_LOG, EXCEPTION_LOG, SYSTEM_CRASH, ANDROID_CRASH, ANDROID_EXITS],
+    owners: [APP_EVENTS, CRASH_LOG, EXCEPTION_LOG, SYSTEM_CRASH, ANDROID_CRASH, ANDROID_EXITS],
     dataClasses: [],
     fields: {
       platform: PLATFORMS,
@@ -215,7 +166,7 @@ export const EVENT_CODES = {
   },
   "native.exit": {
     label: "How the last run ended", // i18n-exempt: support bundle text, never shown in the app
-    owners: [EXIT_WATCH, ANDROID_EXITS],
+    owners: [APP_EVENTS, EXIT_WATCH, ANDROID_EXITS],
     dataClasses: [],
     fields: {
       platform: PLATFORMS,
@@ -237,21 +188,9 @@ export const EVENT_CODES = {
       hang_ms: MS,
     },
   },
-  "native.hang": {
-    label: "App stopped answering", // i18n-exempt: support bundle text, never shown in the app
-    owners: [EXIT_WATCH],
-    dataClasses: [],
-    fields: { thread: { type: "enum", values: ["main", "webview"] }, duration_ms: MS },
-  },
-  "native.hang_recovered": {
-    label: "App answered again", // i18n-exempt: support bundle text, never shown in the app
-    owners: [EXIT_WATCH],
-    dataClasses: [],
-    fields: { thread: { type: "enum", values: ["main", "webview"] }, duration_ms: MS },
-  },
   "native.webview_process_failed": {
     label: "A webview helper process failed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [EXIT_WATCH, ANDROID_WEBVIEW],
+    owners: [APP_EVENTS, EXIT_WATCH, ANDROID_WEBVIEW],
     dataClasses: [],
     fields: {
       process: { type: "enum", values: ["browser", "renderer", "gpu", "utility", "unknown"] },
@@ -262,316 +201,8 @@ export const EVENT_CODES = {
     },
   },
 
-  "camera.started": {
-    label: "Camera started", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: {
-      device: HASH,
-      width: INT,
-      height: INT,
-      fps: INT,
-      requested_width: INT,
-      requested_height: INT,
-      requested_fps: INT,
-      facing: { type: "enum", values: ["user", "environment", "unknown"] },
-    },
-  },
-  "camera.stopped": {
-    label: "Camera stopped", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: { reason: STOP_REASONS },
-  },
-  "camera.device_changed": {
-    label: "Camera device changed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [DEVICES],
-    dataClasses: [],
-    fields: { device: HASH },
-  },
-  "camera.ended": {
-    label: "Browser ended the camera track", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: {},
-  },
-  "camera.muted": {
-    label: "Camera track muted", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: { by: { type: "enum", values: ["browser", "user"] } },
-  },
-  "camera.unmuted": {
-    label: "Camera track unmuted", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: { by: { type: "enum", values: ["browser", "user"] } },
-  },
-  "camera.permission_error": {
-    label: "Camera could not open", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: { error: MEDIA_ERRORS },
-  },
-  "camera.stalled": {
-    label: "Camera stopped sending frames", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WATCHDOG],
-    dataClasses: [],
-    fields: CAMERA_STATS,
-  },
-  "camera.resumed": {
-    label: "Camera sends frames again", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WATCHDOG],
-    dataClasses: [],
-    fields: { ...CAMERA_STATS, gap_ms: MS },
-  },
-
-  "mic.started": {
-    label: "Microphone started", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: { device: HASH, sample_rate: INT },
-  },
-  "mic.stopped": {
-    label: "Microphone stopped", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: { reason: STOP_REASONS },
-  },
-  "mic.device_changed": {
-    label: "Microphone device changed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [DEVICES],
-    dataClasses: [],
-    fields: { device: HASH },
-  },
-  "mic.ended": {
-    label: "Browser ended the microphone track", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: {},
-  },
-  "mic.permission_error": {
-    label: "Microphone could not open", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: { error: MEDIA_ERRORS },
-  },
-
-  "track.published": {
-    label: "Track published", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: { source: SOURCES, codec: TOKEN, simulcast: BOOL },
-  },
-  "track.unpublished": {
-    label: "Track unpublished", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: { source: SOURCES, reason: STOP_REASONS },
-  },
-  "track.replaced": {
-    label: "Track replaced", // i18n-exempt: support bundle text, never shown in the app
-    owners: [MEDIA],
-    dataClasses: [],
-    fields: { source: SOURCES },
-  },
-  "track.layers_changed": {
-    label: "Simulcast layers turned on or off", // i18n-exempt: support bundle text, never shown in the app
-    owners: [ROOM_EVENTS],
-    dataClasses: [],
-    fields: { source: SOURCES, active_layers: INT },
-  },
-  "track.subscribed": {
-    label: "Started receiving a track", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [1],
-    fields: { source: SOURCES, participant: { type: "pseudonym" } },
-  },
-  "track.unsubscribed": {
-    label: "Stopped receiving a track", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [1],
-    fields: { source: SOURCES, participant: { type: "pseudonym" } },
-  },
-  "track.subscription_failed": {
-    label: "Could not receive a track", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [1],
-    fields: { participant: { type: "pseudonym" } },
-  },
-
-  "share.started": {
-    label: "Screen share started", // i18n-exempt: support bundle text, never shown in the app
-    owners: [SCREEN],
-    dataClasses: [],
-    fields: {
-      surface: { type: "enum", values: ["monitor", "window", "browser", "unknown"] },
-      width: INT,
-      height: INT,
-      fps: INT,
-      native: BOOL,
-    },
-  },
-  "share.stopped": {
-    label: "Screen share stopped", // i18n-exempt: support bundle text, never shown in the app
-    owners: [SCREEN],
-    dataClasses: [],
-    fields: { reason: STOP_REASONS },
-  },
-  "share.ended": {
-    label: "Browser ended the screen share", // i18n-exempt: support bundle text, never shown in the app
-    owners: [SCREEN],
-    dataClasses: [],
-    fields: {},
-  },
-  "share.source_changed": {
-    label: "Screen share source changed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [SCREEN],
-    dataClasses: [],
-    fields: { surface: { type: "enum", values: ["monitor", "window", "browser", "unknown"] } },
-  },
-
-  "voice.joined": {
-    label: "Joined a voice channel", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [19],
-    fields: { channel: { type: "pseudonym" }, native: BOOL, after_ms: MS },
-  },
-  "voice.left": {
-    label: "Left the voice channel", // i18n-exempt: support bundle text, never shown in the app
-    owners: [LIFECYCLE],
-    dataClasses: [19],
-    fields: { channel: { type: "pseudonym" } },
-  },
-  "voice.reconnecting": {
-    label: "Voice is reconnecting", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: { attempt: INT, kind: { type: "enum", values: ["signal", "media", "full"] } },
-  },
-  "voice.reconnected": {
-    label: "Voice reconnected", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: { after_ms: MS },
-  },
-  "voice.disconnected": {
-    label: "Voice disconnected", // i18n-exempt: support bundle text, never shown in the app
-    owners: [VOICE_LOG],
-    dataClasses: [],
-    fields: {
-      reason: {
-        type: "enum",
-        values: [
-          "unknown_reason",
-          "client_initiated",
-          "duplicate_identity",
-          "server_shutdown",
-          "participant_removed",
-          "room_deleted",
-          "state_mismatch",
-          "join_failure",
-          "migration",
-          "signal_close",
-          "room_closed",
-          "user_unavailable",
-          "user_rejected",
-          "sip_trunk_failure",
-          "connection_timeout",
-          "media_failure",
-        ],
-      },
-      unexpected: BOOL,
-    },
-  },
-  "voice.encryption": {
-    label: "Call encryption changed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [ROOM_EVENTS],
-    dataClasses: [],
-    fields: { state: { type: "enum", values: ["on", "off", "error"] } },
-  },
-
-  "ice.state": {
-    label: "Media connection state changed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [ROOM_EVENTS],
-    dataClasses: [],
-    fields: {
-      transport: { type: "enum", values: ["publisher", "subscriber"] },
-      state: {
-        type: "enum",
-        values: ["new", "checking", "connected", "completed", "failed", "disconnected", "closed"],
-      },
-    },
-  },
-  "ice.route": {
-    label: "Media route chosen", // i18n-exempt: support bundle text, never shown in the app
-    owners: [DIAGNOSTICS],
-    dataClasses: [],
-    fields: {
-      local_type: { type: "enum", values: ["host", "srflx", "prflx", "relay", "unknown"] },
-      remote_type: { type: "enum", values: ["host", "srflx", "prflx", "relay", "unknown"] },
-      protocol: { type: "enum", values: ["udp", "tcp", "tls", "unknown"] },
-    },
-  },
-
-  "ws.connecting": {
-    label: "Connecting to the server", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
-    dataClasses: [],
-    fields: { generation: GEN, attempt: INT, host: { type: "host" } },
-  },
-  "ws.open": {
-    label: "Server connection open", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
-    dataClasses: [],
-    fields: { generation: GEN },
-  },
-  "ws.ready": {
-    label: "Server connection ready", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
-    dataClasses: [],
-    fields: { generation: GEN, after_ms: MS },
-  },
-  "ws.closed": {
-    label: "Server connection closed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
-    dataClasses: [],
-    fields: {
-      generation: GEN,
-      close_code: INT,
-      close_class: {
-        type: "enum",
-        values: [
-          "normal",
-          "going_away",
-          "protocol",
-          "auth",
-          "policy",
-          "server_error",
-          "abnormal",
-          "other",
-        ],
-      },
-    },
-  },
-  "ws.reconnect_scheduled": {
-    label: "Reconnect to the server scheduled", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
-    dataClasses: [],
-    fields: { generation: GEN, attempt: INT, delay_ms: MS },
-  },
-  "ws.superseded": {
-    label: "A newer server connection replaced this one", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
-    dataClasses: [],
-    fields: { generation: GEN, by_generation: GEN },
-  },
-  "ws.stale_event": {
-    label: "Event from an old server connection ignored", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
-    dataClasses: [],
-    fields: { generation: GEN, live_generation: GEN },
-  },
+  ...MEDIA_EVENT_CODES,
+  ...VOICE_NET_EVENT_CODES,
 
   "events.dropped": {
     label: "Similar events left out", // i18n-exempt: support bundle text, never shown in the app

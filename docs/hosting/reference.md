@@ -110,17 +110,17 @@ default. If you move one, the others do not follow.
 This table lists what each path holds, what limits its size, and what deletes
 old data:
 
-| Path                                        | Written by                                                                | Size limited by                                                                                       | Cleaned up by                                                                                                     |
-| ------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `chatserver.db` + `chatserver.db-wal`       | every feature                                                             | messages: the server's or a channel's retention window (`0` = keep forever); stored events: 24 hours  | the retention sweep (up to 5,000 messages per run); the event pruner, every 60 minutes; the WAL after an erasure  |
-| `uploads/`                                  | attachments, avatars, emoji, and a preview of large images (`thumbs/`)    | `upload.max_size_mb` per file (default 100); `upload.user_quota_mb` per user (default `0` = no limit) | the orphan sweep (files unlinked for over 1 hour), retention, erasure, and reconciliation (up to 500 files a run) |
-| `backups/`                                  | manual and scheduled backups, and `pre_restore_*.db` / `pre_migrate_*.db` | **Keep backups for (days)** on the **Backups & restore** page                                         | retention; it always keeps the newest backup and keeps the newest 3 `pre_restore_*` and 3 `pre_migrate_*` copies  |
-| `acme_certs/`                               | `tls.mode: acme` only                                                     | one certificate for your domain                                                                       | the ACME client handles renewal                                                                                   |
-| `livekit/`                                  | `voice.auto_download_livekit`                                             | one pinned LiveKit release                                                                            | never; delete the file to force a fresh download                                                                  |
-| `plugins/`                                  | plugins, in builds made with `-tags wazero`                               | whatever the plugins write                                                                            | never                                                                                                             |
-| `cert.pem`, `key.pem`                       | first run, `tls.mode: self_signed`                                        | one TLS pair                                                                                          | never; replacing them is [rotation](tls-and-proxy.md#replacing-the-self-signed-certificate)                       |
-| `totp.key`, `erasure.key`, `push_vapid.key` | first run                                                                 | three small files                                                                                     | never, and they must never be: losing one is permanent (see [Backup Strategy](backups.md))                        |
-| `erasure/markers.sqlite`                    | every account erasure and every swept channel                             | one row per erased account or swept channel                                                           | never; it stays small                                                                                             |
+| Path                                        | Written by                                                                | Size limited by                                                                                       | Cleaned up by                                                                                                                                                                                                                                |
+| ------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chatserver.db` + `chatserver.db-wal`       | every feature                                                             | messages: the server's or a channel's retention window (`0` = keep forever); stored events: 24 hours  | the retention sweep (up to 5,000 messages per run); the event pruner, every 60 minutes; the WAL after an erasure                                                                                                                             |
+| `uploads/`                                  | attachments, avatars, emoji, and a preview of large images (`thumbs/`)    | `upload.max_size_mb` per file (default 100); `upload.user_quota_mb` per user (default `0` = no limit) | the orphan sweep (files unlinked for over 24 hours, or of a message deleted over 1 hour ago), retention, erasure, and reconciliation (up to 500 files a run; after a restore, held for 7 days while the `pre_restore_` safety copy is fresh) |
+| `backups/`                                  | manual and scheduled backups, and `pre_restore_*.db` / `pre_migrate_*.db` | **Keep backups for (days)** on the **Backups & restore** page                                         | retention; it always keeps the newest backup and keeps the newest 3 `pre_restore_*` and 3 `pre_migrate_*` copies                                                                                                                             |
+| `acme_certs/`                               | `tls.mode: acme` only                                                     | one certificate for your domain                                                                       | the ACME client handles renewal                                                                                                                                                                                                              |
+| `livekit/`                                  | `voice.auto_download_livekit`                                             | one pinned LiveKit release                                                                            | never; delete the file to force a fresh download                                                                                                                                                                                             |
+| `plugins/`                                  | plugins, in builds made with `-tags wazero`                               | whatever the plugins write                                                                            | never                                                                                                                                                                                                                                        |
+| `cert.pem`, `key.pem`                       | first run, `tls.mode: self_signed`                                        | one TLS pair                                                                                          | never; replacing them is [rotation](tls-and-proxy.md#replacing-the-self-signed-certificate)                                                                                                                                                  |
+| `totp.key`, `erasure.key`, `push_vapid.key` | first run                                                                 | three small files                                                                                     | never, and they must never be: losing one is permanent (see [Backup Strategy](backups.md))                                                                                                                                                   |
+| `erasure/markers.sqlite`                    | every account erasure and every swept channel                             | one row per erased account or swept channel                                                           | never; it stays small                                                                                                                                                                                                                        |
 
 Four things the table cannot show:
 
@@ -673,16 +673,23 @@ Each update is checked with an Ed25519 signature before it is applied.
 
 ### Client support bundle and logs
 
-When a _user_ has a problem, the desktop client can write its own support
-bundle, without contacting the server: **Settings → Diagnostics & logs →
-Export Support Bundle**.
+When a _user_ has a problem, the app can write its own support bundle, without
+contacting the server: **Settings → Diagnostics & logs → Export Support
+Bundle**. This works on the desktop, on Android and in the browser client.
 
-- It is a local zip, saved where the user chooses. Nothing is uploaded.
-- Unlike the server bundle, it copies client log lines as they are. The client
-  log is not cleaned. So review it before sharing. The **Diagnostics & logs**
-  tab says this too.
-- It contains both client logs, plus diagnostic sections the client collects
-  itself. Ask for this bundle first.
+- It is a local zip, saved where the user chooses (on Android through Save or
+  Share). Nothing is uploaded.
+- Every file is cleaned before it is zipped: tokens, passwords, keys, cookies,
+  recovery codes, links (cut to the server name), email and IP addresses and
+  the home folder name are removed, and `redactions.json` counts what was
+  removed. This works on the shape of a value, so plain words in a log line
+  still get through. Review the bundle before sharing; the **Diagnostics &
+  logs** tab says this too.
+- Besides both client logs it carries a diagnostic event log (what the camera,
+  calls and server connection did in the last 30 minutes, without names or
+  messages), `last-exit.json` (how the app's last run ended) and a
+  `manifest.json` that lists every file with its size and checksum. Ask for
+  this bundle first.
 
 The client keeps **two** logs: the webview's own rotating log (JSON lines),
 and the native log below.
@@ -1043,6 +1050,16 @@ troubleshooting. Only administrators can call it. In the admin panel it is the
 **Connectivity check** card on the Dashboard. See
 [port-forwarding.md](../port-forwarding.md).
 
+### System health
+
+The **System health** page (Operations, `GET /admin/api/system/health`, for
+`ADMINISTRATOR` or `VIEW_DIAGNOSTICS`) shows connections, message-delivery
+timings, the database, voice and the server process on four cards, refreshed
+every 5 seconds while the page is open. It reads the same figures as the
+support bundle's `health.json`, and **Copy for support** copies them. When the
+database does not answer within 2 seconds, its card says **Could not read**
+instead of holding up the page. See [Monitoring](monitoring.md#system-health-page).
+
 ### Support bundle contents
 
 When you need help, the admin panel can write a support bundle for you to
@@ -1223,7 +1240,8 @@ manages LiveKit like this:
 network interfaces, and so on), delete the header line that contains the
 auto-generated marker. OwnCord then leaves the file alone on future starts.
 Your `keys:` entry must still match `voice.livekit_api_key` and
-`voice.livekit_api_secret`.
+`voice.livekit_api_secret`. Keep it the only entry: OwnCord accepts voice
+connections made with that key only, and LiveKit signs with any key it has.
 
 If `livekit_binary` is empty and `auto_download_livekit` is off, OwnCord
 assumes you run LiveKit yourself, for example with Docker, systemd or by hand.
@@ -1264,7 +1282,13 @@ Client                     OwnCord Server              LiveKit Server
 **How clients connect:**
 
 - **Proxy path (`/livekit`):** the client connects through OwnCord's HTTPS
-  server. This avoids mixed-content problems. It is the normal path.
+  server. This avoids mixed-content problems. It is the normal path. The
+  server checks each connection here before LiveKit sees it: the token must
+  belong to a voice session the member is in right now, or the connection is
+  refused. The server then connects to LiveKit with a token it issues at that
+  moment, so the connection starts with the member's current rights. Only
+  LiveKit's signalling addresses are passed on (`/rtc`, `/rtc/v1` and their
+  `/validate` forms).
 - **Direct URL (`ws://localhost:7880`):** sent only when `voice.livekit_url` is
   itself a local (loopback) address
   ([protocol.md](../protocol.md#voice_token-server---client-direct)). The client
@@ -1351,7 +1375,7 @@ order. Later steps see what earlier ones left this run.
 3. Clean up expired two-factor state.
 4. Remove stale push subscriptions.
 5. Run backup maintenance: the schedule check and retention.
-6. Delete orphaned attachments: uploaded but never linked, older than 1 hour.
+6. Delete orphaned attachments: uploaded but never linked and older than 24 hours, or linked to a message deleted over 1 hour ago.
 7. Run the message retention sweep, if a window is set.
 8. Remove closed reports' content older than
    `moderation.report_retention_days`.

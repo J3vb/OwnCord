@@ -18,14 +18,8 @@ package ws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
-
-	"github.com/coder/websocket"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 )
@@ -34,10 +28,7 @@ func TestReconnect_ReplaysOwnVoiceRoomOutsideReadableChannels(t *testing.T) {
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
-	userID, err := database.CreateUser(ctx, "voice-resume-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	userID := mustCreateUser(t, database, "voice-resume-user", 1)
 	// A role with no permissions at all: VisibleChannelIDs returns nothing, so
 	// the voice room the user is live in cannot be in allowedChannelIDs.
 	noPerms, err := database.CreateRole(ctx, "voice-only", nil, 0, 1, false, false)
@@ -47,34 +38,19 @@ func TestReconnect_ReplaysOwnVoiceRoomOutsideReadableChannels(t *testing.T) {
 	if err := database.UpdateUserRole(ctx, userID, noPerms.ID); err != nil {
 		t.Fatalf("UpdateUserRole: %v", err)
 	}
-	user, err := database.GetUserByID(ctx, userID)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, userID)
 
-	vcID, err := database.CreateChannel(ctx, "vc-resume", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, userID, vcID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	vcID := mustCreateChannel(t, database, "vc-resume", "voice")
+	mustJoinVoice(t, database, userID, vcID)
 	vs, err := database.GetVoiceState(ctx, userID)
 	if err != nil || vs == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, userID)
 
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newServeRigOn(t, database, nil)
+	hub := rig.hub
 
 	// Precondition: the room really is outside the READ-gated allowed set, so
 	// the plain replay filter can never deliver its events.
@@ -108,53 +84,15 @@ func TestReconnect_ReplaysOwnVoiceRoomOutsideReadableChannels(t *testing.T) {
 	push(102, MsgTypeVoiceState)
 	push(103, MsgTypeVoiceLeaveBC)
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
+	conn := rig.dialAuth(t, ctx, token, 100, 0)
 
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "auth",
-		"payload": map[string]any{"token": token, "last_seq": uint64(100)},
-	})
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-
-	readFrame := func(what string) map[string]any {
-		t.Helper()
-		readCtx, readCancel := context.WithTimeout(ctx, 5*time.Second)
-		defer readCancel()
-		_, msg, err := conn.Read(readCtx)
-		if err != nil {
-			t.Fatalf("read %s: %v", what, err)
-		}
-		var parsed map[string]any
-		if err := json.Unmarshal(msg, &parsed); err != nil {
-			t.Fatalf("unmarshal %s: %v; raw=%s", what, err, msg)
-		}
-		return parsed
-	}
-
-	if got := readFrame("handshake response")["type"]; got != MsgTypeAuthOK {
-		t.Fatalf("expected auth_ok (buffer-tier resume), got type=%v", got)
-	}
+	expectFrame(t, ctx, conn, MsgTypeAuthOK, " (buffer-tier resume)")
 	// Replay frames are written synchronously inside handleReconnect, before
 	// writePump starts, so they are the next two frames on the wire.
 	for i, want := range []string{MsgTypeVoiceState, MsgTypeVoiceLeaveBC} {
-		frame := readFrame("replay frame")
-		got, _ := frame["type"].(string)
+		got, frame := readFrameType(t, ctx, conn)
 		if got == MsgTypeChatMessage {
-			t.Fatalf("replay frame %d leaked a chat frame for a channel the user cannot READ: %+v", i, frame)
+			t.Fatalf("replay frame %d leaked a chat frame for a channel the user cannot READ: %s", i, frame)
 		}
 		if got != want {
 			t.Fatalf("replay frame %d: got type=%q, want %q — the resuming participant's own voice room was filtered out of replay", i, got, want)

@@ -31,11 +31,11 @@ const h = vi.hoisted(() => {
   };
 });
 
-vi.mock("@components/QuickSwitcher", async () => {
+vi.mock("../../src/features/navigation/QuickSwitcher", async () => {
   await h.gates.quick.wait;
   return { createQuickSwitcher: h.createQuickSwitcher };
 });
-vi.mock("@components/SearchOverlay", async () => {
+vi.mock("../../src/features/navigation/SearchOverlay", async () => {
   await h.gates.search.wait;
   // The first import fails once the gate opens; vitest evaluates the factory
   // again on the next import because a throw is not cached.

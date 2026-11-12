@@ -47,6 +47,7 @@ export const connectText = defineCatalog("connect", {
     "Tap Install in the Android prompt to finish the update. Closed it? Tap Retry.",
   "update.androidPermission":
     "Allow OwnCord to install apps on the settings page that opened, then tap Retry.",
+  "update.versionChanged": "A newer update was published. Checking for it now.",
 
   "voice.disconnected": "You were disconnected from voice",
   "voice.afkChannelFallback": "the AFK channel",
@@ -55,6 +56,7 @@ export const connectText = defineCatalog("connect", {
   "voice.movedGeneric": "You were moved to {channel}",
   "voice.movedChannelFallback": "another voice channel",
   "voice.channelFull": "That voice channel is full",
+  "voice.joinUnanswered": "Could not join voice: the server did not answer. Try again.",
   "voice.videoLimit": "That voice channel has reached its video limit",
 
   "brand.tagline": "Self-hosted chat — Your server, your rules",
@@ -228,6 +230,8 @@ export const connectText = defineCatalog("connect", {
   "error.banned": "Your account has been suspended.",
   "error.unavailable": "The server is temporarily unavailable. Try again.",
   "error.storageQuota": "Your storage is full — delete files or ask a server admin.",
+  "error.transferTimedOut":
+    "The upload took too long for this connection. Try a smaller file or a faster network.",
   "error.storageLowDisk": "The server is low on disk space — try again later.",
   "error.storageError": "The server could not store that. Try again.",
   "error.gifDisabled": "GIF search is not configured on this server.",
@@ -242,6 +246,14 @@ export const connectText = defineCatalog("connect", {
   "session.autoLoginFailedDetail": "Auto-login failed: {message}",
   "session.connectTimeout":
     "Couldn't reach this server — it may be offline. Check your connection and try again.",
+  "session.readyTimeout":
+    "The server accepted your sign-in but did not finish loading. Try again in a moment.",
+  "session.unreadableReply":
+    "The server sent a reply this version of OwnCord cannot read. Update OwnCord or ask the server owner to update the server.",
+  "session.codeLoadFailed":
+    "Part of OwnCord failed to load. Check your connection, or reload, and try again.",
+  "session.unreadableWriteReply":
+    "The server's reply could not be read, but your change may have been saved. Check before trying again.",
   "error.notJson":
     "The server answered with a web page instead of the API. A proxy or network gateway in front of it may be intercepting requests.",
   "session.loginFailedStatus": "Login failed ({status})",

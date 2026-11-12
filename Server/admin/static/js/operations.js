@@ -179,11 +179,12 @@ async function renderDashboard(){
   if(can(PERM.VIEW_DIAGNOSTICS)){
     await startHealthPoll();
     html+=healthRow();
-    try{const a=renderAttention(await api('GET','/attention'),u&&u.update_available&&isDismissed('update',noticeSig(u.latest)));html+=a.head;checks=a.checks}
+    try{const a=renderAttention(await api('GET','/attention'),updateOffered(u)&&isDismissed('update',noticeSig(u.latest)));html+=a.head;checks=a.checks}
     catch(e){html+='<section id="attentionPanel" class="section-card"><div class="section-card-body"><p style="color:var(--text-danger)">Could not load attention state: '+esc(e.message)+'</p><button class="btn btn-ghost" data-action="renderContent">Retry</button></div></section>'}
+    html+=slowRequestsCard();
   }
   const updSig=u&&noticeSig(u.latest);
-  if(u&&u.update_available&&!isDismissed('update',updSig))html+='<div class="update-strip">'+I.updates+'<span><strong>'+esc(verLabel(u.latest))+' is available.</strong> <span class="muted">You are running '+esc(verLabel(u.current))+'.</span></span><button class="btn btn-outline" data-action="navigateTo" data-args="'+actArgs('updates')+'">View update</button>'+dismissButton('update',updSig,'update notice')+'</div>';
+  if(updateOffered(u)&&!isDismissed('update',updSig))html+='<div class="update-strip">'+I.updates+'<span><strong>'+esc(verLabel(u.latest))+' is available.</strong> <span class="muted">You are running '+esc(verLabel(u.current))+'.</span></span><button class="btn btn-outline" data-action="navigateTo" data-args="'+actArgs('updates')+'">View update</button>'+dismissButton('update',updSig,'update notice')+'</div>';
   const stat=(label,value)=>'<div class="stat-card"><div class="stat-card-label">'+label+'</div><div class="stat-card-value">'+value+'</div></div>';
   html+='<div class="stat-grid compact">'+stat('Members',s.user_count||0)+stat('Messages',(s.message_count||0).toLocaleString())+stat('Channels',s.channel_count||0)+stat('Database',fmtBytes(s.db_size_bytes||0))+'</div>';
   html+=checks;
@@ -247,7 +248,7 @@ function connectivityHtml(r){
     +row('Online now',typeof sv.online_users==='number'?String(sv.online_users):'')
     +'</dl>';
   const rep=r.reachability;
-  if(!rep)return html+'<p class="card-note" style="margin-top:12px">For the ports to forward and what this server cannot check from inside, set <code>server.reachability_report_enabled: true</code> in config.yaml and restart.</p>';
+  if(!rep)return html+'<p class="card-note" style="margin-top:12px">For the ports to forward and what this server cannot check from inside, turn on Detailed network report (<code>server.reachability_report_enabled</code>) on the '+configPageLink()+' and restart.</p>';
   if(rep.cgnat_note)html+='<p class="card-note" style="margin-top:12px">'+esc(rep.cgnat_note)+'</p>';
   if((rep.required_ports||[]).length)html+='<h4 class="support-heading" style="margin-top:14px">Ports to forward</h4><ul class="support-list">'
     +rep.required_ports.map(p=>'<li><code>'+esc(p.port)+'/'+esc(p.protocol)+'</code> — '+esc(p.purpose)+'</li>').join('')+'</ul>';
@@ -409,7 +410,7 @@ async function reloadAudit(page){
 
 function copyAuditLog(){
   const lines=state.auditCache.map(e=>[e.created_at||'',e.actor_name||e.actor_id,e.action||'',(e.target_type||'')+(e.target_id?' #'+e.target_id:''),e.detail||''].map(formulaGuard).join('\t'));
-  navigator.clipboard.writeText(lines.join('\n')).then(()=>showToast('Copied '+lines.length+' entries','info')).catch(()=>showToast('Copy failed','error'));
+  navigator.clipboard.writeText(lines.join('\n')).then(()=>showToast('Copied '+lines.length+' entries','info')).catch(()=>showToast('Copy failed','warning'));
 }
 
 /* A leading =, +, -, @, tab or CR is prefixed with ' so spreadsheet apps
@@ -711,7 +712,7 @@ function filteredLogText(){
 
 function copyAllLogs(){
   const lines=filteredLogText();
-  navigator.clipboard.writeText(lines.join('\n')).then(()=>showToast('Copied '+lines.length+' log lines','info')).catch(()=>showToast('Copy failed','error'));
+  navigator.clipboard.writeText(lines.join('\n')).then(()=>showToast('Copied '+lines.length+' log lines','info')).catch(()=>showToast('Copy failed','warning'));
 }
 
 function downloadLogs(){
@@ -900,7 +901,7 @@ function showTokenOnceModal(d){
     '<div class="code-copy"><code>'+esc(d.token)+'</code><button class="btn btn-ghost" data-action="copyToken" data-args="'+actArgs(d.token)+'">Copy</button></div></div>'+
     '<div class="modal-footer"><button class="btn btn-accent" data-action="closeModalAndRefresh">Done</button></div>');
 }
-function copyToken(t){navigator.clipboard.writeText(t).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed — select the token and copy it manually','error'))}
+function copyToken(t){navigator.clipboard.writeText(t).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed — select the token and copy it manually','warning'))}
 
 function confirmRevokeToken(id,label){
   openModal('<div class="modal-header"><h3>Revoke Token</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Revoke <strong style="color:var(--text-normal)">'+esc(label||('#'+id))+'</strong>? Any client using it will immediately lose access. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="revokeToken" data-args="'+actArgs(id)+'">Revoke</button></div>');
@@ -955,7 +956,7 @@ async function renderPlugins(){
   let html='<div class="page-title">Plugins</div><div class="page-desc">Install and manage server plugins</div>';
 
   const install='<div style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap">'+
-    '<input type="file" id="pluginFile" aria-label="Plugin package (.zip)" accept=".zip,application/zip" class="form-input" style="max-width:320px;padding:8px" data-change-action="pluginFileChosen">'+
+    pickFile('pluginFile','.zip,application/zip','Plugin package (.zip)',{after:'pluginFileChosen'})+
     '<button class="btn btn-accent" id="pluginInstallBtn" disabled data-action="installPlugin">'+I.upload+' Install</button></div>';
   if(disabled){
     html+='<div class="section-card" style="border-color:var(--yellow)"><div class="section-card-body"><strong style="color:var(--text-warning)">Plugin runtime is disabled on this server.</strong><div style="color:var(--text-muted);font-size:13px;margin-top:4px">Installed plugins are listed below but cannot be installed, enabled, or removed until the runtime is turned on in the server configuration.</div></div></div>';

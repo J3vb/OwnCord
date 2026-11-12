@@ -1,17 +1,6 @@
-// Package plugin implements the OwnCord plugin runtime.
-//
-// It is split into:
-//
-//   - manifest.go    : declarative plugin metadata + permission checks
-//   - registry.go    : in-memory registry + lifecycle (install/enable/load)
-//   - loader.go      : on-disk discovery and package validation
-//   - sandbox.go     : Wazero runtime configuration (build tag `wazero`)
-//   - host_*.go      : capability-scoped host API surfaces
-//   - errors.go
-//
-// The default `go build ./...` ships a stub runtime that satisfies every call
-// site without pulling Wazero into go.mod; the real runtime is built with
-// `go build -tags wazero ./...`, mirroring the otel build-tag approach.
+// Package plugin implements the OwnCord plugin runtime: manifests, the registry
+// and lifecycle, on-disk loading, and capability-scoped host APIs. The default
+// build ships a stub runtime; `-tags wazero` builds the real Wazero one.
 package plugin
 
 import (
@@ -23,23 +12,16 @@ import (
 	"strings"
 )
 
-// pluginNameRegexp restricts plugin names to a tight ASCII charset (lowercase,
-// digits, dash, underscore, 1-64 chars, starting with a letter or digit, like
-// npm package names) so a name can flow into URL paths
-// (/api/v1/plugins/<name>/...), filesystem paths and log lines without
-// escaping.
+// pluginNameRegexp keeps names safe for URL paths, filesystem paths and logs.
 var pluginNameRegexp = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
-// pluginCommandRegexp restricts declared slash-command names to the lowercase
-// charset the dispatcher normalizes to (RegisterCommand lowercases and strips a
-// leading "/"), so a declaration compares equal to the name a client can invoke.
+// pluginCommandRegexp matches the lowercase form the dispatcher normalizes to.
 var pluginCommandRegexp = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
 // maxManifestCommands caps how many commands one plugin may claim.
 const maxManifestCommands = 64
 
-// Manifest is the parsed plugin metadata declared in plugin.json. The on-disk
-// schema is flat so the default JSON parser handles it.
+// Manifest is the parsed plugin.json metadata.
 type Manifest struct {
 	Name        string        `json:"name"`
 	Version     string        `json:"version"`
@@ -52,17 +34,13 @@ type Manifest struct {
 	UI          UISpec        `json:"ui"`
 }
 
-// CommandSpec is one slash command the plugin declares. The declaration is the
-// per-command ACL: activation only binds names listed here, so a guest module
-// cannot claim commands its manifest never advertised. Only Name is enforced
-// today; unknown JSON keys are ignored, so manifests written against the richer
-// schema in docs/plans/slash-commands.md still parse.
+// CommandSpec is one declared slash command; it is the per-command ACL, so a
+// guest cannot claim a name its manifest never listed. Unknown JSON keys are ignored.
 type CommandSpec struct {
 	Name string `json:"name"`
 }
 
-// Resources caps the plugin's runtime budget; zero means the PluginsConfig
-// default.
+// Resources caps the plugin's runtime budget; zero means the PluginsConfig default.
 type Resources struct {
 	MaxMemoryMB int `json:"max_memory_mb"`
 	CPUBudgetMs int `json:"cpu_budget_ms"`
@@ -91,8 +69,7 @@ const (
 	CapUI       Capability = "ui"
 )
 
-// validCapabilities is the closed set of capability names a manifest may
-// declare. Anything else is rejected at load time.
+// validCapabilities is the closed set of capability names a manifest may declare.
 var validCapabilities = map[Capability]bool{
 	CapCommands: true,
 	CapEvents:   true,
@@ -161,10 +138,8 @@ func (m *Manifest) Validate() error {
 	return nil
 }
 
-// validateRelativePath rejects absolute paths, paths containing "..", NUL bytes
-// or backslashes (Windows separators), and paths path.Clean would alter
-// ("./foo", "foo//bar", trailing slashes). Asset and entrypoint paths must be
-// plain forward-slash relative segments under the plugin directory.
+// validateRelativePath rejects absolute paths, "..", NUL, backslashes and
+// anything path.Clean would alter.
 func validateRelativePath(p string) error {
 	if p == "" {
 		return fmt.Errorf("path is empty")
@@ -191,9 +166,6 @@ func validateRelativePath(p string) error {
 	return nil
 }
 
-// validateCommands enforces the per-command ACL schema: declared commands need
-// the `commands` capability, names must be canonical (the dispatcher's
-// normalized form), and the list is bounded and duplicate-free.
 func (m *Manifest) validateCommands() error {
 	if len(m.Commands) == 0 {
 		return nil
@@ -217,8 +189,7 @@ func (m *Manifest) validateCommands() error {
 	return nil
 }
 
-// DeclaresCommand reports whether the manifest listed cmd in its `commands`
-// block. cmd is expected in normalized form (lowercase, no leading "/").
+// DeclaresCommand reports whether cmd (normalized: lowercase, no leading "/") is declared.
 func (m *Manifest) DeclaresCommand(cmd string) bool {
 	for _, c := range m.Commands {
 		if c.Name == cmd {

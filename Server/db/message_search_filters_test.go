@@ -13,10 +13,7 @@ import (
 // seedStamped inserts a message and pins its stored timestamp.
 func seedStamped(t *testing.T, database *db.DB, ch, user int64, content, ts string) int64 {
 	t.Helper()
-	id, err := database.CreateMessage(context.Background(), ch, user, content, nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	id := mustCreateMessage(t, database, ch, user, content, nil)
 	if _, err := database.ExecContext(context.Background(), `UPDATE messages SET timestamp = ? WHERE id = ?`, ts, id); err != nil {
 		t.Fatalf("set timestamp: %v", err)
 	}
@@ -70,9 +67,7 @@ func TestSearchFiltered_NoWordsNewestFirstWithCursor(t *testing.T) {
 	page := db.SearchPage{Limit: 3}
 	for range 5 {
 		rs, err := database.SearchMessagesFiltered(ctx, q, page)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "SearchMessagesFiltered", err)
 		if len(rs) == 0 {
 			break
 		}
@@ -139,9 +134,7 @@ func TestFirstIDAtOrAfter_GapsAndEmptyTable(t *testing.T) {
 	}
 	for _, tc := range tests {
 		got, err := database.FirstIDAtOrAfterForTest(ctx, tc.ts)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "FirstIDAtOrAfterForTest", err)
 		// The boundary may sit anywhere inside an id gap, but it must split
 		// the surviving rows exactly where the timestamp does.
 		var below, older int
@@ -205,9 +198,7 @@ func TestSearchFiltered_RelevanceRanksOnlyNewestCandidates(t *testing.T) {
 
 	q := db.SearchQuery{Text: "needle", ChannelIDs: []int64{in}}
 	got, err := database.SearchMessagesFiltered(ctx, q, db.SearchPage{Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SearchMessagesFiltered", err)
 	ids := resultIDs(got)
 	if len(ids) != 3 || slices.Contains(ids, strong) || slices.Contains(ids, w1) {
 		t.Fatalf("relevance ids = %v, want only the newest 3 in scope {%d %d %d}", ids, mid, w3, w2)
@@ -217,9 +208,7 @@ func TestSearchFiltered_RelevanceRanksOnlyNewestCandidates(t *testing.T) {
 	}
 
 	recent, err := database.SearchMessagesFiltered(ctx, q, db.SearchPage{Limit: 10, Recent: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SearchMessagesFiltered", err)
 	if want := []int64{w3, mid, w2, w1, strong}; !slices.Equal(resultIDs(recent), want) {
 		t.Errorf("recent ids = %v, want %v", resultIDs(recent), want)
 	}
@@ -237,9 +226,7 @@ func TestSearchFiltered_RelevanceFewerHitsThanCapRanksAll(t *testing.T) {
 	_, _ = database.CreateMessage(ctx, ch, u, "needle plus several other words here", nil)
 
 	got, err := database.SearchMessagesFiltered(ctx, db.SearchQuery{Text: "needle", ChannelIDs: []int64{ch}}, db.SearchPage{Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SearchMessagesFiltered", err)
 	if len(got) != 3 || got[0].MessageID != strong {
 		t.Errorf("ids = %v, want 3 results with %d first", resultIDs(got), strong)
 	}

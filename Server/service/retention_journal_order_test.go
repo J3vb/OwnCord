@@ -54,18 +54,14 @@ func TestRetention_TickJournalsEachBatchInDeleteTransaction(t *testing.T) {
 	dir := t.TempDir()
 	uid, _ := database.CreateUser(ctx, "journal-owner", "hash", 1)
 	_, _ = seedRetentionChannel(t, database, "journal-order", uid, dir, RetentionBatch+20)
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}))
 	spy := &journalOrderSpy{DB: database, snapshotAt: 1}
 	svc := NewRetentionService(spy)
 	svc.SetFiles(newTestStorage(t, dir))
 	svc.SetClock(func() time.Time { return retentionNow })
 
 	rep, err := svc.Tick(ctx)
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
+	mustDo(t, "Tick", err)
 	// Pins the run's totals against double counting once journaling moves
 	// into the per-batch loop.
 	if rep.Messages != RetentionBatch+20 {
@@ -87,10 +83,7 @@ func TestRetention_TickJournalsEachBatchInDeleteTransaction(t *testing.T) {
 func seedStaleMarkerBacklog(t *testing.T, database *db.DB, uid int64, n int) (chID int64) {
 	t.Helper()
 	ctx := context.Background()
-	chID, err := database.CreateChannel(ctx, "stale-backlog", "text", "", "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	chID = mustCreateChannel(t, database, "stale-backlog", "text", "", "", 0)
 	// Set-based: one row at a time cost most of the test under the race detector.
 	if _, err := database.ExecContext(ctx, `WITH RECURSIVE s(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM s WHERE i < ? - 1)
 		INSERT INTO messages (channel_id, user_id, content, timestamp)
@@ -128,17 +121,11 @@ func TestRetention_ReplayMarkersSweepsPastOneBudgetAndJournalsEachBatch(t *testi
 	svc.SetMarkers(markers)
 	svc.SetClock(func() time.Time { return retentionNow })
 	seq, err := database.SequenceValue(ctx, db.SequenceFloorChannels)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := markers.RecordMessagesSweep(ctx, chID, retentionNow.Add(-time.Hour).Format("2006-01-02 15:04:05"), seq); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SequenceValue", err)
+	mustDo(t, "RecordMessagesSweep", markers.RecordMessagesSweep(ctx, chID, retentionNow.Add(-time.Hour).Format("2006-01-02 15:04:05"), seq))
 
 	n, err := svc.ReplayMarkers(ctx)
-	if err != nil {
-		t.Fatalf("ReplayMarkers: %v", err)
-	}
+	mustDo(t, "ReplayMarkers", err)
 	if n != backlog {
 		t.Fatalf("ReplayMarkers removed %d, want the whole backlog %d (must not stop at RetentionTickBudget %d)", n, backlog, RetentionTickBudget)
 	}

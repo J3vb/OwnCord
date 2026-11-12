@@ -19,19 +19,15 @@ type Request struct {
 	Body   []byte
 	Header map[string]string
 
-	// AllowHost, when set, is consulted for the "host:port" of every hop, the
-	// first included, and the fetch is refused if it says no. It layers a
-	// caller's own destination rule (the plugin `http` capability's operator
-	// host allowlist) on top of the address policy. It is per-request so one
-	// process-wide Fetcher, and its concurrency cap, can serve callers with
-	// different host rules.
+	// AllowHost, when set, is consulted for the "host:port" of every hop and the
+	// fetch is refused if it says no. It layers a caller's rule (the plugin
+	// `http` host allowlist) on the address policy, per request so one Fetcher
+	// can serve different host rules.
 	AllowHost func(hostport string) bool
 }
 
-// Response is a bounded, type-checked reply.
-// Body is already inflated and inside both ceilings, so Header's
-// Content-Encoding is removed and its Content-Length restated to match what
-// Body holds.
+// Response is a bounded, type-checked reply. Body is inflated and inside both
+// ceilings, so Header's Content-Encoding is removed and Content-Length restated.
 type Response struct {
 	StatusCode  int
 	Header      http.Header
@@ -55,22 +51,21 @@ func (f *Fetcher) Fetch(ctx context.Context, req Request) (*Response, error) {
 	ctx, cancel := context.WithTimeout(ctx, f.policy.Deadline)
 	defer cancel()
 
-	// Two gates: this Fetcher's cap, then the process-wide one. Always in
-	// that order, so two Fetchers can never hold each other's slots.
+	// Always this Fetcher's gate then the process one, so two Fetchers can never
+	// hold each other's slots.
 	if err := f.gate.acquire(ctx); err != nil {
-		return nil, fmt.Errorf("safefetch: waiting for a slot: %w", err)
+		return nil, fmt.Errorf("%w: waiting for a slot: %w", ErrBusy, err)
 	}
 	defer f.gate.release()
 	if err := processGate.acquire(ctx); err != nil {
-		return nil, fmt.Errorf("safefetch: waiting for a process slot: %w", err)
+		return nil, fmt.Errorf("%w: waiting for a process slot: %w", ErrBusy, err)
 	}
 	defer processGate.release()
 
 	return f.follow(ctx, req)
 }
 
-// follow walks the redirect chain, re-running the whole destination check on
-// every hop.
+// follow walks the redirect chain, re-checking every hop.
 func (f *Fetcher) follow(ctx context.Context, req Request) (*Response, error) {
 	method := req.Method
 	if method == "" {
@@ -93,16 +88,14 @@ func (f *Fetcher) follow(ctx context.Context, req Request) (*Response, error) {
 			return done, err
 		}
 		if next == nil {
-			// Unreachable: step returns a response, an error, or a next hop.
-			// Spelled out to avoid a nil dereference in an unbounded loop.
+			// Unreachable; guards a nil dereference in an unbounded loop.
 			return nil, fmt.Errorf("safefetch: no response and no next hop for %s", dest.url.Redacted())
 		}
 		prev, cur = dest.url, *next
 	}
 }
 
-// step performs one request. It returns either a finished Response or the
-// next hop, and closes the response body on every path.
+// step performs one request and returns a Response or the next hop, closing the body on every path.
 func (f *Fetcher) step(ctx context.Context, dest *destination, cur hop, hops int) (*Response, *hop, error) {
 	resp, err := f.roundTrip(ctx, dest, cur)
 	if err != nil {
@@ -118,8 +111,7 @@ func (f *Fetcher) step(ctx context.Context, dest *destination, cur hop, hops int
 	if location == "" {
 		return nil, nil, fmt.Errorf("%w: %d from %s", ErrRedirectWithoutLocation, resp.StatusCode, dest.url.Redacted())
 	}
-	// Drain a little so the connection can be reused, but never the whole
-	// body: a redirect's body is not content anyone asked for.
+	// Drain a little so the connection can be reused, never the whole body.
 	_, _ = io.CopyN(io.Discard, resp.Body, 4<<10)
 	if hops >= f.policy.MaxRedirects {
 		return nil, nil, fmt.Errorf("%w: budget is %d", ErrTooManyRedirects, f.policy.MaxRedirects)
@@ -145,8 +137,7 @@ func (f *Fetcher) roundTrip(ctx context.Context, dest *destination, cur hop) (*h
 	for k, v := range cur.header {
 		req.Header.Set(k, v)
 	}
-	// We manage compression ourselves so the wire ceiling sees wire bytes;
-	// the caller does not get to change that.
+	// We manage compression ourselves so the wire ceiling sees wire bytes.
 	req.Header.Set("Accept-Encoding", "gzip")
 	resp, err := f.client.Do(req) //nolint:bodyclose // step() closes it
 	if err != nil {
@@ -155,8 +146,7 @@ func (f *Fetcher) roundTrip(ctx context.Context, dest *destination, cur hop) (*h
 	return resp, nil
 }
 
-// isRedirect lists the statuses this package follows. 300 and 304 are not
-// among them: neither names a single destination to fetch instead.
+// isRedirect lists the statuses followed; 300 and 304 name no single destination.
 func isRedirect(status int) bool {
 	switch status {
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
@@ -166,8 +156,8 @@ func isRedirect(status int) bool {
 	return false
 }
 
-// checkNoDowngrade refuses a hop that moves from https to a weaker scheme.
-// Following one would hand an on-path attacker the rest of the chain.
+// checkNoDowngrade refuses a hop from https to a weaker scheme, which would
+// hand an on-path attacker the rest of the chain.
 func checkNoDowngrade(from, to string) error {
 	if strings.EqualFold(from, "https") && !strings.EqualFold(to, "https") {
 		return fmt.Errorf("%w: %s -> %s", ErrSchemeDowngrade, from, to)
@@ -175,9 +165,8 @@ func checkNoDowngrade(from, to string) error {
 	return nil
 }
 
-// nextHop applies the method and header rules for a redirect: 301, 302 and
-// 303 turn a body-carrying request into a GET, 307 and 308 keep it, and
-// credentials never cross an origin.
+// nextHop applies the redirect rules: 301, 302 and 303 become a bodyless GET,
+// 307 and 308 keep the request, and credentials never cross an origin.
 func nextHop(cur hop, from, to *url.URL, status int) hop {
 	next := hop{method: cur.method, url: to.String(), body: cur.body, header: maps.Clone(cur.header)}
 	if status != http.StatusTemporaryRedirect && status != http.StatusPermanentRedirect {
@@ -199,9 +188,8 @@ func nextHop(cur hop, from, to *url.URL, status int) hop {
 	return next
 }
 
-// sameOrigin compares scheme, host and port. Port is deliberately part of it:
-// a different port is a different service, and net/http's own hostname-only
-// comparison would carry an Authorization header to it.
+// sameOrigin compares scheme, host and port; a different port is a different
+// service that net/http's hostname-only comparison would send Authorization to.
 func sameOrigin(a, b *url.URL) bool {
 	return strings.EqualFold(a.Scheme, b.Scheme) &&
 		strings.EqualFold(a.Hostname(), b.Hostname()) &&
@@ -218,10 +206,8 @@ func portOf(u *url.URL) string {
 	return "443"
 }
 
-// wrapContext reports a cancelled or expired context as such. The transport
-// wraps its error around the context error inconsistently across the connect,
-// header read and body read; callers need one answer to tell "ran out of time"
-// from "upstream misbehaved".
+// wrapContext reports a cancelled or expired context as such, since the
+// transport wraps it inconsistently; callers must tell a timeout from upstream misbehaviour.
 func wrapContext(ctx context.Context, err error) error {
 	if cause := ctx.Err(); cause != nil && !errors.Is(err, cause) {
 		return fmt.Errorf("safefetch: %w (%w)", cause, err)

@@ -35,10 +35,7 @@ func newRolesHandler(t *testing.T, database *db.DB) (http.Handler, *mockHub, *mo
 // role; these tests want the schema's seeded roles left exactly as they are.)
 func createUserWithRole(t *testing.T, database *db.DB, username string, roleID int) string {
 	t.Helper()
-	uid, err := database.CreateUser(context.Background(), username, "$2a$12$placeholder", roleID)
-	if err != nil {
-		t.Fatalf("CreateUser %s: %v", username, err)
-	}
+	uid := mustCreateUser(t, database, username, "$2a$12$placeholder", roleID)
 	token := "test-token-" + username + "-" + t.Name()
 	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession %s: %v", username, err)
@@ -80,9 +77,7 @@ func TestAdminAPI_CreateRole_OK(t *testing.T) {
 		"permissions": permissions.ReadMessages | permissions.SendMessages,
 		"position":    50,
 	})
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusCreated)
 	role := decodeRole(t, w.Body.Bytes())
 	if role.Name != "Helper" || role.Position != 50 {
 		t.Errorf("role = %+v", role)
@@ -106,9 +101,7 @@ func TestAdminAPI_CreateRole_DuplicateNameIsBadRequest(t *testing.T) {
 	handler, _, _, token := newRolesHandler(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/roles", token, map[string]any{"name": "mEmBeR"})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 func TestAdminAPI_Roles_RequireManageRoles(t *testing.T) {
@@ -184,9 +177,7 @@ func TestAdminAPI_ListRoles_CarriesMemberCounts(t *testing.T) {
 	createUserWithRole(t, database, "member2", 3)
 
 	w := doRequest(t, handler, http.MethodGet, "/roles", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	var list []struct {
 		ID          int64 `json:"id"`
 		Position    int   `json:"position"`
@@ -223,9 +214,7 @@ func TestAdminAPI_PatchRole_PermissionChangeInvalidatesAndResyncs(t *testing.T) 
 	w := doRequest(t, handler, http.MethodPatch, "/roles/3", token, map[string]any{
 		"permissions": permissions.ReadMessages,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	// The one member of role 3 has their cached mask dropped …
 	if len(inv.invalidateUserIDs) != 1 || inv.invalidateUserIDs[0] == 0 {
 		t.Errorf("InvalidateUser calls = %v, want the single role member", inv.invalidateUserIDs)
@@ -248,9 +237,7 @@ func TestAdminAPI_PatchRole_RenameOnlySkipsResync(t *testing.T) {
 	createUserWithRole(t, database, "member1", 3)
 
 	w := doRequest(t, handler, http.MethodPatch, "/roles/3", token, map[string]any{"name": "Regulars"})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if decodeRole(t, w.Body.Bytes()).Name != "Regulars" {
 		t.Errorf("name not applied: %s", w.Body.String())
 	}
@@ -274,19 +261,13 @@ func TestAdminAPI_PatchRole_HierarchyDenied(t *testing.T) {
 
 	// The Admin actor (80) may not edit the Owner role (100) …
 	w := doRequest(t, handler, http.MethodPatch, "/roles/1", adminToken, map[string]any{"name": "Pwned"})
-	if w.Code != http.StatusForbidden {
-		t.Errorf("edit owner role: status = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusForbidden)
 	// … nor their own.
 	w = doRequest(t, handler, http.MethodPatch, "/roles/2", adminToken, map[string]any{"name": "Superadmin"})
-	if w.Code != http.StatusForbidden {
-		t.Errorf("edit own role: status = %d, want 403", w.Code)
-	}
+	expectStatus(t, w, http.StatusForbidden)
 	// … nor push a role up to their own rank.
 	w = doRequest(t, handler, http.MethodPatch, "/roles/3", adminToken, map[string]any{"position": 80})
-	if w.Code != http.StatusForbidden {
-		t.Errorf("promote role to own rank: status = %d, want 403", w.Code)
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 func TestAdminAPI_PatchRole_InvalidIDAndBody(t *testing.T) {
@@ -300,9 +281,7 @@ func TestAdminAPI_PatchRole_InvalidIDAndBody(t *testing.T) {
 		t.Errorf("missing role: status = %d, want 404", w.Code)
 	}
 	req := doRequestRaw(t, handler, http.MethodPatch, "/roles/3", token, "{not json")
-	if req.Code != http.StatusBadRequest {
-		t.Errorf("malformed body: status = %d, want 400", req.Code)
-	}
+	expectStatus(t, req, http.StatusBadRequest)
 }
 
 // ─── DELETE /roles/{id} ──────────────────────────────────────────────────────
@@ -315,9 +294,7 @@ func TestAdminAPI_DeleteRole_ReassignsAndBroadcasts(t *testing.T) {
 	w := doRequest(t, handler, http.MethodPost, "/roles", token, map[string]any{
 		"name": "Contractor", "position": 50,
 	})
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create: %d %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusCreated)
 	created := decodeRole(t, w.Body.Bytes())
 	uid, err := database.CreateUser(ctx, "contractor", "$2a$12$placeholder", int(created.ID))
 	if err != nil {
@@ -326,9 +303,7 @@ func TestAdminAPI_DeleteRole_ReassignsAndBroadcasts(t *testing.T) {
 	hub.roleRefreshes = nil
 
 	w = doRequest(t, handler, http.MethodDelete, "/roles/"+itoa(created.ID), token, nil)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("delete: status = %d, want 204; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusNoContent)
 
 	user, err := database.GetUserByID(ctx, uid)
 	if err != nil || user == nil {
@@ -364,9 +339,7 @@ func TestAdminAPI_DeleteRole_OwnerAndDefaultRefused(t *testing.T) {
 	}
 	// The default role clears the hierarchy check and is stopped by is_default.
 	w := doRequest(t, handler, http.MethodDelete, "/roles/3", token, nil)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("delete default role: status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 	if role, _ := database.GetRoleByID(context.Background(), 3); role == nil {
 		t.Fatal("the default role was deleted")
 	}
@@ -381,13 +354,8 @@ func TestAdminAPI_ReorderRoles_NormalizesAndBroadcasts(t *testing.T) {
 	w := doRequest(t, handler, http.MethodPatch, "/roles/reorder", token, map[string]any{
 		"role_ids": []int64{3, 2},
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	var list []db.Role
-	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	requireStatus(t, w, http.StatusOK)
+	list := decodeBody[[]db.Role](t, w)
 	positions := map[int64]int{}
 	for _, r := range list {
 		positions[r.ID] = r.Position
@@ -422,9 +390,7 @@ func TestAdminAPI_ReorderRoles_PartialListRefused(t *testing.T) {
 	w := doRequest(t, handler, http.MethodPatch, "/roles/reorder", token, map[string]any{
 		"role_ids": []int64{3},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 	if len(hub.roleRefreshes) != 0 {
 		t.Error("a refused reorder must not broadcast")
 	}
@@ -440,9 +406,7 @@ func TestAdminAPI_PatchRole_StaleExpectedPermissionsIs409(t *testing.T) {
 		"permissions":          permissions.ReadMessages,
 		"expected_permissions": 1,
 	})
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusConflict)
 	if !strings.Contains(w.Body.String(), `"ROLE_CONFLICT"`) {
 		t.Errorf("body = %s, want code ROLE_CONFLICT", w.Body.String())
 	}
@@ -454,10 +418,7 @@ func TestAdminAPI_PatchRole_StaleExpectedPermissionsIs409(t *testing.T) {
 	// The current mask goes through.
 	var stored db.Role
 	rw := doRequest(t, handler, http.MethodGet, "/roles", token, nil)
-	var list []db.Role
-	if err := json.Unmarshal(rw.Body.Bytes(), &list); err != nil {
-		t.Fatalf("unmarshal roles: %v", err)
-	}
+	list := decodeBody[[]db.Role](t, rw)
 	for _, r := range list {
 		if r.ID == 3 {
 			stored = r
@@ -467,9 +428,7 @@ func TestAdminAPI_PatchRole_StaleExpectedPermissionsIs409(t *testing.T) {
 		"permissions":          permissions.ReadMessages,
 		"expected_permissions": stored.Permissions,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("matching: status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 }
 
 // WP 6.3c: POST and PATCH /roles carry the hoist and mentionable flags. An
@@ -481,18 +440,14 @@ func TestAdminAPI_Roles_HoistAndMentionable(t *testing.T) {
 	w := doRequest(t, handler, http.MethodPost, "/roles", token, map[string]any{
 		"name": "Pingers", "position": 50, "hoist": true, "mentionable": true,
 	})
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create status = %d; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusCreated)
 	role := decodeRole(t, w.Body.Bytes())
 	if !role.Hoist || !role.Mentionable {
 		t.Fatalf("created role = %+v, want hoist and mentionable", role)
 	}
 
 	w = doRequest(t, handler, http.MethodPatch, "/roles/"+itoa(role.ID), token, map[string]any{"hoist": false})
-	if w.Code != http.StatusOK {
-		t.Fatalf("patch status = %d; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	patched := decodeRole(t, w.Body.Bytes())
 	if patched.Hoist || !patched.Mentionable {
 		t.Fatalf("patched role = %+v, want hoist cleared and mentionable kept", patched)

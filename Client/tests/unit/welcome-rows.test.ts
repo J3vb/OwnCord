@@ -4,15 +4,15 @@
  * but the joiner who can post there, and the ordinary delete rule.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/messageActions";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
+import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
 import {
   WAVE_CONTENT,
   canWaveIn,
   hasWaved,
   markWaved,
   welcomeGreeting,
-} from "@components/message-list/welcomeRows";
+} from "../../src/features/messaging/message-list/welcomeRows";
 import { shouldGroup } from "@lib/text/formatting";
 import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/text/messageKind";
 import { runSessionResets } from "@lib/net/sessionRegistry";

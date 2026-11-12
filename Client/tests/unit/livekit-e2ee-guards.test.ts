@@ -89,6 +89,9 @@ import {
 import { getIdentityPin, getOrCreateIdentityKeyPair, storeIdentityPin } from "@lib/net/identity";
 
 const SELF = 1;
+/** The key holder is the lowest user id in the call, so an offer from PEER_ID
+ *  (42) reaches a user with a higher id. */
+const OFFER_RECEIVER = 100;
 const CHANNEL = 7;
 
 const pk = (n: number | string): string => btoa(`peer-key-${n}`);
@@ -177,6 +180,7 @@ async function joinedAsNonHolder(options: Parameters<typeof create>[0] = {}) {
   await made.mgr.handleAnnounce(42, pk(42));
   const joined = made.mgr.setupKeyExchange(false, CHANNEL);
   await vi.waitFor(() => expect(sends(made.ws, "voice_e2ee_announce")).toHaveLength(1));
+  auth.id = OFFER_RECEIVER;
   await made.mgr.handleOffer(42, "enc", "iv");
   expect(await joined).toBe(true);
   return made;
@@ -905,11 +909,34 @@ describe("handleOffer wiring", () => {
     internals(mgr)._roomKeyRejector = vi.fn();
     internals(mgr)._isKeyHolder = false;
 
+    auth.id = OFFER_RECEIVER;
     await mgr.handleOffer(42, "enc", "iv");
 
     expect(resolver).toHaveBeenCalledTimes(1);
     expect(internals(mgr)._roomKeyResolver).toBeNull();
     expect(internals(mgr)._roomKeyRejector).toBeNull();
+  });
+});
+
+describe("setup superseded after the announce drain", () => {
+  it("returns false without arming a waiter or announcing into the torn-down session", async () => {
+    auth.id = OFFER_RECEIVER;
+    const { mgr, ws } = create();
+    await mgr.handleAnnounce(42, pk(42));
+    const imported = deferred<CryptoKey>();
+    vi.mocked(importPublicKey).mockImplementationOnce(() => imported.promise);
+    const setup = mgr.setupKeyExchange(false, CHANNEL);
+    await vi.waitFor(() => expect(importPublicKey).toHaveBeenCalled());
+    const flows = mgr as unknown as { _flows: { announce: { chain: Promise<void> } } };
+    void flows._flows.announce.chain.then(() => mgr.clearState());
+    ws.send.mockClear();
+
+    imported.resolve({ type: "peer", b64: pk(42) } as unknown as CryptoKey);
+
+    expect(await setup).toBe(false);
+    expect(internals(mgr)._roomKeyResolver).toBeNull();
+    expect(internals(mgr)._roomKeyRejector).toBeNull();
+    expect(sends(ws, "voice_e2ee_announce")).toHaveLength(0);
   });
 });
 
@@ -987,6 +1014,43 @@ describe("handleParticipantLeft", () => {
       "E2EE: key rotation already in progress — deferring re-election as holder",
       { userId: 42, channelId: 1 },
     );
+  });
+
+  describe("when we already hold the key", () => {
+    it("rekeys when the last peer leaves, offering the new key to nobody", async () => {
+      const { mgr, ws } = await holder();
+      await mgr.handleAnnounce(42, pk(42));
+      expect(mgr.epoch).toBe(1);
+      ws.send.mockClear();
+
+      await mgr.handleParticipantLeft(42);
+
+      expect(mgr.epoch).toBe(2);
+      expect(mgr.peerPublicKeys.size).toBe(0);
+      expect(sends(ws, "voice_e2ee_offer")).toHaveLength(0);
+      expect(internals(mgr)._isKeyHolder).toBe(true);
+      expect(mgr.rotatingKey).toBe(false);
+    });
+
+    it("defers the rekey behind a rotation already in flight instead of dropping it", async () => {
+      const { mgr } = await holder();
+      await mgr.handleAnnounce(42, pk(42));
+      mgr.rotatingKey = true;
+
+      await mgr.handleParticipantLeft(42);
+
+      expect(mgr.rotationPending).toBe(true);
+      expect(mgr.epoch).toBe(1);
+    });
+
+    it("does not rekey when the leaver never had a key on file", async () => {
+      const { mgr } = await holder();
+
+      await mgr.handleParticipantLeft(42);
+
+      expect(mgr.epoch).toBe(1);
+      expect(mgr.rotationPending).toBe(false);
+    });
   });
 
   describe("when the lowest remaining user id is ours", () => {
@@ -1174,6 +1238,7 @@ describe("room key installs and log tags", () => {
 
     await mgr.handleAnnounce(42, pk(42));
     internals(mgr)._isKeyHolder = false;
+    auth.id = OFFER_RECEIVER;
     await mgr.handleOffer(42, "enc", "iv");
     expect(installed).toHaveBeenCalledTimes(2);
   });
@@ -1184,6 +1249,7 @@ describe("room key installs and log tags", () => {
     await mgr.handleAnnounce(42, pk(42));
     expect(vi.getTimerCount()).toBe(1);
 
+    auth.id = OFFER_RECEIVER;
     await mgr.handleOffer(42, "enc", "iv");
 
     expect(internals(mgr)._isKeyHolder).toBe(false);

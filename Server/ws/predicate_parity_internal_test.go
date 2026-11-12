@@ -96,13 +96,9 @@ func TestRefreshChannelVisibilityAffordances_Parity(t *testing.T) {
 	}
 	uid := seedHarvestVoiceUser(t, database, "refresh-parity-user")
 	textID := mustCreateVoiceChannel(t, database, "refresh-parity-text")
-	if _, err := database.ExecContext(ctx, `UPDATE channels SET type = 'text' WHERE id = ?`, textID); err != nil {
-		t.Fatalf("retype: %v", err)
-	}
+	mustExec(t, database, `UPDATE channels SET type = 'text' WHERE id = ?`, textID)
 	newsID := mustCreateVoiceChannel(t, database, "refresh-parity-news")
-	if _, err := database.ExecContext(ctx, `UPDATE channels SET type = 'announcement' WHERE id = ?`, newsID); err != nil {
-		t.Fatalf("retype: %v", err)
-	}
+	mustExec(t, database, `UPDATE channels SET type = 'announcement' WHERE id = ?`, newsID)
 	voiceID := mustCreateVoiceChannel(t, database, "refresh-parity-voice")
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
@@ -170,22 +166,14 @@ type viewParityFixture struct {
 
 func newViewParityFixture(t *testing.T) *viewParityFixture {
 	t.Helper()
-	ctx := context.Background()
 	database := newHarvestVoiceDB(t)
 	uid := seedHarvestVoiceUser(t, database, "view-parity-user")
 	textID := mustCreateVoiceChannel(t, database, "view-parity-text")
 	oldID := mustCreateVoiceChannel(t, database, "view-parity-old")
-	if _, err := database.ExecContext(ctx, `UPDATE channels SET type = 'text' WHERE id IN (?, ?)`, textID, oldID); err != nil {
-		t.Fatalf("retype: %v", err)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE channels SET archived = 1 WHERE id = ?`, oldID); err != nil {
-		t.Fatalf("archive: %v", err)
-	}
+	mustExec(t, database, `UPDATE channels SET type = 'text' WHERE id IN (?, ?)`, textID, oldID)
+	mustExec(t, database, `UPDATE channels SET archived = 1 WHERE id = ?`, oldID)
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 	send := make(chan []byte, 64)
 	c := NewTestClientWithUser(h, user, textID, send)
 	h.RegisterNowForTest(c)

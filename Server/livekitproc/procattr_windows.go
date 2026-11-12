@@ -12,19 +12,14 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// liveKitSysProcAttr returns nil: the companion inherits this process's
-// console, so closing that console stops both. Dying with the parent is
-// handled by the job object in containLiveKitProcess instead.
+// liveKitSysProcAttr returns nil: the companion inherits the console, so closing it stops both.
 func liveKitSysProcAttr() *syscall.SysProcAttr {
 	return nil
 }
 
-// liveKitJob is the job object every companion livekit-server joins. Its
-// handle is never closed: the kernel closes it when this process exits by any
-// route (console close, Task Manager kill, crash, backstop os.Exit), and
-// KILL_ON_JOB_CLOSE then kills the companion — the Windows counterpart of
-// Linux's Pdeathsig. Without it an orphaned livekit-server keeps TCP 7880 and
-// the UDP media range bound.
+// liveKitJob is the job object every companion joins. Its handle is never
+// closed: the kernel closes it when this process exits by any route, and
+// KILL_ON_JOB_CLOSE then kills the companion (the counterpart of Pdeathsig).
 var liveKitJob = sync.OnceValues(newKillOnCloseJob)
 
 func newKillOnCloseJob() (windows.Handle, error) {
@@ -54,8 +49,7 @@ func assignProcessToJob(job windows.Handle, process *os.Process) error {
 	return nil
 }
 
-// containLiveKitProcess ties a just-started companion's lifetime to this
-// process by adding it to liveKitJob.
+// containLiveKitProcess adds a just-started companion to liveKitJob.
 func containLiveKitProcess(process *os.Process) error {
 	job, err := liveKitJob()
 	if err != nil {

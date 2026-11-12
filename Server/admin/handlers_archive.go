@@ -20,47 +20,41 @@ import (
 	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
-// archiveName is the download's fixed name. The snapshot inside is a real
-// database copy; the fixed name keeps a browser from confusing two archives.
+// archiveName is the download's fixed name; it keeps a browser from confusing two archives.
 const archiveName = "owncord-archive.zip"
 
-// archiveWorkPrefix names each build's work dir under the backup dir, so the
-// backup maintenance sweep can reclaim one a killed process left behind.
+// archiveWorkPrefix names each build's work dir under the backup dir so the maintenance sweep can reclaim one
+// a killed process left.
 const archiveWorkPrefix = "owncord-archive-"
 
-// handleArchive serves GET /admin/api/archive: one zip carrying everything a
-// restore needs that a database backup does not: the whole data directory
-// (uploads, key files, erasure markers, TLS material) and config.yaml. The
-// live SQLite file is replaced by a `VACUUM INTO` snapshot, so the archive is
-// consistent even while the server runs.
+// handleArchive serves GET /admin/api/archive: one zip with everything a restore needs that a database backup
+// does not (the data directory incl. uploads, key files, erasure markers, TLS material, and config.yaml). The
+// live SQLite file is replaced by a VACUUM INTO snapshot, so it is consistent while running.
 //
-// It is for the owner or a RESTORE_BACKUPS holder: the archive holds password
-// hashes and the key files. The panel asks for a single-use link (POST
-// /archive/link, see archive_link.go) instead, so the archive is never
-// buffered in the page; this route stays for direct API callers.
+// Owner or RESTORE_BACKUPS holder only: it holds password hashes and key files. The panel uses a single-use
+// link (archive_link.go) so the archive is never buffered in the page; this route stays for direct API
+// callers.
 func handleArchive(database *db.DB, opts SetupOptions, paths backupPaths) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serveArchive(w, r, database, opts, paths, actorFromContext(r))
 	})
 }
 
-// archiveBusy is set while an archive is being built or sent.
 var archiveBusy atomic.Bool
 
 func writeArchiveBusy(w http.ResponseWriter) {
 	writeErr(w, http.StatusConflict, httperr.CodeArchiveInProgress, "An archive is already being prepared. Try again when it finishes.")
 }
 
-// serveArchive builds and streams the archive. actor is who the download is
-// attributed to in the audit log; the caller has already authorised the
-// request (the owner-only route, or a redeemed single-use link).
+// serveArchive builds and streams the archive for actor (audit attribution); the caller has already
+// authorised the request.
 func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts SetupOptions, paths backupPaths, actor int64) {
 	if opts.RunningCfg == nil {
 		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "server configuration unavailable")
 		return
 	}
-	// One archive at a time, for the whole build and transfer: two builds
-	// would each pass the free-space check before the other wrote anything.
+	// One archive at a time over build and transfer: two builds would each pass the free-space check before
+	// either wrote.
 	if !archiveBusy.CompareAndSwap(false, true) {
 		writeArchiveBusy(w)
 		return
@@ -71,8 +65,7 @@ func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts 
 	deadline := startArchive(w, r, cancel, archiveProgressTimeout, archiveMaxLifetime)
 	defer deadline.release()
 
-	// The work dir lives under backup.dir: the snapshot is a VACUUM INTO
-	// target, and that directory is already the one backups write to.
+	// The work dir is under backup.dir, already where backups write, and the snapshot is a VACUUM INTO target.
 	if err := os.MkdirAll(paths.dir, 0o750); err != nil {
 		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not prepare the archive")
 		return
@@ -85,7 +78,7 @@ func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts 
 	defer func() { _ = os.RemoveAll(work) }()
 
 	zipPath, err := buildArchive(ctx, database, opts, paths, work)
-	if errors.Is(err, errArchiveNoSpace) {
+	if errors.Is(err, errArchiveNoSpace) || errors.Is(err, db.ErrBackupNoSpace) {
 		writeErr(w, http.StatusInsufficientStorage, httperr.CodeStorageLowDisk, err.Error())
 		return
 	}
@@ -118,8 +111,7 @@ func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts 
 		fmt.Sprintf("downloaded full archive (%d bytes)", info.Size()))
 
 	if _, err := io.Copy(deadline, f); err != nil {
-		// Headers are already committed; the client sees a truncated
-		// download. Log it — the operator can retry.
+		// Headers are committed; the client sees a truncated download. Log it for the operator.
 		slog.Warn("backup archive download interrupted", "err", err)
 	}
 }
@@ -128,14 +120,11 @@ func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts 
 // snapshot; tests use it to land an upload in that window.
 var archiveBeforeSnapshotHook func()
 
-// buildArchive writes the archive to work/owncord-archive.zip and returns its
-// path. It snapshots the live database with VACUUM INTO and walks the data
-// directory wholesale (docs/deployment.md's rule: copy data/, never a hand
-// list), replacing the live database file with the snapshot and leaving out
-// the backup directory. Before the snapshot it refuses with errArchiveNoSpace
-// when the build would take the backup volume below server.min_free_disk_mb;
-// the plan is then retaken so the zip is written from a walk that follows the
-// snapshot.
+// buildArchive writes work/owncord-archive.zip and returns its path. It snapshots the live database with
+// VACUUM INTO and walks the data directory wholesale (docs/deployment.md: copy data/, never a hand list),
+// replacing the live database file with the snapshot and leaving out the backup directory. Before the
+// snapshot it refuses with errArchiveNoSpace if the build would take the backup volume below
+// server.min_free_disk_mb; the plan is then retaken so the zip follows the snapshot.
 func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths backupPaths, work string) (string, error) {
 	cfg := opts.RunningCfg
 	snapshot := filepath.Join(work, "snapshot.db")
@@ -158,9 +147,8 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths
 	if err := os.Chmod(snapshot, 0o600); err != nil {
 		return "", fmt.Errorf("restricting snapshot: %w", err)
 	}
-	// Write from a plan taken after the snapshot: an upload lands its file
-	// before its row, so every file a snapshotted row names is on disk by now,
-	// while the first plan may predate it.
+	// Write from a plan taken after the snapshot: an upload lands its file before its row, so every file a
+	// snapshotted row names is on disk now, while the first plan may predate it.
 	if t, err = plan(); err != nil {
 		return "", err
 	}
@@ -190,9 +178,8 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths
 	return outPath, nil
 }
 
-// resolvePath is filepath.Abs with the symlinks in the path's longest existing
-// prefix resolved, so a link below a directory cannot carry a path out of it
-// unseen. A dangling link on the way is an error: where it leads is unknown.
+// resolvePath is filepath.Abs with symlinks in the longest existing prefix resolved, so a link below a
+// directory cannot carry a path out of it. A dangling link is an error: where it leads is unknown.
 func resolvePath(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -213,18 +200,15 @@ func resolvePath(path string) (string, error) {
 	}
 }
 
-// isWithin reports whether path is root or lies below it.
 func isWithin(path, root string) bool {
 	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
-// errArchiveNoSpace refuses a build that would take its volume below
-// server.min_free_disk_mb.
+// errArchiveNoSpace refuses a build that would take its volume below server.min_free_disk_mb.
 var errArchiveNoSpace = errors.New("not enough free disk space in the backup directory to build the archive")
 
-// checkArchiveSpace refuses when writing need bytes under dir would leave
-// less than floor free. A volume whose free space cannot be read is not
-// treated as full.
+// checkArchiveSpace refuses when writing need bytes under dir would leave less than floor free; unreadable
+// free space is not treated as full.
 func checkArchiveSpace(dir string, need, floor uint64) error {
 	free, err := diskutil.FreeBytes(dir)
 	if err == nil && (free < need || free-need < floor) {
@@ -234,11 +218,9 @@ func checkArchiveSpace(dir string, need, floor uint64) error {
 	return nil
 }
 
-// planTrees plans the data directory as "data/..." and, when
-// upload.storage_dir lives outside it, the uploads as "data/uploads/...". The
-// live database file is replaced by the snapshot, and the backup and work
-// directories, the database's WAL sidecars and any in-progress *.tmp file are
-// left out.
+// planTrees plans the data directory as "data/..." and uploads outside it as "data/uploads/...". Left out:
+// the backup and work dirs, the database's WAL sidecars and in-progress *.tmp files; the live database is
+// replaced by the snapshot.
 func planTrees(ctx context.Context, dataDir, uploadsDir string, paths backupPaths, work, snapshot string) (*archiveTree, error) {
 	absData, err := filepath.Abs(dataDir)
 	if err != nil {
@@ -277,7 +259,6 @@ func planTrees(ctx context.Context, dataDir, uploadsDir string, paths backupPath
 	return t, nil
 }
 
-// archiveEntry is one planned zip member; a directory when src is empty.
 type archiveEntry struct {
 	name   string
 	src    string
@@ -285,10 +266,8 @@ type archiveEntry struct {
 	method uint16
 }
 
-// archiveTree plans directories into one zip, sharing the exclusions and
-// the live-database substitution across every walked root, then writes them.
-// Files under uploads are stored as-is: attachments are mostly
-// already-compressed media, and recompressing them only slows the build.
+// archiveTree plans directories into one zip, sharing exclusions and the live-database substitution across
+// roots. Uploads are stored as-is: attachments are already-compressed media.
 type archiveTree struct {
 	ctx           context.Context
 	db            string
@@ -300,8 +279,8 @@ type archiveTree struct {
 	snapshotAdded bool
 }
 
-// need is roughly the disk space the build takes: every planned file once in
-// the zip, and the database twice (the snapshot, then its copy in the zip).
+// need is roughly the disk space the build takes: every file once in the zip, the database twice (snapshot,
+// then its zip copy).
 func (t *archiveTree) need() uint64 {
 	var dbBytes uint64
 	if info, err := os.Stat(t.db); err == nil {
@@ -310,10 +289,8 @@ func (t *archiveTree) need() uint64 {
 	return t.fileBytes + 2*dbBytes
 }
 
-// write adds the planned entries to zw. A file removed since it was planned
-// is left out; the snapshot must exist. A configured database outside the
-// data dir is still part of "everything a restore needs", so it goes at the
-// conventional path the restore steps in the docs expect.
+// write adds the planned entries to zw. A file removed since planning is left out; the snapshot must exist. A
+// database outside the data dir still goes at the conventional path the restore docs expect.
 func (t *archiveTree) write(zw *zip.Writer) error {
 	for _, e := range t.entries {
 		if err := t.ctx.Err(); err != nil {
@@ -340,17 +317,14 @@ func (t *archiveTree) write(zw *zip.Writer) error {
 	return addFile(zw, "data/chatserver.db", t.snapshot, info, zip.Deflate)
 }
 
-// walk plans every regular file under root as "prefix/<relative>".
 func (t *archiveTree) walk(root, prefix string) error {
 	return filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
 		return t.visit(root, prefix, path, d, walkErr)
 	})
 }
 
-// visit plans one entry of walk. root itself is never skipped, even when it
-// is a skipped directory, and must exist; any other entry removed while the
-// walk runs (the live server deletes uploads and renames temp files away) is
-// left out rather than failing the archive.
+// visit plans one entry. root itself is never skipped and must exist; any other entry removed mid-walk (the
+// live server deletes uploads and renames temps) is left out rather than failing the archive.
 func (t *archiveTree) visit(root, prefix, path string, d os.DirEntry, walkErr error) error {
 	if err := t.ctx.Err(); err != nil {
 		return err
@@ -367,8 +341,7 @@ func (t *archiveTree) visit(root, prefix, path string, d os.DirEntry, walkErr er
 		return err
 	}
 	name := filepath.ToSlash(filepath.Join(prefix, rel))
-	// The live database's WAL sidecars are superseded by the snapshot; *.tmp
-	// files are in-progress writes.
+	// WAL sidecars are superseded by the snapshot; *.tmp files are in-progress writes.
 	if !d.IsDir() && (strings.HasPrefix(path, t.db+"-") || strings.HasSuffix(path, ".tmp")) {
 		return nil
 	}
@@ -393,7 +366,6 @@ func (t *archiveTree) visit(root, prefix, path string, d os.DirEntry, walkErr er
 	if !d.Type().IsRegular() {
 		return nil // symlinks, sockets and devices are not backed up
 	}
-	// The live database is replaced by the snapshot.
 	if path == t.db {
 		t.entries = append(t.entries, archiveEntry{name: name, src: t.snapshot, info: info, method: zip.Deflate})
 		t.snapshotAdded = true
@@ -408,7 +380,6 @@ func (t *archiveTree) visit(root, prefix, path string, d os.DirEntry, walkErr er
 	return nil
 }
 
-// addDir adds a directory entry carrying info's mode and mtime.
 func addDir(zw *zip.Writer, name string, info os.FileInfo) error {
 	hdr, err := zip.FileInfoHeader(info)
 	if err != nil {
@@ -419,8 +390,7 @@ func addDir(zw *zip.Writer, name string, info os.FileInfo) error {
 	return err
 }
 
-// addFile copies src into the zip under name with method, carrying info's
-// mode and mtime so an extracted key file keeps its 0600.
+// addFile copies src into the zip carrying info's mode and mtime so an extracted key file keeps its 0600.
 func addFile(zw *zip.Writer, name, src string, info os.FileInfo, method uint16) error {
 	in, err := os.Open(src) //nolint:gosec // G304: path from our own walk
 	if err != nil {
@@ -443,8 +413,8 @@ func addFile(zw *zip.Writer, name, src string, info os.FileInfo, method uint16) 
 	return nil
 }
 
-// addConfig adds config.yaml when it exists. Its absence is not a failure —
-// the archive is the recovery path and the data dir is still worth having.
+// addConfig adds config.yaml when it exists; absence is not a failure, since the archive is the recovery
+// path.
 func addConfig(zw *zip.Writer, configPath string) error {
 	if configPath == "" {
 		return nil

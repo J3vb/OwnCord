@@ -10,8 +10,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import {
   messagesStore,
   setAroundMessages,
@@ -409,6 +409,59 @@ describe("MessageList — unread navigation", () => {
       expect((divider!.nextElementSibling as HTMLElement).dataset.testid).toBe("message-46");
     });
 
+    describe("a revisit with nothing new", () => {
+      function leaveAt(top: number): void {
+        setMessages(range(1, 50));
+        openChannelWithUnread(0);
+        mount();
+        scrollTo(top);
+        msgList!.destroy?.();
+      }
+
+      it("opens where the reader left the channel", async () => {
+        leaveAt(1500);
+        mount();
+        await nextFrame();
+
+        expect(Math.abs(root().scrollTop - 1500)).toBeLessThanOrEqual(1);
+      });
+
+      it("opens at the bottom when the row it was left at is no longer loaded", async () => {
+        leaveAt(1500);
+        setMessages(range(100, 149));
+        mount();
+        await nextFrame();
+
+        expect(root().scrollTop).toBeGreaterThanOrEqual(SCROLL_HEIGHT - CLIENT_HEIGHT - 100);
+      });
+
+      it("gives way to the NEW divider when unread arrived while away", async () => {
+        leaveAt(300);
+        openChannelWithUnread(5);
+        mount();
+        await nextFrame();
+
+        expectDividerInView(DIVIDER_PX + 45 * ROW_PX);
+      });
+
+      it("gives way to a jump made before the window could be placed", async () => {
+        leaveAt(1500);
+        setDetached(true);
+        mount();
+        await nextFrame();
+
+        expect(Math.abs(root().scrollTop - 1500)).toBeGreaterThan(1);
+      });
+
+      it("follows the tail when it was left at the bottom", async () => {
+        leaveAt(SCROLL_HEIGHT - CLIENT_HEIGHT);
+        mount();
+        await nextFrame();
+
+        expect(root().scrollTop).toBeGreaterThanOrEqual(SCROLL_HEIGHT - CLIENT_HEIGHT - 100);
+      });
+    });
+
     it("still opens at the bottom when nothing is unread", async () => {
       setMessages(range(1, 50));
       openChannelWithUnread(0);
@@ -611,6 +664,25 @@ describe("MessageList — unread navigation", () => {
 
       expect(countText()).toBe("");
       expect(button().getAttribute("aria-label")).not.toContain("new message");
+    });
+
+    it("turns the badge to the mention count when a new message mentions the reader", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+
+      setMessages([...range(1, 52), { ...makeMessage(53), mentionsEveryone: true }]);
+
+      const badge = container.querySelector('[data-testid="scroll-to-bottom-count"]')!;
+      expect(countText()).toBe("1");
+      expect(badge.classList.contains("mention")).toBe(true);
+      expect(button().getAttribute("aria-label")).toBe("Scroll to bottom, 3 new, 1 mentions you");
+
+      button().click();
+
+      expect(countText()).toBe("");
+      expect(badge.classList.contains("mention")).toBe(false);
     });
 
     it("caps the count at 99+", () => {

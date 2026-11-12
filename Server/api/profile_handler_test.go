@@ -48,9 +48,7 @@ func patchJSONWithHost(t *testing.T, router http.Handler, path, token, host stri
 	req.Host = host
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 	return rr
 }
 
@@ -89,38 +87,19 @@ func mustHash(t *testing.T) string {
 // patchJSON sends a PATCH request with JSON body and auth token.
 func patchJSON(t *testing.T, router http.Handler, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	raw, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, path, bytes.NewReader(raw))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPIJSON(t, router, http.MethodPatch, path, token, body)
 }
 
 // putJSON sends a PUT request with JSON body and auth token.
 func putJSON(t *testing.T, router http.Handler, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	raw, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPut, path, bytes.NewReader(raw))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPIJSON(t, router, http.MethodPut, path, token, body)
 }
 
 // profileDelete sends a DELETE request with an auth token (no body).
 func profileDelete(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodDelete, path, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, http.MethodDelete, path, token, nil)
 }
 
 // ─── PATCH /api/v1/users/me ──────────────────────────────────────────────────
@@ -135,12 +114,9 @@ func TestUpdateProfile_Success(t *testing.T) {
 		"avatar":   "https://avatars.example.net/av.png",
 	})
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["username"] != "newname" {
 		t.Errorf("username = %v, want 'newname'", resp["username"])
 	}
@@ -164,27 +140,21 @@ func TestUpdateProfile_RejectsSameHostNonAttachmentAvatar(t *testing.T) {
 		"username": "samehostav",
 		"avatar":   "https://example.com/admin/api/stats",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("same-host non-attachment avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadRequest)
 
 	// A same-host attachment URL stays valid.
 	ok := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
 		"username": "samehostav",
 		"avatar":   "https://example.com/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
 	})
-	if ok.Code != http.StatusOK {
-		t.Fatalf("same-host attachment avatar status = %d, want 200; body = %s", ok.Code, ok.Body.String())
-	}
+	requireStatus(t, ok, http.StatusOK)
 
 	// A different host is still accepted unchanged.
 	other := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
 		"username": "samehostav",
 		"avatar":   "https://avatars.example.net/av.png",
 	})
-	if other.Code != http.StatusOK {
-		t.Fatalf("external-host avatar status = %d, want 200; body = %s", other.Code, other.Body.String())
-	}
+	requireStatus(t, other, http.StatusOK)
 }
 
 // The Host header is client-supplied, so a guard that compared the avatar's
@@ -205,9 +175,7 @@ func TestUpdateProfile_RejectsSameHostAvatarDespiteSpoofedHost(t *testing.T) {
 		"username": "spoofhost",
 		"avatar":   "https://chat.example.com/admin/api/stats",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("spoofed-Host same-host avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadRequest)
 
 	// And the attachment route on the configured host stays valid under the
 	// same spoofed Host.
@@ -215,9 +183,7 @@ func TestUpdateProfile_RejectsSameHostAvatarDespiteSpoofedHost(t *testing.T) {
 		"username": "spoofhost",
 		"avatar":   "https://chat.example.com/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
 	})
-	if ok.Code != http.StatusOK {
-		t.Fatalf("spoofed-Host same-host attachment status = %d, want 200; body = %s", ok.Code, ok.Body.String())
-	}
+	requireStatus(t, ok, http.StatusOK)
 }
 
 // The default deployment listens on a non-443 port, and the client builds its
@@ -235,17 +201,13 @@ func TestUpdateProfile_RejectsSameHostAvatarOnNonDefaultPort(t *testing.T) {
 		"username": "portav",
 		"avatar":   "https://chat.example.com:8443/admin/api/stats",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("same-host :8443 non-attachment avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadRequest)
 
 	ok := patchJSONWithHost(t, router, "/api/v1/users/me", token, "bogus.example.org", map[string]string{
 		"username": "portav",
 		"avatar":   "https://chat.example.com:8443/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
 	})
-	if ok.Code != http.StatusOK {
-		t.Fatalf("same-host :8443 attachment avatar status = %d, want 200; body = %s", ok.Code, ok.Body.String())
-	}
+	requireStatus(t, ok, http.StatusOK)
 }
 
 // A server with no tls.domain that is reached by DNS name (or behind a reverse
@@ -262,17 +224,13 @@ func TestUpdateProfile_RejectsSameHostAvatarWithoutTLSDomain(t *testing.T) {
 		"username": "nodomain",
 		"avatar":   "https://chat.example.org:8443/admin/api/stats",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("DNS-name same-host avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadRequest)
 
 	ok := patchJSONWithHost(t, router, "/api/v1/users/me", token, "chat.example.org:8443", map[string]string{
 		"username": "nodomain",
 		"avatar":   "https://chat.example.org:8443/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
 	})
-	if ok.Code != http.StatusOK {
-		t.Fatalf("DNS-name same-host attachment avatar status = %d, want 200; body = %s", ok.Code, ok.Body.String())
-	}
+	requireStatus(t, ok, http.StatusOK)
 }
 
 func TestUpdateProfile_EmptyUsername(t *testing.T) {
@@ -284,9 +242,7 @@ func TestUpdateProfile_EmptyUsername(t *testing.T) {
 		"username": "",
 	})
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // OC-0100: a rename must canonicalize identically to how login looks the
@@ -306,9 +262,7 @@ func TestUpdateProfile_UsernameWithApostropheIsNotEscaped(t *testing.T) {
 	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
 		"username": "O'Brien",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadRequest)
 
 	for _, name := range []string{"O'Brien", "O&#39;Brien"} {
 		u, err := database.GetUserByUsername(context.Background(), name)
@@ -345,9 +299,7 @@ func TestUpdateProfile_OversizedUsernameRejectedBeforeSanitizing(t *testing.T) {
 	})
 	elapsed := time.Since(start)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("UpdateProfile oversized username status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 
 	// A guard that runs before sanitizing rejects in well under a
 	// millisecond; the pre-fix code spends ~200ms in sanitizeToFixpoint on
@@ -383,9 +335,7 @@ func TestUpdateProfile_OversizedAvatarRejectedBeforeSanitizing(t *testing.T) {
 	})
 	elapsed := time.Since(start)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("UpdateProfile oversized avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 
 	// See TestUpdateProfile_OversizedUsernameRejectedBeforeSanitizing for the
 	// rationale behind this bound: a guard that runs before sanitizing
@@ -417,9 +367,7 @@ func TestUpdateProfile_RejectsEntityEncodedBidiOverrideInDisplayName(t *testing.
 		"username":     "dnentity",
 		"display_name": "ada&#x202e;gnp.exe",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("entity-encoded bidi override display_name status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 
 	// Regardless of what the handler answered, the stored row must never end
 	// up holding a real bidi override character smuggled in via the entity
@@ -451,12 +399,9 @@ func TestUpdateProfile_AvatarQueryStringIsNotEscaped(t *testing.T) {
 		"username": "avatarqsuser",
 		"avatar":   avatarURL,
 	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["avatar"] != avatarURL {
 		t.Errorf("avatar = %v, want %q (must not be HTML-escaped)", resp["avatar"], avatarURL)
 	}
@@ -480,9 +425,7 @@ func TestUpdateProfile_UsernameTaken(t *testing.T) {
 		"username": "takenname",
 	})
 
-	if rr.Code != http.StatusConflict {
-		t.Errorf("status = %d, want 409; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusConflict)
 }
 
 func TestUpdateProfile_Unauthorized(t *testing.T) {
@@ -493,9 +436,7 @@ func TestUpdateProfile_Unauthorized(t *testing.T) {
 		"username": "hacker",
 	})
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── PUT /api/v1/users/me/password ──────────────────────────────────────────
@@ -510,9 +451,7 @@ func TestChangePassword_Success(t *testing.T) {
 		"new_password": "newSecure2",
 	})
 
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 // BUG-108: Password change must revoke other sessions.
@@ -537,9 +476,7 @@ func TestChangePassword_RevokesOtherSessions(t *testing.T) {
 		"old_password": "securePass1",
 		"new_password": "newSecure2",
 	})
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 
 	// token1 (current session) should still work.
 	sess1, _ := database.GetSessionByTokenHash(context.Background(), auth.HashToken(token1))
@@ -564,9 +501,7 @@ func TestChangePassword_WrongOldPassword(t *testing.T) {
 		"new_password": "newSecure2",
 	})
 
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 func TestChangePassword_WeakNewPassword(t *testing.T) {
@@ -579,9 +514,7 @@ func TestChangePassword_WeakNewPassword(t *testing.T) {
 		"new_password": "short",
 	})
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestChangePassword_SamePassword(t *testing.T) {
@@ -594,9 +527,7 @@ func TestChangePassword_SamePassword(t *testing.T) {
 		"new_password": "securePass1",
 	})
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // ─── GET /api/v1/users/me/sessions ──────────────────────────────────────────
@@ -608,16 +539,11 @@ func TestListSessions_Success(t *testing.T) {
 
 	rr := getWithToken(t, router, "/api/v1/users/me/sessions", token)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		Sessions []map[string]any `json:"sessions"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	if len(resp.Sessions) == 0 {
 		t.Error("expected at least 1 session (the current one)")
 	}
@@ -640,9 +566,7 @@ func TestListSessions_Unauthorized(t *testing.T) {
 
 	rr := getWithToken(t, router, "/api/v1/users/me/sessions", "badtoken")
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── DELETE /api/v1/users/me/sessions/:id ───────────────────────────────────
@@ -658,9 +582,7 @@ func TestRevokeSession_Success(t *testing.T) {
 
 	rr := profileDelete(t, router, fmt.Sprintf("/api/v1/users/me/sessions/%d", secondSessID), token)
 
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 func TestRevokeSession_NotFound(t *testing.T) {
@@ -670,9 +592,7 @@ func TestRevokeSession_NotFound(t *testing.T) {
 
 	rr := profileDelete(t, router, "/api/v1/users/me/sessions/99999", token)
 
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestRevokeSession_OtherUsersSession(t *testing.T) {
@@ -686,9 +606,7 @@ func TestRevokeSession_OtherUsersSession(t *testing.T) {
 
 	rr := profileDelete(t, router, fmt.Sprintf("/api/v1/users/me/sessions/%d", otherSessID), token)
 
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404 (should not reveal other user's session); body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestRevokeSession_CurrentSession(t *testing.T) {
@@ -706,9 +624,7 @@ func TestRevokeSession_CurrentSession(t *testing.T) {
 	rr := profileDelete(t, router, fmt.Sprintf("/api/v1/users/me/sessions/%d", sessions[0].ID), token)
 
 	// Revoking own session is allowed.
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 // ─── DELETE /api/v1/users/me/sessions — sign-out-everywhere (B4-7) ─────────
@@ -736,16 +652,11 @@ func TestRevokeAllSessions_OnlyTheCallersAccount(t *testing.T) {
 	}
 
 	rr := profileDelete(t, router, "/api/v1/users/me/sessions", aliceTok)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[struct {
 		SessionsRevoked int64 `json:"sessions_revoked"`
 		CurrentRevoked  bool  `json:"current_session_revoked"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	if resp.SessionsRevoked != 2 || !resp.CurrentRevoked {
 		t.Fatalf("response = %+v, want 2 sessions revoked including the current one", resp)
 	}
@@ -785,9 +696,7 @@ func TestUpdateProfile_PublishIdentityKey(t *testing.T) {
 		"username":            "idkeyuser",
 		"identity_public_key": key,
 	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	u, err := database.GetUserByUsername(context.Background(), "idkeyuser")
 	if err != nil || u == nil {
@@ -816,9 +725,7 @@ func TestUpdateProfile_IdentityKeyOmitted_Unchanged(t *testing.T) {
 	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
 		"username": "idkeykeep",
 	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	after, err := database.GetUserByID(context.Background(), u.ID)
 	if err != nil || after == nil {
 		t.Fatalf("GetUserByID: %v", err)
@@ -848,9 +755,7 @@ func TestUpdateProfile_IdentityKeyInvalid(t *testing.T) {
 				"username":            fmt.Sprintf("idkeybad%d", i),
 				"identity_public_key": tc.key,
 			})
-			if rr.Code != http.StatusBadRequest {
-				t.Errorf("status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-			}
+			expectStatus(t, rr, http.StatusBadRequest)
 		})
 	}
 }
@@ -876,11 +781,7 @@ func TestListSessions_APITokenPrincipalIsRefused(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me/sessions", nil)
-	req.Header.Set("Authorization", "Bearer "+apiTok)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPI(t, router, http.MethodGet, "/api/v1/users/me/sessions", apiTok, nil)
 
 	wantErr(t, rr, http.StatusForbidden, "LOGIN_SESSION_REQUIRED", "this action requires a login session")
 }
@@ -911,9 +812,7 @@ func TestRateLimit_ProfileUpdatesDoNotConsumePasswordBudget(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/users/me/password", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
 	if rr.Code == http.StatusTooManyRequests {
 		t.Fatal("password change 429'd with zero password attempts made — unrelated endpoints share one rate-limit bucket")
@@ -950,15 +849,10 @@ func TestListSessions_NewLoginIsUnseenUntilAnotherDeviceLists(t *testing.T) {
 	list := func(t *testing.T, token string) map[int64]map[string]any {
 		t.Helper()
 		rr := getWithToken(t, router, "/api/v1/users/me/sessions", token)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-		}
-		var resp struct {
+		requireStatus(t, rr, http.StatusOK)
+		resp := decodeBody[struct {
 			Sessions []map[string]any `json:"sessions"`
-		}
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
+		}](t, rr)
 		rows := make(map[int64]map[string]any, len(resp.Sessions))
 		for _, s := range resp.Sessions {
 			id, ok := s["id"].(float64)

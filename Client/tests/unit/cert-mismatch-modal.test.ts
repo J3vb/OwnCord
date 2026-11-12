@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createCertMismatchModal } from "../../src/components/CertMismatchModal";
+import { createCertMismatchModal } from "../../src/features/connection/CertMismatchModal";
 import {
   checkVisibleOverlay,
   registerWarningModalTests,
@@ -50,6 +50,13 @@ describe("CertMismatchModal", () => {
   );
 
   it("renders a visible modal overlay", () => checkVisibleOverlay(mountModal, container()));
+
+  it("opens with focus on the reject button, not the close X", () => {
+    mountModal();
+    const reject = container().querySelector(".modal-footer .btn-ghost");
+    expect(reject).not.toBeNull();
+    expect(document.activeElement).toBe(reject);
+  });
 
   it("displays the host in the details", () => {
     mountModal();

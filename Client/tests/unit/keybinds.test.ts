@@ -321,8 +321,18 @@ describe("keybindConflict", () => {
     ["Ctrl+Left", c(0x25, { ctrl: true })],
     ["Ctrl+Shift+Home", c(0x24, { ctrl: true, shift: true })],
     ["Ctrl+End", c(0x23, { ctrl: true })],
+    ["Ctrl+Shift+Right", c(0x27, { ctrl: true, shift: true })],
+    ["Ctrl+Shift+Delete", c(0x2e, { ctrl: true, shift: true })],
   ])("reserved: %s", (_name, combo) => {
     expect(check(combo)).toEqual({ kind: "reserved" });
+  });
+
+  it.each([
+    ["Alt+Left", c(0x25, { alt: true })],
+    ["Alt+F5", c(0x74, { alt: true })],
+    ["Ctrl+Shift+A", c(0x41, { ctrl: true, shift: true })],
+  ])("does not reserve %s", (_name, combo) => {
+    expect(check(combo)).toBeNull();
   });
 
   it("does not reserve Ctrl+Shift+V, which is camera's default", () => {

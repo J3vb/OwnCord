@@ -68,8 +68,7 @@ func TestPluginsHandler_ErrorsUseTheJSONEnvelope(t *testing.T) {
 			if tc.contentType != "" {
 				req.Header.Set("Content-Type", tc.contentType)
 			}
-			rec := httptest.NewRecorder()
-			tc.handler.ServeHTTP(rec, req)
+			rec := serveRequest(tc.handler, req)
 			assertErrorEnvelope(t, rec, tc.status, tc.code)
 		})
 	}
@@ -93,8 +92,7 @@ func TestPluginsHandler_UploadPastTheCapMidParseIs413(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/install", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := serveRequest(h, req)
 	assertErrorEnvelope(t, rec, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE")
 }
 

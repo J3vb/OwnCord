@@ -30,15 +30,18 @@ const (
 	CodeConfirmationRequired Code = "CONFIRMATION_REQUIRED"
 	CodeConflict             Code = "CONFLICT"
 	CodeContainerDeployment  Code = "CONTAINER_DEPLOYMENT"
-	CodeDownloadFailed       Code = "DOWNLOAD_FAILED"
-	CodeDuplicateReport      Code = "DUPLICATE_REPORT"
-	CodeEnvOverridden        Code = "ENV_OVERRIDDEN"
-	CodeForbidden            Code = "FORBIDDEN"
-	CodeGIFDisabled          Code = "GIF_DISABLED"
-	CodeGIFFavoritesFull     Code = "GIF_FAVORITES_FULL"
-	CodeGroupDMFull          Code = "GROUP_DM_FULL"
-	CodeInstallFailed        Code = "INSTALL_FAILED"
-	CodeInstallReadOnly      Code = "INSTALL_READ_ONLY"
+	// A source build (version dev or untagged) never replaces itself with a
+	// release.
+	CodeDevelopmentBuild Code = "DEVELOPMENT_BUILD"
+	CodeDownloadFailed   Code = "DOWNLOAD_FAILED"
+	CodeDuplicateReport  Code = "DUPLICATE_REPORT"
+	CodeEnvOverridden    Code = "ENV_OVERRIDDEN"
+	CodeForbidden        Code = "FORBIDDEN"
+	CodeGIFDisabled      Code = "GIF_DISABLED"
+	CodeGIFFavoritesFull Code = "GIF_FAVORITES_FULL"
+	CodeGroupDMFull      Code = "GROUP_DM_FULL"
+	CodeInstallFailed    Code = "INSTALL_FAILED"
+	CodeInstallReadOnly  Code = "INSTALL_READ_ONLY"
 	// REST form of an internal failure; the WebSocket sends INTERNAL for the same
 	// thing.
 	CodeInternalError      Code = "INTERNAL_ERROR"
@@ -61,11 +64,15 @@ const (
 	CodePreviewExpired              Code = "PREVIEW_EXPIRED"
 	CodePushDisabled                Code = "PUSH_DISABLED"
 	CodeRateLimited                 Code = "RATE_LIMITED"
-	CodeRestartPending              Code = "RESTART_PENDING"
-	CodeReversalFailed              Code = "REVERSAL_FAILED"
-	CodeRoleConflict                Code = "ROLE_CONFLICT"
-	CodeSchemaTooNew                Code = "SCHEMA_TOO_NEW"
-	CodeSelfReview                  Code = "SELF_REVIEW"
+	// Account recovery set the new password and spent the recovery secret, but no
+	// session could be started; sign in with the new password instead of retrying
+	// the recovery.
+	CodeRecoveredSignInRequired Code = "RECOVERED_SIGN_IN_REQUIRED"
+	CodeRestartPending          Code = "RESTART_PENDING"
+	CodeReversalFailed          Code = "REVERSAL_FAILED"
+	CodeRoleConflict            Code = "ROLE_CONFLICT"
+	CodeSchemaTooNew            Code = "SCHEMA_TOO_NEW"
+	CodeSelfReview              Code = "SELF_REVIEW"
 	// The WebSocket upgrade was refused at connection capacity. Same wire value
 	// as the WS error code.
 	CodeServerBusy Code = "SERVER_BUSY"

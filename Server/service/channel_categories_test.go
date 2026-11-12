@@ -36,17 +36,11 @@ func TestCategoryService_ChangesNameTheChannelsThatMoved(t *testing.T) {
 	a, _ := svc.CreateCategory(ctx, 1, "A")
 	b, _ := svc.CreateCategory(ctx, 1, "B")
 	inA, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "in-a", CategoryID: a.Category.ID}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
 	inB, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "in-b", CategoryID: b.Category.ID}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
 	loose, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "loose"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
 	ids := func(chs []db.Channel) map[int64]bool {
 		out := map[int64]bool{}
 		for _, c := range chs {
@@ -56,9 +50,7 @@ func TestCategoryService_ChangesNameTheChannelsThatMoved(t *testing.T) {
 	}
 
 	renamed, err := svc.RenameCategory(ctx, 1, a.Category.ID, "A2")
-	if err != nil {
-		t.Fatalf("rename: %v", err)
-	}
+	mustDo(t, "rename", err)
 	if got := ids(renamed.Channels); len(got) != 1 || !got[inA.ID] {
 		t.Fatalf("rename changed %v, want only the channel in the category", got)
 	}
@@ -69,9 +61,7 @@ func TestCategoryService_ChangesNameTheChannelsThatMoved(t *testing.T) {
 	// Moving B above A moves both categories' positions, so both channels
 	// change; the uncategorized one never does.
 	reordered, err := svc.ReorderCategories(ctx, 1, []int64{b.Category.ID, a.Category.ID})
-	if err != nil {
-		t.Fatalf("reorder: %v", err)
-	}
+	mustDo(t, "reorder", err)
 	if got := ids(reordered.Channels); len(got) != 2 || !got[inA.ID] || !got[inB.ID] || got[loose.ID] {
 		t.Fatalf("reorder changed %v, want both categorized channels and not %d", got, loose.ID)
 	}
@@ -81,9 +71,7 @@ func TestCategoryService_ChangesNameTheChannelsThatMoved(t *testing.T) {
 	}
 
 	deleted, err := svc.DeleteCategory(ctx, 1, b.Category.ID)
-	if err != nil {
-		t.Fatalf("delete: %v", err)
-	}
+	mustDo(t, "delete", err)
 	if got := ids(deleted.Channels); len(got) != 1 || !got[inB.ID] || deleted.Channels[0].CategoryID != 0 {
 		t.Fatalf("delete changed %+v, want the one channel, now uncategorized", deleted.Channels)
 	}
@@ -118,13 +106,9 @@ func TestCategoryService_ChannelNamesAreUniquePerTypeAndCategoryID(t *testing.T)
 	a, _ := svc.CreateCategory(ctx, 1, "A")
 	b, _ := svc.CreateCategory(ctx, 1, "B")
 	inA, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", CategoryID: a.Category.ID}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
 	inB, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", CategoryID: b.Category.ID}, nil)
-	if err != nil {
-		t.Fatalf("same name in another category: %v", err)
-	}
+	mustDo(t, "same name in another category", err)
 	// Moving the B channel into A would duplicate the name there.
 	if _, _, err := svc.AdminUpdateChannel(ctx, 1, inB, AdminChannelUpdate{Name: "lobby", CategoryID: a.Category.ID}, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("a move onto a sibling's name: err = %v, want ErrConflict", err)
@@ -175,13 +159,9 @@ func TestCategoryService_CarriedCategoryThatVanishedFallsBackToUncategorized(t *
 	svc, _ := newChannelAdminService(t)
 	ctx := context.Background()
 	cat, err := svc.CreateCategory(ctx, 1, "Doomed")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateCategory", err)
 	ch, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "room", CategoryID: cat.Category.ID}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
 	stale := *ch // what the handler read before the delete
 	if _, err := svc.DeleteCategory(ctx, 1, cat.Category.ID); err != nil {
 		t.Fatal(err)
@@ -199,13 +179,9 @@ func TestCategoryService_CarriedCategoryThatVanishedFallsBackToUncategorized(t *
 
 	// The archive step of a delete carries the category the same way.
 	other, err := svc.CreateCategory(ctx, 1, "Other")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateCategory", err)
 	ch2, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "room2", CategoryID: other.Category.ID}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
 	stale2 := *ch2
 	if _, err := svc.DeleteCategory(ctx, 1, other.Category.ID); err != nil {
 		t.Fatal(err)
@@ -231,10 +207,7 @@ func TestCategoryService_LegacyCreateReturnsTheListAndAudits(t *testing.T) {
 	if err != nil || cats != nil {
 		t.Fatalf("reuse = %v, %v; want no list", cats, err)
 	}
-	rows, err := database.GetAuditLog(ctx, 50, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rows := mustGetAuditLog(t, database, 50, 0)
 	n := 0
 	for _, r := range rows {
 		if r.Action == "category_create" {

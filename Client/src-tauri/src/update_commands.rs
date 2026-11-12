@@ -567,12 +567,30 @@ async fn download_for_target<C: FnMut(usize, Option<u64>)>(
     Ok(bytes)
 }
 
+/// Refuse an offer the user was not shown: a release published between the
+/// banner's check and the click would otherwise install without its notes.
+/// No announced version (an older webview) accepts any offer.
+pub(crate) fn check_announced(announced: Option<&str>, offered: &str) -> Result<(), String> {
+    if announced.is_none_or(|announced| announced == offered) {
+        return Ok(());
+    }
+    log::warn!(
+        "[update] refusing version {offered}: the banner announced {}",
+        announced.unwrap_or_default()
+    );
+    Err(crate::text::UPDATE_VERSION_CHANGED.into())
+}
+
 /// Download and install a pending update. Windows exits through its installer;
 /// on Linux/macOS the frontend must call `relaunch()` after this completes.
 /// Android has its own command (`android::download_and_install_update`).
 #[cfg(desktop)]
 #[tauri::command]
-pub async fn download_and_install_update(app: AppHandle, server_url: String) -> Result<(), String> {
+pub async fn download_and_install_update(
+    app: AppHandle,
+    server_url: String,
+    expected_version: Option<String>,
+) -> Result<(), String> {
     let install_guard = InstallGuard::acquire(&UPDATE_IN_PROGRESS)?;
     let updater = build_updater(&app, &server_url)?.updater;
 
@@ -583,6 +601,7 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
 
     match update {
         Some(u) if artifact_matches_this_machine(u.download_url.as_str()) => {
+            check_announced(expected_version.as_deref(), &u.version)?;
             // Accumulate downloaded bytes and emit progress to the webview.
             // A failed emit must never abort the install, hence `let _ =`.
             let progress_app = app.clone();
@@ -673,6 +692,17 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_install_refuses_a_version_the_banner_did_not_show() {
+        assert_eq!(check_announced(Some("2.9.0"), "2.9.0"), Ok(()));
+        assert_eq!(
+            check_announced(Some("2.9.0"), "2.9.1"),
+            Err(crate::text::UPDATE_VERSION_CHANGED.to_string())
+        );
+        // An older webview sends no version: keep its behaviour.
+        assert_eq!(check_announced(None, "2.9.1"), Ok(()));
+    }
 
     #[test]
     fn install_guard_allows_only_one_concurrent_installer() {

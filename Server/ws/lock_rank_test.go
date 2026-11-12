@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/ws/voicestate"
 )
 
 // These tests drive the deadlock build's rank checker (syncutil/ranked_deadlock.go)
@@ -39,7 +40,7 @@ func wantBothStacks(t *testing.T, report, acquiring, held, test string) {
 	if report == "" {
 		t.Fatalf("no rank violation; want %s acquired under %s to panic", acquiring, held)
 	}
-	for _, s := range []string{"acquiring ws." + acquiring, "holding", "ws." + held, "acquire stack:", "held lock acquired at:"} {
+	for _, s := range []string{"acquiring lockrank." + acquiring, "holding", "lockrank." + held, "acquire stack:", "held lock acquired at:"} {
 		if !strings.Contains(report, s) {
 			t.Errorf("report lacks %q:\n%s", s, report)
 		}
@@ -51,12 +52,12 @@ func wantBothStacks(t *testing.T, report, acquiring, held, test string) {
 }
 
 func TestRank_AllowsOutermostFirst(t *testing.T) {
-	h := &Hub{voiceHub: hubVoice{mod: newUserLocks[lockRankVoiceMod]()}}
+	h := &Hub{voiceHub: hubVoice{mod: voicestate.NewUserLocks[lockRankVoiceMod]()}}
 	ps := &PubSub{}
 	c := &Client{}
 	if r := rankPanic(t, func() {
-		unlockMember := h.voiceHub.reg.voiceMember.lock(1) // 1
-		unlockMod := h.voiceHub.mod.lock(1)                // 2
+		unlockMember := h.voiceHub.reg.voiceMember.Lock(1) // 1
+		unlockMod := h.voiceHub.mod.Lock(1)                // 2
 		h.tombstones.mu.Lock()                             // 3
 		h.presenceFeed.mu.Lock()                           // 4
 		h.seqMu.Lock()                                     // 5
@@ -76,7 +77,7 @@ func TestRank_AllowsOutermostFirst(t *testing.T) {
 		t.Fatalf("the documented order panicked:\n%s", r)
 	}
 	// Released in order, the outermost lock is free to take again.
-	if r := rankPanic(t, func() { h.voiceHub.reg.voiceMember.lock(1)() }); r != "" {
+	if r := rankPanic(t, func() { h.voiceHub.reg.voiceMember.Lock(1)() }); r != "" {
 		t.Fatalf("a lock taken after every hold was released panicked:\n%s", r)
 	}
 }
@@ -88,12 +89,12 @@ func TestRank_PanicsOnInversion(t *testing.T) {
 	c.mu.Lock()
 	r := rankPanic(t, func() { h.mu.RLock() })
 	c.mu.Unlock()
-	wantBothStacks(t, r, "lockRankHub (rank 7)", "lockRankLeaf (rank 9)", "TestRank_PanicsOnInversion")
+	wantBothStacks(t, r, "Hub (rank 7)", "Leaf (rank 9)", "TestRank_PanicsOnInversion")
 
 	h.seqMu.Lock()
-	r = rankPanic(t, func() { h.voiceHub.reg.voiceMember.lock(1)() })
+	r = rankPanic(t, func() { h.voiceHub.reg.voiceMember.Lock(1)() })
 	h.seqMu.Unlock()
-	wantBothStacks(t, r, "lockRankVoiceMember (rank 1)", "lockRankSeq (rank 5)", "TestRank_PanicsOnInversion")
+	wantBothStacks(t, r, "VoiceMember (rank 1)", "Seq (rank 5)", "TestRank_PanicsOnInversion")
 
 	// The refused acquire took nothing, so the lock is free afterwards.
 	if r := rankPanic(t, func() { lockOnce(&h.mu) }); r != "" {
@@ -103,16 +104,16 @@ func TestRank_PanicsOnInversion(t *testing.T) {
 
 func TestRank_PanicsOnTwoOfSameRank(t *testing.T) {
 	var reg voiceRegistry
-	unlock := reg.voiceMember.lock(1)
-	r := rankPanic(t, func() { reg.voiceMember.lock(2)() })
+	unlock := reg.voiceMember.Lock(1)
+	r := rankPanic(t, func() { reg.voiceMember.Lock(2)() })
 	unlock()
-	wantBothStacks(t, r, "lockRankVoiceMember (rank 1)", "lockRankVoiceMember (rank 1)", "TestRank_PanicsOnTwoOfSameRank")
+	wantBothStacks(t, r, "VoiceMember (rank 1)", "VoiceMember (rank 1)", "TestRank_PanicsOnTwoOfSameRank")
 
 	a, b := &Client{}, &Client{}
 	a.mu.Lock()
 	r = rankPanic(t, func() { b.mu.Lock() })
 	a.mu.Unlock()
-	wantBothStacks(t, r, "lockRankLeaf (rank 9)", "lockRankLeaf (rank 9)", "TestRank_PanicsOnTwoOfSameRank")
+	wantBothStacks(t, r, "Leaf (rank 9)", "Leaf (rank 9)", "TestRank_PanicsOnTwoOfSameRank")
 
 	// A recursive read lock is two holds of one rank too: it deadlocks once a
 	// writer queues between the two.
@@ -126,7 +127,7 @@ func TestRank_PanicsOnTwoOfSameRank(t *testing.T) {
 }
 
 func TestRank_TryLockNotFlagged(t *testing.T) {
-	h := &Hub{voiceHub: hubVoice{mod: newUserLocks[lockRankVoiceMod]()}}
+	h := &Hub{voiceHub: hubVoice{mod: voicestate.NewUserLocks[lockRankVoiceMod]()}}
 	c := &Client{}
 
 	// A cold read's TryRLock of the tombstones (rank 3) under seqMu (5)
@@ -140,7 +141,7 @@ func TestRank_TryLockNotFlagged(t *testing.T) {
 
 	// It is still a hold: a blocking acquire of rank 3 under it is flagged.
 	r := rankPanic(t, func() { c.focusMu.Lock() })
-	wantBothStacks(t, r, "lockRankSerialiser (rank 3)", "lockRankSerialiser (rank 3)", "TestRank_TryLockNotFlagged")
+	wantBothStacks(t, r, "Serialiser (rank 3)", "Serialiser (rank 3)", "TestRank_TryLockNotFlagged")
 	if !strings.Contains(r, "via TryRLock") {
 		t.Errorf("report should say the held lock was a TryRLock:\n%s", r)
 	}
@@ -160,7 +161,7 @@ func TestRank_TryLockNotFlagged(t *testing.T) {
 	var unlock func()
 	if r := rankPanic(t, func() {
 		var ok bool
-		if unlock, ok = h.voiceHub.mod.tryLock(1); !ok {
+		if unlock, ok = h.voiceHub.mod.TryLock(1); !ok {
 			t.Error("tryLock of an idle user failed")
 		}
 	}); r != "" {

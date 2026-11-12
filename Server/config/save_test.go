@@ -15,9 +15,7 @@ import (
 func loadNoEnv(t *testing.T, cfgPath string) *config.Config {
 	t.Helper()
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	return cfg
 }
 
@@ -40,9 +38,7 @@ func TestSavePatchesGeneratedDefaultFile(t *testing.T) {
 	}
 
 	raw, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("reading patched file: %v", err)
-	}
+	mustDo(t, "reading patched file", err)
 	text := string(raw)
 
 	// Documentation comments must survive the round-trip.
@@ -94,18 +90,12 @@ gif:
 custom_section:
   custom_key: 42
 `
-	if err := os.WriteFile(cfgPath, []byte(handEdited), 0o600); err != nil {
-		t.Fatalf("writing hand-edited file: %v", err)
-	}
+	mustDo(t, "writing hand-edited file", os.WriteFile(cfgPath, []byte(handEdited), 0o600))
 
-	if err := config.Save(cfgPath, config.Patch{ServerName: new("New Name")}); err != nil {
-		t.Fatalf("Save() returned error: %v", err)
-	}
+	mustDo(t, "Save() returned error", config.Save(cfgPath, config.Patch{ServerName: new("New Name")}))
 
 	raw, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("reading patched file: %v", err)
-	}
+	mustDo(t, "reading patched file", err)
 	text := string(raw)
 	for _, want := range []string{
 		"# my important operator note",
@@ -134,14 +124,10 @@ func TestSaveCreatesMissingFileFromTemplate(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
-	if err := config.Save(cfgPath, config.Patch{ServerPort: new(9999)}); err != nil {
-		t.Fatalf("Save() returned error: %v", err)
-	}
+	mustDo(t, "Save() returned error", config.Save(cfgPath, config.Patch{ServerPort: new(9999)}))
 
 	info, err := os.Stat(cfgPath)
-	if err != nil {
-		t.Fatalf("stat patched file: %v", err)
-	}
+	mustDo(t, "stat patched file", err)
 	if runtime.GOOS != "windows" {
 		if perm := info.Mode().Perm(); perm != 0o600 {
 			t.Errorf("file mode = %o, want 0600", perm)
@@ -189,9 +175,7 @@ func TestSaveVoiceCredentialsOnlyWhenEmpty(t *testing.T) {
   livekit_api_key: "operator-key"
   livekit_api_secret: "operator-secret-thats-32-chars-x"
 `
-		if err := os.WriteFile(cfgPath, []byte(existing), 0o600); err != nil {
-			t.Fatalf("writing file: %v", err)
-		}
+		mustDo(t, "writing file", os.WriteFile(cfgPath, []byte(existing), 0o600))
 
 		err := config.Save(cfgPath, config.Patch{
 			VoiceAPIKey:    new("key-should-not-win"),
@@ -216,17 +200,13 @@ func TestSaveVoiceAutoDownloadBool(t *testing.T) {
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 	loadNoEnv(t, cfgPath) // generated default file has auto_download_livekit: true
 
-	if err := config.Save(cfgPath, config.Patch{VoiceAutoDownload: new(false)}); err != nil {
-		t.Fatalf("Save() returned error: %v", err)
-	}
+	mustDo(t, "Save() returned error", config.Save(cfgPath, config.Patch{VoiceAutoDownload: new(false)}))
 	cfg := loadNoEnv(t, cfgPath)
 	if cfg.Voice.AutoDownloadLiveKit {
 		t.Error("Voice.AutoDownloadLiveKit = true, want false after patch")
 	}
 
-	if err := config.Save(cfgPath, config.Patch{VoiceAutoDownload: new(true)}); err != nil {
-		t.Fatalf("Save() returned error: %v", err)
-	}
+	mustDo(t, "Save() returned error", config.Save(cfgPath, config.Patch{VoiceAutoDownload: new(true)}))
 	cfg = loadNoEnv(t, cfgPath)
 	if !cfg.Voice.AutoDownloadLiveKit {
 		t.Error("Voice.AutoDownloadLiveKit = false, want true after re-patch")
@@ -239,9 +219,7 @@ func TestSaveYAMLInjectionIsInert(t *testing.T) {
 	loadNoEnv(t, cfgPath)
 
 	hostile := "x\nserver:\n  port: 1 # pwned"
-	if err := config.Save(cfgPath, config.Patch{ServerName: new(hostile)}); err != nil {
-		t.Fatalf("Save() returned error: %v", err)
-	}
+	mustDo(t, "Save() returned error", config.Save(cfgPath, config.Patch{ServerName: new(hostile)}))
 
 	cfg := loadNoEnv(t, cfgPath)
 	if cfg.Server.Name != hostile {
@@ -261,16 +239,12 @@ func TestSaveLeavesUnparseableFileIntact(t *testing.T) {
 		"root not mapping": "just a scalar\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
-				t.Fatalf("writing file: %v", err)
-			}
+			mustDo(t, "writing file", os.WriteFile(cfgPath, []byte(content), 0o600))
 			if err := config.Save(cfgPath, config.Patch{ServerPort: new(9000)}); err == nil {
 				t.Fatal("Save() succeeded on a file it cannot safely patch")
 			}
 			raw, err := os.ReadFile(cfgPath)
-			if err != nil {
-				t.Fatalf("reading file: %v", err)
-			}
+			mustDo(t, "reading file", err)
 			if string(raw) != content {
 				t.Error("failed Save() modified the original file")
 			}

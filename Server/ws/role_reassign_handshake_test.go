@@ -18,7 +18,6 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -146,10 +145,7 @@ func TestRefreshUserSnapshot_PicksUpRoleReassignment(t *testing.T) {
 	seedDemotedRole(t, database)
 	ctx := context.Background()
 	uid := seedHarvestVoiceUser(t, database, "refresh-snapshot-user")
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := newClient(hub, nil, user, "", 0, ctx)
@@ -180,24 +176,14 @@ func TestFreshConnectFallback_RoleReassignMidReconnect_ResolvesFreshRole(t *test
 	uid := seedHarvestVoiceUser(t, database, "role-race-user")
 	chID := mustCreateTextChannel(t, database, "role-race-channel")
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, uid)
 
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newServeRigOn(t, database, nil)
+	hub := rig.hub
 
 	// Bracket last_seq so the resume takes the buffer tier and reaches the
 	// final mustFullResync re-check, where the hook fires.
-	rb := hub.ReplayBuffer()
-	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{}}`))
-	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{}}`))
-	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{}}`))
+	pushReplayWindow(hub, chID)
 	hub.SeedSeq(100)
 
 	var hookRan bool
@@ -214,16 +200,10 @@ func TestFreshConnectFallback_RoleReassignMidReconnect_ResolvesFreshRole(t *test
 	}
 	defer func() { handleReconnectPreSeqMuRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	conn := dialAndAuth(t, ctx, srv.URL, token, 99, chID)
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	conn := rig.dialAuth(t, ctx, token, 99, chID)
 
 	// The forced fallback writes auth_ok then ready.
-	if typ, _ := readFrameType(t, ctx, conn); typ != MsgTypeAuthOK {
-		t.Fatalf("expected auth_ok, got %v", typ)
-	}
+	expectFrame(t, ctx, conn, MsgTypeAuthOK, "")
 	typ, readyMsg := readFrameType(t, ctx, conn)
 	if typ != MsgTypeReady {
 		t.Fatalf("expected ready (forced fallback), got %v", typ)
@@ -266,22 +246,12 @@ func TestFreshConnectFallback_RoleReassignPreRegister_PostRegisterVerifyRevokes(
 	uid := seedHarvestVoiceUser(t, database, "role-race-late-user")
 	chID := mustCreateTextChannel(t, database, "role-race-late-channel")
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, uid)
 
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newServeRigOn(t, database, nil)
+	hub := rig.hub
 
-	rb := hub.ReplayBuffer()
-	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{}}`))
-	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{}}`))
-	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{}}`))
+	pushReplayWindow(hub, chID)
 	hub.SeedSeq(100)
 
 	// First hook: force the full-ready fallback WITHOUT touching the role,
@@ -312,18 +282,10 @@ func TestFreshConnectFallback_RoleReassignPreRegister_PostRegisterVerifyRevokes(
 	}
 	defer func() { freshConnectPreRegisterRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
+	conn := rig.dialAuth(t, ctx, token, 99, chID)
 
-	conn := dialAndAuth(t, ctx, srv.URL, token, 99, chID)
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	if typ, _ := readFrameType(t, ctx, conn); typ != MsgTypeAuthOK {
-		t.Fatalf("expected auth_ok, got %v", typ)
-	}
-	if typ, _ := readFrameType(t, ctx, conn); typ != MsgTypeReady {
-		t.Fatalf("expected ready (forced fallback), got %v", typ)
-	}
+	expectFrame(t, ctx, conn, MsgTypeAuthOK, "")
+	expectFrame(t, ctx, conn, MsgTypeReady, " (forced fallback)")
 	if !lateHookRan {
 		t.Fatal("freshConnectPreRegisterRaceHook never fired — not exercising the race window")
 	}
@@ -344,10 +306,7 @@ func TestRevokeUnreadableChannels_ActsOnReplacementClient(t *testing.T) {
 	uid := seedHarvestVoiceUser(t, database, "revoke-replaced-user")
 	chID := mustCreateTextChannel(t, database, "revoke-replaced-channel")
 
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c1 := newClient(hub, nil, user, "", 0, ctx)

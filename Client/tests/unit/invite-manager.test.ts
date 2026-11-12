@@ -3,7 +3,7 @@ import {
   createInviteManager,
   type InviteItem,
   type InviteManagerOptions,
-} from "@components/InviteManager";
+} from "../../src/features/invites/InviteManager";
 import { useMountContainer } from "../helpers/mountContainer";
 
 function makeInvite(overrides: Partial<InviteItem> = {}): InviteItem {

@@ -1,18 +1,16 @@
 #!/usr/bin/env node
 // Proves the union of the mutation shards equals the base config's configured
 // surface, so no file silently drops out of the nightly baseline (B7-8 Task 3).
-import { globSync, readFileSync } from "node:fs";
+import { globSync } from "node:fs";
 import { join, matchesGlob } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const clientDir = new URL("..", import.meta.url).pathname;
+const clientDir = fileURLToPath(new URL("..", import.meta.url));
 process.env.STRYKER_SHARD ||= "livekit-1"; // satisfy the config's own validation on import
 const { shards, default: shardConfig } = await import(
-  join(clientDir, "tests/mutation/stryker.shard.config.mjs")
+  pathToFileURL(join(clientDir, "tests/mutation/stryker.shard.config.mjs")).href
 );
-const base = (await import(join(clientDir, "stryker.config.mjs"))).default;
-const { SECOND_NIGHT, SPLIT_BY_LINE, filesForNight } = await import(
-  join(clientDir, "tests/mutation/nights.mjs")
-);
+const base = (await import(pathToFileURL(join(clientDir, "stryker.config.mjs")).href)).default;
 
 if (!shardConfig.reporters?.includes("json")) {
   console.error('shard config must list the "json" reporter, or mutation.json is never written');
@@ -27,7 +25,8 @@ const excluded = (p) => negative.some((g) => matchesGlob(p, g));
 const expected = new Set();
 for (const g of positive) {
   for (const p of globSync(g, { cwd: clientDir })) {
-    if (!excluded(p)) expected.add(p);
+    const normalized = p.replaceAll("\\", "/");
+    if (!excluded(normalized)) expected.add(normalized);
   }
 }
 
@@ -40,24 +39,6 @@ if (missing.length || extra.length) {
     console.error(`missing from every shard (${missing.length}):\n  ${missing.join("\n  ")}`);
   if (extra.length)
     console.error(`in a shard but outside the surface (${extra.length}):\n  ${extra.join("\n  ")}`);
-  process.exit(1);
-}
-
-const stale = [...SECOND_NIGHT, ...SPLIT_BY_LINE].filter((p) => !sharded.has(p)).sort();
-if (stale.length) {
-  console.error(
-    `night lists name files no shard holds (${stale.length}):\n  ${stale.join("\n  ")}`,
-  );
-  process.exit(1);
-}
-const readText = (p) => readFileSync(join(clientDir, p), "utf8");
-const empty = Object.entries(shards).flatMap(([name, files]) =>
-  ["first", "second"]
-    .filter((night) => filesForNight(files, night, readText).length === 0)
-    .map((night) => `${name} (${night} night)`),
-);
-if (empty.length) {
-  console.error(`shards with nothing to test on a night:\n  ${empty.join("\n  ")}`);
   process.exit(1);
 }
 

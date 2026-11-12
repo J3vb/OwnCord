@@ -5,10 +5,9 @@ import (
 	"log/slog"
 )
 
-// fillGroupOwner sets result.DMOwnerID and result.DMIconID for a group DM that
-// this send (re)opened for someone, because only a (re)open builds a
-// dm_channel_open and so needs them. A read failure is non-fatal: the open goes
-// out without owner_id and icon, and the next ready repairs it.
+// fillGroupOwner sets result.DMOwnerID and DMIconID for a group DM this send (re)opened,
+// since only a (re)open builds a dm_channel_open. A read failure is non-fatal: the open
+// goes out without them and the next ready repairs it.
 func (s *dmDelivery) fillGroupOwner(ctx context.Context, isGroup bool, channelID int64, result *SendMessageResult) {
 	if !isGroup || len(result.OpenedDMFor) == 0 {
 		return

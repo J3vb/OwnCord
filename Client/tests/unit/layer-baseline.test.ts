@@ -30,7 +30,7 @@ const baseline = JSON.parse(
 
 /** Upward value-import sites that may remain. Lower this in every change that
  *  removes one; it never rises. */
-const DEBT_SITE_CAP = 72;
+const DEBT_SITE_CAP = 65;
 
 /** The upward imports a written rule requires (Client/CLAUDE.md: the
  *  dispatcher door, and messages.store over its reducer modules). */
@@ -226,14 +226,14 @@ describe("the rule's scope", () => {
     });
   }, 120_000);
 
-  it("maps the five tsconfig and vite aliases, and every top-level src/ entry has a layer", () => {
+  it("maps the four tsconfig and vite aliases, and every top-level src/ entry has a layer", () => {
     const tsconfig = readFileSync(path.join(clientRoot, "tsconfig.json"), "utf8");
     const fromTsconfig = new Map(
       [...tsconfig.matchAll(/"(@[a-z]+)\/\*":\s*\[\s*"\.\/src\/([a-z]+)\/\*"\s*\]/g)].map(
         (m) => [m[1], m[2]] as const,
       ),
     );
-    expect(fromTsconfig.size).toBe(5);
+    expect(fromTsconfig.size).toBe(4);
     expect(new Map(LAYER_ALIASES as Map<string, string>)).toEqual(fromTsconfig);
     const vite = readFileSync(path.join(clientRoot, "vite.config.ts"), "utf8");
     for (const [alias, dir] of fromTsconfig) {

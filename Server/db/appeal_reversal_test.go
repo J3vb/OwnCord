@@ -26,18 +26,9 @@ func TestDecideAppealTx_ReversalFailureAbortsTheWholeTransaction(t *testing.T) {
 
 	expires := time.Now().Add(time.Hour)
 	actionID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", expires)
-	if err != nil {
-		t.Fatalf("TimeoutUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-reversal-fail", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
-	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
-	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
+	mustDo(t, "TimeoutUser", err)
+	appealID := mustInsertAppeal(t, database, "pub-reversal-fail", actionID, memberID, "please")
+	reversal := appealedActionOf(ctx, t, database, actionID)
 
 	db.SetAppealReversalHookForTest(func() error { return errors.New("forced reversal failure for test") })
 	defer db.SetAppealReversalHookForTest(nil)
@@ -51,10 +42,7 @@ func TestDecideAppealTx_ReversalFailureAbortsTheWholeTransaction(t *testing.T) {
 		t.Fatalf("DecideAppealTx result = %v, want AppealWriteReversalFailed", result)
 	}
 
-	appeal, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal: %v", err)
-	}
+	appeal := mustGetAppeal(t, database, appealID)
 	if appeal.State != "open" {
 		t.Fatalf("appeal state = %q, want open — the whole transaction (the decision UPDATE included) must have rolled back", appeal.State)
 	}
@@ -62,9 +50,7 @@ func TestDecideAppealTx_ReversalFailureAbortsTheWholeTransaction(t *testing.T) {
 		t.Fatalf("appeal decided_by = %d, want 0 — nothing committed", appeal.DecidedBy)
 	}
 	active, err := database.HasActiveTimeout(ctx, memberID)
-	if err != nil {
-		t.Fatalf("HasActiveTimeout: %v", err)
-	}
+	mustDo(t, "HasActiveTimeout", err)
 	if !active {
 		t.Fatal("timeout no longer active after a FAILED overturn — the reversal must not have run outside the aborted transaction")
 	}

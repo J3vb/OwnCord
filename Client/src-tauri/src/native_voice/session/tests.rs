@@ -665,3 +665,77 @@ fn set_audio_processing_rebuilds_only_on_a_change() {
         ProcessingChange::Remember
     );
 }
+
+/// Operations run in the order their calls arrived, and one a later call
+/// already overtook is skipped.
+#[test]
+fn a_superseded_audio_operation_is_skipped() {
+    let audio = Audio::new(Vec::<&str>::new());
+    let first = audio.ticket(Class::Running);
+    let second = audio.ticket(Class::Running);
+    assert_eq!(
+        audio.apply(Class::Running, second, |v| v.push("second")),
+        Some(())
+    );
+    assert_eq!(
+        audio.apply(Class::Running, first, |v| v.push("first")),
+        None
+    );
+    assert_eq!(*lock(&audio.device), vec!["second"]);
+}
+
+/// Starting or stopping the stream and choosing the device are ordered
+/// apart: a later device switch never cancels an earlier mute.
+#[test]
+fn audio_operation_kinds_are_ordered_apart() {
+    let audio = Audio::new(0u32);
+    let stop = audio.ticket(Class::Running);
+    let switch = audio.ticket(Class::Selection);
+    assert!(audio.apply(Class::Selection, switch, |n| *n += 1).is_some());
+    assert!(audio.apply(Class::Running, stop, |n| *n += 10).is_some());
+    assert_eq!(*lock(&audio.device), 11);
+}
+
+/// Two quick switches apply in arrival order whichever thread runs first.
+#[test]
+fn two_quick_switches_apply_in_arrival_order() {
+    let audio = Arc::new(Audio::new(Vec::<u64>::new()));
+    let first = audio.ticket(Class::Selection);
+    let second = audio.ticket(Class::Selection);
+    let early = {
+        let audio = audio.clone();
+        std::thread::spawn(move || audio.apply(Class::Selection, first, |v| v.push(first)))
+    };
+    audio.apply(Class::Selection, second, |v| v.push(second));
+    early.join().unwrap();
+    assert_eq!(lock(&audio.device).last(), Some(&second));
+}
+
+/// A first publish closes any open stream before it starts, so the stream it
+/// opens is bound to its own source, whichever of two overlapping calls
+/// reaches the device first.
+#[test]
+fn a_first_publish_always_opens_a_stream_of_its_own() {
+    let capture = Arc::new(Audio::new(Capture::default()));
+    let source =
+        || NativeAudioSource::new(AudioSourceOptions::default(), capture::SAMPLE_RATE, 1, 0);
+    let first = MicStep::first_publish(&capture, 1, source(), None, false);
+    let second = MicStep::first_publish(&capture, 2, source(), Some(64_000), true);
+    let (
+        MicStep::Start {
+            ticket: first_ticket,
+            stop_first: first_stops,
+            ..
+        },
+        MicStep::Start {
+            ticket: second_ticket,
+            stop_first: second_stops,
+            ..
+        },
+    ) = (&first, &second)
+    else {
+        panic!("a first publish starts the capture");
+    };
+    assert!(*first_stops && *second_stops);
+    assert!(first_ticket < second_ticket, "tickets follow call order");
+}

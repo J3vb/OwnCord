@@ -178,7 +178,6 @@ export const moderationText = defineCatalog("moderation", {
   "nicknameDialog.saving": "Saving...",
   "nicknameDialog.reset": "Reset",
   "nicknameDialog.tooLong": "A nickname can have at most {max} characters.",
-  "nicknameDialog.failed": "Could not change the nickname. Try again.",
   "nicknameDialog.changed": "Changed the nickname of {username}.",
   "nicknameDialog.cleared": "Removed the nickname of {username}.",
   "banDialog.retryExpired":

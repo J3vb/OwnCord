@@ -147,6 +147,7 @@
 .ep-body {
   display: flex;
   height: 320px;
+  user-select: none;
 }
 .xp-panel .ep-body {
   flex: 1;
@@ -201,6 +202,7 @@
   outline-offset: 1px;
 }
 .ep-scroll {
+  container-type: inline-size;
   position: relative;
   flex: 1;
   min-width: 0;
@@ -219,10 +221,17 @@
   grid-template-columns: repeat(8, 1fr);
   gap: 2px;
   padding: 4px 8px 8px;
-  /* The full Unicode set is ~1,900 glyphs: lay out and paint only the groups
-     near the viewport, or opening the picker stalls the first frame. */
+  /* One skip box per category: the 1,900 cells cost more as separate boxes than
+     they save. The height is exact (--ep-rows rows of square cells, 2 px gaps,
+     8 px side padding), so the scrollbar never moves and pickerScroll.ts can
+     keep its cached label positions. */
   content-visibility: auto;
-  contain-intrinsic-block-size: auto 600px;
+  contain-intrinsic-block-size: auto calc(var(--ep-rows, 1) * ((100cqw - 30px) / 8 + 2px) - 2px);
+}
+/* A grid that is not built yet keeps its final height (same formula, plus the 12 px of
+   padding), so the scrollbar and the cached label positions do not move when it fills. */
+.ep-grid.ep-lazy {
+  min-height: calc(var(--ep-rows, 1) * ((100cqw - 30px) / 8 + 2px) + 10px);
 }
 .ep-emoji {
   width: 100%;
@@ -405,6 +414,11 @@
   color: var(--text-faint);
   font-size: var(--font-size-sm);
 }
+/* Before consent the grid is hidden: the one button sits in the middle of the
+   panel, not at the top of an empty one. */
+.gp-consent {
+  margin: auto;
+}
 
 .gp-no-favorites .gp-tabs,
 .gp-no-favorites .gp-star {
@@ -551,6 +565,14 @@
   text-align: center;
   color: var(--text-faint);
   font-size: var(--font-size-sm);
+}
+/* An empty or no-match panel centres its message in the tall body. */
+.sp-body:has(> .sp-empty) {
+  display: flex;
+  flex-direction: column;
+}
+.sp-body > .sp-empty {
+  margin: auto 0;
 }
 .sp-empty-hint {
   margin-top: 8px;

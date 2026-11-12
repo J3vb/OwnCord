@@ -15,7 +15,7 @@ import {
 
 // Its module-level listeners must exist before the first test, as in the app,
 // not be added by the dynamic import mid-test.
-import "../../src/components/PhoneCallBar";
+import "../../src/features/voice/PhoneCallBar";
 
 const VOICE = 10;
 

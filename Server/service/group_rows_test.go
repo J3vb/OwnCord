@@ -18,9 +18,7 @@ func groupRowFixture(t *testing.T, kind int64) (f *moderationActionsFixture, dmI
 	f = newModerationActionsFixture(t)
 	ctx := context.Background()
 	res, err := NewDMService(f.database, f.mod.perms).CreateGroupDM(ctx, fixtureMember, []int64{fixtureMember2, fixtureMod}, "Crew")
-	if err != nil {
-		t.Fatalf("CreateGroupDM: %v", err)
-	}
+	mustDo(t, "CreateGroupDM", err)
 	dmID = res.Channel.ID
 	r, err := f.database.ExecContext(ctx,
 		`INSERT INTO messages (channel_id, user_id, content, kind) VALUES (?, ?, 'group event', ?)`, dmID, fixtureMember, kind)
@@ -120,9 +118,7 @@ func TestCreateGroupDM_CreatorOwnsAndSummaryCarriesOwner(t *testing.T) {
 	ctx := context.Background()
 	svc := NewDMService(f.database, f.mod.perms)
 	res, err := svc.CreateGroupDM(ctx, fixtureMember, []int64{fixtureMember2, fixtureMod}, "Crew")
-	if err != nil {
-		t.Fatalf("CreateGroupDM: %v", err)
-	}
+	mustDo(t, "CreateGroupDM", err)
 	for _, viewer := range []int64{fixtureMember, fixtureMember2, fixtureMod} {
 		sum, err := svc.DMSummaryFor(ctx, viewer, res.Channel.ID)
 		if err != nil {
@@ -133,9 +129,7 @@ func TestCreateGroupDM_CreatorOwnsAndSummaryCarriesOwner(t *testing.T) {
 		}
 	}
 	oneToOne, err := svc.CreateDM(ctx, fixtureMember, fixtureMember2)
-	if err != nil {
-		t.Fatalf("CreateDM: %v", err)
-	}
+	mustDo(t, "CreateDM", err)
 	sum, err := svc.DMSummaryFor(ctx, fixtureMember, oneToOne.Channel.ID)
 	if err != nil || sum.OwnerID != 0 {
 		t.Errorf("1:1 summary owner = %d (%v), want 0", sum.OwnerID, err)
@@ -147,9 +141,7 @@ func TestCloseDM_OwnerLeaveHandsOffAndSummaryFollows(t *testing.T) {
 	ctx := context.Background()
 	svc := NewDMService(f.database, f.mod.perms)
 	res, err := svc.CreateGroupDM(ctx, fixtureMember, []int64{fixtureMember2, fixtureMod}, "Crew")
-	if err != nil {
-		t.Fatalf("CreateGroupDM: %v", err)
-	}
+	mustDo(t, "CreateGroupDM", err)
 	if _, err := svc.CloseDM(ctx, fixtureMember, res.Channel.ID); err != nil {
 		t.Fatalf("CloseDM: %v", err)
 	}

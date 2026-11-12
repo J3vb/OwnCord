@@ -1,7 +1,7 @@
 {
   "name": "owncord-client",
   "private": true,
-  "version": "2.8.0",
+  "version": "2.9.0",
   "type": "module",
   "engines": {
     "node": "^26",
@@ -34,6 +34,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:browser": "vitest run --config vitest.config.browser.ts",
+    "gen:wire": "node scripts/gen-wire-validators.mjs",
     "typecheck": "tsc --noEmit",
     "typecheck:build": "tsc -p tsconfig.build.json --noEmit",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit",
@@ -48,7 +49,8 @@
     "screenshots:readme": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.screenshots.ts",
     "test:e2e:web": "node tests/e2e/scripts/build-server.mjs --web && playwright test --config tests/e2e/config/playwright.config.web.ts",
     "test:e2e:fullstack": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.fullstack.ts",
-    "test:e2e:soak": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.soak.ts"
+    "test:e2e:soak": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.soak.ts",
+    "test:e2e:media-cost": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.media-cost.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -60,18 +62,18 @@
     "@stryker-mutator/vitest-runner": "^10.1.1",
     "@tauri-apps/cli": "^2",
     "@types/node": "^26.6.6",
-    "@vitest/browser-playwright": "^5.0.5",
+    "@vitest/browser-playwright": "^5.1.0",
     "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^10.14.0",
     "fast-check": "^4.10.2",
     "jsdom": "^30.1.3",
-    "knip": "^6.44.0",
+    "knip": "^6.44.1",
     "lightningcss": "^1.33.0",
-    "oxlint": "^1.90.0",
+    "oxlint": "^1.92.0",
     "patch-package": "8.0.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1",
-    "vite": "^8.3.5",
+    "vite": "^8.3.6",
     "vitest": "^5.0.5"
   },
   "dependencies": {

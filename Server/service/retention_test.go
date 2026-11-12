@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -21,10 +22,7 @@ var retentionNow = time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
 func seedRetentionChannel(t *testing.T, database *db.DB, name string, uid int64, dir string, old int) (int64, []string) {
 	t.Helper()
 	ctx := context.Background()
-	chID, err := database.CreateChannel(ctx, name, "text", "", "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	chID := mustCreateChannel(t, database, name, "text", "", "", 0)
 	files := make([]string, 0, old)
 	for i := range old {
 		res, err := database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp) VALUES (?, ?, ?, ?)`,
@@ -38,9 +36,7 @@ func seedRetentionChannel(t *testing.T, database *db.DB, name string, uid int64,
 			stored, mid, stored, uid); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, stored), []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, stored), []byte("x"), 0o600))
 		files = append(files, stored)
 	}
 	if _, err := database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp) VALUES (?, ?, 'fresh', ?)`,
@@ -53,9 +49,7 @@ func seedRetentionChannel(t *testing.T, database *db.DB, name string, uid int64,
 func countMessages(t *testing.T, database *db.DB, chID int64) int {
 	t.Helper()
 	var n int
-	if err := database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM messages WHERE channel_id = ?`, chID).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM messages WHERE channel_id = ?`, chID).Scan(&n))
 	return n
 }
 
@@ -86,17 +80,11 @@ func TestRetention_IndefiniteByDefault(t *testing.T) {
 	}
 
 	path, err := alphasnap.Copy(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Copy", err)
 	alpha, err := db.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	t.Cleanup(func() { _ = alpha.Close() })
-	if err := db.Migrate(alpha); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Migrate", db.Migrate(alpha))
 	var before int
 	_ = alpha.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&before)
 	upgraded := NewRetentionService(alpha)
@@ -132,9 +120,7 @@ func TestRetention_OutOfRangeServerWindowDeletesNothing(t *testing.T) {
 	// Bypasses the service-layer bound check the same way a corrupt row
 	// would: db.ApplySettings (called directly, not through Patch) applies
 	// whatever string it is given.
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "106752"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "106752"}))
 	svc := newRetention(t, database, dir)
 	rep, err := svc.Tick(ctx)
 	if err != nil || rep.Messages != 0 || rep.Channels != 0 {
@@ -161,9 +147,7 @@ func TestRetention_TickAppliesTheEffectivePolicy(t *testing.T) {
 	forever, foreverFiles := seedRetentionChannel(t, database, "forever", uid, dir, 2) // opts out
 	short, shortFiles := seedRetentionChannel(t, database, "short", uid, dir, 2)       // 30, 31 days old
 	dm, _, err := database.GetOrCreateDMChannel(ctx, uid, other)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	if _, err := database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp) VALUES (?, ?, 'old dm', ?)`,
 		dm.ID, uid, retentionNow.Add(-400*24*time.Hour).Format("2006-01-02 15:04:05")); err != nil {
 		t.Fatal(err)
@@ -171,9 +155,7 @@ func TestRetention_TickAppliesTheEffectivePolicy(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `UPDATE messages SET pinned = 1 WHERE channel_id = ? AND content = 'old 0'`, general); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "31"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "31"}))
 	svc := newRetention(t, database, dir)
 	if _, err := svc.SetChannelPolicy(ctx, uid, forever, 0); err != nil {
 		t.Fatal(err)
@@ -183,9 +165,7 @@ func TestRetention_TickAppliesTheEffectivePolicy(t *testing.T) {
 	}
 
 	preview, err := svc.Preview(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Preview", err)
 	want := map[int64]int64{general: 1, short: 2} // general: 32-day-old only (31 exactly is at the boundary, 30 inside, "old 0" pinned)
 	for _, p := range preview {
 		if p.WouldDelete != want[p.ChannelID] {
@@ -198,9 +178,7 @@ func TestRetention_TickAppliesTheEffectivePolicy(t *testing.T) {
 	}
 
 	rep, err := svc.Tick(ctx)
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
+	mustDo(t, "Tick", err)
 	if rep.Channels != 2 || rep.Messages != 3 || rep.FilesRemoved != 3 || rep.Budgeted {
 		t.Errorf("report = %+v, want 2 channels, 3 messages, 3 files", rep)
 	}
@@ -266,12 +244,8 @@ func TestRetention_PurgeRemovesThumbnails(t *testing.T) {
 	uid, _ := database.CreateUser(ctx, "ret-owner", "hash", 1)
 	_, files := seedRetentionChannel(t, database, "thumbs", uid, dir, 1)
 	st := newTestStorage(t, dir)
-	if err := st.SaveThumb(files[0], []byte("thumb")); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SaveThumb", st.SaveThumb(files[0], []byte("thumb")))
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}))
 	if rep, err := newRetention(t, database, dir).Tick(ctx); err != nil || rep.FilesRemoved != 1 {
 		t.Fatalf("Tick = %+v, %v; want the old attachment removed", rep, err)
 	}
@@ -286,9 +260,7 @@ func TestRetention_BudgetAndResume(t *testing.T) {
 	dir := t.TempDir()
 	uid, _ := database.CreateUser(ctx, "ret-owner", "hash", 1)
 	chID, files := seedRetentionChannel(t, database, "budget", uid, dir, 4)
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}))
 
 	// The database half only, as a crash after commit leaves it: the run
 	// is journaled with its files, none removed.
@@ -297,9 +269,7 @@ func TestRetention_BudgetAndResume(t *testing.T) {
 	if err != nil || len(ids) != 2 {
 		t.Fatal(err)
 	}
-	if err := database.RecordRetentionRunFiles(ctx, runID, 1, 2, swept); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RecordRetentionRunFiles", database.RecordRetentionRunFiles(ctx, runID, 1, 2, swept))
 	for _, f := range swept {
 		if !fileExists(t, filepath.Join(dir, f)) {
 			t.Fatalf("%s should still be on disk", f)
@@ -308,9 +278,7 @@ func TestRetention_BudgetAndResume(t *testing.T) {
 
 	svc := newRetention(t, database, dir)
 	rep, err := svc.Tick(ctx)
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
+	mustDo(t, "Tick", err)
 	for _, f := range swept {
 		if fileExists(t, filepath.Join(dir, f)) {
 			t.Errorf("%s not removed by the resume", f)
@@ -343,9 +311,7 @@ func TestRetention_BudgetAndResume(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id) VALUES ('again', ?, 'f', 'stored-again', 'image/png', 1, ?)`, mid, uid); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "stored-again"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, "stored-again"), []byte("x"), 0o600))
 	if _, err := svc2.Tick(ctx); err == nil {
 		t.Fatal("Tick with a failing remover reported success")
 	}
@@ -369,13 +335,9 @@ func TestRetention_MarkerFailureDeletesNothing(t *testing.T) {
 	dir := t.TempDir()
 	uid, _ := database.CreateUser(ctx, "ret-marker-failure", "hash", 1)
 	chID, files := seedRetentionChannel(t, database, "marker-failure", uid, dir, 1)
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}))
 	markers := newTestMarkers(t)
-	if err := markers.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", markers.Close())
 	svc := NewRetentionService(database)
 	svc.SetFiles(newTestStorage(t, dir))
 	svc.SetMarkers(markers)
@@ -399,22 +361,14 @@ func TestRetention_ReplayMarkersResweepsARestoredBackup(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
 	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
+	mustDo(t, "Migrate", db.Migrate(database))
 	dir := t.TempDir()
 	uid, _ := database.CreateUser(ctx, "ret-owner", "hash", 1)
 	chID, files := seedRetentionChannel(t, database, "restored", uid, dir, 3)
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}))
 	backup := filepath.Join(t.TempDir(), "older.db")
-	if err := database.BackupToSafe(ctx, backup, filepath.Dir(backup)); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "BackupToSafe", database.BackupToSafe(ctx, backup, filepath.Dir(backup)))
 	markers := newTestMarkers(t)
 	svc := NewRetentionService(database)
 	svc.SetFiles(newTestStorage(t, dir))
@@ -423,26 +377,16 @@ func TestRetention_ReplayMarkersResweepsARestoredBackup(t *testing.T) {
 	if rep, err := svc.Tick(ctx); err != nil || rep.Messages != 3 {
 		t.Fatalf("Tick = %+v, %v", rep, err)
 	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", database.Close())
 	data, _ := os.ReadFile(backup)
-	if err := os.WriteFile(dbPath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(dbPath, data, 0o600))
 	for _, f := range files {
-		if err := os.WriteFile(filepath.Join(dir, f), []byte("back"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, f), []byte("back"), 0o600))
 	}
 	restored, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	t.Cleanup(func() { _ = restored.Close() })
-	if err := db.Migrate(restored); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Migrate", db.Migrate(restored))
 	if countMessages(t, restored, chID) != 4 {
 		t.Fatal("the restore did not resurrect the messages")
 	}
@@ -494,4 +438,191 @@ func TestSettings_RetentionDaysValidatedAndAudited(t *testing.T) {
 		t.Errorf("audit detail = %q, want old -> new", detail)
 	}
 	_ = auth.NewRateLimiter()
+}
+
+// pinnedRetentionFixture seeds a channel with three old messages and one old
+// pinned message, sweeps it once under a 7-day window and returns what a later
+// start-up replay needs.
+func pinnedRetentionFixture(t *testing.T) (database *db.DB, dir string, markers *db.MarkerStore, chID, pinnedID int64) {
+	t.Helper()
+	ctx := context.Background()
+	database = newTestDB(t)
+	dir = t.TempDir()
+	uid, _ := database.CreateUser(ctx, "ret-owner", "hash", 1)
+	chID, _ = seedRetentionChannel(t, database, "pins", uid, dir, 3)
+	res, err := database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp, pinned) VALUES (?, ?, 'pinned rules', ?, 1)`,
+		chID, uid, retentionNow.Add(-40*24*time.Hour).Format("2006-01-02 15:04:05"))
+	mustDo(t, "insert pinned", err)
+	pinnedID, _ = res.LastInsertId()
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}))
+	markers = newTestMarkers(t)
+	svc := NewRetentionService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	svc.SetClock(func() time.Time { return retentionNow })
+	if rep, err := svc.Tick(ctx); err != nil || rep.Messages != 3 {
+		t.Fatalf("Tick = %+v, %v", rep, err)
+	}
+	return database, dir, markers, chID, pinnedID
+}
+
+func replayAtStartup(t *testing.T, database *db.DB, dir string, markers *db.MarkerStore) int {
+	t.Helper()
+	fresh := NewRetentionService(database)
+	fresh.SetFiles(newTestStorage(t, dir))
+	fresh.SetMarkers(markers)
+	n, err := fresh.ReplayMarkers(context.Background())
+	mustDo(t, "ReplayMarkers", err)
+	return n
+}
+
+func TestRetention_ReplayKeepsAMessageUnpinnedAfterRetentionWasTurnedOff(t *testing.T) {
+	ctx := context.Background()
+	database, dir, markers, chID, pinnedID := pinnedRetentionFixture(t)
+	mustDo(t, "off", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "0"}))
+	_, err := database.ExecContext(ctx, `UPDATE messages SET pinned = 0, pinned_at = NULL WHERE id = ?`, pinnedID)
+	mustDo(t, "unpin", err)
+
+	if n := replayAtStartup(t, database, dir, markers); n != 0 {
+		t.Errorf("replay removed %d message(s) from a database that already finished the recorded sweep", n)
+	}
+	// The recent message and the unpinned one remain.
+	if got := countMessages(t, database, chID); got != 2 {
+		t.Errorf("messages after start-up = %d, want 2: the unpinned message was deleted although retention is off", got)
+	}
+}
+
+func TestRetention_ReplayStillSweepsWhenTheDatabaseHasNoRecordOfTheSweep(t *testing.T) {
+	ctx := context.Background()
+	database, dir, markers, chID, pinnedID := pinnedRetentionFixture(t)
+	// A restored older backup (or a sweep interrupted before it was recorded)
+	// carries no swept record: the replay must still run.
+	_, err := database.ExecContext(ctx, `DELETE FROM channel_retention_swept WHERE channel_id = ?`, chID)
+	mustDo(t, "forget the finished sweep", err)
+	_, err = database.ExecContext(ctx, `UPDATE messages SET pinned = 0, pinned_at = NULL WHERE id = ?`, pinnedID)
+	mustDo(t, "unpin", err)
+
+	if n := replayAtStartup(t, database, dir, markers); n != 1 {
+		t.Errorf("replay removed %d message(s), want the 1 past the recorded cutoff", n)
+	}
+}
+
+// fileRetentionDB opens a migrated database in a file, which a test can back
+// up and restore over.
+func fileRetentionDB(t *testing.T) (database *db.DB, dbPath string) {
+	t.Helper()
+	dbPath = filepath.Join(t.TempDir(), "main.sqlite")
+	database, err := db.Open(dbPath)
+	mustDo(t, "Open", err)
+	mustDo(t, "Migrate", db.Migrate(database))
+	return database, dbPath
+}
+
+func backUp(t *testing.T, database *db.DB, name string) string {
+	t.Helper()
+	backup := filepath.Join(t.TempDir(), name)
+	mustDo(t, "BackupToSafe", database.BackupToSafe(context.Background(), backup, filepath.Dir(backup)))
+	return backup
+}
+
+// restoreOver closes database, puts backup in its place and opens the result.
+func restoreOver(t *testing.T, database *db.DB, dbPath, backup string) *db.DB {
+	t.Helper()
+	mustDo(t, "Close", database.Close())
+	data, err := os.ReadFile(backup)
+	mustDo(t, "ReadFile", err)
+	mustDo(t, "WriteFile", os.WriteFile(dbPath, data, 0o600))
+	restored, err := db.Open(dbPath)
+	mustDo(t, "Open", err)
+	t.Cleanup(func() { _ = restored.Close() })
+	mustDo(t, "Migrate", db.Migrate(restored))
+	return restored
+}
+
+func tickingRetention(t *testing.T, database *db.DB, dir string, markers *db.MarkerStore) *RetentionService {
+	t.Helper()
+	svc := NewRetentionService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	svc.SetClock(func() time.Time { return retentionNow })
+	return svc
+}
+
+// A later sweep under a longer window removes a message the first sweep left
+// pinned, without moving the marker's cutoff. A backup taken between the two
+// still gets the start-up replay: the marker names the second sweep and the
+// backup names the first.
+func TestRetention_ReplayResweepsABackupTakenBeforeASweepThatKeptTheCutoff(t *testing.T) {
+	ctx := context.Background()
+	database, dbPath := fileRetentionDB(t)
+	dir := t.TempDir()
+	uid, _ := database.CreateUser(ctx, "ret-owner", "hash", 1)
+	chID, _ := seedRetentionChannel(t, database, "longer", uid, dir, 3)
+	res, err := database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp, pinned) VALUES (?, ?, 'pinned rules', ?, 1)`,
+		chID, uid, retentionNow.Add(-40*24*time.Hour).Format("2006-01-02 15:04:05"))
+	mustDo(t, "insert pinned", err)
+	pinnedID, _ := res.LastInsertId()
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}))
+	markers := newTestMarkers(t)
+	svc := tickingRetention(t, database, dir, markers)
+	if rep, err := svc.Tick(ctx); err != nil || rep.Messages != 3 {
+		t.Fatalf("first Tick = %+v, %v", rep, err)
+	}
+	_, err = database.ExecContext(ctx, `UPDATE messages SET pinned = 0, pinned_at = NULL WHERE id = ?`, pinnedID)
+	mustDo(t, "unpin", err)
+	backup := backUp(t, database, "between.db")
+
+	mustDo(t, "longer window", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "30"}))
+	if rep, err := svc.Tick(ctx); err != nil || rep.Messages != 1 {
+		t.Fatalf("second Tick = %+v, %v; want the unpinned 40-day-old message swept", rep, err)
+	}
+	restored := restoreOver(t, database, dbPath, backup)
+	if countMessages(t, restored, chID) != 2 {
+		t.Fatal("the restore did not bring the swept message back")
+	}
+
+	if n := replayAtStartup(t, restored, dir, markers); n != 1 {
+		t.Errorf("replay removed %d message(s), want the 1 the later sweep had removed", n)
+	}
+	if got := countMessages(t, restored, chID); got != 1 {
+		t.Errorf("messages after the replay = %d, want only the fresh one", got)
+	}
+	// The replayed database now names the marker's sweep: the next start leaves it alone.
+	if n := replayAtStartup(t, restored, dir, markers); n != 0 {
+		t.Errorf("a second start-up replay removed %d message(s), want 0", n)
+	}
+}
+
+// A marker file can hold two markers for one channel, the older written under
+// an erasure key since replaced. The replay decides once for the channel, so
+// finishing the older marker's sweep does not make the newer one look done.
+func TestRetention_ReplayRunsEveryMarkerOfAChannelOnARestoredBackup(t *testing.T) {
+	ctx := context.Background()
+	database, dbPath := fileRetentionDB(t)
+	dir := t.TempDir()
+	uid, _ := database.CreateUser(ctx, "ret-owner", "hash", 1)
+	chID, _ := seedRetentionChannel(t, database, "rekeyed", uid, dir, 3)
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}))
+	backup := backUp(t, database, "before.db")
+	markers := newTestMarkers(t)
+	if rep, err := tickingRetention(t, database, dir, markers).Tick(ctx); err != nil || rep.Messages != 3 {
+		t.Fatalf("Tick = %+v, %v", rep, err)
+	}
+	// The older marker reaches only the oldest of the three messages and is replayed first.
+	rawFile, err := sql.Open("sqlite", markers.Path())
+	mustDo(t, "Open", err)
+	defer rawFile.Close()
+	_, err = rawFile.ExecContext(ctx,
+		`INSERT INTO deletion_markers (subject_token, scope, channel_id, cutoff, state, erased_at)
+		 VALUES ('written-under-the-previous-key', 'messages', ?, ?, 'recorded', '2020-01-01 00:00:00')`,
+		chID, retentionNow.Add(-31*24*time.Hour-12*time.Hour).Format("2006-01-02 15:04:05"))
+	mustDo(t, "insert the older marker", err)
+
+	restored := restoreOver(t, database, dbPath, backup)
+	if n := replayAtStartup(t, restored, dir, markers); n != 3 {
+		t.Errorf("replay removed %d message(s), want all 3 the sweep had removed", n)
+	}
+	if got := countMessages(t, restored, chID); got != 1 {
+		t.Errorf("messages after the replay = %d, want only the fresh one", got)
+	}
 }

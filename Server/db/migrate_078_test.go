@@ -18,9 +18,7 @@ const (
 func migratedAt077(t *testing.T) *db.DB {
 	t.Helper()
 	database := openMemory(t)
-	if err := db.MigrateFS(database, migrationsUpTo(t, "078_")); err != nil {
-		t.Fatalf("MigrateFS up to 077: %v", err)
-	}
+	mustDo(t, "MigrateFS up to 077", db.MigrateFS(database, migrationsUpTo(t, "078_")))
 	return database
 }
 
@@ -42,9 +40,7 @@ func TestMigration078_GrantsUntouchedAdminAndModerator(t *testing.T) {
 		t.Fatalf("Admin before 078 = %d, want %d", got, untouchedAdmin)
 	}
 	// Stop after 078: later migrations (080) change these roles again.
-	if err := db.MigrateFS(database, migrationsUpTo(t, "079_")); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	mustDo(t, "Migrate", db.MigrateFS(database, migrationsUpTo(t, "079_")))
 	for _, tc := range []struct {
 		id   int64
 		name string
@@ -81,9 +77,7 @@ func TestMigration078_CustomisedRolesUnchangedOrCleared(t *testing.T) {
 	exec(`INSERT INTO roles (id, name, permissions, position) VALUES (11, 'Mod Twin', ?, 44)`, untouchedModerator|bit23)
 
 	// Stop after 078: later migrations (080) change these roles again.
-	if err := db.MigrateFS(database, migrationsUpTo(t, "079_")); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	mustDo(t, "Migrate", db.MigrateFS(database, migrationsUpTo(t, "079_")))
 	if got, want := rolePerms(t, database, 3), untouchedModerator&^int64(0x1); got != want {
 		t.Errorf("customised Moderator = %d, want %d unchanged", got, want)
 	}

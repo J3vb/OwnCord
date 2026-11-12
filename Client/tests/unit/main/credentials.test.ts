@@ -3,9 +3,19 @@ import * as mocks from "../../helpers/mainMocks";
 import { emitTauriEvent } from "../helpers/ws-mocks";
 import { expectConsole } from "../../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
-import { deleteCredential, loadCredential, saveCredential } from "@lib/net/credentials";
+import {
+  deleteCredential,
+  loadCredential,
+  resumeSavedSession,
+  saveCredential,
+} from "@lib/net/credentials";
 import { createMainPage } from "@pages/MainPage";
-import { latestConnectPage, loginAndReachAuthOk, useMainHarness } from "../../helpers/mainHarness";
+import {
+  latestConnectPage,
+  loginAndReachAuthOk,
+  readyFrame,
+  useMainHarness,
+} from "../../helpers/mainHarness";
 
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
@@ -20,7 +30,7 @@ vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
-vi.mock("@components/CertMismatchModal", () => mocks.certMismatchModalMock());
+vi.mock("../../../src/features/connection/CertMismatchModal", () => mocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mocks.netCertReconnectMock());
 vi.mock("@lib/presence/profiles", (importOriginal) => mocks.presenceProfilesMock(importOriginal));
 vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());
@@ -46,11 +56,7 @@ describe("main.ts remember-password opt-out delete", () => {
     // delete must not depend on comparing it to the login username — this
     // stubs loadCredential to return a DIFFERENT username than the one
     // logging in, the case that used to make the delete skip.
-    vi.mocked(loadCredential).mockResolvedValue({
-      username: "Bob",
-      token: "tok",
-      hasPassword: true,
-    });
+    vi.mocked(loadCredential).mockResolvedValue({ username: "Bob", hasPassword: true });
     vi.mocked(deleteCredential).mockResolvedValue(true);
 
     await loginAndReachAuthOk("case-fold.example:8443", "alice", {
@@ -209,7 +215,7 @@ describe("main.ts startup resume of the stored token", () => {
     sessionStorage.clear();
     mockProfileManager.getAll.mockReturnValue([]);
     mockProfileManager.getAutoConnectProfile.mockReturnValue(null);
-    vi.mocked(loadCredential).mockReset().mockResolvedValue(null);
+    vi.mocked(resumeSavedSession).mockReset().mockResolvedValue(null);
   });
 
   /** Re-enter the connect page the way a fresh launch does: no skip flag. */
@@ -219,7 +225,7 @@ describe("main.ts startup resume of the stored token", () => {
       server_name: "Elsewhere",
       motd: "",
     });
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
     vi.mocked(createMainPage).mockClear();
     // A fresh launch has no logout behind it, so the skip flag a session end
@@ -245,10 +251,10 @@ describe("main.ts startup resume of the stored token", () => {
   it("resumes the auto-connect profile on a token alone (no remembered password)", async () => {
     mockProfileManager.getAll.mockReturnValue([autoProfile]);
     mockProfileManager.getAutoConnectProfile.mockReturnValue(autoProfile as never);
-    vi.mocked(loadCredential).mockResolvedValue({
+    vi.mocked(resumeSavedSession).mockResolvedValue({
+      outcome: "resumed",
       username: "alex",
       token: "stored-token",
-      hasPassword: false,
     });
     await relaunch();
     expect(lastPage().showAutoConnecting).toHaveBeenCalledWith("Resume Co");
@@ -257,10 +263,10 @@ describe("main.ts startup resume of the stored token", () => {
   it("lands on the login form, not the main page, when the stored token is rejected", async () => {
     mockProfileManager.getAll.mockReturnValue([autoProfile]);
     mockProfileManager.getAutoConnectProfile.mockReturnValue(autoProfile as never);
-    vi.mocked(loadCredential).mockResolvedValue({
+    vi.mocked(resumeSavedSession).mockResolvedValue({
+      outcome: "resumed",
       username: "alex",
       token: "expired-token",
-      hasPassword: false,
     });
     await relaunch();
     expect(lastPage().showAutoConnecting).toHaveBeenCalled();
@@ -278,10 +284,10 @@ describe("main.ts startup resume of the stored token", () => {
   it("resumes nothing when the profile was deleted", async () => {
     mockProfileManager.getAll.mockReturnValue([]);
     mockProfileManager.getAutoConnectProfile.mockReturnValue(null);
-    vi.mocked(loadCredential).mockResolvedValue({
+    vi.mocked(resumeSavedSession).mockResolvedValue({
+      outcome: "resumed",
       username: "alex",
       token: "stale-token",
-      hasPassword: false,
     });
     await relaunch();
     expect(lastPage().showAutoConnecting).not.toHaveBeenCalled();
@@ -354,7 +360,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end", () =
 
     // `ready` arrives and arms the overlay's onReady hand-off (which would
     // otherwise call router.navigate("main") on its own on the next task).
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
 
     // A queued ban/shutdown task lands before the hand-off task runs.
     clearAuth();
@@ -365,7 +371,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end", () =
 
     // Let the hand-off's deadline pass. Without the subscriber's
     // connectedOverlay.destroy() (its AbortController is what cancels the
-    // pending setTimeout — see ConnectedOverlay.ts), the already-armed timer
+    // pending setTimeout — see features/connection/ConnectedOverlay.ts), the already-armed timer
     // still fires onReady() -> router.navigate("main"), mounting MainPage on a
     // cleared authStore and a disconnected socket.
     await vi.advanceTimersByTimeAsync(800);
@@ -389,7 +395,7 @@ describe("main.ts connect-page skip-auto-login flag", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     // ConnectedOverlay.markReady() hands off on the next task, which starts
     // router.navigate("main") — main.ts's only route away from "connect",
     // needed so a later navigate("connect") is a real transition and not a
@@ -438,7 +444,7 @@ describe("main.ts quick-switch resume", () => {
   afterEach(() => {
     sessionStorage.clear();
     mockProfileManager.getAll.mockReturnValue([]);
-    vi.mocked(loadCredential).mockResolvedValue(null);
+    vi.mocked(resumeSavedSession).mockResolvedValue(null);
     mockProfileManager.loadProfiles.mockResolvedValue(undefined);
   });
 
@@ -450,13 +456,13 @@ describe("main.ts quick-switch resume", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
     mockProfileManager.getAll.mockReturnValue(profiles);
-    vi.mocked(loadCredential).mockResolvedValue({
+    vi.mocked(resumeSavedSession).mockResolvedValue({
+      outcome: "resumed",
       username: "alex",
       token: "stored-token",
-      hasPassword: false,
     });
     sessionStorage.setItem("owncord:quick-switch-target", target);
     clearAuth();
@@ -493,10 +499,10 @@ describe("main.ts quick-switch resume", () => {
     mockLogin.mockResolvedValue({ token: "manual-token", requires_2fa: false });
     await capturedConnectCallbacks.onLogin!(target, "alex", "hunter2");
     expectConsole("warn", /\[main\] Credential delete failed/);
-    vi.mocked(loadCredential).mockClear();
+    vi.mocked(resumeSavedSession).mockClear();
     release();
     await flush();
-    expect(loadCredential).not.toHaveBeenCalled();
+    expect(resumeSavedSession).not.toHaveBeenCalled();
     expect(lastPage().showAutoConnecting).not.toHaveBeenCalled();
   });
 });

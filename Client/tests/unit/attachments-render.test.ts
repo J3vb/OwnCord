@@ -34,7 +34,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@tauri-apps/plugin-dialog", () => mocks.dialogMock(saveMock));
 vi.mock("@tauri-apps/plugin-fs", () => mocks.fsMock(writeFileMock));
 vi.mock("@lib/icons", () => mocks.iconsMock());
-vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
+vi.mock("/src/features/messaging/content/mediaVisibility", () => mocks.mediaVisibilityMock());
 vi.mock("../../src/features/messaging/content/media", () => mocks.contentMediaMock());
 
 const { showToastMock } = vi.hoisted(() => ({ showToastMock: vi.fn() }));
@@ -538,6 +538,13 @@ describe("renderAttachment — server thumbnails", () => {
   it("requests /thumb for an image row when the server has thumbnails", async () => {
     authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
     const el = renderAttachment(att);
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb"]);
+  });
+
+  it("requests /thumb for a WebP row, which the server scales too", async () => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+    const el = renderAttachment({ ...att, filename: "photo.webp", mime: "image/webp" });
     await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
     expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb"]);
   });

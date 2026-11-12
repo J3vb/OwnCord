@@ -42,9 +42,11 @@ import type {
   SettingsStore,
   SocketTransport,
   SystemIdle,
+  SystemRegion,
   TrayStatus,
   WindowControl,
   WindowPrefs,
+  GpuAdapter,
 } from "../contracts";
 import type { SocketConnection } from "../contracts/socket";
 import { credentials as browserCredentials } from "./credentials";
@@ -109,6 +111,7 @@ const autostart: Autostart = {
 const inertCredentials: CredentialStore = {
   save: async () => false,
   load: async () => null,
+  resume: async () => null,
   delete: async () => false,
   loginWithSavedPassword: async () => null,
 };
@@ -281,6 +284,11 @@ const systemIdle: SystemIdle = {
   idleMs: async () => null,
 };
 
+// navigator.language is all a page can know.
+const systemRegion: SystemRegion = {
+  localeTag: async () => null,
+};
+
 const trayStatus: TrayStatus = {
   onStatusChange: inertUnsubscribe,
 };
@@ -313,6 +321,12 @@ const windowPrefs: WindowPrefs = {
   set: async () => false,
 };
 
+const gpuAdapter: GpuAdapter = {
+  available: false,
+  list: async () => null,
+  set: async () => false,
+};
+
 export const browser: Platform = {
   ...secureMembers,
   appAudio,
@@ -320,6 +334,10 @@ export const browser: Platform = {
   appProcess,
   autostart,
   callService,
+  meteredNetwork: {
+    isMetered: () => false,
+    start: async () => undefined,
+  },
   deepLinks,
   devTools,
   fileSaver,
@@ -333,11 +351,13 @@ export const browser: Platform = {
   serverScope,
   shareSheet,
   systemIdle,
+  systemRegion,
   trayStatus,
   updater,
   urlOpener,
   window: windowControl,
   windowPrefs,
+  gpuAdapter,
 };
 
 /** The name every caller imports the registry by; the web build swaps modules,

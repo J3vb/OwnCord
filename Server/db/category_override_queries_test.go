@@ -26,19 +26,13 @@ func newCatFixture(t *testing.T, channels int) *catFixture {
 	ctx := context.Background()
 	f := &catFixture{database: database, role: 4}
 	cat, err := database.CreateChannelCategory(ctx, "Games")
-	if err != nil {
-		t.Fatalf("CreateChannelCategory: %v", err)
-	}
+	mustDo(t, "CreateChannelCategory", err)
 	other, err := database.CreateChannelCategory(ctx, "Music")
-	if err != nil {
-		t.Fatalf("CreateChannelCategory: %v", err)
-	}
+	mustDo(t, "CreateChannelCategory", err)
 	f.cat, f.other = cat.ID, other.ID
 	for i := range channels {
 		id, err := database.CreateChannelIn(ctx, db.NewChannel{Name: string(rune('a' + i)), Type: "text", CategoryID: f.cat})
-		if err != nil {
-			t.Fatalf("CreateChannelIn: %v", err)
-		}
+		mustDo(t, "CreateChannelIn", err)
 		f.chs = append(f.chs, id)
 	}
 	return f
@@ -47,34 +41,26 @@ func newCatFixture(t *testing.T, channels int) *catFixture {
 func (f *catFixture) synced(t *testing.T, id int64) bool {
 	t.Helper()
 	ok, err := f.database.ChannelPermissionsSynced(context.Background(), id)
-	if err != nil {
-		t.Fatalf("ChannelPermissionsSynced: %v", err)
-	}
+	mustDo(t, "ChannelPermissionsSynced", err)
 	return ok
 }
 
 func (f *catFixture) row(t *testing.T, ch int64) (int64, int64) {
 	t.Helper()
 	a, d, err := f.database.GetChannelPermissions(context.Background(), ch, f.role)
-	if err != nil {
-		t.Fatalf("GetChannelPermissions: %v", err)
-	}
+	mustDo(t, "GetChannelPermissions", err)
 	return a, d
 }
 
 func (f *catFixture) move(t *testing.T, ch, category int64) {
 	t.Helper()
-	if err := f.database.AdminUpdateChannel(context.Background(), ch, db.ChannelUpdate{Name: "moved", CategoryID: category}); err != nil {
-		t.Fatalf("AdminUpdateChannel: %v", err)
-	}
+	mustDo(t, "AdminUpdateChannel", f.database.AdminUpdateChannel(context.Background(), ch, db.ChannelUpdate{Name: "moved", CategoryID: category}))
 }
 
 func TestMigrate_076NothingIsSynced(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
-	if err := db.MigrateFS(database, migrationsUpTo(t, "076_")); err != nil {
-		t.Fatalf("MigrateFS() building pre-076 schema: %v", err)
-	}
+	mustDo(t, "MigrateFS() building pre-076 schema", db.MigrateFS(database, migrationsUpTo(t, "076_")))
 	if columnExists(t, database, "channels", "permissions_synced") {
 		t.Fatal("the pre-076 schema should not have permissions_synced")
 	}
@@ -87,9 +73,7 @@ func TestMigrate_076NothingIsSynced(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (1, 4, 2, 0)`); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() applying 076: %v", err)
-	}
+	mustDo(t, "Migrate() applying 076", db.Migrate(database))
 	if ok, err := database.ChannelPermissionsSynced(ctx, 1); err != nil || ok {
 		t.Errorf("existing channel synced = %v, %v; the backfill must sync nothing", ok, err)
 	}
@@ -116,9 +100,7 @@ func TestCategoryOverride_TemplateIsCopiedNeverInherited(t *testing.T) {
 	}
 	// An unsynced channel in the same category sees nothing of the template.
 	loose, err := f.database.CreateChannelIn(ctx, db.NewChannel{Name: "loose", Type: "text", CategoryID: f.cat})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannelIn", err)
 	if err := f.database.DeleteChannelOverride(ctx, loose, f.role); err != nil { // direct edit: unsync
 		t.Fatal(err)
 	}
@@ -151,9 +133,7 @@ func TestCategoryOverride_GuardRefusalWritesNothing(t *testing.T) {
 		}
 	}
 	roles, err := f.database.ListCategoryRoleOverrides(ctx, f.cat)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListCategoryRoleOverrides", err)
 	for _, r := range roles {
 		if r.Allow != 0 || r.Deny != 0 {
 			t.Errorf("category row for role %d = (%d,%d), want nothing written", r.RoleID, r.Allow, r.Deny)
@@ -248,9 +228,7 @@ func TestCategoryOverride_RacingWritesAndMovesNeverLeaveASyncedChannelBehind(t *
 	}
 	wg.Wait()
 	roles, err := f.database.ListCategoryRoleOverrides(ctx, f.cat)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListCategoryRoleOverrides", err)
 	var catA, catD int64
 	for _, r := range roles {
 		if r.RoleID == f.role {
@@ -274,9 +252,7 @@ func TestSyncChannelPermissions_Errors(t *testing.T) {
 		t.Errorf("missing channel: err = %v, want ErrNotFound", err)
 	}
 	loose, err := f.database.CreateChannelIn(ctx, db.NewChannel{Name: "loose", Type: "text"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannelIn", err)
 	if _, err := f.database.SyncChannelPermissions(ctx, loose, nil); !errors.Is(err, db.ErrUncategorized) {
 		t.Errorf("uncategorized: err = %v, want ErrUncategorized", err)
 	}
@@ -296,9 +272,7 @@ func TestDeleteChannelCategory_UnsyncsItsChannelsAndDropsTheTemplate(t *testing.
 	if _, err := f.database.WriteCategoryRoleOverride(ctx, f.cat, f.role, 2, 0, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.database.DeleteChannelCategory(ctx, f.cat); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteChannelCategory", f.database.DeleteChannelCategory(ctx, f.cat))
 	for _, ch := range f.chs {
 		if f.synced(t, ch) {
 			t.Errorf("channel %d still synced", ch)
@@ -319,9 +293,7 @@ func TestCategoryOverride_UserRowsClearAndPreview(t *testing.T) {
 	uid := seedUser(t, f.database, "template-user")
 
 	touched, err := f.database.WriteCategoryUserOverride(ctx, f.cat, uid, 4, 2, nil)
-	if err != nil {
-		t.Fatalf("WriteCategoryUserOverride: %v", err)
-	}
+	mustDo(t, "WriteCategoryUserOverride", err)
 	if len(touched) != 2 {
 		t.Errorf("touched %v, want both synced channels", touched)
 	}
@@ -340,9 +312,7 @@ func TestCategoryOverride_UserRowsClearAndPreview(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan, err := f.database.PreviewChannelSync(ctx, f.chs[0], f.cat)
-	if err != nil {
-		t.Fatalf("PreviewChannelSync: %v", err)
-	}
+	mustDo(t, "PreviewChannelSync", err)
 	if plan.ChannelID != f.chs[0] || plan.CategoryID != f.cat || len(plan.Written.Roles) != 1 || len(plan.Written.Users) != 1 {
 		t.Errorf("plan = %+v", plan)
 	}
@@ -392,17 +362,13 @@ func TestSyncChannelPermissions_ReplacesRolesAndMembersWithTheTemplate(t *testin
 		t.Fatal(err)
 	}
 	// A direct edit unsyncs the channel and leaves it with its own row.
-	if err := f.database.UpsertChannelOverride(ctx, f.chs[0], f.role, 1, 0); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertChannelOverride", f.database.UpsertChannelOverride(ctx, f.chs[0], f.role, 1, 0))
 	if f.synced(t, f.chs[0]) {
 		t.Fatal("a direct edit should unsync the channel")
 	}
 	var seen db.ChannelSyncPlan
 	plan, err := f.database.SyncChannelPermissions(ctx, f.chs[0], func(p db.ChannelSyncPlan) error { seen = p; return nil })
-	if err != nil {
-		t.Fatalf("SyncChannelPermissions: %v", err)
-	}
+	mustDo(t, "SyncChannelPermissions", err)
 	if len(seen.Removed.Roles) != 1 || seen.Removed.Roles[0].Allow != 1 || len(plan.Written.Users) != 1 {
 		t.Errorf("guard saw %+v, plan %+v", seen, plan)
 	}
@@ -462,9 +428,7 @@ func TestCategoryOverride_CreateRacingATemplateWrite(t *testing.T) {
 		f := newCatFixture(t, 0)
 		ctx := context.Background()
 		id, err := f.database.CreateChannelIn(ctx, db.NewChannel{Name: "racer", Type: "text", CategoryID: f.cat})
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "CreateChannelIn", err)
 		if _, err := f.database.WriteCategoryRoleOverride(ctx, f.cat, f.role, 2, 1, nil); err != nil {
 			t.Fatal(err)
 		}

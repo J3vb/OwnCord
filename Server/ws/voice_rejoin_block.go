@@ -1,77 +1,27 @@
 package ws
 
-// voice_rejoin_block.go — a moderator's removal is not undone by a reconnect.
-//
-// A client whose voice was reconnecting when a moderator kicked or moved it
-// can miss the unsequenced voice_disconnected or voice_moved, and its
-// reconnect loop answers the released membership with voice_join (P2-T5). For
-// voiceRejoinBlockWindow after any moderator kick or move, an automatic
-// voice_join from that user to the channel it was removed from is refused.
-// The user's own join (payload user_initiated) is not, and clears the block:
-// a removed user may always click back into a channel they can still join.
+// voice_rejoin_block.go: a moderator's removal is not undone by a reconnect. A client whose
+// voice was reconnecting when a moderator kicked or moved it can miss the unsequenced
+// voice_disconnected or voice_moved, and its reconnect loop answers the released membership
+// with voice_join. For voiceRejoinBlockWindow after a moderator kick or move, an automatic
+// voice_join to the channel the user was removed from is refused; the user's own join
+// (user_initiated) is not, and clears the block.
 
-import (
-	"time"
+import "time"
 
-	"github.com/J3vb/OwnCord/Server/syncutil"
-)
-
-// voiceRejoinBlockWindow is how long a moderator removal refuses the removed
-// user's voice_join to the same channel. A var so tests can shrink it.
+// voiceRejoinBlockWindow is how long a moderator removal refuses the user's voice_join to the same channel. A
+// var so tests can shrink it.
 var voiceRejoinBlockWindow = 60 * time.Second
 
-// voiceRejoinRefusal is the error message of a refused voice_join.
 const voiceRejoinRefusal = "You were removed from this voice channel"
-
-type voiceRejoinBlock struct {
-	channelID int64
-	until     time.Time
-}
-
-// voiceRejoinBlockState is the userID -> latest removal map. A later removal
-// replaces the earlier one; expired entries are dropped when read.
-type voiceRejoinBlockState struct {
-	mu      syncutil.Ranked[lockRankLeaf]
-	entries map[int64]voiceRejoinBlock
-}
-
-func (s *voiceRejoinBlockState) block(userID, channelID int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.entries == nil {
-		s.entries = map[int64]voiceRejoinBlock{}
-	}
-	s.entries[userID] = voiceRejoinBlock{channelID: channelID, until: time.Now().Add(voiceRejoinBlockWindow)}
-}
-
-func (s *voiceRejoinBlockState) blocked(userID, channelID int64) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e, ok := s.entries[userID]
-	if !ok {
-		return false
-	}
-	if !time.Now().Before(e.until) {
-		delete(s.entries, userID)
-		return false
-	}
-	return e.channelID == channelID
-}
-
-func (s *voiceRejoinBlockState) clear(userID int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.entries, userID)
-}
 
 // BlockVoiceRejoin records a moderator removal of userID from channelID.
 func (h *Hub) BlockVoiceRejoin(userID, channelID int64) {
-	h.voiceHub.rejoinBlocks.block(userID, channelID)
+	h.voiceHub.rejoinBlocks.Block(userID, channelID, time.Now().Add(voiceRejoinBlockWindow))
 }
 
-// voiceRejoinBlocker lets the moderation handlers record a removal. Like
-// voiceChannelDisconnector, an optional extension of VoiceModerator that the
-// production moderator must keep satisfying.
+// voiceRejoinBlocker lets the moderation handlers record a removal; like voiceChannelDisconnector, an
+// optional VoiceModerator extension the production moderator must keep satisfying.
 type voiceRejoinBlocker interface {
 	BlockVoiceRejoin(userID, channelID int64)
 }

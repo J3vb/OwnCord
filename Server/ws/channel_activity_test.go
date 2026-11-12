@@ -34,14 +34,7 @@ func newActivityFixture(t *testing.T) *activityFixture {
 // leaves the production mention path (the caller starts the worker).
 func newActivityFixtureStore(t *testing.T, wrap func(*db.DB) service.Store, inlineMentions bool) *activityFixture {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := newTeardownTestDB(t)
 	limiter := auth.NewRateLimiter()
 	svc := service.New(wrap(database), limiter)
 	hub := newTestHub(t, database, limiter, svc)
@@ -50,10 +43,7 @@ func newActivityFixtureStore(t *testing.T, wrap func(*db.DB) service.Store, inli
 	}
 
 	ctx := context.Background()
-	textID, err := database.CreateChannel(ctx, "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(text): %v", err)
-	}
+	textID := mustCreateChannel(t, database, "general", "text")
 	voiceID, err := database.CreateChannel(ctx, "voice", "voice", "", "", 1)
 	if err != nil {
 		t.Fatalf("CreateChannel(voice): %v", err)

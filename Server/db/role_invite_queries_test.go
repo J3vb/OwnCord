@@ -14,9 +14,7 @@ func TestGetRoleByID_Found(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 4) // Member — inserted by migration
-	if err != nil {
-		t.Fatalf("GetRoleByID: %v", err)
-	}
+	mustDo(t, "GetRoleByID", err)
 	if role == nil {
 		t.Fatal("GetRoleByID returned nil for Member role")
 	}
@@ -32,9 +30,7 @@ func TestGetRoleByID_NotFound(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 9999)
-	if err != nil {
-		t.Fatalf("GetRoleByID(not found): %v", err)
-	}
+	mustDo(t, "GetRoleByID(not found)", err)
 	if role != nil {
 		t.Error("GetRoleByID returned non-nil for missing role")
 	}
@@ -44,9 +40,7 @@ func TestGetRoleByID_OwnerHasAllPermissions(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 1) // Owner
-	if err != nil {
-		t.Fatalf("GetRoleByID Owner: %v", err)
-	}
+	mustDo(t, "GetRoleByID Owner", err)
 	if role == nil {
 		t.Fatal("GetRoleByID returned nil for Owner role")
 	}
@@ -77,9 +71,7 @@ func TestListRoles_ReturnsFourDefaultRoles(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 
 	roles, err := database.ListRoles(context.Background())
-	if err != nil {
-		t.Fatalf("ListRoles: %v", err)
-	}
+	mustDo(t, "ListRoles", err)
 	if len(roles) != 4 {
 		t.Errorf("ListRoles count = %d, want 4", len(roles))
 	}
@@ -89,9 +81,7 @@ func TestListRoles_OrderedByPositionDesc(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 
 	roles, err := database.ListRoles(context.Background())
-	if err != nil {
-		t.Fatalf("ListRoles: %v", err)
-	}
+	mustDo(t, "ListRoles", err)
 
 	for i := 1; i < len(roles); i++ {
 		if roles[i].Position > roles[i-1].Position {
@@ -107,9 +97,7 @@ func TestListInvites_Empty(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 
 	invites, err := database.ListInvites(context.Background())
-	if err != nil {
-		t.Fatalf("ListInvites empty: %v", err)
-	}
+	mustDo(t, "ListInvites empty", err)
 	if len(invites) != 0 {
 		t.Errorf("ListInvites empty = %d items, want 0", len(invites))
 	}
@@ -124,9 +112,7 @@ func TestListInvites_Multiple(t *testing.T) {
 	_, _ = database.CreateInvite(context.Background(), uid, 0, nil)
 
 	invites, err := database.ListInvites(context.Background())
-	if err != nil {
-		t.Fatalf("ListInvites multiple: %v", err)
-	}
+	mustDo(t, "ListInvites multiple", err)
 	if len(invites) != 3 {
 		t.Errorf("ListInvites count = %d, want 3", len(invites))
 	}
@@ -141,9 +127,7 @@ func TestListInvites_IncludesRevokedInvites(t *testing.T) {
 	_, _ = database.CreateInvite(context.Background(), uid, 0, nil) // active
 
 	invites, err := database.ListInvites(context.Background())
-	if err != nil {
-		t.Fatalf("ListInvites with revoked: %v", err)
-	}
+	mustDo(t, "ListInvites with revoked", err)
 	if len(invites) != 2 {
 		t.Errorf("ListInvites count = %d, want 2", len(invites))
 	}

@@ -48,9 +48,7 @@ func newRRFixture(t *testing.T, run bool) *rrFixture {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 	// Members read nothing, so a promotion to Moderator is what grants access.
-	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = 0 WHERE id = ?`, rrMemberRole); err != nil {
-		t.Fatalf("strip member role: %v", err)
-	}
+	mustExec(t, database, `UPDATE roles SET permissions = 0 WHERE id = ?`, rrMemberRole)
 	f.hub = newTestHub(t, database, nil, nil)
 	f.hub.perms = service.NewPermissionService(database, permissions.NewChecker(database))
 	if err := f.hub.perms.RefreshTimeouts(ctx); err != nil {

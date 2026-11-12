@@ -23,14 +23,7 @@ const oc0006VideoStreamRoleID = int64(211)
 
 func newOC0006VideoStreamDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := newTeardownTestDB(t)
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO roles (id, name, color, permissions, position, is_default)
 		 VALUES (?, 'oc-0006-video', NULL, ?, 5, 0)`,
@@ -51,24 +44,6 @@ func seedOC0006VideoStreamUser(t *testing.T, database *db.DB, username string) i
 	return uid
 }
 
-// mustCreateVideoCappedChannel2 mirrors mustCreateVideoCappedChannel from
-// oc_0023_screenshare_video_limit_test.go (kept file-local to avoid a
-// cross-file test helper dependency).
-func mustCreateVideoCappedChannel2(t *testing.T, database *db.DB, name string, maxVideo int) int64 {
-	t.Helper()
-	chID, err := database.CreateChannel(context.Background(), name, "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel %s: %v", name, err)
-	}
-	if err := database.AdminUpdateChannel(context.Background(), chID, db.ChannelUpdate{
-		Name:          name,
-		VoiceMaxVideo: maxVideo,
-	}); err != nil {
-		t.Fatalf("AdminUpdateChannel %s: %v", name, err)
-	}
-	return chID
-}
-
 // A channel capped at 2 simultaneous video streams. Alice alone publishes
 // both her camera and her screenshare -- that is 2 streams from one row.
 // Bob's camera enable must then be refused: the cap is already saturated by
@@ -78,16 +53,12 @@ func mustCreateVideoCappedChannel2(t *testing.T, database *db.DB, name string, m
 func TestEnableVideoSlot_SameUserDoubleStreamCountsTwoSlots(t *testing.T) {
 	ctx := context.Background()
 	database := newOC0006VideoStreamDB(t)
-	chID := mustCreateVideoCappedChannel2(t, database, "capped-room-samerow", 2)
+	chID := mustCreateVideoCappedChannel(t, database, "capped-room-samerow", 2)
 
 	alice := seedOC0006VideoStreamUser(t, database, "alice-double")
 	bob := seedOC0006VideoStreamUser(t, database, "bob-third")
-	if err := database.JoinVoiceChannel(ctx, alice, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel alice: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, bob, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel bob: %v", err)
-	}
+	mustJoinVoice(t, database, alice, chID)
+	mustJoinVoice(t, database, bob, chID)
 
 	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 

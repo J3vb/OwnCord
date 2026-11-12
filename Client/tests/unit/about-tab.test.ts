@@ -77,7 +77,7 @@ describe("About tab", () => {
 
     const install = card.querySelector<HTMLButtonElement>(".about-update-install")!;
     install.click();
-    expect(mockInstall).toHaveBeenCalledWith("https://s.example");
+    expect(mockInstall).toHaveBeenCalledWith("https://s.example", "2.2.0");
 
     installListener({ status: "downloading", progress: null });
     expect(install.disabled).toBe(true);

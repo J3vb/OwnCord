@@ -14,14 +14,7 @@ import (
 func TestRollback074_Rehearsal(t *testing.T) {
 	database := openMigratedMemoryInternal(t)
 	ctx := context.Background()
-	count := func(q string, args ...any) int {
-		t.Helper()
-		var n int
-		if err := database.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
-		return n
-	}
+	count := rowCounter(t, database)
 	u, err := database.CreateUser(ctx, "rt", "hash", 4)
 	if err != nil {
 		t.Fatal(err)

@@ -3,18 +3,18 @@ import type { SidebarAreaOptions } from "../SidebarArea";
 import type { Disposable } from "@lib/disposable";
 import type { ChannelType } from "@lib/types";
 import type { MountableComponent } from "@lib/text/safeRender";
-import type { DmSidebar } from "@components/DmSidebar";
-import type { DmMenuActions } from "@components/dmContextMenu";
-import type { VoiceWidgetOptions } from "@components/VoiceWidget";
+import type { DmSidebar } from "../../../features/direct-messages/DmSidebar";
+import type { DmMenuActions } from "../../../features/direct-messages/dmContextMenu";
+import type { VoiceWidgetOptions } from "../../../features/voice/VoiceWidget";
 import type { SidebarMemberSectionResult } from "../SidebarMemberSection";
 import type { MemberPanel } from "../../../features/members/memberPanel";
-import type { DmHelperDeps } from "../SidebarDmHelpers";
+import type { DmHelperDeps } from "../../../features/direct-messages/SidebarDmHelpers";
 import type { ModalInstance } from "@lib/ui/modalFactory";
 import type { CategoryRef } from "@stores/channels.store";
 import type { ProfileManager } from "@lib/presence/profiles";
 import type { CategoryDialogs } from "../categoryDialogs";
 import type { InviteManagerController } from "../OverlayManagers";
-import type { LazyScreen } from "../../../components/lazyScreen";
+import type { LazyScreen } from "@lib/ui/lazyScreen";
 import type { VoiceWidgetCallbacks } from "../VoiceCallbacks";
 
 /** The values one sidebar builds, shared by its build steps. */
@@ -217,7 +217,7 @@ export interface SidebarScope {
   // state, so a late mount shows a session that is already under way. It stays
   // mounted once loaded: it hides itself when the user is not in voice.
   // One loader per sidebar; the browser's module cache shares the code itself.
-  voiceWidgetScreen: LazyScreen<typeof import("@components/VoiceWidget")>;
+  voiceWidgetScreen: LazyScreen<typeof import("../../../features/voice/VoiceWidget")>;
   voiceWidgetRequested: boolean;
   // Not in `children`: the page copies that list at build, before this loads.
   voiceWidget: MountableComponent | null;

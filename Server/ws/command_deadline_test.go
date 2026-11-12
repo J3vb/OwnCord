@@ -115,10 +115,7 @@ func TestHandleMessage_DeadlineSendsRequestTimeout(t *testing.T) {
 
 	user := seedOwnerUser(t, database, "deadline-owner")
 	chID := seedTestChannel(t, database, "deadline-chan")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 32)
 
 	release := pinWriter(t, database)
 	cmid := deadlineClientMessageID()
@@ -166,8 +163,10 @@ func TestHandleMessage_DeadlineSendsRequestTimeout(t *testing.T) {
 	}
 }
 
-// commitThenStallStore sleeps past the deadline right after a message commits,
-// modelling a deadline that expires between Commit and the reply.
+// commitThenStallStore waits for the frame's deadline right after a message
+// commits, modelling a deadline that expires between Commit and the reply.
+// Waiting on the context instead of a fixed sleep keeps the expiry after the
+// commit however slow the runner is; stall only bounds the wait.
 type commitThenStallStore struct {
 	service.Store
 	stall time.Duration
@@ -175,31 +174,31 @@ type commitThenStallStore struct {
 
 func (s commitThenStallStore) CreateMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error) {
 	saved, err := s.Store.CreateMessageDelivery(ctx, p)
-	time.Sleep(s.stall)
+	select {
+	case <-ctx.Done():
+	case <-time.After(s.stall):
+	}
 	return saved, err
 }
 
 // Edge 2: a deadline that expires after the commit still acknowledges and
 // broadcasts, because the handler returned success.
 func TestHandleMessage_DeadlineAfterCommitStillSucceeds(t *testing.T) {
-	ws.SetCommandDeadlineForTest(t, 50*time.Millisecond)
+	ws.SetCommandDeadlineForTest(t, time.Second)
 	database := openFileDeadlineDB(t)
 	limiter := auth.NewRateLimiter()
-	st := commitThenStallStore{Store: database, stall: 150 * time.Millisecond}
+	st := commitThenStallStore{Store: database, stall: 5 * time.Second}
 	hub := newTestHubDeps(t, database, limiter, service.New(st, limiter))
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
 	user := seedOwnerUser(t, database, "deadline-after")
 	chID := seedTestChannel(t, database, "deadline-after-chan")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 32)
 
 	hub.HandleMessageForTest(c, deadlineChatSend(chID, "committed", deadlineClientMessageID(), "req-after"))
 
-	if f := nextFrameOfType(send, "chat_send_ok", time.Second); f == nil {
+	if f := nextFrameOfType(send, "chat_send_ok", 5*time.Second); f == nil {
 		t.Fatal("expected chat_send_ok after a post-commit deadline, got none")
 	}
 	if n := countMessages(t, database, chID); n != 1 {
@@ -307,10 +306,7 @@ func TestHandleMessage_EditDeadlineAfterCommitKeepsMentions(t *testing.T) {
 	target := seedMemberUser(t, database, "edit-dl-bob")
 	chID := seedTestChannel(t, database, "edit-dl-chan")
 	msgID := seedMessage(t, database, chID, author.ID, "before")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, author, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, author, chID, 32)
 
 	hub.HandleMessageForTest(c, chatEditMsg(msgID, "hello @edit-dl-bob"))
 

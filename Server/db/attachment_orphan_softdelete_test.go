@@ -27,10 +27,7 @@ func TestDeleteOrphanedAttachments_ReclaimsAttachmentOfSoftDeletedMessage(t *tes
 	); err != nil {
 		t.Fatalf("CreateAttachment: %v", err)
 	}
-	msgID, err := database.CreateMessage(ctx, chID, userID, "with attachment", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, chID, userID, "with attachment", nil)
 	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, userID, []string{"att-softdel-1"}); err != nil || len(n) != 1 {
 		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 	}
@@ -38,17 +35,13 @@ func TestDeleteOrphanedAttachments_ReclaimsAttachmentOfSoftDeletedMessage(t *tes
 	// Soft-delete the message the attachment is linked to. Under the current
 	// schema this ONLY sets messages.deleted=1 -- it does not touch the
 	// attachments row, so attachments.message_id is still set afterward.
-	if err := database.DeleteMessage(ctx, msgID, userID, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, msgID, userID, false))
 
 	// A generous future cutoff -- if the row is ever eligible at all, this
 	// cutoff catches it. today's implementation never will, because
 	// message_id IS NULL is false for this row.
 	files, err := database.DeleteOrphanedAttachments(ctx, time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("DeleteOrphanedAttachments: %v", err)
-	}
+	mustDo(t, "DeleteOrphanedAttachments", err)
 	if len(files) != 1 || files[0] != "stored-softdel.txt" {
 		t.Fatalf("orphan sweep returned %v, want exactly [stored-softdel.txt] -- the attachment "+
 			"of a soft-deleted message must be reclaimed", files)
@@ -75,22 +68,47 @@ func TestDeleteOrphanedAttachments_DoesNotReclaimAttachmentOfLiveMessage(t *test
 	); err != nil {
 		t.Fatalf("CreateAttachment: %v", err)
 	}
-	msgID, err := database.CreateMessage(ctx, chID, userID, "with attachment", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, chID, userID, "with attachment", nil)
 	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, userID, []string{"att-live-1"}); err != nil || len(n) != 1 {
 		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 	}
 
 	files, err := database.DeleteOrphanedAttachments(ctx, time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("DeleteOrphanedAttachments: %v", err)
-	}
+	mustDo(t, "DeleteOrphanedAttachments", err)
 	if len(files) != 0 {
 		t.Fatalf("orphan sweep reclaimed %v, want none -- the message is still live", files)
 	}
 	if att, err := database.GetAttachmentByID(ctx, "att-live-1"); err != nil || att == nil {
 		t.Fatalf("attachment row of a live message must survive the sweep (att=%v err=%v)", att, err)
+	}
+}
+
+// Each half of the sweep reads its own cutoff: a staged upload and a deleted
+// message's file of the same age go on different schedules.
+func TestDeleteOrphanedAttachmentsBefore_EachHalfHasItsOwnCutoff(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "two-cutoffs")
+	chID := seedChannel(t, database, "two-cutoffs-channel")
+	for _, id := range []string{"att-staged", "att-deleted"} {
+		if err := database.CreateAttachment(ctx, id, userID, id+".txt", "stored-"+id, "text/plain", 100, nil, nil); err != nil {
+			t.Fatalf("CreateAttachment %s: %v", id, err)
+		}
+	}
+	msgID := mustCreateMessage(t, database, chID, userID, "with attachment", nil)
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, userID, []string{"att-deleted"}); err != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
+	}
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, msgID, userID, false))
+	past := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	files, err := database.DeleteOrphanedAttachmentsBefore(ctx, past, future)
+	if err != nil || len(files) != 1 || files[0] != "stored-att-deleted" {
+		t.Fatalf("deleted half only: files=%v err=%v, want [stored-att-deleted]", files, err)
+	}
+	files, err = database.DeleteOrphanedAttachmentsBefore(ctx, future, past)
+	if err != nil || len(files) != 1 || files[0] != "stored-att-staged" {
+		t.Fatalf("unlinked half only: files=%v err=%v, want [stored-att-staged]", files, err)
 	}
 }

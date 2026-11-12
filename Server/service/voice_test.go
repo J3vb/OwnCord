@@ -30,9 +30,7 @@ func TestVoiceService_JoinHonoursTheChannelCap(t *testing.T) {
 	svc, _, ctx := voiceFixture(t)
 
 	// maxUsers 0 is "uncapped" and takes the plain upsert.
-	if err := svc.Join(ctx, 1, 10, 0); err != nil {
-		t.Fatalf("uncapped join: %v", err)
-	}
+	mustDo(t, "uncapped join", svc.Join(ctx, 1, 10, 0))
 	state, err := svc.State(ctx, 1)
 	if err != nil || state == nil || state.ChannelID != 10 {
 		t.Fatalf("State after join = %+v, %v", state, err)
@@ -50,9 +48,7 @@ func TestVoiceService_JoinHonoursTheChannelCap(t *testing.T) {
 	}
 
 	// The same cap admits while there is room.
-	if err := svc.Join(ctx, 2, 11, 1); err != nil {
-		t.Fatalf("join into an empty capped channel: %v", err)
-	}
+	mustDo(t, "join into an empty capped channel", svc.Join(ctx, 2, 11, 1))
 	if n, err := svc.CountInChannel(ctx, 11); err != nil || n != 1 {
 		t.Errorf("CountInChannel(11) = %d, %v; want 1", n, err)
 	}
@@ -65,23 +61,17 @@ func TestVoiceService_JoinHonoursTheChannelCap(t *testing.T) {
 func TestVoiceService_LeaveIfMatchWillNotDeleteANewerRow(t *testing.T) {
 	svc, _, ctx := voiceFixture(t)
 
-	if err := svc.Join(ctx, 1, 10, 0); err != nil {
-		t.Fatalf("join: %v", err)
-	}
+	mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
 	stale, err := svc.State(ctx, 1)
 	if err != nil || stale == nil {
 		t.Fatalf("State: %+v, %v", stale, err)
 	}
 
 	// The member moves to room B — a new row, a new joinedAt.
-	if err := svc.Join(ctx, 1, 11, 0); err != nil {
-		t.Fatalf("switch: %v", err)
-	}
+	mustDo(t, "switch", svc.Join(ctx, 1, 11, 0))
 
 	deleted, err := svc.LeaveIfMatch(ctx, 1, stale.ChannelID, stale.JoinedAt)
-	if err != nil {
-		t.Fatalf("LeaveIfMatch: %v", err)
-	}
+	mustDo(t, "LeaveIfMatch", err)
 	if deleted {
 		t.Error("LeaveIfMatch reported a delete against a snapshot the member has already moved off")
 	}
@@ -102,9 +92,7 @@ func TestVoiceService_LeaveIfMatchWillNotDeleteANewerRow(t *testing.T) {
 
 func TestVoiceService_RestoreModFlags(t *testing.T) {
 	svc, _, ctx := voiceFixture(t)
-	if err := svc.Join(ctx, 1, 10, 0); err != nil {
-		t.Fatalf("join: %v", err)
-	}
+	mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
 
 	// Nothing to restore: no round trips, and the caller keeps the row it has.
 	if got := svc.RestoreModFlags(ctx, 1, 10, false, false, nil); got != nil {
@@ -123,9 +111,7 @@ func TestVoiceService_RestoreModFlags(t *testing.T) {
 
 	// Scoped to the channel named, so a restore cannot land on a membership
 	// the moderator's decision never covered.
-	if err := svc.Join(ctx, 2, 11, 0); err != nil {
-		t.Fatalf("join other: %v", err)
-	}
+	mustDo(t, "join other", svc.Join(ctx, 2, 11, 0))
 	if got := svc.RestoreModFlags(ctx, 2, 10, true, false, nil); got != nil && got.ServerMuted {
 		t.Error("a restore scoped to channel 10 muted a member who is in channel 11")
 	}
@@ -137,15 +123,11 @@ func TestVoiceService_RestoreModFlags(t *testing.T) {
 // (manual-mute-shaped) restore — otherwise nothing can ever clear it again.
 func TestVoiceService_RestoreModFlags_CarriesTimeoutOwnership(t *testing.T) {
 	svc, database, ctx := voiceFixture(t)
-	if err := svc.Join(ctx, 1, 10, 0); err != nil {
-		t.Fatalf("join: %v", err)
-	}
+	mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
 	var actionID int64
 	row := database.QueryRowContext(ctx,
 		`INSERT INTO moderation_actions (kind, target_id, expires_at) VALUES ('timeout', 1, '2999-01-01 00:00:00') RETURNING id`)
-	if err := row.Scan(&actionID); err != nil {
-		t.Fatalf("seed active timeout action: %v", err)
-	}
+	mustDo(t, "seed active timeout action", row.Scan(&actionID))
 
 	got := svc.RestoreModFlags(ctx, 1, 10, true, false, &actionID)
 	if got == nil || !got.ServerMuted {
@@ -162,15 +144,11 @@ func TestVoiceService_RestoreModFlags_CarriesTimeoutOwnership(t *testing.T) {
 // have its mute resurrected with no owner left to ever clear it.
 func TestVoiceService_RestoreModFlags_DoesNotRestoreAnInactiveOwnersMute(t *testing.T) {
 	svc, database, ctx := voiceFixture(t)
-	if err := svc.Join(ctx, 1, 10, 0); err != nil {
-		t.Fatalf("join: %v", err)
-	}
+	mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
 	var actionID int64
 	row := database.QueryRowContext(ctx,
 		`INSERT INTO moderation_actions (kind, target_id, expires_at) VALUES ('timeout', 1, '2000-01-01 00:00:00') RETURNING id`)
-	if err := row.Scan(&actionID); err != nil {
-		t.Fatalf("seed expired timeout action: %v", err)
-	}
+	mustDo(t, "seed expired timeout action", row.Scan(&actionID))
 
 	if got := svc.RestoreModFlags(ctx, 1, 10, true, false, &actionID); got != nil && got.ServerMuted {
 		t.Fatal("RestoreModFlags restored a mute whose owner is no longer active")
@@ -188,18 +166,14 @@ func TestVoiceService_RestoreModFlags_DoesNotRestoreAnInactiveOwnersMute(t *test
 func TestVoiceService_RollbackServerDeafenScopesByDirection(t *testing.T) {
 	t.Run("a deafen rolls back by clearing and follows the moved row", func(t *testing.T) {
 		svc, _, ctx := voiceFixture(t)
-		if err := svc.Join(ctx, 1, 10, 0); err != nil {
-			t.Fatalf("join: %v", err)
-		}
+		mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
 		if _, err := svc.SetServerDeafen(ctx, 1, 10, true); err != nil {
 			t.Fatalf("SetServerDeafen: %v", err)
 		}
 		// The target switches channels — the deafen persisted across the
 		// switch (a moderator flag survives a re-join), and channel 10 is now
 		// stale.
-		if err := svc.Join(ctx, 1, 11, 0); err != nil {
-			t.Fatalf("switch: %v", err)
-		}
+		mustDo(t, "switch", svc.Join(ctx, 1, 11, 0))
 		if _, err := svc.SetServerDeafen(ctx, 1, 11, true); err != nil {
 			t.Fatalf("carry the flag onto the new row: %v", err)
 		}
@@ -218,12 +192,8 @@ func TestVoiceService_RollbackServerDeafenScopesByDirection(t *testing.T) {
 
 	t.Run("an undeafen rolls back by re-applying and stays on the authorized channel", func(t *testing.T) {
 		svc, _, ctx := voiceFixture(t)
-		if err := svc.Join(ctx, 1, 10, 0); err != nil {
-			t.Fatalf("join: %v", err)
-		}
-		if err := svc.Join(ctx, 1, 11, 0); err != nil {
-			t.Fatalf("switch: %v", err)
-		}
+		mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
+		mustDo(t, "switch", svc.Join(ctx, 1, 11, 0))
 
 		// The moderator was authorized against channel 10; the target is now
 		// in 11. Re-applying a restriction must not follow them there.
@@ -241,9 +211,7 @@ func TestVoiceService_RollbackServerDeafenScopesByDirection(t *testing.T) {
 
 	t.Run("with the target still in place both directions land", func(t *testing.T) {
 		svc, _, ctx := voiceFixture(t)
-		if err := svc.Join(ctx, 1, 10, 0); err != nil {
-			t.Fatalf("join: %v", err)
-		}
+		mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
 
 		svc.RollbackServerDeafen(ctx, 1, 10, false) // undo an undeafen: re-apply
 		if state, _ := svc.State(ctx, 1); state == nil || !state.ServerDeafened {
@@ -270,25 +238,19 @@ func TestVoiceService_RollbackServerDeafenScopesByDirection(t *testing.T) {
 // target who moved between the authorization and the write (OC-0005).
 func TestVoiceService_ServerFlagsReportAMissedChannel(t *testing.T) {
 	svc, _, ctx := voiceFixture(t)
-	if err := svc.Join(ctx, 1, 10, 0); err != nil {
-		t.Fatalf("join: %v", err)
-	}
+	mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
 
 	matched, err := svc.SetServerMute(ctx, 1, 10, true)
 	if err != nil || !matched {
 		t.Fatalf("SetServerMute on the live channel = %v, %v; want true", matched, err)
 	}
 	matched, err = svc.SetServerMute(ctx, 1, 11, true)
-	if err != nil {
-		t.Fatalf("SetServerMute: %v", err)
-	}
+	mustDo(t, "SetServerMute", err)
 	if matched {
 		t.Error("SetServerMute reported a match against a channel the member is not in")
 	}
 	matched, err = svc.SetServerDeafen(ctx, 1, 11, true)
-	if err != nil {
-		t.Fatalf("SetServerDeafen: %v", err)
-	}
+	mustDo(t, "SetServerDeafen", err)
 	if matched {
 		t.Error("SetServerDeafen reported a match against a channel the member is not in")
 	}
@@ -300,12 +262,8 @@ func TestVoiceService_Reads(t *testing.T) {
 	if state, err := svc.State(ctx, 1); err != nil || state != nil {
 		t.Fatalf("State for a member not in voice = %+v, %v; want (nil, nil)", state, err)
 	}
-	if err := svc.Join(ctx, 1, 10, 0); err != nil {
-		t.Fatalf("join 1: %v", err)
-	}
-	if err := svc.Join(ctx, 2, 11, 0); err != nil {
-		t.Fatalf("join 2: %v", err)
-	}
+	mustDo(t, "join 1", svc.Join(ctx, 1, 10, 0))
+	mustDo(t, "join 2", svc.Join(ctx, 2, 11, 0))
 
 	all, err := svc.AllStates(ctx)
 	if err != nil || len(all) != 2 {
@@ -322,9 +280,7 @@ func TestVoiceService_Reads(t *testing.T) {
 // from a broken read would evict everyone in voice.
 func TestVoiceService_ReadsFailLoud(t *testing.T) {
 	svc, database, ctx := voiceFixture(t)
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", database.Close())
 
 	if _, err := svc.AllStates(ctx); err == nil {
 		t.Error("AllStates on a closed database returned no error — the sweep would read that as an empty roster")

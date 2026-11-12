@@ -116,6 +116,26 @@ const posted = (calls: FetchCall[]) =>
   calls.some((c) => c.method === "POST" && c.path === "/restart");
 const modal = (doc: Document) => doc.getElementById("modal")!;
 
+const row = (key: string, extra: Record<string, unknown> = {}) => ({
+  key,
+  type: "string",
+  value: "",
+  override: null,
+  env_locked: false,
+  ...extra,
+});
+const titles = (doc: Document) =>
+  [...doc.querySelectorAll("[data-config-section] h3")].map((h) => h.textContent);
+const visibleKeys = (doc: Document) =>
+  [...doc.querySelectorAll<HTMLElement>("[data-config-key]")]
+    .filter((el) => !el.closest("[hidden]"))
+    .map((el) => el.getAttribute("data-config-key"));
+const typeFilter = (doc: Document, text: string) => {
+  const box = doc.getElementById("configFilter") as HTMLInputElement;
+  box.value = text;
+  box.dispatchEvent(new doc.defaultView!.Event("input", { bubbles: true }));
+};
+
 describe("Server/admin/static — Server configuration page", () => {
   let dom: JSDOM | undefined;
 
@@ -401,5 +421,105 @@ describe("Server/admin/static — Server configuration page", () => {
 
     fn(bridge.openRestartDialog, "openRestartDialog")();
     expect(modal(doc).textContent).toMatch(text);
+  });
+
+  describe("layout and filter", () => {
+    // Arrives alphabetically, as EditableKeys sends it.
+    const WIDE = {
+      restart_pending: false,
+      settings: [
+        row("backup.dir", { label: "Backup folder" }),
+        row("event_persistence.retention_hours", { type: "int", value: 24 }),
+        row("gif.api_key", { type: "secret", configured: false }),
+        row("server.max_ws_connections", {
+          type: "int",
+          value: 100,
+          label: "Connection limit",
+          description: "Most (WebSocket) connections at once",
+        }),
+        row("moderation.report_retention_days", { type: "int", value: 0 }),
+        row("server.port", { type: "int", value: 8443, label: "Port" }),
+        row("tls.mode", { value: "self_signed", options: ["off", "self_signed"] }),
+        row("zeta.knob", { label: "A key the page does not know yet" }),
+      ],
+    };
+
+    it("titles each card in words and orders the groups as an operator looks for them", async () => {
+      const { doc } = await openConfig([], WIDE);
+      expect(titles(doc)).toEqual([
+        "Server",
+        "Moderation history",
+        "TLS",
+        "Backup",
+        "GIF search",
+        "Event persistence",
+        "Zeta",
+      ]);
+      const jumps = [...doc.querySelectorAll("[data-config-jump]")].map((b) => b.textContent);
+      expect(jumps).toEqual(["Server", "TLS", "Backup", "Integrations", "Advanced"]);
+      // The filter box is the page's "/" search target.
+      expect(doc.querySelector(".filter-search")?.id).toBe("configFilter");
+    });
+
+    it("jumps to a group and moves focus there", async () => {
+      const { doc } = await openConfig([], WIDE);
+      // The shell stays hidden until sign-in, and a hidden element takes no focus.
+      for (let el = doc.getElementById("content"); el; el = el.parentElement) {
+        el.hidden = false;
+        el.classList.remove("hidden");
+      }
+      (doc.querySelector('[data-config-jump="backup"]') as HTMLButtonElement).click();
+      expect(doc.activeElement?.id).toBe("cfgGroup-backup");
+    });
+
+    it("filters rows by label, key or description and hides empty cards and groups", async () => {
+      const { doc } = await openConfig([], WIDE);
+
+      typeFilter(doc, "connection");
+      expect(visibleKeys(doc)).toEqual(["server.max_ws_connections"]);
+      expect(doc.getElementById("cfgGroup-tls")!.hidden).toBe(true);
+      expect((doc.querySelector('[data-config-jump="tls"]') as HTMLElement).hidden).toBe(true);
+      expect(doc.getElementById("configNoMatch")!.hidden).toBe(true);
+
+      // Underscores and dots read as spaces, so the key typed either way matches.
+      typeFilter(doc, "max ws");
+      expect(visibleKeys(doc)).toEqual(["server.max_ws_connections"]);
+      typeFilter(doc, "tls.mode");
+      expect(visibleKeys(doc)).toEqual(["tls.mode"]);
+      // A typed word matches the start of a word: "port" is not "report".
+      typeFilter(doc, "port");
+      expect(visibleKeys(doc)).toEqual(["server.port"]);
+      // Punctuation in a description does not hide its words.
+      typeFilter(doc, "websocket");
+      expect(visibleKeys(doc)).toEqual(["server.max_ws_connections"]);
+
+      // A card title shows the whole card.
+      typeFilter(doc, "server");
+      expect(visibleKeys(doc)).toEqual(["server.max_ws_connections", "server.port"]);
+
+      typeFilter(doc, "nothing like this");
+      expect(visibleKeys(doc)).toEqual([]);
+      expect(doc.getElementById("configNoMatch")!.hidden).toBe(false);
+
+      typeFilter(doc, "");
+      expect(visibleKeys(doc)).toHaveLength(WIDE.settings.length);
+      expect(doc.getElementById("configNoMatch")!.hidden).toBe(true);
+    });
+
+    it("keeps an edit made before filtering and saves it while the row is hidden", async () => {
+      const calls: FetchCall[] = [];
+      const { booted, doc } = await openConfig(calls, WIDE);
+      control(doc, "server.port").value = "9443";
+      fn(booted.bridge.markConfigChanged, "markConfigChanged")();
+      typeFilter(doc, "backup");
+      expect(visibleKeys(doc)).toEqual(["backup.dir"]);
+
+      await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+      const patch = calls.find((c) => c.method === "PATCH" && c.path === "/config/settings");
+      expect(patch?.body).toEqual({ "server.port": 9443 });
+      // The re-rendered page keeps the filter applied.
+      expect((doc.getElementById("configFilter") as HTMLInputElement).value).toBe("backup");
+      expect(visibleKeys(doc)).toEqual(["backup.dir"]);
+    });
   });
 });

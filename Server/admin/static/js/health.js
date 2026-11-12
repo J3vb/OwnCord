@@ -90,8 +90,11 @@ function paintHealth(){
 function healthRow(){
   return'<section id="healthRow" class="health-row" aria-label="Server resources">'+healthTiles(health.data)+'</section>'
     +'<section class="section-card" aria-labelledby="livekitTitle"><div class="section-card-header"><h3 id="livekitTitle">LiveKit</h3><span class="checks-sum">Last hour</span></div>'
-    +'<div class="section-card-body" id="livekitCard">'+livekitBody(health.lk)+'</div></section>'
-    +'<section class="section-card" aria-labelledby="slowRequestsTitle"><div class="section-card-header"><h3 id="slowRequestsTitle">Slow requests</h3><span class="checks-sum">Last hour</span></div>'
+    +'<div class="section-card-body" id="livekitCard">'+livekitBody(health.lk)+'</div></section>';
+}
+/* Below the attention panel: a route list is detail, a warning is news. */
+function slowRequestsCard(){
+  return'<section class="section-card" aria-labelledby="slowRequestsTitle"><div class="section-card-header"><h3 id="slowRequestsTitle">Slow requests</h3><span class="checks-sum">Last hour</span></div>'
     +'<div class="section-card-body" id="slowRequests">'+slowRequestsBody(health.slow)+'</div></section>';
 }
 
@@ -129,7 +132,7 @@ function livekitBody(d){
   if(managed&&status==='ok')line='<span class="badge badge-green">Running</span> <span class="muted">Built-in LiveKit</span>';
   else if(managed&&status==='restarting')line='<span class="badge badge-yellow">Not running</span> <span class="muted">Built-in LiveKit is starting or restarting</span>';
   else if(status==='ok')line='<span class="badge badge-green">Reachable</span>';
-  else if(status==='unreachable')line='<span class="badge badge-red">Not reachable</span> <span class="muted">'+(typeof d.since==='number'?'since '+esc(lkTime(d.since)):'')+'</span>';
+  else if(status==='unreachable')line='<span class="badge badge-red">Not reachable</span> <span class="muted">'+(typeof d.since==='number'?'since '+esc(lkTime(d.since))+'. ':'')+'If LiveKit itself is up, its stats page is off: '+LK_HOWTO+'</span>';
   else if(status==='not_set_up')line='<span class="badge badge-yellow">Not set up</span> <span class="muted">The stats page has no LiveKit figures. '+LK_HOWTO+'</span>';
   else line='<span class="muted">'+(status?esc(status):HEALTH_DASH)+'</span>';
   const series=d.series||[],cur=d.current||{};
@@ -162,8 +165,12 @@ function slowCell(ms){
 }
 function slowRequestsBody(d){
   if(!d)return'<p class="muted">'+HEALTH_DASH+'</p>';
-  const rows=d.routes||[];
-  if(!rows.length)return'<p class="muted">No requests in the last hour yet.</p>';
+  const all=d.routes||[];
+  if(!all.length)return'<p class="muted">No requests in the last hour yet.</p>';
+  /* A route that answers fast is not news: only a 95th percentile at or over
+     the warning line is listed. */
+  const rows=all.filter(r=>(typeof r.p95_ms==='number'?r.p95_ms:r.max_ms)>=SLOW_WARN_MS);
+  if(!rows.length)return'<p class="muted">No slow requests in the last hour.</p>';
   let html='<table class="tbl slow-tbl"><thead><tr><th>Route</th><th class="num">Calls</th><th class="num">Typical</th><th class="num">Worst</th></tr></thead><tbody>';
   rows.forEach(r=>{
     html+='<tr><td class="slow-route"><span class="badge badge-muted">'+esc(r.method)+'</span> <code>'+esc(r.route)+'</code></td>'

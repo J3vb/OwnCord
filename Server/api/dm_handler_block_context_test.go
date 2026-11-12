@@ -75,12 +75,9 @@ func TestBlockUser_EvictsVoiceEvenIfRequestContextCanceledAfterCommit(t *testing
 	req.Header.Set("Authorization", "Bearer "+alice)
 	req.RemoteAddr = "127.0.0.1:9999"
 	req = req.WithContext(ctx)
-	blockRR := httptest.NewRecorder()
-	r.ServeHTTP(blockRR, req)
+	blockRR := serveRequest(r, req)
 
-	if blockRR.Code != http.StatusOK {
-		t.Fatalf("block: %d %s", blockRR.Code, blockRR.Body.String())
-	}
+	requireStatus(t, blockRR, http.StatusOK)
 	if len(bc.evictCalls) != 1 || bc.evictCalls[0].userID != 2 || bc.evictCalls[0].channelID != created.ChannelID {
 		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want exactly one for user=2 channel=%d even though "+
 			"the request context was canceled right after the block commit", bc.evictCalls, created.ChannelID)

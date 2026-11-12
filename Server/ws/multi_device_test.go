@@ -142,15 +142,9 @@ func newMDFix(t *testing.T) *mdFix {
 	f := &mdFix{t: t, hub: hub, db: database, sfu: sfu}
 	f.uid = seedHarvestVoiceUser(t, database, "md-user")
 	f.oid = seedHarvestVoiceUser(t, database, "md-observer")
-	user, err := database.GetUserByID(context.Background(), f.uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, f.uid)
 	f.user = user
-	chID, err := database.CreateChannel(context.Background(), "md-text", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "md-text", "text")
 	f.text = chID
 	f.voiceA = mustCreateVoiceChannel(t, database, "md-voice-a")
 	f.voiceB = mustCreateVoiceChannel(t, database, "md-voice-b")
@@ -838,7 +832,8 @@ func TestMultiDevice_JoinElsewhereEndsAParkedMove(t *testing.T) {
 	b := f.dev("session-b", f.text)
 	f.join(a, f.voiceA)
 	f.dropSocket(a)
-	if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA, true, false, nil) {
+	seedRowModFlags(t, f.hub, f.uid, f.voiceA, true, false)
+	if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA) {
 		t.Fatal("moderator move did not tear down the parked call")
 	}
 	if !f.hub.SendToVoiceDevice(f.uid, buildVoiceMoved(f.voiceB, "", 99)) {
@@ -870,7 +865,7 @@ func TestMultiDevice_ModeratorFramesReachOnlyTheCallDevice(t *testing.T) {
 		b.pump()
 		a.got, b.got = nil, nil
 
-		if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceB, false, false, nil) {
+		if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceB) {
 			t.Fatal("moderator move did not evict")
 		}
 		if !f.hub.SendToVoiceDevice(f.uid, buildVoiceMoved(f.voiceA, "", 99)) {
@@ -891,7 +886,7 @@ func TestMultiDevice_ModeratorFramesReachOnlyTheCallDevice(t *testing.T) {
 		b.pump()
 		b.got = nil
 
-		if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA, false, false, nil) {
+		if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA) {
 			t.Fatal("moderator move did not tear down the parked call")
 		}
 		if !f.hub.SendToVoiceDevice(f.uid, buildVoiceMoved(f.voiceB, "", 99)) {
@@ -1094,7 +1089,8 @@ func TestMultiDevice_ModeratorFlagsFollowADeviceChange(t *testing.T) {
 	b := f.dev("session-b", f.text)
 	f.join(a, f.voiceA)
 
-	if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA, true, false, nil) {
+	seedRowModFlags(t, f.hub, f.uid, f.voiceA, true, false)
+	if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA) {
 		t.Fatal("moderator move did not evict")
 	}
 	if a.c.voice.channel() != 0 {

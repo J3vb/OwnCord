@@ -1,7 +1,6 @@
 package admin_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"slices"
 	"testing"
@@ -31,10 +30,7 @@ func TestUploadFileTypeSettings_OwnerOnly(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("Owner PATCH %s = %d, want 200; body: %s", key, w.Code, w.Body.String())
 		}
-		var got map[string]string
-		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		got := decodeBody[map[string]string](t, w)
 		if got[key] != "png,jpg" {
 			t.Errorf("%s = %q, want %q", key, got[key], "png,jpg")
 		}
@@ -84,16 +80,11 @@ func TestAdminAPI_GetConfigFacts_UploadFileTypes(t *testing.T) {
 	_, managerToken := createRoleUser(t, database, 12, "Manager", permissions.ManageServer, 50, "ftfacts")
 
 	w := doRequest(t, handler, http.MethodGet, "/config", managerToken, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	var got struct {
+	requireStatus(t, w, http.StatusOK)
+	got := decodeBody[struct {
 		Blocked []string `json:"upload_blocked_extensions"`
 		Allowed []string `json:"upload_allowed_extensions"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, w)
 	if !slices.Equal(got.Blocked, []string{"bat", "ps1"}) || got.Allowed == nil || len(got.Allowed) != 0 {
 		t.Errorf("config facts lists = %+v, want [bat ps1] and []; body: %s", got, w.Body.String())
 	}

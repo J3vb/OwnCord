@@ -155,12 +155,12 @@ const ACTION_LABEL={
   appeal_submit:'appealed a moderation action',appeal_withdraw:'withdrew an appeal',appeal_assign:'took an appeal',appeal_decide:'decided an appeal',
   registration_approve:'approved the registration of {t}',registration_deny:'denied the registration of {t}',invite_create:'created an invite',invite_revoke:'revoked an invite',
   channel_create:'created {t}',channel_update:'edited {t}',channel_delete:'deleted {t}',channel_perms_update:'changed role access to {t}',channel_perms_clear:'reset role access to {t}',
-  channel_user_perms_update:'changed member access to {t}',channel_user_perms_clear:'reset member access to {t}',category_perms_update:'changed role access on category {t}',category_perms_clear:'reset role access on category {t}',category_user_perms_update:'changed member access on category {t}',category_user_perms_clear:'reset member access on category {t}',channel_perms_sync:'synced category access into {t}',channel_retention_change:'changed message retention for {t}',
+  channel_user_perms_update:'changed member access to {t}',channel_user_perms_clear:'reset member access to {t}',category_perms_update:'changed role access on {t}',category_perms_clear:'reset role access on {t}',category_user_perms_update:'changed member access on {t}',category_user_perms_clear:'reset member access on {t}',channel_perms_sync:'synced category access into {t}',channel_retention_change:'changed message retention for {t}',
   role_create:'created {t}',role_update:'edited {t}',role_delete:'deleted {t}',role_reorder:'reordered the roles',role_change:'changed the role of {t}',role_add:'added a role to {t}',role_remove:'removed a role from {t}',
   permission_explain:'checked the permissions of {t}',permission_preview:'previewed permissions for {t}',emoji_create:'added an emoji',emoji_delete:'removed an emoji',sticker_create:'added a sticker',sticker_update:'renamed a sticker',sticker_delete:'removed a sticker',
   setting_change:'changed a server setting',settings_change:'changed the server settings',registration_mode_change:'changed who can join',
   retention_policy_change:'changed the message retention policy',config_write:'wrote config.yaml',server_setup:'set up the server',
-  config_override_change:'changed a server configuration override',server_restart_requested:'requested a server restart',
+  config_override_change:'changed a server configuration override',server_restart_requested:'requested a server restart',voice_server_restart_requested:'restarted the voice server',
   backup_create:'took a backup',backup_delete:'deleted a backup',backup_restore:'restored a backup',backup_restore_applied:'finished restoring a backup',backup_restore_rolled_back:'could not restore a backup (previous data kept)',backup_restore_refused:'could not restore a backup (previous data kept)',backup_archive:'downloaded the full archive',backup_link:'asked for a backup download link',archive_link:'asked for a full archive download link',backup_download:'downloaded a backup',discord_import_start:'started importing a Discord channel into {t}',discord_import_publish:'finished importing a Discord channel into {t}',discord_import_cancel:'cancelled a Discord import',
   log_level_debug_on:'turned on debug logging for 15 minutes',log_level_reverted:'turned debug logging off',
   update_apply:'applied a server update',update_applied:'finished a server update',update_failed:'failed to apply a server update',
@@ -168,16 +168,22 @@ const ACTION_LABEL={
   plugin_install:'installed a plugin',plugin_uninstall:'uninstalled a plugin',
   upload_delete:'deleted a file uploaded by {t}',upload_limit_change:'changed the upload limit of {t}',storage_cleanup:'removed leftover files from storage',
 };
-/* What an entry acted on, in words, never empty: an erased account keeps
-   only its token, and a channel the Channels page has loaded reads by name. */
+/* What an entry acted on, in words, never empty and never a bare row id: an
+   erased account keeps only its token, a named target reads by the name the
+   server lists with it (or a channel the Channels page has loaded), and
+   anything else reads as its kind, since the Details column names it. */
+const AUDIT_NAMED={user:n=>n,role:n=>'role '+n,channel:n=>'#'+n,category:n=>'category '+n};
 function auditTarget(e){
   const t=e.target_type||'',id=e.target_id;
   if(t==='user'){if(id&&id===e.actor_id)return'themselves';if(!id)return e.subject_token?'an erased account':'a member'}
   const ch=t==='channel'&&state.channelCache[id];
-  if(ch&&ch.name)return'#'+ch.name;
+  const name=ch&&ch.name?ch.name:e.target_name;
+  if(name&&AUDIT_NAMED[t])return AUDIT_NAMED[t](name);
   if(!t)return'something';
+  if(t==='server')return'the server';
+  if(t==='user')return'a member';
   const noun=t.replace(/_/g,' ');
-  return id?noun+' #'+id:t==='server'?'the server':'a '+noun;
+  return(/^[aeiou]/.test(noun)?'an ':'a ')+noun;
 }
 /* One entry as a sentence: actor, action, target. HTML-escaped. */
 function auditSentence(e){
@@ -185,7 +191,7 @@ function auditSentence(e){
   const numbered=!!e.target_id&&!(e.target_type==='user'&&e.target_id===e.actor_id);
   const label=ACTION_LABEL[e.action]||String(e.action||'').replace(/_/g,' ')+(numbered?' {t}':'');
   const takesTarget=label.endsWith(' {t}');
-  const obj=takesTarget?auditTarget(e):numbered?'#'+e.target_id:'';
+  const obj=takesTarget?auditTarget(e):'';
   return'<strong>'+esc(actor)+'</strong> <span class="audit-verb">'+esc(takesTarget?label.slice(0,-4):label)+'</span>'+(obj?' <strong>'+esc(obj)+'</strong>':'');
 }
 /* Sign-in and connection rows, hidden by default behind the audit log's
@@ -260,15 +266,18 @@ function roleName(rid,name){
   return{1:'Owner',2:'Admin',3:'Moderator',4:'Member'}[rid]||'Member';
 }
 
+const TOAST_WARNING_MS=8000;
 function showToast(msg,type='success'){
   const t=document.getElementById('toast');
   t.className='toast visible '+type;
   /* Errors persist until dismissed (U7): a message that vanishes after three
-     seconds cannot be re-read or acted on. Success/info auto-dismiss. */
-  t.innerHTML=(type==='success'?I.check:type==='error'?I.ban:I.check)+'<span>'+esc(msg)+'</span>'
-    +(type==='error'?'<button class="toast-close" aria-label="Dismiss notification" data-action="dismissToast">&times;</button>':'');
+     seconds cannot be re-read or acted on. Success/info auto-dismiss. A
+     warning is a best-effort step that did not happen (a refused clipboard
+     copy): long enough to read, closable, and never left on screen. */
+  t.innerHTML=(type==='error'?I.ban:type==='warning'?I.triangleAlert:I.check)+'<span>'+esc(msg)+'</span>'
+    +(type==='error'||type==='warning'?'<button class="toast-close" aria-label="Dismiss notification" data-action="dismissToast">&times;</button>':'');
   clearTimeout(window._tt);
-  if(type!=='error')window._tt=setTimeout(()=>t.classList.remove('visible'),3000);
+  if(type!=='error')window._tt=setTimeout(()=>t.classList.remove('visible'),type==='warning'?TOAST_WARNING_MS:3000);
 }
 function dismissToast(){clearTimeout(window._tt);document.getElementById('toast').classList.remove('visible')}
 
@@ -591,12 +600,16 @@ const REGISTRATIONS_PAGE=50;
 /* The Members > Pending view over-fetches its first page by one row, so there
    more than REGISTRATIONS_PAGE rows means more; the plain GET cannot tell a
    full page from a longer queue. Later pages leave the badge alone. */
+/* A newer release is news, except on a development build: the server will
+   not apply it there, so neither the nav badge nor the Dashboard strip
+   offers it. */
+function updateOffered(u){return!!u&&!!u.update_available&&u.apply_blocked!=='development_build'}
 function noteBadgeSource(path,data){
   let v;
   const firstPage=/^\/registrations\?limit=\d+&offset=0$/.test(path);
   if((path==='/registrations'||firstPage)&&Array.isArray(data))v=['pending',(firstPage?data.length>REGISTRATIONS_PAGE:data.length>=REGISTRATIONS_PAGE)?REGISTRATIONS_PAGE+'+':data.length];
   else if(path==='/attention'&&data&&Array.isArray(data.warnings))v=['warnings',data.warnings.filter(w=>!w.recovered_at&&!isDismissed('attn:'+w.id,attnSig(w))).length];
-  else if(path==='/updates'&&data&&typeof data==='object')v=['update',!!data.update_available];
+  else if(path==='/updates'&&data&&typeof data==='object')v=['update',updateOffered(data)];
   if(!v||state.badges[v[0]]===v[1])return;
   state.badges[v[0]]=v[1];
   if(document.getElementById('sidebarNav').childElementCount)renderNav();
@@ -683,6 +696,25 @@ function renderContent(){
   }
 }
 
+/* One themed file control for every upload page: the native input is
+   visually hidden but stays focusable and keyboard-operable, a label styled
+   as a button opens it, and the chosen file's name shows beside it.
+   opts.after names an ACTIONS handler to run, as the input, after a choice. */
+function pickFile(id,accept,label,opts){
+  const o=opts||{};
+  return'<span class="file-pick"><input type="file" class="file-pick-input" id="'+esc(id)+'" accept="'+esc(accept)+'"'+(label?' aria-label="'+esc(label)+'"':'')+(o.disabled?' disabled':'')
+    +' data-change-action="filePicked" data-args="'+actArgs(o.after||'')+'">'
+    +'<label class="btn btn-outline file-pick-btn" for="'+esc(id)+'" aria-hidden="true">'+I.upload+' Choose file</label>'
+    +'<span class="file-pick-name" id="'+esc(id)+'Name">No file chosen</span></span>';
+}
+function filePicked(after){
+  const f=this.files&&this.files[0];
+  const name=document.getElementById(this.id+'Name');
+  if(name)name.textContent=f?f.name:'No file chosen';
+  const fn=after&&ACTIONS[after];
+  if(typeof fn==='function')fn.apply(this,[]);
+}
+
 /* ═══ Actions ═══ */
 /* The admin CSP is script-src 'self', so no markup carries an on*= handler.
    A control names its handler instead: data-action runs on click,
@@ -705,7 +737,7 @@ function delegateActions(type,attr){
 delegateActions('click','data-action');
 delegateActions('input','data-input-action');
 delegateActions('change','data-change-action');
-Object.assign(ACTIONS,{closeModal:dismissModal,renderContent,navigateTo,doLogout,dismissToast,openNav,dismissNotice,restoreDismissed,
+Object.assign(ACTIONS,{filePicked,closeModal:dismissModal,renderContent,navigateTo,doLogout,dismissToast,openNav,dismissNotice,restoreDismissed,
   closeNav(){closeNav()},
   toggleUserMenu(){if(isUserMenuOpen())closeUserMenu(true);else openUserMenu()},
   closeModalAndRefresh(){if(dismissModal())renderContent()},

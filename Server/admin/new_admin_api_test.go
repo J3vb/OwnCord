@@ -73,9 +73,7 @@ func TestNewAdminAPI_IndependentInstances(t *testing.T) {
 // absolute path against the working directory when the API is built.
 func TestNewAdminAPI_EmptyBackupDirKeepsDefault(t *testing.T) {
 	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	if w := doRequest(t, handler, http.MethodPost, "/backup", token, nil); w.Code != http.StatusOK {
 		t.Fatalf("POST /backup = %d, want 200; body: %s", w.Code, w.Body.String())

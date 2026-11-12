@@ -75,6 +75,7 @@ export interface ReconnectingStateOverrides {
   readonly latestToken?: string;
   readonly lastUrl?: string;
   readonly lastDirectUrl?: string | undefined;
+  readonly ac?: AbortController;
 }
 
 /** Puts `session` mid-reconnect into `channelId`, as the connection drop leaves it. */
@@ -191,4 +192,31 @@ export function captureDisconnectedHandler(): () => ((reason?: number) => void) 
     return mockRoom;
   });
   return () => handler;
+}
+
+/** What a reconnect-loop test watches and steers on its session. */
+export interface LoopRig {
+  /** The chat socket's state, as the session reads it. */
+  wsState: string;
+  readonly sendSpy: ReturnType<typeof vi.fn<(msg: { type: string }) => string | undefined>>;
+  readonly errorCb: ReturnType<typeof vi.fn<(message: string) => void>>;
+  readonly ac: AbortController;
+}
+
+/** Give the session a chat socket and an error callback the test can read. */
+export function wireLoopRig(session: LiveKitSession): LoopRig {
+  const rig: LoopRig = {
+    wsState: "connected",
+    sendSpy: vi.fn<(msg: { type: string }) => string | undefined>(),
+    errorCb: vi.fn<(message: string) => void>(),
+    ac: new AbortController(),
+  };
+  session.setServerHost("localhost:7880");
+  session.setWsClient({
+    send: rig.sendSpy,
+    getState: () => rig.wsState,
+    ping: async () => {},
+  } as unknown as Parameters<LiveKitSession["setWsClient"]>[0]);
+  session.setOnError(rig.errorCb);
+  return rig;
 }

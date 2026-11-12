@@ -85,9 +85,7 @@ func newForwardFixture(t *testing.T, limiter *auth.RateLimiter) *forwardFixture 
 
 	dir := t.TempDir()
 	files, err := storage.New(dir, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "New", err)
 	perms := NewPermissionService(database, permissions.NewChecker(database))
 	uploads := NewUploadService(database, perms)
 	uploads.SetStorageLimits(StorageLimits{Dir: dir, FreeBytes: func(string) (uint64, error) { return 0, errors.New("unknown") }})
@@ -109,15 +107,10 @@ func (f *forwardFixture) sendWithFile(t *testing.T, user, channel int64, content
 	if _, err := f.files.Save(fileID, strings.NewReader(body)); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.database.CreateAttachment(context.Background(), fileID, user, "pic.png", fileID, "image/png", int64(len(body)), nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	res, err := f.svc.SendMessage(context.Background(), SendMessageParams{
+	mustDo(t, "CreateAttachment", f.database.CreateAttachment(context.Background(), fileID, user, "pic.png", fileID, "image/png", int64(len(body)), nil, nil))
+	res := mustSendMessage(context.Background(), t, f.svc, SendMessageParams{
 		ChannelID: channel, UserID: user, Username: seedUsername(user), Content: content, AttachmentIDs: []string{fileID},
 	})
-	if err != nil {
-		t.Fatalf("seed send: %v", err)
-	}
 	return res.MessageID, fileID
 }
 
@@ -143,9 +136,7 @@ func (f *forwardFixture) count(t *testing.T, q string, args ...any) int {
 func (f *forwardFixture) storedFiles(t *testing.T) int {
 	t.Helper()
 	entries, err := os.ReadDir(f.dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReadDir", err)
 	n := 0
 	for _, e := range entries {
 		if e.Type().IsRegular() {
@@ -158,18 +149,14 @@ func (f *forwardFixture) storedFiles(t *testing.T) int {
 func (f *forwardFixture) used(t *testing.T, user int64) int64 {
 	t.Helper()
 	n, err := f.uploads.StorageUsed(context.Background(), user)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "StorageUsed", err)
 	return n
 }
 
 func mustForward(t *testing.T, f *forwardFixture, target, source int64) *SendMessageResult {
 	t.Helper()
 	res, err := f.forward(target, source)
-	if err != nil {
-		t.Fatalf("ForwardMessage: %v", err)
-	}
+	mustDo(t, "ForwardMessage", err)
 	return res
 }
 
@@ -206,20 +193,14 @@ func TestForward_CopiesSnapshotAndFilesToTheForwarder(t *testing.T) {
 	}
 
 	// Later changes to the original change nothing: delete it and sweep.
-	if err := f.database.DeleteMessage(ctx, f.srcID, fwdAlice, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", f.database.DeleteMessage(ctx, f.srcID, fwdAlice, false))
 	swept, err := f.database.DeleteOrphanedAttachments(ctx, time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteOrphanedAttachments", err)
 	if len(swept) != 1 || swept[0] != f.srcFile {
 		t.Fatalf("sweep removed %v, want only the original's file %s", swept, f.srcFile)
 	}
 	for _, name := range swept {
-		if err := f.files.Delete(name); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "Delete", f.files.Delete(name))
 	}
 	if body, err := os.ReadFile(filepath.Join(f.dir, clone)); err != nil || string(body) != "PNGDATA-source-bytes" {
 		t.Errorf("the forward lost its file when the original was swept: %q, %v", body, err)
@@ -242,15 +223,10 @@ func TestForward_VoiceMessageKeepsDurationAndWaveform(t *testing.T) {
 		t.Fatal(err)
 	}
 	dur, wave := 2500, "AAH_gA"
-	if err := f.database.CreateAttachmentVoice(ctx, fileID, fwdAlice, "voice-message.ogg", fileID, "application/ogg", int64(len(body)), nil, nil, &dur, &wave); err != nil {
-		t.Fatal(err)
-	}
-	src, err := f.svc.SendMessage(ctx, SendMessageParams{
+	mustDo(t, "CreateAttachmentVoice", f.database.CreateAttachmentVoice(ctx, fileID, fwdAlice, "voice-message.ogg", fileID, "application/ogg", int64(len(body)), nil, nil, &dur, &wave))
+	src := mustSendMessage(ctx, t, f.svc, SendMessageParams{
 		ChannelID: fwdSrcChan, UserID: fwdAlice, Username: seedUsername(fwdAlice), AttachmentIDs: []string{fileID},
 	})
-	if err != nil {
-		t.Fatalf("seed send: %v", err)
-	}
 
 	res := mustForward(t, f, fwdDstChan, src.MessageID)
 	if len(res.Attachments) != 1 {
@@ -276,21 +252,15 @@ func TestForward_RetryNoSecondClone(t *testing.T) {
 	f := newForwardFixture(t, nil)
 	cmid := newClientMessageID()
 	first, err := f.forwardAs(fwdBob, cmid, fwdDstChan, f.srcID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "forwardAs", err)
 	filesAfterFirst, usedAfterFirst := f.storedFiles(t), f.used(t, fwdBob)
 
-	if err := f.database.DeleteMessage(context.Background(), f.srcID, fwdAlice, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", f.database.DeleteMessage(context.Background(), f.srcID, fwdAlice, false))
 	seedChannelOverride(t, f.database, permissions.MemberRoleID, fwdDstChan, 0, permissions.SendMessages)
 	f.perms.InvalidateAll()
 
 	retry, err := f.forwardAs(fwdBob, cmid, fwdDstChan, f.srcID)
-	if err != nil {
-		t.Fatalf("retry: %v", err)
-	}
+	mustDo(t, "retry", err)
 	if !retry.Duplicate || retry.MessageID != first.MessageID || retry.Timestamp != first.Timestamp {
 		t.Fatalf("retry = %+v, first = %+v", retry, first)
 	}
@@ -376,16 +346,11 @@ func TestForward_GateTable(t *testing.T) {
 	}{
 		{"no such message", func(*testing.T, *forwardFixture) (int64, int64) { return fwdDstChan, 9999 }, ErrNotFound},
 		{"unreadable source channel", func(t *testing.T, f *forwardFixture) (int64, int64) {
-			id, err := f.database.CreateMessage(ctx, fwdLockedChan, fwdAlice, "secret", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
+			id := mustCreateMessage(t, f.database, fwdLockedChan, fwdAlice, "secret", nil)
 			return fwdDstChan, id
 		}, ErrNotFound},
 		{"deleted source", func(t *testing.T, f *forwardFixture) (int64, int64) {
-			if err := f.database.DeleteMessage(ctx, f.srcID, fwdAlice, false); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "DeleteMessage", f.database.DeleteMessage(ctx, f.srcID, fwdAlice, false))
 			return fwdDstChan, f.srcID
 		}, ErrNotFound},
 		{"source is not an ordinary message", func(t *testing.T, f *forwardFixture) (int64, int64) {
@@ -396,9 +361,7 @@ func TestForward_GateTable(t *testing.T) {
 		}, ErrNotFound},
 		{"source in a DM the forwarder is not in", func(t *testing.T, f *forwardFixture) (int64, int64) {
 			id, err := f.svc.SendMessage(ctx, SendMessageParams{ChannelID: fwdDM, UserID: fwdCarol, Username: "carol", Content: "private"})
-			if err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "SendMessage", err)
 			if _, err := f.database.ExecContext(ctx, `DELETE FROM dm_participants WHERE user_id = ?`, fwdBob); err != nil {
 				t.Fatal(err)
 			}
@@ -428,9 +391,7 @@ func TestForward_GateTable(t *testing.T) {
 				`INSERT INTO moderation_actions (kind, target_id, expires_at) VALUES ('timeout', ?, '2999-01-01 00:00:00')`, fwdBob); err != nil {
 				t.Fatal(err)
 			}
-			if err := f.perms.RefreshTimeouts(ctx); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "RefreshTimeouts", f.perms.RefreshTimeouts(ctx))
 			return fwdDstChan, 0
 		}, ErrTimedOut},
 	}
@@ -474,9 +435,7 @@ func TestForward_LabelledSourceGoesToAnotherLabelledChannel(t *testing.T) {
 	f := newForwardFixture(t, nil)
 	src := f.nsfwSource(t)
 	res, err := f.forward(fwdNSFWDst, src)
-	if err != nil {
-		t.Fatalf("labelled to labelled: %v", err)
-	}
+	mustDo(t, "labelled to labelled", err)
 	if res.Forward == nil || res.Forward.SourceChannelID != fwdNSFWSrc {
 		t.Errorf("forward block = %+v", res.Forward)
 	}
@@ -491,9 +450,7 @@ func TestForward_TextOnlySourceNeedsNoAttachPermission(t *testing.T) {
 		t.Fatal(err)
 	}
 	fw, err := f.forward(fwdNoFilesDst, res.MessageID)
-	if err != nil {
-		t.Fatalf("text-only forward into a no-files channel: %v", err)
-	}
+	mustDo(t, "text-only forward into a no-files channel", err)
 	if len(fw.Attachments) != 0 || fw.Content != "just text" {
 		t.Errorf("result = %+v", fw)
 	}
@@ -576,9 +533,7 @@ func TestForward_OfForwardKeepsOrigin(t *testing.T) {
 func TestForward_OfForwardWithDeletedOriginalHasNoJumpLink(t *testing.T) {
 	f := newForwardFixture(t, nil)
 	first := mustForward(t, f, fwdDstChan, f.srcID)
-	if err := f.database.DeleteMessage(context.Background(), f.srcID, fwdAlice, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", f.database.DeleteMessage(context.Background(), f.srcID, fwdAlice, false))
 	second := mustForward(t, f, fwdSrcChan, first.MessageID)
 	if second.Forward == nil || second.Forward.SourceMessageID != nil {
 		t.Fatalf("forward of a forward of a deleted original = %+v, want no jump link", second.Forward)
@@ -634,18 +589,14 @@ func TestForward_QuotaRefusal(t *testing.T) {
 
 func TestForward_MissingFileIsSkippedLikeAnUpload(t *testing.T) {
 	f := newForwardFixture(t, nil)
-	if err := f.files.Delete(f.srcFile); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Delete", f.files.Delete(f.srcFile))
 	res := mustForward(t, f, fwdDstChan, f.srcID)
 	if len(res.Attachments) != 0 || res.Content == "" {
 		t.Fatalf("text should go through without the lost file: %+v", res)
 	}
 	// With no text, nothing is left to forward.
 	id, fileID := f.sendWithFile(t, fwdAlice, fwdSrcChan, "", "PNGDATA-only-file")
-	if err := f.files.Delete(fileID); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Delete", f.files.Delete(fileID))
 	if _, err := f.forward(fwdDstChan, id); !errors.Is(err, ErrAttachmentsUnavailable) {
 		t.Errorf("file-only message whose file is gone: err = %v, want ErrAttachmentsUnavailable", err)
 	}

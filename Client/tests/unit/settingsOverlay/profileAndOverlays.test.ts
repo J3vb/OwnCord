@@ -161,6 +161,42 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  describe("Edit Profile opens the profile editor", () => {
+    const toggle = (): HTMLElement =>
+      container.querySelector<HTMLElement>("[data-testid='profile-edit-toggle']")!;
+    const nameInput = (): HTMLInputElement =>
+      container.querySelector<HTMLInputElement>("[data-testid='display-name-input']")!;
+
+    it("from the sidebar link, on any tab", () => {
+      const overlay = openOverlay(container);
+      clickEl(container.querySelector("#settings-tab-appearance"));
+
+      const link = container.querySelector<HTMLButtonElement>(".settings-sidebar-edit")!;
+      expect(link.tagName).toBe("BUTTON");
+      link.click();
+
+      expect(container.querySelector(".settings-nav-item.active")?.id).toBe("settings-tab-account");
+      expect(toggle().getAttribute("aria-expanded")).toBe("true");
+      expect(document.activeElement).toBe(nameInput());
+
+      // A second press leaves the editor open instead of folding it away.
+      link.click();
+      expect(toggle().getAttribute("aria-expanded")).toBe("true");
+      overlay.destroy?.();
+    });
+
+    it("from a 'Profile' request (the profile card's Edit Profile)", () => {
+      mockUiState.settingsOpen = true;
+      mockUiState.settingsTab = "Profile";
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      expect(container.querySelector(".settings-nav-item.active")?.id).toBe("settings-tab-account");
+      expect(toggle().getAttribute("aria-expanded")).toBe("true");
+      expect(document.activeElement).toBe(nameInput());
+      overlay.destroy?.();
+    });
+  });
+
   it("hides 'Edit Profile' link when isAuthenticated is false", () => {
     const overlay = createSettingsOverlay({ ...defaultOptions, isAuthenticated: false });
     overlay.mount(container);

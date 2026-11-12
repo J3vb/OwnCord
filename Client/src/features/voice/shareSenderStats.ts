@@ -48,6 +48,10 @@ export interface ShareSenderSample {
   readonly codec?: string;
   /** Every layer, widest first. */
   readonly layers?: readonly ShareLayerSample[];
+  /** The most the server lets this share send, in bits per second, when that
+   *  is below what its quality asks for. Not a sender stat: added where the
+   *  sample is read. */
+  readonly serverLimit?: number;
 }
 
 /** The fields read from an `outbound-rtp` (or livekit's VideoSenderStats). */

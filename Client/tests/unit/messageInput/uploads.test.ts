@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/messageInputMocks";
-import { createMessageInput } from "@components/MessageInput";
+import { createMessageInput } from "../../../src/features/messaging/MessageInput";
 import { authStore } from "@stores/auth.store";
 import {
   makeOptions,
@@ -11,8 +11,8 @@ import {
   pasteFile,
 } from "../../helpers/messageInputHarness";
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
-vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
+vi.mock("../../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../../src/features/messaging/GifPicker", () => mocks.gifPickerMock());
 
 describe("MessageInput", () => {
   let container: HTMLDivElement;

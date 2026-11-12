@@ -8,46 +8,27 @@ import "@styles/theme-neon-glow.css";
 
 import { installGlobalErrorHandlers } from "@lib/text/safeRender";
 import { createApiClient } from "@lib/api";
-import { Disposable } from "@lib/disposable";
-import { isAndroidHost } from "@lib/hostPlatform";
 import { installGlobalGuards } from "./app/globalGuards";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { openNotificationTarget } from "@lib/notifications";
 import { settleNotificationLevelDefault } from "@lib/prefs/notificationLevel";
 import { createWsClient } from "@lib/ws";
-import { wireConnectionStatus } from "@lib/dispatcher";
 import { markActiveChannelReadOnUnload } from "@lib/readState";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
-import { applyStoredAppearance } from "@lib/prefs/appearance";
-import {
-  applyStoredCustomTheme,
-  installCustomThemeEscape,
-} from "./features/custom-themes/customTheme";
-import { startZoom } from "./features/zoom/zoomKeys";
-import {
-  forgetAndroidInputDevice,
-  migrateAutoInputSensitivity,
-  migrateInputMode,
-} from "@lib/ui/inputMode";
-import { migrateVoiceSensitivityScale } from "@lib/voice/gateScale";
 import { configureSession, installLogoutTeardown, voiceSessionLeave } from "./app/session";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
-import { initWindowState } from "@lib/prefs/windowState";
 import { createProfileManager, createTauriBackend } from "@lib/presence/profiles";
-import { saveUserStatus } from "@lib/presence/userStatus";
-import { getActivePresenceSender } from "@lib/presence/presence";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
 import { installCertPrompts } from "./app/certPrompts";
 import { configureServerHealth } from "./app/serverHealth";
 import { configureRouter, activePageId, navigate, renderActive, rerunHealth } from "./app/router";
-import { installDeepLinks } from "./app/deepLinks";
+import { afterCoreSteps, beforeRenderSteps, runStartupSteps } from "./app/startup";
 
 // First, while storage still holds only what earlier sessions wrote: that is
 // how an install from before the notification level is told from a new one.
@@ -74,43 +55,10 @@ void initLogPersistence();
 // The diagnostic event log and the app's own lifecycle events, off the startup
 // path; owners that record earlier are queued until it attaches.
 void import("@lib/diagnostics/appEvents")
-  .then((m) => m.startAppEvents(desktop.appMetadata))
+  .then((m) => m.startAppEvents(desktop.appMetadata, desktop.logFiles))
   .catch((e: unknown) => log.warn("Diagnostic event log failed to start", e));
 
-// Apply stored theme/font/compact preferences before first render
-applyStoredAppearance();
-// After the built-in theme and accent: a custom theme paints on top of them.
-applyStoredCustomTheme();
-// Native webview zoom: the stored level now, and the zoom keys everywhere.
-startZoom(() => import("./features/zoom").then((m) => m.appZoom), new Disposable().signal);
-// Ctrl+Shift+Backspace turns a custom CSS theme off, even one that hides the settings.
-installCustomThemeEscape(new Disposable().signal);
-
-// A profile from before automatic sensitivity keeps a tuned slider, and one
-// from before the decibel slider keeps its gate level.
-migrateAutoInputSensitivity();
-migrateVoiceSensitivityScale();
-forgetAndroidInputDevice();
-
-// Start push-to-talk listener (Rust-side polling, non-consuming), once the
-// input mode is settled: a profile from before Input Mode keeps its PTT key.
-migrateInputMode();
-void desktop.pushToTalk.init();
-// The Android app has no key to hold: its Push to Talk trigger is the
-// on-screen talk button, loaded on first use.
-if (isAndroidHost()) {
-  void import("./features/voice/talkButton")
-    .then((m) => m.startTalkButton(new Disposable().signal))
-    .catch((e: unknown) => log.warn("Talk button failed to start", e));
-  // Android silences a background app's mic unless a call service runs.
-  void import("./features/voice/backgroundCall")
-    .then((m) => m.startBackgroundCall(new Disposable().signal))
-    .catch((e: unknown) => log.warn("Background call service failed to start", e));
-  // Pause the camera while the app is in the background, resume on return.
-  void import("./features/voice/backgroundCamera")
-    .then((m) => m.startBackgroundCamera(new Disposable().signal))
-    .catch((e: unknown) => log.warn("Background camera pause failed to start", e));
-}
+runStartupSteps(beforeRenderSteps, { log });
 
 const appEl = document.getElementById("app");
 if (!appEl) {
@@ -122,13 +70,12 @@ if (!appEl) {
 // → src-tauri/src/http_proxy.rs), which pins the server certificate to the same
 // trust-on-first-use fingerprint as the WS proxy. No cert is ever blindly
 // accepted; the bearer token never rides an unpinned TLS connection.
-/** Shared 401 handling, named so the saved-password relay path can run the
- *  same side effect `api.ts` runs for an ordinary request. */
+/** The API client's 401 sink: a live session's token was refused. */
 function handleUnauthorized(): void {
   log.warn("Session expired (401), clearing auth");
-  // A 401 on a request made before any session existed (e.g. a failed login
-  // attempt) is not a session "expiring" — the login form's own catch block
-  // already surfaces that failure. Only warn about a session that was live.
+  // A 401 on a request made before any session existed is not a session
+  // "expiring" (the sign-in calls skip this sink, so a refused password never
+  // gets here). Only warn about a session that was live.
   if (authStore.getState().isAuthenticated) {
     setTransientError(connectText("session.expired"));
   }
@@ -160,44 +107,12 @@ void registerSessionReset(
   },
   { phase: "session" },
 );
-// Single writer for the UX-facing connection status (docs/architecture/ux §3):
-// live controls read ui.store.connectionStatus reactively instead of wiring
-// their own ws.onStateChange. Lifecycle plumbing that needs the exact internal
-// transition (the connected overlay below) stays on ws.onStateChange.
-wireConnectionStatus(ws);
 const profileManager = createProfileManager(createTauriBackend());
-configureRouter(api, ws, appEl, profileManager, handleUnauthorized);
+configureRouter(api, ws, appEl, profileManager);
 configureSession(api, ws, appEl, activePageId, navigate);
 configureServerHealth(api);
 
 installCertPrompts(ws, activePageId, navigate, rerunHealth);
-
-// Route the tray's Status submenu (Online/Idle/Do Not Disturb/Offline) into
-// the same path the in-app StatusPicker uses (UserBar.ts): persist through
-// saveUserStatus() — lib/presence/userStatus.ts's documented single source of truth —
-// before sending the wire message, not just a raw ws.send. Without this the
-// tray's choice never reaches loadUserStatus(), so notifications.ts's DND
-// gate, autoIdle's "never touch a manual DND/invisible" guard, and
-// restoreSavedPresence() on the next reconnect all silently disagree with
-// what the tray just set. The send itself goes through the
-// session's shared PresenceSender (registered by MainPage.ts via
-// setActivePresenceSender) rather than a raw ws.send: the server enforces a
-// single 1-update/10s budget per user regardless of which surface sent the
-// frame, and a raw send here would open a second, uncoordinated budget that
-// silently drops whichever frame the server sees second. When no
-// session is mounted the optional call is a no-op, matching the old raw
-// ws.send's "safe no-op when disconnected" behavior, so no auth guard is
-// needed here.
-desktop.trayStatus.onStatusChange((status) => {
-  if (status === "online" || status === "idle" || status === "dnd" || status === "offline") {
-    // The tray's legacy "offline" spelling maps to "invisible" the same way
-    // userStatus.ts migrates an old client's stored "offline" value (see its
-    // doc comment) — the local pref and the wire message must agree.
-    const mapped = status === "offline" ? "invisible" : status;
-    saveUserStatus(mapped);
-    getActivePresenceSender()?.send(mapped);
-  }
-});
 
 installLogoutTeardown();
 
@@ -224,14 +139,6 @@ void renderActive().then(() =>
   desktop.appProcess.reportReady().catch((err) => log.warn("Failed to report frontend ready", err)),
 );
 
-// Initialize window state persistence (fire-and-forget)
-void initWindowState();
-
-installDeepLinks(api);
-
-// A clicked message notification opens the message it was for (U1d). The native
-// host emits `notification-click` with the target; routing it through the same
-// jumper a permalink uses keeps one implementation.
-desktop.notifier.onMessageActivated(openNotificationTarget);
+runStartupSteps(afterCoreSteps(api), { log });
 
 log.info("OwnCord client initialized");

@@ -1,9 +1,7 @@
 package api_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,27 +14,19 @@ import (
 // ─── POST /api/v1/auth/verify-totp ──────────────────────────────────────────
 
 func TestVerifyTOTP_Success(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	// Create user with TOTP enabled.
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser(context.Background(), "totpuser", hash, 4)
+	uid := mustCreateUser(t, database, "totpuser", hash, 4)
 	storeSealedTOTP(t, database, uid, secret)
 
 	// Login should return requires_2fa + partial_token.
-	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
-		"username": "totpuser",
-		"password": "Password1!",
-	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	rr := postLogin(t, router, "totpuser", "Password1!")
+	requireStatus(t, rr, http.StatusOK)
 
-	var loginResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&loginResp)
+	loginResp := decodeBody[map[string]any](t, rr)
 	if loginResp["requires_2fa"] != true {
 		t.Fatal("expected requires_2fa=true in login response")
 	}
@@ -53,211 +43,146 @@ func TestVerifyTOTP_Success(t *testing.T) {
 
 	rr = postJSONWithToken(t, router, "/api/v1/auth/verify-totp", partialToken,
 		map[string]string{"code": code})
-	if rr.Code != http.StatusOK {
-		t.Errorf("verify-totp status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 
-	var verifyResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&verifyResp)
+	verifyResp := decodeBody[map[string]any](t, rr)
 	if verifyResp["token"] == nil {
 		t.Error("verify-totp response missing session token")
 	}
 }
 
 func TestVerifyTOTP_InvalidCode(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser(context.Background(), "totpuser2", hash, 4)
+	uid := mustCreateUser(t, database, "totpuser2", hash, 4)
 	storeSealedTOTP(t, database, uid, secret)
 
 	// Login to get partial token.
-	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
-		"username": "totpuser2",
-		"password": "Password1!",
-	})
-	var loginResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&loginResp)
+	rr := postLogin(t, router, "totpuser2", "Password1!")
+	loginResp := decodeBody[map[string]any](t, rr)
 	partialToken := loginResp["partial_token"].(string)
 
 	// Submit wrong code.
 	rr = postJSONWithToken(t, router, "/api/v1/auth/verify-totp", partialToken,
 		map[string]string{"code": "000000"})
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("verify-totp with bad code: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestVerifyTOTP_MissingToken(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	_, _, router := newAuthEnv(t)
 
 	rr := postJSON(t, router, "/api/v1/auth/verify-totp",
 		map[string]string{"code": "123456"})
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("verify-totp without token: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestVerifyTOTP_InvalidPartialToken(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	_, _, router := newAuthEnv(t)
 
 	rr := postJSONWithToken(t, router, "/api/v1/auth/verify-totp", "bogus-token",
 		map[string]string{"code": "123456"})
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("verify-totp with bogus token: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestVerifyTOTP_MalformedBody(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	// Need a valid partial token to get past the token check.
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser(context.Background(), "totpuser3", hash, 4)
+	uid := mustCreateUser(t, database, "totpuser3", hash, 4)
 	storeSealedTOTP(t, database, uid, secret)
 
-	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
-		"username": "totpuser3",
-		"password": "Password1!",
-	})
-	var loginResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&loginResp)
+	rr := postLogin(t, router, "totpuser3", "Password1!")
+	loginResp := decodeBody[map[string]any](t, rr)
 	partialToken := loginResp["partial_token"].(string)
 
 	// Send invalid JSON.
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/verify-totp",
-		bytes.NewReader([]byte("{invalid")))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+partialToken)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
+	rec := doAPIRawJSON(t, router, http.MethodPost, "/api/v1/auth/verify-totp", partialToken, "{invalid")
 
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("verify-totp with malformed body: status = %d, want 400", rec.Code)
-	}
+	expectStatus(t, rec, http.StatusBadRequest)
 }
 
 func TestVerifyTOTP_ReplayProtection(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser(context.Background(), "totpuser4", hash, 4)
+	uid := mustCreateUser(t, database, "totpuser4", hash, 4)
 	storeSealedTOTP(t, database, uid, secret)
 
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 
 	// First login + verify — should succeed.
-	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
-		"username": "totpuser4",
-		"password": "Password1!",
-	})
-	var resp1 map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp1)
+	rr := postLogin(t, router, "totpuser4", "Password1!")
+	resp1 := decodeBody[map[string]any](t, rr)
 	token1 := resp1["partial_token"].(string)
 
 	rr = postJSONWithToken(t, router, "/api/v1/auth/verify-totp", token1,
 		map[string]string{"code": code})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("first verify: status = %d, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	// Second login + verify with same code — should fail (consumed token).
-	rr = postJSON(t, router, "/api/v1/auth/login", map[string]string{
-		"username": "totpuser4",
-		"password": "Password1!",
-	})
-	var resp2 map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp2)
+	rr = postLogin(t, router, "totpuser4", "Password1!")
+	resp2 := decodeBody[map[string]any](t, rr)
 	token2 := resp2["partial_token"].(string)
 
 	rr = postJSONWithToken(t, router, "/api/v1/auth/verify-totp", token2,
 		map[string]string{"code": code})
 	// Code was already used in UsedTOTPCodeStore, so it should be rejected.
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("replay code: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── POST /api/v1/users/me/totp/enable ──────────────────────────────────────
 
 func TestEnableTOTP_Success(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "enableuser", 4)
 
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusOK {
-		t.Errorf("enable-totp status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["qr_uri"] == nil || resp["qr_uri"] == "" {
 		t.Error("enable-totp response missing qr_uri")
 	}
 }
 
 func TestEnableTOTP_WrongPassword(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "enableuser2", 4)
 
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
 		map[string]string{"password": "wrongpassword"})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("enable-totp with wrong password: status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestEnableTOTP_Unauthenticated(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	_, _, router := newAuthEnv(t)
 
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", "badtoken",
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("enable-totp unauthenticated: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── POST /api/v1/users/me/totp/confirm ─────────────────────────────────────
 
 func TestConfirmTOTP_Success(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmuser", 4)
 
 	// Step 1: Enable to get pending secret.
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("enable: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var enableResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
+	enableResp := decodeBody[map[string]any](t, rr)
 	qrURI, _ := enableResp["qr_uri"].(string)
 
 	// Extract secret from QR URI (otpauth://totp/...?secret=XXX&...)
@@ -267,9 +192,7 @@ func TestConfirmTOTP_Success(t *testing.T) {
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token,
 		map[string]string{"password": "Password1!", "code": code})
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("confirm-totp: status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 
 	// Verify TOTP is now stored on user.
 	user, _ := database.GetUserByUsername(context.Background(), "confirmuser")
@@ -282,9 +205,7 @@ func TestConfirmTOTP_Success(t *testing.T) {
 }
 
 func TestConfirmTOTP_InvalidCode_Handler(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmuser2", 4)
 
@@ -295,30 +216,22 @@ func TestConfirmTOTP_InvalidCode_Handler(t *testing.T) {
 	// Confirm with wrong code.
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token,
 		map[string]string{"password": "Password1!", "code": "000000"})
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("confirm-totp with bad code: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestConfirmTOTP_NoPendingEnrollment(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmuser3", 4)
 
 	// Try to confirm without enable first.
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token,
 		map[string]string{"password": "Password1!", "code": "123456"})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("confirm-totp without enable: status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestConfirmTOTP_WrongPassword_Handler(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmuser4", 4)
 
@@ -327,25 +240,20 @@ func TestConfirmTOTP_WrongPassword_Handler(t *testing.T) {
 
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token,
 		map[string]string{"password": "wrong", "code": "123456"})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("confirm-totp wrong password: status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // ─── DELETE /api/v1/users/me/totp ────────────────────────────────────────────
 
 func TestDisableTOTP_Success(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "disableuser", 4)
 
 	// Enable and confirm TOTP first.
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
 		map[string]string{"password": "Password1!"})
-	var enableResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
+	enableResp := decodeBody[map[string]any](t, rr)
 	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 	postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token,
@@ -354,41 +262,29 @@ func TestDisableTOTP_Success(t *testing.T) {
 	// Now disable.
 	rr = deleteWithToken(t, router, "/api/v1/users/me/totp", token,
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("disable-totp: status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 func TestDisableTOTP_WrongPassword_Handler(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "disableuser2", 4)
 
 	rr := deleteWithToken(t, router, "/api/v1/users/me/totp", token,
 		map[string]string{"password": "wrong"})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("disable-totp wrong password: status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestDisableTOTP_Unauthenticated(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	_, _, router := newAuthEnv(t)
 
 	rr := deleteWithToken(t, router, "/api/v1/users/me/totp", "badtoken",
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("disable-totp unauthenticated: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestDisableTOTP_BlockedByServerPolicy(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "disableuser3", 4)
 
@@ -397,29 +293,21 @@ func TestDisableTOTP_BlockedByServerPolicy(t *testing.T) {
 
 	rr := deleteWithToken(t, router, "/api/v1/users/me/totp", token,
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("disable-totp with require_2fa: status = %d, want 403; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // ─── API-token principals (nil session) and post-password bans ───────────────
 
 func TestVerifyTOTP_BannedAfterPasswordStep(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser(context.Background(), "banafterpw", hash, 4)
+	uid := mustCreateUser(t, database, "banafterpw", hash, 4)
 	storeSealedTOTP(t, database, uid, secret)
 
-	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
-		"username": "banafterpw",
-		"password": "Password1!",
-	})
-	var loginResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&loginResp)
+	rr := postLogin(t, router, "banafterpw", "Password1!")
+	loginResp := decodeBody[map[string]any](t, rr)
 	partialToken, _ := loginResp["partial_token"].(string)
 	if partialToken == "" {
 		t.Fatal("expected partial_token from login")
@@ -434,11 +322,8 @@ func TestVerifyTOTP_BannedAfterPasswordStep(t *testing.T) {
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 	rr = postJSONWithToken(t, router, "/api/v1/auth/verify-totp", partialToken,
 		map[string]string{"code": code})
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("verify-totp for banned user: status = %d, want 403; body = %s", rr.Code, rr.Body.String())
-	}
-	var verifyResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&verifyResp)
+	expectStatus(t, rr, http.StatusForbidden)
+	verifyResp := decodeBody[map[string]any](t, rr)
 	if verifyResp["token"] != nil {
 		t.Error("verify-totp issued a session token to a banned user")
 	}
@@ -448,9 +333,7 @@ func TestVerifyTOTP_BannedAfterPasswordStep(t *testing.T) {
 // two-factor all take a login session; an API token changes nothing and the
 // account's login session survives.
 func TestTOTP_APITokenPrincipalIsRefused(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	sessionToken := loginAndGetToken(t, router, database, "apitotp1", 4)
 	user, _ := database.GetUserByUsername(context.Background(), "apitotp1")
@@ -470,11 +353,8 @@ func TestTOTP_APITokenPrincipalIsRefused(t *testing.T) {
 	// something to confirm.
 	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", sessionToken,
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("enable via login session: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var enableResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
+	requireStatus(t, rr, http.StatusOK)
+	enableResp := decodeBody[map[string]any](t, rr)
 	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 
@@ -503,9 +383,7 @@ func TestTOTP_APITokenPrincipalIsRefused(t *testing.T) {
 // (service/user.go:262-274 / api/profile_handler.go:377) and report a 200
 // with an explicit warning, not a silent 204.
 func TestConfirmTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmrevokefail", 4)
 	user, _ := database.GetUserByUsername(context.Background(), "confirmrevokefail")
@@ -523,11 +401,8 @@ func TestConfirmTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
 	// Step 1: enable to get a pending secret (before the trigger exists).
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("enable: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var enableResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
+	requireStatus(t, rr, http.StatusOK)
+	enableResp := decodeBody[map[string]any](t, rr)
 	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 
@@ -555,13 +430,8 @@ func TestConfirmTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
 		t.Fatal("expected TOTPSecret to be committed even though revocation failed")
 	}
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("confirm-totp with revoke failure: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode confirm response: %v", err)
-	}
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["warning"] == nil {
 		t.Error("expected a warning field when session revocation failed after totp enable")
 	}
@@ -576,9 +446,7 @@ func TestConfirmTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
 // TestDisableTOTP_RevokeFailureSurfacesWarning is the handleDisableTOTP
 // sibling of TestConfirmTOTP_RevokeFailureSurfacesWarning.
 func TestDisableTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "disablerevokefail", 4)
 	user, _ := database.GetUserByUsername(context.Background(), "disablerevokefail")
@@ -589,15 +457,12 @@ func TestDisableTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
 	// Enable and confirm TOTP first (before the trigger exists).
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
 		map[string]string{"password": "Password1!"})
-	var enableResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
+	enableResp := decodeBody[map[string]any](t, rr)
 	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token,
 		map[string]string{"password": "Password1!", "code": code})
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("setup confirm: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 
 	// A second, unrelated session so DeleteOtherSessions has a row to delete.
 	otherToken, _ := auth.GenerateToken()
@@ -623,13 +488,8 @@ func TestDisableTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
 		t.Fatal("expected TOTPSecret to be cleared even though revocation failed")
 	}
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("disable-totp with revoke failure: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode disable response: %v", err)
-	}
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["warning"] == nil {
 		t.Error("expected a warning field when session revocation failed after totp disable")
 	}
@@ -644,14 +504,7 @@ func TestDisableTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
 // deleteWithToken sends a DELETE request with a JSON body and auth token.
 func deleteWithToken(t *testing.T, router http.Handler, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	raw, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodDelete, path, bytes.NewReader(raw))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPIJSON(t, router, http.MethodDelete, path, token, body)
 }
 
 // extractSecretFromURI parses a TOTP otpauth:// URI and returns the secret parameter.
@@ -673,23 +526,17 @@ func extractSecretFromURI(t *testing.T, uri string) string {
 // wrong-code 401, and charges nothing, so once the row is sealed the same
 // challenge still completes.
 func TestVerifyTOTP_UnsealedStoredSecretIsAStoreFailure(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser(context.Background(), "unsealed", hash, 4)
+	uid := mustCreateUser(t, database, "unsealed", hash, 4)
 	if err := database.UpdateUserTOTPSecret(context.Background(), uid, &secret); err != nil {
 		t.Fatalf("UpdateUserTOTPSecret: %v", err)
 	}
 
-	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
-		"username": "unsealed",
-		"password": "Password1!",
-	})
-	var loginResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&loginResp)
+	rr := postLogin(t, router, "unsealed", "Password1!")
+	loginResp := decodeBody[map[string]any](t, rr)
 	partialToken, _ := loginResp["partial_token"].(string)
 	if partialToken == "" {
 		t.Fatalf("login gave no partial_token; status %d", rr.Code)
@@ -708,7 +555,5 @@ func TestVerifyTOTP_UnsealedStoredSecretIsAStoreFailure(t *testing.T) {
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 	rr = postJSONWithToken(t, router, "/api/v1/auth/verify-totp", partialToken,
 		map[string]string{"code": code})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("verify after sealing: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 }

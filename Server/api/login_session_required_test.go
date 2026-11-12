@@ -30,8 +30,7 @@ func bearerJSON(t *testing.T, h http.Handler, method, path, token string, body a
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 	return rr
 }
 

@@ -15,21 +15,21 @@ vi.mock("@lib/logger", () => ({
 }));
 vi.mock("../../src/features/connection/logout", () => ({ logout: vi.fn() }));
 vi.mock("@lib/voice/livekitSession", () => ({}));
-vi.mock("@components/QuickSwitchOverlay", () => ({
+vi.mock("../../src/features/navigation/QuickSwitchOverlay", () => ({
   createQuickSwitchOverlay: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
 }));
-vi.mock("@components/ChannelSidebar", () => ({
+vi.mock("../../src/features/channels/ChannelSidebar", () => ({
   createChannelSidebar: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
 }));
-vi.mock("@components/DmSidebar", () => ({
+vi.mock("../../src/features/direct-messages/DmSidebar", () => ({
   createDmSidebar: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn(), update: vi.fn() }),
 }));
-vi.mock("@components/MemberList", () => ({
+vi.mock("../../src/features/members/MemberList", () => ({
   createMemberList: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
 }));
 
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
-import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
+import { createQuickSwitchOverlay } from "../../src/features/navigation/QuickSwitchOverlay";
 import { logout } from "../../src/features/connection/logout";
 import { authStore } from "../../src/stores/auth.store";
 import { shellText } from "../../src/i18n/shell";

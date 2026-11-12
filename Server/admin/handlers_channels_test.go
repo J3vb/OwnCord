@@ -50,9 +50,7 @@ func TestCreateChannel_AnyTypeUnderAnyCategory(t *testing.T) {
 				"category": tc.category,
 			}
 			w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
-			if w.Code != http.StatusCreated {
-				t.Errorf("status = %d, want 201; body: %s", w.Code, w.Body.String())
-			}
+			expectStatus(t, w, http.StatusCreated)
 		})
 	}
 }
@@ -66,9 +64,7 @@ func TestCreateChannel_UnknownTypeRejected(t *testing.T) {
 		"category": "Chat",
 	}
 	w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusBadRequest)
 	var resp map[string]string
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err == nil {
 		if resp["error"] != "INVALID_INPUT" {
@@ -88,20 +84,15 @@ func TestCreateChannel_ForumAccepted(t *testing.T) {
 	w := doRequest(t, handler, http.MethodPost, "/channels", token, map[string]any{
 		"name": "ideas", "type": "forum",
 	})
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
-	}
-	var resp struct {
+	requireStatus(t, w, http.StatusCreated)
+	resp := decodeBody[struct {
 		Type  string `json:"type"`
 		Forum *struct {
 			Tags                      []any `json:"tags"`
 			RequireTag                bool  `json:"require_tag"`
 			DefaultAutoArchiveMinutes int   `json:"default_auto_archive_minutes"`
 		} `json:"forum"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, w)
 	if resp.Type != "forum" || resp.Forum == nil {
 		t.Fatalf("created %+v, want a forum carrying its settings", resp)
 	}
@@ -119,9 +110,7 @@ func TestPatchChannel_MovesCategory(t *testing.T) {
 	create := doRequest(t, handler, http.MethodPost, "/channels", token, map[string]any{
 		"name": "lounge", "type": "voice", "category": "Gaming",
 	})
-	if create.Code != http.StatusCreated {
-		t.Fatalf("create: status = %d; body: %s", create.Code, create.Body.String())
-	}
+	requireStatus(t, create, http.StatusCreated)
 	var created struct {
 		ID int64 `json:"id"`
 	}
@@ -133,9 +122,7 @@ func TestPatchChannel_MovesCategory(t *testing.T) {
 	moved := doRequest(t, handler, http.MethodPatch, path, token, map[string]any{
 		"name": "lounge", "category": "Hangout",
 	})
-	if moved.Code != http.StatusOK {
-		t.Fatalf("patch: status = %d; body: %s", moved.Code, moved.Body.String())
-	}
+	requireStatus(t, moved, http.StatusOK)
 	var afterMove struct {
 		Category string `json:"category"`
 	}
@@ -150,9 +137,7 @@ func TestPatchChannel_MovesCategory(t *testing.T) {
 	kept := doRequest(t, handler, http.MethodPatch, path, token, map[string]any{
 		"name": "lounge-2",
 	})
-	if kept.Code != http.StatusOK {
-		t.Fatalf("patch without category: status = %d; body: %s", kept.Code, kept.Body.String())
-	}
+	requireStatus(t, kept, http.StatusOK)
 	var afterKeep struct {
 		Category string `json:"category"`
 	}
@@ -181,12 +166,9 @@ func newChannel(t *testing.T, handler http.Handler, token, name, chType string) 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create %s: status = %d; body: %s", name, w.Code, w.Body.String())
 	}
-	var created struct {
+	created := decodeBody[struct {
 		ID int64 `json:"id"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
-		t.Fatalf("unmarshal created: %v", err)
-	}
+	}](t, w)
 	return created.ID
 }
 
@@ -201,13 +183,8 @@ type channelFlags struct {
 func patchChannelFlags(t *testing.T, handler http.Handler, token string, id int64, body map[string]any) channelFlags {
 	t.Helper()
 	w := doRequest(t, handler, http.MethodPatch, fmt.Sprintf("/channels/%d", id), token, body)
-	if w.Code != http.StatusOK {
-		t.Fatalf("patch: status = %d; body: %s", w.Code, w.Body.String())
-	}
-	var got channelFlags
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal patched: %v", err)
-	}
+	requireStatus(t, w, http.StatusOK)
+	got := decodeBody[channelFlags](t, w)
 	return got
 }
 
@@ -274,13 +251,8 @@ func TestPatchChannel_RejectsOutOfRangeValues(t *testing.T) {
 			id := newChannel(t, handler, token, "lounge", "voice")
 
 			w := doRequest(t, handler, http.MethodPatch, fmt.Sprintf("/channels/%d", id), token, tc.body)
-			if w.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-			}
-			var resp map[string]string
-			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-				t.Fatalf("unmarshal error body: %v", err)
-			}
+			requireStatus(t, w, http.StatusBadRequest)
+			resp := decodeBody[map[string]string](t, w)
 			if resp["error"] != "INVALID_INPUT" {
 				t.Errorf("error code = %q, want INVALID_INPUT", resp["error"])
 			}
@@ -308,13 +280,8 @@ func TestPatchChannel_RejectsEmptyName(t *testing.T) {
 			w := doRequest(t, handler, http.MethodPatch, fmt.Sprintf("/channels/%d", id), token, map[string]any{
 				"name": tc.value,
 			})
-			if w.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-			}
-			var resp map[string]string
-			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-				t.Fatalf("unmarshal error body: %v", err)
-			}
+			requireStatus(t, w, http.StatusBadRequest)
+			resp := decodeBody[map[string]string](t, w)
 			if resp["error"] != "INVALID_INPUT" {
 				t.Errorf("error code = %q, want INVALID_INPUT", resp["error"])
 			}
@@ -354,9 +321,7 @@ func TestPatchChannel_RejectedPatchWritesNothing(t *testing.T) {
 	w := doRequest(t, handler, http.MethodPatch, fmt.Sprintf("/channels/%d", id), token, map[string]any{
 		"name": "renamed", "nsfw": true, "voice_max_users": 500,
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusBadRequest)
 
 	list := doRequest(t, handler, http.MethodGet, "/channels", token, nil)
 	var channels []struct {
@@ -383,10 +348,7 @@ func TestPatchChannel_RejectedPatchWritesNothing(t *testing.T) {
 // desktop client updates its channel store from channel_update alone and would
 // otherwise show a stale gate until the next reconnect.
 func TestPatchChannel_BroadcastCarriesFeatureFlags(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, hub, handler, token := newAdminHarnessWithHub(t)
 
 	id := newChannel(t, handler, token, "lounge", "voice")
 	patchChannelFlags(t, handler, token, id, map[string]any{
@@ -450,9 +412,7 @@ func TestPatchChannel_FeatureFlagsRequireManageChannels(t *testing.T) {
 	w := doRequest(t, handler, http.MethodPatch, fmt.Sprintf("/channels/%d", id), memberToken, map[string]any{
 		"nsfw": true,
 	})
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 // ─── DM exclusion (A-2026-08-02) ─────────────────────────────────────────────
@@ -467,15 +427,10 @@ func TestListChannels_ExcludesDMs(t *testing.T) {
 	handler, token, database := newChannelTestAPI(t)
 
 	textID := newChannel(t, handler, token, "general", "text")
-	dmID, err := database.CreateChannel(context.Background(), "dm-chan", "dm", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel dm: %v", err)
-	}
+	dmID := mustCreateChannel(t, database, "dm-chan", "dm")
 
 	w := doRequest(t, handler, http.MethodGet, "/channels", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	var channels []struct {
 		ID   int64  `json:"id"`
 		Type string `json:"type"`
@@ -500,17 +455,12 @@ func TestListChannels_ExcludesDMs(t *testing.T) {
 func TestPatchChannel_RefusesDM(t *testing.T) {
 	handler, token, database := newChannelTestAPI(t)
 
-	dmID, err := database.CreateChannel(context.Background(), "dm-chan", "dm", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel dm: %v", err)
-	}
+	dmID := mustCreateChannel(t, database, "dm-chan", "dm")
 
 	w := doRequest(t, handler, http.MethodPatch, fmt.Sprintf("/channels/%d", dmID), token, map[string]any{
 		"name": "renamed-by-admin",
 	})
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusNotFound)
 
 	ch, err := database.GetChannel(context.Background(), dmID)
 	if err != nil || ch == nil {
@@ -524,15 +474,10 @@ func TestPatchChannel_RefusesDM(t *testing.T) {
 func TestDeleteChannel_RefusesDM(t *testing.T) {
 	handler, token, database := newChannelTestAPI(t)
 
-	dmID, err := database.CreateChannel(context.Background(), "dm-chan", "dm", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel dm: %v", err)
-	}
+	dmID := mustCreateChannel(t, database, "dm-chan", "dm")
 
 	w := doRequest(t, handler, http.MethodDelete, fmt.Sprintf("/channels/%d", dmID), token, nil)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusNotFound)
 
 	ch, err := database.GetChannel(context.Background(), dmID)
 	if err != nil {

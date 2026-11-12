@@ -22,17 +22,11 @@ func newThreadFixture(t *testing.T) threadFixture {
 	ctx := context.Background()
 	d := openMigratedMemory(t)
 	u, err := d.CreateUser(ctx, "threader", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateUser", err)
 	parent, err := d.CreateChannel(ctx, "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	starter, err := d.CreateMessage(ctx, parent, u, "start here", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessage", err)
 	res, err := d.ExecContext(ctx,
 		`INSERT INTO channels (name, type, parent_channel_id, thread_starter_message_id, thread_owner_id)
 		 VALUES ('a thread', 'thread', ?, ?, ?)`, parent, starter, u)
@@ -40,9 +34,7 @@ func newThreadFixture(t *testing.T) threadFixture {
 		t.Fatalf("insert thread: %v", err)
 	}
 	thread, err := res.LastInsertId()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LastInsertId", err)
 	return threadFixture{db: d, user: u, parent: parent, starter: starter, thread: thread}
 }
 
@@ -58,13 +50,9 @@ func TestThreadRowShapeTrigger(t *testing.T) {
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	voice, err := f.db.CreateChannel(ctx, "voice", "voice", "", "", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	other, err := f.db.CreateChannel(ctx, "other", "text", "", "", 2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 
 	refusedInserts := map[string]string{
 		"thread without parent":    `INSERT INTO channels (name, type) VALUES ('x', 'thread')`,
@@ -143,12 +131,8 @@ func TestThreadRowShapeTrigger(t *testing.T) {
 func TestThreadInheritsParentChannelState(t *testing.T) {
 	f := newThreadFixture(t)
 	ctx := context.Background()
-	if err := f.exec(t, `UPDATE channels SET nsfw = 1, archived = 1, slow_mode = 7 WHERE id = ?`, f.parent); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.exec(t, `UPDATE channels SET thread_locked = 1 WHERE id = ?`, f.thread); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "exec", f.exec(t, `UPDATE channels SET nsfw = 1, archived = 1, slow_mode = 7 WHERE id = ?`, f.parent))
+	mustDo(t, "exec", f.exec(t, `UPDATE channels SET thread_locked = 1 WHERE id = ?`, f.thread))
 	ch, err := f.db.GetChannel(ctx, f.thread)
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel(thread) = %v, %v", ch, err)
@@ -167,9 +151,7 @@ func TestThreadInheritsParentChannelState(t *testing.T) {
 		t.Errorf("parent reads as a thread: %+v", p.Thread)
 	}
 	all, err := f.db.ListChannels(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListChannels", err)
 	for i := range all {
 		if all[i].ID == f.thread {
 			t.Fatal("ListChannels returned the thread, want parents only")
@@ -184,12 +166,8 @@ func TestThreadOverrideReadsResolveParent(t *testing.T) {
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	const role = 4
-	if err := f.db.UpsertChannelOverride(ctx, f.parent, role, 0x10, 0x20); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.db.UpsertChannelUserOverride(ctx, f.parent, f.user, 0x40, 0x80); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertChannelOverride", f.db.UpsertChannelOverride(ctx, f.parent, role, 0x10, 0x20))
+	mustDo(t, "UpsertChannelUserOverride", f.db.UpsertChannelUserOverride(ctx, f.parent, f.user, 0x40, 0x80))
 	if allow, deny, err := f.db.GetChannelPermissions(ctx, f.thread, role); err != nil || allow != 0x10 || deny != 0x20 {
 		t.Errorf("role override on thread = %#x/%#x, %v, want the parent's 0x10/0x20", allow, deny, err)
 	}
@@ -197,9 +175,7 @@ func TestThreadOverrideReadsResolveParent(t *testing.T) {
 		t.Errorf("user override on thread = %#x/%#x, %v, want the parent's 0x40/0x80", allow, deny, err)
 	}
 	grants, err := f.db.GetMemberGrants(ctx, f.user)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetMemberGrants", err)
 	if _, ok := grants.Overrides[f.thread]; ok {
 		t.Error("the batch override map has a thread key, want parent keys only")
 	}
@@ -214,9 +190,7 @@ func TestThreadOverrideReadsResolveParent(t *testing.T) {
 func TestThreadNSFWConsentIsParents(t *testing.T) {
 	f := newThreadFixture(t)
 	ctx := context.Background()
-	if err := f.exec(t, `UPDATE channels SET nsfw = 1 WHERE id = ?`, f.parent); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "exec", f.exec(t, `UPDATE channels SET nsfw = 1 WHERE id = ?`, f.parent))
 	if labelled, err := f.db.AcknowledgeNSFW(ctx, f.user, f.thread); err != nil || labelled {
 		t.Errorf("AcknowledgeNSFW(thread) = %v, %v, want not labelled", labelled, err)
 	}
@@ -254,12 +228,8 @@ func TestThreadAttachmentTakesParentNSFW(t *testing.T) {
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	msg, err := f.db.CreateMessage(ctx, f.thread, f.user, "pic", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.db.CreateAttachment(ctx, "att-thread", f.user, "a.png", "a.png", "image/png", 1, nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessage", err)
+	mustDo(t, "CreateAttachment", f.db.CreateAttachment(ctx, "att-thread", f.user, "a.png", "a.png", "image/png", 1, nil, nil))
 	if _, err := f.db.LinkAttachmentsToMessage(ctx, msg, f.user, []string{"att-thread"}); err != nil {
 		t.Fatal(err)
 	}
@@ -267,9 +237,7 @@ func TestThreadAttachmentTakesParentNSFW(t *testing.T) {
 	if err != nil || a == nil || a.ChannelNSFW {
 		t.Fatalf("unlabelled parent: %+v, %v", a, err)
 	}
-	if err := f.exec(t, `UPDATE channels SET nsfw = 1 WHERE id = ?`, f.parent); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "exec", f.exec(t, `UPDATE channels SET nsfw = 1 WHERE id = ?`, f.parent))
 	a, err = f.db.GetAttachmentWithChannel(ctx, "att-thread")
 	if err != nil || a == nil || !a.ChannelNSFW || a.ChannelType != "thread" {
 		t.Errorf("labelled parent: %+v, %v, want ChannelNSFW", a, err)
@@ -281,13 +249,9 @@ func TestThreadAttachmentTakesParentNSFW(t *testing.T) {
 func TestThreadRetentionFollowsParent(t *testing.T) {
 	f := newThreadFixture(t)
 	ctx := context.Background()
-	if err := f.db.SetChannelRetention(ctx, f.parent, 30, f.user); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetChannelRetention", f.db.SetChannelRetention(ctx, f.parent, 30, f.user))
 	ws, err := f.db.RetentionWindows(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RetentionWindows", err)
 	found := false
 	for _, w := range ws {
 		if w.ChannelID == f.thread {
@@ -307,16 +271,12 @@ func TestThreadRetentionFollowsParent(t *testing.T) {
 func TestThreadGoesWithParent(t *testing.T) {
 	f := newThreadFixture(t)
 	ctx := context.Background()
-	if err := f.exec(t, `DELETE FROM messages WHERE id = ?`, f.starter); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "exec", f.exec(t, `DELETE FROM messages WHERE id = ?`, f.starter))
 	ch, err := f.db.GetChannel(ctx, f.thread)
 	if err != nil || ch == nil {
 		t.Fatalf("thread gone with its starter: %v", err)
 	}
-	if err := f.db.DeleteChannel(ctx, f.parent); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteChannel", f.db.DeleteChannel(ctx, f.parent))
 	if ch, err := f.db.GetChannel(ctx, f.thread); err != nil || ch != nil {
 		t.Errorf("thread survived its parent: %+v, %v", ch, err)
 	}

@@ -17,14 +17,10 @@ func TestUpsertLockout_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	expiry := time.Now().UTC().Add(15 * time.Minute).Truncate(time.Second)
-	if err := database.UpsertLockout(ctx, "ip:203.0.113.7", expiry); err != nil {
-		t.Fatalf("UpsertLockout: %v", err)
-	}
+	mustDo(t, "UpsertLockout", database.UpsertLockout(ctx, "ip:203.0.113.7", expiry))
 
 	keys, expiries, err := database.LoadActiveLockouts(ctx)
-	if err != nil {
-		t.Fatalf("LoadActiveLockouts: %v", err)
-	}
+	mustDo(t, "LoadActiveLockouts", err)
 	if len(keys) != 1 || len(expiries) != 1 {
 		t.Fatalf("LoadActiveLockouts returned %d keys / %d expiries, want 1 each", len(keys), len(expiries))
 	}
@@ -43,17 +39,11 @@ func TestUpsertLockout_ReplacesExistingKey(t *testing.T) {
 	first := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
 	later := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Second)
 
-	if err := database.UpsertLockout(ctx, "user:alice", first); err != nil {
-		t.Fatalf("UpsertLockout first: %v", err)
-	}
-	if err := database.UpsertLockout(ctx, "user:alice", later); err != nil {
-		t.Fatalf("UpsertLockout second: %v", err)
-	}
+	mustDo(t, "UpsertLockout first", database.UpsertLockout(ctx, "user:alice", first))
+	mustDo(t, "UpsertLockout second", database.UpsertLockout(ctx, "user:alice", later))
 
 	keys, expiries, err := database.LoadActiveLockouts(ctx)
-	if err != nil {
-		t.Fatalf("LoadActiveLockouts: %v", err)
-	}
+	mustDo(t, "LoadActiveLockouts", err)
 	if len(keys) != 1 {
 		t.Fatalf("got %d lockouts after re-upserting the same key, want 1: %v", len(keys), keys)
 	}
@@ -70,17 +60,11 @@ func TestLoadActiveLockouts_ExcludesExpired(t *testing.T) {
 	past := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
 	future := time.Now().UTC().Add(1 * time.Hour).Truncate(time.Second)
 
-	if err := database.UpsertLockout(ctx, "expired", past); err != nil {
-		t.Fatalf("UpsertLockout expired: %v", err)
-	}
-	if err := database.UpsertLockout(ctx, "active", future); err != nil {
-		t.Fatalf("UpsertLockout active: %v", err)
-	}
+	mustDo(t, "UpsertLockout expired", database.UpsertLockout(ctx, "expired", past))
+	mustDo(t, "UpsertLockout active", database.UpsertLockout(ctx, "active", future))
 
 	keys, _, err := database.LoadActiveLockouts(ctx)
-	if err != nil {
-		t.Fatalf("LoadActiveLockouts: %v", err)
-	}
+	mustDo(t, "LoadActiveLockouts", err)
 	if len(keys) != 1 || keys[0] != "active" {
 		t.Errorf("LoadActiveLockouts = %v, want only [active]", keys)
 	}
@@ -102,23 +86,17 @@ func TestCleanupExpiredLockouts(t *testing.T) {
 		}
 	}
 
-	if err := database.CleanupExpiredLockouts(ctx); err != nil {
-		t.Fatalf("CleanupExpiredLockouts: %v", err)
-	}
+	mustDo(t, "CleanupExpiredLockouts", database.CleanupExpiredLockouts(ctx))
 
 	var remaining int
 	row := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM rate_lockouts`)
-	if err := row.Scan(&remaining); err != nil {
-		t.Fatalf("count rate_lockouts: %v", err)
-	}
+	mustDo(t, "count rate_lockouts", row.Scan(&remaining))
 	if remaining != 1 {
 		t.Errorf("%d rows left after cleanup, want 1 (only the unexpired one)", remaining)
 	}
 
 	keys, _, err := database.LoadActiveLockouts(ctx)
-	if err != nil {
-		t.Fatalf("LoadActiveLockouts: %v", err)
-	}
+	mustDo(t, "LoadActiveLockouts", err)
 	if len(keys) != 1 || keys[0] != "live" {
 		t.Errorf("LoadActiveLockouts = %v, want only [live]", keys)
 	}
@@ -136,21 +114,13 @@ func TestDeleteLockout(t *testing.T) {
 	ctx := context.Background()
 
 	future := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
-	if err := database.UpsertLockout(ctx, "ip:198.51.100.4", future); err != nil {
-		t.Fatalf("UpsertLockout: %v", err)
-	}
-	if err := database.UpsertLockout(ctx, "ip:198.51.100.5", future); err != nil {
-		t.Fatalf("UpsertLockout: %v", err)
-	}
+	mustDo(t, "UpsertLockout", database.UpsertLockout(ctx, "ip:198.51.100.4", future))
+	mustDo(t, "UpsertLockout", database.UpsertLockout(ctx, "ip:198.51.100.5", future))
 
-	if err := database.DeleteLockout(ctx, "ip:198.51.100.4"); err != nil {
-		t.Fatalf("DeleteLockout: %v", err)
-	}
+	mustDo(t, "DeleteLockout", database.DeleteLockout(ctx, "ip:198.51.100.4"))
 
 	keys, _, err := database.LoadActiveLockouts(ctx)
-	if err != nil {
-		t.Fatalf("LoadActiveLockouts: %v", err)
-	}
+	mustDo(t, "LoadActiveLockouts", err)
 	if len(keys) != 1 || keys[0] != "ip:198.51.100.5" {
 		t.Errorf("LoadActiveLockouts = %v, want only the untouched key", keys)
 	}

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/messageListMocks";
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import {
   resetSafetyStore,
@@ -17,6 +17,7 @@ import {
   setHistoryLoadState,
   useWiredMessageList,
 } from "../../helpers/messageListHarness";
+import { hoverRows } from "../../helpers/hoverRows";
 
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
@@ -99,6 +100,38 @@ describe("MessageList", () => {
 
     expect(w.container.querySelector(".messages-loading")).toBeNull();
     expect(w.container.querySelector(".channel-welcome")).not.toBeNull();
+  });
+
+  it("tints the row the reply bar answers, and only that row", () => {
+    setMessages(1, [
+      makeMessage({ id: 1, content: "First" }),
+      makeMessage({ id: 2, content: "Second" }),
+    ]);
+    w.msgList.mount(w.container);
+    const tinted = () =>
+      [...w.container.querySelectorAll<HTMLElement>(".reply-target")].map(
+        (el) => el.dataset.testid,
+      );
+
+    w.msgList.setReplyTarget(2);
+    expect(tinted()).toEqual(["message-2"]);
+    w.msgList.setReplyTarget(1);
+    expect(tinted()).toEqual(["message-1"]);
+    w.msgList.setReplyTarget(null);
+    expect(tinted()).toEqual([]);
+  });
+
+  it("keeps the reply tint on a row drawn again after the target was set", () => {
+    setMessages(1, [makeMessage({ id: 1, content: "First" })]);
+    w.msgList.mount(w.container);
+    w.msgList.setReplyTarget(1);
+
+    setMessages(1, [makeMessage({ id: 1, content: "First, edited" })]);
+    messagesStore.flush();
+
+    const row = w.container.querySelector<HTMLElement>('[data-testid="message-1"]')!;
+    expect(row.textContent).toContain("First, edited");
+    expect(row.classList.contains("reply-target")).toBe(true);
   });
 
   it("destroy removes DOM and cleans up", () => {
@@ -261,6 +294,7 @@ describe("MessageList", () => {
     const windowSignals: AbortSignal[][] = [];
     for (let i = 1; i <= 5; i++) {
       expect(w.msgList.scrollToMessage(i)).toBe(true);
+      hoverRows(w.container);
       const signals = rowSignalsSinceLastRender();
       // Each rendered row has its own owner (P4-01), so a row patch can
       // release exactly the rows it replaces.
@@ -473,6 +507,7 @@ describe("MessageList", () => {
     uiStore.flush();
     setMessages(1, [makeMessage({ id: 1, reactions: [{ emoji: "🔥", count: 2, me: false }] })]);
     w.msgList.mount(w.container);
+    hoverRows(w.container);
     const controls = (): HTMLElement[] => [
       ...w.container.querySelectorAll<HTMLElement>(
         "[data-testid='message-1'] .reaction-chip, [data-testid='msg-react-1']",
@@ -503,6 +538,7 @@ describe("MessageList", () => {
     uiStore.flush();
     setMessages(1, [makeMessage({ id: 1 })]);
     w.msgList.mount(w.container);
+    hoverRows(w.container);
     const deleteBtn = (): HTMLButtonElement =>
       w.container.querySelector<HTMLButtonElement>("[data-testid='msg-delete-1']")!;
     expect(deleteBtn().disabled).toBe(false);

@@ -24,10 +24,19 @@ import {
   MIN_FONT_SIZE_PX,
   MAX_FONT_SIZE_PX,
 } from "@lib/prefs/appearance";
-import { getTimeFormat, saveTimeFormat, type TimeFormat } from "@lib/text/timeFormat";
+import {
+  DATE_FORMATS,
+  getDateFormat,
+  getTimeFormat,
+  saveDateFormat,
+  saveTimeFormat,
+  type DateFormat,
+  type TimeFormat,
+} from "@lib/text/timeFormat";
 import { loadMemberLayout, MEMBER_LAYOUT_PREF, type MemberLayout } from "../members/memberLayout";
 import { appZoom, ZOOM_LEVELS, zoomIndex } from "../zoom";
 import { buildCustomThemeSection } from "../custom-themes/customThemeSection";
+import { buildChoiceRow, buildSettingRow } from "./settingRow";
 import { settingsText as t } from "../../i18n/settings";
 
 const FALLBACK_ACCENT = "#5865f2";
@@ -43,6 +52,105 @@ function paletteOf(choice: string): string {
   return choice === SYSTEM_THEME ? resolveSystemTheme() : choice;
 }
 
+/** The font size slider row; its label shows the effective size. */
+function buildFontSizeRow(signal: AbortSignal, currentFontSize: number): HTMLElement {
+  const fontRow = createElement("div", { class: "slider-row" });
+  const fontSlider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: String(MIN_FONT_SIZE_PX),
+    max: String(MAX_FONT_SIZE_PX),
+    value: String(currentFontSize),
+    "aria-label": t("appearance.fontSize"),
+  });
+  // The EFFECTIVE size, not the raw slider position: Large Font can floor it
+  // above where the slider sits, and a label that disagrees with the rendered
+  // text is the same "control that lies" bug in a different place.
+  const fontLabel = createElement(
+    "span",
+    { class: "slider-val" },
+    t("appearance.fontSize.value", { size: effectiveFontSize() }),
+  );
+  fontSlider.addEventListener(
+    "input",
+    () => {
+      const size = Number(fontSlider.value);
+      savePref("fontSize", size);
+      // Both read the pref back, so save first.
+      applyFontSize();
+      setText(fontLabel, t("appearance.fontSize.value", { size: effectiveFontSize() }));
+    },
+    { signal },
+  );
+  appendChildren(fontRow, fontSlider, fontLabel);
+  return buildSettingRow({ label: t("appearance.fontSize"), control: fontRow });
+}
+
+/** The zoom slider row. Null on Android, which has no webview zoom to set. */
+function buildZoomRow(signal: AbortSignal): HTMLElement | null {
+  const zoomRow = createElement("div", { class: "slider-row" });
+  const zoomSlider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: "0",
+    max: String(ZOOM_LEVELS.length - 1),
+    step: "1",
+    value: String(zoomIndex(appZoom.current())),
+    "aria-label": t("appearance.zoom"),
+  });
+  const zoomLabel = createElement(
+    "span",
+    { class: "slider-val" },
+    t("appearance.zoom.value", { percent: appZoom.current() }),
+  );
+  const zoomReset = createElement(
+    "button",
+    {
+      class: "btn btn-secondary",
+      type: "button",
+      "aria-label": t("appearance.zoom.resetAria"),
+    },
+    t("appearance.zoom.reset"),
+  );
+  const paintZoom = (level: number): void => {
+    zoomSlider.value = String(zoomIndex(level));
+    zoomSlider.setAttribute("aria-valuetext", t("appearance.zoom.value", { percent: level }));
+    setText(zoomLabel, t("appearance.zoom.value", { percent: level }));
+  };
+  paintZoom(appZoom.current());
+  appZoom.subscribe(paintZoom, signal);
+  zoomSlider.addEventListener(
+    "input",
+    () => {
+      void appZoom.set(ZOOM_LEVELS[Number(zoomSlider.value)] ?? 100);
+    },
+    { signal },
+  );
+  zoomReset.addEventListener("click", () => void appZoom.reset(), { signal });
+  appendChildren(zoomRow, zoomSlider, zoomLabel, zoomReset);
+  // The Android app has no webview zoom to set.
+  if (isAndroidApp()) return null;
+  return buildSettingRow({ label: t("appearance.zoom"), control: zoomRow });
+}
+
+/** Apply stored preferences on render; a null accent means none is stored. */
+function applyStoredPreferences(
+  currentTheme: string | null,
+  currentCompact: boolean,
+  storedAccent: string | null,
+): void {
+  if (currentTheme === null) {
+    restoreTheme();
+  } else {
+    applyThemeChoice(currentTheme);
+  }
+  applyFontSize();
+  document.documentElement.classList.toggle("compact-mode", currentCompact);
+  if (storedAccent !== null) {
+    applyAccent(storedAccent);
+  }
+}
+
 export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const activeThemeName = getActiveThemeName();
@@ -54,8 +162,11 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const defaultAccent = getDefaultAccent(paletteOf(activeThemeName));
 
   // Theme selector
-  const themeHeader = createElement("h3", {}, t("appearance.theme"));
-  const themeRow = createElement("div", { class: "theme-options", role: "radiogroup" });
+  const themeRow = createElement("div", {
+    class: "theme-options",
+    role: "radiogroup",
+    "aria-label": t("appearance.theme"),
+  });
   const choices: string[] = [...(Object.keys(THEMES) as ThemeName[]), SYSTEM_THEME];
   for (const name of choices) {
     const isActive = name === currentTheme;
@@ -112,94 +223,18 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   // tiles are a horizontal row, so ArrowLeft/Right is the stepping axis.
   setRovingTabindex(themeRow, "[role='radio']");
   enableRovingNavigation(themeRow, "[role='radio']", signal);
-  appendChildren(section, themeHeader, themeRow);
+  section.appendChild(
+    buildSettingRow({ label: t("appearance.theme"), control: themeRow, stacked: true }),
+  );
 
-  // Font size slider
-  const fontHeader = createElement("h3", {}, t("appearance.fontSize"));
-  const fontRow = createElement("div", { class: "slider-row" });
-  const fontSlider = createElement("input", {
-    class: "settings-slider",
-    type: "range",
-    min: String(MIN_FONT_SIZE_PX),
-    max: String(MAX_FONT_SIZE_PX),
-    value: String(currentFontSize),
-    "aria-label": t("appearance.fontSize"),
-  });
-  // The EFFECTIVE size, not the raw slider position: Large Font can floor it
-  // above where the slider sits, and a label that disagrees with the rendered
-  // text is the same "control that lies" bug in a different place.
-  const fontLabel = createElement(
-    "span",
-    { class: "slider-val" },
-    t("appearance.fontSize.value", { size: effectiveFontSize() }),
-  );
-  fontSlider.addEventListener(
-    "input",
-    () => {
-      const size = Number(fontSlider.value);
-      savePref("fontSize", size);
-      // Both read the pref back, so save first.
-      applyFontSize();
-      setText(fontLabel, t("appearance.fontSize.value", { size: effectiveFontSize() }));
-    },
-    { signal },
-  );
-  appendChildren(fontRow, fontSlider, fontLabel);
-  appendChildren(section, fontHeader, fontRow);
+  section.appendChild(buildFontSizeRow(signal, currentFontSize));
 
   // Zoom level: the native webview zoom, snapping to Discord's levels. The
   // slider follows the zoom keys (Ctrl+= / Ctrl+- / Ctrl+0) while it is open.
-  const zoomHeader = createElement("h3", {}, t("appearance.zoom"));
-  const zoomRow = createElement("div", { class: "slider-row" });
-  const zoomSlider = createElement("input", {
-    class: "settings-slider",
-    type: "range",
-    min: "0",
-    max: String(ZOOM_LEVELS.length - 1),
-    step: "1",
-    value: String(zoomIndex(appZoom.current())),
-    "aria-label": t("appearance.zoom"),
-  });
-  const zoomLabel = createElement(
-    "span",
-    { class: "slider-val" },
-    t("appearance.zoom.value", { percent: appZoom.current() }),
-  );
-  const zoomReset = createElement(
-    "button",
-    {
-      class: "btn btn-secondary",
-      type: "button",
-      "aria-label": t("appearance.zoom.resetAria"),
-    },
-    t("appearance.zoom.reset"),
-  );
-  const paintZoom = (level: number): void => {
-    zoomSlider.value = String(zoomIndex(level));
-    zoomSlider.setAttribute("aria-valuetext", t("appearance.zoom.value", { percent: level }));
-    setText(zoomLabel, t("appearance.zoom.value", { percent: level }));
-  };
-  paintZoom(appZoom.current());
-  appZoom.subscribe(paintZoom, signal);
-  zoomSlider.addEventListener(
-    "input",
-    () => {
-      void appZoom.set(ZOOM_LEVELS[Number(zoomSlider.value)] ?? 100);
-    },
-    { signal },
-  );
-  zoomReset.addEventListener("click", () => void appZoom.reset(), { signal });
-  appendChildren(zoomRow, zoomSlider, zoomLabel, zoomReset);
-  // The Android app has no webview zoom to set.
-  if (!isAndroidApp()) appendChildren(section, zoomHeader, zoomRow);
+  const zoomRow = buildZoomRow(signal);
+  if (zoomRow !== null) section.appendChild(zoomRow);
 
   // Compact mode toggle
-  const compactRow = createElement("div", { class: "setting-row" });
-  const compactLabel = createElement(
-    "span",
-    { class: "setting-label" },
-    t("appearance.compactMode"),
-  );
   const compactToggle = createToggle(currentCompact, {
     signal,
     label: t("appearance.compactMode"),
@@ -208,123 +243,51 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
       document.documentElement.classList.toggle("compact-mode", isNowCompact);
     },
   });
-  appendChildren(compactRow, compactLabel, compactToggle);
-  section.appendChild(compactRow);
-
-  // Time format (12-hour / 24-hour)
-  const timeFormatRow = createElement("div", { class: "setting-row" });
-  const timeFormatInfo = createElement("div", {});
-  appendChildren(
-    timeFormatInfo,
-    createElement("div", { class: "setting-label" }, t("appearance.timeFormat")),
-    createElement("div", { class: "setting-desc" }, t("appearance.timeFormat.desc")),
+  section.appendChild(
+    buildSettingRow({ label: t("appearance.compactMode"), control: compactToggle }),
   );
-  const timeFormatGroup = createElement("div", {
-    class: "level-options",
-    role: "radiogroup",
-    "aria-label": t("appearance.timeFormat"),
-    "data-testid": "time-format",
+
+  // Time format (12-hour / 24-hour) and date order. A date format change can
+  // move the clock default, so it repaints both rows.
+  const timeFormatRow = buildChoiceRow<TimeFormat>({
+    signal,
+    label: t("appearance.timeFormat"),
+    desc: t("appearance.timeFormat.desc"),
+    testId: "time-format",
+    options: [
+      ["12h", t("appearance.timeFormat.12h")],
+      ["24h", t("appearance.timeFormat.24h")],
+    ],
+    current: getTimeFormat,
+    save: saveTimeFormat,
   });
-  const timeFormatButtons = new Map<TimeFormat, HTMLButtonElement>();
-  const timeFormatLabels: Record<TimeFormat, string> = {
-    "12h": t("appearance.timeFormat.12h"),
-    "24h": t("appearance.timeFormat.24h"),
-  };
-  const paintTimeFormat = (): void => {
-    const current = getTimeFormat();
-    for (const [value, button] of timeFormatButtons) {
-      const on = value === current;
-      button.classList.toggle("active", on);
-      button.setAttribute("aria-checked", String(on));
-    }
-  };
-  for (const value of ["12h", "24h"] as const) {
-    const button = createElement(
-      "button",
-      {
-        class: "level-opt",
-        type: "button",
-        role: "radio",
-        "aria-checked": "false",
-        tabindex: "-1",
-        "data-testid": `time-format-${value}`,
-        "data-value": value,
-      },
-      timeFormatLabels[value],
-    );
-    button.addEventListener(
-      "click",
-      () => {
-        saveTimeFormat(value);
-        paintTimeFormat();
-      },
-      { signal },
-    );
-    timeFormatButtons.set(value, button);
-    timeFormatGroup.appendChild(button);
-  }
-  paintTimeFormat();
-  setRovingTabindex(timeFormatGroup, "[role='radio']");
-  enableRovingNavigation(timeFormatGroup, "[role='radio']", signal);
-  appendChildren(timeFormatRow, timeFormatInfo, timeFormatGroup);
-  section.appendChild(timeFormatRow);
+  const dateFormatRow = buildChoiceRow<DateFormat>({
+    signal,
+    label: t("appearance.dateFormat"),
+    desc: t("appearance.dateFormat.desc"),
+    testId: "date-format",
+    options: DATE_FORMATS.map((value) => [value, t(`appearance.dateFormat.${value}`)]),
+    current: getDateFormat,
+    save: (value) => {
+      saveDateFormat(value);
+      timeFormatRow.paint();
+    },
+  });
+  section.append(timeFormatRow.row, dateFormatRow.row);
 
   // Member list position (right column / under the channels)
-  const memberLayoutRow = createElement("div", { class: "setting-row" });
-  const memberLayoutInfo = createElement("div", {});
-  appendChildren(
-    memberLayoutInfo,
-    createElement("div", { class: "setting-label" }, t("appearance.memberLayout")),
-    createElement("div", { class: "setting-desc" }, t("appearance.memberLayout.desc")),
-  );
-  const memberLayoutGroup = createElement("div", {
-    class: "level-options",
-    role: "radiogroup",
-    "aria-label": t("appearance.memberLayout"),
-    "data-testid": "member-layout",
-  });
-  const memberLayoutButtons = new Map<MemberLayout, HTMLButtonElement>();
-  const memberLayoutLabels: Record<MemberLayout, string> = {
-    right: t("appearance.memberLayout.right"),
-    left: t("appearance.memberLayout.left"),
-  };
-  const paintMemberLayout = (): void => {
-    const current = loadMemberLayout();
-    for (const [value, button] of memberLayoutButtons) {
-      const on = value === current;
-      button.classList.toggle("active", on);
-      button.setAttribute("aria-checked", String(on));
-    }
-  };
-  for (const value of ["right", "left"] as const) {
-    const button = createElement(
-      "button",
-      {
-        class: "level-opt",
-        type: "button",
-        role: "radio",
-        "aria-checked": "false",
-        tabindex: "-1",
-        "data-testid": `member-layout-${value}`,
-        "data-value": value,
-      },
-      memberLayoutLabels[value],
-    );
-    button.addEventListener(
-      "click",
-      () => {
-        savePref(MEMBER_LAYOUT_PREF, value);
-        paintMemberLayout();
-      },
-      { signal },
-    );
-    memberLayoutButtons.set(value, button);
-    memberLayoutGroup.appendChild(button);
-  }
-  paintMemberLayout();
-  setRovingTabindex(memberLayoutGroup, "[role='radio']");
-  enableRovingNavigation(memberLayoutGroup, "[role='radio']", signal);
-  appendChildren(memberLayoutRow, memberLayoutInfo, memberLayoutGroup);
+  const memberLayoutRow = buildChoiceRow<MemberLayout>({
+    signal,
+    label: t("appearance.memberLayout"),
+    desc: t("appearance.memberLayout.desc"),
+    testId: "member-layout",
+    options: [
+      ["right", t("appearance.memberLayout.right")],
+      ["left", t("appearance.memberLayout.left")],
+    ],
+    current: loadMemberLayout,
+    save: (value) => savePref(MEMBER_LAYOUT_PREF, value),
+  }).row;
   // A phone shows the member list as an overlay, so it has no side to pick.
   if (!isAndroidApp()) section.appendChild(memberLayoutRow);
 
@@ -350,7 +313,6 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     applyAccent(color);
   }
 
-  const accentHeader = createElement("h3", {}, t("appearance.accentColor"));
   const swatchesRow = createElement("div", { class: "accent-swatches" });
 
   // Declare hexInput early so swatch closures can reference it after construction
@@ -434,7 +396,11 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   );
 
   appendChildren(hexInputRow, hexPrefix, hexInput);
-  appendChildren(section, accentHeader, swatchesRow, hexInputRow, accentNote);
+  const accentControl = createElement("div", { class: "accent-control" });
+  appendChildren(accentControl, swatchesRow, hexInputRow, accentNote);
+  section.appendChild(
+    buildSettingRow({ label: t("appearance.accentColor"), control: accentControl, stacked: true }),
+  );
   section.appendChild(buildCustomThemeSection(signal));
 
   // An OS light/dark flip under "Sync with computer" changes the default
@@ -444,17 +410,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     syncDisplayedAccent(getDefaultAccent(paletteOf(getActiveThemeName())));
   }, signal);
 
-  // Apply stored preferences on render
-  if (currentTheme === null) {
-    restoreTheme();
-  } else {
-    applyThemeChoice(currentTheme);
-  }
-  applyFontSize();
-  document.documentElement.classList.toggle("compact-mode", currentCompact);
-  if (hasStoredAccent) {
-    applyAccent(currentAccent);
-  }
+  applyStoredPreferences(currentTheme, currentCompact, hasStoredAccent ? currentAccent : null);
 
   return section;
 }

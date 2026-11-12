@@ -70,14 +70,7 @@ func TestWarning_NotifyModAction_NoConnectionIsANoOp(t *testing.T) {
 // channel, for MuteForTimeout/UnmuteForTimeout's tests.
 func applyTimeoutMuteTestDB(t *testing.T) (*db.DB, int64) {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := newTeardownTestDB(t)
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO channels (id, name, type, position) VALUES (100, 'voice-100', 'voice', 0)`); err != nil {
 		t.Fatalf("seed channel: %v", err)
@@ -116,10 +109,7 @@ func TestMuteForTimeout_NoVoiceStore(t *testing.T) {
 func TestMuteForTimeout_NoSession(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
 	h := newTestHub(t, database, nil, nil)
-	uid, err := database.CreateUser(context.Background(), "no-session-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "no-session-user", 4)
 	actionID := seedTimeoutActionForTest(t, database, uid)
 	if applied, owned := h.MuteForTimeout(context.Background(), uid, chID, actionID, "no-such-token", nil); applied || owned {
 		t.Fatalf("applied=%v owned=%v, want both false: no voice_states row for %d", applied, owned, uid)
@@ -133,10 +123,7 @@ func TestMuteForTimeout_NoSession(t *testing.T) {
 // there.
 func TestMuteForTimeout_SessionMismatch(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
-	uid, err := database.CreateUser(context.Background(), "timedout-mismatch", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "timedout-mismatch", 4)
 	h := newTestHub(t, database, nil, nil)
 	actionID := seedTimeoutActionForTest(t, database, uid)
 	if err := h.voice.Join(context.Background(), uid, chID, 0); err != nil {
@@ -162,10 +149,7 @@ func TestMuteForTimeout_SessionMismatch(t *testing.T) {
 // again: server_muted=0, server_muted_by=NULL.
 func TestMuteForTimeout_SFUFailureRollsBackDB(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
-	uid, err := database.CreateUser(context.Background(), "timedout", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "timedout", 4)
 	h := newTestHub(t, database, nil, nil)
 	actionID := seedTimeoutActionForTest(t, database, uid)
 	if err := h.voice.Join(context.Background(), uid, chID, 0); err != nil {
@@ -208,14 +192,8 @@ func TestMuteForTimeout_SFUFailureRollsBackDB(t *testing.T) {
 func TestMuteForTimeout_SFUFailureRollsBackDB_SupersedeDuringSFU(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
 	ctx := context.Background()
-	actorID, err := database.CreateUser(ctx, "supersede-actor", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser(actor): %v", err)
-	}
-	uid, err := database.CreateUser(ctx, "supersede-target", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(target): %v", err)
-	}
+	actorID := mustCreateUser(t, database, "supersede-actor", 1)
+	uid := mustCreateUser(t, database, "supersede-target", 4)
 	h := newTestHub(t, database, nil, nil)
 	if err := h.voice.Join(ctx, uid, chID, 0); err != nil {
 		t.Fatalf("Join: %v", err)
@@ -441,10 +419,7 @@ func TestUnmuteForTimeout_ClearServerMuteOwnedByFailed(t *testing.T) {
 // MuteForTimeout's fresh mute is, matching voice_mod_mute's own posture.
 func TestUnmuteForTimeout_SFUFailureStillClearsDB(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
-	uid, err := database.CreateUser(context.Background(), "unmute-sfu-fail-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "unmute-sfu-fail-user", 4)
 	h := newTestHub(t, database, nil, nil)
 	actionID := seedTimeoutActionForTest(t, database, uid)
 	if err := h.voice.Join(context.Background(), uid, chID, 0); err != nil {
@@ -477,10 +452,7 @@ func TestUnmuteForTimeout_SFUFailureStillClearsDB(t *testing.T) {
 // timeout's lift, no matter which action ids it names.
 func TestUnmuteForTimeout_ManualMuteNeverCleared(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
-	uid, err := database.CreateUser(context.Background(), "manual-mute-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "manual-mute-user", 4)
 	lk, _, _ := voicePermissionSFU(t)
 	h := newTestHubWith(t, HubOptions{DB: database, LiveKit: lk})
 	actionID := seedTimeoutActionForTest(t, database, uid)
@@ -508,14 +480,8 @@ func TestUnmuteForTimeout_ManualMuteNeverCleared(t *testing.T) {
 func TestHandleVoiceModMuteV2_ModLessDepsFallsBackToUnlockedWrite(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
 	ctx := context.Background()
-	actorID, err := database.CreateUser(ctx, "modless-actor", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser(actor): %v", err)
-	}
-	targetID, err := database.CreateUser(ctx, "modless-target", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(target): %v", err)
-	}
+	actorID := mustCreateUser(t, database, "modless-actor", 1)
+	targetID := mustCreateUser(t, database, "modless-target", 4)
 	h := newTestHub(t, database, nil, nil)
 	if err := h.voice.Join(ctx, targetID, chID, 0); err != nil {
 		t.Fatalf("Join: %v", err)
@@ -542,10 +508,7 @@ func TestHandleVoiceModMuteV2_ModLessDepsFallsBackToUnlockedWrite(t *testing.T) 
 // later — real contention on the Hub's own lock, not a doc comment's claim.
 func TestMuteForTimeout_ContendsOnTheHubLock(t *testing.T) {
 	database, chID := applyTimeoutMuteTestDB(t)
-	uid, err := database.CreateUser(context.Background(), "lock-contend-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "lock-contend-user", 4)
 	h := newTestHub(t, database, nil, nil)
 	ctx := context.Background()
 	if err := h.voice.Join(ctx, uid, chID, 0); err != nil {
@@ -553,7 +516,7 @@ func TestMuteForTimeout_ContendsOnTheHubLock(t *testing.T) {
 	}
 	actionID := seedTimeoutActionForTest(t, database, uid)
 
-	unlock := h.voiceHub.mod.lock(uid)
+	unlock := h.voiceHub.mod.Lock(uid)
 
 	done := make(chan struct{})
 	go func() {
@@ -573,116 +536,6 @@ func TestMuteForTimeout_ContendsOnTheHubLock(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("MuteForTimeout never completed after the lock was released")
-	}
-}
-
-// TestVoiceModLocks_SerializesSameUser proves userLocks' core contract
-// (round 4, Codex 12): two callers for the SAME userID cannot both be inside
-// their critical section at once — the second's lock() call genuinely
-// blocks until the first releases. Deterministic (no sleeps): the second
-// goroutine signals it is about to call lock(), then the test asserts it has
-// NOT yet reported "acquired" a short, generous instant later, before
-// releasing the first and confirming the second then proceeds.
-func TestVoiceModLocks_SerializesSameUser(t *testing.T) {
-	v := newUserLocks[lockRankVoiceMod]()
-	const uid = int64(1)
-
-	firstAcquired := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	go func() {
-		unlock := v.lock(uid)
-		close(firstAcquired)
-		<-releaseFirst
-		unlock()
-	}()
-	<-firstAcquired
-
-	secondAttempting := make(chan struct{})
-	secondAcquired := make(chan struct{})
-	go func() {
-		close(secondAttempting)
-		unlock := v.lock(uid)
-		close(secondAcquired)
-		unlock()
-	}()
-	<-secondAttempting
-
-	select {
-	case <-secondAcquired:
-		t.Fatal("second lock() returned while the first still holds it")
-	case <-time.After(50 * time.Millisecond):
-		// Expected: still blocked.
-	}
-
-	close(releaseFirst)
-	select {
-	case <-secondAcquired:
-	case <-time.After(2 * time.Second):
-		t.Fatal("second lock() never returned after the first released")
-	}
-}
-
-// TestVoiceModLocks_DoesNotSerializeDifferentUsers proves the lock is keyed
-// per userID, not a single global lock — a moderation action against one
-// user must not stall on an unrelated one.
-func TestVoiceModLocks_DoesNotSerializeDifferentUsers(t *testing.T) {
-	v := newUserLocks[lockRankVoiceMod]()
-	unlock1 := v.lock(1)
-	defer unlock1()
-
-	done := make(chan struct{})
-	go func() {
-		unlock2 := v.lock(2)
-		unlock2()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("lock(2) blocked on an unrelated user's held lock(1)")
-	}
-}
-
-// TestVoiceModLocks_EvictsEntryOnceUnheldAndUnwaited is round 5's Codex
-// review P3: the per-target map must not grow forever — an entry with no
-// current holder and no queued waiter is removed as soon as the last
-// release happens, not kept around indefinitely.
-func TestVoiceModLocks_EvictsEntryOnceUnheldAndUnwaited(t *testing.T) {
-	v := newUserLocks[lockRankVoiceMod]()
-
-	unlock := v.lock(1)
-	if len(v.locks) != 1 {
-		t.Fatalf("locks = %d entries while held, want 1", len(v.locks))
-	}
-	unlock()
-	if len(v.locks) != 0 {
-		t.Fatalf("locks = %d entries after the only holder released, want 0 (evicted)", len(v.locks))
-	}
-
-	// A waiter queued behind an in-flight holder must NOT be evicted out
-	// from under it: refs stays at 2 (holder + waiter) until both release.
-	unlockA := v.lock(2)
-	waiterStarted := make(chan struct{})
-	waiterDone := make(chan struct{})
-	go func() {
-		close(waiterStarted)
-		v.lock(2)() // blocks until unlockA runs, then immediately releases
-		close(waiterDone)
-	}()
-	<-waiterStarted
-	// Give the waiter a moment to register itself (increment refs) before
-	// the holder releases — best-effort, like the existing contention test
-	// above; the correctness claim (refs never hits 0 while a waiter is
-	// registered) holds regardless of exactly when it gets there.
-	time.Sleep(20 * time.Millisecond)
-	unlockA()
-	select {
-	case <-waiterDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the queued waiter for user 2 never completed")
-	}
-	if len(v.locks) != 0 {
-		t.Fatalf("locks = %d entries after both the holder and the waiter released, want 0 (evicted)", len(v.locks))
 	}
 }
 
@@ -734,9 +587,7 @@ func TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim(t *testing.T) {
 			// X is lifted (db.LiftTimeout already ran, ledger-side) before
 			// its voice-muter call is ever made — exactly the service-layer
 			// order (db write, then the voiceMuter call afterward).
-			if _, err := database.ExecContext(ctx, `UPDATE moderation_actions SET lifted_at = datetime('now') WHERE id = ?`, actionX); err != nil {
-				t.Fatalf("mark X lifted: %v", err)
-			}
+			mustExec(t, database, `UPDATE moderation_actions SET lifted_at = datetime('now') WHERE id = ?`, actionX)
 			actionY := seedTimeoutActionForTest(t, database, uid)
 			sfuLog = nil // only the race's own calls matter from here
 
@@ -809,9 +660,7 @@ func TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim_GenuineContention(t *t
 			// X is lifted (db.LiftTimeout already ran, ledger-side) before its
 			// voice-muter call is ever made — the same service-layer order the
 			// sequential test pins.
-			if _, err := database.ExecContext(ctx, `UPDATE moderation_actions SET lifted_at = datetime('now') WHERE id = ?`, actionX); err != nil {
-				t.Fatalf("mark X lifted: %v", err)
-			}
+			mustExec(t, database, `UPDATE moderation_actions SET lifted_at = datetime('now') WHERE id = ?`, actionX)
 			actionY := seedTimeoutActionForTest(t, database, uid)
 
 			// From here, the hook parks whichever call reaches MuteParticipant

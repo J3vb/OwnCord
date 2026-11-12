@@ -6,6 +6,21 @@ import type { WindowPrefName, WindowPrefs, WindowPrefsState } from "../contracts
 
 const log = createLogger("windowPrefs");
 
+// The host saves off the UI thread, so two quick toggles sent together could
+// be applied out of order. Each save waits for the one before it.
+let saves: Promise<unknown> = Promise.resolve();
+
+async function save(pref: WindowPrefName, enabled: boolean): Promise<boolean> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("set_window_pref", { pref, enabled });
+    return true;
+  } catch (err) {
+    log.warn("window pref not saved", { pref, error: String(err) });
+    return false;
+  }
+}
+
 function isState(value: unknown): value is WindowPrefsState {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
@@ -23,14 +38,9 @@ export const windowPrefs: WindowPrefs = {
       return null;
     }
   },
-  async set(pref: WindowPrefName, enabled: boolean): Promise<boolean> {
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("set_window_pref", { pref, enabled });
-      return true;
-    } catch (err) {
-      log.warn("window pref not saved", { pref, error: String(err) });
-      return false;
-    }
+  set(pref: WindowPrefName, enabled: boolean): Promise<boolean> {
+    const next = saves.then(() => save(pref, enabled));
+    saves = next;
+    return next;
   },
 };

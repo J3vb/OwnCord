@@ -87,20 +87,11 @@ type authCauseFixture struct {
 
 func newAuthCauseFixture(t *testing.T) *authCauseFixture {
 	t.Helper()
-	ctx := context.Background()
 	database := newTestDB(t)
 	hash, err := auth.HashPassword(causeLogPassword)
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	uid, err := database.CreateUser(ctx, causeLogUser, hash, 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	mustDo(t, "HashPassword", err)
+	uid := mustCreateUser(t, database, causeLogUser, hash, 4)
+	user := mustGetUserByID(t, database, uid)
 
 	logs := &bytes.Buffer{}
 	prev := slog.Default()
@@ -143,9 +134,7 @@ func TestAuthRefusals_LogTheCauseOnce(t *testing.T) {
 			}},
 		{"register_pending_count", "CountPendingUsers", false, ErrRegistrationPolicyUnavailable,
 			func(t *testing.T, f *authCauseFixture) error {
-				if err := f.st.SetSetting(ctx, registrationModeKey, string(RegistrationApproval)); err != nil {
-					t.Fatalf("SetSetting: %v", err)
-				}
+				mustDo(t, "SetSetting", f.st.SetSetting(ctx, registrationModeKey, string(RegistrationApproval)))
 				_, err := f.svc.Register(ctx, RegisterInput{Username: "newbie", Password: causeLogPassword, IP: causeLogIP})
 				return err
 			}},
@@ -162,25 +151,15 @@ func TestAuthRefusals_LogTheCauseOnce(t *testing.T) {
 		{"verify_totp_session", "CreateSession", false, ErrSessionIssue,
 			func(t *testing.T, f *authCauseFixture) error {
 				secret, err := auth.GenerateTOTPSecret()
-				if err != nil {
-					t.Fatalf("GenerateTOTPSecret: %v", err)
-				}
+				mustDo(t, "GenerateTOTPSecret", err)
 				key := make([]byte, 32)
 				enc, err := auth.EncryptTOTPSecret(key, secret)
-				if err != nil {
-					t.Fatalf("EncryptTOTPSecret: %v", err)
-				}
-				if err := f.st.DB.UpdateUserTOTPSecret(ctx, f.user.ID, &enc); err != nil {
-					t.Fatalf("UpdateUserTOTPSecret: %v", err)
-				}
+				mustDo(t, "EncryptTOTPSecret", err)
+				mustDo(t, "UpdateUserTOTPSecret", f.st.DB.UpdateUserTOTPSecret(ctx, f.user.ID, &enc))
 				token, err := f.svc.partial.Issue(ctx, f.user.ID, "dev", causeLogIP)
-				if err != nil {
-					t.Fatalf("Issue: %v", err)
-				}
+				mustDo(t, "Issue", err)
 				code, err := auth.GenerateTOTPCode(secret, time.Now().UTC())
-				if err != nil {
-					t.Fatalf("GenerateTOTPCode: %v", err)
-				}
+				mustDo(t, "GenerateTOTPCode", err)
 				_, err = f.svc.VerifyTOTP(ctx, token, code)
 				return err
 			}},
@@ -198,9 +177,7 @@ func TestAuthRefusals_LogTheCauseOnce(t *testing.T) {
 					t.Fatal("no pending enrolment")
 				}
 				code, err := auth.GenerateTOTPCode(secret, time.Now().UTC())
-				if err != nil {
-					t.Fatalf("GenerateTOTPCode: %v", err)
-				}
+				mustDo(t, "GenerateTOTPCode", err)
 				f.st.fail["UpdateUserTOTPSecret"] = cause
 				_, err = f.svc.ConfirmTOTP(ctx, sessionPrincipal(f.user), causeLogPassword, code)
 				return err
@@ -223,9 +200,7 @@ func TestAuthRefusals_LogTheCauseOnce(t *testing.T) {
 		{"recovery_new_password_hash", "", false, ErrPasswordHash,
 			func(t *testing.T, f *authCauseFixture) error {
 				issue, err := f.svc.EnrolRecoveryKit(ctx, sessionPrincipal(f.user), causeLogPassword, "")
-				if err != nil {
-					t.Fatalf("EnrolRecoveryKit: %v", err)
-				}
+				mustDo(t, "EnrolRecoveryKit", err)
 				// bcrypt refuses a password past 72 bytes.
 				_, err = f.svc.RecoverWithKit(ctx, RecoverInput{
 					Username: causeLogUser, KitSecret: issue.Secret,
@@ -233,12 +208,10 @@ func TestAuthRefusals_LogTheCauseOnce(t *testing.T) {
 				})
 				return err
 			}},
-		{"recovery_fresh_user", "GetUserByID", true, ErrRecoveryFailed,
+		{"recovery_fresh_user", "GetUserByID", true, ErrRecoveredSignInRequired,
 			func(t *testing.T, f *authCauseFixture) error {
 				issue, err := f.svc.EnrolRecoveryKit(ctx, sessionPrincipal(f.user), causeLogPassword, "")
-				if err != nil {
-					t.Fatalf("EnrolRecoveryKit: %v", err)
-				}
+				mustDo(t, "EnrolRecoveryKit", err)
 				// The closing re-read is the recovery's only GetUserByID.
 				f.st.fail["GetUserByID"] = cause
 				_, err = f.svc.RecoverWithKit(ctx, RecoverInput{

@@ -17,6 +17,7 @@ function inertWsMembers() {
     startCertListener: vi.fn().mockResolvedValue(undefined),
     onCertFirstUse: vi.fn().mockReturnValue(() => {}),
     onServerBusy: vi.fn().mockReturnValue(() => {}),
+    onHandshakeFault: vi.fn().mockReturnValue(() => {}),
     onCertMismatch: vi.fn().mockReturnValue(() => {}),
     acceptCertFingerprint: vi.fn(),
     getState: vi.fn(() => "connected"),

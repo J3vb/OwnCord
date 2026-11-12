@@ -2,11 +2,13 @@ package api
 
 import (
 	"bytes"
-	"log/slog"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // --- isWebSocketUpgrade tests ---
@@ -201,68 +203,68 @@ func TestIsOriginAllowed_FirstPartyLookalikesDenied(t *testing.T) {
 // --- NewLiveKitProxy HTTP routing tests ---
 
 func TestLiveKitProxy_BlocksAdminPath(t *testing.T) {
-	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"})
+	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"}, AdmitAllVoiceSessionsForTest)
 	r := httptest.NewRequest("GET", "/admin/dashboard", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for /admin path, got %d", w.Code)
 	}
 }
 
 func TestLiveKitProxy_BlocksMetricsPath(t *testing.T) {
-	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"})
+	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"}, AdmitAllVoiceSessionsForTest)
 	r := httptest.NewRequest("GET", "/metrics", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for /metrics path, got %d", w.Code)
 	}
 }
 
 func TestLiveKitProxy_BlocksDebugPath(t *testing.T) {
-	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"})
+	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"}, AdmitAllVoiceSessionsForTest)
 	r := httptest.NewRequest("GET", "/debug/pprof", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for /debug path, got %d", w.Code)
 	}
 }
 
 func TestLiveKitProxy_BlocksTwirpPath(t *testing.T) {
-	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"})
+	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"}, AdmitAllVoiceSessionsForTest)
 	r := httptest.NewRequest("POST", "/twirp/livekit.RoomService/ListRooms", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for /twirp path, got %d", w.Code)
 	}
 }
 
-func TestLiveKitProxy_AllowsNormalPath(t *testing.T) {
-	// Use a test backend that returns 200
+// A plain GET on a signalling path reaches LiveKit with the issued credential
+// in place of the client's.
+func TestLiveKitProxy_ForwardsSignalPathWithIssuedCredential(t *testing.T) {
+	var gotAuthz, gotQuery string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthz, gotQuery = r.Header.Get("Authorization"), r.URL.RawQuery
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK")) //nolint:errcheck
 	}))
 	defer backend.Close()
 
-	proxy := NewLiveKitProxy(backend.URL, []string{"*"})
-	r := httptest.NewRequest("GET", "/rtc", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	proxy := NewLiveKitProxy(backend.URL, []string{"*"}, AdmitAllVoiceSessionsForTest)
+	r := httptest.NewRequest("GET", "/rtc/validate?access_token=client&sdk=js", nil)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 for normal path, got %d", w.Code)
+		t.Errorf("expected 200 for a signalling path, got %d", w.Code)
+	}
+	if want := "Bearer " + IssuedCredentialForTest; gotAuthz != want || gotQuery != "sdk=js" {
+		t.Errorf("backend saw Authorization %q and query %q, want %q and %q", gotAuthz, gotQuery, want, "sdk=js")
 	}
 }
 
 func TestLiveKitProxy_BlocksCrossOriginHTTP(t *testing.T) {
-	proxy := NewLiveKitProxy("http://localhost:7880", []string{"https://myapp.com"})
+	proxy := NewLiveKitProxy("http://localhost:7880", []string{"https://myapp.com"}, AdmitAllVoiceSessionsForTest)
 	r := httptest.NewRequest("GET", "/rtc", nil)
 	r.Header.Set("Origin", "https://evil.com")
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for cross-origin HTTP, got %d", w.Code)
 	}
@@ -274,32 +276,71 @@ func TestLiveKitProxy_AllowsSameOriginHTTP(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	proxy := NewLiveKitProxy(backend.URL, []string{"https://myapp.com"})
-	r := httptest.NewRequest("GET", "/rtc", nil)
+	proxy := NewLiveKitProxy(backend.URL, []string{"https://myapp.com"}, AdmitAllVoiceSessionsForTest)
+	r := httptest.NewRequest("GET", "/rtc/validate?access_token=client", nil)
 	r.Header.Set("Origin", "https://myapp.com")
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 for same-origin HTTP, got %d", w.Code)
 	}
 }
 
-func TestLiveKitProxy_DoesNotBlockUserMetrics(t *testing.T) {
-	// "/user-metrics" should NOT be blocked (only "/metrics" segment is blocked)
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// Only the four signalling paths are forwarded, matched exactly and as a GET,
+// the session paths only as a WebSocket and the validate paths never as one;
+// everything else LiveKit serves on the same port is refused before the gate
+// or the backend is asked, with a 403 (the SDK reads a 404 as "not this
+// signalling version").
+func TestLiveKitProxy_ForwardsOnlySignalPaths(t *testing.T) {
+	var backendHits, gateCalls int
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		backendHits++
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer backend.Close()
+	gate := func(ctx context.Context, presented string) (ws.VoiceSessionTicket, error) {
+		gateCalls++
+		return AdmitAllVoiceSessionsForTest(ctx, presented)
+	}
+	proxy := NewLiveKitProxy(backend.URL, []string{"*"}, gate)
 
-	proxy := NewLiveKitProxy(backend.URL, []string{"*"})
-	r := httptest.NewRequest("GET", "/user-metrics", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
-	// The path is split by "/" — "user-metrics" is one segment, not "metrics"
-	// Wait — actually the blocked check splits by "/" and checks each segment.
-	// "/user-metrics" splits to ["", "user-metrics"] so "user-metrics" != "metrics". Should pass.
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 for /user-metrics (not an exact segment match), got %d", w.Code)
+	for _, tc := range []struct {
+		method, path string
+		upgrade      bool
+	}{
+		{"GET", "/", false},
+		{"GET", "/user-metrics", false},
+		{"GET", "/agent", true},
+		{"POST", "/whip/v1", false},
+		{"GET", "/rtc/", false},
+		{"GET", "/rtc", false},
+		{"GET", "/rtc/v1", false},
+		{"GET", "/rtc/v1/validate", true},
+		{"GET", "/RTC", true},
+		{"GET", "/rtc/v2", true},
+		{"GET", "/rtc/validate/extra", false},
+		{"POST", "/rtc/validate", false},
+		{"GET", "/rtc/validate", true},
+	} {
+		r := httptest.NewRequest(tc.method, tc.path+"?access_token=client", nil)
+		if tc.upgrade {
+			r.Header.Set("Connection", "Upgrade")
+			r.Header.Set("Upgrade", "websocket")
+		}
+		if w := serveRequest(proxy, r); w.Code != http.StatusForbidden {
+			t.Errorf("%s %s (upgrade=%v): status %d, want 403", tc.method, tc.path, tc.upgrade, w.Code)
+		}
+	}
+	if backendHits != 0 || gateCalls != 0 {
+		t.Errorf("refused paths reached the backend %d times and the gate %d times, want 0 and 0", backendHits, gateCalls)
+	}
+
+	for _, path := range []string{"/rtc/validate", "/rtc/v1/validate"} {
+		if w := serveRequest(proxy, httptest.NewRequest("GET", path+"?access_token=client", nil)); w.Code != http.StatusOK {
+			t.Errorf("GET %s: status %d, want 200", path, w.Code)
+		}
+	}
+	if backendHits != 2 || gateCalls != 2 {
+		t.Errorf("signalling paths reached the backend %d times and the gate %d times, want 2 and 2", backendHits, gateCalls)
 	}
 }
 
@@ -314,19 +355,20 @@ func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 	const headerToken = "eyJhbGciOiJIUzI1NiJ9.SECRET-HEADER-JWT-PAYLOAD.c2lnbmF0dXJl"
 
 	var logs bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	captureDebugLogs(t, &logs)
 
 	// Port 1 on loopback refuses connections, which is the exact branch where
 	// the wrapped *url.Error carries the query string.
-	proxy := NewLiveKitProxy("http://127.0.0.1:1", []string{"*"})
+	const issued = "eyJhbGciOiJIUzI1NiJ9.SECRET-ISSUED-JWT-PAYLOAD.c2lnbmF0dXJl"
+	gate := func(context.Context, string) (ws.VoiceSessionTicket, error) {
+		return ws.VoiceSessionTicket{Token: issued, Confirm: func(context.Context) error { return nil }}, nil
+	}
+	proxy := NewLiveKitProxy("http://127.0.0.1:1", []string{"*"}, gate)
 	r := httptest.NewRequest("GET", "/rtc?access_token="+token, nil)
 	r.Header.Set("Connection", "Upgrade")
 	r.Header.Set("Upgrade", "websocket")
 	r.Header.Set("Authorization", "Bearer "+headerToken)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502 when the backend refuses the dial, got %d", w.Code)
@@ -343,6 +385,9 @@ func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 	if strings.Contains(out, headerToken) {
 		t.Fatalf("the Authorization token leaked into the log stream:\n%s", out)
 	}
+	if strings.Contains(out, issued) {
+		t.Fatalf("the issued credential leaked into the log stream:\n%s", out)
+	}
 	if !strings.Contains(out, "backend dial failed") {
 		t.Errorf("the failure must still be diagnosable, got:\n%s", out)
 	}
@@ -350,8 +395,8 @@ func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 
 func TestLiveKitProxy_InvalidURL_FallsBackToLocalhost(t *testing.T) {
 	// Should not panic with invalid URL
-	proxy := NewLiveKitProxy("://invalid", []string{"*"})
-	r := httptest.NewRequest("GET", "/rtc", nil)
+	proxy := NewLiveKitProxy("://invalid", []string{"*"}, AdmitAllVoiceSessionsForTest)
+	r := httptest.NewRequest("GET", "/rtc/validate?access_token=client", nil)
 	w := httptest.NewRecorder()
 	// This will fail to connect to localhost:7880, but should not panic
 	proxy.ServeHTTP(w, r)

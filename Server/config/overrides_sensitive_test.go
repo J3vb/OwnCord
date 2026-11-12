@@ -167,9 +167,7 @@ func TestLoad_SecretOverrideAppliedButNotLogged(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	mustDo(t, "Load", err)
 	if cfg.GIF.APIKey != secret {
 		t.Errorf("gif.api_key = %q, want the panel value", cfg.GIF.APIKey)
 	}
@@ -191,32 +189,24 @@ func TestPreview_ReflectsNextBoot(t *testing.T) {
 	writeOverrides(t, dataDir, `{"server.admin_allowed_cidrs": ["192.0.2.0/24"]}`)
 	ovPath := config.OverridesPath(dataDir)
 	before, err := os.ReadFile(ovPath)
-	if err != nil {
-		t.Fatalf("read overrides: %v", err)
-	}
+	mustDo(t, "read overrides", err)
 
 	next, err := config.Preview(cfgPath, ovPath, map[string]any{"server.max_ws_connections": float64(5)})
-	if err != nil {
-		t.Fatalf("Preview: %v", err)
-	}
+	mustDo(t, "Preview", err)
 	if !slices.Equal(next.Server.AdminAllowedCIDRs, []string{"192.0.2.0/24"}) || next.Server.MaxWSConnections != 5 {
 		t.Errorf("Preview = admin %v, max_ws %d; want the saved override kept and the change applied",
 			next.Server.AdminAllowedCIDRs, next.Server.MaxWSConnections)
 	}
 
 	next, err = config.Preview(cfgPath, ovPath, map[string]any{"server.admin_allowed_cidrs": nil})
-	if err != nil {
-		t.Fatalf("Preview(reset): %v", err)
-	}
+	mustDo(t, "Preview(reset)", err)
 	if !slices.Equal(next.Server.AdminAllowedCIDRs, []string{"10.0.0.0/8"}) {
 		t.Errorf("Preview(reset) admin = %v, want config.yaml's [10.0.0.0/8]", next.Server.AdminAllowedCIDRs)
 	}
 
 	t.Setenv("OWNCORD_SERVER_MAX_WS_CONNECTIONS", "30")
 	next, err = config.Preview(cfgPath, ovPath, nil)
-	if err != nil {
-		t.Fatalf("Preview(env): %v", err)
-	}
+	mustDo(t, "Preview(env)", err)
 	if next.Server.MaxWSConnections != 30 {
 		t.Errorf("Preview max_ws = %d, want the environment's 30", next.Server.MaxWSConnections)
 	}
@@ -245,17 +235,13 @@ func TestPreview_DoesNotGenerateVoiceCredentials(t *testing.T) {
 	cfgPath := writeYAML(t, dataDir, "")
 
 	next, err := config.Preview(cfgPath, config.OverridesPath(dataDir), nil)
-	if err != nil {
-		t.Fatalf("Preview: %v", err)
-	}
+	mustDo(t, "Preview", err)
 	if next.Voice.LiveKitAPIKey != "" || next.Voice.LiveKitAPISecret != "" {
 		t.Error("Preview generated LiveKit credentials; a preview must be side-effect free")
 	}
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	mustDo(t, "Load", err)
 	if cfg.Voice.LiveKitAPIKey == "" || cfg.Voice.LiveKitAPISecret == "" {
 		t.Error("Load must still generate LiveKit credentials")
 	}

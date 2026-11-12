@@ -56,6 +56,35 @@ function defaultNextFrame(): Promise<void> {
   });
 }
 
+/** A jump that is known to be pointless: say why, quietly. */
+function refuseJump(channelId: number, messageId: number): boolean {
+  // A permalink to a channel this user cannot see must degrade quietly
+  // rather than blank the chat area on an unknown id.
+  if (findChannelById(channelId) === null) {
+    showToast(messagingText("jump.channelUnavailable"), "info");
+    return true;
+  }
+  // The store keeps a deleted message as a tombstone, so a jump to one is
+  // known to be pointless: the list does not draw it and the around fetch
+  // would 404.
+  if (getChannelMessages(channelId).some((m) => m.id === messageId && m.deleted)) {
+    showToast(messagingText("jump.gone"), "info");
+    return true;
+  }
+  return false;
+}
+
+function reportWindowFetchFailure(err: unknown, channelId: number, messageId: number): void {
+  // The channel's NSFW gate is showing and says why.
+  if (err instanceof ApiClientError && err.code === NSFW_ACKNOWLEDGEMENT_REQUIRED) return;
+  if (err instanceof ApiClientError && err.status === 404) {
+    showToast(messagingText("jump.gone"), "info");
+    return;
+  }
+  log.error("Failed to fetch the message window", { channelId, messageId, error: String(err) });
+  showToast(messagingText("jump.failed"), "error");
+}
+
 export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
   const nextFrame = opts.nextFrame ?? defaultNextFrame;
 
@@ -74,23 +103,29 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
     return ctrl.messageList.scrollToMessage(messageId);
   }
 
+  /** Swap the fetched around-window in, unless the jump went stale meanwhile. */
+  function installAroundWindow(
+    gen: number,
+    channelId: number,
+    resp: Awaited<ReturnType<ApiClient["getMessagesAround"]>>,
+  ): boolean {
+    // A newer jump was fired (and possibly already resolved) while this
+    // fetch was in flight — its response landing now must not clobber the
+    // window the newer jump already applied.
+    if (gen !== jumpGen) return false;
+    // The user left the channel while the fetch was in flight. The switch
+    // already dropped its loaded flag, so writing the window now would mark
+    // it loaded and detached, and the next visit would open on this old
+    // window instead of the live tail.
+    if (opts.getChannelCtrl()?.currentChannelId !== channelId) return false;
+    setAroundMessages(channelId, resp.messages, resp.has_more_before, resp.has_more_after);
+    return true;
+  }
+
   async function jumpTo(channelId: number, messageId: number): Promise<boolean> {
     const gen = ++jumpGen;
 
-    // A permalink to a channel this user cannot see must degrade quietly
-    // rather than blank the chat area on an unknown id.
-    if (findChannelById(channelId) === null) {
-      showToast(messagingText("jump.channelUnavailable"), "info");
-      return false;
-    }
-
-    // The store keeps a deleted message as a tombstone, so a jump to one is
-    // known to be pointless: the list does not draw it and the around fetch
-    // would 404.
-    if (getChannelMessages(channelId).some((m) => m.id === messageId && m.deleted)) {
-      showToast(messagingText("jump.gone"), "info");
-      return false;
-    }
+    if (refuseJump(channelId, messageId)) return false;
 
     const ctrl = opts.getChannelCtrl();
     if (ctrl === null) return false;
@@ -114,25 +149,9 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
       const resp = await opts.api.getMessagesAround(channelId, messageId, {
         limit: AROUND_WINDOW,
       });
-      // A newer jump was fired (and possibly already resolved) while this
-      // fetch was in flight — its response landing now must not clobber the
-      // window the newer jump already applied.
-      if (gen !== jumpGen) return false;
-      // The user left the channel while the fetch was in flight. The switch
-      // already dropped its loaded flag, so writing the window now would mark
-      // it loaded and detached, and the next visit would open on this old
-      // window instead of the live tail.
-      if (opts.getChannelCtrl()?.currentChannelId !== channelId) return false;
-      setAroundMessages(channelId, resp.messages, resp.has_more_before, resp.has_more_after);
+      if (!installAroundWindow(gen, channelId, resp)) return false;
     } catch (err) {
-      // The channel's NSFW gate is showing and says why.
-      if (err instanceof ApiClientError && err.code === NSFW_ACKNOWLEDGEMENT_REQUIRED) return false;
-      if (err instanceof ApiClientError && err.status === 404) {
-        showToast(messagingText("jump.gone"), "info");
-        return false;
-      }
-      log.error("Failed to fetch the message window", { channelId, messageId, error: String(err) });
-      showToast(messagingText("jump.failed"), "error");
+      reportWindowFetchFailure(err, channelId, messageId);
       return false;
     }
 

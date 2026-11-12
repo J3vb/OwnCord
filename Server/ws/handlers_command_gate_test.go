@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -38,16 +37,10 @@ func (s stubDispatcher) DispatchCommand(_ context.Context, _, _ int64, _ string,
 // whose role carries none, and a text channel.
 func newCommandTestDeps(t *testing.T, res *plugin.CommandResult) (deps PluginDeps, ownerID, mutedID, chID int64) {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := newTeardownTestDB(t)
 
 	ctx := context.Background()
+	var err error
 	if ownerID, err = database.CreateUser(ctx, "cmd-owner", "hash", 1); err != nil { // Owner role
 		t.Fatalf("CreateUser owner: %v", err)
 	}
@@ -159,24 +152,11 @@ func TestHandleChatCommandV2_BroadcastFansOutWhenAllowed(t *testing.T) {
 // regardless of message-request trust, so the plain shape would leak the
 // broadcast to a recipient who has not accepted.
 func TestHandleChatCommandV2_DMBroadcastExcludesUntrustedRecipient(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := newTeardownTestDB(t)
 
 	ctx := context.Background()
-	senderID, err := database.CreateUser(ctx, "dmcmd-sender", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser sender: %v", err)
-	}
-	recipientID, err := database.CreateUser(ctx, "dmcmd-recipient", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser recipient: %v", err)
-	}
+	senderID := mustCreateUser(t, database, "dmcmd-sender", 4)
+	recipientID := mustCreateUser(t, database, "dmcmd-recipient", 4)
 	ch, _, err := database.GetOrCreateDMChannel(ctx, senderID, recipientID)
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)

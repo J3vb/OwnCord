@@ -8,10 +8,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// requireRecoveryTargetBelow is the rank rule for an ISSUE_RECOVERY holder:
-// unless the actor's top role is the owner's, the target's top role
-// must sit strictly below it, and the owner is never a target. The owner has no
-// such limit. The target may not hold an owner-tier bit the actor lacks. A target with no role is refused, failing closed.
+// requireRecoveryTargetBelow is the rank rule for an ISSUE_RECOVERY holder: unless the actor's top role is
+// the owner's, the target's top role must sit strictly below it, and the owner is never a target. The target
+// may not hold an owner-tier bit the actor lacks. A target with no role is refused (fail closed).
 func (s *accountRecovery) requireRecoveryTargetBelow(ctx context.Context, actor *db.MemberRoles, targetID int64) error {
 	actorTop := actor.Top
 	if permissions.IsOwner(actorTop.ID, actorTop.Position) {
@@ -25,8 +24,7 @@ func (s *accountRecovery) requireRecoveryTargetBelow(ctx context.Context, actor 
 	if held == nil || permissions.IsOwner(held.Top.ID, held.Top.Position) || held.Top.Position >= actorTop.Position {
 		return ErrRecoveryAssistRank
 	}
-	// A credential for an account carrying an owner-tier power the actor lacks
-	// would be a way to take that power, so it is refused too.
+	// A credential for an account with an owner-tier power the actor lacks would be a way to take that power.
 	if held.Perms&permissions.OwnerOnlyGrant&^actor.Perms != 0 {
 		return ErrRecoveryAssistRank
 	}

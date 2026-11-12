@@ -61,12 +61,9 @@ func newThreadFixture(t *testing.T) *threadFixture {
 
 func (f *threadFixture) post(t *testing.T, channelID, userID int64, text string) int64 {
 	t.Helper()
-	res, err := f.msgs.SendMessage(context.Background(), SendMessageParams{
+	res := mustSendMessage(context.Background(), t, f.msgs, SendMessageParams{
 		ChannelID: channelID, UserID: userID, Username: "u", RoleName: "member", Content: text,
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	return res.MessageID
 }
 
@@ -93,9 +90,7 @@ func TestThreadCreate_Valid(t *testing.T) {
 	}
 	// The starter message carries the thread in history.
 	msgs, err := f.database.GetMessagesForAPI(context.Background(), thrParent, 0, 10, thrOwner)
-	if err != nil {
-		t.Fatalf("GetMessages: %v", err)
-	}
+	mustDo(t, "GetMessages", err)
 	var seen bool
 	for _, m := range msgs {
 		if info.StarterMessageID != nil && m.ID == *info.StarterMessageID {

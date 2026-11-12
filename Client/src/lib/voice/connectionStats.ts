@@ -1,7 +1,8 @@
 // Connection stats poller — extracts WebRTC metrics from LiveKit Room
-import type { Room, Track } from "livekit-client";
+import type { Track } from "livekit-client";
 import type { CameraStallWatchdog, cameraSampleFromStats } from "./cameraStallWatchdog";
 import { createLogger } from "@lib/logger";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("connection-stats");
 
@@ -168,7 +169,7 @@ function activeJitter(prev: AudioStreams, next: AudioStreams): number {
 
 /** Collect stats from both publisher and subscriber PeerConnections.
  *  RTT is typically on the subscriber PC in LiveKit's SFU model. */
-async function collectAllStats(room: Room): Promise<RTCStatsReport[]> {
+async function collectAllStats(room: VoiceRoom): Promise<RTCStatsReport[]> {
   try {
     // Use the SDK transport API: PCTransport owns a private _pc, not a
     // public `pc`. Keeping this typed makes SDK shape changes a build error.
@@ -212,43 +213,45 @@ function extractMetrics(reports: RTCStatsReport[]): {
   const audioSentById = new Map<string, number>();
   const remoteAudio: Array<Record<string, unknown>> = [];
 
+  /** Look for candidate-pair with RTT — accept any state that has a valid RTT,
+   *  not just "succeeded", because LiveKit's subscriber PC may report "in-progress". */
+  const foldCandidatePair = (entry: Record<string, unknown>): void => {
+    const rawRtt = entry.currentRoundTripTime;
+    if (typeof rawRtt === "number" && rawRtt > 0 && (rtt === 0 || rawRtt * 1000 < rtt)) {
+      rtt = rawRtt * 1000;
+    }
+    // Use max across candidate-pairs (avoid double-counting across PCs)
+    if (typeof entry.bytesSent === "number" && entry.bytesSent > totalUp) totalUp = entry.bytesSent;
+    if (typeof entry.bytesReceived === "number" && entry.bytesReceived > totalDown)
+      totalDown = entry.bytesReceived;
+  };
+
+  const foldOutbound = (entry: Record<string, unknown>): void => {
+    if (typeof entry.packetsSent === "number") outPackets += entry.packetsSent;
+    if (typeof entry.bytesSent === "number") outBytes += entry.bytesSent;
+    if (entry.kind === "audio" && typeof entry.packetsSent === "number")
+      audioSentById.set(String(entry.id), entry.packetsSent);
+  };
+
+  const foldInbound = (entry: Record<string, unknown>): void => {
+    if (typeof entry.packetsReceived === "number") inPackets += entry.packetsReceived;
+    if (typeof entry.bytesReceived === "number") inBytes += entry.bytesReceived;
+    if (entry.kind !== "audio") return;
+    inbound.set(String(entry.id), {
+      lost: typeof entry.packetsLost === "number" ? entry.packetsLost : 0,
+      received: typeof entry.packetsReceived === "number" ? entry.packetsReceived : 0,
+      jitter: jitterMs(entry),
+    });
+  };
+
   for (const report of reports) {
     report.forEach((entry: Record<string, unknown>) => {
-      // Look for candidate-pair with RTT — accept any state that has a valid RTT,
-      // not just "succeeded", because LiveKit's subscriber PC may report "in-progress".
-      if (entry.type === "candidate-pair") {
-        const rawRtt = entry.currentRoundTripTime;
-        if (typeof rawRtt === "number" && rawRtt > 0 && (rtt === 0 || rawRtt * 1000 < rtt)) {
-          rtt = rawRtt * 1000;
-        }
-        // Use max across candidate-pairs (avoid double-counting across PCs)
-        if (typeof entry.bytesSent === "number" && entry.bytesSent > totalUp)
-          totalUp = entry.bytesSent;
-        if (typeof entry.bytesReceived === "number" && entry.bytesReceived > totalDown)
-          totalDown = entry.bytesReceived;
+      if (entry.type === "candidate-pair") foldCandidatePair(entry);
+      else if (entry.type === "outbound-rtp") foldOutbound(entry);
+      else if (entry.type === "inbound-rtp") foldInbound(entry);
+      else if (entry.type === "remote-inbound-rtp" && entry.kind === "audio") {
+        remoteAudio.push(entry);
       }
-
-      if (entry.type === "outbound-rtp") {
-        if (typeof entry.packetsSent === "number") outPackets += entry.packetsSent;
-        if (typeof entry.bytesSent === "number") outBytes += entry.bytesSent;
-        if (entry.kind === "audio" && typeof entry.packetsSent === "number")
-          audioSentById.set(String(entry.id), entry.packetsSent);
-      }
-
-      if (entry.type === "inbound-rtp") {
-        if (typeof entry.packetsReceived === "number") inPackets += entry.packetsReceived;
-        if (typeof entry.bytesReceived === "number") inBytes += entry.bytesReceived;
-      }
-
-      if (entry.type === "inbound-rtp" && entry.kind === "audio") {
-        inbound.set(String(entry.id), {
-          lost: typeof entry.packetsLost === "number" ? entry.packetsLost : 0,
-          received: typeof entry.packetsReceived === "number" ? entry.packetsReceived : 0,
-          jitter: jitterMs(entry),
-        });
-      }
-
-      if (entry.type === "remote-inbound-rtp" && entry.kind === "audio") remoteAudio.push(entry);
     });
   }
 
@@ -281,7 +284,18 @@ function jitterMs(entry: Record<string, unknown>): number {
   return typeof entry.jitter === "number" ? entry.jitter * 1000 : 0;
 }
 
-export function createConnectionStatsPoller(getRoom: () => Room | null): ConnectionStatsPoller {
+/** The local camera's publication, track and RTP sender, once it publishes. */
+function publishedCamera(room: VoiceRoom) {
+  const pub = room.localParticipant?.getTrackPublication?.("camera" as Track.Source);
+  const track = pub?.track;
+  const sender = (track as { sender?: RTCRtpSender } | undefined)?.sender;
+  if (pub === undefined || track === undefined || sender === undefined) return null;
+  return { pub, track, sender };
+}
+
+export function createConnectionStatsPoller(
+  getRoom: () => VoiceRoom | null,
+): ConnectionStatsPoller {
   let current: ConnectionStats = EMPTY_STATS;
   let prev: PrevSnapshot = { timestamp: Date.now(), ...EMPTY_SNAPSHOT };
   let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -300,30 +314,33 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
   let watchdogLoading = false;
   let run = 0;
 
-  async function sampleCamera(room: Room, now: number): Promise<void> {
-    const pub = room.localParticipant?.getTrackPublication?.("camera" as Track.Source);
-    const track = pub?.track;
-    const sender = (track as { sender?: RTCRtpSender } | undefined)?.sender;
-    if (pub === undefined || track === undefined || sender === undefined) {
+  /** Load the watchdog module; a stop() or restart meanwhile drops it. */
+  async function loadWatchdog(): Promise<void> {
+    watchdogLoading = true;
+    const loadRun = run;
+    try {
+      const mod = await import("./cameraStallWatchdog");
+      toSample = mod.cameraSampleFromStats;
+      if (loadRun === run) watchdog = mod.createCameraStallWatchdog();
+    } finally {
+      watchdogLoading = false;
+    }
+  }
+
+  async function sampleCamera(room: VoiceRoom, now: number): Promise<void> {
+    const camera = publishedCamera(room);
+    if (camera === null) {
       watchdog?.reset();
       return;
     }
     if (watchdog === null) {
       if (watchdogLoading) return;
-      watchdogLoading = true;
-      const loadRun = run;
-      try {
-        const mod = await import("./cameraStallWatchdog");
-        toSample = mod.cameraSampleFromStats;
-        if (loadRun === run) watchdog = mod.createCameraStallWatchdog();
-      } finally {
-        watchdogLoading = false;
-      }
+      await loadWatchdog();
       return;
     }
-    const live = track.mediaStreamTrack?.readyState === "live" && !pub.isMuted;
+    const live = camera.track.mediaStreamTrack?.readyState === "live" && !camera.pub.isMuted;
     const sampleRun = run;
-    const report = await sender.getStats();
+    const report = await camera.sender.getStats();
     if (sampleRun !== run || watchdog === null || toSample === null) return;
     watchdog.sample(now, toSample(live, report.values()));
   }
@@ -460,42 +477,4 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
   return { start, stop, getStats, onUpdate, onQualityChanged };
 }
 
-// --- Formatting helpers ---
-
-/**
- * Format a byte count as `B` / `<kiloUnit>` / `MB`, switching units at
- * `base` and `base * base`. Shared by `formatBytes` here (base-1000, "kB")
- * and `formatFileSize` in features/messaging/content/attachments.ts
- * (base-1024, "KB") — those two disagreed on both the base and the unit
- * case before this was unified, so keep each call site's own `base`/
- * `kiloUnit`/`decimals` rather than picking one for both.
- */
-export function formatByteSize(
-  bytes: number,
-  base: number,
-  kiloUnit: string,
-  decimals: number,
-): string {
-  if (bytes < base) return `${Math.round(bytes)} B`;
-  if (bytes < base * base) return `${(bytes / base).toFixed(decimals)} ${kiloUnit}`;
-  return `${(bytes / (base * base)).toFixed(decimals)} MB`;
-}
-
-export function formatBytes(bytes: number): string {
-  return formatByteSize(bytes, 1000, "kB", 2);
-}
-
-/**
- * Compact transfer rate for the voice widget's stats pane: one unit, a
- * rounded value and no second Mbps figure, so a value never wraps at the
- * widget's narrow width (`331 kB/s`, not `331.25 kB/s (2.6 Mbps)`).
- */
-export function formatRateCompact(bytesPerSec: number): string {
-  const bytes = Math.max(0, bytesPerSec);
-  if (Math.round(bytes) < 1000) return `${Math.round(bytes)} B/s`;
-  const kb = bytes / 1000;
-  if (Number(kb.toFixed(1)) < 100) return `${kb.toFixed(1)} kB/s`;
-  if (Math.round(kb) < 1000) return `${Math.round(kb)} kB/s`;
-  const mb = bytes / 1_000_000;
-  return `${Number(mb.toFixed(1)) < 10 ? mb.toFixed(1) : mb.toFixed(0)} MB/s`;
-}
+export { formatByteSize, formatBytes, formatRateCompact } from "./connectionStatsFormat";

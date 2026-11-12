@@ -163,7 +163,7 @@ func TestVoicePermissions_SweepSkipsConcurrentModeration(t *testing.T) {
 	c := NewTestClient(h, 1, make(chan []byte, 8))
 	c.voice.setState(100, state.JoinedAt)
 	h.clients[1] = []*Client{c}
-	unlock := h.voiceHub.mod.lock(1)
+	unlock := h.voiceHub.mod.Lock(1)
 	finished := make(chan struct{})
 	go func() {
 		h.sweepStaleVoiceEvictRevoked(ctx)
@@ -198,7 +198,7 @@ func TestVoicePermissions_ModerationFailureRetainsDesiredStateForRetry(t *testin
 			ctx := context.Background()
 			deps, database := tokenRefreshDeps(t)
 			seedVoiceOnlyRole(t, database, voiceOnlyRoleID, permissions.ReadMessages|permissions.ConnectVoice|permissions.SpeakVoice|permissions.UseVideo|permissions.ShareScreen)
-			actorID := seedDeafenRaceUser(t, database, "moderator", 2)
+			actorID := mustCreateUser(t, database, "moderator", 2)
 			lk, updates, failing := voicePermissionSFU(t)
 			h := newTestHubWith(t, HubOptions{DB: database, LiveKit: lk})
 			initial, err := h.voice.State(ctx, 1)

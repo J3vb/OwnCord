@@ -18,12 +18,8 @@ import (
 func secondFactorDB(t *testing.T) *db.DB {
 	t.Helper()
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	mustDo(t, "db.Open", err)
+	mustDo(t, "db.Migrate", db.Migrate(database))
 	t.Cleanup(func() { _ = database.Close() })
 	return database
 }
@@ -34,24 +30,13 @@ func TestSecondFactor_ChallengeAndReplayWindowSurviveRestart(t *testing.T) {
 	key := make([]byte, 32)
 
 	hash, err := auth.HashPassword("correctPass1")
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	uid, err := database.CreateUser(ctx, "restarter", hash, 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "HashPassword", err)
+	uid := mustCreateUser(t, database, "restarter", hash, 4)
 	secret, err := auth.GenerateTOTPSecret()
-	if err != nil {
-		t.Fatalf("GenerateTOTPSecret: %v", err)
-	}
+	mustDo(t, "GenerateTOTPSecret", err)
 	enc, err := auth.EncryptTOTPSecret(key, secret)
-	if err != nil {
-		t.Fatalf("EncryptTOTPSecret: %v", err)
-	}
-	if err := database.UpdateUserTOTPSecret(ctx, uid, &enc); err != nil {
-		t.Fatalf("UpdateUserTOTPSecret: %v", err)
-	}
+	mustDo(t, "EncryptTOTPSecret", err)
+	mustDo(t, "UpdateUserTOTPSecret", database.UpdateUserTOTPSecret(ctx, uid, &enc))
 	login := LoginInput{Username: "restarter", Password: "correctPass1", Device: "d", IP: "203.0.113.5"}
 
 	first := NewAuthService(database, auth.NewRateLimiter(), key, nil)
@@ -63,9 +48,7 @@ func TestSecondFactor_ChallengeAndReplayWindowSurviveRestart(t *testing.T) {
 	// The process restarts: a new service, an empty cache, the same database.
 	second := NewAuthService(database, auth.NewRateLimiter(), key, nil)
 	code, err := auth.GenerateTOTPCode(secret, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("GenerateTOTPCode: %v", err)
-	}
+	mustDo(t, "GenerateTOTPCode", err)
 	done, err := second.VerifyTOTP(ctx, res.PartialToken, code)
 	if err != nil || done.Token == "" {
 		t.Fatalf("VerifyTOTP after restart = %+v, %v; want a session", done, err)
@@ -74,9 +57,7 @@ func TestSecondFactor_ChallengeAndReplayWindowSurviveRestart(t *testing.T) {
 	// The spent code is refused everywhere, including by the process that
 	// never saw it.
 	again, err := first.Login(ctx, login)
-	if err != nil {
-		t.Fatalf("second Login: %v", err)
-	}
+	mustDo(t, "second Login", err)
 	if _, err := first.VerifyTOTP(ctx, again.PartialToken, code); !errors.Is(err, ErrTOTPCodeInvalid) {
 		t.Fatalf("replay across processes: err = %v, want ErrTOTPCodeInvalid", err)
 	}
@@ -93,13 +74,8 @@ func TestSecondFactor_PendingEnrolmentSurvivesRestart(t *testing.T) {
 	key := make([]byte, 32)
 
 	hash, err := auth.HashPassword("correctPass1")
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	uid, err := database.CreateUser(ctx, "enroller", hash, 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "HashPassword", err)
+	uid := mustCreateUser(t, database, "enroller", hash, 4)
 	user, err := database.GetUserByID(ctx, uid)
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
@@ -108,9 +84,7 @@ func TestSecondFactor_PendingEnrolmentSurvivesRestart(t *testing.T) {
 
 	first := NewAuthService(database, auth.NewRateLimiter(), key, nil)
 	enr, err := first.EnableTOTP(ctx, p, "correctPass1")
-	if err != nil {
-		t.Fatalf("EnableTOTP: %v", err)
-	}
+	mustDo(t, "EnableTOTP", err)
 	if len(enr.RecoveryCodes) != 10 {
 		t.Fatalf("EnableTOTP issued %d recovery codes, want 10", len(enr.RecoveryCodes))
 	}
@@ -123,9 +97,7 @@ func TestSecondFactor_PendingEnrolmentSurvivesRestart(t *testing.T) {
 		t.Fatal("the staged enrolment did not survive the restart")
 	}
 	code, err := auth.GenerateTOTPCode(secret, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("GenerateTOTPCode: %v", err)
-	}
+	mustDo(t, "GenerateTOTPCode", err)
 	if _, err := second.ConfirmTOTP(ctx, p, "correctPass1", code); err != nil {
 		t.Fatalf("ConfirmTOTP after restart: %v", err)
 	}
@@ -142,9 +114,7 @@ func TestSecondFactor_PendingEnrolmentSurvivesRestart(t *testing.T) {
 		t.Fatalf("VerifyTOTP with a recovery code = %+v, %v; want a session and 9 remaining", done, err)
 	}
 	res, err = third.Login(ctx, LoginInput{Username: "enroller", Password: "correctPass1"})
-	if err != nil {
-		t.Fatalf("Login: %v", err)
-	}
+	mustDo(t, "Login", err)
 	if _, err := third.VerifyTOTP(ctx, res.PartialToken, enr.RecoveryCodes[3]); !errors.Is(err, ErrTOTPCodeInvalid) {
 		t.Fatalf("a spent recovery code: err = %v, want ErrTOTPCodeInvalid", err)
 	}

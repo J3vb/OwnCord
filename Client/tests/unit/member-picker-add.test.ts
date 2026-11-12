@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { memberRow, useMemberPickerHarness } from "../helpers/memberPickerHarness";
-import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
+import { createMemberPickerModal } from "../../src/features/direct-messages/MemberPickerModal";
 import { membersStore } from "@stores/members.store";
 import { showToast } from "@lib/ui/toast";
 
@@ -110,7 +110,7 @@ describe("member picker add mode", () => {
     open({ onAdd });
     q("dm-picker-member-3")!.click();
     q("dm-picker-create")!.click();
-    document.querySelector<HTMLElement>(".btn-secondary")!.click();
+    document.querySelector<HTMLElement>(".btn-modal-cancel")!.click();
     fail("This group is full");
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("This group is full", "error"));
   });

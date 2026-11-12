@@ -42,9 +42,7 @@ func TestUserService_GetWithRoleName(t *testing.T) {
 	seedUserRole(t, database, 1, 7)
 
 	user, roleName, err := svc.GetWithRoleName(ctx, 1)
-	if err != nil {
-		t.Fatalf("GetWithRoleName: %v", err)
-	}
+	mustDo(t, "GetWithRoleName", err)
 	if user.ID != 1 || roleName != "Helper" {
 		t.Errorf("got (id=%d, role=%q), want (1, \"Helper\")", user.ID, roleName)
 	}
@@ -87,18 +85,14 @@ func TestUserService_ListAllAndServerStats(t *testing.T) {
 	}
 
 	page, err := svc.ListAll(ctx, db.UserListFilter{}, 2, 0)
-	if err != nil {
-		t.Fatalf("ListAll: %v", err)
-	}
+	mustDo(t, "ListAll", err)
 	if len(page) != 2 {
 		t.Errorf("ListAll(limit=2) returned %d rows, want 2 — the caller's bound is honoured", len(page))
 	}
 
 	// The offset is the caller's too: page two of a 3-row set holds the rest.
 	rest, err := svc.ListAll(ctx, db.UserListFilter{}, 2, 2)
-	if err != nil {
-		t.Fatalf("ListAll(offset): %v", err)
-	}
+	mustDo(t, "ListAll(offset)", err)
 	if len(rest) != 1 {
 		t.Errorf("ListAll(limit=2, offset=2) returned %d rows, want 1", len(rest))
 	}
@@ -123,9 +117,7 @@ func TestUserService_AdminReadsFailLoud(t *testing.T) {
 	database := newTestDB(t)
 	svc := NewUserService(database)
 	ctx := context.Background()
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", database.Close())
 
 	if _, err := svc.ListAll(ctx, db.UserListFilter{}, 10, 0); !errors.Is(err, ErrInternal) {
 		t.Errorf("ListAll on a closed database: err = %v, want ErrInternal", err)

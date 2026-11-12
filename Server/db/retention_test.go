@@ -62,16 +62,12 @@ func TestSweepRetentionJournaled_IsAtomicWithDeletion(t *testing.T) {
 	}
 
 	runID, ids, files, err := database.SweepRetentionJournaled(ctx, 0, chID, cutoff, 10, true)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SweepRetentionJournaled", err)
 	if runID == 0 || !slices.Equal(ids, []int64{mid}) || !slices.Equal(files, []string{"stored-atomic"}) {
 		t.Fatalf("sweep = run %d, ids %v, files %v; want a run, [%d], [stored-atomic]", runID, ids, files, mid)
 	}
 	run, err := database.GetRetentionRun(ctx, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetRetentionRun", err)
 	if run.Channels != 1 || run.MessagesDeleted != 1 || !slices.Equal(run.PurgePending, ids) || !slices.Equal(run.Files, files) {
 		t.Fatalf("journal at deletion commit = %+v; want one channel, ids %v and files %v", run, ids, files)
 	}
@@ -86,9 +82,7 @@ func TestRetentionWindows_ServerAndChannelPrecedence(t *testing.T) {
 	shorter := seedChannel(t, database, "shorter-ret")
 	other := seedUser(t, database, "ret-other")
 	dm, _, err := database.GetOrCreateDMChannel(ctx, owner, other)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 
 	// Fresh server: indefinite, no windows at all.
 	if days, err := database.ServerRetentionDays(ctx); err != nil || days != 0 {
@@ -98,25 +92,17 @@ func TestRetentionWindows_ServerAndChannelPrecedence(t *testing.T) {
 		t.Fatalf("windows with no policy = %v, %v; want none", ws, err)
 	}
 	// A channel override alone applies even without a server window.
-	if err := database.SetChannelRetention(ctx, shorter, 3, owner); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetChannelRetention", database.SetChannelRetention(ctx, shorter, 3, owner))
 	ws, err := database.RetentionWindows(ctx)
 	if err != nil || len(ws) != 1 || ws[0].ChannelID != shorter || ws[0].Days != 3 || ws[0].Source != "channel" {
 		t.Fatalf("windows with one override = %+v, %v", ws, err)
 	}
 	// Server window 30: general inherits, forever opts out with 0, shorter
 	// stays at 3, the DM is never listed.
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "30"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.SetChannelRetention(ctx, forever, 0, owner); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "30"}))
+	mustDo(t, "SetChannelRetention", database.SetChannelRetention(ctx, forever, 0, owner))
 	ws, err = database.RetentionWindows(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RetentionWindows", err)
 	got := map[int64]db.RetentionWindow{}
 	for _, w := range ws {
 		got[w.ChannelID] = w
@@ -134,9 +120,7 @@ func TestRetentionWindows_ServerAndChannelPrecedence(t *testing.T) {
 		t.Error("a DM channel has a retention window")
 	}
 	// A malformed setting keeps everything.
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "soon"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "soon"}))
 	if days, _ := database.ServerRetentionDays(ctx); days != 0 {
 		t.Errorf("malformed retention_days = %d, want 0", days)
 	}
@@ -165,9 +149,7 @@ func TestRetentionWindows_ServerAndChannelPrecedence(t *testing.T) {
 func TestServerRetentionDays_OutOfRangeKeepsForever(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "106752"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "106752"}))
 	if days, err := database.ServerRetentionDays(ctx); err != nil || days != 0 {
 		t.Fatalf("ServerRetentionDays with an out-of-range row = %d, %v; want 0 (keep forever)", days, err)
 	}
@@ -190,9 +172,7 @@ func TestRetentionWindows_OutOfRangeOverrideKeepsForever(t *testing.T) {
 		t.Fatal(err)
 	}
 	ws, err := database.RetentionWindows(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RetentionWindows", err)
 	for _, w := range ws {
 		if w.ChannelID == ch {
 			t.Fatalf("out-of-range channel override still a live window: %+v", w)
@@ -293,27 +273,19 @@ func TestRetentionRuns_Journal(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	id, err := database.StartRetentionRun(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.RecordRetentionRunFiles(ctx, id, 2, 7, []string{"a", "b"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "StartRetentionRun", err)
+	mustDo(t, "RecordRetentionRunFiles", database.RecordRetentionRunFiles(ctx, id, 2, 7, []string{"a", "b"}))
 	runs, err := database.ListUnfinishedRetentionRuns(ctx)
 	if err != nil || len(runs) != 1 || runs[0].ID != id || len(runs[0].Files) != 2 || runs[0].MessagesDeleted != 7 {
 		t.Fatalf("unfinished = %+v, %v", runs, err)
 	}
-	if err := database.FinishRetentionRun(ctx, id, 1, "remove b: EIO"); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "FinishRetentionRun", database.FinishRetentionRun(ctx, id, 1, "remove b: EIO"))
 	// Finished but a file short: still listed for the resume.
 	runs, _ = database.ListUnfinishedRetentionRuns(ctx)
 	if len(runs) != 1 || runs[0].LastError == "" {
 		t.Fatalf("a short run is not listed for resume: %+v", runs)
 	}
-	if err := database.FinishRetentionRun(ctx, id, 2, ""); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "FinishRetentionRun", database.FinishRetentionRun(ctx, id, 2, ""))
 	if runs, _ := database.ListUnfinishedRetentionRuns(ctx); len(runs) != 0 {
 		t.Fatalf("a complete run is still listed: %+v", runs)
 	}
@@ -330,5 +302,30 @@ func TestRetentionRuns_Journal(t *testing.T) {
 	_ = database.FinishRetentionRun(ctx, empty, 0, "")
 	if runs, _ := database.ListUnfinishedRetentionRuns(ctx); len(runs) != 0 {
 		t.Fatalf("an empty finished run is listed: %+v", runs)
+	}
+}
+
+// The record holds the last sweep the database finished, and a channel that is
+// gone records nothing.
+func TestRetentionSwept_HoldsTheLastFinishedSweep(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	ch := seedChannel(t, database, "swept-chan")
+	if sweep, ok, err := database.RetentionSwept(ctx, ch); err != nil || ok || sweep != "" {
+		t.Fatalf("RetentionSwept before any sweep = (%q, %v, %v), want no record", sweep, ok, err)
+	}
+	for _, sweep := range []string{"second", "", "first"} {
+		if err := database.RecordRetentionSwept(ctx, ch, sweep); err != nil {
+			t.Fatalf("RecordRetentionSwept(%q): %v", sweep, err)
+		}
+		if got, ok, err := database.RetentionSwept(ctx, ch); err != nil || !ok || got != sweep {
+			t.Fatalf("RetentionSwept = (%q, %v, %v), want %q", got, ok, err, sweep)
+		}
+	}
+	if err := database.RecordRetentionSwept(ctx, ch+1000, "any"); err != nil {
+		t.Fatalf("RecordRetentionSwept for a missing channel: %v", err)
+	}
+	if _, ok, err := database.RetentionSwept(ctx, ch+1000); err != nil || ok {
+		t.Fatalf("RetentionSwept for a missing channel = (%v, %v), want no record", ok, err)
 	}
 }

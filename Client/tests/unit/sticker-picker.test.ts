@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { pressComposingEnter } from "../helpers/keyEvents";
 
-vi.mock("@components/message-list/sticker", () => ({ loadStickerImage: vi.fn() }));
+vi.mock("../../src/features/messaging/message-list/sticker", () => ({ loadStickerImage: vi.fn() }));
 
-import { createStickerPicker, stickerMatches } from "@components/StickerPicker";
-import { addRecentSticker, getRecentStickerIds } from "@components/stickerRecent";
+import { createStickerPicker, stickerMatches } from "../../src/features/messaging/StickerPicker";
+import { addRecentSticker, getRecentStickerIds } from "../../src/features/messaging/stickerRecent";
 import { stickersStore, setStickers, clearStickers } from "@stores/stickers.store";
 
 const SET = [

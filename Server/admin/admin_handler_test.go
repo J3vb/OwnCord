@@ -37,9 +37,7 @@ func TestNewHandler_ServesStaticRoot(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("GET / status = %d, want 200", w.Code)
-	}
+	expectStatus(t, w, http.StatusOK)
 
 	ct := w.Header().Get("Content-Type")
 	if ct == "" {
@@ -159,9 +157,7 @@ func TestNewHandler_APIRoutesMounted(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	// 200 because no users exist yet — setup is needed
-	if w.Code != http.StatusOK {
-		t.Errorf("GET /api/setup/status status = %d, want 200", w.Code)
-	}
+	expectStatus(t, w, http.StatusOK)
 }
 
 // TestNewHandler_AuthProtectedRoute verifies that authenticated routes under
@@ -175,9 +171,7 @@ func TestNewHandler_AuthProtectedRoute(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("unauthenticated /api/stats status = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }
 
 // TestNewHandler_WithUpdater verifies that NewHandler works correctly when an
@@ -223,15 +217,13 @@ func TestOwnerOnlyMiddleware_AdminDenied(t *testing.T) {
 		admin.SetupOptions{BackupDir: t.TempDir()})
 
 	// Create admin user (role_id=2, position=80)
-	adminUID, _ := database.CreateUser(context.Background(), "middlewareadmin", "hash", 2)
+	adminUID := mustCreateUser(t, database, "middlewareadmin", "hash", 2)
 	token := "mw-admin-token"
 	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", token, nil)
 
-	if w.Code != http.StatusForbidden {
-		t.Errorf("Admin user status = %d, want 403", w.Code)
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 // TestOwnerOnlyMiddleware_MemberDenied verifies that a Member-role user cannot
@@ -261,7 +253,5 @@ func TestOwnerOnlyMiddleware_Unauthenticated(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", "", nil)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("unauthenticated backup request status = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }

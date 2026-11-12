@@ -13,26 +13,32 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// identityKeyFailStore wraps a real *db.DB and fails only
-// UpdateUserIdentityKey, simulating the transient DB error that can strike
-// after handleUpdateProfile's profile write has already committed.
+// identityKeyFailStore wraps a real *db.DB and fails the identity-key half of
+// the profile write inside its transaction, after the profile columns were
+// written, so the rollback is what keeps them unchanged.
 type identityKeyFailStore struct {
 	*db.DB
 }
 
-func (s *identityKeyFailStore) UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error {
+func (s *identityKeyFailStore) UpdateUserProfileAndIdentityKey(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string, _ string) error {
+	tx, err := s.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET username = ? WHERE id = ?`, username, userID); err != nil {
+		return err
+	}
 	return errors.New("simulated identity key write failure")
 }
 
-// A follow-on identity-key failure must not swallow the profile write that
-// already committed: the response reports failure, but every other
-// connected client still needs the committed username/avatar change, or it
-// silently disappears until their next ready (v100).
-func TestUpdateProfile_IdentityKeyFailureStillBroadcastsCommittedProfile(t *testing.T) {
+// PATCH /users/me with an identity key is all-or-nothing: when the key write
+// fails, the profile change rolls back with it, the request reports the
+// failure, and nothing is broadcast, so no client sees a half-saved profile.
+func TestUpdateProfile_IdentityKeyFailureLeavesProfileUnchanged(t *testing.T) {
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
-	failingStore := &identityKeyFailStore{database}
-	svc := service.New(failingStore, limiter)
+	svc := service.New(&identityKeyFailStore{database}, limiter)
 	spy := &userUpdateSpy{}
 
 	r := chi.NewRouter()
@@ -43,28 +49,46 @@ func TestUpdateProfile_IdentityKeyFailureStillBroadcastsCommittedProfile(t *test
 		"username":            "renamedidentitykeyuser",
 		"identity_public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 	})
+	requireStatus(t, rr, http.StatusInternalServerError)
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body = %s", rr.Code, rr.Body.String())
+	if user, _ := database.GetUserByUsername(context.Background(), "renamedidentitykeyuser"); user != nil {
+		t.Fatal("the username change committed even though the identity key write failed")
 	}
+	if user, _ := database.GetUserByUsername(context.Background(), "identitykeyuser"); user == nil || user.IdentityPublicKey != nil {
+		t.Fatalf("user after the failed PATCH = %+v, want the original name and no key", user)
+	}
+	if len(spy.got) != 0 {
+		t.Fatalf("BroadcastUserUpdate calls = %d, want 0 (nothing committed)", len(spy.got))
+	}
+}
 
-	// The username write committed even though the request reports failure.
-	user, err := database.GetUserByUsername(context.Background(), "renamedidentitykeyuser")
-	if err != nil {
-		t.Fatalf("GetUserByUsername: %v", err)
-	}
-	if user == nil {
-		t.Fatal("expected the username change to have committed despite the identity-key failure")
-	}
+// The happy path commits both halves and broadcasts the profile once, key
+// included.
+func TestUpdateProfile_IdentityKeyCommitsWithProfile(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	svc := service.New(database, limiter)
+	spy := &userUpdateSpy{}
 
-	if len(spy.got) != 1 {
-		t.Fatalf("BroadcastUserUpdate calls = %d, want 1 (the committed profile, even though the request failed)", len(spy.got))
+	r := chi.NewRouter()
+	api.MountProfileRoutes(r, svc, nil, limiter, nil, spy, nil)
+	token := profileCreateToken(t, database, "identitykeyok", 4)
+
+	const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	rr := patchJSON(t, r, "/api/v1/users/me", token, map[string]any{
+		"username":            "identitykeyok2",
+		"identity_public_key": key,
+	})
+	requireStatus(t, rr, http.StatusOK)
+
+	user, err := database.GetUserByUsername(context.Background(), "identitykeyok2")
+	if err != nil || user == nil {
+		t.Fatalf("GetUserByUsername: %v, %v", user, err)
 	}
-	got := spy.got[0]
-	if got.Username != "renamedidentitykeyuser" {
-		t.Errorf("broadcast username = %q, want the committed rename", got.Username)
+	if user.IdentityPublicKey == nil || *user.IdentityPublicKey != key {
+		t.Fatalf("stored identity key = %v, want %q", user.IdentityPublicKey, key)
 	}
-	if got.IdentityPublicKey != nil {
-		t.Errorf("broadcast identity key = %v, want nil (that half never committed)", *got.IdentityPublicKey)
+	if len(spy.got) != 1 || spy.got[0].IdentityPublicKey == nil || *spy.got[0].IdentityPublicKey != key {
+		t.Fatalf("broadcasts = %+v, want one carrying the key", spy.got)
 	}
 }

@@ -60,17 +60,8 @@ func TestBroadcastServerRestart_SameReasonWithinWindowIsSentOnce(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	userID, err := database.CreateUser(context.Background(), "ws-restart-dedupe", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	userID := mustCreateUser(t, database, "ws-restart-dedupe", 1)
+	token := seedSessionToken(t, database, userID)
 	srv := httptest.NewServer(ws.ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
@@ -84,7 +75,7 @@ func TestBroadcastServerRestart_SameReasonWithinWindowIsSentOnce(t *testing.T) {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-	raw, _ := json.Marshal(map[string]any{"type": "auth", "payload": map[string]string{"token": token}})
+	raw := envelope("auth", map[string]string{"token": token})
 	_ = conn.Write(ctx, websocket.MessageText, raw)
 	for range 2 {
 		if _, _, err := conn.Read(ctx); err != nil {

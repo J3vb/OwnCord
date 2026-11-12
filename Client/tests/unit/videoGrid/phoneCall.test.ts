@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { usePhone } from "../../helpers/phoneMedia";
 import * as mocks from "../../helpers/videoGridMocks";
-import { type VideoGridComponent, type TileConfig } from "../../../src/components/VideoGrid";
+import {
+  type VideoGridComponent,
+  type TileConfig,
+} from "../../../src/features/voice/videoGrid/VideoGrid";
 import {
   fakeStream,
   installFullscreenApi,
@@ -81,8 +84,35 @@ describe("VideoGrid on a phone", () => {
     it("holds mic, deafen, camera, chat and a Leave, with no share button", () => {
       usePhone(true);
       setup(vi.fn());
-      expect(callControls(callBar())).toEqual(["mute", "deafen", "camera", "chat", "leave"]);
+      expect(callControls(callBar())).toEqual([
+        "mute",
+        "deafen",
+        "camera",
+        "views",
+        "chat",
+        "leave",
+      ]);
       expect(callBar().querySelector("[data-call-control='share']")).toBeNull();
+    });
+
+    it("View options lists the view toggles in a menu instead of square buttons", () => {
+      usePhone(true);
+      setup(vi.fn());
+      const views = callBar().querySelector<HTMLButtonElement>("[data-call-control='views']")!;
+      expect(views.getAttribute("aria-haspopup")).toBe("menu");
+      views.click();
+      const row = (key: string) =>
+        document.querySelector<HTMLElement>(`[data-testid='view-menu-${key}']`);
+      expect(row("nonVideo")!.getAttribute("aria-checked")).toBe("true");
+      expect(row("selfCamera")!.getAttribute("aria-checked")).toBe("true");
+      expect(row("strip")!.getAttribute("aria-checked")).toBe("true");
+
+      row("selfCamera")!.click();
+      expect(localStorage.getItem("owncord:settings:callShowSelfCamera")).toBe("false");
+      expect(row("selfCamera")).toBeNull();
+      views.click();
+      expect(row("selfCamera")!.getAttribute("aria-checked")).toBe("false");
+      expect(row("nonVideo")!.getAttribute("aria-checked")).toBe("true");
     });
 
     it("Chat goes back to the text channel and Leave ends the call", () => {
@@ -172,7 +202,7 @@ describe("VideoGrid on a phone", () => {
       expect(grid.getFocusedTileId()).toBeNull();
     });
 
-    it("a tap on a strip tile moves the focus to it instead", () => {
+    it("a tap on another tile moves the focus to it instead", () => {
       usePhone(true);
       grid.setFocusedTile(3);
       tap(SHARE);

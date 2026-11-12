@@ -8,8 +8,8 @@ import {
   unmuteChannel,
 } from "@lib/prefs/channelMutes";
 import { useDmSidebarHost } from "../helpers/dmSidebarHost";
-import type { DmConversation } from "@components/DmSidebar";
-import { createIncomingCallBanner } from "@components/IncomingCallBanner";
+import type { DmConversation } from "../../src/features/direct-messages/DmSidebar";
+import { createIncomingCallBanner } from "../../src/features/direct-messages/IncomingCallBanner";
 import { dmDisplayName, dmStore } from "@stores/dm.store";
 import type { DmChannel, DmUser } from "@stores/dm.store";
 import { openContextMenuOn } from "../helpers/dmHarness";

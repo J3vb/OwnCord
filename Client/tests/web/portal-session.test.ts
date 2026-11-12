@@ -20,8 +20,13 @@ vi.mock("@lib/logger", () => ({
 }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: vi.fn() }));
 vi.mock("@lib/prefs/lastChannel", () => ({ setLastChannelHost: vi.fn() }));
-vi.mock("@lib/dispatcher", () => ({ wireDispatcher: vi.fn(() => () => undefined) }));
-vi.mock("@components/ConnectedOverlay", () => ({ createConnectedOverlay: vi.fn() }));
+vi.mock("@lib/dispatcher", () => ({
+  wireDispatcher: vi.fn(() => () => undefined),
+  wireConnectionStatus: vi.fn(() => () => undefined),
+}));
+vi.mock("../../src/features/connection/ConnectedOverlay", () => ({
+  createConnectedOverlay: vi.fn(),
+}));
 
 import { createApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
@@ -47,6 +52,7 @@ const ws = {
   send: vi.fn(),
   onCertFirstUse: vi.fn(unsub),
   onServerBusy: vi.fn(unsub),
+  onHandshakeFault: vi.fn(unsub),
   onStateChange: vi.fn(unsub),
   getConnectFailureCode: vi.fn(() => null),
   on: vi.fn((type: string, handler: unknown) => {
@@ -196,7 +202,7 @@ describe("browser credential save order", () => {
     // Moving session-only to kept: the new copy cannot be written.
     expect(await credentials.save(HOST, "casey", "new", "", false, false)).toBe(false);
     expect(stored(sessionStorage)).toEqual({ username: "casey", token: "old" });
-    expect(await credentials.load(HOST)).toEqual(expect.objectContaining({ token: "old" }));
+    expect(await credentials.resume(HOST)).toEqual(expect.objectContaining({ token: "old" }));
   });
 
   it("a removal that throws after a good write still reports the token saved", async () => {
@@ -206,6 +212,6 @@ describe("browser credential save order", () => {
     expect(await credentials.save(HOST, "casey", "new", "", false, true)).toBe(true);
     expect(stored(sessionStorage)).toEqual({ username: "casey", token: "new" });
     // Session is read first, so the new token is the one that loads.
-    expect(await credentials.load(HOST)).toEqual(expect.objectContaining({ token: "new" }));
+    expect(await credentials.resume(HOST)).toEqual(expect.objectContaining({ token: "new" }));
   });
 });

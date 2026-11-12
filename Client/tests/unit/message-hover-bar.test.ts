@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
-import { renderMessage } from "@components/message-list/renderers";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import { messagesStore, type Message } from "@stores/messages.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { setActiveTimeout } from "../../src/features/safety/store";
@@ -16,6 +16,7 @@ import {
   signInAs,
 } from "../helpers/message-actions-fixtures";
 import "../helpers/resizeObserverStub";
+import { hoverRows } from "../helpers/hoverRows";
 
 const UP = "\u{1F44D}";
 
@@ -46,6 +47,7 @@ describe("message hover bar", () => {
   function render(msg: Message, over: Partial<MessageListOptions> = {}): MessageListOptions {
     const opts = makeOpts(over);
     container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+    hoverRows(container);
     return opts;
   }
   const bar = (): HTMLElement => container.querySelector<HTMLElement>(".msg-actions-bar")!;
@@ -178,7 +180,8 @@ describe("message hover bar", () => {
   });
 
   it("refreshReactionLocks locks and unlocks the quick buttons in place", async () => {
-    const { refreshReactionLocks } = await import("@components/message-list/reactions");
+    const { refreshReactionLocks } =
+      await import("../../src/features/messaging/message-list/reactions");
     render(makeMessage());
     const first = btn("msg-quick-react-1-0");
     expect(first.hasAttribute("aria-disabled")).toBe(false);
@@ -366,12 +369,20 @@ describe("hover bar Shift tracking", () => {
     expect(root().classList.contains("shift-held")).toBe(false);
   });
 
+  const hover = (): void => {
+    container
+      .querySelector("[data-testid='message-1']")!
+      .dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  };
+
   it("the list's rows carry Pin and Delete (CSS hides them without Shift)", () => {
+    hover();
     const del = container.querySelector("[data-testid='msg-delete-1']");
     expect(del?.classList.contains("msg-shift-only")).toBe(true);
   });
 
   it("releasing Shift moves focus from a Shift-only button to the row's More", () => {
+    hover();
     key("keydown", true);
     const del = container.querySelector<HTMLElement>("[data-testid='msg-delete-1']")!;
     del.focus();

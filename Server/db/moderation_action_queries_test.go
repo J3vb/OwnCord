@@ -17,14 +17,8 @@ import (
 func newModerationActionsTestDB(t *testing.T) (database *db.DB, ownerID, memberID int64) {
 	t.Helper()
 	database = openMigratedMemory(t)
-	ownerID, err := database.CreateUser(context.Background(), "actionsowner", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser(owner): %v", err)
-	}
-	memberID, err = database.CreateUser(context.Background(), "actionsmember", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(member): %v", err)
-	}
+	ownerID = mustCreateUser(t, database, "actionsowner", "hash", 1)
+	memberID = mustCreateUser(t, database, "actionsmember", "hash", 4)
 	return database, ownerID, memberID
 }
 
@@ -32,23 +26,14 @@ func TestWarnUser_WritesRowAndRejectsPeer(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
-	id, err := database.WarnUser(ctx, memberID, ownerID, nil, "be nice")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	id := mustWarn(t, database, memberID, ownerID, "be nice")
+	rows := mustListModerationActionsForTarget(t, database, memberID)
 	if len(rows) != 1 || rows[0].ID != id || rows[0].Kind != "warning" || rows[0].Reason != "be nice" {
 		t.Fatalf("rows = %+v, want one warning row with id %d", rows, id)
 	}
 
 	// A peer (same rank) is refused by the live guard.
-	peerID, err := database.CreateUser(ctx, "actionspeer", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser(peer): %v", err)
-	}
+	peerID := mustCreateUser(t, database, "actionspeer", "hash", 1)
 	if _, err := database.WarnUser(ctx, memberID, peerID, nil, "x"); err != nil {
 		t.Fatalf("WarnUser by a second owner-rank actor: %v (peers of the FIRST owner would be refused, but this is a distinct higher-rank actor over a lower-rank target)", err)
 	}
@@ -62,9 +47,7 @@ func TestTimeoutUser_HasActiveTimeout_LiftTimeout(t *testing.T) {
 	ctx := context.Background()
 
 	active, err := database.HasActiveTimeout(ctx, memberID)
-	if err != nil {
-		t.Fatalf("HasActiveTimeout (none yet): %v", err)
-	}
+	mustDo(t, "HasActiveTimeout (none yet)", err)
 	if active {
 		t.Fatal("HasActiveTimeout = true before any timeout was issued")
 	}
@@ -73,33 +56,25 @@ func TestTimeoutUser_HasActiveTimeout_LiftTimeout(t *testing.T) {
 		t.Fatalf("TimeoutUser: %v", err)
 	}
 	active, err = database.HasActiveTimeout(ctx, memberID)
-	if err != nil {
-		t.Fatalf("HasActiveTimeout: %v", err)
-	}
+	mustDo(t, "HasActiveTimeout", err)
 	if !active {
 		t.Fatal("HasActiveTimeout = false right after TimeoutUser")
 	}
 
 	liftedIDs, err := database.LiftTimeout(ctx, memberID, ownerID)
-	if err != nil {
-		t.Fatalf("LiftTimeout: %v", err)
-	}
+	mustDo(t, "LiftTimeout", err)
 	if len(liftedIDs) != 1 {
 		t.Fatalf("LiftTimeout reported %d lifted ids, want 1", len(liftedIDs))
 	}
 	active, err = database.HasActiveTimeout(ctx, memberID)
-	if err != nil {
-		t.Fatalf("HasActiveTimeout after lift: %v", err)
-	}
+	mustDo(t, "HasActiveTimeout after lift", err)
 	if active {
 		t.Fatal("HasActiveTimeout = true after LiftTimeout")
 	}
 
 	// Lifting again finds nothing.
 	liftedIDs, err = database.LiftTimeout(ctx, memberID, ownerID)
-	if err != nil {
-		t.Fatalf("second LiftTimeout: %v", err)
-	}
+	mustDo(t, "second LiftTimeout", err)
 	if len(liftedIDs) != 0 {
 		t.Fatal("second LiftTimeout reported a lift with nothing active")
 	}
@@ -121,9 +96,7 @@ func TestLiftTimeout_NonexistentLifterRefused(t *testing.T) {
 		t.Fatalf("LiftTimeout with a nonexistent lifter: want db.ErrOutranked, got (%v, %v)", liftedIDs, err)
 	}
 	active, err := database.HasActiveTimeout(ctx, memberID)
-	if err != nil {
-		t.Fatalf("HasActiveTimeout: %v", err)
-	}
+	mustDo(t, "HasActiveTimeout", err)
 	if !active {
 		t.Fatal("a refused lift left the timeout inactive")
 	}
@@ -150,9 +123,7 @@ func TestLiftTimeout_DemotedActorRefused(t *testing.T) {
 		t.Fatalf("LiftTimeout by a demoted actor: want db.ErrOutranked, got (%v, %v)", liftedIDs, err)
 	}
 	active, err := database.HasActiveTimeout(ctx, memberID)
-	if err != nil {
-		t.Fatalf("HasActiveTimeout: %v", err)
-	}
+	mustDo(t, "HasActiveTimeout", err)
 	if !active {
 		t.Fatal("a refused lift left the timeout inactive")
 	}
@@ -167,18 +138,11 @@ func TestTimeoutUser_SupersedesEarlierActiveTimeout(t *testing.T) {
 	ctx := context.Background()
 
 	firstID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "first", time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatalf("TimeoutUser(first): %v", err)
-	}
+	mustDo(t, "TimeoutUser(first)", err)
 	secondID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "second", time.Now().Add(2*time.Hour))
-	if err != nil {
-		t.Fatalf("TimeoutUser(second): %v", err)
-	}
+	mustDo(t, "TimeoutUser(second)", err)
 
-	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	rows := mustListModerationActionsForTarget(t, database, memberID)
 	byID := map[int64]int{}
 	for i, r := range rows {
 		byID[r.ID] = i
@@ -200,9 +164,7 @@ func TestTimeoutUser_SupersedesEarlierActiveTimeout(t *testing.T) {
 
 	// Only the second is active; a single lift call lifts exactly it.
 	liftedIDs, err := database.LiftTimeout(ctx, memberID, ownerID)
-	if err != nil {
-		t.Fatalf("LiftTimeout: %v", err)
-	}
+	mustDo(t, "LiftTimeout", err)
 	if len(liftedIDs) != 1 || liftedIDs[0] != secondID {
 		t.Fatalf("LiftTimeout = %v, want exactly [%d]", liftedIDs, secondID)
 	}
@@ -226,16 +188,12 @@ func TestLiftTimeout_LiftsEveryActiveRow(t *testing.T) {
 	}
 
 	liftedIDs, err := database.LiftTimeout(ctx, memberID, ownerID)
-	if err != nil {
-		t.Fatalf("LiftTimeout: %v", err)
-	}
+	mustDo(t, "LiftTimeout", err)
 	if len(liftedIDs) != 2 {
 		t.Fatalf("LiftTimeout reported %d lifted ids, want 2", len(liftedIDs))
 	}
 	active, err := database.HasActiveTimeout(ctx, memberID)
-	if err != nil {
-		t.Fatalf("HasActiveTimeout: %v", err)
-	}
+	mustDo(t, "HasActiveTimeout", err)
 	if active {
 		t.Fatal("a row was still active after LiftTimeout — it must lift every active row, not just one")
 	}
@@ -252,22 +210,15 @@ func TestLiftTimeout_LiftsEveryActiveRow(t *testing.T) {
 func TestTimeoutUser_TransfersVoiceMuteOwnershipOnSupersede(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
-	chanID, err := database.CreateChannel(ctx, "vc-supersede", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, memberID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	chanID := mustCreateChannel(t, database, "vc-supersede", "voice", "", "", 0)
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(ctx, memberID, chanID))
 	state, err := database.GetVoiceState(ctx, memberID)
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 
 	idA, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "first", time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatalf("TimeoutUser(A): %v", err)
-	}
+	mustDo(t, "TimeoutUser(A)", err)
 	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, memberID, chanID, idA, state.JoinedAt, nil); err != nil || !matched || !transitioned {
 		t.Fatalf("MuteForTimeoutSession(A): matched=%v transitioned=%v err=%v", matched, transitioned, err)
 	}
@@ -278,9 +229,7 @@ func TestTimeoutUser_TransfersVoiceMuteOwnershipOnSupersede(t *testing.T) {
 	// its own): B's OWN voice half carries supersededIDs through to its
 	// MuteForTimeoutSession call, which does the transfer.
 	idB, supersededIDs, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "second", time.Now().Add(2*time.Hour))
-	if err != nil {
-		t.Fatalf("TimeoutUser(B): %v", err)
-	}
+	mustDo(t, "TimeoutUser(B)", err)
 	if len(supersededIDs) != 1 || supersededIDs[0] != idA {
 		t.Fatalf("TimeoutUser(B) supersededIDs = %v, want [%d]", supersededIDs, idA)
 	}
@@ -297,9 +246,7 @@ func TestTimeoutUser_TransfersVoiceMuteOwnershipOnSupersede(t *testing.T) {
 	}
 
 	liftedIDs, err := database.LiftTimeout(ctx, memberID, ownerID)
-	if err != nil {
-		t.Fatalf("LiftTimeout: %v", err)
-	}
+	mustDo(t, "LiftTimeout", err)
 	if len(liftedIDs) != 1 || liftedIDs[0] != idB {
 		t.Fatalf("LiftTimeout = %v, want exactly [%d]", liftedIDs, idB)
 	}
@@ -323,33 +270,22 @@ func TestTimeoutUser_TransfersVoiceMuteOwnershipOnSupersede(t *testing.T) {
 func TestLiftTimeout_LeaveAndRejoinIsolatesTheNewSession(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
-	chanID, err := database.CreateChannel(ctx, "vc-rejoin", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, memberID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel (first): %v", err)
-	}
+	chanID := mustCreateChannel(t, database, "vc-rejoin", "voice", "", "", 0)
+	mustDo(t, "JoinVoiceChannel (first)", database.JoinVoiceChannel(ctx, memberID, chanID))
 	first, err := database.GetVoiceState(ctx, memberID)
 	if err != nil || first == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 
 	id, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatalf("TimeoutUser: %v", err)
-	}
+	mustDo(t, "TimeoutUser", err)
 	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, memberID, chanID, id, first.JoinedAt, nil); err != nil || !matched || !transitioned {
 		t.Fatalf("MuteForTimeoutSession: matched=%v transitioned=%v err=%v", matched, transitioned, err)
 	}
 
 	// Leave and rejoin the SAME channel — a brand-new session with no owner.
-	if err := database.LeaveVoiceChannel(ctx, memberID); err != nil {
-		t.Fatalf("LeaveVoiceChannel: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, memberID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel (rejoin): %v", err)
-	}
+	mustDo(t, "LeaveVoiceChannel", database.LeaveVoiceChannel(ctx, memberID))
+	mustDo(t, "JoinVoiceChannel (rejoin)", database.JoinVoiceChannel(ctx, memberID, chanID))
 	// The NEW session gets its own manual mute — nothing to do with the old
 	// timeout, and must survive the old timeout's lift below.
 	if matched, err := database.SetVoiceServerMute(ctx, memberID, chanID, true); err != nil || !matched {
@@ -357,9 +293,7 @@ func TestLiftTimeout_LeaveAndRejoinIsolatesTheNewSession(t *testing.T) {
 	}
 
 	liftedIDs, err := database.LiftTimeout(ctx, memberID, ownerID)
-	if err != nil {
-		t.Fatalf("LiftTimeout: %v", err)
-	}
+	mustDo(t, "LiftTimeout", err)
 	if len(liftedIDs) != 1 || liftedIDs[0] != id {
 		t.Fatalf("LiftTimeout = %v, want exactly [%d]", liftedIDs, id)
 	}
@@ -376,43 +310,29 @@ func TestAcknowledgeWarning_OwnRowsOnly(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
-	id, err := database.WarnUser(ctx, memberID, ownerID, nil, "be nice")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
+	id := mustWarn(t, database, memberID, ownerID, "be nice")
 
-	otherID, err := database.CreateUser(ctx, "actionsother", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(other): %v", err)
-	}
+	otherID := mustCreateUser(t, database, "actionsother", "hash", 4)
 	ok, err := database.AcknowledgeWarning(ctx, otherID, id)
-	if err != nil {
-		t.Fatalf("AcknowledgeWarning(other): %v", err)
-	}
+	mustDo(t, "AcknowledgeWarning(other)", err)
 	if ok {
 		t.Fatal("AcknowledgeWarning succeeded for a foreign user")
 	}
 
 	ok, err = database.AcknowledgeWarning(ctx, memberID, id)
-	if err != nil {
-		t.Fatalf("AcknowledgeWarning(target): %v", err)
-	}
+	mustDo(t, "AcknowledgeWarning(target)", err)
 	if !ok {
 		t.Fatal("AcknowledgeWarning did not report success for the target")
 	}
 	notices, err := database.ListUnacknowledgedWarnings(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListUnacknowledgedWarnings: %v", err)
-	}
+	mustDo(t, "ListUnacknowledgedWarnings", err)
 	if len(notices) != 0 {
 		t.Fatalf("notices after ack = %+v, want none", notices)
 	}
 
 	// Repeating finds nothing left to acknowledge.
 	ok, err = database.AcknowledgeWarning(ctx, memberID, id)
-	if err != nil {
-		t.Fatalf("second AcknowledgeWarning: %v", err)
-	}
+	mustDo(t, "second AcknowledgeWarning", err)
 	if ok {
 		t.Fatal("second AcknowledgeWarning reported success")
 	}
@@ -430,9 +350,7 @@ func TestListModerationActionsForReport(t *testing.T) {
 		t.Fatalf("WarnUser (unlinked): %v", err)
 	}
 	rows, err := database.ListModerationActionsForReport(ctx, reportID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForReport: %v", err)
-	}
+	mustDo(t, "ListModerationActionsForReport", err)
 	if len(rows) != 1 || rows[0].ReportID == nil || *rows[0].ReportID != reportID || rows[0].Reason != "linked" {
 		t.Fatalf("rows = %+v, want exactly the linked row", rows)
 	}
@@ -443,20 +361,12 @@ func TestBanUserWithAction_WritesLedgerRowAndRejectsPeer(t *testing.T) {
 	ctx := context.Background()
 
 	id, err := database.BanUserWithAction(ctx, memberID, "spam", nil, ownerID, nil)
-	if err != nil {
-		t.Fatalf("BanUserWithAction: %v", err)
-	}
-	target, err := database.GetUserByID(ctx, memberID)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	mustDo(t, "BanUserWithAction", err)
+	target := mustGetUserByID(t, database, memberID)
 	if !target.Banned {
 		t.Fatal("target not banned after BanUserWithAction")
 	}
-	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	rows := mustListModerationActionsForTarget(t, database, memberID)
 	found := false
 	for _, r := range rows {
 		if r.ID == id && r.Kind == "ban" {
@@ -468,17 +378,11 @@ func TestBanUserWithAction_WritesLedgerRowAndRejectsPeer(t *testing.T) {
 	}
 
 	// A peer target is refused, and rolled back — never banned.
-	peerID, err := database.CreateUser(ctx, "actionsbanpeer", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser(peer): %v", err)
-	}
+	peerID := mustCreateUser(t, database, "actionsbanpeer", "hash", 1)
 	if _, err := database.BanUserWithAction(ctx, peerID, "coup", nil, ownerID, nil); !errors.Is(err, db.ErrOutranked) {
 		t.Fatalf("BanUserWithAction on a peer: want db.ErrOutranked, got %v", err)
 	}
-	peer, err := database.GetUserByID(ctx, peerID)
-	if err != nil {
-		t.Fatalf("GetUserByID(peer): %v", err)
-	}
+	peer := mustGetUserByID(t, database, peerID)
 	if peer.Banned {
 		t.Fatal("a refused ban left the peer banned — the effect did not roll back")
 	}
@@ -492,20 +396,13 @@ func TestForceLogoutWithAction_WritesLedgerRowAndRevokesSessions(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	id, err := database.ForceLogoutWithAction(ctx, memberID, ownerID, nil, "")
-	if err != nil {
-		t.Fatalf("ForceLogoutWithAction: %v", err)
-	}
+	mustDo(t, "ForceLogoutWithAction", err)
 	sessions, err := database.GetUserSessions(ctx, memberID)
-	if err != nil {
-		t.Fatalf("GetUserSessions: %v", err)
-	}
+	mustDo(t, "GetUserSessions", err)
 	if len(sessions) != 0 {
 		t.Fatalf("sessions after ForceLogoutWithAction = %d, want 0", len(sessions))
 	}
-	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	rows := mustListModerationActionsForTarget(t, database, memberID)
 	found := false
 	for _, r := range rows {
 		if r.ID == id && r.Kind == "kick" {
@@ -522,41 +419,23 @@ func TestDeleteMessageWithRemoval(t *testing.T) {
 	ctx := context.Background()
 
 	chID := seedTestChannel(t, database)
-	selfMsgID, err := database.CreateMessage(ctx, chID, memberID, "my own message", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(self): %v", err)
-	}
+	selfMsgID := mustCreateMessage(t, database, chID, memberID, "my own message", nil)
 	// A self-delete (or non-mod delete) writes no ledger row: unchanged
 	// DeleteMessage behavior.
-	if err := database.DeleteMessageWithRemoval(ctx, selfMsgID, memberID, false, memberID, nil, ""); err != nil {
-		t.Fatalf("DeleteMessageWithRemoval (self): %v", err)
-	}
-	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	mustDo(t, "DeleteMessageWithRemoval (self)", database.DeleteMessageWithRemoval(ctx, selfMsgID, memberID, false, memberID, nil, ""))
+	rows := mustListModerationActionsForTarget(t, database, memberID)
 	if len(rows) != 0 {
 		t.Fatalf("a self-delete wrote %d ledger row(s), want 0", len(rows))
 	}
 
-	modMsgID, err := database.CreateMessage(ctx, chID, memberID, "moderated message", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(mod): %v", err)
-	}
-	if err := database.DeleteMessageWithRemoval(ctx, modMsgID, ownerID, true, memberID, nil, "violated rule 3"); err != nil {
-		t.Fatalf("DeleteMessageWithRemoval (moderator): %v", err)
-	}
+	modMsgID := mustCreateMessage(t, database, chID, memberID, "moderated message", nil)
+	mustDo(t, "DeleteMessageWithRemoval (moderator)", database.DeleteMessageWithRemoval(ctx, modMsgID, ownerID, true, memberID, nil, "violated rule 3"))
 	msg, err := database.GetMessage(ctx, modMsgID)
-	if err != nil {
-		t.Fatalf("GetMessage: %v", err)
-	}
+	mustDo(t, "GetMessage", err)
 	if !msg.Deleted {
 		t.Fatal("moderator delete did not soft-delete the message")
 	}
-	rows, err = database.ListModerationActionsForTarget(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget (2): %v", err)
-	}
+	rows = mustListModerationActionsForTarget(t, database, memberID)
 	// The submitted reason is stored verbatim (P2-10, Codex review) rather
 	// than always the fixed phrase "message removed".
 	if len(rows) != 1 || rows[0].Kind != "removal" || rows[0].Reason != "violated rule 3" {
@@ -573,19 +452,14 @@ func TestDeleteMessageWithRemoval_ErasedActorRefused(t *testing.T) {
 	database, _, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 	chID := seedTestChannel(t, database)
-	msgID, err := database.CreateMessage(ctx, chID, memberID, "moderated message", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, chID, memberID, "moderated message", nil)
 
 	const noSuchActor = int64(999999)
 	if err := database.DeleteMessageWithRemoval(ctx, msgID, noSuchActor, true, memberID, nil, ""); !errors.Is(err, db.ErrOutranked) {
 		t.Fatalf("DeleteMessageWithRemoval with a nonexistent actor: want db.ErrOutranked, got %v", err)
 	}
 	msg, err := database.GetMessage(ctx, msgID)
-	if err != nil {
-		t.Fatalf("GetMessage: %v", err)
-	}
+	mustDo(t, "GetMessage", err)
 	if msg.Deleted {
 		t.Fatal("the delete was not rolled back for a nonexistent actor")
 	}
@@ -596,33 +470,24 @@ func TestPurgeChannelMessagesWithAction(t *testing.T) {
 	ctx := context.Background()
 	chID := seedTestChannel(t, database)
 	for range 3 {
-		if _, err := database.CreateMessage(ctx, chID, memberID, "purge me", nil); err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		mustCreateMessage(t, database, chID, memberID, "purge me", nil)
 	}
 
 	ids, err := database.PurgeChannelMessagesWithAction(ctx, chID, 0, 10, ownerID, nil)
-	if err != nil {
-		t.Fatalf("PurgeChannelMessagesWithAction: %v", err)
-	}
+	mustDo(t, "PurgeChannelMessagesWithAction", err)
 	if len(ids) != 3 {
 		t.Fatalf("purged %d messages, want 3", len(ids))
 	}
 	// The ledger row targets the ACTOR (a bulk purge has no single author) —
 	// see recordLedgerRow's doc comment.
-	rows, err := database.ListModerationActionsForTarget(ctx, ownerID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	rows := mustListModerationActionsForTarget(t, database, ownerID)
 	if len(rows) != 1 || rows[0].Kind != "removal" || rows[0].Reason != "3 messages purged" {
 		t.Fatalf("rows = %+v, want one removal row reasoned \"3 messages purged\"", rows)
 	}
 
 	// limit < 1 is a no-op, same as PurgeChannelMessages.
 	ids, err = database.PurgeChannelMessagesWithAction(ctx, chID, 0, 0, ownerID, nil)
-	if err != nil {
-		t.Fatalf("PurgeChannelMessagesWithAction(limit=0): %v", err)
-	}
+	mustDo(t, "PurgeChannelMessagesWithAction(limit=0)", err)
 	if len(ids) != 0 {
 		t.Fatalf("purged %d messages with limit 0, want 0", len(ids))
 	}
@@ -637,14 +502,8 @@ func TestModerationRetention_RetiresWarningsAndTimeoutsOnly(t *testing.T) {
 	}
 
 	// A warning acknowledged long ago retires; one acknowledged just now does not.
-	oldID, err := database.WarnUser(ctx, memberID, ownerID, nil, "old")
-	if err != nil {
-		t.Fatalf("WarnUser(old): %v", err)
-	}
-	newID, err := database.WarnUser(ctx, memberID, ownerID, nil, "new")
-	if err != nil {
-		t.Fatalf("WarnUser(new): %v", err)
-	}
+	oldID := mustWarn(t, database, memberID, ownerID, "old")
+	newID := mustWarn(t, database, memberID, ownerID, "new")
 	if ok, err := database.AcknowledgeWarning(ctx, memberID, oldID); err != nil || !ok {
 		t.Fatalf("ack old: ok=%v err=%v", ok, err)
 	}
@@ -660,35 +519,26 @@ func TestModerationRetention_RetiresWarningsAndTimeoutsOnly(t *testing.T) {
 
 	// A timeout expired 100 days ago retires; an active one does not.
 	oldTimeoutID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "old timeout", time.Now().Add(-100*24*time.Hour))
-	if err != nil {
-		t.Fatalf("TimeoutUser(old): %v", err)
-	}
+	mustDo(t, "TimeoutUser(old)", err)
 	if _, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "active timeout", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("TimeoutUser(active): %v", err)
 	}
 
 	// Ban/kick/removal rows are never touched, regardless of age.
 	banID, err := database.BanUserWithAction(ctx, memberID, "spam", nil, ownerID, nil)
-	if err != nil {
-		t.Fatalf("BanUserWithAction: %v", err)
-	}
+	mustDo(t, "BanUserWithAction", err)
 	if _, err := database.ExecContext(ctx,
 		`UPDATE moderation_actions SET created_at = datetime('now', '-1000 days') WHERE id = ?`, banID); err != nil {
 		t.Fatalf("backdate ban: %v", err)
 	}
 
 	n, err := database.RetireModerationActions(ctx, 90)
-	if err != nil {
-		t.Fatalf("RetireModerationActions(days=90): %v", err)
-	}
+	mustDo(t, "RetireModerationActions(days=90)", err)
 	if n != 2 {
 		t.Fatalf("retired %d rows, want 2 (the old warning and the old timeout)", n)
 	}
 
-	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	rows := mustListModerationActionsForTarget(t, database, memberID)
 	remaining := map[int64]bool{}
 	for _, r := range rows {
 		remaining[r.ID] = true
@@ -724,22 +574,10 @@ func TestModerationRetention_SkipsAppealedActions(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
-	appealedID, err := database.WarnUser(ctx, memberID, ownerID, nil, "appealed")
-	if err != nil {
-		t.Fatalf("WarnUser(appealed): %v", err)
-	}
-	withdrawnAppealID, err := database.WarnUser(ctx, memberID, ownerID, nil, "withdrawn")
-	if err != nil {
-		t.Fatalf("WarnUser(withdrawn): %v", err)
-	}
-	upheldAppealID, err := database.WarnUser(ctx, memberID, ownerID, nil, "upheld")
-	if err != nil {
-		t.Fatalf("WarnUser(upheld): %v", err)
-	}
-	unappealedID, err := database.WarnUser(ctx, memberID, ownerID, nil, "unappealed")
-	if err != nil {
-		t.Fatalf("WarnUser(unappealed): %v", err)
-	}
+	appealedID := mustWarn(t, database, memberID, ownerID, "appealed")
+	withdrawnAppealID := mustWarn(t, database, memberID, ownerID, "withdrawn")
+	upheldAppealID := mustWarn(t, database, memberID, ownerID, "upheld")
+	unappealedID := mustWarn(t, database, memberID, ownerID, "unappealed")
 	for _, id := range []int64{appealedID, withdrawnAppealID, upheldAppealID, unappealedID} {
 		if _, err := database.AcknowledgeWarning(ctx, memberID, id); err != nil {
 			t.Fatalf("ack %d: %v", id, err)
@@ -754,21 +592,13 @@ func TestModerationRetention_SkipsAppealedActions(t *testing.T) {
 	if _, err := database.InsertAppeal(ctx, "pub-retention-appeal", appealedID, memberID, "please reconsider"); err != nil {
 		t.Fatalf("InsertAppeal(open): %v", err)
 	}
-	withdrawnID, err := database.InsertAppeal(ctx, "pub-retention-withdrawn", withdrawnAppealID, memberID, "please reconsider")
-	if err != nil {
-		t.Fatalf("InsertAppeal(withdrawn): %v", err)
-	}
+	withdrawnID := mustInsertAppeal(t, database, "pub-retention-withdrawn", withdrawnAppealID, memberID, "please reconsider")
 	if ok, err := database.WithdrawAppeal(ctx, withdrawnID, memberID); err != nil || !ok {
 		t.Fatalf("WithdrawAppeal: (%v, %v), want (true, nil)", ok, err)
 	}
-	upheldID, err := database.InsertAppeal(ctx, "pub-retention-upheld", upheldAppealID, memberID, "please reconsider")
-	if err != nil {
-		t.Fatalf("InsertAppeal(upheld): %v", err)
-	}
+	upheldID := mustInsertAppeal(t, database, "pub-retention-upheld", upheldAppealID, memberID, "please reconsider")
 	action, err := database.GetModerationAction(ctx, upheldAppealID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
+	mustDo(t, "GetModerationAction", err)
 	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
 	if result, _, _, err := database.DecideAppealTx(ctx, upheldID, "open", 0, "upheld", ownerID, "no",
 		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil); err != nil || result != db.AppealWriteOK {
@@ -776,16 +606,11 @@ func TestModerationRetention_SkipsAppealedActions(t *testing.T) {
 	}
 
 	n, err := database.RetireModerationActions(ctx, 90)
-	if err != nil {
-		t.Fatalf("RetireModerationActions: %v", err)
-	}
+	mustDo(t, "RetireModerationActions", err)
 	if n != 1 {
 		t.Fatalf("retired %d rows, want 1 (only the unappealed one)", n)
 	}
-	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	rows := mustListModerationActionsForTarget(t, database, memberID)
 	remaining := map[int64]bool{}
 	for _, r := range rows {
 		remaining[r.ID] = true
@@ -807,10 +632,7 @@ func TestModerationRetention_SkipsAppealedActions(t *testing.T) {
 // seedTestChannel creates a bare text channel for message-removal tests.
 func seedTestChannel(t *testing.T, database *db.DB) int64 {
 	t.Helper()
-	id, err := database.CreateChannel(context.Background(), "moderation-actions-test", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	id := mustCreateChannel(t, database, "moderation-actions-test", "text", "", "", 0)
 	return id
 }
 
@@ -820,21 +642,14 @@ func seedTestChannel(t *testing.T, database *db.DB) int64 {
 func TestRetireModerationActions_KeepsActionThatOwnsAVoiceMute(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
-	chanID, err := database.CreateChannel(ctx, "vc-retire", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, memberID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	chanID := mustCreateChannel(t, database, "vc-retire", "voice", "", "", 0)
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(ctx, memberID, chanID))
 	state, err := database.GetVoiceState(ctx, memberID)
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 	ownerAction, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "owns mute", time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatalf("TimeoutUser(owner): %v", err)
-	}
+	mustDo(t, "TimeoutUser(owner)", err)
 	if matched, _, err := database.MuteForTimeoutSession(ctx, memberID, chanID, ownerAction, state.JoinedAt, nil); err != nil || !matched {
 		t.Fatalf("MuteForTimeoutSession: matched=%v err=%v", matched, err)
 	}
@@ -843,10 +658,7 @@ func TestRetireModerationActions_KeepsActionThatOwnsAVoiceMute(t *testing.T) {
 		t.Fatalf("backdate owner: %v", err)
 	}
 	// Equally old, but owns no voice_states row.
-	plainAction, err := database.WarnUser(ctx, memberID, ownerID, nil, "no mute")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
+	plainAction := mustWarn(t, database, memberID, ownerID, "no mute")
 	if ok, err := database.AcknowledgeWarning(ctx, memberID, plainAction); err != nil || !ok {
 		t.Fatalf("ack: ok=%v err=%v", ok, err)
 	}
@@ -860,15 +672,11 @@ func TestRetireModerationActions_KeepsActionThatOwnsAVoiceMute(t *testing.T) {
 	}
 	var got []int64
 	rows, err := database.QueryContext(ctx, `SELECT id FROM moderation_actions WHERE id IN (?, ?)`, ownerAction, plainAction)
-	if err != nil {
-		t.Fatalf("query: %v", err)
-	}
+	mustDo(t, "query", err)
 	defer rows.Close()
 	for rows.Next() {
 		var id int64
-		if err := rows.Scan(&id); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
+		mustDo(t, "scan", rows.Scan(&id))
 		got = append(got, id)
 	}
 	if len(got) != 1 || got[0] != ownerAction {

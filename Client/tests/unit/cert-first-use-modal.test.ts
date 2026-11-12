@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createCertFirstUseModal } from "../../src/components/CertMismatchModal";
+import { createCertFirstUseModal } from "../../src/features/connection/CertMismatchModal";
 
 describe("createCertFirstUseModal (F4/F8)", () => {
   it("renders the host + fingerprint and wires accept/reject", () => {
@@ -118,7 +118,7 @@ describe("createCertFirstUseModal (F4/F8)", () => {
     document.body.appendChild(container);
     modal.mount(container);
 
-    expect(container.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(container.querySelector(".modal-footer .btn-ghost"));
 
     modal.destroy?.();
     expect(document.activeElement).toBe(outside);

@@ -1,5 +1,5 @@
 /**
- * Tests for src/components/channel-sidebar/dragReorder.ts.
+ * Tests for src/features/channels/sidebar/dragReorder.ts.
  *
  * This module was the least-covered file in the client (38.8% statements) and
  * had no test of its own — the reorder index arithmetic, the admin-only gate,
@@ -14,8 +14,8 @@ import { makeChannel } from "../helpers/channelFactory";
 import {
   attachDragHandlers,
   ensureGlobalDragListeners,
-} from "@components/channel-sidebar/dragReorder";
-import type { ChannelReorderData } from "@components/ChannelSidebar";
+} from "../../src/features/channels/sidebar/dragReorder";
+import type { ChannelReorderData } from "../../src/features/channels/ChannelSidebar";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";

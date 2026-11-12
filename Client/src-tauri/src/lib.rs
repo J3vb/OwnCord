@@ -4,6 +4,8 @@ mod android_notifications;
 #[cfg(target_os = "android")]
 mod call_service;
 mod commands;
+#[cfg(target_os = "android")]
+mod metered_network;
 // Test-only: gates over tauri.conf.json and the source text itself.
 #[cfg(test)]
 mod config_gates;
@@ -33,6 +35,8 @@ mod file_transfer;
 #[cfg(any(target_os = "android", test))]
 mod files;
 mod game_activity;
+#[cfg(desktop)]
+mod gpu_adapter;
 mod http_pool;
 mod http_proxy;
 mod idle;
@@ -65,10 +69,13 @@ mod portal_shortcuts;
 pub mod native_voice;
 mod proxy_common;
 mod ptt;
+mod region;
 mod secret_store;
 #[cfg(any(target_os = "android", test))]
 mod share_in;
 mod shortcuts;
+#[cfg(target_os = "linux")]
+mod stderr_capture;
 mod sync;
 #[cfg(any(target_os = "linux", windows))]
 mod system_crash_report;
@@ -227,6 +234,7 @@ pub fn run() {
     let builder = builder
         .plugin(update_commands::android::init())
         .plugin(call_service::init())
+        .plugin(metered_network::init())
         .plugin(exit_info::init())
         .plugin(files::init())
         .plugin(share_in::init())
@@ -278,6 +286,10 @@ pub fn run() {
             window_prefs::set_window_pref,
             #[cfg(desktop)]
             window_prefs::show_next_launch,
+            #[cfg(desktop)]
+            gpu_adapter::get_gpu_adapters,
+            #[cfg(desktop)]
+            gpu_adapter::set_gpu_adapter,
             commands::get_settings,
             commands::save_settings,
             commands::get_cert_fingerprint,
@@ -296,6 +308,7 @@ pub fn run() {
             credentials::save_credential,
             credentials::load_credential,
             credentials::login_with_saved_password,
+            credentials::session_resume::resume_saved_session,
             credentials::delete_credential,
             credentials::save_identity_key,
             credentials::load_identity_key,
@@ -310,6 +323,8 @@ pub fn run() {
             update_commands::android::download_and_install_update,
             #[cfg(target_os = "android")]
             call_service::set_call_service,
+            #[cfg(target_os = "android")]
+            metered_network::is_metered,
             #[cfg(target_os = "android")]
             android_notifications::android_notification_channels,
             #[cfg(target_os = "android")]
@@ -344,6 +359,7 @@ pub fn run() {
             external_content::external_preview,
             external_content::external_image,
             idle::system_idle_ms,
+            region::system_region_locale,
             game_activity::detect_game,
             game_activity::list_running_programs,
             media_activity::detect_media,
@@ -447,6 +463,8 @@ pub fn run() {
             native_voice::native_voice_change_screen,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_screen_quality,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_video_bitrate,
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])
@@ -540,14 +558,32 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let prefs = app.state::<window_prefs::WindowPrefs>();
         // Always consumed, so the marker never outlives one launch.
         let show_next = window_prefs::take_show_next_launch(app.handle());
-        window_prefs::should_start_hidden(
+        let hidden = window_prefs::should_start_hidden(
             show_next,
             window_prefs::launched_minimized(),
             prefs.start_minimized(),
             window_prefs::tray_available,
-        )
+        );
+        window_prefs::warm_tray_probe(prefs.minimize_to_tray());
+        hidden
     };
+    // Graphics card for video (gpu_adapter.rs): decided before the window
+    // exists, because WebView2 picks its card when it starts.
+    #[cfg(desktop)]
+    #[cfg_attr(not(windows), allow(unused_variables))]
+    let gpu_flag = gpu_adapter::prepare(app.handle());
     if let Some(config) = app.config().app.windows.first().cloned() {
+        #[cfg(windows)]
+        let config = {
+            let mut config = config;
+            if let Some(flag) = &gpu_flag {
+                config.additional_browser_args = Some(gpu_adapter::append_browser_arg(
+                    config.additional_browser_args.as_deref(),
+                    flag,
+                ));
+            }
+            config
+        };
         // WebKitGTK gives a drop only the file manager's uri-list, so on
         // Linux the host takes drops and reads the files (file_transfer.rs).
         // WebView2 hands the page real files, so Windows keeps it off.
@@ -588,6 +624,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 #[cfg(desktop)]
                 popout::close_all(&handle);
             }
+            // Refresh the tray answer while the user is here, so the close
+            // button does not wait on the bus (window_prefs.rs).
+            #[cfg(target_os = "linux")]
+            tauri::WindowEvent::Focused(true) => window_prefs::warm_tray_probe(
+                handle
+                    .state::<window_prefs::WindowPrefs>()
+                    .minimize_to_tray(),
+            ),
             // The window's close button, Alt+F4, or the desktop
             // closing it: a quit, unless close to tray hides it.
             #[cfg(desktop)]

@@ -9,12 +9,12 @@ const panel = vi.hoisted(() => ({
 }));
 const createChannelMediaGallery = vi.hoisted(() => vi.fn((_opts: unknown) => panel));
 
-vi.mock("@components/ChannelMediaGallery", () => ({ createChannelMediaGallery }));
+vi.mock("../../src/features/messaging/ChannelMediaGallery", () => ({ createChannelMediaGallery }));
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("@lib/logger", () => loggerMock());
 
 import { createMediaGalleryController } from "../../src/pages/main-page/MediaGalleryController";
-import type { ChannelMediaGalleryOptions } from "@components/ChannelMediaGallery";
+import type { ChannelMediaGalleryOptions } from "../../src/features/messaging/ChannelMediaGallery";
 import type { ApiClient } from "@lib/api";
 import { closeSettings, uiStore } from "@stores/ui.store";
 import {

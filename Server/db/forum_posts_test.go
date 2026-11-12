@@ -31,9 +31,7 @@ func postCounts(t *testing.T, d *db.DB) (threads, msgs, links, receipts int) {
 		`SELECT COUNT(*) FROM thread_tags`:                    &links,
 		`SELECT COUNT(*) FROM message_delivery_receipts`:      &receipts,
 	} {
-		if err := d.QueryRowContext(ctx, q).Scan(dst); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "QueryRowContext", d.QueryRowContext(ctx, q).Scan(dst))
 	}
 	return threads, msgs, links, receipts
 }
@@ -44,9 +42,7 @@ func TestForumPostDelivery(t *testing.T) {
 	f := newForumFixture(t)
 	ctx := context.Background()
 	got, err := f.db.CreateMessageDelivery(ctx, postParams(f.user, f.forum, "p1", "hello forum", f.tag))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
 	if got.Thread == nil || got.Message.ChannelID != got.Thread.ID || got.Thread.ParentID != f.forum {
 		t.Fatalf("delivery = %+v thread = %+v", got.Message, got.Thread)
 	}
@@ -93,9 +89,7 @@ func TestForumPostRetryAfterDelete(t *testing.T) {
 	} {
 		cmid := "del-" + name
 		p, err := f.db.CreateMessageDelivery(ctx, postParams(f.user, f.forum, cmid, "x"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "CreateMessageDelivery", err)
 		remove(p)
 		before, _, _, _ := postCounts(t, f.db)
 		if _, err := f.db.FindMessageDelivery(ctx, postParams(f.user, f.forum, cmid, "x")); !errors.Is(err, db.ErrMessageDeliveryDeleted) {
@@ -117,13 +111,9 @@ func TestForumPostUnknownTagWritesNothing(t *testing.T) {
 	f := newForumFixture(t)
 	ctx := context.Background()
 	other, err := f.db.CreateChannel(ctx, "other", "forum", "", "", 5)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	otherTags, err := f.db.ReplaceForumSettings(ctx, other, db.ForumSettingsWrite{DefaultAutoArchiveMinutes: 60, Tags: []db.ForumTagWrite{{Name: "x"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReplaceForumSettings", err)
 	t0, m0, l0, r0 := postCounts(t, f.db)
 	cases := map[string]db.MessageDeliveryParams{
 		"unknown id":          postParams(f.user, f.forum, "u1", "x", 9999),
@@ -188,9 +178,7 @@ func TestForumPostTagDeleteRace(t *testing.T) {
 		}
 		var orphanPosts, orphanLinks, posts int
 		must := func(q string, dst *int) {
-			if err := f.db.QueryRowContext(ctx, q).Scan(dst); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "QueryRowContext", f.db.QueryRowContext(ctx, q).Scan(dst))
 		}
 		// The fixture's own post has its message; count only the race's post.
 		must(`SELECT COUNT(*) FROM channels c WHERE c.type = 'thread' AND c.parent_channel_id = `+itoa(f.forum)+` AND c.thread_post_message_id IS NULL`, &orphanPosts)
@@ -216,9 +204,7 @@ func TestThreadPostBlock(t *testing.T) {
 	ctx := context.Background()
 	long := strings.Repeat("é", db.ForumPostPreviewRunes+50)
 	p, err := f.db.CreateMessageDelivery(ctx, postParams(f.user, f.forum, "blk", long, f.tag))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
 	got, err := f.db.GetThread(ctx, p.Thread.ID)
 	if err != nil || got == nil || got.Post == nil {
 		t.Fatalf("GetThread = %+v, %v", got, err)

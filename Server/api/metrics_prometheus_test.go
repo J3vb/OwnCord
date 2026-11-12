@@ -305,9 +305,7 @@ func scrapeProm(t *testing.T, src api.MetricsSources) (*httptest.ResponseRecorde
 	rr := httptest.NewRecorder()
 	api.HandlePrometheusMetricsForTest(src).ServeHTTP(rr,
 		httptest.NewRequest(http.MethodGet, "/api/v1/metrics/prometheus", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	return rr, parseProm(t, rr.Body.String())
 }
 
@@ -560,8 +558,7 @@ func TestPrometheusMetrics_AdminIPRestrict(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/prometheus", nil)
 			req.RemoteAddr = tc.addr
-			rr := httptest.NewRecorder()
-			build(tc.cidrs).ServeHTTP(rr, req)
+			rr := serveRequest(build(tc.cidrs), req)
 			if rr.Code != tc.want {
 				t.Errorf("status = %d, want %d; body: %s", rr.Code, tc.want, rr.Body.String())
 			}
@@ -575,12 +572,8 @@ func TestPrometheusMetrics_AdminIPRestrict(t *testing.T) {
 func TestPrometheusMetrics_LiveRouter(t *testing.T) {
 	handler := fullRouter(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/prometheus", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; body: %s", rr.Code, rr.Body.String())
-	}
+	rr := serveLocal(handler, req)
+	requireStatus(t, rr, http.StatusOK)
 	if ct := rr.Header().Get("Content-Type"); ct != "text/plain; version=0.0.4; charset=utf-8" {
 		t.Errorf("Content-Type = %q", ct)
 	}
@@ -790,8 +783,7 @@ func TestMetricsRoutes_LiveRouterPerimeter(t *testing.T) {
 		} {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.RemoteAddr = tc.addr
-			rr := httptest.NewRecorder()
-			handler.ServeHTTP(rr, req)
+			rr := serveRequest(handler, req)
 			if rr.Code != tc.want {
 				t.Errorf("GET %s from %s = %d, want %d", path, tc.addr, rr.Code, tc.want)
 			}

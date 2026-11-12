@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/permissions"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // TestVoiceMod_ChannelOverridesApply locks SEC-02's server half: the actor's
@@ -44,10 +43,7 @@ func TestVoiceMod_ChannelOverridesApply(t *testing.T) {
 
 			joinVoice(t, hub, target, chanID)
 
-			send := make(chan []byte, 16)
-			c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-			hub.Register(c)
-			waitRegistered(t, hub, c)
+			c, send := connectClient(t, hub, actor, chanID, 16)
 
 			hub.HandleMessageForTest(c, voiceModMuteMsg(chanID, target.ID, true))
 
@@ -61,7 +57,7 @@ func TestVoiceMod_ChannelOverridesApply(t *testing.T) {
 				}
 				return
 			}
-			if code := receiveErrorCode(send, waitTimeout); code != tc.wantCode {
+			if code := drainForErrorCode(send, waitTimeout); code != tc.wantCode {
 				t.Fatalf("error code = %q, want %s", code, tc.wantCode)
 			}
 			if state.ServerMuted {

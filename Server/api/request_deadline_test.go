@@ -41,9 +41,7 @@ func TestRequestDeadline_WriterStallReturns503(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("handler ran %v; the deadline did not bound it", elapsed)
 	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", rec.Code)
-	}
+	requireStatus(t, rec, http.StatusServiceUnavailable)
 	if got := rec.Header().Get("Retry-After"); got != "2" {
 		t.Fatalf("Retry-After = %q, want 2", got)
 	}
@@ -243,6 +241,7 @@ var deadlineBound = []string{
 	"GET /admin/api/system/livekit",
 	"GET /admin/api/system/slow-requests",
 	"GET /admin/api/system/health",
+	"POST /admin/api/system/livekit/restart",
 	"GET /admin/api/tokens",
 	"GET /admin/api/updates",
 	"GET /admin/api/users",

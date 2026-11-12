@@ -9,7 +9,6 @@ import (
 	"testing/fstest"
 
 	"github.com/J3vb/OwnCord/Server/migrations"
-	"github.com/J3vb/OwnCord/Server/rollback"
 )
 
 // schemaSnapshot describes every schema object of database in a form that
@@ -95,14 +94,7 @@ func TestForumsRollback(t *testing.T) {
 	want := schemaSnapshot(t, base)
 
 	database := openMigratedMemoryInternal(t)
-	count := func(q string, args ...any) int {
-		t.Helper()
-		var n int
-		if err := database.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
-		return n
-	}
+	count := rowCounter(t, database)
 	u, err := database.CreateUser(ctx, "rf", "hash", 4)
 	if err != nil {
 		t.Fatal(err)
@@ -178,18 +170,7 @@ func TestForumsRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = database.writer.Exec(`PRAGMA foreign_keys = ON`) })
-	raw, err := rollback.FS.ReadFile("075_forums.down.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, stmt := range splitStatements(string(raw)) {
-		if sqlText(stmt) == "" {
-			continue
-		}
-		if _, err := database.writer.ExecContext(ctx, stmt); err != nil {
-			t.Fatalf("reversal statement %q: %v", stmt, err)
-		}
-	}
+	applyRollbackFile(t, database, "075_forums.down.sql")
 
 	got := schemaSnapshot(t, database)
 	for k, w := range want {

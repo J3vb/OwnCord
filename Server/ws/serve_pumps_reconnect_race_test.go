@@ -13,14 +13,9 @@ package ws
 import (
 	"bytes"
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/coder/websocket"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -38,9 +33,7 @@ func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.
 	chID := mustCreateVoiceChannel(t, database, "voice-race")
 
 	ctx := context.Background()
-	if err := database.JoinVoiceChannel(ctx, uid, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, uid, chID)
 	if err := database.UpdateUserStatus(ctx, uid, "online"); err != nil {
 		t.Fatalf("UpdateUserStatus: %v", err)
 	}
@@ -65,34 +58,7 @@ func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.
 	// Real server-side *websocket.Conn, closed immediately so readPump's
 	// first Read fails and its defer runs — mirrors
 	// serve_reconnect_double_teardown_test.go's setup.
-	connCh := make(chan *websocket.Conn, 1)
-	wsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, acceptErr := websocket.Accept(w, r, nil)
-		if acceptErr != nil {
-			return
-		}
-		_ = conn.CloseNow()
-		connCh <- conn
-	}))
-	defer wsSrv.Close()
-
-	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	clientConn, resp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(wsSrv.URL, "http"), nil)
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("dial: %v", dialErr)
-	}
-	defer func() { _ = clientConn.Close(websocket.StatusNormalClosure, "") }()
-
-	var conn *websocket.Conn
-	select {
-	case conn = <-connCh:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server never accepted the connection")
-	}
+	conn := serverSideConn(t, true)
 
 	done := make(chan struct{})
 	go func() {

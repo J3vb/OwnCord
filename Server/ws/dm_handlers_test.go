@@ -37,81 +37,60 @@ func seedDMChannel(t *testing.T, database *db.DB, user1ID, user2ID int64) int64 
 
 // dmChatSendMsg constructs a raw chat_send WebSocket envelope for a DM channel.
 func dmChatSendMsg(channelID int64, content string) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": channelID,
-			"content":    content,
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id": channelID,
+		"content":    content,
 	})
 	return raw
 }
 
 // dmChatEditMsg constructs a raw chat_edit WebSocket envelope.
 func dmChatEditMsg(msgID int64, content string) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_edit",
-		"payload": map[string]any{
-			"message_id": msgID,
-			"content":    content,
-		},
+	raw := envelope("chat_edit", map[string]any{
+		"message_id": msgID,
+		"content":    content,
 	})
 	return raw
 }
 
 // dmChatDeleteMsg constructs a raw chat_delete WebSocket envelope.
 func dmChatDeleteMsg(msgID int64) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_delete",
-		"payload": map[string]any{
-			"message_id": msgID,
-		},
+	raw := envelope("chat_delete", map[string]any{
+		"message_id": msgID,
 	})
 	return raw
 }
 
 // dmTypingMsg constructs a raw typing_start WebSocket envelope.
 func dmTypingMsg(channelID int64) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": "typing_start",
-		"payload": map[string]any{
-			"channel_id": channelID,
-		},
+	raw := envelope("typing_start", map[string]any{
+		"channel_id": channelID,
 	})
 	return raw
 }
 
 // dmChannelFocusMsg constructs a raw channel_focus WebSocket envelope.
 func dmChannelFocusMsg(channelID int64) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": "channel_focus",
-		"payload": map[string]any{
-			"channel_id": channelID,
-		},
+	raw := envelope("channel_focus", map[string]any{
+		"channel_id": channelID,
 	})
 	return raw
 }
 
 // dmReactionAddMsg constructs a raw reaction_add WebSocket envelope.
 func dmReactionAddMsg(msgID int64, emoji string) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": "reaction_add",
-		"payload": map[string]any{
-			"message_id": msgID,
-			"emoji":      emoji,
-		},
+	raw := envelope("reaction_add", map[string]any{
+		"message_id": msgID,
+		"emoji":      emoji,
 	})
 	return raw
 }
 
 // dmReactionRemoveMsg constructs a raw reaction_remove WebSocket envelope.
 func dmReactionRemoveMsg(msgID int64, emoji string) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": "reaction_remove",
-		"payload": map[string]any{
-			"message_id": msgID,
-			"emoji":      emoji,
-		},
+	raw := envelope("reaction_remove", map[string]any{
+		"message_id": msgID,
+		"emoji":      emoji,
 	})
 	return raw
 }
@@ -121,7 +100,10 @@ func dmDrainAll(ch <-chan []byte) []map[string]any {
 	var result []map[string]any
 	for {
 		select {
-		case raw := <-ch:
+		case raw, ok := <-ch:
+			if !ok {
+				return result
+			}
 			var env map[string]any
 			if err := json.Unmarshal(raw, &env); err == nil {
 				result = append(result, env)
@@ -161,7 +143,10 @@ func dmCollectAll(ch <-chan []byte, d time.Duration) []map[string]any {
 	defer timer.Stop()
 	for {
 		select {
-		case raw := <-ch:
+		case raw, ok := <-ch:
+			if !ok {
+				return result
+			}
 			var env map[string]any
 			if err := json.Unmarshal(raw, &env); err == nil {
 				result = append(result, env)
@@ -203,13 +188,8 @@ func TestDM_ChatSend_ParticipantSuccess(t *testing.T) {
 	bob := seedMemberUser(t, database, "dm-send-bob")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, sendAlice := connectClient(t, hub, alice, dmChID, 64)
+	_, sendBob := connectClient(t, hub, bob, dmChID, 64)
 
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "hello bob"))
 
@@ -230,13 +210,8 @@ func TestDM_ChatSend_SequencedAndReplayBuffered(t *testing.T) {
 	bob := seedMemberUser(t, database, "dm-seq-bob")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendAlice := make(chan []byte, 128)
-	sendBob := make(chan []byte, 128)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, _ := connectClient(t, hub, alice, dmChID, 128)
+	_, sendBob := connectClient(t, hub, bob, dmChID, 128)
 
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "m1"))
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "m2"))
@@ -268,10 +243,7 @@ func TestDM_ChatSend_NonParticipantForbidden(t *testing.T) {
 	charlie := seedMemberUser(t, database, "dm-forbid-charlie")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendCharlie := make(chan []byte, 64)
-	cCharlie := ws.NewTestClientWithUser(hub, charlie, 0, sendCharlie)
-	hub.Register(cCharlie)
-	waitRegistered(t, hub, cCharlie)
+	cCharlie, sendCharlie := connectClient(t, hub, charlie, 0, 64)
 
 	hub.HandleMessageForTest(cCharlie, dmChatSendMsg(dmChID, "intruder"))
 
@@ -294,13 +266,8 @@ func TestDM_ChatSend_AutoReopenForRecipient(t *testing.T) {
 		t.Fatalf("CloseDM: %v", err)
 	}
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, 0, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, _ := connectClient(t, hub, alice, dmChID, 64)
+	_, sendBob := connectClient(t, hub, bob, 0, 64)
 
 	// Alice sends a message — should auto-reopen for Bob.
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "hey bob"))
@@ -323,15 +290,9 @@ func TestDM_ChatEdit_ParticipantCanEdit(t *testing.T) {
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
 	// Create a message directly in the DB.
-	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "original", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, dmChID, alice.ID, "original")
 
-	sendAlice := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	hub.Register(cAlice)
-	waitRegistered(t, hub, cAlice)
+	cAlice, sendAlice := connectClient(t, hub, alice, dmChID, 64)
 
 	hub.HandleMessageForTest(cAlice, dmChatEditMsg(msgID, "edited"))
 
@@ -349,15 +310,9 @@ func TestDM_ChatEdit_NonParticipantForbidden(t *testing.T) {
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
 	// Alice creates a message.
-	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "private", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, dmChID, alice.ID, "private")
 
-	sendCharlie := make(chan []byte, 64)
-	cCharlie := ws.NewTestClientWithUser(hub, charlie, 0, sendCharlie)
-	hub.Register(cCharlie)
-	waitRegistered(t, hub, cCharlie)
+	cCharlie, sendCharlie := connectClient(t, hub, charlie, 0, 64)
 
 	hub.HandleMessageForTest(cCharlie, dmChatEditMsg(msgID, "hacked"))
 
@@ -377,18 +332,10 @@ func TestDM_ChatDelete_ParticipantCanDeleteOwn(t *testing.T) {
 	bob := seedMemberUser(t, database, "dm-del-bob")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "to delete", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, dmChID, alice.ID, "to delete")
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, sendAlice := connectClient(t, hub, alice, dmChID, 64)
+	_, sendBob := connectClient(t, hub, bob, dmChID, 64)
 
 	hub.HandleMessageForTest(cAlice, dmChatDeleteMsg(msgID))
 
@@ -408,15 +355,9 @@ func TestDM_ChatDelete_NonParticipantForbidden(t *testing.T) {
 	charlie := seedMemberUser(t, database, "dm-delforbid-charlie")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "protected", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, dmChID, alice.ID, "protected")
 
-	sendCharlie := make(chan []byte, 64)
-	cCharlie := ws.NewTestClientWithUser(hub, charlie, 0, sendCharlie)
-	hub.Register(cCharlie)
-	waitRegistered(t, hub, cCharlie)
+	cCharlie, sendCharlie := connectClient(t, hub, charlie, 0, 64)
 
 	hub.HandleMessageForTest(cCharlie, dmChatDeleteMsg(msgID))
 
@@ -436,15 +377,9 @@ func TestDM_ChatDelete_NoModeratorOverride(t *testing.T) {
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
 	// Bob's message.
-	msgID, err := database.CreateMessage(context.Background(), dmChID, bob.ID, "bob says hi", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, dmChID, bob.ID, "bob says hi")
 
-	sendAlice := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	hub.Register(cAlice)
-	waitRegistered(t, hub, cAlice)
+	cAlice, sendAlice := connectClient(t, hub, alice, dmChID, 64)
 
 	// Alice (Owner role) tries to delete Bob's message — should fail because
 	// DMs disable moderator override.
@@ -466,13 +401,8 @@ func TestDM_Typing_ParticipantBroadcasts(t *testing.T) {
 	bob := seedMemberUser(t, database, "dm-type-bob")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, _ := connectClient(t, hub, alice, dmChID, 64)
+	_, sendBob := connectClient(t, hub, bob, dmChID, 64)
 
 	hub.HandleMessageForTest(cAlice, dmTypingMsg(dmChID))
 
@@ -489,16 +419,9 @@ func TestDM_Typing_NonParticipantSilentlyDropped(t *testing.T) {
 	charlie := seedMemberUser(t, database, "dm-typedrop-charlie")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendCharlie := make(chan []byte, 64)
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cCharlie := ws.NewTestClientWithUser(hub, charlie, 0, sendCharlie)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
-	hub.Register(cCharlie)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cCharlie, sendCharlie := connectClient(t, hub, charlie, 0, 64)
+	_, sendAlice := connectClient(t, hub, alice, dmChID, 64)
+	_, sendBob := connectClient(t, hub, bob, dmChID, 64)
 
 	hub.HandleMessageForTest(cCharlie, dmTypingMsg(dmChID))
 
@@ -530,10 +453,7 @@ func TestDM_ChannelFocus_ParticipantAllowed(t *testing.T) {
 	bob := seedMemberUser(t, database, "dm-focus-bob")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendAlice := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, 0, sendAlice)
-	hub.Register(cAlice)
-	waitRegistered(t, hub, cAlice)
+	cAlice, sendAlice := connectClient(t, hub, alice, 0, 64)
 
 	hub.HandleMessageForTest(cAlice, dmChannelFocusMsg(dmChID))
 
@@ -551,10 +471,7 @@ func TestDM_ChannelFocus_NonParticipantRejected(t *testing.T) {
 	charlie := seedMemberUser(t, database, "dm-focusforbid-charlie")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendCharlie := make(chan []byte, 64)
-	cCharlie := ws.NewTestClientWithUser(hub, charlie, 0, sendCharlie)
-	hub.Register(cCharlie)
-	waitRegistered(t, hub, cCharlie)
+	cCharlie, sendCharlie := connectClient(t, hub, charlie, 0, 64)
 
 	hub.HandleMessageForTest(cCharlie, dmChannelFocusMsg(dmChID))
 
@@ -574,18 +491,10 @@ func TestDM_ReactionAdd_ParticipantSuccess(t *testing.T) {
 	bob := seedMemberUser(t, database, "dm-react-bob")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "react to me", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, dmChID, alice.ID, "react to me")
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	_, sendAlice := connectClient(t, hub, alice, dmChID, 64)
+	cBob, sendBob := connectClient(t, hub, bob, dmChID, 64)
 
 	hub.HandleMessageForTest(cBob, dmReactionAddMsg(msgID, "👍"))
 
@@ -605,15 +514,9 @@ func TestDM_ReactionAdd_NonParticipantError(t *testing.T) {
 	charlie := seedMemberUser(t, database, "dm-reactforbid-charlie")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "private msg", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, dmChID, alice.ID, "private msg")
 
-	sendCharlie := make(chan []byte, 64)
-	cCharlie := ws.NewTestClientWithUser(hub, charlie, 0, sendCharlie)
-	hub.Register(cCharlie)
-	waitRegistered(t, hub, cCharlie)
+	cCharlie, sendCharlie := connectClient(t, hub, charlie, 0, 64)
 
 	hub.HandleMessageForTest(cCharlie, dmReactionAddMsg(msgID, "👎"))
 
@@ -632,15 +535,9 @@ func TestDM_ReactionRemove_ParticipantSuccess(t *testing.T) {
 	bob := seedMemberUser(t, database, "dm-reactrm-bob")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	msgID, err := database.CreateMessage(context.Background(), dmChID, bob.ID, "remove reaction", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, dmChID, bob.ID, "remove reaction")
 
-	sendBob := make(chan []byte, 64)
-	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cBob, sendBob := connectClient(t, hub, bob, dmChID, 64)
 
 	// Add a reaction first and consume its reaction_update broadcast.
 	hub.HandleMessageForTest(cBob, dmReactionAddMsg(msgID, "🔥"))
@@ -704,16 +601,9 @@ func TestDM_MultipleChannels_IsolatedDelivery(t *testing.T) {
 	dmAC := seedDMChannel(t, database, alice.ID, charlie.ID)
 	_ = dmAC // charlie's DM is separate
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	sendCharlie := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmAB, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, dmAB, sendBob)
-	cCharlie := ws.NewTestClientWithUser(hub, charlie, dmAC, sendCharlie)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	hub.Register(cCharlie)
-	waitRegistered(t, hub, cCharlie)
+	cAlice, _ := connectClient(t, hub, alice, dmAB, 64)
+	_, sendBob := connectClient(t, hub, bob, dmAB, 64)
+	_, sendCharlie := connectClient(t, hub, charlie, dmAC, 64)
 
 	// Alice sends to Alice-Bob DM.
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmAB, fmt.Sprintf("only for bob %d", dmAB)))
@@ -743,13 +633,8 @@ func TestDM_ChatSend_ReopenCarriesSenderLiveStatus(t *testing.T) {
 		t.Fatalf("CloseDM: %v", err)
 	}
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, 0, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cAlice)
+	cAlice, _ := connectClient(t, hub, alice, dmChID, 64)
+	cBob, sendBob := connectClient(t, hub, bob, 0, 64)
 	waitRegistered(t, hub, cBob)
 	hub.ApplyConnectStatusForTest(cAlice)
 	if err := database.UpdateUserStatus(ctx, alice.ID, db.StatusOffline); err != nil {

@@ -23,10 +23,7 @@ func TestResume_AcrossOverrideChange_FullReadyCarriesNewPin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	chID, err := database.CreateChannel(ctx, "resume-pin-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "resume-pin-channel", "text")
 	role, err := database.GetRoleForUser(ctx, userID)
 	if err != nil || role == nil {
 		t.Fatalf("GetRoleForUser: %v", err)
@@ -35,13 +32,7 @@ func TestResume_AcrossOverrideChange_FullReadyCarriesNewPin(t *testing.T) {
 		t.Fatal("fixture precondition: the Member role must not hold MANAGE_MESSAGES")
 	}
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, userID)
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
 	hub := newTestHub(t, database, limiter, svc)

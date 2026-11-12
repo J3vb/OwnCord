@@ -2,255 +2,38 @@
 // every socket subscription and calls these plain functions. Every LiveKit
 // and screen-share call goes through a dynamic import: dispatcher.ts is in the
 // startup chunk, and livekit-client must stay out of it.
+import { enforceModeratorAudioState } from "./wsReady";
 import { authStore } from "../../stores/auth.store";
 import {
   voiceStore,
-  setVoiceStates,
   updateVoiceState,
   removeVoiceUser,
   joinVoiceChannel,
   leaveVoiceChannel,
   setVoiceConfig,
-  setModeratorDeafened,
-  restateSelfVoiceState,
   setPeerVideoDecode,
   setPeerKeySlots,
+  setPeerBoundOffers,
   setPeerWatching,
-  noteWatchingResync,
-  clearPeerWatching,
 } from "../../stores/voice.store";
-import { ensureIdentityKeyPublished } from "../../lib/net/identity";
 import { showToast } from "../../lib/ui/toast";
-import { noteJoinFailed } from "./joinBackoff";
 import { takeWatchRefusal } from "../../lib/voice/watchRequest";
+import { applyVideoBitrateCap } from "./videoBitrateCap";
 import {
-  joinSequence,
+  leaveEndsEarlierStay,
+  noteJoinAnswered,
   noteJoinSent,
-  refusalWasPasswordRetry,
-  takeJoinRefusal,
-  takeRefusedJoin,
+  setJoinAnswerWait,
 } from "./joinRequest";
+import { joinAnswerWaitFor } from "./wsErrors";
 import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHint";
 import { settleVoiceLeave } from "./leaveOwed";
 import { channelsStore } from "../../stores/channels.store";
 import { membersStore, memberDisplayName } from "../../stores/members.store";
-import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
-import type {
-  DispatchApi,
-  DispatchWs,
-  Payload,
-  ReconnectClock,
-} from "../connection/dispatchContext";
-import { log } from "../connection/dispatchContext";
+import { livekitSession, cancelVoiceRejoin, log, route } from "../connection/dispatchContext";
+import type { DispatchWs, Payload, ReconnectClock, WsRoute } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
-import { WsErrorCode } from "@lib/protocolTypes";
-
-/**
- * Honor a moderator's mute/deafen locally. Mute is also enforced at the SFU,
- * but deafen governs what WE play back, so the client is the only place it
- * can take effect (Server/ws/voice_moderation.go: "enforced by the target's
- * client honoring server_deafened"). Both apply through one lazy import so
- * the two effects cannot land in different ticks.
- *
- * Called from both the incremental VOICE_STATE path and the full-resync
- * READY path (a WS drop that outlives the LiveKit session can mean a
- * moderator mute/deafen issued while disconnected is only ever delivered via
- * `ready`'s voice_states, never a voice_state the client could have missed).
- * The `!voice.localMuted`/`!voice.localDeafened` guards make it safe to call
- * from either path — or both, on the same session — without redundantly
- * re-invoking the livekit calls once already applied.
- *
- * A moderator restriction must also be released once it is lifted.
- * `setMuted`/`setDeafened` deliberately send no voice_mute/voice_deafen frame
- * (unlike the user's own toggle), so nothing else ever un-applies a
- * moderator-imposed local mute/deafen — without this, the falling edge
- * (server_muted/server_deafened going back to false) left the client
- * permanently silent/deaf while every peer's roster, and the server's own
- * voice_states row, said otherwise. `prevServerMuted`/`prevServerDeafened`
- * scope the release to the exact frame the restriction was lifted on (a
- * falling edge), rather than to every voice_state that happens to show the
- * flag already false — the latter would risk undoing an in-flight optimistic
- * self-mute from an unrelated restated voice_state (e.g. a camera toggle).
- * `selfMuted`/`selfDeafened` are the row's own muted/deafened fields (never
- * touched by moderation, always kept in sync with the user's own toggle via
- * voice_mute/voice_deafen) — requiring them to also be false before
- * releasing means a genuine self-mute that happens to coincide with the
- * moderator's release is never clobbered.
- *
- * Lifting a moderator deafen also clears the row's own deafen (the server
- * cannot tell whose it was), so a member who had deafened themselves before
- * the moderator did would hear the room again unasked. The client knows:
- * `moderatorDeafened` marks a deafen it applied for the moderator, so any
- * other deafen in effect at the lift is the member's own, kept and restated
- * to the server. It follows the local deafen, not the moderator flags, so a
- * moderator move (a leave that clears those flags, then a re-join that
- * restates them) cannot mistake the moderator's deafen for the member's.
- */
-function enforceModeratorAudioState(
-  ws: DispatchWs,
-  serverMuted: boolean,
-  serverDeafened: boolean,
-  prevServerMuted: boolean,
-  prevServerDeafened: boolean,
-  selfMuted: boolean,
-  selfDeafened: boolean,
-): void {
-  const voice = voiceStore.getState();
-  const applyDeafen = serverDeafened && !voice.localDeafened;
-  if (applyDeafen) setModeratorDeafened(true);
-  const deafenLifted = prevServerDeafened && !serverDeafened;
-  const keepOwnDeafen = deafenLifted && voice.localDeafened && voice.moderatorDeafened !== true;
-  if (deafenLifted) setModeratorDeafened(false);
-  if (keepOwnDeafen) ws.send({ type: "voice_deafen", payload: { deafened: true } });
-  const applyMute = serverMuted && !voice.localMuted;
-  const releaseMute = prevServerMuted && !serverMuted && voice.localMuted && !selfMuted;
-  const releaseDeafen = deafenLifted && !keepOwnDeafen && voice.localDeafened && !selfDeafened;
-  if (applyDeafen || applyMute || releaseMute || releaseDeafen) {
-    void livekitSession().then(({ setDeafened, setMuted }) => {
-      if (applyDeafen) setDeafened(true);
-      if (applyMute) setMuted(true);
-      if (releaseMute) setMuted(false);
-      if (releaseDeafen) setDeafened(false);
-    });
-  }
-}
-
-/**
- * The voice slice of `ready`, in two steps. Call this first: it snapshots the
- * voice state `ready` is about to replace, and returns the function that
- * restates the voice states and reconciles a surviving session against that
- * snapshot.
- */
-export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">) => void {
-  // Snapshot the current voice channel's peer roster BEFORE the
-  // wholesale replace below, so the reconciliation branch further down
-  // can tell who left while the socket was down. Must run before
-  // setVoiceStates() overwrites voiceUsers with the fresh payload.
-  const prevVoiceChannelId = voiceStore.getState().currentChannelId;
-  const prevVoicePeerIds =
-    prevVoiceChannelId !== null
-      ? new Set(voiceStore.getState().voiceUsers.get(prevVoiceChannelId)?.keys() ?? [])
-      : new Set<number>();
-  // Same reasoning as the VOICE_STATE handler — snapshot the
-  // pre-resync moderator flags before setVoiceStates() overwrites them,
-  // so a moderator restriction lifted while we were disconnected (and
-  // still applied locally from before the drop) is released here too.
-  const prevSelfServerMuted = voiceStore.getState().localServerMuted ?? false;
-  const prevSelfServerDeafened = voiceStore.getState().localServerDeafened ?? false;
-  return (ws, payload) => {
-    setVoiceStates(payload.voice_states);
-    // A reconnect supersedes any AFK move still awaiting its join
-    // acknowledgement: that move was abandoned, so it earns no toast.
-    clearAfkMove();
-
-    // A self row in `ready` while this device holds no call (voiceStatus
-    // "idle") is another device's call: one account keeps a connection per
-    // device and the server broadcasts the user's voice rows to all of them.
-    // Do not send voice_leave and do not leaveVoiceChannel() — that would end
-    // the other device's call. The server already retires this device's own
-    // stale call when it connects afresh (e.g. after an F5 reload), so no
-    // defensive leave is needed here; the row stays in the roster only.
-    //
-    // The store's lifecycle status stands in for livekitSession (lazily
-    // imported): any status but "idle" means this device is driving a
-    // session right now.
-    const currentUserId = authStore.getState().user?.id ?? 0;
-    const selfVoiceState =
-      currentUserId !== 0
-        ? payload.voice_states.find((vs) => vs.user_id === currentUserId)
-        : undefined;
-    const voiceSessionActive = voiceStore.getState().voiceStatus !== "idle";
-    if (selfVoiceState !== undefined && voiceSessionActive) {
-      // A LiveKit session survived a WS drop that outlived it (nothing
-      // tears voice down on a socket drop alone): this full
-      // resync is the only place a moderator mute/deafen issued while we
-      // were disconnected ever reaches us, since the mustFullResync tier
-      // that produced this `ready` never replays the voice_state that
-      // would otherwise have carried it.
-      enforceModeratorAudioState(
-        ws,
-        selfVoiceState.server_muted === true,
-        selfVoiceState.server_deafened === true,
-        prevSelfServerMuted,
-        prevSelfServerDeafened,
-        selfVoiceState.muted,
-        selfVoiceState.deafened,
-      );
-      // The socket was down: tell the server any mute/deafen toggled meanwhile.
-      // enforceModeratorAudioState applies its releases later, so a moderator
-      // restriction in play on either side of the outage is left to it.
-      const modMuted = prevSelfServerMuted || selfVoiceState.server_muted === true;
-      const modDeafened = prevSelfServerDeafened || selfVoiceState.server_deafened === true;
-      restateSelfVoiceState(ws, modMuted || modDeafened, modDeafened);
-      // The server does not re-relay a resumed member's own watch set to
-      // peers: send ours again, and keep the viewer sounds out of the re-sync.
-      noteWatchingResync();
-      clearPeerWatching();
-
-      // Same gap, for E2EE. A full resync never replays the
-      // voice_leave for anyone who departed our voice channel during the
-      // outage — handleParticipantLeft (the only path that prunes a
-      // departed peer's key, rotates for membership forward secrecy, and
-      // re-runs the lowest-uid key-holder election) is otherwise only ever
-      // driven by a live voice_leave frame. Without this, a departed peer
-      // keeps a working room key indefinitely, and a client the server
-      // just elected key holder on reconnect (Server/ws hub.go
-      // registerNow -> updateKeyHolder) never self-elects. Only reconcile
-      // when the resync's self voice state is for the SAME channel the
-      // snapshot above was taken from — a channel change is out of scope
-      // here and comparing rosters across two different channels would
-      // misfire.
-      const left: number[] = [];
-      if (prevVoiceChannelId === selfVoiceState.channel_id) {
-        const currentVoicePeerIds = new Set(
-          payload.voice_states
-            .filter((vs) => vs.channel_id === selfVoiceState.channel_id)
-            .map((vs) => vs.user_id),
-        );
-        for (const uid of prevVoicePeerIds) {
-          if (uid !== currentUserId && !currentVoicePeerIds.has(uid)) left.push(uid);
-        }
-      }
-      // The same gap for the camera and share flags: an announce sent while
-      // the socket was down never reached the server.
-      for (const uid of left) {
-        setPeerVideoDecode(uid, undefined);
-        setPeerKeySlots(uid, false);
-      }
-      void livekitSession().then(
-        ({ handleParticipantLeft, reconcileVideoFlags, resendWatching }) => {
-          for (const uid of left) void handleParticipantLeft(uid);
-          resendWatching();
-          if (prevVoiceChannelId === selfVoiceState.channel_id)
-            reconcileVideoFlags(
-              selfVoiceState.camera === true,
-              selfVoiceState.screenshare === true,
-            );
-        },
-      );
-    }
-  };
-}
-
-/** The identity slice of `ready`: publish our identity public key. */
-export function publishReadyIdentity(
-  api: DispatchApi | undefined,
-  payload: Payload<"ready">,
-): void {
-  const currentUserId = authStore.getState().user?.id ?? 0;
-  // Publish our long-term identity public key so peers can pin+verify
-  // us in voice. Idempotent (no PATCH when the server copy already matches)
-  // and fire-and-forget — never block the ready flow. Username is required
-  // by the server's profile update, so it rides along with the key.
-  const self = payload.members.find((m) => m.id === currentUserId);
-  const host = api?.getConfig?.().host;
-  if (self !== undefined && currentUserId !== 0 && host && api?.updateProfile) {
-    const updateProfile = api.updateProfile;
-    void ensureIdentityKeyPublished(host, self.username, self.identity_public_key ?? null, (data) =>
-      updateProfile(data),
-    );
-  }
-}
+import { WsErrorCode, ServerMessageType as S } from "@lib/protocolTypes";
 
 export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">): void {
   // Auto-join voice channel if the event is for the current user
@@ -267,8 +50,15 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   // A self row while this device holds no call is another device's call (one
   // account, one call, one device): the roster is updated, nothing else. This
   // device's own join moves voiceStatus off "idle" before the server's answer.
-  if (voiceStore.getState().voiceStatus === "idle") return;
-  joinVoiceChannel(payload.channel_id);
+  const { voiceStatus, currentChannelId } = voiceStore.getState();
+  if (voiceStatus === "idle") return;
+  // Only into the channel this device asked for. A self row naming another one
+  // is the old call's echo (a mute or camera toggle sent just before a switch)
+  // overtaken by the click: following it would point the store back at the
+  // channel the server is about to take this device out of.
+  if (currentChannelId === null || currentChannelId === payload.channel_id) {
+    joinVoiceChannel(payload.channel_id);
+  }
   // The server's answer to the join that followed an AFK move: only now is
   // the move real, so only now does the user hear why.
   if (takeAfkMove(payload.channel_id)) {
@@ -376,7 +166,26 @@ export function handleVoiceDisconnected(
   showToast(payload.reason || connectText("voice.disconnected"), "error");
 }
 
+/** The server left the call a waiting switch kept, so the switch is going
+ *  ahead: the store follows it, as it would have at the click. Any self leave
+ *  of that call counts, an eviction included: the join sent for the new channel
+ *  is answered either way. */
+function followSwitchOnLeave(channelId: number): void {
+  const { currentChannelId, switchingTo } = voiceStore.getState();
+  if (switchingTo !== null && switchingTo !== undefined && currentChannelId === channelId) {
+    joinVoiceChannel(switchingTo);
+  }
+}
+
 export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: ReconnectClock): void {
+  const currentUserId = authStore.getState().user?.id ?? 0;
+  const isSelf = payload.user_id === currentUserId;
+  // A voice_leave names a channel, not a stay in it. When the user leaves a
+  // channel and is back in it before the server answered, the leave of the
+  // earlier stay arrives while the store already names the newer one, before
+  // or after that join's token: it must not take the user off the roster,
+  // clear the store or end the session of the stay they are in now.
+  const earlierStay = isSelf && leaveEndsEarlierStay(payload.channel_id);
   // removeVoiceUser() below always mutates the roster before
   // handleParticipantLeft below runs, and a pre-mutation snapshot (the
   // earlier attempt this replaced) reads "still present" on every
@@ -385,9 +194,9 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // any point relative to that mutation, cannot tell a genuine departure
   // apart from the stale-leave case. Don't try; see
   // E2EEManager.handleParticipantLeft for the current defense.
-  removeVoiceUser(payload);
-  const currentUserId = authStore.getState().user?.id ?? 0;
-  const isSelf = payload.user_id === currentUserId;
+  if (!earlierStay) removeVoiceUser(payload);
+  // An earlier stay's leave says nothing about a switch waiting now.
+  if (isSelf && !earlierStay) followSwitchOnLeave(payload.channel_id);
   // A server-initiated eviction (revocation sweep, channel delete) has no
   // companion teardown message — this voice_leave IS the signal that
   // drives our own LiveKit/E2EE teardown, or mic publish and key material
@@ -395,7 +204,7 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // late-arriving voice_leave for a channel we already left (and rejoined
   // elsewhere) must not kill a newer join. Read the store before
   // leaveVoiceChannel() below clears currentChannelId.
-  const sameChannel = voiceStore.getState().currentChannelId === payload.channel_id;
+  const sameChannel = !earlierStay && voiceStore.getState().currentChannelId === payload.channel_id;
   const shouldTeardownSession = isSelf && sameChannel;
   // Leaving after an AFK move was noted ends the move; the leave that
   // precedes the voice_moved frame arrives before the note is made.
@@ -419,13 +228,16 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // voice_state happens to restore it, or forever if the switch then fails
   // server-side.
   // P2-T5: while the auto-reconnect loop owns the session, it decides what a
-  // released membership means — it rejoins, or gives up with its toast. Only a
-  // "reconnecting" badge can mean the loop, so any other clears the store now.
+  // released membership means — it rejoins, or gives up with its toast. A loop
+  // for the store's own channel always shows the "reconnecting" badge (one the
+  // user clicked away from runs under "joining", but the store then names the
+  // other channel), so any other status clears the store now.
   const loopMayOwn = voiceStore.getState().voiceStatus === "reconnecting";
   if (shouldTeardownSession && !loopMayOwn) leaveVoiceChannel();
   // A rejoin may come from another client; its own announce restates the list.
   setPeerVideoDecode(payload.user_id, undefined);
   setPeerKeySlots(payload.user_id, false);
+  setPeerBoundOffers(payload.user_id, false);
   void livekitSession().then(({ handleParticipantLeft, leaveVoice, isAutoReconnecting }) => {
     if (sameChannel) void handleParticipantLeft(payload.user_id);
     if (shouldTeardownSession && !isAutoReconnecting()) {
@@ -445,7 +257,18 @@ export function handleVoiceConfig(payload: Payload<"voice_config">): void {
   setVoiceConfig(payload);
 }
 
+/** `video_bitrate_cap`: an admin saved the server's video upload cap. */
+export function handleVideoBitrateCap(payload: Payload<"video_bitrate_cap">): void {
+  applyVideoBitrateCap(payload.max_video_bitrate);
+}
+
 export function handleVoiceTokenFrame(payload: Payload<"voice_token">): void {
+  noteJoinAnswered(payload.channel_id);
+  // The switch a live call was kept for is granted: the store follows it now,
+  // and the session below takes the token as it does after any click.
+  if (voiceStore.getState().switchingTo === payload.channel_id) {
+    joinVoiceChannel(payload.channel_id);
+  }
   void livekitSession().then(({ handleVoiceToken }) =>
     handleVoiceToken(
       payload.token,
@@ -480,6 +303,7 @@ export function handleVoiceE2eeAnnounce(payload: Payload<"voice_e2ee_announce">)
   }
   try {
     setPeerKeySlots(payload.user_id, payload.key_slots === true);
+    setPeerBoundOffers(payload.user_id, payload.bound_offers === true);
   } catch (err) {
     log.warn("voice_e2ee_announce: could not record key_slots", err);
   }
@@ -530,173 +354,38 @@ export function handleVoiceE2eeOffer(payload: Payload<"voice_e2ee_offer">): void
   );
 }
 
-/**
- * The `error` chain's voice-join rollback. Acts only on the refusal of the
- * join in flight; never consumes the frame.
- */
-export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | undefined): void {
-  // The sidebar/widget optimistically writes currentChannelId
-  // before the server answers voice_join (VoiceCallbacks.onVoiceJoin,
-  // voiceStatus="joining"). A first-time join refusal earns no
-  // voice_leave (there was no previous channel to leave), so nothing
-  // else ever clears that optimistic state — setVoiceStatus("idle") only
-  // runs inside LiveKitSession.leaveVoice(). handleVoiceJoin can refuse
-  // for CHANNEL_FULL, VOICE_ERROR, FORBIDDEN, NOT_FOUND, BAD_REQUEST,
-  // RATE_LIMITED, ALREADY_JOINED, or INTERNAL, and every refusal echoes
-  // the join's envelope id (voice_join.go, buildErrorMsgWithID). Only that
-  // refusal rolls the join back: an error answering another command (a
-  // refused chat_edit, a rate-limited typing frame) used to cancel the
-  // join too. An older server sends the refusal with no id, so an id-less
-  // error still counts when its code is one a join refusal can carry
-  // (joinRequest.ts). A channel *switch* refusal hits the same guard: the
-  // self voice_leave for the OLD channel that precedes it no longer resets
-  // voiceStatus (that voice_leave's channel no longer matches the already-updated
-  // currentChannelId, so it must not tear down the NEW channel's
-  // optimistic state either), so voiceStatus is still "joining" when
-  // this error lands and the guard clears it here instead. A plain
-  // store rollback is safe for an already-established session (never
-  // "joining") and for a first-time join refusal (no prior session to
-  // tear down) — but a channel *switch* refused at precheck (RATE_LIMITED,
-  // FORBIDDEN, NOT_FOUND, archived-channel BAD_REQUEST) never reaches
-  // voiceJoinLeaveCurrent server-side, so no voice_leave is broadcast and
-  // the OLD channel's LiveKit room is still connected (mic still
-  // published) while the store already points at the NEW channel.
-  // isVoiceSessionActive() distinguishes that live-or-in-flight
-  // case from the first-time-join refusal; tearing it down here also
-  // sends voice_leave so the server/SFU state matches the now-cleared
-  // store. isVoiceConnected() (Room !== null) reads false for
-  // the entire "connecting" state — the very state a join is in while
-  // voiceStatus is "joining" and connectAndSetup() still awaits
-  // createRoom()/resolveLiveKitUrl() — so an unrelated error landing in
-  // that window used to roll back only the store while the connect
-  // attempt ran to completion unseen (hot mic, no UI). isVoiceSessionActive()
-  // also covers "connecting"/"reconnecting", and leaveVoice() itself
-  // already tolerates a null Room, aborting the in-flight attempt at its
-  // next checkpoint.
-  const { voiceStatus, currentChannelId } = voiceStore.getState();
-  if (voiceStatus === "joining" && takeJoinRefusal(payload.code, id, currentChannelId)) {
-    // A refused join abandons an AFK move: nothing to explain.
-    clearAfkMove();
-    // A refused join (often before any voice token) is a failed join: back
-    // off the next one, or every click re-sends voice_join. A password refusal
-    // (and the rate limit on a password try) is the exception: the dialog it
-    // opens is the retry, and a backoff would turn the user's next try away.
-    // Any other refusal of a retry backs off as usual.
-    const passwordRefusal =
-      isPasswordCode(payload.code) ||
-      (payload.code === WsErrorCode.RATE_LIMITED && refusalWasPasswordRetry(id));
-    if (!passwordRefusal) noteJoinFailed();
-    void livekitSession().then(({ isVoiceSessionActive, leaveVoice, failPendingRejoin }) => {
-      failPendingRejoin();
-      if (isVoiceSessionActive()) void leaveVoice(true);
-    });
-    leaveVoiceChannel();
-  }
-}
+export { snapshotReadyVoice, publishReadyIdentity } from "./wsReady";
+export {
+  handleVoiceJoinRollback,
+  handleVoicePasswordRefusal,
+  handleVoiceError,
+  rollbackVideoOnError,
+} from "./wsErrors";
 
-function isPasswordCode(code: string): boolean {
-  return code === WsErrorCode.PASSWORD_REQUIRED || code === WsErrorCode.WRONG_PASSWORD;
-}
+/** The voice_token route also bounds the wait for that token: a join waits for
+ *  its answer only while these routes are wired, on this login's socket. */
+const voiceTokenRoute: WsRoute = {
+  type: S.VOICE_TOKEN,
+  attach: (subscribe, ctx) => {
+    const off = subscribe(S.VOICE_TOKEN, handleVoiceTokenFrame);
+    setJoinAnswerWait(joinAnswerWaitFor(ctx.ws));
+    return () => {
+      off();
+      setJoinAnswerWait(null);
+    };
+  },
+};
 
-/**
- * A join refused for its password: open the dialog for that channel. Runs
- * after the rollback, which already cleared the optimistic join. Acts only on
- * the refusal of the join this client sent last, so a stale or foreign error
- * never opens a dialog. Returns true when the frame was a password refusal (or
- * a retry's rate limit), so no generic toast follows.
- */
-export function handleVoicePasswordRefusal(
-  ws: DispatchWs,
-  payload: Payload<"error">,
-  id: string | undefined,
-): boolean {
-  const refused = takeRefusedJoin(id);
-  if (refused === null || refused.channelId === null) return isPasswordCode(payload.code);
-  const channelId = refused.channelId;
-  let problem: "wrong" | "rateLimited" | null = null;
-  if (payload.code === WsErrorCode.WRONG_PASSWORD) problem = "wrong";
-  else if (payload.code === WsErrorCode.RATE_LIMITED && refused.passwordRetry)
-    problem = "rateLimited";
-  else if (payload.code !== WsErrorCode.PASSWORD_REQUIRED) return false;
-  // Only this refusal needs the dialog, so it loads on demand. The prompt
-  // registers its sign-out reset and its new-join listener only once loaded,
-  // so a session that ended, or a join started, while the chunk was loading
-  // must not get a dialog from it.
-  const owner = authStore.getState().user?.id;
-  const seq = joinSequence();
-  void import("./passwordPrompt").then(
-    ({ promptForChannelPassword }) => {
-      if (owner === undefined || authStore.getState().user?.id !== owner) return;
-      if (joinSequence() !== seq) return;
-      promptForChannelPassword(ws, channelId, problem);
-    },
-    (err: unknown) => log.error("Password prompt failed to load", err),
-  );
-  return true;
-}
-
-/** The voice capacity refusals of `error`. Returns true when the frame was one. */
-export function handleVoiceError(payload: Payload<"error">, id: string | undefined): boolean {
-  // Voice capacity refusals. The server owns the limits (voice_max_users /
-  // voice_max_video) and refuses the join or the camera; the client never
-  // pre-blocks the click, because its copy of the participant list can lag
-  // and a refusal it invented would be uncorrectable. So the only job here
-  // is to say what happened — without this the click was a silent no-op
-  // with an explanation buried in the log.
-  if (payload.code === WsErrorCode.CHANNEL_FULL) {
-    showToast(connectText("voice.channelFull"), "error");
-    return true;
-  }
-  if (payload.code === WsErrorCode.VIDEO_LIMIT) {
-    showToast(connectText("voice.videoLimit"), "error");
-    // max_video has no SFU-level enforcement — the server only refuses the
-    // DB write. Without this rollback the already-published track keeps
-    // streaming to everyone while voice_state says camera/screenshare is
-    // off. voice_controls.go routes both a refused voice_camera AND a
-    // refused voice_screenshare enable through the same shared
-    // enableVideoSlot cap check, so this code is not camera-specific —
-    // correlate by envelope id, exactly like the generic rollback below,
-    // instead of assuming it's always the camera. A bare VIDEO_LIMIT with
-    // no id (older server / no correlation available) still falls back
-    // to the camera, the only kind this branch used to handle.
-    if (id !== undefined) {
-      void import("../../lib/voice/screenShare").then(({ rollbackPendingVideo }) => {
-        const kind = rollbackPendingVideo(id);
-        // undefined means this id no longer correlates to anything
-        // pending (superseded by a later enable of the same kind) — the
-        // refusal is stale and there is nothing to roll back. It must
-        // never be treated as "it was the camera".
-        if (kind === undefined) return;
-        void livekitSession().then(({ disableCamera, disableScreenshare }) =>
-          kind === "screen" ? disableScreenshare() : disableCamera(),
-        );
-      });
-    } else {
-      void livekitSession().then(({ disableCamera }) => disableCamera());
-    }
-    return true;
-  }
-  return false;
-}
-
-/** Roll back a refused camera/screenshare enable correlated by envelope id. */
-export function rollbackVideoOnError(id: string | undefined): void {
-  // A server refusal of a voice_camera/voice_screenshare enable other
-  // than VIDEO_LIMIT (FORBIDDEN, RATE_LIMITED, INTERNAL, ...): roll back
-  // the already-published track, or it keeps streaming to every peer
-  // while the store says it's off. Correlated by envelope id — exactly
-  // like pendingSends/pendingReactions above — so an unrelated
-  // FORBIDDEN/RATE_LIMITED on some other action never touches video
-  // state. screenShare.ts pulls in livekit-client at module scope, so —
-  // like livekitSession() above — it's loaded lazily here too, at its
-  // one call site in this file.
-  if (id !== undefined) {
-    void import("../../lib/voice/screenShare").then(({ rollbackPendingVideo }) => {
-      const kind = rollbackPendingVideo(id);
-      if (kind === undefined) return;
-      void livekitSession().then(({ disableCamera, disableScreenshare }) =>
-        kind === "camera" ? disableCamera() : disableScreenshare(),
-      );
-    });
-  }
-}
+// Voice state, moves, tokens and the client-side E2EE key exchange.
+export const wsRoutes: readonly WsRoute[] = [
+  route(S.VOICE_STATE, (c) => (p) => handleVoiceState(c.ws, p)),
+  route(S.VOICE_MOVED, (c) => (p) => handleVoiceMoved(c.ws, p, c.clock)),
+  route(S.VOICE_DISCONNECTED, (c) => (p) => handleVoiceDisconnected(p, c.clock)),
+  route(S.VOICE_LEAVE, (c) => (p) => handleVoiceLeave(p, c.clock)),
+  route(S.VOICE_CONFIG, () => handleVoiceConfig),
+  route(S.VIDEO_BITRATE_CAP, () => handleVideoBitrateCap),
+  voiceTokenRoute,
+  route(S.VOICE_E2EE_ANNOUNCE, () => handleVoiceE2eeAnnounce),
+  route(S.VOICE_E2EE_OFFER, () => handleVoiceE2eeOffer),
+  route(S.VOICE_WATCHING, () => handleVoiceWatching),
+];

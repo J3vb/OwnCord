@@ -73,7 +73,11 @@ struct InstallerResponse {
 /// Kotlin side opens that settings page and this returns
 /// `text::UPDATE_INSTALL_PERMISSION` so the banner can say what to do.
 #[tauri::command]
-pub async fn download_and_install_update(app: AppHandle, server_url: String) -> Result<(), String> {
+pub async fn download_and_install_update(
+    app: AppHandle,
+    server_url: String,
+    expected_version: Option<String>,
+) -> Result<(), String> {
     // Released when this returns: the user can cancel Android's prompt, and
     // the next tap must be able to start again.
     let _guard = InstallGuard::acquire(&UPDATE_IN_PROGRESS)?;
@@ -83,6 +87,7 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
         .await
         .map_err(|e| format!("update check failed: {e}"))?
         .ok_or_else(|| "no update available".to_string())?;
+    super::check_announced(expected_version.as_deref(), &update.version)?;
 
     let progress_app = app.clone();
     let mut received: u64 = 0;
@@ -96,15 +101,26 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
         )
         .await
         .map_err(|e| format!("download/install failed: {e}"))?;
-    verify_apk_artifact(&bytes, &update.signature, updater_public_key(&app)?)
-        .map_err(|e| format!("download/install failed: {e}"))?;
+    let byte_len = bytes.len();
+    let signature = update.signature.clone();
+    let pubkey = updater_public_key(&app)?.to_owned();
+    let write_app = app.clone();
+    let path = tauri::async_runtime::spawn_blocking(move || {
+        verify_apk_artifact(&bytes, &signature, &pubkey)
+            .map_err(|e| format!("download/install failed: {e}"))?;
+        write_update_apk(&write_app, &bytes)
+    })
+    .await
+    .map_err(|e| {
+        log::warn!("[update] verify/write task ended early: {e}");
+        "download/install failed".to_string()
+    })??;
     log::info!(
-        "[update] APK downloaded ({} bytes) for version {}",
-        bytes.len(),
+        "[update] APK verified and written ({} bytes) for version {}",
+        byte_len,
         update.version
     );
 
-    let path = write_update_apk(&app, &bytes)?;
     let installer = app.state::<ApkInstaller>();
     let response: InstallerResponse = installer
         .0

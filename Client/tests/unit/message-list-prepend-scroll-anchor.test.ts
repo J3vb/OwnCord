@@ -8,8 +8,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";

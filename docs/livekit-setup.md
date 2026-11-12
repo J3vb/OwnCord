@@ -71,7 +71,7 @@ admin Dashboard then shows a LiveKit card: whether it is reachable, its CPU and
 memory, and rooms, participants, tracks and traffic. The port is not published,
 so only containers on the compose network can reach it. An older `livekit.yaml`
 needs the two `prometheus:` lines added (then `docker compose restart livekit`);
-until then the card says "Not set up".
+until then the card says "Not reachable".
 
 The card finds its source by itself. When OwnCord runs LiveKit for you
 (`livekit_binary` or `auto_download_livekit`), it reads that process
@@ -104,19 +104,20 @@ Or keep the server in charge but use your own copy of the program: set
 
 ## All voice settings
 
-| Setting                 | What it does                                                     | Default               |
-| ----------------------- | ---------------------------------------------------------------- | --------------------- |
-| `livekit_api_key`       | Key shared by OwnCord and LiveKit                                | random if unset       |
-| `livekit_api_secret`    | Secret for voice sign-in, at least 32 characters                 | random if unset       |
-| `livekit_url`           | Where LiveKit listens                                            | `ws://localhost:7880` |
-| `livekit_binary`        | Path to your own `livekit-server` program                        | empty                 |
-| `livekit_metrics_url`   | LiveKit's stats page, for the Dashboard's LiveKit card           | empty (card off)      |
-| `auto_download_livekit` | Download and run LiveKit when no program is set                  | on in a new config    |
-| `livekit_version`       | A different LiveKit version to download                          | built-in version      |
-| `node_ip`               | Fixed public address for voice. Only when detection cannot work. | empty (detect)        |
-| `advertise_internal_ip` | Also offer the local address, for people on your network         | off                   |
-| `udp_port`              | One UDP port for all media instead of the range                  | range                 |
-| `quality`               | Default voice quality: `low`, `medium` or `high`                 | `medium`              |
+| Setting                    | What it does                                                     | Default               |
+| -------------------------- | ---------------------------------------------------------------- | --------------------- |
+| `livekit_api_key`          | Key shared by OwnCord and LiveKit                                | random if unset       |
+| `livekit_api_secret`       | Secret for voice sign-in, at least 32 characters                 | random if unset       |
+| `livekit_url`              | Where LiveKit listens                                            | `ws://localhost:7880` |
+| `livekit_binary`           | Path to your own `livekit-server` program                        | empty                 |
+| `livekit_metrics_url`      | LiveKit's stats page, for the Dashboard's LiveKit card           | empty (card off)      |
+| `auto_download_livekit`    | Download and run LiveKit when no program is set                  | on in a new config    |
+| `livekit_version`          | A different LiveKit version to download                          | built-in version      |
+| `node_ip`                  | Fixed public address for voice. Only when detection cannot work. | empty (detect)        |
+| `advertise_internal_ip`    | Also offer the local address, for people on your network         | off                   |
+| `udp_port`                 | One UDP port for all media instead of the range                  | range                 |
+| `quality`                  | Default voice quality: `low`, `medium` or `high`                 | `medium`              |
+| `restrict_data_publishing` | Issue voice grants without the right to send data packets        | off                   |
 
 All of them live under `voice:` in `config.yaml`. Full list:
 [Server configuration](server-configuration.md).

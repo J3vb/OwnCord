@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/db/audittest"
 	"github.com/J3vb/OwnCord/Server/permissions"
-	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // appealFixture wraps moderationActionsFixture (moderation_actions_test.go)
@@ -121,20 +119,9 @@ func TestAppealLocker_EvictsAfterRealTransitionsFinish(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	if err := f.appeals.Assign(ctx, fixturePeerMod, publicID, false); err != nil {
-		t.Fatalf("Assign: %v", err)
-	}
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "fine"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
+	publicID := f.openAppeal(ctx, t)
+	mustDo(t, "Assign", f.appeals.Assign(ctx, fixturePeerMod, publicID, false))
+	mustDo(t, "Decide", f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "fine"))
 
 	f.appeals.locks.mu.Lock()
 	n := len(f.appeals.locks.locks)
@@ -185,20 +172,11 @@ func TestAppeal_ServiceWiresANonNilAuthorityCallbackIntoDecideAppealTx(t *testin
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	publicID := f.openAppeal(ctx, t)
 
 	recorder := &authCallbackRecorderStore{DB: f.database}
 	appeals := NewAppealService(recorder, f.mod.perms, f.mod, auth.NewRateLimiter())
-	if err := appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
+	mustDo(t, "Decide", appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"))
 	if !recorder.sawNonNilCheckAuthority {
 		t.Fatal("AppealService.Decide called DecideAppealTx with a nil checkAuthority — the production service is not wiring its authority re-check")
 	}
@@ -210,10 +188,7 @@ func TestAppeal_OnlyTheTargetMaySubmit(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "be nice", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
+	actionID := f.warnMember(ctx, t, "be nice")
 
 	if _, err := f.appeals.Submit(ctx, fixtureMember2, actionID, "not me"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("submit by a non-target: want ErrNotFound, got %v", err)
@@ -229,16 +204,11 @@ func TestAppeal_SelfTargetedPurgeRowIsNotAppealable(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	if _, err := f.database.CreateMessage(ctx, fixtureChannel, fixtureMember, "old", nil); err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustCreateMessage(t, f.database, fixtureChannel, fixtureMember, "old", nil)
 	if _, err := f.database.PurgeChannelMessagesWithAction(ctx, fixtureChannel, 0, 10, fixtureMod, nil); err != nil {
 		t.Fatalf("PurgeChannelMessagesWithAction: %v", err)
 	}
-	rows, err := f.database.ListModerationActionsForTarget(ctx, fixtureMod)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	rows := mustListModerationActionsForTarget(t, f.database, fixtureMod)
 	var actionID int64
 	for i := range rows {
 		if r := &rows[i]; r.Kind == "removal" && r.ActorID == fixtureMod {
@@ -285,10 +255,7 @@ func TestAppeal_VanishedActionMapsToTheSameNotFoundShapeAsUnknown(t *testing.T) 
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "be nice", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
+	actionID := f.warnMember(ctx, t, "be nice")
 
 	vs := &vanishingActionStore{Store: f.database, actionID: actionID}
 	appeals := NewAppealService(vs, f.mod.perms, f.mod, auth.NewRateLimiter())
@@ -312,10 +279,7 @@ func TestAppeal_OnePerActionEver(t *testing.T) {
 
 	t.Run("second submit", func(t *testing.T) {
 		f := newAppealFixture(t)
-		actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-		if err != nil {
-			t.Fatalf("Warn: %v", err)
-		}
+		actionID := f.warnMember(ctx, t, "x")
 		if _, err := f.appeals.Submit(ctx, fixtureMember, actionID, "first"); err != nil {
 			t.Fatalf("first submit: %v", err)
 		}
@@ -326,17 +290,9 @@ func TestAppeal_OnePerActionEver(t *testing.T) {
 
 	t.Run("after decision", func(t *testing.T) {
 		f := newAppealFixture(t)
-		actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-		if err != nil {
-			t.Fatalf("Warn: %v", err)
-		}
-		publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "first")
-		if err != nil {
-			t.Fatalf("submit: %v", err)
-		}
-		if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"); err != nil {
-			t.Fatalf("Decide: %v", err)
-		}
+		actionID := f.warnMember(ctx, t, "x")
+		publicID := f.submitAppeal(ctx, t, actionID, "first")
+		mustDo(t, "Decide", f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"))
 		if _, err := f.appeals.Submit(ctx, fixtureMember, actionID, "again"); !errors.Is(err, ErrAlreadyAppealed) {
 			t.Fatalf("re-submit after decision: want ErrAlreadyAppealed, got %v", err)
 		}
@@ -354,10 +310,7 @@ func TestAppeal_OnePerActionEver(t *testing.T) {
 	// interleaves them) is db.TestAppealQueries_InsertAppealConcurrentBothInFlight.
 	t.Run("concurrent submit", func(t *testing.T) {
 		f := newAppealFixture(t)
-		actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-		if err != nil {
-			t.Fatalf("Warn: %v", err)
-		}
+		actionID := f.warnMember(ctx, t, "x")
 
 		var wg sync.WaitGroup
 		type outcome struct {
@@ -402,10 +355,7 @@ func TestAppeal_OnePerActionEver(t *testing.T) {
 	// into the real UNIQUE(action_id) constraint InsertAppeal hits.
 	t.Run("UNIQUE constraint alone maps to ErrAlreadyAppealed with the pre-check disabled", func(t *testing.T) {
 		f := newAppealFixture(t)
-		actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-		if err != nil {
-			t.Fatalf("Warn: %v", err)
-		}
+		actionID := f.warnMember(ctx, t, "x")
 		if _, err := f.appeals.Submit(ctx, fixtureMember, actionID, "first"); err != nil {
 			t.Fatalf("first submit: %v", err)
 		}
@@ -418,17 +368,9 @@ func TestAppeal_OnePerActionEver(t *testing.T) {
 
 	t.Run("after withdraw", func(t *testing.T) {
 		f := newAppealFixture(t)
-		actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-		if err != nil {
-			t.Fatalf("Warn: %v", err)
-		}
-		publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "first")
-		if err != nil {
-			t.Fatalf("submit: %v", err)
-		}
-		if err := f.appeals.Withdraw(ctx, fixtureMember, publicID); err != nil {
-			t.Fatalf("Withdraw: %v", err)
-		}
+		actionID := f.warnMember(ctx, t, "x")
+		publicID := f.submitAppeal(ctx, t, actionID, "first")
+		mustDo(t, "Withdraw", f.appeals.Withdraw(ctx, fixtureMember, publicID))
 		if _, err := f.appeals.Submit(ctx, fixtureMember, actionID, "again"); !errors.Is(err, ErrAlreadyAppealed) {
 			t.Fatalf("re-submit after withdraw: want ErrAlreadyAppealed, got %v", err)
 		}
@@ -442,9 +384,7 @@ func TestAppeal_RateLimit(t *testing.T) {
 	actionIDs := make([]int64, 0, 4)
 	for range 4 {
 		id, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-		if err != nil {
-			t.Fatalf("Warn: %v", err)
-		}
+		mustDo(t, "Warn", err)
 		actionIDs = append(actionIDs, id)
 	}
 
@@ -463,9 +403,7 @@ func TestAppeal_KickIsNotAppealable(t *testing.T) {
 	ctx := context.Background()
 
 	actionID, err := f.database.ForceLogoutWithAction(ctx, fixtureMember, fixtureMod, nil, "kicked")
-	if err != nil {
-		t.Fatalf("ForceLogoutWithAction: %v", err)
-	}
+	mustDo(t, "ForceLogoutWithAction", err)
 	if _, err := f.appeals.Submit(ctx, fixtureMember, actionID, "let me back in"); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("appeal against a kick: want ErrBadRequest, got %v", err)
 	}
@@ -484,10 +422,7 @@ func TestAppeal_RateLimitKeyIndependentOfReports(t *testing.T) {
 		f.appeals.limiter.Allow(auth.Key("report", fixtureMember), 5, 10*time.Minute)
 	}
 
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
+	actionID := f.warnMember(ctx, t, "x")
 	if _, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please"); err != nil {
 		t.Fatalf("Submit after exhausting the report bucket: %v (the appeal key must be independent)", err)
 	}
@@ -505,13 +440,9 @@ func TestAppeal_AdministratorCountsAsEligibleModerator(t *testing.T) {
 	seedUserRole(t, f.database, 99, 3)
 
 	actionID, err := f.mod.Warn(ctx, soleModID, soleMemberID, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
+	mustDo(t, "Warn", err)
 	publicID, err := f.appeals.Submit(ctx, soleMemberID, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	mustDo(t, "Submit", err)
 	if err := f.appeals.Decide(ctx, soleModID, publicID, "upheld", "self-serving"); !errors.Is(err, ErrSelfReview) {
 		t.Fatalf("acting moderator deciding their own appeal with an Administrator present: want ErrSelfReview, got %v", err)
 	}
@@ -523,76 +454,54 @@ func TestAppeal_StateMachine(t *testing.T) {
 	newOpen := func(t *testing.T, f *appealFixture) string {
 		t.Helper()
 		actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "x", nil)
-		if err != nil {
-			t.Fatalf("Warn: %v", err)
-		}
+		mustDo(t, "Warn", err)
 		publicID, err := f.appeals.Submit(context.Background(), fixtureMember, actionID, "please")
-		if err != nil {
-			t.Fatalf("Submit: %v", err)
-		}
+		mustDo(t, "Submit", err)
 		return publicID
 	}
 
 	t.Run("open to assigned", func(t *testing.T) {
 		f := newAppealFixture(t)
 		publicID := newOpen(t, f)
-		if err := f.appeals.Assign(context.Background(), fixturePeerMod, publicID, false); err != nil {
-			t.Fatalf("Assign: %v", err)
-		}
+		mustDo(t, "Assign", f.appeals.Assign(context.Background(), fixturePeerMod, publicID, false))
 	})
 
 	t.Run("open directly to upheld", func(t *testing.T) {
 		f := newAppealFixture(t)
 		publicID := newOpen(t, f)
-		if err := f.appeals.Decide(context.Background(), fixturePeerMod, publicID, "upheld", ""); err != nil {
-			t.Fatalf("Decide: %v", err)
-		}
+		mustDo(t, "Decide", f.appeals.Decide(context.Background(), fixturePeerMod, publicID, "upheld", ""))
 	})
 
 	t.Run("open directly to overturned", func(t *testing.T) {
 		f := newAppealFixture(t)
 		publicID := newOpen(t, f)
-		if err := f.appeals.Decide(context.Background(), fixturePeerMod, publicID, "overturned", ""); err != nil {
-			t.Fatalf("Decide: %v", err)
-		}
+		mustDo(t, "Decide", f.appeals.Decide(context.Background(), fixturePeerMod, publicID, "overturned", ""))
 	})
 
 	t.Run("assigned to upheld", func(t *testing.T) {
 		f := newAppealFixture(t)
 		publicID := newOpen(t, f)
-		if err := f.appeals.Assign(context.Background(), fixturePeerMod, publicID, false); err != nil {
-			t.Fatalf("Assign: %v", err)
-		}
-		if err := f.appeals.Decide(context.Background(), fixturePeerMod, publicID, "upheld", ""); err != nil {
-			t.Fatalf("Decide: %v", err)
-		}
+		mustDo(t, "Assign", f.appeals.Assign(context.Background(), fixturePeerMod, publicID, false))
+		mustDo(t, "Decide", f.appeals.Decide(context.Background(), fixturePeerMod, publicID, "upheld", ""))
 	})
 
 	t.Run("open to withdrawn by the appellant", func(t *testing.T) {
 		f := newAppealFixture(t)
 		publicID := newOpen(t, f)
-		if err := f.appeals.Withdraw(context.Background(), fixtureMember, publicID); err != nil {
-			t.Fatalf("Withdraw: %v", err)
-		}
+		mustDo(t, "Withdraw", f.appeals.Withdraw(context.Background(), fixtureMember, publicID))
 	})
 
 	t.Run("assigned to withdrawn by the appellant", func(t *testing.T) {
 		f := newAppealFixture(t)
 		publicID := newOpen(t, f)
-		if err := f.appeals.Assign(context.Background(), fixturePeerMod, publicID, false); err != nil {
-			t.Fatalf("Assign: %v", err)
-		}
-		if err := f.appeals.Withdraw(context.Background(), fixtureMember, publicID); err != nil {
-			t.Fatalf("Withdraw: %v", err)
-		}
+		mustDo(t, "Assign", f.appeals.Assign(context.Background(), fixturePeerMod, publicID, false))
+		mustDo(t, "Withdraw", f.appeals.Withdraw(context.Background(), fixtureMember, publicID))
 	})
 
 	t.Run("nothing leaves upheld", func(t *testing.T) {
 		f := newAppealFixture(t)
 		publicID := newOpen(t, f)
-		if err := f.appeals.Decide(context.Background(), fixturePeerMod, publicID, "upheld", ""); err != nil {
-			t.Fatalf("Decide: %v", err)
-		}
+		mustDo(t, "Decide", f.appeals.Decide(context.Background(), fixturePeerMod, publicID, "upheld", ""))
 		if err := f.appeals.Assign(context.Background(), fixturePeerMod, publicID, false); !errors.Is(err, ErrConflict) {
 			t.Fatalf("assign a decided appeal: want ErrConflict, got %v", err)
 		}
@@ -607,9 +516,7 @@ func TestAppeal_StateMachine(t *testing.T) {
 	t.Run("nothing leaves withdrawn", func(t *testing.T) {
 		f := newAppealFixture(t)
 		publicID := newOpen(t, f)
-		if err := f.appeals.Withdraw(context.Background(), fixtureMember, publicID); err != nil {
-			t.Fatalf("Withdraw: %v", err)
-		}
+		mustDo(t, "Withdraw", f.appeals.Withdraw(context.Background(), fixtureMember, publicID))
 		if err := f.appeals.Assign(context.Background(), fixturePeerMod, publicID, false); !errors.Is(err, ErrConflict) {
 			t.Fatalf("assign a withdrawn appeal: want ErrConflict, got %v", err)
 		}
@@ -623,14 +530,7 @@ func TestAppeal_WithdrawIsAppellantOnly(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	publicID := f.openAppeal(ctx, t)
 
 	if err := f.appeals.Withdraw(ctx, fixturePeerMod, publicID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("withdraw by a moderator: want ErrNotFound, got %v", err)
@@ -638,9 +538,7 @@ func TestAppeal_WithdrawIsAppellantOnly(t *testing.T) {
 	if err := f.appeals.Withdraw(ctx, fixtureMember2, publicID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("withdraw by another member: want ErrNotFound, got %v", err)
 	}
-	if err := f.appeals.Withdraw(ctx, fixtureMember, publicID); err != nil {
-		t.Fatalf("withdraw by the appellant: %v", err)
-	}
+	mustDo(t, "withdraw by the appellant", f.appeals.Withdraw(ctx, fixtureMember, publicID))
 }
 
 // ── The deciding-moderator rule ──────────────────────────────────────────
@@ -651,22 +549,13 @@ func TestAppeal_ActingModeratorMayNotDecideWhereAnotherExists(t *testing.T) {
 
 	// fixtureMod acted; fixturePeerMod is a second eligible moderator
 	// (moderationActionsFixture grants both ModerateMembers).
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	publicID := f.openAppeal(ctx, t)
 
 	if err := f.appeals.Decide(ctx, fixtureMod, publicID, "upheld", "self-serving"); !errors.Is(err, ErrSelfReview) {
 		t.Fatalf("acting moderator deciding their own appeal: want ErrSelfReview, got %v", err)
 	}
 	// The other eligible moderator may decide it.
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "fine"); err != nil {
-		t.Fatalf("Decide by the other moderator: %v", err)
-	}
+	mustDo(t, "Decide by the other moderator", f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "fine"))
 }
 
 // TestAppeal_AppellantMayNotDecideOrAssignOwnAppealEvenAsModerator is a
@@ -683,13 +572,9 @@ func TestAppeal_AppellantMayNotDecideOrAssignOwnAppealEvenAsModerator(t *testing
 	// MODERATE_MEMBERS in their own right — the appellant here is also a
 	// moderator, but did not take the appealed action.
 	actionID, err := f.mod.Warn(ctx, fixtureOwner, fixturePeerMod, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
+	mustDo(t, "Warn", err)
 	publicID, err := f.appeals.Submit(ctx, fixturePeerMod, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	mustDo(t, "Submit", err)
 
 	if err := f.appeals.Assign(ctx, fixturePeerMod, publicID, false); !errors.Is(err, ErrSelfReview) {
 		t.Fatalf("appellant assigning their own appeal: want ErrSelfReview, got %v", err)
@@ -698,9 +583,7 @@ func TestAppeal_AppellantMayNotDecideOrAssignOwnAppealEvenAsModerator(t *testing
 		t.Fatalf("appellant deciding their own appeal: want ErrSelfReview, got %v", err)
 	}
 	// An uninvolved moderator may still decide it.
-	if err := f.appeals.Decide(ctx, fixtureMod, publicID, "upheld", "fine"); err != nil {
-		t.Fatalf("Decide by an uninvolved moderator: %v", err)
-	}
+	mustDo(t, "Decide by an uninvolved moderator", f.appeals.Decide(ctx, fixtureMod, publicID, "upheld", "fine"))
 }
 
 // TestAppeal_ActingModeratorMayNotAssignWhereAnotherExists is Claim 6: the
@@ -712,22 +595,13 @@ func TestAppeal_ActingModeratorMayNotAssignWhereAnotherExists(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	publicID := f.openAppeal(ctx, t)
 
 	if err := f.appeals.Assign(ctx, fixtureMod, publicID, false); !errors.Is(err, ErrSelfReview) {
 		t.Fatalf("acting moderator assigning their own appealed action to themself: want ErrSelfReview, got %v", err)
 	}
 	// The other eligible moderator may still assign it.
-	if err := f.appeals.Assign(ctx, fixturePeerMod, publicID, false); err != nil {
-		t.Fatalf("Assign by the other moderator: %v", err)
-	}
+	mustDo(t, "Assign by the other moderator", f.appeals.Assign(ctx, fixturePeerMod, publicID, false))
 }
 
 func TestAppeal_SoleModeratorMayDecideAndAuditSaysSo(t *testing.T) {
@@ -735,892 +609,15 @@ func TestAppeal_SoleModeratorMayDecideAndAuditSaysSo(t *testing.T) {
 	ctx := context.Background()
 
 	actionID, err := f.mod.Warn(ctx, soleModID, soleMemberID, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
+	mustDo(t, "Warn", err)
 	publicID, err := f.appeals.Submit(ctx, soleMemberID, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	mustDo(t, "Submit", err)
 
 	rec := audittest.Install(t, f.database)
-	if err := f.appeals.Decide(ctx, soleModID, publicID, "upheld", "only mod here"); err != nil {
-		t.Fatalf("sole moderator deciding their own appeal: %v", err)
-	}
+	mustDo(t, "sole moderator deciding their own appeal", f.appeals.Decide(ctx, soleModID, publicID, "upheld", "only mod here"))
 	entry := rec.Wait(t, "appeal_decide")
 	if !strings.Contains(entry.Detail, "sole moderator") {
 		t.Fatalf("appeal_decide audit detail = %q, want it to name \"sole moderator\"", entry.Detail)
-	}
-}
-
-// TestAppeal_OverturnAuditsBothTheDecisionAndTheReversalWithDistinctActors
-// is item 4: overturning writes TWO audit rows — appeal_decide, actor the
-// human decider (the accountable decision), and the kind-specific reversal
-// (user_untimeout here), actor 0 (a mechanical consequence of the decision,
-// not a second moderation action by that human — the same convention
-// LiftTimeoutByActionID's lifted_by=0 already uses). The reversal row's
-// detail names the appeal's public id; neither row ever carries the appeal
-// body or the decision note.
-func TestAppeal_OverturnAuditsBothTheDecisionAndTheReversalWithDistinctActors(t *testing.T) {
-	f := newAppealFixture(t)
-	ctx := context.Background()
-
-	const body = "appeal body sentinel 4-item"
-	const note = "decision note sentinel 4-item"
-	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
-	if err != nil {
-		t.Fatalf("Timeout: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, body)
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-
-	rec := audittest.Install(t, f.database)
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", note); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
-
-	decideEntry := rec.Wait(t, "appeal_decide")
-	if decideEntry.ActorID != fixturePeerMod {
-		t.Fatalf("appeal_decide actor = %d, want the human decider %d", decideEntry.ActorID, fixturePeerMod)
-	}
-	// round 4/5: "user_untimeout" is now FinalizeTimeoutLift's own audit
-	// write (not a second, appeal-specific one — see Decide's comment on why
-	// the generic reversal-audit block excludes "timeout"), so its detail is
-	// the same fixed "timeout lifted" a moderator-initiated LiftTimeout
-	// leaves, not the appeal's public id; the appeal_decide row above is
-	// where the appeal's own identity lives.
-	reversalEntry := rec.Wait(t, "user_untimeout")
-	if reversalEntry.ActorID != 0 {
-		t.Fatalf("user_untimeout actor = %d, want 0 (a mechanical consequence of the decision)", reversalEntry.ActorID)
-	}
-	if reversalEntry.Detail != "timeout lifted" {
-		t.Fatalf("user_untimeout detail = %q, want %q (FinalizeTimeoutLift's own)", reversalEntry.Detail, "timeout lifted")
-	}
-	for _, e := range rec.Entries() {
-		if strings.Contains(e.Detail, body) || strings.Contains(e.Detail, note) {
-			t.Fatalf("audit %q detail carries the appeal body or note: %q", e.Action, e.Detail)
-		}
-	}
-}
-
-// ── Effects ──────────────────────────────────────────────────────────────
-
-func TestAppeal_OverturnLiftsTimeoutUnbansAcknowledgesWarning(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("timeout", func(t *testing.T) {
-		f := newAppealFixture(t)
-		result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
-		if err != nil {
-			t.Fatalf("Timeout: %v", err)
-		}
-		publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, "please")
-		if err != nil {
-			t.Fatalf("Submit: %v", err)
-		}
-		if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-			t.Fatalf("Decide: %v", err)
-		}
-		active, err := f.database.HasActiveTimeout(ctx, fixtureMember)
-		if err != nil {
-			t.Fatalf("HasActiveTimeout: %v", err)
-		}
-		if active {
-			t.Fatal("timeout still active after the appeal was overturned")
-		}
-	})
-
-	t.Run("ban", func(t *testing.T) {
-		f := newAppealFixture(t)
-		if err := f.mod.BanUser(ctx, fixtureMod, fixtureMember, "spam", nil); err != nil {
-			t.Fatalf("BanUser: %v", err)
-		}
-		rows, err := f.database.ListModerationActionsForTarget(ctx, fixtureMember)
-		if err != nil {
-			t.Fatalf("ListModerationActionsForTarget: %v", err)
-		}
-		var actionID int64
-		for _, r := range rows {
-			if r.Kind == "ban" {
-				actionID = r.ID
-			}
-		}
-		if actionID == 0 {
-			t.Fatal("no ban ledger row found")
-		}
-		// The banned member cannot themselves reach Submit in production
-		// (AuthMiddleware rejects every effectively-banned caller) — this
-		// unit test drives the service directly, standing in for "the ban
-		// has since lapsed or been reversed" per the narrow ban-appeal path.
-		publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-		if err != nil {
-			t.Fatalf("Submit: %v", err)
-		}
-		if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-			t.Fatalf("Decide: %v", err)
-		}
-		target, err := f.database.GetUserByID(ctx, fixtureMember)
-		if err != nil {
-			t.Fatalf("GetUserByID: %v", err)
-		}
-		if target.Banned {
-			t.Fatal("target still banned after the appeal was overturned")
-		}
-	})
-
-	t.Run("warning", func(t *testing.T) {
-		f := newAppealFixture(t)
-		actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-		if err != nil {
-			t.Fatalf("Warn: %v", err)
-		}
-		publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-		if err != nil {
-			t.Fatalf("Submit: %v", err)
-		}
-		if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-			t.Fatalf("Decide: %v", err)
-		}
-		notices, err := f.database.ListUnacknowledgedWarnings(ctx, fixtureMember)
-		if err != nil {
-			t.Fatalf("ListUnacknowledgedWarnings: %v", err)
-		}
-		if len(notices) != 0 {
-			t.Fatalf("unacknowledged notices after overturning a warning = %d, want 0", len(notices))
-		}
-	})
-}
-
-// TestAppeal_OverturnReversesOnlyTheSpecificAppealedTimeout is N1: overturn
-// must reverse the SPECIFICALLY appealed action, never "whatever timeout is
-// active for this target now". A second Timeout call supersedes (lifts) the
-// first, so appealing the OLDER (already-superseded) one and overturning it
-// must be a record only — the newer timeout, still active, must survive
-// completely untouched. Before N1, overturn looked up "the target's current
-// active timeout" instead of the appealed action's own id, and would have
-// wrongly lifted the newer one here.
-func TestAppeal_OverturnReversesOnlyTheSpecificAppealedTimeout(t *testing.T) {
-	f := newAppealFixture(t)
-	ctx := context.Background()
-	f.mod.SetVoiceMuter(&dbBackedVoiceMuter{database: f.database})
-	notifier := &fakeModActionNotifier{}
-	f.mod.SetNotifier(notifier)
-
-	if err := f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	olderResult, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "first", time.Hour, nil)
-	if err != nil {
-		t.Fatalf("Timeout (older): %v", err)
-	}
-	newerResult, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "second", 2*time.Hour, nil)
-	if err != nil {
-		t.Fatalf("Timeout (newer): %v", err)
-	}
-	if olderResult.ID == newerResult.ID {
-		t.Fatal("the two Timeout calls returned the same action id")
-	}
-	state, err := f.database.GetVoiceState(ctx, fixtureMember)
-	if err != nil || state == nil || !state.ServerMuted {
-		t.Fatalf("test setup broken: want the target server-muted (owned by the newer timeout) before the appeal, got %+v, err=%v", state, err)
-	}
-	notifier.kinds = nil // discard Timeout's own two "timeout" issue frames.
-
-	// The older timeout is already superseded (lifted) by the newer one —
-	// appealing it anyway (the target may not know which of two attempts a
-	// notice referred to) must not disturb the newer, still-active row, its
-	// voice mute (still owned by the newer timeout), or send a stale
-	// "lifted" frame — B5-10 round 4/5, FinalizeTimeoutLift's own staleness
-	// check (HasActiveTimeout).
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, olderResult.ID, "please")
-	if err != nil {
-		t.Fatalf("Submit against the older (superseded) timeout: %v", err)
-	}
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
-
-	active, err := f.database.HasActiveTimeout(ctx, fixtureMember)
-	if err != nil {
-		t.Fatalf("HasActiveTimeout: %v", err)
-	}
-	if !active {
-		t.Fatal("the newer timeout is no longer active after overturning the OLDER, already-superseded one")
-	}
-	rows, err := f.database.ListModerationActionsForTarget(ctx, fixtureMember)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
-	for i := range rows {
-		if r := &rows[i]; r.ID == newerResult.ID && r.LiftedAt != nil {
-			t.Fatalf("the newer timeout (action %d) was lifted by overturning a different action", newerResult.ID)
-		}
-	}
-	state, err = f.database.GetVoiceState(ctx, fixtureMember)
-	if err != nil || state == nil || !state.ServerMuted {
-		t.Fatalf("target must still be server-muted — the newer timeout still owns the mute, got %+v, err=%v", state, err)
-	}
-	if len(notifier.kinds) != 0 {
-		t.Fatalf("NotifyModAction calls after overturning the superseded timeout = %v, want none — the newer timeout's own issue already published the current state", notifier.kinds)
-	}
-}
-
-// TestAppeal_OverturnedTimeoutLiftsVoiceMuteWhenItApplied is B5-10 round
-// 4/5's voice-reconcile wiring, the common case: the target is in voice
-// when the timeout lands (the mute applies), and overturning the appeal
-// against it — through Decide, not ModerationService.LiftTimeout — must
-// still call FinalizeTimeoutLift and leave the target genuinely unmuted, the
-// same as a moderator lifting it directly.
-func TestAppeal_OverturnedTimeoutLiftsVoiceMuteWhenItApplied(t *testing.T) {
-	f := newAppealFixture(t)
-	ctx := context.Background()
-	f.mod.SetVoiceMuter(&dbBackedVoiceMuter{database: f.database})
-	notifier := &fakeModActionNotifier{}
-	f.mod.SetNotifier(notifier)
-
-	if err := f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
-	if err != nil {
-		t.Fatalf("Timeout: %v", err)
-	}
-	if result.VoiceSkipped {
-		t.Fatal("test setup broken: want the voice half to apply")
-	}
-	state, err := f.database.GetVoiceState(ctx, fixtureMember)
-	if err != nil || state == nil || !state.ServerMuted {
-		t.Fatalf("test setup broken: want the target server-muted before the appeal, got %+v, err=%v", state, err)
-	}
-	notifier.kinds = nil // discard Timeout's own issue frame.
-
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
-
-	state, err = f.database.GetVoiceState(ctx, fixtureMember)
-	if err != nil || state == nil {
-		t.Fatalf("GetVoiceState: %+v, %v", state, err)
-	}
-	if state.ServerMuted {
-		t.Fatal("target still server-muted after the appeal was overturned")
-	}
-	found := false
-	for _, k := range notifier.kinds {
-		if k == "timeout" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("NotifyModAction calls = %v, want a \"timeout\" (timeout-cleared) frame", notifier.kinds)
-	}
-}
-
-// TestAppeal_OverturnedTimeoutWithNoVoiceHalfChangesNoVoiceState is B5-10
-// round 4/5's voice-reconcile wiring, the other common case: the target was
-// never in voice (the mute never applied, VoiceSkipped=true), so
-// FinalizeTimeoutLift's own UnmuteForTimeout call has nothing to clear —
-// overturning the appeal must not create or otherwise touch any voice
-// state, though the ledger/notification side of the lift still applies.
-func TestAppeal_OverturnedTimeoutWithNoVoiceHalfChangesNoVoiceState(t *testing.T) {
-	f := newAppealFixture(t)
-	ctx := context.Background()
-	f.mod.SetVoiceMuter(&dbBackedVoiceMuter{database: f.database})
-	notifier := &fakeModActionNotifier{}
-	f.mod.SetNotifier(notifier)
-
-	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
-	if err != nil {
-		t.Fatalf("Timeout: %v", err)
-	}
-	if !result.VoiceSkipped {
-		t.Fatal("test setup broken: want the voice half to be skipped (the target is not in voice)")
-	}
-	if state, err := f.database.GetVoiceState(ctx, fixtureMember); err != nil || state != nil {
-		t.Fatalf("test setup broken: want no voice state for the target, got %+v, err=%v", state, err)
-	}
-	notifier.kinds = nil // discard Timeout's own issue frame.
-
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
-
-	if state, err := f.database.GetVoiceState(ctx, fixtureMember); err != nil || state != nil {
-		t.Fatalf("voice state after overturning a never-applied timeout = %+v, err=%v, want still none", state, err)
-	}
-	found := false
-	for _, k := range notifier.kinds {
-		if k == "timeout" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("NotifyModAction calls = %v, want a \"timeout\" (timeout-cleared) frame even without a voice half", notifier.kinds)
-	}
-}
-
-// TestAppeal_OverturnFirstBanDoesNotUnbanAfterReban is N1's ban case: ban,
-// unban, re-ban, then overturn the FIRST ban's appeal — the target must
-// still be banned, because a strictly newer ban action (the re-ban) governs
-// their current state. applyAppealReversalTx's ban reversal only unbans
-// when no newer ban action exists for the target; here one does.
-func TestAppeal_OverturnFirstBanDoesNotUnbanAfterReban(t *testing.T) {
-	f := newAppealFixture(t)
-	ctx := context.Background()
-
-	if err := f.mod.BanUser(ctx, fixtureMod, fixtureMember, "first offense", nil); err != nil {
-		t.Fatalf("BanUser (first): %v", err)
-	}
-	firstBanID := latestActionOfKind(t, ctx, f, fixtureMember, "ban")
-
-	if err := f.mod.UnbanUser(ctx, fixtureMod, fixtureMember); err != nil {
-		t.Fatalf("UnbanUser: %v", err)
-	}
-	if err := f.mod.BanUser(ctx, fixtureMod, fixtureMember, "second offense", nil); err != nil {
-		t.Fatalf("BanUser (second): %v", err)
-	}
-	secondBanID := latestActionOfKind(t, ctx, f, fixtureMember, "ban")
-	if firstBanID == secondBanID {
-		t.Fatal("the two BanUser calls returned the same action id")
-	}
-
-	// Appealing the FIRST ban, now superseded by the re-ban.
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, firstBanID, "please")
-	if err != nil {
-		t.Fatalf("Submit against the first ban: %v", err)
-	}
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
-
-	target, err := f.database.GetUserByID(ctx, fixtureMember)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
-	if !target.Banned {
-		t.Fatal("target is unbanned after overturning the FIRST ban — the re-ban should still govern")
-	}
-}
-
-// TestAppeal_OverturnRemovalIsRecordOnly covers applyAppealReversalTx's
-// "removal" branch: there is nothing to restore (the content is gone), so
-// overturning a removal appeal must still commit cleanly as a record-only
-// decision — no error, no panic, just the appeal's own state flipping.
-func TestAppeal_OverturnRemovalIsRecordOnly(t *testing.T) {
-	f := newAppealFixture(t)
-	ctx := context.Background()
-
-	msgID, err := f.database.CreateMessage(ctx, fixtureChannel, fixtureMember2, "reported content", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	result, err := f.mod.ActOnReport(ctx, ActOnReportParams{
-		ActorID: fixtureMod, Kind: "removal", Reason: "linked removal", MessageID: msgID, ReportID: 999,
-	})
-	if err != nil {
-		t.Fatalf("ActOnReport(removal): %v", err)
-	}
-	rows, err := f.database.ListModerationActionsForTarget(ctx, fixtureMember2)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
-	var actionID int64
-	for i := range rows {
-		if r := &rows[i]; r.Kind == "removal" {
-			actionID = r.ID
-		}
-	}
-	if actionID == 0 {
-		t.Fatalf("no removal ledger row found (result=%+v)", result)
-	}
-
-	publicID, err := f.appeals.Submit(ctx, fixtureMember2, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-		t.Fatalf("Decide(removal, overturned): %v", err)
-	}
-	appeal, err := f.database.GetAppealByPublicID(ctx, publicID)
-	if err != nil {
-		t.Fatalf("GetAppealByPublicID: %v", err)
-	}
-	if appeal.State != "overturned" {
-		t.Fatalf("appeal state = %q, want overturned", appeal.State)
-	}
-}
-
-// latestActionOfKind returns the highest-id moderation_actions row of kind
-// for targetID — a test helper for scenarios that create the same kind
-// twice against the same target and need to name each action id distinctly.
-func latestActionOfKind(t *testing.T, ctx context.Context, f *appealFixture, targetID int64, kind string) int64 {
-	t.Helper()
-	rows, err := f.database.ListModerationActionsForTarget(ctx, targetID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
-	var latest int64
-	for i := range rows {
-		if r := &rows[i]; r.Kind == kind && r.ID > latest {
-			latest = r.ID
-		}
-	}
-	if latest == 0 {
-		t.Fatalf("no %q action found for target %d", kind, targetID)
-	}
-	return latest
-}
-
-// TestAppeal_OverturnRequiresOutrankAndKindPermission: overturning an appeal
-// reverses the appealed action, so the decider must carry the same authority
-// the direct reversal path does — outrank the target, and (for a ban) hold
-// BAN_MEMBERS. Before this, any MODERATE_MEMBERS holder could overturn a
-// timeout/warning a higher-ranked moderator issued, or clear a ban without
-// BAN_MEMBERS, because Decide only checked CanModerate.
-func TestAppeal_OverturnRequiresOutrankAndKindPermission(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("equal-rank target", func(t *testing.T) {
-		f := newAppealFixture(t)
-
-		// The owner (position 100) times out fixturePeerMod (position 80).
-		// fixtureMod is that target's equal-rank peer (both position 80), so
-		// it may not overturn the owner's action against it.
-		result, err := f.mod.Timeout(ctx, fixtureOwner, fixturePeerMod, "cool off", time.Hour, nil)
-		if err != nil {
-			t.Fatalf("Timeout: %v", err)
-		}
-		publicID, err := f.appeals.Submit(ctx, fixturePeerMod, result.ID, "please")
-		if err != nil {
-			t.Fatalf("Submit: %v", err)
-		}
-
-		// Sanity: the direct lift path refuses this actor for the same
-		// reason, so the assertion below is not accidentally vacuous.
-		if err := f.mod.LiftTimeout(ctx, fixtureMod, fixturePeerMod); !errors.Is(err, ErrForbidden) {
-			t.Fatalf("sanity: ModerationService.LiftTimeout(fixtureMod, fixturePeerMod): want ErrForbidden, got %v", err)
-		}
-
-		if err := f.appeals.Decide(ctx, fixtureMod, publicID, "overturned", "fine"); !errors.Is(err, ErrForbidden) {
-			t.Fatalf("Decide by an equal-rank peer: want ErrForbidden, got %v", err)
-		}
-		active, err := f.database.HasActiveTimeout(ctx, fixturePeerMod)
-		if err != nil {
-			t.Fatalf("HasActiveTimeout: %v", err)
-		}
-		if !active {
-			t.Fatal("timeout was lifted despite the overturn being refused")
-		}
-		appeal, err := f.database.GetAppealByPublicID(ctx, publicID)
-		if err != nil {
-			t.Fatalf("GetAppealByPublicID: %v", err)
-		}
-		if appeal.State != "open" {
-			t.Fatalf("appeal state = %q, want open (nothing may commit)", appeal.State)
-		}
-	})
-
-	t.Run("ban without BAN_MEMBERS", func(t *testing.T) {
-		f := newAppealFixture(t)
-
-		// A moderator above the target (position 90, so it outranks
-		// fixtureMember's 40) but holding only MODERATE_MEMBERS, never
-		// BAN_MEMBERS.
-		//nolint:contextcheck // seedRole/seedUser/seedUserRole always use context.Background() internally
-		seedRole(t, f.database, &db.Role{ID: 6, Name: "warnmod", Permissions: permissions.ModerateMembers, Position: 90})
-		const warnModID = int64(7)
-		seedUser(t, f.database, &db.User{ID: warnModID, Username: "warnmod"}) //nolint:contextcheck // see above
-		seedUserRole(t, f.database, warnModID, 6)                             //nolint:contextcheck // see above
-
-		if err := f.mod.BanUser(ctx, fixtureMod, fixtureMember, "spam", nil); err != nil {
-			t.Fatalf("BanUser: %v", err)
-		}
-		banID := latestActionOfKind(t, ctx, f, fixtureMember, "ban")
-		publicID, err := f.appeals.Submit(ctx, fixtureMember, banID, "please")
-		if err != nil {
-			t.Fatalf("Submit: %v", err)
-		}
-
-		if err := f.appeals.Decide(ctx, warnModID, publicID, "overturned", "fine"); !errors.Is(err, ErrForbidden) {
-			t.Fatalf("Decide on a ban without BAN_MEMBERS: want ErrForbidden, got %v", err)
-		}
-		target, err := f.database.GetUserByID(ctx, fixtureMember)
-		if err != nil {
-			t.Fatalf("GetUserByID: %v", err)
-		}
-		if !target.Banned {
-			t.Fatal("ban was lifted despite the overturn being refused")
-		}
-	})
-
-	t.Run("outranking decider below the original actor may overturn", func(t *testing.T) {
-		f := newAppealFixture(t)
-
-		// The owner (100) issues the timeout; fixtureMod (80) outranks the
-		// member target (40), so — exactly like the direct lift path — it may
-		// overturn even though it does not outrank the original actor.
-		result, err := f.mod.Timeout(ctx, fixtureOwner, fixtureMember, "cool off", time.Hour, nil)
-		if err != nil {
-			t.Fatalf("Timeout: %v", err)
-		}
-		publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, "please")
-		if err != nil {
-			t.Fatalf("Submit: %v", err)
-		}
-		if err := f.appeals.Decide(ctx, fixtureMod, publicID, "overturned", "fine"); err != nil {
-			t.Fatalf("Decide by an outranking moderator: %v", err)
-		}
-		active, err := f.database.HasActiveTimeout(ctx, fixtureMember)
-		if err != nil {
-			t.Fatalf("HasActiveTimeout: %v", err)
-		}
-		if active {
-			t.Fatal("timeout still active after an outranking moderator overturned the appeal")
-		}
-	})
-}
-
-// TestAppeal_DecideDoesNotNotifyOnFailure is the notification half of F1: a
-// Decide call that returns an error (for any reason — this one uses the
-// simplest, an already-decided appeal) must never fire the appeal_status
-// notification. db/appeal_reversal_test.go covers the reversal-specific
-// half (a forced reversal failure rolls back the whole transaction) at the
-// db layer, where the test-only fault-injection hook actually lives.
-func TestAppeal_DecideDoesNotNotifyOnFailure(t *testing.T) {
-	f := newAppealFixture(t)
-	ctx := context.Background()
-
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"); err != nil {
-		t.Fatalf("first Decide: %v", err)
-	}
-
-	notifier := &fakeAppealNotifier{}
-	f.appeals.SetNotifier(notifier)
-
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "again"); !errors.Is(err, ErrConflict) {
-		t.Fatalf("re-deciding a decided appeal: want ErrConflict, got %v", err)
-	}
-	if len(notifier.calls) != 0 {
-		t.Fatalf("appeal_status notify calls = %d, want 0 for a failed Decide", len(notifier.calls))
-	}
-}
-
-// appealOrderRecorder records every notify call's order across BOTH
-// channels (appeal_status and mod_queue) in one shared, lock-protected
-// slice — F4's own test needs the two interleaved to prove one transition's
-// pair never lands between another's.
-type appealOrderRecorder struct {
-	mu     syncutil.Mutex
-	events []string
-}
-
-func (r *appealOrderRecorder) add(s string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.events = append(r.events, s)
-}
-
-func (r *appealOrderRecorder) snapshot() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]string(nil), r.events...)
-}
-
-type orderedStatusNotifier struct{ rec *appealOrderRecorder }
-
-func (n *orderedStatusNotifier) NotifyAppealStatus(userID int64, publicID, state string, note *string) {
-	n.rec.add("status:" + state)
-}
-
-type orderedQueueBroadcaster struct{ rec *appealOrderRecorder }
-
-func (b *orderedQueueBroadcaster) BroadcastAppealQueue(ctx context.Context, appealID int64, state string) {
-	b.rec.add("queue:" + state)
-}
-
-// TestAppeal_AssignThenDecideNotifyOrderMatchesCommitOrder is F4: Assign's
-// write commits, then — before Assign has notified anyone — a concurrent
-// Decide runs to completion (write, audit, both notifies). F4's per-appeal
-// lock must force Decide to wait for Assign's own notify pair before it can
-// even begin its write, so every notify (appeal_status AND mod_queue) lands
-// in commit order: assigned, assigned, overturned, overturned — never a
-// stale "assigned" trailing behind "overturned".
-func TestAppeal_AssignThenDecideNotifyOrderMatchesCommitOrder(t *testing.T) {
-	f := newAppealFixture(t)
-	ctx := context.Background()
-
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-
-	rec := &appealOrderRecorder{}
-	f.appeals.SetNotifier(&orderedStatusNotifier{rec: rec})
-	f.appeals.SetQueueBroadcaster(&orderedQueueBroadcaster{rec: rec})
-
-	reached := make(chan struct{})
-	release := make(chan struct{})
-	var armed atomic.Bool
-	appealPostWriteHookForTest = func(pid string) {
-		if pid != publicID {
-			return
-		}
-		// Only the FIRST call (Assign's) parks here. A second transition's
-		// call (Decide's, if it ever reaches this same hook) must return
-		// immediately, with NO blocking of its own — sync.Once would be the
-		// obvious tool here, but Once.Do blocks EVERY caller until the
-		// winning call's function returns, which would make Decide's call
-		// block on Assign's in-flight <-release for the exact same reason a
-		// shared release channel does: proving nothing about the appeal's
-		// own lock. CompareAndSwap lets exactly one caller run the blocking
-		// body while every other caller falls through instantly.
-		if armed.CompareAndSwap(false, true) {
-			close(reached)
-			<-release
-		}
-	}
-	defer func() { appealPostWriteHookForTest = nil }()
-
-	assignDone := make(chan error, 1)
-	go func() {
-		assignDone <- f.appeals.Assign(ctx, fixturePeerMod, publicID, false)
-	}()
-
-	select {
-	case <-reached:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Assign never reached the post-write hook — the barrier never armed")
-	}
-	// Assign's write has committed and it is now parked in the hook, still
-	// holding the appeal's own lock (it has not notified or unlocked yet).
-
-	decideDone := make(chan error, 1)
-	go func() {
-		decideDone <- f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine")
-	}()
-
-	// The parking pattern (round 4 test-strengthening): PROVE Decide is
-	// actually blocked on the appeal's lock while Assign holds it, rather
-	// than hoping a fixed sleep gave it enough time to queue. If the lock
-	// were a no-op, Decide's whole transaction (an in-memory sqlite write)
-	// would essentially always complete within this window; it can only
-	// still be empty here because something is genuinely holding it up.
-	select {
-	case err := <-decideDone:
-		t.Fatalf("Decide completed (err=%v) while Assign was still holding the appeal's lock — the lock is not actually blocking", err)
-	case <-time.After(100 * time.Millisecond):
-		// Still parked, as the lock requires.
-	}
-
-	close(release)
-
-	if err := <-assignDone; err != nil {
-		t.Fatalf("Assign: %v", err)
-	}
-	if err := <-decideDone; err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
-
-	want := []string{"status:assigned", "queue:assigned", "status:overturned", "queue:overturned"}
-	if got := rec.snapshot(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("notify order = %v, want %v", got, want)
-	}
-}
-
-// TestAppeal_SubmitThenWithdrawNotifyOrderMatchesCommitOrder is P3 item 4,
-// Submit's twin of TestAppeal_AssignThenDecideNotifyOrderMatchesCommitOrder:
-// Submit's own "open" mod_queue broadcast used to run in the API handler
-// AFTER Submit returned, so it could arrive after a withdraw (or assign)
-// frame for the SAME appeal filed moments later. Submit now broadcasts
-// under the same per-appeal lock as every other transition — this proves
-// it the same way F4's test proves Assign/Decide: park Submit inside the
-// post-write hook (write committed, lock held, not yet notified), prove a
-// concurrent Withdraw is genuinely blocked on the lock rather than merely
-// slower, then release and check commit order held: open before withdrawn.
-func TestAppeal_SubmitThenWithdrawNotifyOrderMatchesCommitOrder(t *testing.T) {
-	f := newAppealFixture(t)
-	ctx := context.Background()
-
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-
-	rec := &appealOrderRecorder{}
-	f.appeals.SetQueueBroadcaster(&orderedQueueBroadcaster{rec: rec})
-
-	reached := make(chan struct{})
-	release := make(chan struct{})
-	publicIDCh := make(chan string, 1)
-	var armed atomic.Bool
-	appealPostWriteHookForTest = func(pid string) {
-		select {
-		case publicIDCh <- pid:
-		default:
-		}
-		if armed.CompareAndSwap(false, true) {
-			close(reached)
-			<-release
-		}
-	}
-	defer func() { appealPostWriteHookForTest = nil }()
-
-	type submitResult struct {
-		publicID string
-		err      error
-	}
-	submitDone := make(chan submitResult, 1)
-	go func() {
-		pid, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-		submitDone <- submitResult{pid, err}
-	}()
-
-	select {
-	case <-reached:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Submit never reached the post-write hook — the barrier never armed")
-	}
-	publicID := <-publicIDCh
-	// Submit's insert has committed and it is now parked in the hook, still
-	// holding the appeal's own lock (it has not notified or unlocked yet).
-
-	withdrawDone := make(chan error, 1)
-	go func() {
-		withdrawDone <- f.appeals.Withdraw(ctx, fixtureMember, publicID)
-	}()
-
-	select {
-	case err := <-withdrawDone:
-		t.Fatalf("Withdraw completed (err=%v) while Submit was still holding the appeal's lock — the lock is not actually blocking", err)
-	case <-time.After(100 * time.Millisecond):
-		// Still parked, as the lock requires.
-	}
-
-	close(release)
-
-	result := <-submitDone
-	if result.err != nil {
-		t.Fatalf("Submit: %v", result.err)
-	}
-	if err := <-withdrawDone; err != nil {
-		t.Fatalf("Withdraw: %v", err)
-	}
-
-	want := []string{"queue:open", "queue:withdrawn"}
-	if got := rec.snapshot(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("notify order = %v, want %v", got, want)
-	}
-}
-
-// TestAppeal_DelayedAssignAfterDecisionDoesNotBroadcast is F4: a delayed
-// Assign that finally reaches the database after the appeal was already
-// decided must fail on the same guarded UPDATE Claim 5 added (the appeal's
-// state is no longer "open"/"assigned", so the write affects zero rows) —
-// and, critically, must NOT emit an "assigned" appeal_status frame, which
-// would otherwise arrive at the appellant's socket AFTER the "overturned"
-// or "upheld" frame it already received.
-func TestAppeal_DelayedAssignAfterDecisionDoesNotBroadcast(t *testing.T) {
-	f := newAppealFixture(t)
-	ctx := context.Background()
-
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
-
-	notifier := &fakeAppealNotifier{}
-	f.appeals.SetNotifier(notifier)
-
-	if err := f.appeals.Assign(ctx, fixturePeerMod, publicID, false); !errors.Is(err, ErrConflict) {
-		t.Fatalf("delayed assign after decision: want ErrConflict, got %v", err)
-	}
-	if len(notifier.calls) != 0 {
-		t.Fatalf("appeal_status notify calls = %d, want 0 — a refused assign must never broadcast", len(notifier.calls))
-	}
-}
-
-// recordingQueueBroadcaster records whether it was called and the exact
-// context it was handed, for TestAppeal_NotifyQueueSurvivesCallerContextCancellation.
-type recordingQueueBroadcaster struct {
-	called bool
-	gotCtx context.Context
-}
-
-func (r *recordingQueueBroadcaster) BroadcastAppealQueue(ctx context.Context, appealID int64, state string) {
-	r.called = true
-	r.gotCtx = ctx
-}
-
-// TestAppeal_NotifyQueueSurvivesCallerContextCancellation is P3 item 3:
-// notifyQueue used to forward the caller's own request context straight to
-// the broadcaster, so a client disconnecting right after the write commits
-// (canceling ctx) could suppress the mod_queue frame every OTHER
-// moderator's queue view depends on. The postWriteHook fires exactly
-// between the commit and notifyQueue's call, the same seam F4's ordering
-// tests use — canceling the caller's context there proves notifyQueue must
-// detach via context.WithoutCancel, not merely that it happens to run
-// before some later cancellation.
-func TestAppeal_NotifyQueueSurvivesCallerContextCancellation(t *testing.T) {
-	f := newAppealFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-
-	broadcaster := &recordingQueueBroadcaster{}
-	f.appeals.SetQueueBroadcaster(broadcaster)
-
-	appealPostWriteHookForTest = func(pid string) {
-		if pid == publicID {
-			cancel() // the client "disconnects" right after the write commits.
-		}
-	}
-	defer func() { appealPostWriteHookForTest = nil }()
-
-	if err := f.appeals.Withdraw(ctx, fixtureMember, publicID); err != nil {
-		t.Fatalf("Withdraw: %v", err)
-	}
-	if !broadcaster.called {
-		t.Fatal("BroadcastAppealQueue was never called — the caller's context cancellation must not suppress the mod_queue broadcast")
-	}
-	if broadcaster.gotCtx.Err() != nil {
-		t.Fatalf("BroadcastAppealQueue's context was already canceled (err=%v) — notifyQueue must detach via context.WithoutCancel", broadcaster.gotCtx.Err())
 	}
 }
 
@@ -1629,20 +626,11 @@ func TestAppeal_UpholdChangesNothing(t *testing.T) {
 	ctx := context.Background()
 
 	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
-	if err != nil {
-		t.Fatalf("Timeout: %v", err)
-	}
+	mustDo(t, "Timeout", err)
 	publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
-	active, err := f.database.HasActiveTimeout(ctx, fixtureMember)
-	if err != nil {
-		t.Fatalf("HasActiveTimeout: %v", err)
-	}
+	mustDo(t, "Submit", err)
+	mustDo(t, "Decide", f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"))
+	active := mustHaveActiveTimeout(t, f.database, fixtureMember)
 	if !active {
 		t.Fatal("timeout no longer active after upholding — upholding must change nothing")
 	}
@@ -1674,18 +662,12 @@ func TestAppeal_QueueExcludesTheCallersOwnAppeal(t *testing.T) {
 	// MODERATE_MEMBERS — the appellant here is also a moderator viewing the
 	// queue.
 	actionID, err := f.mod.Warn(ctx, fixtureOwner, fixturePeerMod, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
+	mustDo(t, "Warn", err)
 	publicID, err := f.appeals.Submit(ctx, fixturePeerMod, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	mustDo(t, "Submit", err)
 
 	rows, err := f.appeals.Queue(ctx, fixturePeerMod, "")
-	if err != nil {
-		t.Fatalf("Queue: %v", err)
-	}
+	mustDo(t, "Queue", err)
 	for _, r := range rows {
 		if r.PublicID == publicID {
 			t.Fatalf("Queue for the appellant themself included their own appeal %q", publicID)
@@ -1693,9 +675,7 @@ func TestAppeal_QueueExcludesTheCallersOwnAppeal(t *testing.T) {
 	}
 	// An uninvolved moderator sees it.
 	rows, err = f.appeals.Queue(ctx, fixtureMod, "")
-	if err != nil {
-		t.Fatalf("Queue by an uninvolved moderator: %v", err)
-	}
+	mustDo(t, "Queue by an uninvolved moderator", err)
 	found := false
 	for _, r := range rows {
 		if r.PublicID == publicID {
@@ -1716,13 +696,9 @@ func TestAppeal_GetRefusesTheCallersOwnAppeal(t *testing.T) {
 	ctx := context.Background()
 
 	actionID, err := f.mod.Warn(ctx, fixtureOwner, fixturePeerMod, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
+	mustDo(t, "Warn", err)
 	publicID, err := f.appeals.Submit(ctx, fixturePeerMod, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	mustDo(t, "Submit", err)
 
 	if _, err := f.appeals.Get(ctx, fixturePeerMod, publicID); !errors.Is(err, ErrSelfReview) {
 		t.Fatalf("Get by the appellant themself: want ErrSelfReview, got %v", err)
@@ -1738,14 +714,7 @@ func TestAppeal_ConcurrentDecideOneWins(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	publicID := f.openAppeal(ctx, t)
 
 	var wg sync.WaitGroup
 	results := make([]error, 2)
@@ -1784,20 +753,9 @@ func TestAppeal_DecidingModeratorErasureUnlinks(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	if err := f.appeals.Assign(ctx, fixturePeerMod, publicID, false); err != nil {
-		t.Fatalf("Assign: %v", err)
-	}
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
+	publicID := f.openAppeal(ctx, t)
+	mustDo(t, "Assign", f.appeals.Assign(ctx, fixturePeerMod, publicID, false))
+	mustDo(t, "Decide", f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"))
 
 	const token = "erased-mod-token"
 	if _, err := f.database.EraseAccount(ctx, fixturePeerMod, token); err != nil {
@@ -1805,9 +763,7 @@ func TestAppeal_DecidingModeratorErasureUnlinks(t *testing.T) {
 	}
 
 	appeal, err := f.database.GetAppealByPublicID(ctx, publicID)
-	if err != nil {
-		t.Fatalf("GetAppealByPublicID after erasure: %v", err)
-	}
+	mustDo(t, "GetAppealByPublicID after erasure", err)
 	if appeal.DecidedBy != 0 {
 		t.Errorf("decided_by after erasure = %d, want 0", appeal.DecidedBy)
 	}
@@ -1855,10 +811,7 @@ func TestSubmit_OpenBroadcastPrecedesConcurrentAssign(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
+	actionID := f.warnMember(ctx, t, "x")
 
 	rec := &appealOrderRecorder{}
 	store := &assignAfterInsertStore{Store: f.database, actor: fixturePeerMod}
@@ -1897,14 +850,7 @@ func decideWithStore(t *testing.T, st *failingDecideStore) error {
 	t.Helper()
 	f := newAppealFixture(t)
 	ctx := context.Background()
-	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
-	if err != nil {
-		t.Fatalf("Warn: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	publicID := f.openAppeal(ctx, t)
 	st.DB = f.database
 	appeals := NewAppealService(st, f.mod.perms, f.mod, auth.NewRateLimiter())
 	return appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no")

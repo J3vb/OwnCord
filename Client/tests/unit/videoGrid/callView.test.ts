@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { usePhone } from "../../helpers/phoneMedia";
 import * as mocks from "../../helpers/videoGridMocks";
 import { cascadedDeclaration } from "../../helpers/app-css";
 import { expectConsole } from "../../helpers/console";
@@ -6,7 +7,7 @@ import {
   createVideoGrid,
   type VideoGridComponent,
   type TileConfig,
-} from "../../../src/components/VideoGrid";
+} from "../../../src/features/voice/videoGrid/VideoGrid";
 import {
   fakeStream,
   fakeStreamWithTrack,
@@ -64,7 +65,7 @@ describe("VideoGrid", () => {
       localStorage.clear();
     });
 
-    it("shows the control bar in the call view, in grid and focus mode", () => {
+    it("shows the control bar in the call view, with and without a focused tile", () => {
       grid.setCallbacks({ callControls: controls() });
       expect(bar()).toBeNull();
 
@@ -76,12 +77,12 @@ describe("VideoGrid", () => {
         [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
           (b) => b.dataset["callControl"],
         ),
-      ).toEqual(["mute", "deafen", "camera", "share", "leave"]);
+      ).toEqual(["mute", "deafen", "camera", "share", "views", "leave"]);
 
       grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
       grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
       grid.setFocusedTile(2);
-      expect(root().classList.contains("focus-mode")).toBe(true);
+      expect(grid.getFocusedTileId()).toBe(2);
       expect(bar()).not.toBeNull();
       grid.setFocusedTile(null);
       expect(bar()).not.toBeNull();
@@ -117,7 +118,7 @@ describe("VideoGrid", () => {
         [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
           (b) => b.dataset["callControl"],
         ),
-      ).toEqual(["mute", "deafen", "camera", "camera-device", "share", "leave"]);
+      ).toEqual(["mute", "deafen", "camera", "camera-device", "share", "views", "leave"]);
 
       const pick = barButton("camera-device");
       expect(pick.getAttribute("aria-label")).toBe("Choose camera");
@@ -345,33 +346,25 @@ describe("VideoGrid", () => {
 
       toggle("selfCamera").click();
       expect(grid.getFocusedTileId()).toBeNull();
-      expect(root().classList.contains("focus-mode")).toBe(false);
+      expect(tile(2).classList.contains("focused")).toBe(false);
       expect(tile(2).parentElement).toBe(root());
     });
 
-    it("offers the strip toggle only in focus view, and hides the strip with it", () => {
+    it("offers the strip toggle in the grid and in focus, and remembers it", () => {
       grid.setExitVisible(true);
       grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
       grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
-      expect(toggle("strip").hidden).toBe(true);
+      expect(toggle("strip").hidden).toBe(false);
 
       grid.setFocusedTile(2);
       expect(toggle("strip").hidden).toBe(false);
-      expect(root().querySelector(".video-focus-strip")).not.toBeNull();
 
       toggle("strip").click();
-      // Hidden, not detached: a video taken out of the document pauses.
-      const strip = root().querySelector<HTMLElement>(".video-focus-strip")!;
-      expect(strip.hidden).toBe(true);
-      expect(strip.contains(tile(3))).toBe(true);
-      expect(tile(2).parentElement!.classList.contains("video-focus-main")).toBe(true);
+      expect(toggle("strip").getAttribute("aria-pressed")).toBe("false");
       expect(localStorage.getItem("owncord:settings:callShowStrip")).toBe("false");
-
-      toggle("strip").click();
-      expect(root().querySelector<HTMLElement>(".video-focus-strip")!.hidden).toBe(false);
     });
 
-    it("moves focus past your hidden camera when the focused stream ends", () => {
+    it("returns to the grid, your camera still hidden, when the focused stream ends", () => {
       grid.setExitVisible(true);
       grid.addStream(SELF, "You", fakeStream(), selfCfg);
       grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
@@ -380,7 +373,9 @@ describe("VideoGrid", () => {
       grid.setFocusedTile(2);
 
       grid.removeStream(2);
-      expect(grid.getFocusedTileId()).toBe(3);
+      expect(grid.getFocusedTileId()).toBeNull();
+      expect(tile(SELF).hidden).toBe(true);
+      expect(tile(3).hidden).toBe(false);
     });
 
     it("keeps keyboard focus on a bar button or toggle while focus view redraws", () => {
@@ -457,6 +452,57 @@ describe("VideoGrid", () => {
 
     it("leaves room below the tiles for the bar (CSS)", () => {
       expect(cascadedDeclaration(".video-grid--call", "padding-bottom")).toBeDefined();
+      expect(cascadedDeclaration(".video-grid--views-above", "padding-bottom")).toBeDefined();
+    });
+
+    it("keeps each control's icon across redraws that change nothing", () => {
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      const state = { muted: false, deafened: false, listenOnly: false, camera: false };
+      grid.setCallState(state);
+      const icons = ["mute", "deafen", "camera", "share"].map((id) =>
+        barButton(id).querySelector("svg")!,
+      );
+      grid.setCallState({ ...state });
+      ["mute", "deafen", "camera", "share"].forEach((id, i) =>
+        expect(barButton(id).querySelector("svg")).toBe(icons[i]),
+      );
+
+      grid.setCallState({ ...state, muted: true });
+      expect(barButton("mute").querySelectorAll("svg")).toHaveLength(1);
+      expect(barButton("mute").querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+      expect(barButton("deafen").querySelector("svg")).toBe(icons[1]);
+    });
+
+    it("gives Show my camera its own icon, not the camera's", () => {
+      grid.setExitVisible(true);
+      const icon = toggle("selfCamera").querySelector("svg")!.getAttribute("data-icon");
+      expect(icon).not.toBe("camera");
+      expect(icon).not.toBe("switch-camera");
+    });
+
+    it("stacks the view toggles above the bar, with room for them, when the call view is narrow", () => {
+      let width = 1200;
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+        () => ({ width, height: 600, top: 0, left: 0, right: width, bottom: 600 }) as DOMRect,
+      );
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      expect(root().classList.contains("video-grid--views-above")).toBe(false);
+      const wide = parseFloat(tile(2).style.height);
+
+      width = 600;
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      grid.removeStream(3);
+      expect(root().classList.contains("video-grid--views-above")).toBe(true);
+      expect(parseFloat(tile(2).style.height)).toBeLessThan(wide);
+
+      // Outside the call view there is no bar to stack above.
+      grid.setExitVisible(false);
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      expect(root().classList.contains("video-grid--views-above")).toBe(false);
+      vi.restoreAllMocks();
     });
   });
 
@@ -473,6 +519,8 @@ describe("VideoGrid", () => {
       [...menu()!.querySelectorAll<HTMLElement>("[data-action]")].map((m) => m.dataset["action"]);
     const item = (action: string) =>
       menu()!.querySelector<HTMLButtonElement>(`[data-action='${action}']`)!;
+    /** The size and pin rows every grid-layout tile menu carries. */
+    const ARRANGE = ["size-small", "size-medium", "size-large", "pin"];
     async function openMenu(id: number, x = 30, y = 40): Promise<HTMLElement | null> {
       cell(id).dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y }),
@@ -522,6 +570,7 @@ describe("VideoGrid", () => {
         "focus",
         "fullscreen",
         "popout",
+        ...ARRANGE,
         "stop-watching",
         "server-mute",
         "server-deafen",
@@ -535,7 +584,14 @@ describe("VideoGrid", () => {
       grid.addStream(OTTO, "Otto", fakeStream(), remote());
       await openMenu(OTTO);
 
-      expect(actions()).toEqual(["local-mute", "focus", "fullscreen", "popout", "stop-watching"]);
+      expect(actions()).toEqual([
+        "local-mute",
+        "focus",
+        "fullscreen",
+        "popout",
+        ...ARRANGE,
+        "stop-watching",
+      ]);
     });
 
     it("hides moderation when the host returns nothing, and says why when it returns a reason", async () => {
@@ -623,7 +679,13 @@ describe("VideoGrid", () => {
       try {
         grid.addStream(OTTO, "Otto", fakeStream(), remote());
         await openMenu(OTTO);
-        expect(actions()).toEqual(["local-mute", "focus", "fullscreen", "stop-watching"]);
+        expect(actions()).toEqual([
+          "local-mute",
+          "focus",
+          "fullscreen",
+          ...ARRANGE,
+          "stop-watching",
+        ]);
       } finally {
         clearHost();
       }
@@ -717,7 +779,7 @@ describe("VideoGrid", () => {
         await openMenu(SELF);
 
         expect(menu()!.getAttribute("aria-label")).toBe("Your camera");
-        expect(actions()).toEqual(["hide-self", "camera-off"]);
+        expect(actions()).toEqual(["hide-self", "camera-off", ...ARRANGE]);
         expect(menu()!.querySelector("[data-menu-volume]")).toBeNull();
       });
 
@@ -740,7 +802,7 @@ describe("VideoGrid", () => {
         grid.addStream(SELF, "Me (You)", fakeStream(), self());
         await openMenu(SELF);
         // Outside the call view the "Show my camera" toggle does not apply.
-        expect(actions()).toEqual(["camera-off"]);
+        expect(actions()).toEqual(["camera-off", ...ARRANGE]);
         item("camera-off").click();
         expect(cc.onCameraToggle).toHaveBeenCalledTimes(1);
       });
@@ -774,11 +836,31 @@ describe("VideoGrid", () => {
         }
       });
 
-      it("opens no menu outside the call view while the camera is locked", async () => {
+      it("on a phone, Hide my camera puts focus on View options", async () => {
+        usePhone(true);
+        document.body.appendChild(container);
+        try {
+          grid.setCallbacks({ callControls: controls() });
+          grid.setExitVisible(true);
+          grid.addStream(SELF, "Me (You)", fakeStream(), self());
+          await openMenu(SELF);
+          item("hide-self").click();
+          expect(document.activeElement).toBe(
+            container.querySelector("[data-call-control='views']"),
+          );
+        } finally {
+          container.remove();
+          vi.unstubAllGlobals();
+        }
+      });
+
+      it("greys Turn off camera beside size and pin while the camera is locked", async () => {
         grid.setCallbacks({ callControls: controls() });
         grid.setCallState({ muted: false, deafened: false, listenOnly: false, connecting: true });
         grid.addStream(SELF, "Me (You)", fakeStream(), self());
-        expect(await openMenu(SELF)).toBeNull();
+        await openMenu(SELF);
+        expect(actions()).toEqual(["camera-off", ...ARRANGE]);
+        expect(item("camera-off").disabled).toBe(true);
       });
 
       it("greys Turn off camera with the reason while the camera is locked", async () => {
@@ -801,9 +883,11 @@ describe("VideoGrid", () => {
         expect(cc.onCameraToggle).not.toHaveBeenCalled();
       });
 
-      it("opens no menu with nothing to offer, and none on your own screen share", async () => {
+      it("offers only size and pin with nothing else to offer, and no menu on your own screen share", async () => {
         grid.addStream(SELF, "Me (You)", fakeStream(), self());
-        expect(await openMenu(SELF)).toBeNull();
+        await openMenu(SELF);
+        expect(actions()).toEqual(ARRANGE);
+        menu()!.remove();
 
         grid.setCallbacks({ callControls: controls() });
         grid.addStream(

@@ -87,8 +87,7 @@ func (f *storageFixture) deleteFiles(t *testing.T, ctx context.Context, ids ...s
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	f.handler.ServeHTTP(w, req)
-	var out map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	out := decodeBody[map[string]any](t, w)
 	return w, out
 }
 
@@ -125,9 +124,7 @@ func TestStorage_BulkDeleteFinishesWhenCancelledAndReportsKeptFiles(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	f.store.onDelete = cancel
 	w, out := f.deleteFiles(t, ctx, "f-a", "f-b", "f-locked", "f-a", "f-missing")
-	if w.Code != http.StatusOK {
-		t.Fatalf("delete = %d: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if got := ids(out["deleted"]); len(got) != 3 {
 		t.Errorf("deleted = %v, want the three real files", got)
 	}

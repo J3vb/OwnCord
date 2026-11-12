@@ -59,10 +59,12 @@ password for sensitive changes and are rate-limited server-side.
 
 ### 2.1 Profile edit
 
-| Step                 | Reaction                                                                                                                  |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Edit username/avatar | `PATCH /users/me`; optimistic `auth.updateUser`; server broadcasts `user_update` so the member list + own bar update live |
-| Failure              | Inline field error + rollback                                                                                             |
+| Step                 | Reaction                                                                                                                                                              |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edit username/avatar | `PATCH /users/me`; optimistic `auth.updateUser`; server broadcasts `user_update` so the member list + own bar update live                                             |
+| Failure              | Inline field error + rollback                                                                                                                                         |
+| Rename               | Enter or Save submits; Save is disabled while the request is in flight, so a double click sends one rename                                                            |
+| Unsaved edits        | A tab switch, Escape, the close button or a backdrop click with unsaved name, about, banner colour or rename text asks "Discard?" first (Keep editing is the default) |
 
 ### 2.2 Change password (with session revocation)
 
@@ -98,11 +100,11 @@ success message with a soft note, never a red error. (Server contract:
 
 ### 2.3 Two-factor (TOTP)
 
-| Flow             | Steps                                                                                                                                                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Enable           | Password prompt → `POST /totp/enable` → render QR URI + backup codes → 6-digit confirm → `POST /totp/confirm` → "Enabled" badge, `auth` user `totp_enabled:true`                                                       |
-| Disable          | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already the 403 rewrite in `buildTotpDisableView()`, `features/settings/AccountTab.ts`) |
-| Regenerate codes | With 2FA enabled: password confirm → `POST /totp/recovery-codes` → the new set is shown once (copy + Done); the old set is invalid server-side and never kept client-side                                              |
+| Flow             | Steps                                                                                                                                                                                                                                                                   |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable           | Password prompt → `POST /totp/enable` → render a QR code (drawn in the client) + the key with Copy key (key first on a phone) + the link behind a disclosure + backup codes → 6-digit confirm → `POST /totp/confirm` → "Enabled" badge, `auth` user `totp_enabled:true` |
+| Disable          | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already the 403 rewrite in `buildTotpDisableView()`, `features/settings/AccountTab.ts`)                                                  |
+| Regenerate codes | With 2FA enabled: password confirm → `POST /totp/recovery-codes` → the new set is shown once (copy + Done); the old set is invalid server-side and never kept client-side                                                                                               |
 
 **Target rule:** backup codes are shown exactly once, with an explicit "Save these
 now — you won't see them again" and a copy affordance.
@@ -162,7 +164,7 @@ and (b) confirm destructive actions.
   inerts the other role options — `currentRole` only updates when the
   `member_update` echoes).
 - **✓ Ban collects a reason (2026-07/08).** The ban flow renders an inline
-  reason input plus a duration choice (`appendBanFlow()` in `components/AdminActions.ts`),
+  reason input plus a duration choice (`appendBanFlow()` in `features/moderation/AdminActions.ts`),
   and the menu passes both through
   (the `onBan` handler in `createSidebarMemberSection()`, `pages/main-page/SidebarMemberSection.ts` → `api.adminBanMember(userId, reason,
 durationHours)`), so temporary bans and stored reasons work from the client.
@@ -236,7 +238,7 @@ sequenceDiagram
 | State       | Presentation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | checking    | Silent (no UI until a result)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| available   | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `components/UpdateNotifier.ts`); on Windows a line below says SmartScreen will warn about the unsigned installer (More info → Run anyway)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| available   | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `features/updates/UpdateNotifier.ts`); on Windows a line below says SmartScreen will warn about the unsigned installer (More info → Run anyway)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | downloading | Banner "Downloading update… N%" (or "… N.N MB" until Content-Length is known)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | applied     | App relaunches automatically                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | failed      | "Update failed. Please try again later." + Dismiss                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -267,8 +269,8 @@ the leave exit, because installing this client cannot resolve that refusal.
 The tray icon (`src-tauri/src/tray.rs`) is a parallel presence/window surface:
 **Show/Hide** toggles the main window, a **Status** submenu
 (Online / Idle / Do Not Disturb / Offline) emits a `status-change` event that
-the TS side applies through the same presence path as the user-bar picker
-(`lib/presence/userStatus.ts` / `components/StatusPicker.ts`), **Mute / Unmute** and
+the TS side applies through the same presence path as the user bar's status
+menu (`lib/presence/userStatus.ts` / `features/voice/UserBar.ts`), **Mute / Unmute** and
 **Deafen / Undeafen** emit the `voice-shortcut` event that the global
 Ctrl+Shift+<key> poller (`src-tauri/src/shortcuts.rs`, rebindable from the
 Keybinds tab) also emits,
@@ -295,9 +297,9 @@ the only indicator. Both clear at 0 and on logout.
 
 ## Source of truth
 
-`src/features/settings/SettingsOverlay.ts` (+ `settings/*`), `src/components/AdminActions.ts`,
-`src/components/InviteManager.ts`, `CreateChannelModal.ts`, `EditChannelModal.ts`,
-`DeleteChannelModal.ts`, `src/components/UpdateNotifier.ts`, `src/lib/net/updater.ts`,
+`src/features/settings/SettingsOverlay.ts` (+ `settings/*`), `src/features/moderation/AdminActions.ts`,
+`src/features/invites/InviteManager.ts`, `src/features/channels/CreateChannelModal.ts`, `src/features/channels/editChannelDialog.ts`,
+`src/features/channels/DeleteChannelModal.ts`, `src/features/updates/UpdateNotifier.ts`, `src/lib/net/updater.ts`,
 `src/lib/api.ts`, `src/lib/prefs/themes.ts`, `src/lib/prefs/preferences.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
 `OverlayManagers.ts`, `src-tauri/src/commands.rs`, `src-tauri/src/update_commands.rs`;

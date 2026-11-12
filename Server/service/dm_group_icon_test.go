@@ -13,16 +13,12 @@ func TestAuthorizeGroupIcon_GateOrder(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 
-	if err := f.dms.AuthorizeGroupIcon(ctx, fixtureMember2, f.dm); err != nil {
-		t.Fatalf("a member must pass: %v", err)
-	}
+	mustDo(t, "a member must pass", f.dms.AuthorizeGroupIcon(ctx, fixtureMember2, f.dm))
 	if err := f.dms.AuthorizeGroupIcon(ctx, fixturePeerMod, f.dm); !errors.Is(err, ErrNotFound) {
 		t.Errorf("non-member = %v, want ErrNotFound", err)
 	}
 	oneToOne, err := f.dms.CreateDM(ctx, fixtureMember, fixtureOwner)
-	if err != nil {
-		t.Fatalf("CreateDM: %v", err)
-	}
+	mustDo(t, "CreateDM", err)
 	if err = f.dms.AuthorizeGroupIcon(ctx, fixtureMember, oneToOne.Channel.ID); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("1:1 = %v, want ErrBadRequest", err)
 	}
@@ -37,14 +33,10 @@ func TestAuthorizeGroupIcon_GateOrder(t *testing.T) {
 func TestSetGroupIcon_RowFallbackTextAndAuthor(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
-	if err := f.database.CreateAttachment(ctx, "icon-a", fixtureMember2, "a.png", "s-a", "image/png", 1, nil, nil); err != nil {
-		t.Fatalf("CreateAttachment: %v", err)
-	}
+	mustDo(t, "CreateAttachment", f.database.CreateAttachment(ctx, "icon-a", fixtureMember2, "a.png", "s-a", "image/png", 1, nil, nil))
 	icon := "icon-a"
 	res, err := f.dms.SetGroupIcon(ctx, fixtureMember2, f.dm, &icon)
-	if err != nil {
-		t.Fatalf("SetGroupIcon: %v", err)
-	}
+	mustDo(t, "SetGroupIcon", err)
 	if len(res.Rows) != 1 || res.Rows[0].Kind != "group_icon" || res.Rows[0].IconRemoved || res.Rows[0].Author == nil || res.Rows[0].Author.ID != fixtureMember2 {
 		t.Fatalf("rows = %+v, want one group_icon authored by the actor", res.Rows)
 	}
@@ -56,9 +48,7 @@ func TestSetGroupIcon_RowFallbackTextAndAuthor(t *testing.T) {
 	}
 
 	res, err = f.dms.SetGroupIcon(ctx, fixtureMember, f.dm, nil)
-	if err != nil {
-		t.Fatalf("clear: %v", err)
-	}
+	mustDo(t, "clear", err)
 	if len(res.Rows) != 1 || !res.Rows[0].IconRemoved || res.Rows[0].Content != groupActorName(res.Rows[0].Author)+" removed the group icon." {
 		t.Errorf("clear rows = %+v", res.Rows)
 	}

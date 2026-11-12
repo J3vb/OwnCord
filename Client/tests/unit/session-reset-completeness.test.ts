@@ -8,13 +8,21 @@
  */
 import { makeChannel } from "../helpers/channelFactory";
 import { makeDm } from "../helpers/dmHarness";
-import { hasWaved, markWaved } from "@components/message-list/welcomeRows";
+import { hasWaved, markWaved } from "../../src/features/messaging/message-list/welcomeRows";
+import {
+  rememberReadingPosition,
+  takeReadingPosition,
+} from "../../src/features/messaging/message-list/readingPositions";
 import {
   claimForwardRequest,
   isForwardRequest,
 } from "../../src/features/messaging/forwardRequests";
 import { claimPollRequest, isPollRequest } from "../../src/features/messaging/pollRequests";
-import { pollCardState } from "../../src/components/message-list/pollCard";
+import { pollCardState } from "../../src/features/messaging/message-list/pollCard";
+import { createThreadSender, holdsThreadDrafts } from "../../src/features/threads/threadSender";
+import { createMockWsClient } from "../helpers/mock-ws";
+import type { WsClient } from "../../src/lib/ws";
+import type { ApiClient } from "../../src/lib/api";
 import { withThreadsStore } from "../../src/stores/threadsLoader";
 import { acceptSharesFor, sendShareTo } from "../../src/features/share/shareInbox";
 import { setFocusedThread, threadsStore, upsertThread } from "../../src/stores/threads.store";
@@ -44,8 +52,8 @@ import { getImageBox, setImageBox } from "../../src/features/messaging/content/i
 import {
   rememberRowHeight,
   rememberedRowHeight,
-} from "../../src/components/message-list/rowHeights";
-import { discardMedia, observeMedia } from "../../src/lib/prefs/mediaVisibility";
+} from "../../src/features/messaging/message-list/rowHeights";
+import { discardMedia, observeMedia } from "../../src/features/messaging/content/mediaVisibility";
 import {
   EXTERNAL_CONSENT_PREF,
   admitDerived,
@@ -70,7 +78,7 @@ import {
   uiStore,
 } from "../../src/stores/ui.store";
 import { membersStore, setMembers, setTyping } from "../../src/stores/members.store";
-import { hasMemberModelMemo, memberModelFor } from "../../src/components/MemberList";
+import { hasMemberModelMemo, memberModelFor } from "../../src/features/members/MemberList";
 import { dmStore, setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { safetyStore, setReadyNotices } from "../../src/features/safety/store";
@@ -86,7 +94,9 @@ import { buildBlockedUsersSection } from "../../src/features/safety/BlockedUsers
 import { createAvatarElement } from "../../src/features/profiles/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
 import { isVoiceLeaveOwed, noteVoiceLeave } from "../../src/features/voice/leaveOwed";
+import { noteJoinSent, takeJoinRefusal } from "../../src/features/voice/joinRequest";
 import { noteWatchSent, takeWatchRefusal } from "../../src/lib/voice/watchRequest";
+import { applyVideoBitrateCap, videoBitrateCap } from "../../src/features/voice/videoBitrateCap";
 import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import {
   bindGifFavoritesApi,
@@ -195,6 +205,11 @@ const PROBES: readonly Probe[] = [
     name: "welcomeRows:waved",
     mutate: () => markWaved(77),
     isInitial: () => !hasWaved(77),
+  },
+  {
+    name: "readingPositions:byChannel",
+    mutate: () => rememberReadingPosition(77, { messageId: 5, offset: 12 }),
+    isInitial: () => takeReadingPosition(77) === null,
   },
   {
     name: "voice:store",
@@ -452,6 +467,14 @@ const PROBES: readonly Probe[] = [
     isInitial: () => !isVoiceLeaveOwed(),
   },
   {
+    name: "voice:join-request",
+    mutate: () => {
+      noteJoinSent("join-probe", false, 5);
+    },
+    // A refusal is taken only for a join still pending, so a live one reads as not initial.
+    isInitial: () => !takeJoinRefusal("FORBIDDEN", "join-probe"),
+  },
+  {
     name: "voice:move-hint",
     mutate: () => {
       noteVoiceMoved(5);
@@ -466,6 +489,13 @@ const PROBES: readonly Probe[] = [
     },
     // takeWatchRefusal consumes a pending id, so a live one reads as not initial.
     isInitial: () => !takeWatchRefusal("env-1"),
+  },
+  {
+    name: "voice:video-bitrate-cap",
+    mutate: () => {
+      applyVideoBitrateCap(6_000_000);
+    },
+    isInitial: () => videoBitrateCap() === 0,
   },
   {
     name: "voice:passwordPrompt",
@@ -574,6 +604,23 @@ const PROBES: readonly Probe[] = [
       await vi.dynamicImportSettled();
       return !threadsJobRan;
     },
+  },
+  {
+    name: "threads:sendDrafts",
+    mutate: () => {
+      const priorStatus = uiStore.getState().connectionStatus;
+      setConnectionStatus("disconnected");
+      createThreadSender({
+        ws: createMockWsClient() as unknown as WsClient,
+        api: { getConfig: () => ({ host: "h" }) } as unknown as ApiClient,
+        threadId: 9_002,
+        signal: new AbortController().signal,
+        showToast: () => {},
+        restoreUnsent: () => {},
+      }).sendText("probe", null, false, []);
+      setConnectionStatus(priorStatus);
+    },
+    isInitial: () => !holdsThreadDrafts(9_002),
   },
   {
     name: "share-inbox",

@@ -71,9 +71,7 @@ func TestPushDispatch_RoleHolderWhoCannotReadGetsNoPush(t *testing.T) {
 	seedUserRole(t, f.database, 2, 4)
 	seedUserRole(t, f.database, 3, 4)
 	seedChannelOverride(t, f.database, 4, 10, 0, permissions.ReadMessages)
-	if err := f.database.UpsertChannelUserOverride(context.Background(), 10, 3, permissions.ReadMessages, 0); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertChannelUserOverride", f.database.UpsertChannelUserOverride(context.Background(), 10, 3, permissions.ReadMessages, 0))
 	f.subscribe(t, 2, "https://push.example.net/cannot-read")
 	f.subscribe(t, 3, "https://push.example.net/can-read")
 	fetch := newRecordingPushFetcher()
@@ -106,9 +104,7 @@ func TestPushDispatch_IneligibleSubscriberReservesNoWindow(t *testing.T) {
 	if len(fetch.urls()) != 0 {
 		t.Fatalf("pushed to a user who cannot read: %v", fetch.urls())
 	}
-	if err := f.database.UpsertChannelUserOverride(context.Background(), 10, 2, permissions.ReadMessages, 0); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertChannelUserOverride", f.database.UpsertChannelUserOverride(context.Background(), 10, 2, permissions.ReadMessages, 0))
 	f.perms.InvalidateAll()
 	d.Notify(context.Background(), 10, 1, []int64{2})
 	if got := len(fetch.urls()); got != 1 {

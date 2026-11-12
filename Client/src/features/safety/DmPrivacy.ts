@@ -17,6 +17,7 @@
 import type { ApiClient, DmPrivacy } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
 import { createLogger } from "@lib/logger";
+import { createInlineError } from "@lib/ui/inlineError";
 import { safetyText as t } from "../../i18n/safety";
 
 const log = createLogger("DmPrivacy");
@@ -41,19 +42,14 @@ export function buildDmPrivacySection(signal: AbortSignal, api: DmPrivacyApi): H
   const desc = createElement("p", { class: "setting-desc" }, t("dmPrivacy.desc"));
   // Both live regions exist before their text changes, so each change is read.
   const status = createElement("div", { class: "my-reports-status", role: "status" });
-  const failure = createElement("div", {
-    class: "form-error",
-    role: "alert",
-    "data-testid": "dm-privacy-error",
+  const failure = createInlineError({
+    retryLabel: t("dmPrivacy.retry"),
+    onRetry: () => load(),
+    signal,
+    testId: "dm-privacy-error",
   });
-  const retry = createElement(
-    "button",
-    { type: "button", class: "ac-btn secondary", "data-testid": "dm-privacy-retry" },
-    t("dmPrivacy.retry"),
-  );
-  retry.hidden = true;
   const rowsEl = createElement("div", { class: "dm-privacy-rows" });
-  section.append(heading, desc, status, failure, retry, rowsEl);
+  section.append(heading, desc, status, failure.el, rowsEl);
 
   /** The last values the server confirmed (GET or a PUT reply). */
   let confirmed: DmPrivacy | null = null;
@@ -146,7 +142,7 @@ export function buildDmPrivacySection(signal: AbortSignal, api: DmPrivacyApi): H
   }
 
   function change(next: DmPrivacy): void {
-    setText(failure, "");
+    failure.clear();
     shown = next;
     dirty = true;
     render();
@@ -184,7 +180,7 @@ export function buildDmPrivacySection(signal: AbortSignal, api: DmPrivacyApi): H
           return;
         }
         log.warn("Failed to save direct message settings", { error: String(err) });
-        setText(failure, t("dmPrivacy.saveFailed"));
+        failure.show(t("dmPrivacy.saveFailed"), false);
         resync();
       },
     );
@@ -217,9 +213,9 @@ export function buildDmPrivacySection(signal: AbortSignal, api: DmPrivacyApi): H
   }
 
   function load(): void {
-    setText(failure, "");
+    failure.setBusy(true);
+    failure.clear();
     setText(status, t("dmPrivacy.loading"));
-    retry.setAttribute("aria-disabled", "true");
     section.setAttribute("aria-busy", "true");
     api.getDmPrivacy(signal).then(
       (r) => {
@@ -227,8 +223,9 @@ export function buildDmPrivacySection(signal: AbortSignal, api: DmPrivacyApi): H
         confirmed = r;
         shown = r;
         setText(status, "");
-        retry.hidden = true;
-        const retryHadFocus = document.activeElement === retry;
+        const retryHadFocus = document.activeElement === failure.retry;
+        failure.setBusy(false);
+        failure.clear();
         section.removeAttribute("aria-busy");
         if (rowsEl.children.length === 0) rowsEl.append(allow.row, requests.row);
         render();
@@ -239,21 +236,12 @@ export function buildDmPrivacySection(signal: AbortSignal, api: DmPrivacyApi): H
         log.warn("Failed to load direct message settings", { error: String(err) });
         setText(status, "");
         section.removeAttribute("aria-busy");
-        retry.removeAttribute("aria-disabled");
-        retry.hidden = false;
-        setText(failure, t("dmPrivacy.loadFailed"));
+        failure.setBusy(false);
+        failure.show(t("dmPrivacy.loadFailed"));
       },
     );
   }
 
-  retry.addEventListener(
-    "click",
-    () => {
-      if (retry.getAttribute("aria-disabled") === "true") return;
-      load();
-    },
-    { signal },
-  );
   // A tab closed before this module loaded gets nothing: no GET.
   if (!signal.aborted) load();
   return section;

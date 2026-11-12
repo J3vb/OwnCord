@@ -27,9 +27,7 @@ func TestApplySettings_AppliesEveryKey(t *testing.T) {
 
 func TestApplySettings_EmptyMapIsNoOp(t *testing.T) {
 	database := openMigratedMemory(t)
-	if err := database.ApplySettings(context.Background(), nil); err != nil {
-		t.Fatalf("ApplySettings(nil): %v", err)
-	}
+	mustDo(t, "ApplySettings(nil)", database.ApplySettings(context.Background(), nil))
 }
 
 func TestApplySettings_RollsBackOnFailure(t *testing.T) {

@@ -15,9 +15,9 @@ vi.mock("@lib/net/httpProxy", () => ({
 }));
 vi.mock("@lib/logger", () => loggerMock());
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
+vi.mock("/src/features/messaging/content/mediaVisibility", () => ({ observeMedia: vi.fn() }));
 
-import { renderMessage } from "../../src/components/message-list/renderers";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import { closeActiveLightbox } from "../../src/features/messaging/content/attachments";
 import { messagesStore, type Message } from "../../src/stores/messages.store";
 import {

@@ -12,6 +12,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { LogLevel, LoggerNames, RoomEvent, getLogger, setLogLevel } from "livekit-client";
 import { addLogListener, type LogEntry } from "@lib/logger";
+import { attachRecorder } from "@lib/diagnostics/eventSink";
 import type { Room } from "livekit-client";
 
 import {
@@ -202,6 +203,29 @@ describe("logIceConnectionInfo", () => {
 
     expect(subGetStats).toHaveBeenCalled();
     expect(pubGetStats).toHaveBeenCalled();
+  });
+
+  it("records each transport's ICE state, leaving out a state it does not know", () => {
+    const states: unknown[] = [];
+    const detach = attachRecorder((code, fields) => {
+      if (code === "ice.state") states.push(fields);
+    });
+    // Attaching replays what earlier tests queued; only this call counts.
+    states.length = 0;
+    try {
+      logIceConnectionInfo(
+        withEngine(
+          fakeTransport({ iceConnectionState: "checking" }),
+          fakeTransport({ iceConnectionState: "weird" as RTCIceConnectionState }),
+        ),
+      );
+    } finally {
+      detach();
+    }
+    expect(states).toEqual([
+      { transport: "subscriber", state: "checking" },
+      { transport: "publisher", state: null },
+    ]);
   });
 
   it("resolves the selected candidate pair from the stats report", async () => {
@@ -420,7 +444,11 @@ describe("buildSessionDebugInfo", () => {
     expect(got.localMicSettings).toEqual(micSettings);
   });
 
-  it("reports hasRNNoiseProcessor when the mic track carries a processor", () => {
+  it.each([
+    { speechDetection: false, enhanced: false, present: false },
+    { speechDetection: true, enhanced: false, present: true },
+    { speechDetection: false, enhanced: true, present: true },
+  ])("reports whether RNNoise filters audio or only detects speech (%j)", (state) => {
     const room = {
       name: "r",
       state: "connected",
@@ -428,12 +456,19 @@ describe("buildSessionDebugInfo", () => {
       localParticipant: {
         identity: "user-1",
         trackPublications: new Map(),
-        getTrackPublication: () => ({ track: { getProcessor: () => ({ name: "rnnoise" }) } }),
+        getTrackPublication: () => ({ track: { getProcessor: () => ({ name: "owncord-mic" }) } }),
       },
       engine: {},
     } as unknown as Room;
+    const { speechDetection, enhanced, present } = state;
+    const got = buildSessionDebugInfo({
+      ...baseDeps,
+      room,
+      audioPipeline: fakePipeline({ rnnoiseState: { speechDetection, enhanced } }),
+    });
 
-    expect(buildSessionDebugInfo({ ...baseDeps, room }).hasRNNoiseProcessor).toBe(true);
+    expect(got.hasRNNoiseProcessor).toBe(present);
+    expect(got.enhancedNoiseSuppressionActive).toBe(enhanced);
   });
 
   it("maps remote participants, their volumes and their tracks", () => {

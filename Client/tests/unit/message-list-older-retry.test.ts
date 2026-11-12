@@ -7,8 +7,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListComponent, MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type {
+  MessageListComponent,
+  MessageListOptions,
+} from "../../src/features/messaging/MessageList";
 import {
   messagesStore,
   hasOlderLoadFailed,

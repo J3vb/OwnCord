@@ -3,11 +3,7 @@ import type { LocalVideoTrack } from "livekit-client";
 import { captureLogs } from "../../../tests/helpers/log-capture";
 import type { PublishCodec } from "./videoCodec";
 import type { ShareSenderSample } from "./shareSenderStats";
-import type {
-  CameraTrackState,
-  ScreenTrackState,
-  VideoTrackDeps,
-} from "../../lib/voice/screenShare";
+import type { CameraTrackState, ScreenTrackState, VideoTrackDeps } from "./screenShare";
 
 const republish = vi.hoisted(() => vi.fn());
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
@@ -21,8 +17,8 @@ vi.mock("./native/videoCodecs", () => ({
   nativeVideoCodecs: () => Promise.resolve({ h264: false, vp9: nativeVp9.value, decode: [] }),
 }));
 
-vi.mock("../../lib/voice/screenShare", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../lib/voice/screenShare")>();
+vi.mock("./screenShare", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./screenShare")>();
   return { ...actual, republishVideo: republish };
 });
 
@@ -83,6 +79,7 @@ function rig(
     preferred?: PublishCodec;
     /** What the screen share's sender reports; none reads as null. */
     sample?: ShareSenderSample | null;
+    cameraSample?: ShareSenderSample | null;
     /** Replaces the sender sample read (a deferred or failing one). */
     readSample?: () => Promise<ShareSenderSample | null>;
     onSwitchError?: (err: unknown) => void;
@@ -137,6 +134,7 @@ function rig(
     getDeps: () => ({}) as VideoTrackDeps,
     readScreenSenderSample:
       opts.readSample ?? (() => Promise.resolve(opts.sample === undefined ? null : opts.sample)),
+    readCameraSenderSample: () => Promise.resolve(opts.cameraSample ?? null),
     onSwitchError: opts.onSwitchError ?? (() => {}),
   });
   made.push(controller);
@@ -182,6 +180,92 @@ function h264Rig(sample: ShareSenderSample | null): ReturnType<typeof rig> {
 }
 
 describe("CodecSwitchController software H.264 check", () => {
+  it("checks a webcam independently from a hardware screen share", async () => {
+    const r = rig({
+      camera: "h264",
+      screen: "h264",
+      preferred: "h264",
+      sample: { encoder: "ExternalEncoder" },
+      cameraSample: { encoder: "OpenH264" },
+    });
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual(["camera:vp8"]);
+  });
+
+  it("rechecks after capture changes on the same wrapper", async () => {
+    const opts = {
+      screen: "h264" as const,
+      preferred: "h264" as const,
+      sample: { encoder: "ExternalEncoder" },
+    };
+    const r = rig(opts);
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    await r.controller.checkAfterChange("screen", () => {
+      opts.sample = { encoder: "OpenH264" };
+      return Promise.resolve();
+    });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("discards an old sample during a source change", async () => {
+    const sample = deferredSample();
+    const r = rig({ screen: "h264", preferred: "h264", readSample: sample.read });
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    await r.controller.checkAfterChange("screen", () => Promise.resolve());
+    sample.resolve({ encoder: "OpenH264" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(r.calls).toEqual([]);
+  });
+
+  it("waits for capture changes even when another kick arrives", async () => {
+    const r = h264Rig({ encoder: "OpenH264" });
+    let finish!: () => void;
+    const changing = r.controller.checkAfterChange(
+      "screen",
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS * 3);
+    expect(r.calls).toEqual([]);
+    finish();
+    await changing;
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("rechecks the surviving capture when a change fails", async () => {
+    const r = h264Rig({ encoder: "OpenH264" });
+    await expect(
+      r.controller.checkAfterChange("screen", () => Promise.reject(new Error("cancelled"))),
+    ).rejects.toThrow("cancelled");
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("does not restart monitoring when a change finishes after disconnect", async () => {
+    const r = h264Rig({ encoder: "OpenH264" });
+    let finish!: () => void;
+    const changing = r.controller.checkAfterChange(
+      "screen",
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    r.controller.stop();
+    finish();
+    await changing;
+    expect(vi.getTimerCount()).toBe(0);
+    expect(r.calls).toEqual([]);
+  });
+
   it("republishes an OpenH264 share as VP8 after SOFTWARE_CHECK_MS", async () => {
     const r = h264Rig({ encoder: "OpenH264", codec: "video/H264" });
     await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS - 1);
@@ -197,8 +281,9 @@ describe("CodecSwitchController software H.264 check", () => {
     const logs = captureLogs();
     h264Rig({ encoder: "OpenH264", width: 5120, height: 1440, captureFps: 60, sentFps: 9 });
     await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
-    const [entry] = logs.find("H.264 share fell back to the software encoder, switching to VP8");
+    const [entry] = logs.find("H.264 software fallback to VP8");
     expect(entry?.data).toEqual({
+      kind: "screen",
       encoder: "OpenH264",
       width: 5120,
       height: 1440,

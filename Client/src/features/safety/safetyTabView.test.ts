@@ -73,10 +73,14 @@ describe("Safety tab markup", () => {
     expect(status.className).toBe("setting-desc");
     expect(status.textContent).toBe("Nothing to show.");
 
-    const retry = q<HTMLButtonElement>(pane, "button.safety-retry");
+    const retry = q<HTMLButtonElement>(pane, "button.inline-error-retry");
     expect(retry.type).toBe("button");
-    expect(retry.className).toBe("ac-btn safety-retry");
+    expect(retry.className).toBe("ac-btn secondary inline-error-retry");
     expect(retry.textContent).toBe("Try again");
+    expect(retry.hidden).toBe(true);
+    const failure = q(pane, "[data-testid='moderation-history-error']");
+    expect(failure.getAttribute("role")).toBe("alert");
+    expect(failure.textContent).toBe("");
 
     const list = q(pane, "ul");
     expect(list.className).toBe("safety-history");
@@ -106,10 +110,11 @@ describe("Safety tab markup", () => {
       p.textContent.startsWith("Warnings, timeouts, removed messages"),
     )!;
     expect(hint.hidden).toBe(true);
-    expect(q<HTMLButtonElement>(pane, ".safety-retry").hidden).toBe(false);
-    expect(q(pane, "p.setting-desc[role='status']").textContent).toBe(
+    expect(q<HTMLButtonElement>(pane, ".inline-error-retry").hidden).toBe(false);
+    expect(q(pane, "[data-testid='moderation-history-error']").textContent).toBe(
       "Your moderation history couldn't be loaded.",
     );
+    expect(q(pane, "p.setting-desc[role='status']").textContent).toBe("");
     expect(pane.querySelectorAll(".safety-history-row")).toHaveLength(0);
     ac.abort();
   });
@@ -220,7 +225,7 @@ describe("Safety tab teardown", () => {
     const { pane, ac, getOwnModeration } = await mount(new Error("offline"));
     const calls = getOwnModeration.mock.calls.length;
     ac.abort();
-    q<HTMLButtonElement>(pane, ".safety-retry").click();
+    q<HTMLButtonElement>(pane, ".inline-error-retry").click();
     await flush();
     expect(getOwnModeration).toHaveBeenCalledTimes(calls);
   });
@@ -228,7 +233,7 @@ describe("Safety tab teardown", () => {
   it("reads again when Try again is pressed on an open tab", async () => {
     const { pane, ac, getOwnModeration } = await mount(new Error("offline"));
     const calls = getOwnModeration.mock.calls.length;
-    q<HTMLButtonElement>(pane, ".safety-retry").click();
+    q<HTMLButtonElement>(pane, ".inline-error-retry").click();
     await flush();
     expectConsole("warn", "Failed to load own moderation history");
     expect(getOwnModeration.mock.calls.length).toBeGreaterThan(calls);

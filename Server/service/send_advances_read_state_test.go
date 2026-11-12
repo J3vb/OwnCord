@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"testing"
 )
 
@@ -14,7 +13,6 @@ import (
 // read. SendMessage now advances the author's read state past the message it
 // just committed.
 func TestSendMessage_AdvancesAuthorReadState(t *testing.T) {
-	ctx := context.Background()
 	svc, _, database := newMentionFixture(t)
 
 	const author = int64(1)
@@ -22,10 +20,7 @@ func TestSendMessage_AdvancesAuthorReadState(t *testing.T) {
 
 	res := sendAs(t, svc, author, "my own message")
 
-	counts, err := database.GetChannelUnreadCounts(ctx, author)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts(author): %v", err)
-	}
+	counts := mustGetChannelUnreadCounts(t, database, author)
 	if got := counts[10].UnreadCount; got != 0 {
 		t.Fatalf("author unread = %d, want 0 — your own message must not read back as unread to you", got)
 	}
@@ -39,10 +34,7 @@ func TestSendMessage_AdvancesAuthorReadState(t *testing.T) {
 
 	// Everyone else must still see it as unread — this fix must not suppress
 	// the badge for the recipients it exists for.
-	otherCounts, err := database.GetChannelUnreadCounts(ctx, other)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts(other): %v", err)
-	}
+	otherCounts := mustGetChannelUnreadCounts(t, database, other)
 	if got := otherCounts[10].UnreadCount; got != 1 {
 		t.Fatalf("recipient unread = %d, want 1 — a message from someone else is still unread", got)
 	}
@@ -52,7 +44,6 @@ func TestSendMessage_AdvancesAuthorReadState(t *testing.T) {
 // unread for the author: advancing the read state on send must move it to the
 // sent message, never past it.
 func TestSendMessage_AuthorStillSeesLaterMessagesAsUnread(t *testing.T) {
-	ctx := context.Background()
 	svc, _, database := newMentionFixture(t)
 
 	const author = int64(1)
@@ -61,10 +52,7 @@ func TestSendMessage_AuthorStillSeesLaterMessagesAsUnread(t *testing.T) {
 	sendAs(t, svc, author, "mine")
 	sendAs(t, svc, other, "theirs")
 
-	counts, err := database.GetChannelUnreadCounts(ctx, author)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
+	counts := mustGetChannelUnreadCounts(t, database, author)
 	if got := counts[10].UnreadCount; got != 1 {
 		t.Fatalf("author unread = %d, want 1 (only the reply from the other user)", got)
 	}

@@ -8,9 +8,9 @@ let stickerOpts: {
   canManage: boolean;
 } | null = null;
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
-vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
-vi.mock("@components/StickerPicker", () => ({
+vi.mock("../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../src/features/messaging/GifPicker", () => mocks.gifPickerMock());
+vi.mock("../../src/features/messaging/StickerPicker", () => ({
   createStickerPicker: (opts: NonNullable<typeof stickerOpts>) => {
     stickerOpts = opts;
     const element = document.createElement("div");
@@ -19,7 +19,7 @@ vi.mock("@components/StickerPicker", () => ({
   },
 }));
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
+import { createMessageInput, type MessageInputOptions } from "../helpers/messageInputApi";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { stubGifApi as gifApi } from "../helpers/messageInputHarness";
 

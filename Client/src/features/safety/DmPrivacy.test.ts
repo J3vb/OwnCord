@@ -206,7 +206,7 @@ describe("DmPrivacy section", () => {
     await flush();
     expectConsole("warn", /Failed to load direct message settings/);
     expect(errorLine(section)).toBe("Couldn't load your direct message settings.");
-    section.querySelector<HTMLButtonElement>("[data-testid='dm-privacy-retry']")!.click();
+    section.querySelector<HTMLButtonElement>("[data-testid='dm-privacy-error-retry']")!.click();
     gets[1]!.resolve(both);
     await flush();
     expect(checked(allowSw(section))).toBe("true");
@@ -223,7 +223,7 @@ describe("DmPrivacy section", () => {
 });
 
 const retryOf = (s: HTMLElement): HTMLButtonElement =>
-  s.querySelector<HTMLButtonElement>("[data-testid='dm-privacy-retry']")!;
+  s.querySelector<HTMLButtonElement>("[data-testid='dm-privacy-error-retry']")!;
 const statusOf = (s: HTMLElement): HTMLElement => s.querySelector<HTMLElement>("[role=status]")!;
 const keydown = (el: HTMLElement, key: string): KeyboardEvent => {
   const e = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
@@ -255,13 +255,15 @@ describe("DmPrivacy markup", () => {
     expect(section.querySelector("p")?.className).toBe("setting-desc");
     expect(statusOf(section).className).toBe("my-reports-status");
     const alert = section.querySelector<HTMLElement>("[role=alert]")!;
-    expect(alert.className).toBe("form-error");
+    expect(alert.className).toBe("inline-error-text");
+    expect(alert.parentElement!.className).toBe("inline-error");
     expect(alert.getAttribute("data-testid")).toBe("dm-privacy-error");
     const rows = section.querySelector<HTMLElement>(".dm-privacy-rows")!;
     expect(rows.querySelectorAll("[role=switch]")).toHaveLength(2);
     const retry = retryOf(section);
     expect(retry.getAttribute("type")).toBe("button");
-    expect(retry.className).toBe("ac-btn secondary");
+    expect(retry.className).toBe("ac-btn secondary inline-error-retry");
+    expect(retry.parentElement).toBe(alert.parentElement);
   });
 
   it("wires each switch to its label, help and hint, and keeps it focusable", async () => {

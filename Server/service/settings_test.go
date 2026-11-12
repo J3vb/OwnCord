@@ -14,7 +14,7 @@ import (
 )
 
 // The settings family's service-level characterization (B3-8). The admin
-// handler surface is pinned by admin/api_test.go's TestAdminAPI_PatchSettings_*
+// handler surface is pinned by admin/api_settings_test.go's TestAdminAPI_PatchSettings_*
 // rows; these tests pin the same policy at the service seam the handlers now
 // delegate to, plus the contracts only the service exposes (Setting's
 // ErrNotFound wrap, the audit rows, multi-key atomic apply).
@@ -28,9 +28,7 @@ func newSettingsService(t *testing.T) (*SettingsService, *db.DB) {
 func TestSettings_ListContainsMigratedDefaults(t *testing.T) {
 	svc, _ := newSettingsService(t)
 	all, err := svc.List(context.Background())
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
+	mustDo(t, "List", err)
 	if _, ok := all["server_name"]; !ok {
 		t.Fatalf("List missing server_name; got keys %v", len(all))
 	}
@@ -190,9 +188,7 @@ func TestSettings_UnrelatedKeyNotBlockedByRequire2FAGate(t *testing.T) {
 	svc, database := newSettingsService(t)
 	// require_2fa already on, and a user without TOTP exists: an unrelated
 	// PATCH must not inherit the gate (the wedged-settings-page regression).
-	if err := database.SetSetting(context.Background(), "require_2fa", "1"); err != nil {
-		t.Fatalf("SetSetting: %v", err)
-	}
+	mustDo(t, "SetSetting", database.SetSetting(context.Background(), "require_2fa", "1"))
 	seedUser(t, database, &db.User{ID: 1, Username: "un-enrolled"})
 
 	if _, err := svc.Patch(context.Background(), 1, map[string]string{"motd": "hello"}); err != nil {
@@ -217,10 +213,7 @@ func TestSettings_PatchAppliesAllKeysAndAudits(t *testing.T) {
 		t.Fatalf("returned map = %q/%q, want the applied values", after["server_name"], after["motd"])
 	}
 
-	entries, err := database.GetAuditLog(context.Background(), 10, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, database, 10, 0)
 	changes := 0
 	for _, e := range entries {
 		if e.Action == "setting_change" && e.ActorID == 7 {
@@ -261,9 +254,7 @@ func TestSettings_RegistrationModeTransitionsChainUnderConcurrency(t *testing.T)
 	}
 	wg.Wait()
 	final, err := database.GetSetting(ctx, "registration_mode")
-	if err != nil {
-		t.Fatalf("GetSetting: %v", err)
-	}
+	mustDo(t, "GetSetting", err)
 
 	// The audit writer may flush asynchronously: wait until the chain
 	// reaches the stored value.

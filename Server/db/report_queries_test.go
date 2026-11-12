@@ -30,9 +30,7 @@ func testPublicID() string {
 func fileReport(t *testing.T, database *db.DB, reporterID, subjectID int64, targetType, targetRef string, channelID *int64, reason, detail string) int64 {
 	t.Helper()
 	id, err := database.FileReport(context.Background(), testPublicID(), reporterID, subjectID, targetType, targetRef, channelID, reason, detail, nil)
-	if err != nil {
-		t.Fatalf("FileReport: %v", err)
-	}
+	mustDo(t, "FileReport", err)
 	return id
 }
 
@@ -48,10 +46,7 @@ func TestReportQueries_InsertGetAndDedupe(t *testing.T) {
 		t.Fatalf("FileReport id = %d, want positive", id)
 	}
 
-	report, err := database.GetReport(ctx, id)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
+	report := mustGetReport(t, database, id)
 	if report.PublicID == "" {
 		t.Error("GetReport public_id is empty")
 	}
@@ -68,9 +63,7 @@ func TestReportQueries_InsertGetAndDedupe(t *testing.T) {
 	}
 
 	byPublic, err := database.GetReportByPublicID(ctx, report.PublicID)
-	if err != nil {
-		t.Fatalf("GetReportByPublicID: %v", err)
-	}
+	mustDo(t, "GetReportByPublicID", err)
 	if byPublic.ID != id {
 		t.Errorf("GetReportByPublicID = %+v, want id %d", byPublic, id)
 	}
@@ -79,9 +72,7 @@ func TestReportQueries_InsertGetAndDedupe(t *testing.T) {
 	}
 
 	dupeID, err := database.FindOpenOrAssignedReport(ctx, reporter, "message", "42")
-	if err != nil {
-		t.Fatalf("FindOpenOrAssignedReport: %v", err)
-	}
+	mustDo(t, "FindOpenOrAssignedReport", err)
 	if dupeID != id {
 		t.Errorf("FindOpenOrAssignedReport = %d, want %d", dupeID, id)
 	}
@@ -126,9 +117,7 @@ func TestReportQueries_FileReportWritesEvidenceInTheSameTransaction(t *testing.T
 		t.Fatalf("FileReport: %v", err)
 	}
 	evidence, err := database.ListReportEvidence(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportEvidence: %v", err)
-	}
+	mustDo(t, "ListReportEvidence", err)
 	if len(evidence) != 2 {
 		t.Fatalf("evidence rows = %d, want 2 (report and evidence committed together)", len(evidence))
 	}
@@ -156,12 +145,8 @@ func TestReportQueries_FileReportRollsBackOnEvidenceFailure(t *testing.T) {
 	}
 
 	var reportRows, evidenceRows int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports WHERE target_ref = 'tx-fail-ref'`).Scan(&reportRows); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_evidence WHERE content = 'centre'`).Scan(&evidenceRows); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports WHERE target_ref = 'tx-fail-ref'`).Scan(&reportRows))
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_evidence WHERE content = 'centre'`).Scan(&evidenceRows))
 	if reportRows != 0 {
 		t.Errorf("reports rows for the failed filing = %d, want 0 (the report insert must roll back with the evidence insert)", reportRows)
 	}
@@ -186,10 +171,7 @@ func TestReportQueries_GetReportCarriesTokens(t *testing.T) {
 	if _, err := database.EraseAccount(ctx, reporter, "tok-reporter-rq"); err != nil {
 		t.Fatalf("EraseAccount(reporter): %v", err)
 	}
-	report, err := database.GetReport(ctx, id)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
+	report := mustGetReport(t, database, id)
 	if report.SubjectToken != "tok-subject-rq" || report.ReporterToken != "tok-reporter-rq" {
 		t.Errorf("GetReport tokens = subject=%q reporter=%q, want tok-subject-rq/tok-reporter-rq",
 			report.SubjectToken, report.ReporterToken)
@@ -232,9 +214,7 @@ func TestReportQueries_QueueFilters(t *testing.T) {
 	}
 
 	openRows, err := database.ListReportsQueue(ctx, "open")
-	if err != nil {
-		t.Fatalf("ListReportsQueue(open): %v", err)
-	}
+	mustDo(t, "ListReportsQueue(open)", err)
 	assertIDs(t, openRows, openID)
 	for _, r := range openRows {
 		if r.ID == assignedID || r.ID == closedID {
@@ -243,24 +223,18 @@ func TestReportQueries_QueueFilters(t *testing.T) {
 	}
 
 	assignedRows, err := database.ListReportsQueue(ctx, "assigned")
-	if err != nil {
-		t.Fatalf("ListReportsQueue(assigned): %v", err)
-	}
+	mustDo(t, "ListReportsQueue(assigned)", err)
 	assertIDs(t, assignedRows, assignedID)
 	if len(assignedRows) > 0 && (assignedRows[0].ReporterName == "" || assignedRows[0].SubjectName == "") {
 		t.Errorf("assigned row missing reporter/subject names: %+v", assignedRows[0])
 	}
 
 	closedRows, err := database.ListReportsQueue(ctx, "closed")
-	if err != nil {
-		t.Fatalf("ListReportsQueue(closed): %v", err)
-	}
+	mustDo(t, "ListReportsQueue(closed)", err)
 	assertIDs(t, closedRows, closedID)
 
 	defaultRows, err := database.ListReportsQueue(ctx, "")
-	if err != nil {
-		t.Fatalf("ListReportsQueue(default): %v", err)
-	}
+	mustDo(t, "ListReportsQueue(default)", err)
 	assertIDs(t, defaultRows, openID, assignedID)
 	for _, r := range defaultRows {
 		if r.ID == closedID {
@@ -269,9 +243,7 @@ func TestReportQueries_QueueFilters(t *testing.T) {
 	}
 
 	mine, err := database.ListReportsMine(ctx, reporter)
-	if err != nil {
-		t.Fatalf("ListReportsMine: %v", err)
-	}
+	mustDo(t, "ListReportsMine", err)
 	if len(mine) != 3 {
 		t.Fatalf("ListReportsMine = %d rows, want 3", len(mine))
 	}
@@ -360,16 +332,12 @@ func TestReportQueries_InsertReportNoteRefusesAnErasedModerator(t *testing.T) {
 	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
 	const noSuchModerator = int64(999999)
 	ok, err := database.InsertReportNote(ctx, id, noSuchModerator, "a note")
-	if err != nil {
-		t.Fatalf("InsertReportNote: %v", err)
-	}
+	mustDo(t, "InsertReportNote", err)
 	if ok {
 		t.Error("InsertReportNote by a nonexistent moderator = true, want false")
 	}
 	notes, err := database.ListReportNotes(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportNotes: %v", err)
-	}
+	mustDo(t, "ListReportNotes", err)
 	if len(notes) != 0 {
 		t.Errorf("notes after a refused insert = %d, want 0", len(notes))
 	}
@@ -394,9 +362,7 @@ func TestReportQueries_FileReportRefusesAGoneReporterOrSubject(t *testing.T) {
 		t.Errorf("FileReport with a gone subject: err = %v, want ErrNotFound", err)
 	}
 	var rows int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports WHERE target_ref LIKE 'revalidate-%'`).Scan(&rows); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports WHERE target_ref LIKE 'revalidate-%'`).Scan(&rows))
 	if rows != 0 {
 		t.Errorf("reports rows from the refused filings = %d, want 0", rows)
 	}
@@ -421,9 +387,7 @@ func TestReportQueries_FileReportDropsEvidenceFromAGoneAuthor(t *testing.T) {
 		t.Fatalf("FileReport: %v", err)
 	}
 	evidence, err := database.ListReportEvidence(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportEvidence: %v", err)
-	}
+	mustDo(t, "ListReportEvidence", err)
 	if len(evidence) != 1 {
 		t.Fatalf("evidence rows = %d, want 1 (the gone author's row silently dropped)", len(evidence))
 	}
@@ -449,16 +413,12 @@ func TestReportQueries_InsertReportNoteRefusesOnClosedReport(t *testing.T) {
 		t.Fatalf("CloseReport: %v, %v", ok, err)
 	}
 	ok, err := database.InsertReportNote(ctx, id, mod, "too late")
-	if err != nil {
-		t.Fatalf("InsertReportNote: %v", err)
-	}
+	mustDo(t, "InsertReportNote", err)
 	if ok {
 		t.Error("InsertReportNote on a closed report = true, want false")
 	}
 	notes, err := database.ListReportNotes(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportNotes: %v", err)
-	}
+	mustDo(t, "ListReportNotes", err)
 	if len(notes) != 0 {
 		t.Errorf("notes on a closed report = %d, want 0", len(notes))
 	}
@@ -500,10 +460,7 @@ func TestReportQueries_AssignReportForced(t *testing.T) {
 	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, lowerActor); !errors.Is(err, db.ErrForbidden) || ok {
 		t.Errorf("AssignReportForced without outranking = %v, %v, want false, ErrForbidden", ok, err)
 	}
-	report, err := database.GetReport(ctx, id)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
+	report := mustGetReport(t, database, id)
 	if report.AssigneeID != lowMod {
 		t.Errorf("assignee after a refused force = %d, want %d (unchanged)", report.AssigneeID, lowMod)
 	}
@@ -513,10 +470,7 @@ func TestReportQueries_AssignReportForced(t *testing.T) {
 	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, highMod); err != nil || !ok {
 		t.Errorf("AssignReportForced outranking = %v, %v, want true, nil", ok, err)
 	}
-	report, err = database.GetReport(ctx, id)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
+	report = mustGetReport(t, database, id)
 	if report.AssigneeID != highMod {
 		t.Errorf("assignee after a successful force = %d, want %d", report.AssigneeID, highMod)
 	}
@@ -584,17 +538,11 @@ func TestReportQueries_InsertAndListReportEvents(t *testing.T) {
 
 	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
 	// FileReport already wrote the "created" row; add the rest directly.
-	if err := database.InsertReportEvent(ctx, id, mod, "assigned", ""); err != nil {
-		t.Fatalf("InsertReportEvent(assigned): %v", err)
-	}
-	if err := database.InsertReportEvent(ctx, id, mod, "closed", "actioned"); err != nil {
-		t.Fatalf("InsertReportEvent(closed): %v", err)
-	}
+	mustDo(t, "InsertReportEvent(assigned)", database.InsertReportEvent(ctx, id, mod, "assigned", ""))
+	mustDo(t, "InsertReportEvent(closed)", database.InsertReportEvent(ctx, id, mod, "closed", "actioned"))
 
 	events, err := database.ListReportEvents(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportEvents: %v", err)
-	}
+	mustDo(t, "ListReportEvents", err)
 	wantActions := []string{"created", "assigned", "closed"}
 	if len(events) != len(wantActions) {
 		t.Fatalf("events = %d rows, want %d", len(events), len(wantActions))
@@ -624,17 +572,11 @@ func TestReportQueries_EvidenceAndNotes(t *testing.T) {
 
 	id := fileReport(t, database, reporter, subject, "message", "5", nil, "spam", "")
 	msgID := int64(5)
-	if err := database.InsertReportEvidence(ctx, id, 0, &msgID, author, "the content", `[{"id":"a","filename":"f","mime":"m","size":1}]`); err != nil {
-		t.Fatalf("InsertReportEvidence: %v", err)
-	}
-	if err := database.InsertReportEvidence(ctx, id, -1, nil, 0, "before", "[]"); err != nil {
-		t.Fatalf("InsertReportEvidence(seq -1): %v", err)
-	}
+	mustDo(t, "InsertReportEvidence", database.InsertReportEvidence(ctx, id, 0, &msgID, author, "the content", `[{"id":"a","filename":"f","mime":"m","size":1}]`))
+	mustDo(t, "InsertReportEvidence(seq -1)", database.InsertReportEvidence(ctx, id, -1, nil, 0, "before", "[]"))
 
 	evidence, err := database.ListReportEvidence(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportEvidence: %v", err)
-	}
+	mustDo(t, "ListReportEvidence", err)
 	if len(evidence) != 2 {
 		t.Fatalf("ListReportEvidence = %d rows, want 2", len(evidence))
 	}
@@ -646,16 +588,12 @@ func TestReportQueries_EvidenceAndNotes(t *testing.T) {
 	}
 
 	ok, err := database.InsertReportNote(ctx, id, author, "an internal note")
-	if err != nil {
-		t.Fatalf("InsertReportNote: %v", err)
-	}
+	mustDo(t, "InsertReportNote", err)
 	if !ok {
 		t.Fatal("InsertReportNote by a real user = false, want true")
 	}
 	notes, err := database.ListReportNotes(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportNotes: %v", err)
-	}
+	mustDo(t, "ListReportNotes", err)
 	if len(notes) != 1 || notes[0].Body != "an internal note" || notes[0].AuthorID != author {
 		t.Errorf("ListReportNotes = %+v", notes)
 	}
@@ -693,13 +631,8 @@ func TestReportQueries_ErrorsPropagateOnClosedDB(t *testing.T) {
 	reporter := seedUser(t, database, "rq-closed-reporter")
 	subject := seedUser(t, database, "rq-closed-subject")
 	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
-	publicID, err := database.GetReport(ctx, id)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	publicID := mustGetReport(t, database, id)
+	mustDo(t, "Close", database.Close())
 
 	if _, err := database.FileReport(ctx, testPublicID(), reporter, subject, "user", "2", nil, "spam", "", nil); err == nil {
 		t.Error("FileReport on a closed db: want an error")
@@ -749,9 +682,7 @@ func TestReportQueries_PruneContentOlderThan(t *testing.T) {
 	subject := seedUser(t, database, "rq-prune-subject")
 
 	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "kept until pruned")
-	if err := database.InsertReportEvidence(ctx, id, 0, nil, 0, "content", "[]"); err != nil {
-		t.Fatalf("InsertReportEvidence: %v", err)
-	}
+	mustDo(t, "InsertReportEvidence", database.InsertReportEvidence(ctx, id, 0, nil, 0, "content", "[]"))
 	if ok, err := database.InsertReportNote(ctx, id, reporter, "a note"); err != nil || !ok {
 		t.Fatalf("InsertReportNote: %v, %v", ok, err)
 	}
@@ -771,23 +702,16 @@ func TestReportQueries_PruneContentOlderThan(t *testing.T) {
 	}
 
 	evidence, err := database.ListReportEvidence(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportEvidence: %v", err)
-	}
+	mustDo(t, "ListReportEvidence", err)
 	if len(evidence) != 0 {
 		t.Errorf("evidence after prune = %d, want 0", len(evidence))
 	}
 	notes, err := database.ListReportNotes(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportNotes: %v", err)
-	}
+	mustDo(t, "ListReportNotes", err)
 	if len(notes) != 0 {
 		t.Errorf("notes after prune = %d, want 0", len(notes))
 	}
-	report, err := database.GetReport(ctx, id)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
+	report := mustGetReport(t, database, id)
 	if report.Detail != "" {
 		t.Errorf("detail after prune = %q, want empty", report.Detail)
 	}
@@ -797,10 +721,7 @@ func TestReportQueries_PruneContentOlderThan(t *testing.T) {
 	if _, err := database.PruneReportContentOlderThan(ctx, cutoff); err != nil {
 		t.Fatalf("PruneReportContentOlderThan: %v", err)
 	}
-	openReport, err := database.GetReport(ctx, openID)
-	if err != nil {
-		t.Fatalf("GetReport(open): %v", err)
-	}
+	openReport := mustGetReport(t, database, openID)
 	if openReport.Detail != "still open" {
 		t.Errorf("open report detail after prune = %q, want unchanged", openReport.Detail)
 	}
@@ -829,9 +750,7 @@ func TestReportQueries_MutationsRecordTheirEventInTheSameTransaction(t *testing.
 	}
 
 	events, err := database.ListReportEvents(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportEvents: %v", err)
-	}
+	mustDo(t, "ListReportEvents", err)
 	got := make([]string, 0, len(events))
 	for _, e := range events {
 		got = append(got, e.Action)
@@ -858,11 +777,39 @@ func TestReportQueries_CloseReportRefusesAnErasedModerator(t *testing.T) {
 		t.Fatalf("CloseReport = %v, %v, want true, nil", ok, err)
 	}
 	events, err := database.ListReportEvents(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportEvents: %v", err)
-	}
+	mustDo(t, "ListReportEvents", err)
 	last := events[len(events)-1]
 	if len(events) != 2 || last.Action != "closed" || last.Detail != "no_action" || last.ActorID != mod {
 		t.Fatalf("events = %+v, want created then closed/no_action by the moderator", events)
+	}
+}
+
+// ListReportLinks resolves several ids in one read, keyed by internal id; an
+// id with no row is absent and an empty list reads nothing.
+func TestListReportLinks_ResolvesManyInOneRead(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "rl-reporter")
+	subjectA := seedUser(t, database, "rl-subject-a")
+	subjectB := seedUser(t, database, "rl-subject-b")
+
+	idA := fileReport(t, database, reporter, subjectA, "user", "a", nil, "spam", "")
+	idB := fileReport(t, database, reporter, subjectB, "user", "b", nil, "spam", "")
+	repA := mustGetReport(t, database, idA)
+	repB := mustGetReport(t, database, idB)
+
+	links, err := database.ListReportLinks(ctx, []int64{idA, idB, idA, idB + 1000})
+	mustDo(t, "ListReportLinks", err)
+	want := map[int64]db.ReportLink{
+		idA: {PublicID: repA.PublicID, SubjectID: subjectA},
+		idB: {PublicID: repB.PublicID, SubjectID: subjectB},
+	}
+	if !reflect.DeepEqual(links, want) {
+		t.Fatalf("ListReportLinks = %+v, want %+v", links, want)
+	}
+
+	empty, err := database.ListReportLinks(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("ListReportLinks(nil) = %v, %v; want empty, nil", empty, err)
 	}
 }

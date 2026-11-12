@@ -68,26 +68,14 @@ func TestContentFrameLoss_ResumingClientTakesFullReadyAndRecoversMessage(t *test
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
 			}
-			chID, err := database.CreateChannel(ctx, "srv03-busy", "text", "", "", 0)
-			if err != nil {
-				t.Fatalf("CreateChannel: %v", err)
-			}
-			token, err := auth.GenerateToken()
-			if err != nil {
-				t.Fatalf("GenerateToken: %v", err)
-			}
-			if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-				t.Fatalf("CreateSession: %v", err)
-			}
+			chID := mustCreateChannel(t, database, "srv03-busy", "text")
+			token := seedSessionToken(t, database, userID)
 
 			h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 			t.Cleanup(h.Stop)
 
 			emit := func() int64 {
-				msgID, err := database.CreateMessage(ctx, chID, userID, "srv03", nil)
-				if err != nil {
-					t.Fatalf("CreateMessage: %v", err)
-				}
+				msgID := mustCreateMessage(t, database, chID, userID, "srv03")
 				payload := fmt.Appendf(nil, `{"type":"chat_message","payload":{"id":%d,"channel_id":%d,"content":"srv03"}}`, msgID, chID)
 				h.EmitEvents(ctx, []Event{channelEvt{evType: MsgTypeChatMessage, channelID: chID, payload: payload}})
 				return msgID

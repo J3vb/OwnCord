@@ -15,11 +15,10 @@ import (
 	"time"
 )
 
-// Saved log history: every entry the live viewer gets is also written, as one
-// JSON line, to data/logs/owncord-YYYY-MM-DD[.N].log. A day starts a new file,
-// and so does a file reaching its size cap (".1", ".2", ...). Files older than
-// the configured age, then the oldest files past the total-size cap, are
-// deleted. The history route reads these files and nothing else does.
+// Saved log history: every entry the live viewer gets is also written as one JSON line to
+// data/logs/owncord-YYYY-MM-DD[.N].log. A new day, or a file reaching its size cap, starts a new file (".1",
+// ".2"). Files past the configured age, then the oldest past the total-size cap, are deleted. Only the
+// history route reads them.
 
 const (
 	logFileQueue    = 4096
@@ -30,11 +29,10 @@ const (
 	logFileSweepGap = time.Hour
 )
 
-// logFileName matches the files the writer creates; the history route accepts
-// only these names, so a cursor cannot point anywhere else.
+// logFileName matches the files the writer creates; the history route accepts only these names, so a cursor
+// cannot point elsewhere.
 var logFileName = regexp.MustCompile(`^owncord-(\d{4}-\d{2}-\d{2})(?:\.(\d+))?\.log$`)
 
-// logFileKey orders history files: by day, then by part within a day.
 type logFileKey struct {
 	day  string
 	part int
@@ -73,14 +71,12 @@ func parseLogFileName(name string) (logFileKey, bool) {
 	return logFileKey{day: m[1], part: part}, true
 }
 
-// logFileInfo is one history file on disk.
 type logFileInfo struct {
 	key  logFileKey
 	size int64
 }
 
-// listLogFiles returns the history files in dir, oldest first. A missing
-// directory is an empty history.
+// listLogFiles returns the history files in dir, oldest first; a missing directory is an empty history.
 func listLogFiles(dir string) ([]logFileInfo, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -137,8 +133,8 @@ type LogFile struct {
 	failedDay string
 }
 
-// StartLogFile starts the writer goroutine on ctx. It runs until ctx ends or
-// Stop is called, and writes whatever is still queued before it exits.
+// StartLogFile starts the writer goroutine on ctx; it runs until ctx ends or Stop, writing what is still
+// queued before exit.
 func StartLogFile(ctx context.Context, opts LogFileOptions) *LogFile {
 	ctx, cancel := context.WithCancel(ctx)
 	lf := newLogFile(opts, cancel)
@@ -173,8 +169,7 @@ func (lf *LogFile) Enqueue(entry LogEntry) {
 	}
 }
 
-// Stop ends the writer and waits for it to write what is queued and close its
-// file, or for ctx to end first.
+// Stop ends the writer and waits for it to flush and close its file, or for ctx to end first.
 func (lf *LogFile) Stop(ctx context.Context) {
 	lf.cancel()
 	select {
@@ -241,8 +236,6 @@ func (lf *LogFile) write(entry LogEntry) {
 	}
 }
 
-// rotate closes the current file and opens the newest part for day, or the
-// next part when that one is full.
 func (lf *LogFile) rotate(day string) error {
 	rotated := lf.f != nil
 	lf.closeFile()
@@ -318,9 +311,8 @@ func (lf *LogFile) closeFile() {
 	lf.f, lf.bw = nil, nil
 }
 
-// sweep deletes files past the age limit, then the oldest files until the
-// total fits the size cap. The open file is never deleted. A delete that fails
-// (on Windows, a file a history read has open) is retried on the next sweep.
+// sweep deletes files past the age limit, then the oldest until the total fits the size cap. The open file is
+// never deleted; a failed delete (on Windows, a file a history read has open) retries on the next sweep.
 func (lf *LogFile) sweep() {
 	files, err := listLogFiles(lf.opts.Dir)
 	if err != nil {

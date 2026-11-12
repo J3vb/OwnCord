@@ -29,18 +29,12 @@ func TestVoiceJoin_ChannelFullAfterMove_PreservesPendingModStash(t *testing.T) {
 	// advisory pre-flight is skipped (it only runs when cur > 0) and the
 	// atomic insert is the first capacity check to run.
 	filler := seedVoiceOwner(t, database, "oc0420-filler")
-	fillerSend := make(chan []byte, 32)
-	fillerClient := ws.NewTestClientWithUser(hub, filler, chanID, fillerSend)
-	hub.Register(fillerClient)
-	waitRegistered(t, hub, fillerClient)
+	fillerClient, fillerSend := connectClient(t, hub, filler, chanID, 32)
 	hub.HandleMessageForTest(fillerClient, voiceJoinMsg(chanID))
 	drainChanTimeout(fillerSend, 30*time.Millisecond)
 
 	target := seedVoiceMember(t, database, "oc0420-target")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, target, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, target, chanID, 32)
 
 	// Mirrors handleVoiceModMoveV2 stashing the target's server-muted state
 	// onto their live connection immediately before the eviction that leaves
@@ -51,7 +45,7 @@ func TestVoiceJoin_ChannelFullAfterMove_PreservesPendingModStash(t *testing.T) {
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "CHANNEL_FULL" {
+	if code := drainForErrorCode(send, waitTimeout); code != "CHANNEL_FULL" {
 		t.Fatalf("error code = %q, want CHANNEL_FULL", code)
 	}
 

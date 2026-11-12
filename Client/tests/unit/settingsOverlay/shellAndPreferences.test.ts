@@ -80,7 +80,12 @@ describe("SettingsOverlay", () => {
     expect(container.querySelector(".settings-sidebar-avatar .avatar-initial")?.textContent).toBe(
       "Z",
     );
-    expect(container.querySelector(".settings-sidebar-name")?.textContent).toBe("testuser");
+    // The display name leads, like every other identity surface, with the
+    // username under it now that the two differ.
+    expect(container.querySelector(".settings-sidebar-name")?.textContent).toBe("Zed");
+    const handle = container.querySelector<HTMLElement>(".settings-sidebar-handle")!;
+    expect(handle.textContent).toBe("@testuser");
+    expect(handle.hidden).toBe(false);
 
     overlay.destroy?.();
   });
@@ -519,10 +524,11 @@ describe("SettingsOverlay", () => {
     expect(sliders.length).toBeGreaterThanOrEqual(1);
 
     const toggles = container.querySelectorAll(".toggle");
-    // 7 toggles: automatic input sensitivity, automatically play cameras,
-    // mirror my camera preview, echo cancellation, noise suppression, auto
-    // gain control, enhanced noise suppression (RNNoise)
-    expect(toggles.length).toBe(7);
+    // 8 toggles: automatic input sensitivity, automatically play cameras,
+    // mirror my camera preview, send a screen share backup copy, echo
+    // cancellation, noise suppression, auto gain control, enhanced noise
+    // suppression (RNNoise)
+    expect(toggles.length).toBe(8);
 
     overlay.destroy?.();
   });

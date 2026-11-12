@@ -35,9 +35,9 @@ func closingWSBackend(t *testing.T, code websocket.StatusCode, reason string) st
 
 func dialProxy(t *testing.T, ctx context.Context, backend string) *websocket.Conn {
 	t.Helper()
-	proxy := httptest.NewServer(api.NewLiveKitProxy(backend, []string{"*"}))
+	proxy := httptest.NewServer(api.NewLiveKitProxy(backend, []string{"*"}, api.AdmitAllVoiceSessionsForTest))
 	t.Cleanup(proxy.Close)
-	conn, resp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", nil)
+	conn, resp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc?access_token=client", nil)
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
@@ -128,12 +128,12 @@ func TestLiveKitProxy_WebSocket_DialTimeout(t *testing.T) {
 		}
 	}()
 
-	proxy := httptest.NewServer(api.NewLiveKitProxy("ws://"+ln.Addr().String(), []string{"*"}))
+	proxy := httptest.NewServer(api.NewLiveKitProxy("ws://"+ln.Addr().String(), []string{"*"}, api.AdmitAllVoiceSessionsForTest))
 	t.Cleanup(proxy.Close)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	start := time.Now()
-	_, resp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", nil)
+	_, resp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc?access_token=client", nil)
 	if err == nil {
 		t.Fatal("dial succeeded against a silent backend")
 	}

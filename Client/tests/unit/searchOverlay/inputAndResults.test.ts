@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { pressComposingEnter } from "../../helpers/keyEvents";
-import { createSearchOverlay } from "../../../src/components/SearchOverlay";
+import { createSearchOverlay } from "../../../src/features/navigation/SearchOverlay";
 import { setDmChannels } from "../../../src/stores/dm.store";
 import { setMembers } from "../../../src/stores/members.store";
 import { seedMemberEntries } from "../../helpers/composerAutocomplete";

@@ -39,14 +39,7 @@ func (a partialSweepAuthn) RecordSessionIdentityKey(context.Context, string, str
 // SessionVerdict's zero value, so this test is what keeps that zero value
 // fail-closed — reorder the constants and it goes red.
 func TestSweepRevokedSessions_MissingVerdictFailsClosed(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := newTeardownTestDB(t)
 
 	h := newTestHubWith(t, HubOptions{
 		DB: database,

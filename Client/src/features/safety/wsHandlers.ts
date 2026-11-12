@@ -1,7 +1,7 @@
 // Safety handler bodies, called only from lib/dispatcher.ts.
 import { showToast } from "../../lib/ui/toast";
 import { formatUntil, safetyText } from "../../i18n/safety";
-import type { DispatchApi, Payload } from "../connection/dispatchContext";
+import type { DispatchApi, Payload, WsRoute } from "../connection/dispatchContext";
 import {
   addNotice,
   applyAppealStatus,
@@ -10,8 +10,9 @@ import {
   setActiveTimeout,
   setReadyNotices,
 } from "./store";
-import { WsErrorCode } from "@lib/protocolTypes";
+import { WsErrorCode, ServerMessageType as S } from "@lib/protocolTypes";
 import { uiStore } from "@stores/ui.store";
+import { route } from "../connection/dispatchContext";
 
 type SafetyApi = DispatchApi | undefined;
 
@@ -66,3 +67,9 @@ export function handleAppealStatus(api: SafetyApi, payload: Payload<"appeal_stat
   applyAppealStatus(payload);
   refresh(api);
 }
+
+// A warning or timeout on this user, and their own appeal changing state.
+export const wsRoutes: readonly WsRoute[] = [
+  route(S.MOD_ACTION, (c) => (p) => handleModAction(c.api, p)),
+  route(S.APPEAL_STATUS, (c) => (p) => handleAppealStatus(c.api, p)),
+];

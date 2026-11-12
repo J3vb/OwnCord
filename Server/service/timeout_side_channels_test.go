@@ -18,19 +18,12 @@ func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
 	channels := NewChannelService(f.database, f.mod.perms)
 
 	group, err := dms.CreateGroupDM(ctx, fixtureMember2, []int64{fixtureMember, fixtureMod}, "before")
-	if err != nil {
-		t.Fatalf("CreateGroupDM: %v", err)
-	}
+	mustDo(t, "CreateGroupDM", err)
 	direct, err := dms.CreateDM(ctx, fixtureMember, fixtureMember2)
-	if err != nil {
-		t.Fatalf("CreateDM: %v", err)
-	}
-	sent, err := f.messages.SendMessage(ctx, SendMessageParams{
+	mustDo(t, "CreateDM", err)
+	sent := mustSendMessage(ctx, t, f.messages, SendMessageParams{
 		ChannelID: direct.Channel.ID, UserID: fixtureMember2, Username: "u5", Content: "hi",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 
 	if _, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil); err != nil {
 		t.Fatalf("Timeout: %v", err)

@@ -13,9 +13,7 @@ func TestMigrate_060ReplyPingDefaultsToZeroOnExistingRows(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
 
-	if err := db.MigrateFS(database, migrationsUpTo(t, "060_")); err != nil {
-		t.Fatalf("MigrateFS() building pre-060 schema: %v", err)
-	}
+	mustDo(t, "MigrateFS() building pre-060 schema", db.MigrateFS(database, migrationsUpTo(t, "060_")))
 	if columnExists(t, database, "message_mentions", "reply_ping") {
 		t.Fatal("reply_ping exists before migration 060 ran")
 	}
@@ -30,9 +28,7 @@ func TestMigrate_060ReplyPingDefaultsToZeroOnExistingRows(t *testing.T) {
 		}
 	}
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() applying 060: %v", err)
-	}
+	mustDo(t, "Migrate() applying 060", db.Migrate(database))
 	if !columnExists(t, database, "message_mentions", "reply_ping") {
 		t.Fatal("reply_ping missing after migration 060")
 	}

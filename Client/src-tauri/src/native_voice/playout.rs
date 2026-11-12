@@ -527,7 +527,38 @@ pub struct Playout {
     watcher: Option<Watcher>,
 }
 
+/// A [`Playout`]'s shared state: the mixer, the reader count and the echo
+/// reference, none of which waits on the audio driver.
+#[derive(Clone)]
+pub struct Controls {
+    mixer: Arc<Mixer>,
+    readers: Readers,
+    reference: Arc<Shared<Option<Arc<Apm>>>>,
+}
+
+impl Controls {
+    pub fn mixer(&self) -> &Arc<Mixer> {
+        &self.mixer
+    }
+
+    pub fn readers(&self) -> usize {
+        lock(&self.readers).len()
+    }
+
+    pub fn set_reference(&self, apm: Arc<Apm>) {
+        self.reference.set(Some(apm));
+    }
+}
+
 impl Playout {
+    pub fn controls(&self) -> Controls {
+        Controls {
+            mixer: self.mixer.clone(),
+            readers: self.readers.clone(),
+            reference: self.reference.clone(),
+        }
+    }
+
     pub fn listener(&self) -> Listener {
         Listener {
             mixer: self.mixer.clone(),

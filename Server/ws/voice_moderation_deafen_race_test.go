@@ -37,53 +37,28 @@ const (
 	deafenRaceRoleMember = 4
 )
 
-func newDeafenRaceDB(t *testing.T) *db.DB {
+// runDeafenMoveRace has an admin issue a mod deafen command against a target
+// who is moved from chanA to chanB between the deafen write and the implied
+// mute write, then returns the target's voice state after the handler's
+// compensating rollback. preDeafened seeds a server deafen on chanA first,
+// making the command a genuine undeafen when deafened is false.
+func runDeafenMoveRace(t *testing.T, prefix string, deafened, preDeafened bool) *db.VoiceState {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	return database
-}
-
-func seedDeafenRaceUser(t *testing.T, database *db.DB, username string, roleID int) int64 {
-	t.Helper()
-	uid, err := database.CreateUser(context.Background(), username, "hash", roleID)
-	if err != nil {
-		t.Fatalf("CreateUser %s: %v", username, err)
-	}
-	return uid
-}
-
-func mustCreateDeafenRaceChannel(t *testing.T, database *db.DB, name string) int64 {
-	t.Helper()
-	chID, err := database.CreateChannel(context.Background(), name, "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel %s: %v", name, err)
-	}
-	return chID
-}
-
-// TestVoiceModDeafen_RollbackFollowsTargetChannelMove pins OC-0034: the
-// compensating deafen-clear must be scoped to the target's CURRENT channel,
-// not the stale channel snapshot the mute write just failed to match
-// against, or the rollback silently no-ops when the mismatch was caused by a
-// channel move rather than the target leaving voice entirely.
-func TestVoiceModDeafen_RollbackFollowsTargetChannelMove(t *testing.T) {
-	database := newDeafenRaceDB(t)
+	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
-	chanA := mustCreateDeafenRaceChannel(t, database, "vc-deafen-race-a")
-	chanB := mustCreateDeafenRaceChannel(t, database, "vc-deafen-race-b")
-	actorID := seedDeafenRaceUser(t, database, "deafen-race-admin", deafenRaceRoleAdmin)
-	targetID := seedDeafenRaceUser(t, database, "deafen-race-member", deafenRaceRoleMember)
+	chanA := mustCreateVoiceChannel(t, database, "vc-"+prefix+"-race-a")
+	chanB := mustCreateVoiceChannel(t, database, "vc-"+prefix+"-race-b")
+	actorID := mustCreateUser(t, database, prefix+"-race-admin", deafenRaceRoleAdmin)
+	targetID := mustCreateUser(t, database, prefix+"-race-member", deafenRaceRoleMember)
 
-	if err := database.JoinVoiceChannel(ctx, targetID, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
+	mustJoinVoice(t, database, targetID, chanA)
+	if preDeafened {
+		// The ordinary undeafen direction: volume-menu.ts sends
+		// !mod.serverDeafened, and toggling off is the common case.
+		if matched, err := database.SetVoiceServerDeafen(ctx, targetID, chanA, true); err != nil || !matched {
+			t.Fatalf("seed SetVoiceServerDeafen: matched=%v err=%v", matched, err)
+		}
 	}
 
 	// Fire exactly between the deafen write (which matches, since the target
@@ -99,7 +74,7 @@ func TestVoiceModDeafen_RollbackFollowsTargetChannelMove(t *testing.T) {
 	}
 	defer func() { voiceModDeafenPreMuteRaceHook = nil }()
 
-	cmd := VoiceModDeafenCmd{userID: actorID, ChannelID: chanA, TargetID: targetID, Deafened: true}
+	cmd := VoiceModDeafenCmd{userID: actorID, ChannelID: chanA, TargetID: targetID, Deafened: deafened}
 	info := ClientInfo{UserID: actorID}
 	deps := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
@@ -127,6 +102,16 @@ func TestVoiceModDeafen_RollbackFollowsTargetChannelMove(t *testing.T) {
 	if state.ChannelID != chanB {
 		t.Fatalf("test setup broken: target channel = %d, want %d (chanB)", state.ChannelID, chanB)
 	}
+	return state
+}
+
+// TestVoiceModDeafen_RollbackFollowsTargetChannelMove pins OC-0034: the
+// compensating deafen-clear must be scoped to the target's CURRENT channel,
+// not the stale channel snapshot the mute write just failed to match
+// against, or the rollback silently no-ops when the mismatch was caused by a
+// channel move rather than the target leaving voice entirely.
+func TestVoiceModDeafen_RollbackFollowsTargetChannelMove(t *testing.T) {
+	state := runDeafenMoveRace(t, "deafen", true, false)
 	if state.ServerDeafened {
 		t.Error("ServerDeafened = true after the mismatched mute write, want false: " +
 			"the compensating rollback must clear it on the target's CURRENT channel, " +
@@ -150,67 +135,9 @@ func TestVoiceModDeafen_RollbackFollowsTargetChannelMove(t *testing.T) {
 // (state.ChannelID), so a target who moved channels mid-request simply ends
 // up with the rollback matching zero rows -- the safe outcome.
 func TestVoiceModDeafen_UndeafenRollbackDoesNotApplyOnUnauthorizedChannel(t *testing.T) {
-	database := newDeafenRaceDB(t)
-	ctx := context.Background()
-
-	chanA := mustCreateDeafenRaceChannel(t, database, "vc-undeafen-race-a")
-	chanB := mustCreateDeafenRaceChannel(t, database, "vc-undeafen-race-b")
-	actorID := seedDeafenRaceUser(t, database, "undeafen-race-admin", deafenRaceRoleAdmin)
-	targetID := seedDeafenRaceUser(t, database, "undeafen-race-member", deafenRaceRoleMember)
-
-	if err := database.JoinVoiceChannel(ctx, targetID, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	// Seed a pre-existing server deafen on chanA so the command below is a
-	// genuine undeafen (the ordinary direction: volume-menu.ts sends
-	// !mod.serverDeafened, and toggling off is the common case).
-	if matched, err := database.SetVoiceServerDeafen(ctx, targetID, chanA, true); err != nil || !matched {
-		t.Fatalf("seed SetVoiceServerDeafen: matched=%v err=%v", matched, err)
-	}
-
-	// Fire exactly between the deafen-clear write (which matches, since the
-	// target is still on chanA at that point) and the implied-mute write:
-	// move the target's row to chanB, which is what makes the mute write
-	// fail to match against the chanA snapshot the handler is holding.
-	var hookRan bool
-	voiceModDeafenPreMuteRaceHook = func(ctx context.Context, d VoiceDeps, targetID int64) {
-		hookRan = true
-		if err := d.Voice.Join(ctx, targetID, chanB, 0); err != nil {
-			t.Fatalf("hook: joining chanB: %v", err)
-		}
-	}
-	defer func() { voiceModDeafenPreMuteRaceHook = nil }()
-
 	// deafened: false -- an UNDEAFEN, the opposite direction from the sibling
-	// test above.
-	cmd := VoiceModDeafenCmd{userID: actorID, ChannelID: chanA, TargetID: targetID, Deafened: false}
-	info := ClientInfo{UserID: actorID}
-	deps := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
-
-	result := handleVoiceModDeafenV2(ctx, cmd, info, deps)
-
-	if !hookRan {
-		t.Fatal("voiceModDeafenPreMuteRaceHook never fired — test setup is broken, not exercising the race window")
-	}
-	var clientErr ClientError
-	ok := errors.As(result.Error, &clientErr)
-	if !ok {
-		t.Fatalf("result error = %#v (%T), want a ClientError", result.Error, result.Error)
-	}
-	if clientErr.Code != ErrCodeVoiceError {
-		t.Fatalf("result error code = %q, want %q (target moved channels mid-request)", clientErr.Code, ErrCodeVoiceError)
-	}
-
-	state, err := database.GetVoiceState(ctx, targetID)
-	if err != nil {
-		t.Fatalf("GetVoiceState: %v", err)
-	}
-	if state == nil {
-		t.Fatal("target's voice_states row disappeared")
-	}
-	if state.ChannelID != chanB {
-		t.Fatalf("test setup broken: target channel = %d, want %d (chanB)", state.ChannelID, chanB)
-	}
+	// test above, against a target seeded with a server deafen on chanA.
+	state := runDeafenMoveRace(t, "undeafen", false, true)
 	if state.ServerDeafened {
 		t.Error("ServerDeafened = true on chanB after the mismatched mute write, want false: " +
 			"the compensating rollback re-applies a deafen (the command was an undeafen), which " +

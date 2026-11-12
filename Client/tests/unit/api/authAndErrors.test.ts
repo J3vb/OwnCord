@@ -5,9 +5,12 @@ import {
   ApiClientError,
   TransportError,
   errorText,
+  REPLY_SHAPE_CODE,
   type OnUnauthorized,
 } from "../../../src/lib/api";
+import { connectText } from "../../../src/i18n/connect";
 import { expectConsole } from "../../helpers/console";
+import { validReply } from "../../helpers/restReplyFixtures";
 import {
   jsonResponse,
   errorResponse,
@@ -98,7 +101,7 @@ describe("API Client", () => {
     });
 
     it("sends Authorization header", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({}));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("MemberResponse")));
       await api.getMe();
       const headers = fetchCallOpts().headers as Record<string, string>;
       expect(headers["Authorization"]).toBe("Bearer test-token");
@@ -153,6 +156,16 @@ describe("API Client", () => {
       await expect(api.getMe()).rejects.toThrow();
       expectConsole("warn", /\[api\] API error/);
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ["login", () => api.login("u", "wrong")],
+      ["recoverAccount", () => api.recoverAccount("u", "BAD-SECRET", "N3w-Pass!")],
+    ])("%s keeps a refused credential (401) a form error", async (_name, call) => {
+      mockFetch.mockResolvedValue(errorResponse(401, "INVALID_CREDENTIALS", "invalid credentials"));
+      await expect(call()).rejects.toMatchObject({ status: 401 });
+      expectConsole("warn", /\[api\] API error/);
+      expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
     it("does not call onUnauthorized on other errors", async () => {
@@ -270,9 +283,59 @@ describe("API Client", () => {
     });
   });
 
+  describe("reply shape", () => {
+    it("passes a valid reply through unchanged, extra fields included", async () => {
+      const body = { ...validReply("MessagesResponse"), added_by_a_newer_server: { a: 1 } };
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await expect(api.getMessages(5)).resolves.toEqual(body);
+    });
+
+    it("accepts a reply that leaves out a field only newer servers send", async () => {
+      const full = validReply("MessagesResponse");
+      const { mentions: _mentions, ...older } = { mentions: [1], ...full.messages[0]! };
+      mockFetch.mockResolvedValue(jsonResponse({ ...full, messages: [older] }));
+      await expect(api.getMessages(5)).resolves.toMatchObject({ messages: [{ id: 10 }] });
+    });
+
+    it("rejects a reply missing a required field with the response's status", async () => {
+      const broken = validReply("MessagesResponse");
+      const { id: _id, ...noId } = { ...broken.messages[0]!, content: "secret chat text" };
+      mockFetch.mockResolvedValue(jsonResponse({ ...broken, messages: [noId] }, 200));
+      const err = await api.getMessages(5, { limit: 25 }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ApiClientError);
+      expect(err).toMatchObject({ status: 200, code: REPLY_SHAPE_CODE });
+      expect(errorText(err, "fallback")).toBe(connectText("session.unreadableReply"));
+      // The log names the call, the field and the expectation, never the body or the query.
+      expectConsole(
+        "warn",
+        /^(?!.*(secret chat text|limit=25)).*GET.*\/channels\/5\/messages.*messages\[\]\.id.*number \(missing\)/s,
+      );
+    });
+
+    it("keeps the response's own status on a 201 and says a write may have gone through", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ id: 12 }, 201));
+      const err = await api.timeoutMember(7, 300, "").catch((e: unknown) => e);
+      expect(err).toMatchObject({ status: 201, code: REPLY_SHAPE_CODE });
+      expect(errorText(err, "fallback")).toBe(connectText("session.unreadableWriteReply"));
+      expectConsole("warn", /Response is not the expected shape.*voice/s);
+    });
+
+    it("still answers a bodiless 204 for a call that may have none", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await expect(api.changePassword("old", "new")).resolves.toBeUndefined();
+    });
+
+    it("leaves a body read that dies mid-way to the caller as the transport error it is", async () => {
+      const res = jsonResponse({});
+      (res as { json: unknown }).json = () => Promise.reject(new TypeError("network error"));
+      mockFetch.mockResolvedValue(res);
+      await expect(api.getMe()).rejects.toMatchObject({ name: "TypeError" });
+    });
+  });
+
   describe("cancellation", () => {
     it("passes AbortSignal to fetch", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({}));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("MemberResponse")));
       const controller = new AbortController();
       await api.getMe(controller.signal);
       // Requests combine caller cancellation with the session lifetime.
@@ -500,7 +563,9 @@ describe("API Client", () => {
 
   describe("verifyTotp", () => {
     it("sends POST /auth/verify-totp with partial token in header", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ token: "full-token", user: { id: 1 } }));
+      mockFetch.mockResolvedValue(
+        jsonResponse({ ...validReply("AuthResponse"), token: "full-token" }),
+      );
       const result = await api.verifyTotp("123456", "partial-tok");
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/verify-totp");
       expect(fetchCallOpts().method).toBe("POST");
@@ -511,14 +576,15 @@ describe("API Client", () => {
       expect(result.token).toBe("full-token");
     });
 
-    it("throws ApiClientError on 401 and calls onUnauthorized", async () => {
+    it("throws ApiClientError on 401 without running the session-expiry sink", async () => {
+      // A wrong code is a form error: no session exists yet to expire.
       mockFetch.mockResolvedValue(errorResponse(401, "INVALID_TOTP", "Bad code"));
       await expect(api.verifyTotp("000000", "pt")).rejects.toMatchObject({
         status: 401,
         code: "INVALID_TOTP",
       });
       expectConsole("warn", /\[api\] API error/);
-      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
     it("throws ApiClientError on non-ok non-401", async () => {
@@ -556,7 +622,7 @@ describe("API Client", () => {
     });
 
     it("passes AbortSignal to fetch", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ token: "t", user: { id: 1 } }));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("AuthResponse")));
       const controller = new AbortController();
       await api.verifyTotp("123456", "pt", controller.signal);
       // Requests combine caller cancellation with the session lifetime.
@@ -564,14 +630,14 @@ describe("API Client", () => {
     });
 
     it("never sets danger.acceptInvalidCerts (cert pinning is handled by the Rust proxy)", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ token: "t", user: { id: 1 } }));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("AuthResponse")));
       await api.verifyTotp("123456", "pt");
       const opts = fetchCallOpts();
       expect((opts as Record<string, unknown>).danger).toBeUndefined();
     });
 
     it("routes verify-totp through the resolved proxy origin", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ token: "t", user: { id: 1 } }));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("AuthResponse")));
       await api.verifyTotp("123456", "pt");
       // The httpProxy mock resolves ensureHttpProxy("localhost:8443") to
       // https://localhost:8443, so the tunneled URL matches the direct one.

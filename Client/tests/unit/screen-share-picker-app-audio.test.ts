@@ -1,11 +1,11 @@
 // WP 6.7b: the Windows quality step's "Share the app's sound" switch
-// (src/components/ScreenSharePicker.ts, osPicker branch).
+// (src/features/voice/ScreenSharePicker.ts, osPicker branch).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) as unknown }));
 
-const { showScreenSharePicker } = await import("../../src/components/ScreenSharePicker");
+const { showScreenSharePicker } = await import("../../src/features/voice/ScreenSharePicker");
 
 const WINDOWS_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36";

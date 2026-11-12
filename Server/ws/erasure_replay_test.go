@@ -12,25 +12,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// The replay pipeline after an erasure (data-lifecycle O5): frames the
-// subject produced sit in the ring buffer and, with a slow flush interval,
-// in the persister's queue; the erasure's member_ban is one more frame
-// naming them. With the hub installed on the runner, the erasure must leave
-// none of them — not in the ring, not in the store, and the queued ones
-// must not be written back after the purge.
-func TestErasure_PurgesTheReplayPipeline(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+// newReplayPipeline wires a hub to a persister and event store, so replay
+// frames are both ringed and persisted. The persister's flush interval is one
+// no test waits for: only an explicit barrier writes the rows.
+func newReplayPipeline(t *testing.T) (*ws.Hub, *db.DB, *service.Services, *ws.EventPersister, context.Context) {
+	t.Helper()
+	database := openMigratedDB(t)
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
 	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, Services: svc})
-	// A flush interval no test waits for: only the barrier writes the rows.
 	persister := ws.NewEventPersister(database, 256, 64, time.Hour)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -40,6 +30,17 @@ func TestErasure_PurgesTheReplayPipeline(t *testing.T) {
 	hub.SetEventStore(database)
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
+	return hub, database, svc, persister, ctx
+}
+
+// The replay pipeline after an erasure (data-lifecycle O5): frames the
+// subject produced sit in the ring buffer and, with a slow flush interval,
+// in the persister's queue; the erasure's member_ban is one more frame
+// naming them. With the hub installed on the runner, the erasure must leave
+// none of them — not in the ring, not in the store, and the queued ones
+// must not be written back after the purge.
+func TestErasure_PurgesTheReplayPipeline(t *testing.T) {
+	hub, database, svc, persister, ctx := newReplayPipeline(t)
 	svc.Erasure.SetHub(hub)
 
 	if _, err := database.CreateUser(ctx, "replay-other-owner", "hash", 1); err != nil {
@@ -48,26 +49,15 @@ func TestErasure_PurgesTheReplayPipeline(t *testing.T) {
 	subject := seedCoverageOwner(t, database, "replay-subject")
 	observer := seedCoverageOwner(t, database, "replay-observer")
 	chID := seedTestChannel(t, database, "replay-chan")
-	subjectSend := make(chan []byte, 64)
-	observerSend := make(chan []byte, 64)
-	sc := ws.NewTestClientWithUser(hub, subject, chID, subjectSend)
-	oc := ws.NewTestClientWithUser(hub, observer, chID, observerSend)
-	hub.Register(sc)
-	hub.Register(oc)
-	waitRegistered(t, hub, sc)
+	sc, _ := connectClient(t, hub, subject, chID, 64)
+	oc, observerSend := connectClient(t, hub, observer, chID, 64)
 	waitRegistered(t, hub, oc)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "chat_send",
-		"payload": map[string]any{"channel_id": chID, "content": "erase me from replay"},
-	})
+	raw := envelope("chat_send", map[string]any{"channel_id": chID, "content": "erase me from replay"})
 	hub.HandleMessageForTest(sc, raw)
 	waitFor(t, waitTimeout, func() bool { return namedInRing(hub, subject.ID) > 0 }, "the subject's chat frame to reach the ring buffer")
 	// The observer's own frame is the control: it must survive the purge.
-	otherRaw, _ := json.Marshal(map[string]any{
-		"type":    "chat_send",
-		"payload": map[string]any{"channel_id": chID, "content": "observer stays"},
-	})
+	otherRaw := envelope("chat_send", map[string]any{"channel_id": chID, "content": "observer stays"})
 	hub.HandleMessageForTest(oc, otherRaw)
 	waitFor(t, waitTimeout, func() bool { return namedInRing(hub, observer.ID) > 0 }, "the observer's chat frame to reach the ring buffer")
 	if n := countEventsNaming(t, database, subject.ID); n != 0 {
@@ -128,7 +118,10 @@ func countEventsNaming(t *testing.T, database *db.DB, uid int64) int {
 func sawType(ch <-chan []byte, want string) bool {
 	for {
 		select {
-		case msg := <-ch:
+		case msg, ok := <-ch:
+			if !ok {
+				return false
+			}
 			var env struct {
 				Type string `json:"type"`
 			}
@@ -142,14 +135,7 @@ func sawType(ch <-chan []byte, want string) bool {
 }
 
 func TestEventPersister_FlushIsABarrier(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	p := ws.NewEventPersister(database, 16, 8, time.Hour)
 	// Not started: nothing to wait for.
 	if err := p.Flush(context.Background()); err != nil {
@@ -225,26 +211,7 @@ func TestEventRingBuffer_RemoveWhere(t *testing.T) {
 // reconnecting client. And a producer that reaches the hub after the purge
 // with a frame naming the erased user is dropped, not sequenced.
 func TestErasure_PurgeForcesFullResyncAndDropsLateFrames(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	limiter := auth.NewRateLimiter()
-	svc := service.New(database, limiter)
-	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, Services: svc})
-	persister := ws.NewEventPersister(database, 256, 64, time.Hour)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	persister.Start(ctx)
-	t.Cleanup(func() { persister.Stop(context.Background()) })
-	hub.SetEventPersister(persister)
-	hub.SetEventStore(database)
-	go hub.Run()
-	t.Cleanup(func() { hub.Stop() })
+	hub, database, svc, persister, ctx := newReplayPipeline(t)
 	svc.Erasure.SetHub(hub)
 
 	if _, err := database.CreateUser(ctx, "resync-other-owner", "hash", 1); err != nil {
@@ -253,17 +220,12 @@ func TestErasure_PurgeForcesFullResyncAndDropsLateFrames(t *testing.T) {
 	subject := seedCoverageOwner(t, database, "resync-subject")
 	observer := seedCoverageOwner(t, database, "resync-observer")
 	chID := seedTestChannel(t, database, "resync-chan")
-	subjectSend := make(chan []byte, 64)
-	observerSend := make(chan []byte, 64)
-	sc := ws.NewTestClientWithUser(hub, subject, chID, subjectSend)
-	oc := ws.NewTestClientWithUser(hub, observer, chID, observerSend)
-	hub.Register(sc)
-	hub.Register(oc)
-	waitRegistered(t, hub, sc)
+	sc, _ := connectClient(t, hub, subject, chID, 64)
+	oc, observerSend := connectClient(t, hub, observer, chID, 64)
 	waitRegistered(t, hub, oc)
 
 	chat := func(c *ws.Client, content string) {
-		raw, _ := json.Marshal(map[string]any{"type": "chat_send", "payload": map[string]any{"channel_id": chID, "content": content}})
+		raw := envelope("chat_send", map[string]any{"channel_id": chID, "content": content})
 		hub.HandleMessageForTest(c, raw)
 	}
 	chat(oc, "observer before")
@@ -303,9 +265,9 @@ func TestErasure_PurgeForcesFullResyncAndDropsLateFrames(t *testing.T) {
 	// The late producer: a frame naming the erased user arrives after the
 	// purge. It must not be sequenced, buffered or persisted.
 	before := hub.CurrentSeqForTest()
-	late, _ := json.Marshal(map[string]any{"type": "chat_message", "payload": map[string]any{"channel_id": chID, "user": map[string]any{"id": subject.ID}, "content": "late"}})
+	late := envelope("chat_message", map[string]any{"channel_id": chID, "user": map[string]any{"id": subject.ID}, "content": "late"})
 	hub.BroadcastToAll(late)
-	harmless, _ := json.Marshal(map[string]any{"type": "typing", "payload": map[string]any{"channel_id": chID, "user_id": observer.ID}})
+	harmless := envelope("typing", map[string]any{"channel_id": chID, "user_id": observer.ID})
 	hub.BroadcastToAll(harmless)
 	waitFor(t, waitTimeout, func() bool { return hub.CurrentSeqForTest() > before }, "the harmless frame to be sequenced")
 	if hub.CurrentSeqForTest() != before+1 {

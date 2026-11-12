@@ -7,7 +7,6 @@ import { join } from "node:path";
 
 const clientDir = new URL("..", import.meta.url).pathname;
 process.env.STRYKER_SHARD ||= "livekit-1"; // satisfy the config's own validation on import
-process.env.OC_MUTATION_NIGHT ||= "both";
 const { shards } = await import(join(clientDir, "tests/mutation/stryker.shard.config.mjs"));
 const names = Object.keys(shards);
 if (names.length === 0) {

@@ -25,6 +25,13 @@ const LOG_SUBDIR = "client-logs";
 const NATIVE_LOG_PREFIX = "owncord-client";
 const NATIVE_LOG_TAIL_BYTES = 2 << 20; // 2 MB
 
+// One run writes at most DAY_LOG_LIMIT characters to a day's file: debug level
+// in a reconnect loop could otherwise grow it to hundreds of MB. Past the limit
+// one note says so and the rest of the day's lines stay in memory only. The
+// support bundle keeps the last BUNDLE_LOG_TAIL characters of each file.
+const DAY_LOG_LIMIT = 20 << 20; // about 20 MB
+const BUNDLE_LOG_TAIL = 4 << 20; // about 4 MB
+
 // The diagnostic event log (lib/diagnostics/eventLog.ts) is written beside the
 // logs as events-<start time>.jsonl so it survives a crash; the support bundle
 // reads it with the logs. Each run starts a new file, and a file that reaches
@@ -42,6 +49,8 @@ let eventBytes = 0;
 let stopEvents: (() => void) | null = null;
 let flushDroppedCounts: (() => void) | null = null;
 let currentDate: string | null = null;
+let dayChars = 0;
+let dayCapped = false;
 let buffer: string[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let initialized = false;
@@ -77,12 +86,20 @@ async function doFlush(): Promise<void> {
   const date = today();
   if (date !== currentDate) {
     currentDate = date;
+    dayChars = 0;
+    dayCapped = false;
     await rotateOldFiles();
   }
 
   // Snapshot after any await above, so lines logged while waiting go out in order.
-  const lines = buffer.join("\n") + "\n";
+  let lines = buffer.join("\n") + "\n";
   buffer = [];
+  if (dayCapped) return;
+  if (dayChars + lines.length > DAY_LOG_LIMIT) {
+    dayCapped = true;
+    lines = limitNote() + "\n";
+  }
+  dayChars += lines.length;
 
   try {
     await writeTextFile(logFilePath(logDir, date), lines, { append: true });
@@ -90,6 +107,18 @@ async function doFlush(): Promise<void> {
     // Log persistence failure shouldn't crash the app.
     log.error("flush failed", err);
   }
+}
+
+/** The one line written when a day's file reaches its limit. */
+function limitNote(): string {
+  const entry: LogEntry = {
+    timestamp: new Date().toISOString(),
+    level: "warn",
+    component: "logPersistence",
+    // i18n-exempt: a log line for support, not shown in the UI
+    message: "daily log limit reached; later lines today are not saved",
+  };
+  return JSON.stringify(entry);
 }
 
 // This run's start time and its file count: names sort by run, then by part.
@@ -365,13 +394,13 @@ async function readNative(): Promise<{ name: string; text: string }[]> {
   }
 }
 
-/** Read a log file, keeping only its last NATIVE_LOG_TAIL_BYTES bytes. */
-async function readLogTail(path: string): Promise<string> {
+/** Read a log file, keeping only its last `limit` characters. */
+async function readLogTail(path: string, limit = NATIVE_LOG_TAIL_BYTES): Promise<string> {
   const text = await readTextFile(path);
-  return text.length > NATIVE_LOG_TAIL_BYTES ? text.slice(-NATIVE_LOG_TAIL_BYTES) : text;
+  return text.length > limit ? text.slice(-limit) : text;
 }
 
-/** Every persisted log file, oldest first, read verbatim. */
+/** Every persisted log file, oldest first, each cut to its last BUNDLE_LOG_TAIL characters. */
 async function readAll(): Promise<{ name: string; text: string }[]> {
   await flush();
   try {
@@ -383,7 +412,7 @@ async function readAll(): Promise<{ name: string; text: string }[]> {
     const files = [];
     for (const name of names) {
       // oxlint-disable-next-line no-await-in-loop -- at most MAX_LOG_FILES reads, kept in order
-      files.push({ name, text: await readTextFile(`${dir}/${name}`) });
+      files.push({ name, text: await readLogTail(`${dir}/${name}`, BUNDLE_LOG_TAIL) });
     }
     return files;
   } catch (err) {

@@ -66,15 +66,11 @@ func seedBulkErasure(tb testing.TB, database *db.DB, subject, other, channel int
 func jobRows(t *testing.T, database *db.DB, userID int64) (n int, state string) {
 	t.Helper()
 	rows, err := database.QueryContext(context.Background(), `SELECT state FROM erasure_jobs WHERE user_id = ?`, userID)
-	if err != nil {
-		t.Fatalf("erasure_jobs: %v", err)
-	}
+	mustDo(t, "erasure_jobs", err)
 	defer rows.Close() //nolint:errcheck
 	for rows.Next() {
 		n++
-		if err := rows.Scan(&state); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
+		mustDo(t, "scan", rows.Scan(&state))
 	}
 	return n, state
 }
@@ -91,9 +87,7 @@ func countRows(t *testing.T, database *db.DB, query string, args ...any) int {
 func assertInventoryZero(t *testing.T, database *db.DB, sub eraseSubject) {
 	t.Helper()
 	after, err := database.TakeInventory(context.Background(), sub.id, sub.username)
-	if err != nil {
-		t.Fatalf("TakeInventory: %v", err)
-	}
+	mustDo(t, "TakeInventory", err)
 	for _, c := range db.SubjectInventory {
 		if after[c.Key] != 0 && !db.InventoryKeptByErasure[c.Key] {
 			t.Errorf("%s: %d rows left after the erasure", c.Key, after[c.Key])
@@ -115,9 +109,7 @@ func TestEraseAccount_CrashMidDrainResumesOnReopen(t *testing.T) {
 	cs := seedEraseSubject(t, controlDB)
 	seedBulkErasure(t, controlDB, cs.id, cs.other, cs.channel, n)
 	control, err := controlDB.EraseAccount(ctx, cs.id, "")
-	if err != nil {
-		t.Fatalf("control EraseAccount: %v", err)
-	}
+	mustDo(t, "control EraseAccount", err)
 	if len(control.Files) < n/10 {
 		t.Fatalf("control job lists %d files, want at least %d", len(control.Files), n/10)
 	}
@@ -155,15 +147,11 @@ func TestEraseAccount_CrashMidDrainResumesOnReopen(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT files FROM erasure_jobs WHERE user_id = ?`, sub.id).Scan(&journaled); err != nil || journaled == "[]" {
 		t.Fatalf("queued job files = %q (%v), want the committed chunks' names", journaled, err)
 	}
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", database.Close())
 
 	reopened := openErasureFile(t, path)
 	job, err := reopened.ReplayEraseAccount(ctx, sub.id, "tok")
-	if err != nil {
-		t.Fatalf("ReplayEraseAccount after reopen: %v", err)
-	}
+	mustDo(t, "ReplayEraseAccount after reopen", err)
 	assertInventoryZero(t, reopened, sub)
 	if rows, state := jobRows(t, reopened, sub.id); rows != 1 || state != db.ErasureStateDBDone {
 		t.Errorf("erasure_jobs after the replay = %d rows in state %q, want one db_done", rows, state)
@@ -358,9 +346,7 @@ func TestEraseAccountLock_RefusesLaterMessages(t *testing.T) {
 	}
 	count := func() int {
 		var n int
-		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE user_id = ? AND content = 'late'`, sub.id).Scan(&n); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE user_id = ? AND content = 'late'`, sub.id).Scan(&n))
 		return n
 	}
 	if _, err := database.CreateMessageWithMentions(ctx, sub.channel, sub.id, "late", nil, nil, 0, false, nil); !errors.Is(err, db.ErrAccountErasing) {

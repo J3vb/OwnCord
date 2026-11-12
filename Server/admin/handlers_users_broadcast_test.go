@@ -10,7 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// unbanMockHub wraps mockHub (admin/api_test.go) and additionally implements
+// unbanMockHub wraps mockHub (admin/api_mockhub_test.go) and additionally implements
 // the optional memberUnbanBroadcaster capability handlePatchUser looks for
 // via a type assertion, so these tests can observe whether an unban fired
 // the mirror of BroadcastMemberBan.
@@ -33,21 +33,17 @@ func TestAdminAPI_PatchUser_UnbanBroadcastsMemberUnban(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServicesFor(database, hub, nil))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser(context.Background(), "unbanbroadcast", "hash", 3)
+	targetUID := mustCreateUser(t, database, "unbanbroadcast", "hash", 3)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, map[string]any{
 		"banned": true,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("ban: status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	w = doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, map[string]any{
 		"banned": false,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("unban: status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	if len(hub.unbannedIDs) != 1 || hub.unbannedIDs[0] != targetUID {
 		t.Fatalf("BroadcastMemberUnban calls = %v, want exactly [%d]", hub.unbannedIDs, targetUID)
@@ -67,14 +63,12 @@ func TestAdminAPI_PatchUser_RoleChangeRefreshesVisibility(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServicesFor(database, hub, nil))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser(context.Background(), "rolerefresh", "hash", 3)
+	targetUID := mustCreateUser(t, database, "rolerefresh", "hash", 3)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, map[string]any{
 		"role_id": 2,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	if hub.visibilityEnqueues() != 1 {
 		t.Fatalf("visibility refresh enqueues = %d, want 1", hub.visibilityEnqueues())
@@ -120,7 +114,7 @@ func TestAdminAPI_PatchUser_RoleChangeBroadcastsEvenIfRoleReReadFails(t *testing
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, invalidator, newTestServicesFor(database, hub, invalidator))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser(context.Background(), "roleracetarget", "hash", 3)
+	targetUID := mustCreateUser(t, database, "roleracetarget", "hash", 3)
 
 	// Promote the target to role 2 ("Admin"). The handler's own
 	// InvalidateUser hook fires mid-request and deletes role 2 (reassigning
@@ -130,9 +124,7 @@ func TestAdminAPI_PatchUser_RoleChangeBroadcastsEvenIfRoleReReadFails(t *testing
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, map[string]any{
 		"role_id": 2,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	if hub.visibilityEnqueues() != 1 {
 		t.Fatalf("visibility refresh enqueues = %d, want 1 (role change committed regardless of the re-read)", hub.visibilityEnqueues())

@@ -1,6 +1,12 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { compare, measure, nextBaseline } from "./check-test-duplication.mjs";
+import {
+  TARGETS,
+  compare,
+  measure,
+  nextBaseline,
+  selectTargets,
+} from "./check-test-duplication.mjs";
 
 const report = (percentage) => ({
   statistics: { total: { percentage, duplicatedLines: 100, clones: 5 } },
@@ -26,4 +32,16 @@ test("nextBaseline lowers the baseline and refuses to raise it", () => {
   assert.equal(nextBaseline(measure(report(8.5)), baseline).percentage, 8.5);
   assert.throws(() => nextBaseline(measure(report(9.5)), baseline), /refusing to raise/);
   assert.equal(nextBaseline(measure(report(9.5)), null).percentage, 9.5);
+});
+
+test("selectTargets runs every target unless one is named", () => {
+  assert.deepEqual(selectTargets([]), ["client", "server"]);
+  assert.deepEqual(selectTargets(["--target", "server"]), ["server"]);
+  assert.throws(() => selectTargets(["--target", "rust"]), /unknown --target rust/);
+});
+
+test("the server target scans only Go test files", () => {
+  assert.equal(TARGETS.server.scan, "Server");
+  assert.deepEqual(TARGETS.server.extraArgs, ["--pattern", "**/*_test.go"]);
+  assert.notEqual(TARGETS.server.baselinePath, TARGETS.client.baselinePath);
 });

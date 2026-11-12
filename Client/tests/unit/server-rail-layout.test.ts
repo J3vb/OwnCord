@@ -189,6 +189,21 @@ describe("persistence", () => {
     expect(ok).not.toBeNull();
     expect(ok![0]).toMatchObject({ color: FOLDER_COLORS[0] });
   });
+  it("rejects an empty host or folder id, and one bad entry drops the whole layout", () => {
+    const goodFolder = {
+      kind: "folder",
+      id: "f",
+      name: "n",
+      color: "#fff",
+      collapsed: false,
+      hosts: [],
+    };
+    expect(parseLayout([{ kind: "server", host: "" }])).toBeNull();
+    expect(parseLayout([{ ...goodFolder, id: "" }])).toBeNull();
+    expect(parseLayout([{ ...goodFolder, hosts: [1] }])).toBeNull();
+    expect(parseLayout([{ kind: "server", host: "a" }, { kind: "other" }])).toBeNull();
+    expect(parseLayout([{ kind: "server", host: "a" }, goodFolder])).toHaveLength(2);
+  });
   it("survives a throwing storage", () => {
     const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("blocked");

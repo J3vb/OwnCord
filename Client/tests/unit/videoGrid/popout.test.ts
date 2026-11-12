@@ -4,7 +4,10 @@ import { cascadedDeclaration, keyword } from "../../helpers/app-css";
 import { expectConsole } from "../../helpers/console";
 import { clearHost, hostAndroidApp } from "../../helpers/androidHost";
 import { registerVideoSurface } from "../../../src/lib/voice/videoSurface";
-import { createVideoGrid, type VideoGridComponent } from "../../../src/components/VideoGrid";
+import {
+  createVideoGrid,
+  type VideoGridComponent,
+} from "../../../src/features/voice/videoGrid/VideoGrid";
 import {
   fakeStream,
   fakeStreamWithTrack,

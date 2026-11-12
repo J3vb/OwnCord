@@ -47,9 +47,7 @@ func TestForceLogout_DisconnectsLiveSocket(t *testing.T) {
 	notifier := &fakeKickDisconnectNotifier{}
 	f.mod.SetNotifier(notifier)
 
-	if err := f.mod.ForceLogout(ctx, fixtureMod, fixtureMember); err != nil {
-		t.Fatalf("ForceLogout: %v", err)
-	}
+	mustDo(t, "ForceLogout", f.mod.ForceLogout(ctx, fixtureMod, fixtureMember))
 
 	got := notifier.calls()
 	if len(got) != 1 || got[0] != fixtureMember {

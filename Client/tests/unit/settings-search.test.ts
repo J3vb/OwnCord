@@ -81,6 +81,21 @@ import { baseOptions } from "../helpers/settingsOverlayOptions";
 
 const options = baseOptions();
 
+// The Windows host lists one card, so the graphics card row is on screen.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: async (cmd: string): Promise<unknown> => {
+    if (cmd !== "get_gpu_adapters") throw new Error("no host");
+    const card = { id: "10de:1234:RTX", name: "RTX", vendorId: 1, deviceId: 2 };
+    return {
+      cards: [card],
+      saved: "auto",
+      active: null,
+      notFound: false,
+      resetAfterCrash: false,
+    };
+  },
+}));
+
 const uploadsApi = {
   getUserStorage: vi.fn().mockResolvedValue({ used_bytes: 1, quota_bytes: 0 }),
   listUserUploads: vi.fn().mockResolvedValue({ items: [] }),
@@ -202,6 +217,11 @@ describe("settings search", () => {
         tab.click();
         if (name === "About") {
           await vi.waitFor(() => expect(container.querySelector(".about-tab")).not.toBeNull());
+        }
+        if (name === "Voice & Video" && _host === "desktop app") {
+          await vi.waitFor(() =>
+            expect(container.querySelector("[data-testid=gpu-adapter-select]")).not.toBeNull(),
+          );
         }
         const pane = container.querySelector<HTMLElement>(".settings-content")!;
         const shown = (pane.textContent ?? "").replace(/\s+/g, " ");
@@ -547,6 +567,25 @@ describe("settings search", () => {
       const stops = tabs().filter((t) => t.getAttribute("tabindex") === "0");
       expect(stops).toHaveLength(1);
       expect(stops[0]!.hidden).toBe(false);
+    });
+
+    it("switches the open page to the first matching tab as you type", () => {
+      mountOverlay();
+      const active = (): string => container.querySelector(`${TAB_SELECTOR}.active`)!.textContent!;
+      expect(active()).toBe("Account");
+      type("zoom");
+      expect(active()).toBe(visibleNames()[0]);
+      expect(container.querySelector("mark.settings-search-hit")).not.toBeNull();
+      expect(document.activeElement).not.toBe(tabs().find((t) => t.classList.contains("active")));
+    });
+
+    it("keeps the open page while it still matches", () => {
+      mountOverlay();
+      tabs()
+        .find((t) => labelFor(t) === "Notifications")!
+        .click();
+      type("sound");
+      expect(container.querySelector(`${TAB_SELECTOR}.active`)!.textContent).toBe("Notifications");
     });
 
     it("Ctrl+F focuses the box while the panel is open", () => {

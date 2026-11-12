@@ -22,14 +22,7 @@ const mentionGateRoleID = int64(210)
 // inline mention fallback running synchronously.
 func newMentionGateFixture(t testing.TB) (*Hub, *db.DB, *service.Services, int64) {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := newTeardownTestDB(t)
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO roles (id, name, color, permissions, position, is_default)
 		 VALUES (?, 'mention-gate', NULL, ?, 5, 0)`,
@@ -37,10 +30,7 @@ func newMentionGateFixture(t testing.TB) (*Hub, *db.DB, *service.Services, int64
 	); err != nil {
 		t.Fatalf("seed role: %v", err)
 	}
-	chID, err := database.CreateChannel(context.Background(), "mention-gate-chan", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "mention-gate-chan", "text")
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
 	hub := newTestHub(t, database, limiter, svc)

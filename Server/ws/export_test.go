@@ -15,6 +15,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/ws/voicestate"
 )
 
 // SetVoiceRejoinBlockWindowForTest shrinks the moderator-removal rejoin block
@@ -233,7 +234,7 @@ func NewHubForTest() *Hub {
 		clients:  make(map[int64][]*Client),
 		pubsub:   NewPubSub(),
 		limiter:  auth.NewRateLimiter(),
-		voiceHub: hubVoice{mod: newUserLocks[lockRankVoiceMod]()},
+		voiceHub: hubVoice{mod: voicestate.NewUserLocks[lockRankVoiceMod]()},
 	}
 }
 
@@ -375,9 +376,7 @@ func PeekClientPendingModFlagsForTest(c *Client) (serverMuted, serverDeafened bo
 // ExpireSettingsCacheForTest forces the settings cache to appear stale so that
 // the next call to getCachedSettings triggers a DB refresh.
 func (h *Hub) ExpireSettingsCacheForTest() {
-	h.settings.mu.Lock()
-	defer h.settings.mu.Unlock()
-	h.settings.lastUpdate = time.Time{} // zero time — always older than any TTL
+	h.settings.cache.Expire()
 }
 
 // BuildJSONForTest exposes buildJSON for external tests.
@@ -553,7 +552,7 @@ func (h *Hub) DeliverBroadcastForTest(channelID int64, recipients []int64, msg [
 // as DeliverBroadcastForTest.
 func (h *Hub) SendSequencedToUsersForTest(channelID int64, userIDs []int64, msg []byte) uint64 {
 	before := atomic.LoadUint64(&h.seq)
-	h.sendSequencedToUsers(channelID, userIDs, msg)
+	h.sendSequencedToUsers(channelID, userIDs, 0, msg)
 	if after := atomic.LoadUint64(&h.seq); after != before {
 		return after
 	}
@@ -711,7 +710,8 @@ func (h *Hub) rollbackVoiceJoinTest(ctx context.Context, c *Client, channelID in
 func (h *Hub) voiceJoinGrantTokenTest(ctx context.Context, c *Client, channelID int64, state *db.VoiceState, reqID string) bool {
 	txn := h.begin(c.userID)
 	defer txn.end()
-	return h.voiceJoinGrantToken(ctx, txn, c, channelID, false, state, reqID)
+	granted, _ := h.voiceJoinGrantToken(ctx, txn, c, channelID, false, state, reqID)
+	return granted
 }
 
 func (h *Hub) leaveParkedVoiceTest(ctx context.Context, userID int64, e *voiceGraceEntry, reason string) bool {
@@ -814,3 +814,6 @@ func (h *Hub) newestLocked(userID int64) *Client {
 
 // MarkMobileForTest makes c a connection that declared the "mobile" client feature.
 func MarkMobileForTest(c *Client) { c.features.mobile = true }
+
+// DeclareFeaturesForTest gives c the client features an auth frame naming them would.
+func DeclareFeaturesForTest(c *Client, names ...string) { c.features = parseClientFeatures(names) }

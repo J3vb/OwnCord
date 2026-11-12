@@ -2,8 +2,8 @@
 // recovery actions of a page that failed to render, and the connect page's
 // two hooks (the health refresh and the invite apply) with the invite link
 // that arrived before the page mounted. Moved out of main.ts verbatim; the
-// free variables (api, ws, the #app element, the profile manager, the 401
-// handler) arrive through configureRouter(). Like session.ts it is module
+// free variables (api, ws, the #app element, the profile manager) arrive
+// through configureRouter(). Like session.ts it is module
 // functions plus one configure call, with no class or factory object: object
 // keys survive minification and this runs in the startup chunk. Nothing here
 // runs at import time: main.ts calls configureRouter() before anything that
@@ -24,6 +24,7 @@ import { retentionNotice } from "@lib/types";
 import { renderConnect } from "./connectRoute";
 import { serverInfoFor } from "./serverHealth";
 import type { PageId } from "./context";
+import { startNetworkMonitoring } from "./networkStartup";
 
 const log = createLogger("main");
 
@@ -31,7 +32,7 @@ let api: ApiClient;
 let ws: WsClient;
 let appEl: HTMLElement;
 let profileManager: ProfileManager;
-let handleUnauthorized: () => void;
+let networkReady: Promise<void> | null = null;
 
 // The active page. `currentPage` further down holds the mounted page
 // *component*, so the page id needs its own name.
@@ -63,13 +64,12 @@ export function configureRouter(
   wsClient: WsClient,
   appElement: HTMLElement,
   profiles: ProfileManager,
-  unauthorized: () => void,
 ): void {
   api = apiClient;
   ws = wsClient;
   appEl = appElement;
   profileManager = profiles;
-  handleUnauthorized = unauthorized;
+  networkReady = startNetworkMonitoring();
 }
 
 /** The id of the page that is showing (or about to). */
@@ -203,7 +203,6 @@ async function renderPage(pageId: PageId): Promise<void> {
       profileManager,
       appEl,
       renderRecovery,
-      handleUnauthorized,
       () => {
         const pending = pendingInviteLink;
         pendingInviteLink = null;
@@ -216,7 +215,7 @@ async function renderPage(pageId: PageId): Promise<void> {
     // soon as the WS connect succeeds, so this normally resolves from the
     // module cache.
     try {
-      const { createMainPage } = await import("@pages/MainPage");
+      const [{ createMainPage }] = await Promise.all([import("@pages/MainPage"), networkReady]);
       // A newer navigation may have superseded this one while the chunk loaded;
       // mounting now would fight the page that navigation rendered.
       if (!isCurrentNavigation()) return;

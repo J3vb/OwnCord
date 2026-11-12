@@ -297,6 +297,67 @@ function changedBetween(
   return { removed, added };
 }
 
+/** The buckets `updateModel` edits in place; the previous model keeps its own arrays. */
+interface Draft {
+  readonly buckets: Map<string, readonly Entry[]>;
+  online: readonly Entry[];
+  offline: readonly Entry[];
+  /** Arrays already copied for this update, so each is copied once. */
+  readonly copied: Set<readonly Entry[]>;
+}
+
+function draftEntries(d: Draft, key: BucketKey): readonly Entry[] | undefined {
+  if (key === OFFLINE) return d.offline;
+  if (key === ONLINE) return d.online;
+  return d.buckets.get(key);
+}
+
+function draftWritable(d: Draft, entries: readonly Entry[]): Entry[] {
+  if (d.copied.has(entries)) return entries as Entry[];
+  const copy = entries.slice();
+  d.copied.add(copy);
+  return copy;
+}
+
+function draftStore(d: Draft, key: BucketKey, next: Entry[], dropEmpty: boolean): void {
+  if (key === OFFLINE) d.offline = next;
+  else if (key === ONLINE) d.online = next;
+  else if (dropEmpty && next.length === 0) d.buckets.delete(key);
+  else d.buckets.set(key, next);
+}
+
+function draftRemove(
+  d: Draft,
+  member: Member,
+  facts: ReturnType<typeof roleFacts>,
+  compare: EntryComparator,
+): void {
+  const key = bucketKeyOf(member, facts);
+  const entries = draftEntries(d, key);
+  if (entries === undefined) return;
+  const target: Entry = { member, colorVar: "" };
+  let at = lowerBound(entries, target, compare);
+  if (entries[at]?.member !== member) at = entries.findIndex((e) => e.member === member);
+  if (at < 0) return;
+  const next = draftWritable(d, entries);
+  next.splice(at, 1);
+  draftStore(d, key, next, true);
+}
+
+function draftAdd(
+  d: Draft,
+  member: Member,
+  colors: ReturnType<typeof knownColors>,
+  facts: ReturnType<typeof roleFacts>,
+  compare: EntryComparator,
+): void {
+  const key = bucketKeyOf(member, facts);
+  const entry = entryFor(member, colors, facts);
+  const next = draftWritable(d, draftEntries(d, key) ?? []);
+  next.splice(lowerBound(next, entry, compare), 0, entry);
+  draftStore(d, key, next, false);
+}
+
 /**
  * The model for `members`, reusing `prev` where it can. An unchanged pair of
  * references returns `prev`. A new `roles` reference (group order, labels and
@@ -318,44 +379,22 @@ export function updateModel(
 
   const colors = knownColors(prev.groups);
   const facts = roleFacts(roles);
-  const buckets = new Map(prev.buckets);
-  let online = prev.online;
-  let offline = prev.offline;
-  // Each touched array is copied once; the previous model keeps its own.
-  const copied = new Set<readonly Entry[]>();
-  const writable = (entries: readonly Entry[]): Entry[] => {
-    if (copied.has(entries)) return entries as Entry[];
-    const copy = entries.slice();
-    copied.add(copy);
-    return copy;
+  const draft: Draft = {
+    buckets: new Map(prev.buckets),
+    online: prev.online,
+    offline: prev.offline,
+    copied: new Set(),
   };
-
-  for (const member of delta.removed) {
-    const key = bucketKeyOf(member, facts);
-    const entries = key === OFFLINE ? offline : key === ONLINE ? online : buckets.get(key);
-    if (entries === undefined) continue;
-    const target: Entry = { member, colorVar: "" };
-    let at = lowerBound(entries, target, compare);
-    if (entries[at]?.member !== member) at = entries.findIndex((e) => e.member === member);
-    if (at < 0) continue;
-    const next = writable(entries);
-    next.splice(at, 1);
-    if (key === OFFLINE) offline = next;
-    else if (key === ONLINE) online = next;
-    else if (next.length === 0) buckets.delete(key);
-    else buckets.set(key, next);
-  }
-  for (const member of delta.added) {
-    const key = bucketKeyOf(member, facts);
-    const entry = entryFor(member, colors, facts);
-    const entries = key === OFFLINE ? offline : key === ONLINE ? online : (buckets.get(key) ?? []);
-    const next = writable(entries);
-    next.splice(lowerBound(next, entry, compare), 0, entry);
-    if (key === OFFLINE) offline = next;
-    else if (key === ONLINE) online = next;
-    else buckets.set(key, next);
-  }
-  return { members, roles, groups: prev.groups, buckets, online, offline };
+  for (const member of delta.removed) draftRemove(draft, member, facts, compare);
+  for (const member of delta.added) draftAdd(draft, member, colors, facts, compare);
+  return {
+    members,
+    roles,
+    groups: prev.groups,
+    buckets: draft.buckets,
+    online: draft.online,
+    offline: draft.offline,
+  };
 }
 
 /**

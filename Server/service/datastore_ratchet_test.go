@@ -34,7 +34,7 @@ const (
 	// service starts or stops calling a method. It was 309 while Store listed
 	// its methods itself; it fell to 288 when each service declared its own
 	// interface and the methods no service calls left Store.
-	storeMethodBaseline = 292
+	storeMethodBaseline = 295
 
 	// modelsJSONTagBaseline is the number of struct fields in db/models.go
 	// whose tag carries a json: key, json:"-" included.
@@ -71,13 +71,15 @@ const (
 	// count.
 	// WP 8.9 gives AttachmentInfo two voice message tags and moves it into
 	// db/attachment_model.go (models.go hit its line limit), so its tags
-	// leave the count: 128 to 121. Any further tag fails.
-	modelsJSONTagBaseline = 121
+	// leave the count: 128 to 121. AuditEntry gains target_name and moves
+	// into db/audit_model.go, so its ten tags leave the count: 121 to 111.
+	// Any further tag fails.
+	modelsJSONTagBaseline = 111
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included. It closes the
 	// gap the source count leaves for growth inside a cross-package embed.
-	storeFullSurfaceBaseline = 303
+	storeFullSurfaceBaseline = 306
 )
 
 // storeCrossPackageEmbeds names every interface embedded in Store that is
@@ -231,27 +233,10 @@ func readServerFile(t *testing.T, rel string) string {
 }
 
 func TestStoreMethodRatchet(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read service dir: %v", err)
-	}
-	sources := map[string]string{}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		b, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		sources[name] = string(b)
-	}
+	sources := serviceSources(t)
 
 	got, err := measureInterface("Store", sources)
-	if err != nil {
-		t.Fatalf("measure Store: %v", err)
-	}
+	mustDo(t, "measure Store", err)
 
 	for _, c := range got.crossPackage {
 		if _, ok := storeCrossPackageEmbeds[c]; !ok {
@@ -282,9 +267,7 @@ func TestStoreMethodRatchet(t *testing.T) {
 
 func TestModelsJSONTagRatchet(t *testing.T) {
 	got, err := countJSONTags(readServerFile(t, "db/models.go"))
-	if err != nil {
-		t.Fatalf("count tags: %v", err)
-	}
+	mustDo(t, "count tags", err)
 	if got != modelsJSONTagBaseline {
 		t.Errorf("db/models.go has %d json: tags, pinned at %d. New REST response types live in api or service, not db/models.go; if tags were removed, set modelsJSONTagBaseline to %d", got, modelsJSONTagBaseline, got)
 	}
@@ -372,12 +355,28 @@ func TestCountJSONTags(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := countJSONTags(tc.src)
-			if err != nil {
-				t.Fatalf("countJSONTags: %v", err)
-			}
+			mustDo(t, "countJSONTags", err)
 			if got != tc.want {
 				t.Fatalf("tags = %d, want %d", got, tc.want)
 			}
 		})
 	}
+}
+
+// serviceSources reads this package's non-test Go files, keyed by file name.
+func serviceSources(t *testing.T) map[string]string {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	mustDo(t, "read service dir", err)
+	sources := map[string]string{}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(name)
+		mustDo(t, "read "+name, err)
+		sources[name] = string(b)
+	}
+	return sources
 }

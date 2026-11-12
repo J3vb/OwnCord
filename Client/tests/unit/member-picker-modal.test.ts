@@ -3,7 +3,7 @@ import { useMountContainer } from "../helpers/mountContainer";
 import {
   createMemberPickerModal,
   type MemberPickerOptions,
-} from "../../src/pages/main-page/MemberPickerModal";
+} from "../../src/features/direct-messages/MemberPickerModal";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { membersStore } from "../../src/stores/members.store";
 import type { Member } from "../../src/stores/members.store";
@@ -354,7 +354,7 @@ describe("createMemberPickerModal", () => {
 
     const component = openPicker();
 
-    const cancelBtn = container.querySelector(".btn-secondary") as HTMLButtonElement;
+    const cancelBtn = container.querySelector(".btn-modal-cancel") as HTMLButtonElement;
     expect(cancelBtn).not.toBeNull();
     expect(cancelBtn.textContent).toBe("Cancel");
 
@@ -367,7 +367,7 @@ describe("createMemberPickerModal", () => {
 
     const component = openPicker();
 
-    const cancelBtn = container.querySelector(".btn-secondary") as HTMLButtonElement;
+    const cancelBtn = container.querySelector(".btn-modal-cancel") as HTMLButtonElement;
     cancelBtn.click();
 
     const overlay = container.querySelector(".modal-overlay");
@@ -383,7 +383,7 @@ describe("createMemberPickerModal", () => {
     const onClose = vi.fn();
     const component = openPicker({ onClose });
 
-    const cancelBtn = container.querySelector(".btn-secondary") as HTMLButtonElement;
+    const cancelBtn = container.querySelector(".btn-modal-cancel") as HTMLButtonElement;
     cancelBtn.click();
 
     expect(onClose).toHaveBeenCalledTimes(1);

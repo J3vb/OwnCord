@@ -39,17 +39,8 @@ func TestHandleReconnect_ConcurrentVisibilityBumpBlocksUntilRegistered(t *testin
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	chID, err := database.CreateChannel(ctx, "seqmu-race-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "seqmu-race-channel", "text")
+	token := seedSessionToken(t, database, uid)
 
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()

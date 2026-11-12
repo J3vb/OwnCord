@@ -2,9 +2,8 @@ package safefetch
 
 import "errors"
 
-// The refusal vocabulary. Every one is a policy decision, not a transport
-// failure: callers test with errors.Is and treat anything else as an upstream
-// problem.
+// The refusal vocabulary: each is a policy decision, not a transport failure;
+// callers test with errors.Is and treat anything else as an upstream problem.
 var (
 	// ErrInvalidURL — the URL did not parse, or carried no host.
 	ErrInvalidURL = errors.New("safefetch: invalid URL")
@@ -12,13 +11,10 @@ var (
 	ErrBlockedScheme = errors.New("safefetch: scheme not allowed")
 	// ErrBlockedPort — the URL's port is not in Policy.Ports.
 	ErrBlockedPort = errors.New("safefetch: port not allowed")
-	// ErrCredentialsInURL — the URL carried userinfo. Credentials in a URL
-	// are how a fetch is tricked into authenticating to somewhere it should
-	// not, and no caller here has a use for them.
+	// ErrCredentialsInURL — the URL carried userinfo, which no caller needs.
 	ErrCredentialsInURL = errors.New("safefetch: URL carries embedded credentials")
-	// ErrHostNotAllowed — the caller's own Request.AllowHost rule refused
-	// this hop's host. Distinct from ErrBlockedAddress: the address may be
-	// perfectly routable, and the caller simply does not permit that host.
+	// ErrHostNotAllowed — the caller's Request.AllowHost rule refused this hop's
+	// host; distinct from ErrBlockedAddress, the address may be routable.
 	ErrHostNotAllowed = errors.New("safefetch: host not allowed by the caller's rule")
 	// ErrBlockedAddress — a resolved address is not globally routable.
 	ErrBlockedAddress = errors.New("safefetch: destination address is not globally routable")
@@ -34,14 +30,14 @@ var (
 	ErrRedirectWithoutLocation = errors.New("safefetch: redirect without a usable Location")
 	// ErrBodyTooLarge — the response exceeded Policy.MaxBytes on the wire.
 	ErrBodyTooLarge = errors.New("safefetch: response body exceeds the byte ceiling")
-	// ErrDecompressedTooLarge — the response inflated past
-	// Policy.MaxDecompressedBytes (small on the wire, huge after inflation).
+	// ErrDecompressedTooLarge — the response inflated past Policy.MaxDecompressedBytes.
 	ErrDecompressedTooLarge = errors.New("safefetch: decompressed body exceeds the byte ceiling")
-	// ErrContentEncoding — the body arrived in an encoding we neither asked
-	// for nor decode.
+	// ErrContentEncoding — the body arrived in an encoding we did not ask for.
 	ErrContentEncoding = errors.New("safefetch: unsupported content encoding")
 	// ErrContentType — the declared or the sniffed media type is not allowed.
 	ErrContentType = errors.New("safefetch: content type not allowed")
+	// ErrBusy — no fetch slot came free before the deadline; nothing was sent.
+	ErrBusy = errors.New("safefetch: no fetch slot came free")
 	// ErrPolicy — the Policy itself is unusable.
 	ErrPolicy = errors.New("safefetch: invalid policy")
 )

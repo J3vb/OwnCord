@@ -45,9 +45,7 @@ func TestChangePassword_RevokeFailureIsPartialSuccess(t *testing.T) {
 	svc := NewUserService(fs)
 
 	res, err := svc.ChangePassword(context.Background(), 7, "newhash", 1, false)
-	if err != nil {
-		t.Fatalf("committed password change must not return an error: %v", err)
-	}
+	mustDo(t, "committed password change must not return an error", err)
 	if !res.RevokeFailed {
 		t.Fatal("RevokeFailed should be set when revocation keeps failing")
 	}
@@ -68,9 +66,7 @@ func TestChangePassword_RetryRecoversRevocation(t *testing.T) {
 	svc := NewUserService(fs)
 
 	res, err := svc.ChangePassword(context.Background(), 7, "newhash", 1, false)
-	if err != nil {
-		t.Fatalf("ChangePassword: %v", err)
-	}
+	mustDo(t, "ChangePassword", err)
 	if res.RevokeFailed {
 		t.Fatal("retry should have recovered the revocation")
 	}
@@ -102,9 +98,7 @@ func TestChangePassword_TokenRevokeFailureIsPartialSuccess(t *testing.T) {
 	svc := NewUserService(fs)
 
 	res, err := svc.ChangePassword(context.Background(), 7, "newhash", 1, true)
-	if err != nil {
-		t.Fatalf("committed password change must not return an error: %v", err)
-	}
+	mustDo(t, "committed password change must not return an error", err)
 	if !res.RevokeFailed {
 		t.Fatal("RevokeFailed should be set when the token revoke keeps failing")
 	}

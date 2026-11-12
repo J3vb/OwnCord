@@ -18,13 +18,9 @@ import (
 func lockLikeARunningImage(t *testing.T, path string) {
 	t.Helper()
 	name, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UTF16PtrFromString", err)
 	h, err := windows.CreateFile(name, windows.GENERIC_READ, windows.FILE_SHARE_READ, nil, windows.OPEN_EXISTING, 0, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateFile", err)
 	t.Cleanup(func() { _ = windows.CloseHandle(h) })
 }
 
@@ -34,9 +30,7 @@ func lockLikeARunningImage(t *testing.T, path string) {
 func TestRemoveOldBinary_LeavesALockedOneWithoutWaiting(t *testing.T) {
 	exePath := filepath.Join(t.TempDir(), "chatserver.exe")
 	for _, p := range []string{exePath + ".old", exePath + ".old-1", exePath + ".old-2"} {
-		if err := os.WriteFile(p, []byte("previous version"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "WriteFile", os.WriteFile(p, []byte("previous version"), 0o600))
 	}
 	lockLikeARunningImage(t, exePath+".old-2")
 

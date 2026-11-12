@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -24,28 +23,16 @@ func buildGIFFavoritesRouter(database *db.DB) http.Handler {
 
 func gifFavDo(t *testing.T, router http.Handler, method, path, token, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, method, path, token, strings.NewReader(body))
 }
 
 func gifFavList(t *testing.T, router http.Handler, token string) []map[string]string {
 	t.Helper()
 	rr := gifFavDo(t, router, http.MethodGet, "/api/v1/gif/favorites", token, "")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("list status = %d (%s)", rr.Code, rr.Body.String())
-	}
-	var body struct {
+	requireStatus(t, rr, http.StatusOK)
+	body := decodeBody[struct {
 		Favorites []map[string]string `json:"favorites"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	return body.Favorites
 }
 
@@ -75,9 +62,7 @@ func TestGIFFavorites_AddListRemove(t *testing.T) {
 	}
 
 	rr := gifFavDo(t, router, http.MethodDelete, "/api/v1/gif/favorites?url=https%3A%2F%2Fmedia.klipy.com%2Fb.gif", token, "")
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("remove = %d", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 	if got := gifFavList(t, router, token); len(got) != 1 || got[0]["title"] != "a" {
 		t.Fatalf("after remove = %+v", got)
 	}
@@ -88,9 +73,7 @@ func TestGIFFavorites_EmptyPreviewIsRejected(t *testing.T) {
 	token := profileCreateToken(t, database, "favuser", 4)
 	router := buildGIFFavoritesRouter(database)
 	rec := gifFavDo(t, router, http.MethodPut, "/api/v1/gif/favorites", token, `{"url":"https://media.klipy.com/a.gif"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
+	requireStatus(t, rec, http.StatusBadRequest)
 	if got := gifFavList(t, router, token); len(got) != 0 {
 		t.Fatalf("list = %+v", got)
 	}

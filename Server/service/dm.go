@@ -11,8 +11,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// dmCoreStore is what DMService itself reads and writes: channel lifecycle,
-// summaries and call targets. *db.DB satisfies it.
 type dmCoreStore interface {
 	dmReachStore
 	LeaveGroupDM(ctx context.Context, userID, channelID int64, content string) (*db.LeaveGroupResult, error)
@@ -32,8 +30,6 @@ type dmCoreStore interface {
 	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 }
 
-// dmStore is what the DM service and its group management part read and write.
-// *db.DB satisfies it.
 type dmStore interface {
 	dmCoreStore
 	groupManagementStore
@@ -44,48 +40,41 @@ type DMService struct {
 	st    dmCoreStore
 	perms *PermissionService
 	*groupManagement
-	// liveStatus returns userID's live status (what their connection last stamped or
-	// chose), "" with no connection or no stamp. The ws layer wires it
-	// (Hub.LiveStatus) so DM payloads apply the rules of ws/serve_ready.go's
-	// presentableMembers/presentableDMChannels instead of users.status, which keeps
-	// a chosen idle/dnd/invisible across a disconnect and trails a connect by the
-	// batched stamp. Nil (tests, no hub) leaves the row's status untouched.
+	// liveStatus returns userID's live status, "" with no connection or stamp. Wired by the ws
+	// layer (Hub.LiveStatus) so DM payloads follow ws/serve_ready.go instead of users.status,
+	// which keeps a chosen idle/dnd/invisible across a disconnect. Nil leaves the row untouched.
 	liveStatus func(userID int64) string
-	// liveMobile returns whether userID's live presence is on the Android app (the
-	// ws layer wires Hub.LiveMobile). Nil leaves every DM user off the phone.
+	// liveMobile returns whether userID's live presence is on the Android app (Hub.LiveMobile). Nil leaves every
+	// DM user off the phone.
 	liveMobile func(userID int64) bool
 }
 
-// NewDMService creates a DMService. perms answers whether an actor is timed out,
-// which refuses the writes that publish to other participants.
+// NewDMService creates a DMService. perms answers whether an actor is timed out, which
+// refuses writes that publish to other participants.
 func NewDMService(st dmStore, perms *PermissionService) *DMService {
 	return &DMService{st: st, perms: perms, groupManagement: &groupManagement{st: st, perms: perms}}
 }
 
-// SetLiveStatusLookup wires the live-status lookup DM payloads present instead of
-// users.status; nil clears it. Call once at startup or from a test.
+// SetLiveStatusLookup wires the live-status lookup DM payloads present instead of users.status; nil
+// clears it.
 func (s *DMService) SetLiveStatusLookup(liveStatus func(userID int64) string) {
 	s.liveStatus = liveStatus
 }
 
-// SetLiveMobileLookup wires the lookup DM payloads read the phone flag from; nil
-// clears it. Call once at startup or from a test.
+// SetLiveMobileLookup wires the lookup DM payloads read the phone flag from; nil clears it.
 func (s *DMService) SetLiveMobileLookup(liveMobile func(userID int64) bool) {
 	s.liveMobile = liveMobile
 }
 
-// PresentableMobile reports whether subjectID shows the phone to a viewer who is
-// shown them with presented status (PresentableStatus): never while they read as
-// offline.
+// PresentableMobile reports whether subjectID shows the phone to a viewer shown them with
+// presented status: never while they read as offline.
 func (s *DMService) PresentableMobile(subjectID int64, presented string) bool {
 	return s.liveMobile != nil && presented != db.StatusOffline && s.liveMobile(subjectID)
 }
 
-// PresentableStatus returns the status viewerID should see for subjectID: offline
-// with no stamped live connection, else the live status through
-// db.StatusForViewer, whatever users.status says. Exported so POST /dms, which
-// hand-builds a db.DMUser, applies the same rule. An unwired lookup leaves status
-// untouched.
+// PresentableStatus returns the status viewerID should see for subjectID: offline with no
+// stamped live connection, else the live status through db.StatusForViewer. Exported so
+// POST /dms, which hand-builds a db.DMUser, applies the same rule.
 func (s *DMService) PresentableStatus(subjectID, viewerID int64, status string) string {
 	if s.liveStatus == nil {
 		return status
@@ -102,9 +91,6 @@ func (s *DMService) presentableDMUser(u db.DMUser, viewerID int64) db.DMUser {
 	return u
 }
 
-// presentableDMChannelInfo applies PresentableStatus to Recipient (the legacy
-// single field, a copy of Recipients[0], not a shared reference) and every entry
-// of Recipients. Mirrors Hub.presentableDMChannels (ws/serve_ready.go).
 func (s *DMService) presentableDMChannelInfo(info db.DMChannelInfo, viewerID int64) db.DMChannelInfo {
 	if info.Recipient.ID != 0 {
 		info.Recipient = s.presentableDMUser(info.Recipient, viewerID)
@@ -120,28 +106,24 @@ type CreateDMResult struct {
 	Channel   *db.Channel
 	Created   bool
 	Recipient *db.User
-	// RecipientOpened reports whether the recipient's side is open and safe to
-	// announce (dm_channel_open, ready.dm_channels, GET /dms). Meaningful only when
-	// Created: an existing channel's visibility is untouched. A new 1:1 channel opens
-	// the recipient's side only if the recipient already trusts the caller (decided
-	// atomically in GetOrCreateDMChannelGated's transaction); otherwise it opens at
-	// acceptance (MessageRequestService.Accept). The caller (api/dm_handler.go)
-	// broadcasts dm_channel_open from it.
+	// RecipientOpened reports whether the recipient's side is open and safe to announce
+	// (dm_channel_open, ready.dm_channels, GET /dms); meaningful only when Created. A new 1:1
+	// channel opens it only if they already trust the caller (decided in
+	// GetOrCreateDMChannelGated's transaction), else at acceptance (MessageRequestService.Accept).
 	RecipientOpened bool
-	// AcceptedRequest is the caller's own undecided request from the other user that
-	// opening the DM just accepted, so the caller can send Accept's dm_request update.
+	// AcceptedRequest is the caller's own undecided request from the other user that opening the DM just
+	// accepted (for Accept's dm_request update).
 	AcceptedRequest *db.MessageRequest
 }
 
-// dmReachableUser reports whether u can be the other side of a new DM or group
-// membership: the account exists, is active (not pending or denied) and is not
-// effectively banned (a lapsed temporary ban counts as not banned).
+// dmReachableUser reports whether u can be the other side of a new DM or group: the
+// account exists, is active and is not effectively banned (a lapsed temporary ban counts as not banned).
 func dmReachableUser(u *db.User) bool {
 	return u != nil && u.RegistrationStatus == db.RegistrationActive && !auth.IsEffectivelyBanned(u)
 }
 
-// CreateDM creates or retrieves a DM channel between two users, validating that
-// neither blocked the other and the recipient accepts DMs from the caller.
+// CreateDM creates or retrieves a DM channel between two users, validating that neither
+// blocked the other and the recipient accepts DMs from the caller.
 func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*CreateDMResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.CreateDM",
 		telemetry.Int64("user_id", userID),
@@ -160,8 +142,7 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 	if err != nil || recipient == nil {
 		return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 	}
-	// Anything not active and unbanned is the same "recipient not found" as an
-	// unknown id.
+	// Anything not active and unbanned is the same "recipient not found" as an unknown id.
 	if !dmReachableUser(recipient) {
 		return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 	}
@@ -174,8 +155,7 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		return nil, fmt.Errorf("%w: %s", ErrForbidden, dmUnreachableText)
 	}
 	// The recipient may have turned off DMs from members; a trusted sender (accepted,
-	// sent_first, grandfathered) still reaches them. Same refusal as a block, so the
-	// two causes read alike.
+	// sent_first, grandfathered) still reaches them. Same refusal as a block.
 	refused, err := storeDMReader{s.st}.DMRefusesSender(ctx, recipientID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to check DM privacy: %w", ErrInternal, err)
@@ -184,8 +164,8 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		return nil, fmt.Errorf("%w: %s", ErrForbidden, dmUnreachableText)
 	}
 
-	// A new channel can notify the recipient (dm_channel_open), which a timeout
-	// refuses like a send; reopening an existing one notifies nobody.
+	// A new channel can notify the recipient (dm_channel_open), which a timeout refuses like
+	// a send; reopening an existing one notifies nobody.
 	if timeoutErr := requireNotTimedOut(ctx, s.perms, userID); timeoutErr != nil {
 		if !errors.Is(timeoutErr, ErrTimedOut) {
 			return nil, timeoutErr
@@ -199,10 +179,9 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		}
 	}
 
-	// The recipient's visibility is decided INSIDE GetOrCreateDMChannelGated's
-	// transaction (does the recipient already trust the caller?) and written once with
-	// the channel and participants, leaving no post-hoc CloseDM to race a
-	// cancellation, failure or in-flight accept.
+	// The recipient's visibility is decided INSIDE GetOrCreateDMChannelGated's transaction
+	// and written once with the channel, leaving no post-hoc CloseDM to race a cancellation,
+	// failure or in-flight accept.
 	ch, created, recipientOpened, accepted, err := s.st.GetOrCreateDMChannelGated(ctx, userID, recipientID)
 	if err != nil {
 		slog.Error("DMService.CreateDM", "err", err)
@@ -224,32 +203,24 @@ func (s *DMService) ListDMs(ctx context.Context, userID int64) ([]db.DMChannelIn
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to list DMs: %w", ErrInternal, err)
 	}
-	// GetUserDMChannels applies only db.StatusForViewer; add the "no live
-	// connection" half (see presentableDMChannelInfo).
+	// GetUserDMChannels applies only db.StatusForViewer; add the "no live connection" half.
 	for i := range dms {
 		dms[i] = s.presentableDMChannelInfo(dms[i], userID)
 	}
 	return dms, nil
 }
 
-// CloseDMResult describes what closing a DM did, so the caller knows which events
-// to send.
+// CloseDMResult describes what closing a DM did, so the caller knows which events to send.
 type CloseDMResult struct {
-	// Left is true when the caller left a group DM; the remaining members need telling.
-	Left bool
-	// ChannelDeleted is true when the caller was the group's last participant.
-	ChannelDeleted bool
-	// RemainingParticipantIDs is who is left after a leave; empty for a 1:1 close.
+	Left                    bool
+	ChannelDeleted          bool
 	RemainingParticipantIDs []int64
-	// Rows are the group_leave rows to fan out; empty for a 1:1 close or a last member.
-	Rows []GroupEventRow
+	Rows                    []GroupEventRow
 }
 
-// CloseDM closes a DM for a user. For a 1:1 DM it only hides the conversation
-// from the caller's sidebar (the other party keeps theirs; the next message
-// reopens it). For a group DM it is a leave: the caller leaves dm_participants
-// and cannot reopen without being re-added. They share a route because they
-// share a gesture, but are different operations and the result says which ran.
+// CloseDM closes a DM for a user. For a 1:1 DM it only hides it from the caller's sidebar
+// (the next message reopens it). For a group DM it is a leave: the caller leaves
+// dm_participants and cannot reopen without being re-added. The result says which ran.
 func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) (*CloseDMResult, error) {
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
@@ -277,14 +248,12 @@ func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) (*Clos
 	res, err := s.st.LeaveGroupDM(ctx, userID, channelID, groupLeaveContent(leaver))
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			// Removed (or gone) between the membership check and the tx.
 			return nil, fmt.Errorf("%w: not a participant in this DM", ErrNotFound)
 		}
 		return nil, fmt.Errorf("%w: failed to leave group DM: %w", ErrInternal, err)
 	}
 
-	// The leave committed: the reads below must not fail on a client hang-up, or the
-	// survivors never hear of it.
+	// The leave committed: the reads below must not fail on a client hang-up or survivors never hear of it.
 	ctx = context.WithoutCancel(ctx)
 	slog.Debug("group DM left", "user_id", userID, "channel_id", channelID, "deleted", res.Deleted)
 	out := &CloseDMResult{
@@ -298,29 +267,22 @@ func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) (*Clos
 	return out, nil
 }
 
-// MaxGroupDMNameLen bounds the optional group name; it matches the channel name
-// cap since both render in the same sidebar row.
+// MaxGroupDMNameLen bounds the optional group name; matches the channel name cap (same sidebar row).
 const MaxGroupDMNameLen = 100
 
 // CreateGroupDMResult holds the result of creating a group DM.
 type CreateGroupDMResult struct {
-	Channel      *db.Channel
-	Participants []db.DMUser
-	// ParticipantIDs is every member including the creator: the dm_channel_open fan-out set.
+	Channel        *db.Channel
+	Participants   []db.DMUser
 	ParticipantIDs []int64
 }
 
-// CreateGroupDM creates a group DM between the caller and 2..8 other users
-// (3..10 total, db.MaxGroupDMParticipants). Blocks are enforced both ways per
-// recipient: a user cannot pull someone they blocked into a room, nor reach
-// someone who blocked them via a group. A recipient who turned off DMs from
-// members and does not trust the caller, or whom the caller holds an unaccepted
-// request to, is refused the same way. The check is deliberately creation-time
-// only: a group is a shared room, and silently dropping one member's messages for
-// another would make the conversation lie to everybody (so the client composer
-// gate applies to 1:1 DMs alone, and a member who later turns DMs off stays).
-// Unlike CreateDM it always creates a new channel; the same people may want
-// several groups.
+// CreateGroupDM creates a group DM between the caller and 2..8 others (db.MaxGroupDMParticipants
+// total). Blocks are enforced both ways per recipient; a recipient with DMs from members
+// off who does not trust the caller, or whom the caller holds an unaccepted request to, is
+// refused the same way. Creation-time only by design: silently dropping one member's
+// messages for another would make the conversation lie to everybody (so a member who later
+// turns DMs off stays). Always creates a new channel.
 func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientIDs []int64, name string) (*CreateGroupDMResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.CreateGroupDM",
 		telemetry.Int64("user_id", userID),
@@ -343,17 +305,15 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		return nil, fmt.Errorf("%w: a group DM holds at most %d users", ErrBadRequest, db.MaxGroupDMParticipants)
 	}
 
-	// Bound the raw bytes before cleanText; see cleanTextBounded (user.go).
+	// Bound the raw bytes before cleanText (see cleanTextBounded in user.go).
 	cleanName, err := cleanVisibleBounded(name, MaxGroupDMNameLen, "name")
 	if err != nil {
 		return nil, err
 	}
 
-	// The same checks an add runs, so they cannot drift: recipients are
-	// dmReachableUser, no pair is blocked, each is reachable by the creator. The
-	// send-time gate (RequireDMReachable) skips groups, so this is the only check:
-	// two mutually-blocked recipients must not share a group even if neither blocked
-	// the creator.
+	// The same checks an add runs, so they cannot drift. The send-time gate
+	// (RequireDMReachable) skips groups, so this is the only check: two mutually-blocked
+	// recipients must not share a group even if neither blocked the creator.
 	if _, err = s.validateGroupRecipients(ctx, userID, unique, []int64{userID}); err != nil {
 		return nil, err
 	}
@@ -367,17 +327,14 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		return nil, fmt.Errorf("%w: failed to create group DM", ErrInternal)
 	}
 
-	// Everything is committed, so this read must not turn a persisted group into a
-	// reported failure: it is uncancellable so a disconnect cannot fail it, and any
-	// other failure is logged so the caller still gets a result to fan
-	// dm_channel_open from. Groups are duplicate-by-design, so reporting a failure
-	// would only invite a retry creating a second, indistinguishable group.
+	// Everything is committed, so this read must not turn a persisted group into a reported
+	// failure (uncancellable; other failures are logged). Groups are duplicate-by-design, so a
+	// reported failure would invite a retry creating a second group.
 	participants, err := s.st.GetDMParticipants(context.WithoutCancel(ctx), ch.ID, userID)
 	if err != nil {
 		slog.Error("DMService.CreateGroupDM: failed to read participants after commit", "err", err, "channel_id", ch.ID)
 		participants = nil
 	}
-	// A participant with no live connection reads offline (see presentableDMChannelInfo).
 	for i := range participants {
 		participants[i] = s.presentableDMUser(participants[i], userID)
 	}
@@ -389,10 +346,9 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 	}, nil
 }
 
-// DMSummaryFor returns one DM's payload as viewerID sees it: group name,
-// participants other than them, group flag. Every push of a DM's membership
-// (create, rename, leave) goes through it so events match GET /dms and `ready`.
-// Membership is checked here, not by each caller.
+// DMSummaryFor returns one DM's payload as viewerID sees it (group name, other
+// participants, group flag). Every push of a DM's membership goes through it so events
+// match GET /dms and `ready`. Membership is checked here, not by callers.
 func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64) (db.DMChannelInfo, error) {
 	ok, err := s.st.IsDMParticipant(ctx, viewerID, channelID)
 	if err != nil || !ok {
@@ -417,90 +373,5 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 			return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read group owner: %w", ErrInternal, err)
 		}
 	}
-	// The single place broadcastDMOpen and PATCH /dms/{id} build from, so the "no
-	// live connection" rule here covers every push (see presentableDMChannelInfo).
 	return s.presentableDMChannelInfo(db.NewDMChannelInfo(channelID, ch.Name, isGroup, ownerID, iconID, participants, viewerID), viewerID), nil
-}
-
-// SharedOneToOneDM returns the 1:1 DM channel the two users share, or ok=false.
-// Group DMs never match (RequireDMReachable exempts groups).
-func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (int64, bool, error) {
-	id, ok, err := s.st.FindDMChannelIDBetween(ctx, userA, userB)
-	if err != nil {
-		return 0, false, fmt.Errorf("%w: failed to look up shared DM: %w", ErrInternal, err)
-	}
-	return id, ok, nil
-}
-
-// RingTargets returns the other participants of a DM the caller is in, the people
-// a call_ring is addressed to. A timed-out caller is refused, as for a send.
-// Ringing carries no state: a "call" in a DM is somebody present in its voice
-// channel and the ring a nudge, so there is nothing to persist that presence does
-// not say, and a persisted call could dangle after a crash.
-func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([]int64, error) {
-	return s.callTargets(ctx, userID, channelID, true)
-}
-
-// DeclineTargets is RingTargets for a call_decline. A decline carries no text and
-// only stops the ringer's client ringing, so a timeout does not refuse it.
-func (s *DMService) DeclineTargets(ctx context.Context, userID, channelID int64) ([]int64, error) {
-	return s.callTargets(ctx, userID, channelID, false)
-}
-
-func (s *DMService) callTargets(ctx context.Context, userID, channelID int64, ring bool) ([]int64, error) {
-	if channelID <= 0 {
-		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
-	}
-	ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to check DM participation: %w", ErrInternal, err)
-	}
-	if !ok {
-		return nil, fmt.Errorf("%w: not a participant in this DM", ErrForbidden)
-	}
-	// A ring is a DM interaction like any other sink: without this a blocked user
-	// could make the blocker's client ring. Groups are exempt inside
-	// RequireDMReachable; blocks are enforced at group creation instead.
-	if err := RequireDMReachable(ctx, storeDMReader{s.st}, userID, channelID); err != nil {
-		return nil, err
-	}
-	if ring {
-		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
-			return nil, err
-		}
-	}
-
-	ids, err := s.st.GetDMParticipantIDs(ctx, channelID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
-	}
-
-	// call_incoming/call_declined is a DM interaction like chat and typing: an
-	// untrusted recipient of a pending request must not learn the sender is in voice.
-	// Groups are untouched. A failed IsGroupDM must fail closed to no ring targets,
-	// not an unfiltered ring.
-	isGroup, gErr := s.st.IsGroupDM(ctx, channelID)
-	if gErr != nil {
-		return nil, nil //nolint:nilerr // fail closed to no targets, not an error — the ringer's own call_ring must still succeed
-	}
-
-	targets := make([]int64, 0, len(ids))
-	for _, pid := range ids {
-		if pid == userID {
-			continue
-		}
-		if !isGroup {
-			trusted, tErr := s.st.IsTrustedSender(ctx, pid, userID)
-			if tErr == nil && !trusted && ring {
-				// Tell the ringer at once rather than let them wait out a ring nobody will hear.
-				// A decline stays silent.
-				return nil, ErrCallNeedsAcceptance
-			}
-			if tErr != nil || !trusted {
-				continue
-			}
-		}
-		targets = append(targets, pid)
-	}
-	return targets, nil
 }

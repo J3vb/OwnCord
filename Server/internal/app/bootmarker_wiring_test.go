@@ -16,18 +16,14 @@ import (
 // the marker for the next boot.
 func TestApp_BootMarkerStage_ReportsPreviousExitAndClearsOnCleanClose(t *testing.T) {
 	a := bootTestApp(t, "0", "")
-	if err := a.startDataDir(); err != nil {
-		t.Fatalf("startDataDir: %v", err)
-	}
+	mustDo(t, "startDataDir", a.startDataDir())
 	markerPath := bootMarkerPath(a.cfg.Server.DataDir)
 	// A previous run that started and was killed (never closed).
 	if _, err := openBootMarker(markerPath, time.Now().Add(-time.Hour)); err != nil {
 		t.Fatalf("arming the previous marker: %v", err)
 	}
 
-	if err := a.startBootMarker(); err != nil {
-		t.Fatalf("startBootMarker: %v", err)
-	}
+	mustDo(t, "startBootMarker", a.startBootMarker())
 	if a.bootMarker == nil {
 		t.Fatal("startBootMarker left no handle, so a clean close cannot clear the marker")
 	}
@@ -51,9 +47,7 @@ func TestApp_BootMarkerStage_ReportsPreviousExitAndClearsOnCleanClose(t *testing
 		t.Fatal("the unclean previous exit did not raise an attention warning")
 	}
 
-	if err := a.Close(context.Background()); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", a.Close(context.Background()))
 	if st := readBootMarker(markerPath); !st.Recorded || st.Unclean {
 		t.Fatalf("after a clean close the marker reads %+v, want recorded and clean", st)
 	}
@@ -64,13 +58,9 @@ func TestApp_BootMarkerStage_ReportsPreviousExitAndClearsOnCleanClose(t *testing
 // successful start still reports the killed run, then clears it.
 func TestApp_BootMarkerStage_FailedStartCarriesUncleanExitForward(t *testing.T) {
 	a := bootTestApp(t, "0", "")
-	if err := a.startDataDir(); err != nil {
-		t.Fatalf("startDataDir: %v", err)
-	}
+	mustDo(t, "startDataDir", a.startDataDir())
 	dataDir, err := filepath.Abs(a.cfg.Server.DataDir)
-	if err != nil {
-		t.Fatalf("Abs: %v", err)
-	}
+	mustDo(t, "Abs", err)
 	a.cfg.Server.DataDir = dataDir
 	markerPath := bootMarkerPath(dataDir)
 	killedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
@@ -79,28 +69,20 @@ func TestApp_BootMarkerStage_FailedStartCarriesUncleanExitForward(t *testing.T) 
 	}
 
 	// The restart fails before the hub stage: Close runs without a report.
-	if err := a.startBootMarker(); err != nil {
-		t.Fatalf("startBootMarker: %v", err)
-	}
-	if err := a.Close(context.Background()); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "startBootMarker", a.startBootMarker())
+	mustDo(t, "Close", a.Close(context.Background()))
 
 	// The next start still sees the killed run.
 	b := bootTestApp(t, "0", "")
 	b.cfg.Server.DataDir = dataDir
-	if err := b.startBootMarker(); err != nil {
-		t.Fatalf("startBootMarker: %v", err)
-	}
+	mustDo(t, "startBootMarker", b.startBootMarker())
 	if !b.prevBoot.Unclean || !b.prevBoot.StartedAt.Equal(killedAt) {
 		t.Fatalf("after a failed start prevBoot = %+v, want the killed run started %v", b.prevBoot, killedAt)
 	}
 	svc := service.NewAttentionService(service.AttentionThresholds{}, service.AttentionSources{})
 	b.recordBootStatus(&service.Services{Attention: svc})
 	b.bootMarker.reported() // every start stage came up
-	if err := b.Close(context.Background()); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", b.Close(context.Background()))
 	if st := readBootMarker(markerPath); !st.Recorded || st.Unclean {
 		t.Fatalf("after a reported start and a clean close the marker reads %+v, want clean", st)
 	}
@@ -111,9 +93,7 @@ func TestApp_BootMarkerStage_FailedStartCarriesUncleanExitForward(t *testing.T) 
 // must still carry the unclean exit forward.
 func TestAppRun_LateStageFailureCarriesUncleanExitForward(t *testing.T) {
 	a := bootTestApp(t, "0", "http")
-	if err := os.MkdirAll(a.cfg.Server.DataDir, 0o750); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(a.cfg.Server.DataDir, 0o750))
 	markerPath := bootMarkerPath(a.cfg.Server.DataDir)
 	killedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
 	if _, err := openBootMarker(markerPath, killedAt); err != nil {

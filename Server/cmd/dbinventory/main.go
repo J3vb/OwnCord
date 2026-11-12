@@ -1,21 +1,15 @@
-// Command dbinventory lists every production Go file above the domain layer
-// that uses the db package, and what it uses it for: db.* types, db.* package
-// functions and sentinels, method calls on a *db.DB value, and the places the
-// bare handle is passed on to somebody else.
-//
-// It is the measurement behind docs/architecture/server-boundaries.md and
-// prints a Markdown table so the document can be regenerated:
+// Command dbinventory lists every production Go file above the domain layer that uses the db package, and
+// what for: db.* types, functions and sentinels, method calls on a *db.DB value, and where the bare handle is
+// passed on. It is the measurement behind docs/architecture/server-boundaries.md and prints a Markdown table
+// so the document can be regenerated:
 //
 //	cd Server && go run ./cmd/dbinventory
 //
-// The analysis is syntactic (go/parser + go/ast) and lives in Server/invariants
-// so the guard and this command measure the same thing: see DBHandleVars,
-// DBHandleFields and DBHandleCalls.
-//
-// It measures use, not import: the handle is stored on a struct field
-// (Hub.db, App.database), so any file in that package can call it without
-// importing db. A file in a package that declares a *db.DB field is analysed
-// whatever it imports, and becomes a row once it calls the handle or hands it on.
+// The analysis is syntactic (go/parser + go/ast) and lives in Server/invariants so the guard and this command
+// measure the same thing (DBHandleVars, DBHandleFields, DBHandleCalls). It measures use, not import: the
+// handle is stored on a struct field (Hub.db, App.database), so any file in that package can call it without
+// importing db; a file in a package declaring a *db.DB field is analysed whatever it imports and becomes a
+// row once it calls the handle or hands it on.
 package main
 
 import (
@@ -37,12 +31,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/invariants"
 )
 
-// layerDirs are the top-level packages that may import db freely and are not
-// inventoried. Matched on the root-relative path, so a nested directory sharing
-// a name (api/service/) is still inventoried, as db-import-boundary does.
+// layerDirs are the top-level packages that may import db freely and are not inventoried; matched on the
+// root-relative path, so a nested directory sharing a name (api/service/) is still inventoried, as
+// db-import-boundary does.
 var layerDirs = map[string]bool{"db": true, "service": true}
 
-// skipNames are never code at any depth: fixtures and vendored JS.
 var skipNames = map[string]bool{"testdata": true, "node_modules": true}
 
 type kind int
@@ -77,9 +70,8 @@ func main() {
 	}
 }
 
-// inventory returns one row per production file under root that imports db,
-// sorted by path. It is split out of main so the doc gate
-// (TestServerBoundariesDocIsCurrent) can render the same block.
+// inventory returns one row per production file under root that imports db, sorted by path; split out of main
+// so the doc gate (TestServerBoundariesDocIsCurrent) can render the same block.
 func inventory(root string) ([]fileUse, error) {
 	fset := token.NewFileSet()
 	dbKinds, err := declKinds(fset, filepath.Join(root, "db"))
@@ -92,10 +84,9 @@ func inventory(root string) ([]fileUse, error) {
 		return nil, err
 	}
 
-	// Pass 1: parse everything, collecting per package the struct fields typed
-	// *db.DB and the functions that return one, the two ways a file with no
-	// import can hold the handle. A constructor keeps the position of its
-	// *db.DB result, which decides which name on the left receives it.
+	// Pass 1: parse everything, collecting per package the struct fields typed *db.DB and the functions
+	// returning one, the two ways a file with no import can hold the handle. A constructor keeps the position of
+	// its *db.DB result, which decides which name on the left receives it.
 	parsed := map[string]*ast.File{}
 	fieldsByPkg := map[string]map[string]bool{}
 	ctorsByPkg := map[string]map[string]int{}
@@ -120,9 +111,8 @@ func inventory(root string) ([]fileUse, error) {
 		maps.Copy(ctorsByPkg[dir], invariants.DBHandleCtors(f, alias))
 	}
 
-	// Pass 2: per-file uses. A file with no import is analysed anyway when its
-	// package carries the handle on a field or opens it through a constructor,
-	// and becomes a row only if it uses it.
+	// Pass 2: per-file uses. A file with no import is analysed anyway when its package carries the handle on a
+	// field or opens it through a constructor, and becomes a row only if it uses it.
 	var rows []fileUse
 	for _, rel := range files {
 		f := parsed[rel]
@@ -142,8 +132,6 @@ func inventory(root string) ([]fileUse, error) {
 	return rows, nil
 }
 
-// productionFiles returns slash-separated .go paths under root, excluding
-// tests and skipDirs, sorted.
 func productionFiles(root string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -177,8 +165,6 @@ func productionFiles(root string) ([]string, error) {
 	return out, err
 }
 
-// declKinds parses the db package's production files and maps every exported
-// top-level name to its kind, so a db.X selector can be classified exactly.
 func declKinds(fset *token.FileSet, dir string) (map[string]kind, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -232,7 +218,6 @@ func analyze(f *ast.File, rel, alias string, dbKinds map[string]kind, dbFields m
 	return u
 }
 
-// pkgSelector returns the selector's field name when expr is <alias>.X.
 func pkgSelector(expr ast.Expr, alias string) (string, bool) {
 	sel, ok := expr.(*ast.SelectorExpr)
 	if !ok {
@@ -245,9 +230,8 @@ func pkgSelector(expr ast.Expr, alias string) (string, bool) {
 	return sel.Sel.Name, true
 }
 
-// classifySelectors buckets every <alias>.X selector by what db declares X as.
-// A file with no alias names no db.X selector at all, which is exactly what an
-// empty alias yields.
+// classifySelectors buckets every <alias>.X selector by what db declares X as; an empty alias names no db.X
+// selector.
 func classifySelectors(f *ast.File, alias string, dbKinds map[string]kind, u *fileUse) {
 	if alias == "" {
 		return
@@ -300,9 +284,8 @@ func sum(m map[string]int) int {
 }
 
 // printTable renders the Markdown block between the dbinventory markers in
-// docs/architecture/server-boundaries.md and returns the number of problems
-// found; nonzero makes the command exit 1, and TestServerBoundariesDocIsCurrent
-// fails before it compares anything.
+// docs/architecture/server-boundaries.md and returns the number of problems; nonzero makes the command exit
+// 1, and TestServerBoundariesDocIsCurrent fails before comparing anything.
 //
 // The problem classes:
 //
@@ -316,9 +299,8 @@ func sum(m map[string]int) int {
 //     edit to DBImportAllow, never a side effect of editing the file.
 //   - STALE: a row whose file no longer uses db at all.
 //
-// allow is a parameter so unit tests can drive each class from a fixture.
-// allow is a parameter rather than invariants.DBImportAllow directly so the
-// unit tests can drive each class from a fixture instead of the live tree.
+// allow is a parameter, not invariants.DBImportAllow directly, so unit tests can drive each class from a
+// fixture instead of the live tree.
 func printTable(w io.Writer, rows []fileUse, allow map[string]invariants.DBImportEntry) int {
 	byPkg := map[string]int{}
 	byDisposition := map[string]int{}
@@ -379,9 +361,8 @@ func printTable(w io.Writer, rows []fileUse, allow map[string]invariants.DBImpor
 	return problems
 }
 
-// classify compares one measured row against the entry that claims it and
-// returns a line per problem, naming the file, the measured multiset and the
-// pinned one.
+// classify compares one measured row against the entry that claims it and returns a line per problem (file,
+// measured multiset, pinned one).
 func classify(r fileUse, entry invariants.DBImportEntry, listed bool) []string {
 	if !listed {
 		if r.imports {
@@ -409,7 +390,6 @@ func classify(r fileUse, entry invariants.DBImportEntry, listed bool) []string {
 	return out
 }
 
-// countList renders a count map as "a 1, b 2", keys sorted.
 func countList(m map[string]int) string {
 	keys := slices.Sorted(maps.Keys(m))
 	parts := make([]string, 0, len(keys))

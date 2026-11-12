@@ -36,15 +36,8 @@ func newReplyTargetFixture(t *testing.T, lookupErr error) (svc *MessageService, 
 	t.Helper()
 	_, database = newTestMessageService(t)
 	seedChannel(t, database, &db.Channel{ID: 11, Name: "other", Type: "text"})
-	ctx := context.Background()
-	inCh10, err := database.CreateMessage(ctx, 10, 1, "parent", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	inCh11, err = database.CreateMessage(ctx, 11, 1, "elsewhere", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	inCh10 = mustCreateMessage(t, database, 10, 1, "parent", nil)
+	inCh11 = mustCreateMessage(t, database, 11, 1, "elsewhere", nil)
 	inserts = new(int)
 	permSvc := NewPermissionService(database, permissions.NewChecker(database))
 	svc = NewMessageService(replyTargetStore{Store: database, inserts: inserts, lookupErr: lookupErr}, permSvc, nil)
@@ -59,9 +52,7 @@ func TestSendMessage_ReplyInSameChannelIsAccepted(t *testing.T) {
 	svc, _, inserts, parent, _ := newReplyTargetFixture(t, nil)
 
 	result, err := svc.SendMessage(context.Background(), replyParams(parent))
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
+	mustDo(t, "SendMessage", err)
 	if *inserts != 1 {
 		t.Errorf("inserts = %d, want 1", *inserts)
 	}
@@ -78,9 +69,7 @@ func TestSendMessage_ReplyTargetMustBeAMessageInTheChannel(t *testing.T) {
 		{"another channel", func(_ *db.DB, _, inCh11 int64) int64 { return inCh11 }},
 		{"no such message", func(_ *db.DB, _, inCh11 int64) int64 { return inCh11 + 1000 }},
 		{"deleted", func(database *db.DB, inCh10, _ int64) int64 {
-			if err := database.DeleteMessage(context.Background(), inCh10, 1, false); err != nil {
-				t.Fatalf("DeleteMessage: %v", err)
-			}
+			mustDo(t, "DeleteMessage", database.DeleteMessage(context.Background(), inCh10, 1, false))
 			return inCh10
 		}},
 	}
@@ -110,17 +99,11 @@ func TestSendMessage_RetryAfterReplyTargetDeletedReturnsOriginal(t *testing.T) {
 	p.ClientMessageID = deliveryTestID(time.Now())
 
 	first, err := svc.SendMessage(context.Background(), p)
-	if err != nil {
-		t.Fatalf("first send: %v", err)
-	}
-	if err := database.DeleteMessage(context.Background(), parent, 1, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "first send", err)
+	mustDo(t, "DeleteMessage", database.DeleteMessage(context.Background(), parent, 1, false))
 
 	retry, err := svc.SendMessage(context.Background(), p)
-	if err != nil {
-		t.Fatalf("retry: %v", err)
-	}
+	mustDo(t, "retry", err)
 	if !retry.Duplicate || retry.MessageID != first.MessageID {
 		t.Errorf("retry = {Duplicate: %v, MessageID: %d}, want the original %d as a duplicate",
 			retry.Duplicate, retry.MessageID, first.MessageID)

@@ -10,17 +10,18 @@ import (
 
 // ─── Sentinel error identity ─────────────────────────────────────────────────
 
+var sentinels = []struct {
+	name string
+	err  error
+}{
+	{"ErrNotFound", db.ErrNotFound},
+	{"ErrForbidden", db.ErrForbidden},
+	{"ErrConflict", db.ErrConflict},
+	{"ErrBanned", db.ErrBanned},
+	{"ErrLastAdmin", db.ErrLastAdmin},
+}
+
 func TestSentinelErrors_AreDistinct(t *testing.T) {
-	sentinels := []struct {
-		name string
-		err  error
-	}{
-		{"ErrNotFound", db.ErrNotFound},
-		{"ErrForbidden", db.ErrForbidden},
-		{"ErrConflict", db.ErrConflict},
-		{"ErrBanned", db.ErrBanned},
-		{"ErrLastAdmin", db.ErrLastAdmin},
-	}
 
 	for i, a := range sentinels {
 		for j, b := range sentinels {
@@ -35,16 +36,6 @@ func TestSentinelErrors_AreDistinct(t *testing.T) {
 }
 
 func TestSentinelErrors_MatchThemselves(t *testing.T) {
-	sentinels := []struct {
-		name string
-		err  error
-	}{
-		{"ErrNotFound", db.ErrNotFound},
-		{"ErrForbidden", db.ErrForbidden},
-		{"ErrConflict", db.ErrConflict},
-		{"ErrBanned", db.ErrBanned},
-		{"ErrLastAdmin", db.ErrLastAdmin},
-	}
 
 	for _, tc := range sentinels {
 		t.Run(tc.name, func(t *testing.T) {
@@ -56,16 +47,6 @@ func TestSentinelErrors_MatchThemselves(t *testing.T) {
 }
 
 func TestSentinelErrors_MatchWrapped(t *testing.T) {
-	sentinels := []struct {
-		name string
-		err  error
-	}{
-		{"ErrNotFound", db.ErrNotFound},
-		{"ErrForbidden", db.ErrForbidden},
-		{"ErrConflict", db.ErrConflict},
-		{"ErrBanned", db.ErrBanned},
-		{"ErrLastAdmin", db.ErrLastAdmin},
-	}
 
 	for _, tc := range sentinels {
 		t.Run(tc.name, func(t *testing.T) {

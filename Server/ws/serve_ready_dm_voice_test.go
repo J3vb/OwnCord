@@ -10,7 +10,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 )
 
@@ -31,14 +30,9 @@ func TestBuildReady_IncludesDMVoiceStates(t *testing.T) {
 	dmChannelID := seedDMChannel(t, database, viewer.ID, other.ID)
 
 	// The other participant joins the DM's voice channel.
-	if err := database.JoinVoiceChannel(context.Background(), other.ID, dmChannelID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, other.ID, dmChannelID)
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, viewer.ID, viewerRole)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, viewer.ID, viewerRole)
 
 	var env struct {
 		Payload struct {
@@ -48,9 +42,7 @@ func TestBuildReady_IncludesDMVoiceStates(t *testing.T) {
 			} `json:"voice_states"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 
 	found := false
 	for _, vs := range env.Payload.VoiceStates {

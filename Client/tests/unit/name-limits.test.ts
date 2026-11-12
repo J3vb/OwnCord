@@ -15,11 +15,10 @@ import {
   visibleLength,
 } from "../../src/lib/text/nameLimits";
 import { createPromptModal } from "../../src/lib/ui/modalFactory";
-import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import { makeCallbacks, testProfiles as profiles } from "../helpers/connectPageHarness";
 import type { ConnectPageCallbacks } from "../../src/pages/ConnectPage";
-import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
+import { createMemberPickerModal } from "../../src/features/direct-messages/MemberPickerModal";
 import { membersStore } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 
@@ -266,45 +265,6 @@ describe("register form username", () => {
 // Custom status
 // ---------------------------------------------------------------------------
 
-describe("status picker custom status", () => {
-  let container: HTMLDivElement;
-  let picker: StatusPickerComponent | null = null;
-  useMountContainer((c) => {
-    container = c;
-  });
-  afterEach(() => {
-    picker?.destroy?.();
-    picker = null;
-  });
-
-  it("shows a hint, and an over-limit value is not sent", () => {
-    const onCustomStatusChange = vi.fn();
-    picker = createStatusPicker({
-      currentStatus: "online",
-      onStatusChange: vi.fn(),
-      onCustomStatusChange,
-    });
-    picker.mount(container);
-    const input = container.querySelector<HTMLInputElement>("[data-testid='custom-status-input']")!;
-    const hint = container.querySelector<HTMLElement>("[data-testid='custom-status-hint']")!;
-    // 2 UTF-16 units per character, so astral text is not cut short; the real
-    // limit is enforced by character count.
-    expect(input.maxLength).toBe(256);
-    expect(hint.textContent).toBe("Up to 128 characters, on one line.");
-
-    const over = "x".repeat(200);
-    input.value = over;
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    expect(onCustomStatusChange).not.toHaveBeenCalled();
-    expect(hint.textContent).toBe("Custom status must be at most 128 characters.");
-    expect(input.value).toBe(over);
-
-    input.value = "fine";
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    expect(onCustomStatusChange).toHaveBeenCalledExactlyOnceWith("fine");
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Group DM name
 // ---------------------------------------------------------------------------
@@ -475,26 +435,6 @@ describe("one-line fields do not cap below the server's limit", () => {
     input.dispatchEvent(new Event("input", { bubbles: true }));
     expect(runeCount(input.value)).toBe(32);
     input.remove();
-  });
-});
-
-describe("text is sent as the server stores it", () => {
-  it("a custom status goes out with runs of spaces collapsed", () => {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const onCustomStatusChange = vi.fn();
-    const picker = createStatusPicker({
-      currentStatus: "online",
-      onStatusChange: vi.fn(),
-      onCustomStatusChange,
-    });
-    picker.mount(container);
-    const input = container.querySelector<HTMLInputElement>("[data-testid='custom-status-input']")!;
-    input.value = "  heads   down\u00a0\u00a0now ";
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    expect(onCustomStatusChange).toHaveBeenCalledExactlyOnceWith("heads down now");
-    picker.destroy?.();
-    container.remove();
   });
 });
 

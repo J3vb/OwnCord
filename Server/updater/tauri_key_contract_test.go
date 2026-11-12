@@ -27,9 +27,7 @@ func TestDefaultServerSignaturePublicKey_DiffersFromTauriUpdaterKey(t *testing.T
 			} `json:"updater"`
 		} `json:"plugins"`
 	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		t.Fatalf("Unmarshal tauri.conf.json: %v", err)
-	}
+	mustDo(t, "Unmarshal tauri.conf.json", json.Unmarshal(raw, &cfg))
 
 	if cfg.Plugins.Updater.PubKey == defaultServerSignaturePublicKey {
 		t.Fatalf("server updater signing key must differ from tauri.conf.json updater pubkey")

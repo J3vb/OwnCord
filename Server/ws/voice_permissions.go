@@ -15,13 +15,13 @@ var errVoiceMediaPending = errors.New("voice media update pending")
 // The channel and join token identify the session that requested this work;
 // a newer membership is never followed by an older permission update.
 func (h *Hub) syncVoiceParticipantPermissions(ctx context.Context, userID, channelID int64, joinToken string) error {
-	unlock := h.voiceHub.mod.lock(userID)
+	unlock := h.voiceHub.mod.Lock(userID)
 	defer unlock()
 	return h.updateVoiceParticipantPermissions(ctx, userID, channelID, joinToken)
 }
 
 func (h *Hub) trySyncVoiceParticipantPermissions(ctx context.Context, userID, channelID int64, joinToken string) error {
-	unlock, acquired := h.voiceHub.mod.tryLock(userID)
+	unlock, acquired := h.voiceHub.mod.TryLock(userID)
 	if !acquired {
 		return nil
 	}
@@ -66,34 +66,55 @@ func (h *Hub) ReconcileChannelVoicePermissions(channelID int64) {
 	}
 }
 
+type voicePublishGrants struct {
+	microphone, camera, screenshare bool
+}
+
+// currentVoiceGrants is the one rule for what a join may publish right now, for a live participant
+// and for a session about to start. live is false when the row is gone or names another join.
+// Reconciliation is the uncached backstop for role/override changes, so the permission read skips
+// the cache.
+func (h *Hub) currentVoiceGrants(ctx context.Context, userID, channelID int64, joinToken string) (voicePublishGrants, bool, error) {
+	state, err := h.voice.State(ctx, userID)
+	if err != nil {
+		return voicePublishGrants{}, false, fmt.Errorf("reading voice state: %w", err)
+	}
+	if state == nil || state.ChannelID != channelID || state.JoinedAt != joinToken || joinToken == "" {
+		return voicePublishGrants{}, false, nil
+	}
+	sub, err := subjectFor(ctx, h.readers.Dispatch, h.permChecker, nil, userID, channelID)
+	if err != nil {
+		return voicePublishGrants{}, false, fmt.Errorf("resolving voice permissions: %w", err)
+	}
+	// The AFK channel is listen-only: reconciliation must not re-grant what
+	// the join and the token refresh withheld.
+	ch, err := h.readers.Dispatch.GetChannel(ctx, channelID)
+	if err != nil {
+		return voicePublishGrants{}, false, fmt.Errorf("reading voice channel: %w", err)
+	}
+	if ch != nil && ch.AFK {
+		return voicePublishGrants{}, true, nil
+	}
+	return voicePublishGrants{
+		microphone:  voiceMicrophoneAllowed(sub.Has(permissions.SpeakVoice), state),
+		camera:      sub.Has(permissions.UseVideo),
+		screenshare: sub.Has(permissions.ShareScreen),
+	}, true, nil
+}
+
 // updateVoiceParticipantPermissions requires the per-user moderation lock.
 // Reads finish before the SFU call; no hub, client or database lock crosses it.
 func (h *Hub) updateVoiceParticipantPermissions(ctx context.Context, userID, channelID int64, joinToken string) error {
 	if h.livekit == nil {
 		return fmt.Errorf("voice not configured")
 	}
-	state, err := h.voice.State(ctx, userID)
+	grants, live, err := h.currentVoiceGrants(ctx, userID, channelID, joinToken)
 	if err != nil {
 		return err
 	}
-	if state == nil || state.ChannelID != channelID || state.JoinedAt != joinToken || joinToken == "" {
+	if !live {
 		return fmt.Errorf("voice membership changed")
 	}
-	// Reconciliation is the uncached backstop for role/override changes.
-	sub, err := subjectFor(ctx, h.readers.Dispatch, h.permChecker, nil, userID, channelID)
-	if err != nil {
-		return err
-	}
-	// The AFK channel is listen-only: reconciliation must not re-grant what
-	// the join and the token refresh withheld. Fail closed on a lookup error.
-	ch, err := h.readers.Dispatch.GetChannel(ctx, channelID)
-	if err != nil {
-		return err
-	}
-	if ch != nil && ch.AFK {
-		return h.livekit.updateParticipantPublishing(ctx, channelID, userID, joinToken, false, false, false)
-	}
 	return h.livekit.updateParticipantPublishing(ctx, channelID, userID, joinToken,
-		voiceMicrophoneAllowed(sub.Has(permissions.SpeakVoice), state),
-		sub.Has(permissions.UseVideo), sub.Has(permissions.ShareScreen))
+		grants.microphone, grants.camera, grants.screenshare)
 }

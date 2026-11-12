@@ -9,8 +9,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// AbandonImport deletes the pending channel and its messages and marks the job
-// failed or cancelled; copied files stay as unlinked rows for the orphan sweep.
+// AbandonImport deletes the pending channel and messages and marks the job failed or
+// cancelled; copied files stay as unlinked rows.
 func (d *DB) AbandonImport(ctx context.Context, jobID, channelID int64, status, reason string, pr ImportProgress) error {
 	if status != ImportFailed && status != ImportCancelled {
 		return fmt.Errorf("AbandonImport: status %q is not an ending for an unfinished import", status)
@@ -33,8 +33,6 @@ func abandonImportTx(ctx context.Context, q *dbgen.Queries, jobID, channelID int
 	return finishImportJob(ctx, q, jobID, status, reason, pr)
 }
 
-// failStaleImports fails every running job not named in live and deletes its
-// pending channel.
 func failStaleImports(ctx context.Context, q *dbgen.Queries, live []int64) error {
 	jobs, err := q.ListRunningImportJobs(ctx)
 	if err != nil {
@@ -61,12 +59,10 @@ func failStaleImports(ctx context.Context, q *dbgen.Queries, live []int64) error
 	return nil
 }
 
-// maxChannelNameRunes mirrors the channel name cap the admin routes enforce.
 const maxChannelNameRunes = 100
 
-// uniquifyImportChannelName appends " (imported)", then " (imported 2)" and so
-// on until the name is unique among the category's visible text channels. It
-// runs inside the publishing transaction.
+// uniquifyImportChannelName appends " (imported)", " (imported 2)", ... until the name
+// is unique among the category's visible text channels.
 func uniquifyImportChannelName(ctx context.Context, q *dbgen.Queries, channelID int64) error {
 	place, err := q.GetImportChannelPlacement(ctx, channelID)
 	if err != nil {
@@ -82,7 +78,6 @@ func uniquifyImportChannelName(ctx context.Context, q *dbgen.Queries, channelID 
 	if err != nil {
 		return err
 	}
-	// The same case folding the admin create route uses.
 	taken := func(name string) bool {
 		return slices.ContainsFunc(names, func(other string) bool { return strings.EqualFold(other, name) })
 	}

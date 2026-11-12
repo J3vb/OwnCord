@@ -21,10 +21,7 @@ func newAssistFixture(t *testing.T, totp bool) (*AuthService, *db.User, *db.User
 	svc, user, _ := newKitService(t, totp)
 	database := svc.st.(*db.DB)
 	ctx := context.Background()
-	oid, err := database.CreateUser(ctx, "owner", "hash", int(permissions.OwnerRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser(owner): %v", err)
-	}
+	oid := mustCreateUser(t, database, "owner", "hash", int(permissions.OwnerRoleID))
 	owner, _ := database.GetUserByID(ctx, oid)
 	return svc, owner, user, database
 }
@@ -50,9 +47,7 @@ func TestRecoveryAssist_IssueIsOwnerOnlyWithFixedWording(t *testing.T) {
 	if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, owner.ID, "in_person"); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("self-issuance = %v, want bad request", err)
 	}
-	if err := database.BanUser(ctx, user.ID, "test", nil); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(ctx, user.ID, "test", nil))
 	if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person"); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("banned target = %v, want bad request", err)
 	}
@@ -73,9 +68,7 @@ func TestRecoveryAssist_RedeemsOnceWithoutSecondFactor(t *testing.T) {
 	_ = logs
 
 	issue, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "video_call")
-	if err != nil {
-		t.Fatalf("IssueRecoveryAssist: %v", err)
-	}
+	mustDo(t, "IssueRecoveryAssist", err)
 	if groups := strings.Split(issue.Credential, "-"); len(groups) != 6 || len(issue.Credential) != 29 || issue.Username != "kitholder" {
 		t.Fatalf("issue = %+v, want six groups of four for the target", issue)
 	}
@@ -95,9 +88,7 @@ func TestRecoveryAssist_RedeemsOnceWithoutSecondFactor(t *testing.T) {
 	// The account has TOTP: recovery signs in without the challenge,
 	// replaces the password and revokes every session.
 	res, err := recoverWith(svc, "kitholder", issue.Credential, "203.0.113.5")
-	if err != nil {
-		t.Fatalf("recover with the credential: %v", err)
-	}
+	mustDo(t, "recover with the credential", err)
 	if res.Token == "" || res.Requires2FA {
 		t.Fatalf("recovery result = %+v, want a session without a 2FA challenge", res)
 	}
@@ -119,17 +110,13 @@ func TestRecoveryAssist_RedeemsOnceWithoutSecondFactor(t *testing.T) {
 	// account, redemption the account; neither row nor the log carries the
 	// credential or its verifier.
 	rows, err := database.QueryContext(ctx, `SELECT actor_id, action, target_id, detail FROM audit_log WHERE action LIKE 'recovery_assist_%'`)
-	if err != nil {
-		t.Fatalf("query audit: %v", err)
-	}
+	mustDo(t, "query audit", err)
 	defer rows.Close() //nolint:errcheck
 	seen := map[string][2]int64{}
 	for rows.Next() {
 		var actor, target int64
 		var action, detail string
-		if err := rows.Scan(&actor, &action, &target, &detail); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
+		mustDo(t, "scan", rows.Scan(&actor, &action, &target, &detail))
 		seen[action] = [2]int64{actor, target}
 		for _, leak := range []string{issue.Credential, canonical, stored.Verifier} {
 			if strings.Contains(detail, leak) {
@@ -149,9 +136,7 @@ func TestRecoveryAssist_LogCarriesNoRecoveryMaterial(t *testing.T) {
 	oid, _ := database.CreateUser(ctx, "owner", "hash", int(permissions.OwnerRoleID))
 	owner, _ := database.GetUserByID(ctx, oid)
 	issue, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person")
-	if err != nil {
-		t.Fatalf("IssueRecoveryAssist: %v", err)
-	}
+	mustDo(t, "IssueRecoveryAssist", err)
 	canonical, _ := auth.NormalizeRecoverySecret(issue.Credential)
 	stored, _ := database.GetRecoveryAssist(ctx, user.ID)
 	if _, err := recoverWith(svc, "kitholder", issue.Credential, "203.0.113.5"); err != nil {
@@ -171,9 +156,7 @@ func TestRecoveryAssist_ExpiryAndReplacement(t *testing.T) {
 	ctx := context.Background()
 	svc, owner, user, database := newAssistFixture(t, false)
 	first, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person")
-	if err != nil {
-		t.Fatalf("IssueRecoveryAssist: %v", err)
-	}
+	mustDo(t, "IssueRecoveryAssist", err)
 	// Expired: the server's clock moved past expires_at.
 	if _, err := database.ExecContext(ctx, `UPDATE recovery_assists SET expires_at = '2000-01-01T00:00:00Z' WHERE user_id = ?`, user.ID); err != nil {
 		t.Fatalf("expire: %v", err)
@@ -186,9 +169,7 @@ func TestRecoveryAssist_ExpiryAndReplacement(t *testing.T) {
 	}
 	// A new issuance replaces it; the old credential never works again.
 	second, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "voice_call")
-	if err != nil {
-		t.Fatalf("re-issue: %v", err)
-	}
+	mustDo(t, "re-issue", err)
 	if _, err := recoverWith(svc, "kitholder", first.Credential, "203.0.113.9"); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("replaced credential = %v, want the uniform refusal", err)
 	}
@@ -204,9 +185,7 @@ func TestRecoveryAssist_SurvivesARestart(t *testing.T) {
 	ctx := context.Background()
 	svc, owner, user, database := newAssistFixture(t, false)
 	issue, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person")
-	if err != nil {
-		t.Fatalf("IssueRecoveryAssist: %v", err)
-	}
+	mustDo(t, "IssueRecoveryAssist", err)
 	restarted := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), nil)
 	if _, err := recoverWith(restarted, "kitholder", issue.Credential, "203.0.113.11"); err != nil {
 		t.Fatalf("recover after restart: %v", err)
@@ -220,31 +199,8 @@ func TestRecoveryAssist_ConcurrentRedemptionAdmitsOne(t *testing.T) {
 	ctx := context.Background()
 	svc, owner, user, database := newAssistFixture(t, false)
 	issue, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person")
-	if err != nil {
-		t.Fatalf("IssueRecoveryAssist: %v", err)
-	}
-	const racers = 4
-	results := make(chan error, racers)
-	var wg sync.WaitGroup
-	for i := range racers {
-		wg.Go(func() {
-			_, err := recoverWith(svc, "kitholder", issue.Credential, fmt.Sprintf("203.0.113.%d", 60+i))
-			results <- err
-		})
-	}
-	wg.Wait()
-	close(results)
-	ok := 0
-	for err := range results {
-		if err == nil {
-			ok++
-		} else if !errors.Is(err, ErrUnauthorized) && !errors.Is(err, ErrRateLimited) {
-			t.Errorf("unexpected outcome: %v", err)
-		}
-	}
-	if ok != 1 {
-		t.Fatalf("%d redemptions succeeded, want exactly 1", ok)
-	}
+	mustDo(t, "IssueRecoveryAssist", err)
+	raceKitRedemptions(t, svc, "kitholder", issue.Credential, 60)
 	if sessions, _ := database.ListUserSessions(ctx, user.ID); len(sessions) != 1 {
 		t.Fatalf("sessions = %d, want the one winner's", len(sessions))
 	}
@@ -254,13 +210,9 @@ func TestRecoveryAssist_KitAndCredentialDoNotInterfere(t *testing.T) {
 	ctx := context.Background()
 	svc, owner, user, database := newAssistFixture(t, false)
 	kit, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
-	if err != nil {
-		t.Fatalf("EnrolRecoveryKit: %v", err)
-	}
+	mustDo(t, "EnrolRecoveryKit", err)
 	cred, err := svc.IssueRecoveryAssist(ctx, owner.ID, user.ID, "in_person")
-	if err != nil {
-		t.Fatalf("IssueRecoveryAssist: %v", err)
-	}
+	mustDo(t, "IssueRecoveryAssist", err)
 	// A credential presented where a kit is expected, and vice versa, is
 	// just a wrong secret; the kit stays enrolled after an assisted recovery.
 	if _, err := recoverWith(svc, "kitholder", cred.Credential[:29], "203.0.113.20"); err != nil {
@@ -278,9 +230,7 @@ func TestRecoveryAssist_KitAndCredentialDoNotInterfere(t *testing.T) {
 	}
 	recovered, _ := database.GetUserByID(ctx, user.ID)
 	again, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(recovered), "Recovered-Pass2!", "")
-	if err != nil {
-		t.Fatalf("re-enrol: %v", err)
-	}
+	mustDo(t, "re-enrol", err)
 	if _, err := recoverWith(svc, "kitholder", again.Secret, "203.0.113.22"); err != nil {
 		t.Fatalf("kit: %v", err)
 	}
@@ -304,10 +254,7 @@ func TestRecoveryAssist_IssuanceIsBudgeted(t *testing.T) {
 	// Per owner: across accounts, the sixth issuance is refused.
 	others := make([]int64, 0, recoveryAssistIssueLimit)
 	for i := range recoveryAssistIssueLimit {
-		uid, err := database.CreateUser(ctx, fmt.Sprintf("other%d", i), "hash", 4)
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
+		uid := mustCreateUser(t, database, fmt.Sprintf("other%d", i), "hash", 4)
 		others = append(others, uid)
 	}
 	issued := 0
@@ -331,10 +278,7 @@ func TestRecoveryAssist_IssuanceBudgetHoldsUnderConcurrency(t *testing.T) {
 	const racers = 8
 	targets := make([]int64, 0, racers)
 	for i := range racers {
-		uid, err := database.CreateUser(ctx, fmt.Sprintf("target%d", i), "hash", 4)
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
+		uid := mustCreateUser(t, database, fmt.Sprintf("target%d", i), "hash", 4)
 		targets = append(targets, uid)
 	}
 	svc.limiter.SetAdmissionBudget(racers)

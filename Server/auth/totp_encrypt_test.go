@@ -59,13 +59,9 @@ func TestEncryptTOTPSecret_NonceIsRandom(t *testing.T) {
 	const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 
 	first, err := auth.EncryptTOTPSecret(key, secret)
-	if err != nil {
-		t.Fatalf("EncryptTOTPSecret: %v", err)
-	}
+	mustDo(t, "EncryptTOTPSecret", err)
 	second, err := auth.EncryptTOTPSecret(key, secret)
-	if err != nil {
-		t.Fatalf("EncryptTOTPSecret: %v", err)
-	}
+	mustDo(t, "EncryptTOTPSecret", err)
 	if first == second {
 		t.Fatal("two encryptions of the same secret produced identical ciphertext (nonce reuse)")
 	}
@@ -81,15 +77,11 @@ func TestDecryptTOTPSecret_FailsClosed(t *testing.T) {
 	const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 
 	encrypted, err := auth.EncryptTOTPSecret(key, secret)
-	if err != nil {
-		t.Fatalf("EncryptTOTPSecret: %v", err)
-	}
+	mustDo(t, "EncryptTOTPSecret", err)
 
 	// Flip the last ciphertext byte to simulate tampering/corruption.
 	raw, err := hex.DecodeString(encrypted)
-	if err != nil {
-		t.Fatalf("hex.DecodeString: %v", err)
-	}
+	mustDo(t, "hex.DecodeString", err)
 	raw[len(raw)-1] ^= 0xff
 	tampered := hex.EncodeToString(raw)
 
@@ -152,13 +144,9 @@ func TestSealLegacyTOTPSecret(t *testing.T) {
 	key := testKey(0x04)
 	const legacy = "JBSWY3DPEHPK3PXP"
 	sealed, err := auth.EncryptTOTPSecret(key, legacy)
-	if err != nil {
-		t.Fatalf("EncryptTOTPSecret: %v", err)
-	}
+	mustDo(t, "EncryptTOTPSecret", err)
 	underOtherKey, err := auth.EncryptTOTPSecret(testKey(0x05), legacy)
-	if err != nil {
-		t.Fatalf("EncryptTOTPSecret: %v", err)
-	}
+	mustDo(t, "EncryptTOTPSecret", err)
 
 	t.Run("legacy base32 is sealed", func(t *testing.T) {
 		for _, v := range []string{legacy, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "jbswy3dpehpk3pxp", " JBSWY3DPEHPK3PXP "} {
@@ -211,17 +199,13 @@ func TestLoadOrGenerateTOTPKey_StableAcrossRestarts(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
 
 	first, err := auth.LoadOrGenerateTOTPKey(dataDir)
-	if err != nil {
-		t.Fatalf("first LoadOrGenerateTOTPKey: %v", err)
-	}
+	mustDo(t, "first LoadOrGenerateTOTPKey", err)
 	if len(first) != 32 {
 		t.Fatalf("key length = %d, want 32", len(first))
 	}
 
 	second, err := auth.LoadOrGenerateTOTPKey(dataDir)
-	if err != nil {
-		t.Fatalf("second LoadOrGenerateTOTPKey: %v", err)
-	}
+	mustDo(t, "second LoadOrGenerateTOTPKey", err)
 	if !bytes.Equal(first, second) {
 		t.Fatalf("key changed across restarts: %x then %x", first, second)
 	}
@@ -229,9 +213,7 @@ func TestLoadOrGenerateTOTPKey_StableAcrossRestarts(t *testing.T) {
 	// The persisted key must be the one returned, so an operator copying
 	// totp.key to another host gets the same decryption key.
 	onDisk, err := os.ReadFile(filepath.Join(dataDir, "totp.key"))
-	if err != nil {
-		t.Fatalf("reading totp.key: %v", err)
-	}
+	mustDo(t, "reading totp.key", err)
 	if string(onDisk) != hex.EncodeToString(first) {
 		t.Fatalf("totp.key = %q, want %q", onDisk, hex.EncodeToString(first))
 	}
@@ -252,9 +234,7 @@ func TestLoadOrGenerateTOTPKey_EnvVar(t *testing.T) {
 		}
 
 		got, err := auth.LoadOrGenerateTOTPKey(dataDir)
-		if err != nil {
-			t.Fatalf("LoadOrGenerateTOTPKey: %v", err)
-		}
+		mustDo(t, "LoadOrGenerateTOTPKey", err)
 		if !bytes.Equal(got, envKey) {
 			t.Fatalf("key = %x, want the env key %x", got, envKey)
 		}
@@ -289,9 +269,7 @@ func TestLoadOrGenerateTOTPKey_RejectsBadKeyFile(t *testing.T) {
 			t.Setenv("OWNCORD_TOTP_KEY", "")
 			dataDir := t.TempDir()
 			keyPath := filepath.Join(dataDir, "totp.key")
-			if err := os.WriteFile(keyPath, []byte(tc.contents), 0o600); err != nil {
-				t.Fatalf("writing totp.key: %v", err)
-			}
+			mustDo(t, "writing totp.key", os.WriteFile(keyPath, []byte(tc.contents), 0o600))
 
 			key, err := auth.LoadOrGenerateTOTPKey(dataDir)
 			if err == nil {

@@ -72,9 +72,7 @@ func TestStickerService_PermissionGate(t *testing.T) {
 	}
 	// MANAGE_SERVER alone is enough, as for emoji.
 	created, err := svc.Create(ctx, 2, "Wave", "", "file-a", "image/png")
-	if err != nil {
-		t.Fatalf("admin Create: %v", err)
-	}
+	mustDo(t, "admin Create", err)
 	if _, err := svc.Update(ctx, 4, created.ID, "Hello", ""); !errors.Is(err, ErrForbidden) {
 		t.Errorf("member Update = %v, want ErrForbidden", err)
 	}
@@ -98,9 +96,7 @@ func TestStickerService_NameIsUniqueIgnoringCase(t *testing.T) {
 		}
 	}
 	other, err := svc.Create(ctx, 1, "Other", "", "file-c", "image/png")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Create", err)
 	if _, err := svc.Update(ctx, 1, other.ID, "wave", ""); !errors.Is(err, ErrConflict) {
 		t.Errorf("rename onto an existing name = %v, want ErrConflict", err)
 	}
@@ -128,9 +124,7 @@ func TestStickerService_DeleteReturnsRowAndUnknownIs404(t *testing.T) {
 	svc, _ := newStickerService(t)
 	ctx := context.Background()
 	created, err := svc.Create(ctx, 1, "Wave", "", "file-a", "image/png")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Create", err)
 	removed, err := svc.Delete(ctx, 1, created.ID)
 	if err != nil || removed.StoredAs != "file-a" {
 		t.Fatalf("Delete = %+v, %v; want the removed row", removed, err)
@@ -164,19 +158,14 @@ func TestStickerWrites_WriteAudit(t *testing.T) {
 	svc, database := newStickerService(t)
 	ctx := context.Background()
 	created, err := svc.Create(ctx, 1, "Wave", "", "stored-1", "image/png")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	mustDo(t, "Create", err)
 	if _, err := svc.Update(ctx, 1, created.ID, "Hello", ""); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	if _, err := svc.Delete(ctx, 1, created.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	entries, err := database.GetAuditLog(ctx, 50, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, database, 50, 0)
 	seen := map[string]bool{}
 	for _, e := range entries {
 		if e.TargetType == "sticker" {

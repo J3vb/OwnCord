@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { makeChannel } from "../helpers/channelFactory";
 import { openChannelMenu, useChannelMenuHost } from "../helpers/channelMenuHost";
 import { withMeasuredSize } from "../helpers/measuredSize";
-import { attachChannelContextMenu } from "@components/channel-sidebar/contextMenu";
+import { attachChannelContextMenu } from "../../src/features/channels/sidebar/contextMenu";
 import { buildNotificationsTab } from "../../src/features/settings/NotificationsTab";
 import {
   CHANNEL_MUTE_CHANGED,

@@ -8,31 +8,26 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// Ringing is rate limited per user rather than per (user, channel): the abuse
-// it exists to stop is spamming *someone* with call banners, and a per-channel
-// key would let one user ring five different DMs a second. One ring every three
-// seconds is far below what a human does and far above what a redial costs.
+// Ringing is rate limited per user, not per (user, channel): the abuse is
+// spamming someone with call banners, and a per-channel key would let one user
+// ring five DMs a second.
 const (
 	callRingRateLimit = 1
 	callRingWindow    = 3 * time.Second
 )
 
-// registerCallHandlers registers the DM call signalling handlers.
-//
-// There is deliberately no call state on the server. A "call" in a DM is
-// nothing more than somebody being present in that DM's voice channel — which
-// voice_state already broadcasts — and a ring is a transient nudge to come
-// look. Persisting a call row would add a thing that a crashed client can
-// leave dangling, in exchange for information the presence already carries.
+// registerCallHandlers registers the DM call signalling handlers. There is
+// deliberately no server call state: a "call" is someone present in the DM's
+// voice channel (voice_state already says so) and a ring is a transient nudge; a
+// call row could dangle after a client crash.
 func registerCallHandlers(r *HandlerRegistry, deps CallDeps) {
 	r.RegisterV2(MsgTypeCallRing, handleCallRingV2, deps)
 	r.RegisterV2(MsgTypeCallDecline, handleCallDeclineV2, deps)
 }
 
 // handleCallRingV2 forwards a call_ring to the DM's other participants as
-// call_incoming. Only a participant of the DM may ring it; the fan-out reaches
-// whichever of them are connected, because a targeted event to an offline user
-// is a no-op by construction.
+// call_incoming. Only a participant may ring; a targeted event to an offline user
+// is a no-op.
 func handleCallRingV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(CallDeps)
 	ringCmd := cmd.(CallRingCmd)
@@ -47,18 +42,17 @@ func handleCallRingV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return serviceErrorToResult(err)
 	}
 
-	// "The ring is only truthful once the caller is actually there": a ring
-	// from someone who is not in this DM's voice channel would let the callee
-	// accept a call that does not exist. Checked after RingTargets so
-	// non-participant, block and timeout refusals keep their own codes.
+	// A ring from someone not in the DM's voice channel would let the callee
+	// accept a call that does not exist. Checked after RingTargets so non-
+	// participant, block and timeout refusals keep their own codes.
 	if info.VoiceChannelID != ringCmd.ChannelID {
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "join the call before ringing"}}
 	}
 
 	payload := buildCallSignal(MsgTypeCallIncoming, ringCmd.ChannelID, info.UserID, info.Username)
 	events := make([]Event, 0, 2*len(targets))
-	// A callee who had closed the DM gets it back before the ring, in the same
-	// order as a chat send, so the client already has the channel.
+	// A callee who had closed the DM gets it back before the ring, as in a chat
+	// send, so the client already has the channel.
 	reopens := d.DMSvc.OpenForRing(ctx, ringCmd.ChannelID, targets)
 	for i := range reopens {
 		events = append(events, DMChannelOpenEvent{
@@ -76,19 +70,15 @@ func handleCallRingV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	return Result{Events: events}
 }
 
-// handleCallDeclineV2 tells the DM's other participants that the caller is not
-// picking up, so a ringing client can stop ringing before the 30s timeout.
-//
-// It is addressed to every other participant rather than to "the ringer"
-// because the server does not know who that was — no call state, by design —
-// and in a group DM more than one person may be ringing anyway. The decline is
-// advisory: a client that has already been answered ignores it.
+// handleCallDeclineV2 tells the DM's other participants the caller is not picking
+// up. Addressed to everyone else because there is no call state to say who was
+// ringing; advisory, ignored by a client already answered. It also reaches the
+// decliner's own call_sync sockets, so a device of theirs still ringing stops.
 func handleCallDeclineV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(CallDeps)
 	declineCmd := cmd.(CallDeclineCmd)
 
-	// Same cost shape as call_ring (participant + block lookups, fan-out to
-	// every other participant), so it carries the same limit.
+	// Same cost shape as call_ring, so the same limit.
 	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("call_decline", info.UserID), callRingRateLimit, callRingWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many call actions"}}
 	}
@@ -99,7 +89,7 @@ func handleCallDeclineV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	}
 
 	payload := buildCallSignal(MsgTypeCallDeclined, declineCmd.ChannelID, info.UserID, info.Username)
-	events := make([]Event, 0, len(targets))
+	events := make([]Event, 0, len(targets)+1)
 	for _, pid := range targets {
 		events = append(events, CallSignalEvent{
 			eventType:    MsgTypeCallDeclined,
@@ -107,6 +97,14 @@ func handleCallDeclineV2(ctx context.Context, cmd Command, info ClientInfo, deps
 			payload:      payload,
 		})
 	}
+	// The decliner's other signed-in devices stop ringing too. The declining
+	// socket may get it as well; its client has already ended that ring.
+	events = append(events, CallSignalEvent{
+		eventType:    MsgTypeCallDeclined,
+		targetUserID: info.UserID,
+		payload:      payload,
+		ownDevices:   true,
+	})
 	return Result{Events: events}
 }
 

@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type { Message } from "../../src/stores/messages.store";
-import type { MessageListOptions } from "../../src/components/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 
 /** A sent message from alice in channel 1 carrying one reaction of `emoji` with count 2. */
 export function makeReactionMessage(emoji = "🔥"): Message {

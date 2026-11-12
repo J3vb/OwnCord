@@ -4,7 +4,7 @@ import { cascadedDeclaration, varToken } from "../../helpers/app-css";
 import {
   createChannelSidebar,
   type ChannelSidebarOptions,
-} from "../../../src/components/ChannelSidebar";
+} from "../../../src/features/channels/ChannelSidebar";
 import {
   addChannel,
   channelsStore,

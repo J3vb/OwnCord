@@ -9,7 +9,11 @@ import type { WsClient } from "../../lib/ws";
 import { setLocalCamera, setLocalScreenshare, setVoiceStatus } from "../../stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "../../lib/logger";
-import { micProcessingOptions, type AudioPipeline } from "../../lib/voice/audioPipeline";
+import {
+  enhancedNoiseSuppressionEnabled,
+  micProcessingOptions,
+  type AudioPipeline,
+} from "../../lib/voice/audioPipeline";
 import type { AudioElements } from "../../lib/voice/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/voice/deviceManager";
 import type { E2EEManager } from "../../lib/voice/livekitE2EE";
@@ -27,12 +31,14 @@ import {
   stopManualCameraTrack,
   stopManualScreenTracks,
   bumpGeneration,
-} from "../../lib/voice/screenShare";
+} from "./screenShare";
 import { attachDiagnosticListeners } from "../../lib/voice/livekitDiagnostics";
+import { recordVoiceLeft } from "../../lib/voice/voiceEventLog";
 import { detachRoom, onRoom } from "./releaseRoom";
 import type { RoomEventHandlers } from "../../lib/voice/roomEventHandlers";
 import { parseUserId, type SessionState } from "./sessionState";
 import { isLinuxDesktop } from "./native/platform";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 import { syncShareGrant } from "./mediaControl";
 import { noteVoiceLeave } from "./leaveOwed";
 
@@ -45,7 +51,7 @@ const log = createLogger("livekitSession");
 export interface RoomLifecycleHost {
   getState(): SessionState;
   setState(next: SessionState): void;
-  getRoom(): Room | null;
+  getRoom(): VoiceRoom | null;
   getWs(): WsClient | null;
   getOnError(): ((message: string) => void) | null;
   getE2EE(): Pick<E2EEManager, "newKeyProvider" | "releaseKeyProvider" | "clearState">;
@@ -56,16 +62,16 @@ export interface RoomLifecycleHost {
   getTokenManager(): Pick<VoiceTokenManager, "resetBudget">;
   getCameraState(): CameraTrackState;
   getScreenState(): ScreenTrackState;
-  getPendingMicrophoneRoom(): Room | null;
-  setPendingMicrophoneRoom(room: Room | null): void;
+  getPendingMicrophoneRoom(): VoiceRoom | null;
+  setPendingMicrophoneRoom(room: VoiceRoom | null): void;
   clearPendingReconnectFields(): void;
   clearTokenRefreshTimer(): void;
   configuredAudioOptions(
     channelId: number | null,
   ): { audioPreset: { maxBitrate: number } } | undefined;
-  microphonePublishingAllowed(room: Room): boolean;
+  microphonePublishingAllowed(room: VoiceRoom): boolean;
   applyMicMuteState(muted: boolean): Promise<void>;
-  dropDeniedVideo(room: Room): void;
+  dropDeniedVideo(room: VoiceRoom): void;
 }
 
 export class RoomLifecycle {
@@ -73,7 +79,7 @@ export class RoomLifecycle {
 
   // --- Host views, named as the pre-extraction fields so the bodies read the same ---
 
-  private get _room(): Room | null {
+  private get _room(): VoiceRoom | null {
     return this.host.getRoom();
   }
   private get _reconnectAc(): AbortController | null {
@@ -110,10 +116,10 @@ export class RoomLifecycle {
   private get _screenState(): ScreenTrackState {
     return this.host.getScreenState();
   }
-  private get pendingMicrophoneRoom(): Room | null {
+  private get pendingMicrophoneRoom(): VoiceRoom | null {
     return this.host.getPendingMicrophoneRoom();
   }
-  private set pendingMicrophoneRoom(room: Room | null) {
+  private set pendingMicrophoneRoom(room: VoiceRoom | null) {
     this.host.setPendingMicrophoneRoom(room);
   }
   private setState(next: SessionState): void {
@@ -127,7 +133,7 @@ export class RoomLifecycle {
   ): { audioPreset: { maxBitrate: number } } | undefined {
     return this.host.configuredAudioOptions(channelId);
   }
-  private microphonePublishingAllowed(room: Room): boolean {
+  private microphonePublishingAllowed(room: VoiceRoom): boolean {
     return this.host.microphonePublishingAllowed(room);
   }
   private applyMicMuteState(muted: boolean): Promise<void> {
@@ -141,8 +147,14 @@ export class RoomLifecycle {
    *  resident in it. */
   private _e2eeWorker: Worker | null = null;
 
-  async createRoom(channelId?: number): Promise<Room> {
+  async createRoom(channelId?: number): Promise<VoiceRoom> {
     if (isLinuxDesktop()) return this.createNativeRoom();
+    return this.createWebRoom(channelId);
+  }
+
+  /** The livekit `Room` of the web, macOS and Windows builds, with the full
+   *  type for the code that only runs there. Not for Linux: call createRoom. */
+  async createWebRoom(channelId?: number): Promise<Room> {
     // livekit's per-room E2EEManager subscribes to its key provider and
     // never unsubscribes, so each Room gets its own provider and the old one
     // goes with the old Room.
@@ -258,27 +270,25 @@ export class RoomLifecycle {
    *  never lands in the voice chunk on other platforms. The room key was
    *  installed by the E2EE worker before this room connects, and the same
    *  event wiring applies. */
-  private async createNativeRoom(): Promise<Room> {
+  private async createNativeRoom(): Promise<VoiceRoom> {
     const { createNativeRoom } = await import("./native/nativeRoom");
     const nativeRoom = createNativeRoom(
       {
         echoCancellation: loadPref("echoCancellation", true),
         noiseSuppression: loadPref("noiseSuppression", true),
         autoGainControl: loadPref("autoGainControl", true),
-        enhancedNoiseSuppression: loadPref("enhancedNoiseSuppression", false),
+        enhancedNoiseSuppression: enhancedNoiseSuppressionEnabled(),
       },
       (identity) => this._audioElements.getEffectiveVolume(parseUserId(identity)),
       (identity) => this._audioElements.getScreenshareGain(parseUserId(identity)),
     );
     this._audioElements.setScreenshareGainListener(() => nativeRoom.applyScreenshareVolumes());
-    // The adapter is structurally the subset of Room the modules call; the
-    // cast is the one seam where the two backends meet.
-    const newRoom = nativeRoom as unknown as Room;
+    const newRoom: VoiceRoom = nativeRoom;
     this.wireRoomEvents(newRoom);
     return newRoom;
   }
 
-  private wireRoomEvents(newRoom: Room): void {
+  private wireRoomEvents(newRoom: VoiceRoom): void {
     // Diagnostics first, so they have seen an event before the app reacts to it.
     attachDiagnosticListeners(newRoom);
     onRoom(newRoom, RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
@@ -336,7 +346,7 @@ export class RoomLifecycle {
    *  "reconnecting" and therefore room-less — the default would wire every
    *  module to null. Either way the DeviceManager callbacks are re-installed
    *  here, so there is exactly one place that knows the full wiring. */
-  syncModuleRooms(room: Room | null = this._room): void {
+  syncModuleRooms(room: VoiceRoom | null = this._room): void {
     this._audioPipeline.setRoom(room);
     this._audioElements.setRoom(room);
     this._deviceManager.setRoom(room);
@@ -388,6 +398,7 @@ export class RoomLifecycle {
     const room = this._room;
     let disconnected: Promise<void> = Promise.resolve();
     if (room !== null) {
+      recordVoiceLeft(room);
       detachRoom(room);
       disconnected = room
         .disconnect()

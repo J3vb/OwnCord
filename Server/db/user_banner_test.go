@@ -20,9 +20,7 @@ func setBanner(t *testing.T, f groupRowFixture, user int64, id *string, color *s
 	if err != nil || u == nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
-	if err := f.database.UpdateUserProfile(context.Background(), user, u.Username, u.Avatar, u.DisplayName, u.About, id, color); err != nil {
-		t.Fatalf("UpdateUserProfile: %v", err)
-	}
+	mustDo(t, "UpdateUserProfile", f.database.UpdateUserProfile(context.Background(), user, u.Username, u.Avatar, u.DisplayName, u.About, id, color))
 }
 
 func TestOrphanSweep_KeepsLiveBanner(t *testing.T) {
@@ -35,9 +33,7 @@ func TestOrphanSweep_KeepsLiveBanner(t *testing.T) {
 	setBanner(t, f, f.alice, new("banner-live"), nil)
 
 	swept, err := f.database.DeleteOrphanedAttachments(ctx, time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatalf("DeleteOrphanedAttachments: %v", err)
-	}
+	mustDo(t, "DeleteOrphanedAttachments", err)
 	got := map[string]bool{}
 	for _, s := range swept {
 		got[s] = true
@@ -72,9 +68,7 @@ func TestLinkAttachments_RefusesLiveBanner(t *testing.T) {
 	seedIconAttachment(t, f.database, "banner-live", f.alice)
 	setBanner(t, f, f.alice, new("banner-live"), nil)
 	msgID, err := f.database.CreateMessage(ctx, f.group, f.alice, "carrier", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	linked, err := f.database.LinkAttachmentsToMessage(ctx, msgID, f.alice, []string{"banner-live"})
 	if err != nil || len(linked) != 0 {
 		t.Errorf("link = %v, %v; want the live banner skipped", linked, err)
@@ -92,9 +86,7 @@ func TestIsBannerFile_OnlyWhileNamed(t *testing.T) {
 	is := func(id string) bool {
 		t.Helper()
 		ok, err := f.database.IsBannerFile(ctx, id)
-		if err != nil {
-			t.Fatalf("IsBannerFile: %v", err)
-		}
+		mustDo(t, "IsBannerFile", err)
 		return ok
 	}
 	if is("b1") {
@@ -119,9 +111,7 @@ func TestMemberGeneration_MovesOnBannerWrite(t *testing.T) {
 	gen := func() int64 {
 		t.Helper()
 		g, err := f.database.MemberGeneration(ctx)
-		if err != nil {
-			t.Fatalf("MemberGeneration: %v", err)
-		}
+		mustDo(t, "MemberGeneration", err)
 		return g
 	}
 	steps := []struct {
@@ -150,9 +140,7 @@ func TestListMembers_CarriesBannerOnlyWhenSet(t *testing.T) {
 	seedIconAttachment(t, f.database, "b1", f.alice)
 	setBanner(t, f, f.alice, new("b1"), new("#112233"))
 	members, err := f.database.ListMembers(ctx)
-	if err != nil {
-		t.Fatalf("ListMembers: %v", err)
-	}
+	mustDo(t, "ListMembers", err)
 	for _, m := range members {
 		banner, color := m.BannerOf()
 		switch m.ID {
@@ -188,9 +176,7 @@ func TestFileLiveness_EverySiteNamesBanner(t *testing.T) {
 	sqlFiles, _ := filepath.Glob("queries/sqlite/*.sql")
 	for _, p := range sqlFiles {
 		b, err := os.ReadFile(p)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "ReadFile", err)
 		check(p, strings.Split(string(b), "-- name:"))
 	}
 	goFiles, _ := filepath.Glob("*.go")
@@ -199,9 +185,7 @@ func TestFileLiveness_EverySiteNamesBanner(t *testing.T) {
 			continue
 		}
 		b, err := os.ReadFile(p)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "ReadFile", err)
 		check(p, strings.Split(string(b), "`")) // raw-string SQL texts
 	}
 	// DiscardUnlinkedAttachment, DeleteOrphanedAttachments, linkAttachmentsToMessage.

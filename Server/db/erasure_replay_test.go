@@ -32,9 +32,7 @@ func TestReplayEraseAccount_BypassesTheLastAdminGuard(t *testing.T) {
 		t.Fatalf("EraseAccount(sole owner) = %v, want ErrLastAdmin", err)
 	}
 	job, err := database.ReplayEraseAccount(ctx, owner, "tok")
-	if err != nil {
-		t.Fatalf("ReplayEraseAccount(sole owner): %v", err)
-	}
+	mustDo(t, "ReplayEraseAccount(sole owner)", err)
 	if job == nil || job.UserID != owner {
 		t.Fatalf("job = %+v", job)
 	}

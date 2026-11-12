@@ -14,9 +14,7 @@ func TestDeleteOtherSessions_KeepsTheCurrentOne(t *testing.T) {
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "multi", "hash", 4)
 	keep, err := database.CreateSession(ctx, uid, "tok-keep", "laptop", "10.0.0.1")
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustDo(t, "CreateSession", err)
 	for _, tok := range []string{"tok-a", "tok-b"} {
 		if _, err := database.CreateSession(ctx, uid, tok, "phone", "10.0.0.2"); err != nil {
 			t.Fatalf("CreateSession: %v", err)
@@ -70,9 +68,7 @@ func TestCountEventsInRange(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	for seq := int64(1); seq <= 3; seq++ {
-		if err := database.PersistEvent(ctx, seq, "chat_message", 1, []byte(`{}`)); err != nil {
-			t.Fatalf("PersistEvent: %v", err)
-		}
+		mustDo(t, "PersistEvent", database.PersistEvent(ctx, seq, "chat_message", 1, []byte(`{}`)))
 	}
 	for _, tc := range []struct{ after, upto, want int64 }{{0, 3, 3}, {1, 3, 2}, {3, 3, 0}, {0, 1, 1}} {
 		if n, err := database.CountEventsInRange(ctx, tc.after, tc.upto); err != nil || n != tc.want {

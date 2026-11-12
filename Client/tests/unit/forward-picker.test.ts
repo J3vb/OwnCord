@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeDm } from "../helpers/dmHarness";
-import { openForwardPicker } from "../../src/components/ForwardPicker";
+import { openForwardPicker } from "../../src/features/messaging/ForwardPicker";
 import { channelsStore, setRoles, type Channel } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { dmStore, type DmChannel } from "../../src/stores/dm.store";

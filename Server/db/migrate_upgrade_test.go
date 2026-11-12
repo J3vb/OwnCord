@@ -38,9 +38,7 @@ import (
 func migrationsUpTo(t *testing.T, cutoff string) fstest.MapFS {
 	t.Helper()
 	entries, err := fs.ReadDir(migrations.FS, ".")
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
+	mustDo(t, "ReadDir", err)
 	out := fstest.MapFS{}
 	for _, e := range entries {
 		if e.Name() >= cutoff {
@@ -76,9 +74,7 @@ func columnExists(t *testing.T, database *db.DB, table, column string) bool {
 // bit landed on exactly the privileged seeded roles.
 func TestMigrate_FullChainSchemaIsCoherent(t *testing.T) {
 	database := openMemory(t)
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	for _, tbl := range []string{"message_mentions", "channel_user_overrides"} {
 		if !tableExists(t, database, tbl) {
@@ -103,26 +99,7 @@ func TestMigrate_FullChainSchemaIsCoherent(t *testing.T) {
 		}
 	}
 
-	const mentionEveryone = int64(0x200000)
-	for _, tc := range []struct {
-		roleID int64
-		name   string
-		want   bool
-	}{
-		{1, "Owner", true},
-		{2, "Admin", true},
-		{3, "Moderator", true},
-		{4, "Member", false},
-	} {
-		var perms int64
-		if err := database.QueryRowContext(context.Background(),
-			`SELECT permissions FROM roles WHERE id = ?`, tc.roleID).Scan(&perms); err != nil {
-			t.Fatalf("read role %s: %v", tc.name, err)
-		}
-		if got := perms&mentionEveryone != 0; got != tc.want {
-			t.Errorf("%s MENTION_EVERYONE = %v, want %v (perms=0x%X)", tc.name, got, tc.want, perms)
-		}
-	}
+	requireMentionEveryoneSeeded(t, database)
 }
 
 // TestMigrate_UpgradeFromMigration019PreservesData simulates upgrading a
@@ -145,9 +122,7 @@ func TestMigrate_UpgradeFromMigration019PreservesData(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
 
-	if err := db.MigrateFS(database, migrationsUpTo(t, "020_")); err != nil {
-		t.Fatalf("MigrateFS() building pre-020 schema: %v", err)
-	}
+	mustDo(t, "MigrateFS() building pre-020 schema", db.MigrateFS(database, migrationsUpTo(t, "020_")))
 
 	// Sanity: none of the phase 2-6 additions exist yet.
 	for _, tbl := range []string{"message_mentions", "channel_user_overrides"} {
@@ -201,9 +176,7 @@ func TestMigrate_UpgradeFromMigration019PreservesData(t *testing.T) {
 	}
 
 	// Apply the remaining migrations (020..028) via the real production path.
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() upgrading from 019 to head: %v", err)
-	}
+	mustDo(t, "Migrate() upgrading from 019 to head", db.Migrate(database))
 
 	// Every pre-existing row must still be present.
 	for _, tc := range []struct {
@@ -315,9 +288,7 @@ func TestMigrate_UpgradeFromMigration019PreservesData(t *testing.T) {
 	// MENTION_EVERYONE — migration 022 only updates roles 1-3.
 	const mentionEveryone = int64(0x200000)
 	var perms int64
-	if err := database.QueryRowContext(ctx, `SELECT permissions FROM roles WHERE id = 5`).Scan(&perms); err != nil {
-		t.Fatalf("reading upgraded custom role: %v", err)
-	}
+	mustDo(t, "reading upgraded custom role", database.QueryRowContext(ctx, `SELECT permissions FROM roles WHERE id = 5`).Scan(&perms))
 	if perms&mentionEveryone != 0 {
 		t.Errorf("custom role id=5 gained MENTION_EVERYONE from the upgrade (perms=0x%X), want unchanged", perms)
 	}
@@ -333,12 +304,36 @@ func TestMigrate_UpgradeFromMigration019PreservesData(t *testing.T) {
 	// upgrade path's real contract: 001..019 came from the seed/normal path
 	// during the first MigrateFS call, 020..head from the second.
 	all, err := fs.ReadDir(migrations.FS, ".")
-	if err != nil {
-		t.Fatalf("reading embedded migrations dir: %v", err)
-	}
+	mustDo(t, "reading embedded migrations dir", err)
 	for _, e := range all {
 		if !hasVersion(t, database, e.Name()) {
 			t.Errorf("migration %q not recorded in schema_versions after upgrade", e.Name())
+		}
+	}
+}
+
+// requireMentionEveryoneSeeded checks migration 022 granted MENTION_EVERYONE
+// to the staff roles only, so @everyone stays gated for members.
+func requireMentionEveryoneSeeded(t *testing.T, database *db.DB) {
+	t.Helper()
+	const mentionEveryone = int64(0x200000)
+	for _, tc := range []struct {
+		roleID int64
+		name   string
+		want   bool
+	}{
+		{1, "Owner", true},
+		{2, "Admin", true},
+		{3, "Moderator", true},
+		{4, "Member", false},
+	} {
+		var perms int64
+		if err := database.QueryRowContext(context.Background(),
+			`SELECT permissions FROM roles WHERE id = ?`, tc.roleID).Scan(&perms); err != nil {
+			t.Fatalf("read role %s: %v", tc.name, err)
+		}
+		if got := perms&mentionEveryone != 0; got != tc.want {
+			t.Errorf("%s MENTION_EVERYONE = %v, want %v (perms=0x%X)", tc.name, got, tc.want, perms)
 		}
 	}
 }

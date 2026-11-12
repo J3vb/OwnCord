@@ -155,31 +155,46 @@ const isFKey = (vk: number): boolean => vk >= VK_F1 && vk <= VK_F12;
 const isArrow = (vk: number): boolean => vk >= VK_LEFT && vk <= VK_DOWN;
 const TEXT_EDIT_VKS: ReadonlySet<number> = new Set([0x41, 0x43, 0x56, 0x58, 0x5a, 0x59]); // A C V X Z Y
 
-/** Keys the OS, the webview or the text field itself keep. */
-function isReserved(c: KeyCombo): boolean {
-  // AltGr: see comboFromEvent.
-  if (c.ctrl && c.alt) return true;
-  if (c.alt && (c.vk === VK_F4 || c.vk === VK_SPACE)) return true;
-  if (!c.alt && (c.vk === VK_F5 || c.vk === VK_F11 || c.vk === VK_F12)) return true;
-  if (c.shift && !c.ctrl && !c.alt && c.vk === 0x79) return true; // Shift+F10 context menu
-  if (c.ctrl && !c.alt && c.vk === VK_R) return true;
-  if (c.ctrl && c.shift && (c.vk === VK_I || c.vk === VK_J)) return true;
-  if (c.ctrl && !c.shift && c.vk === VK_P) return true;
-  // Text editing. (Shift+arrow selects text but never gets here: needsModifier
-  // refuses a Shift-only non-F key first.)
-  if (c.ctrl && !c.shift && TEXT_EDIT_VKS.has(c.vk)) return true;
-  if (c.ctrl && c.shift && c.vk === 0x5a) return true; // redo
-  if (
-    c.ctrl &&
+const VK_SHIFT_CONTEXT_MENU = 0x79; // F10
+const VK_Z = 0x5a;
+
+const RESERVED_FKEYS: ReadonlySet<number> = new Set([VK_F5, VK_F11, VK_F12]);
+
+/** Ctrl chords (no Alt) the webview keeps: reload, dev tools, print. */
+function isCtrlSystemReserved(c: KeyCombo): boolean {
+  if (c.shift) return c.vk === VK_R || c.vk === VK_I || c.vk === VK_J;
+  return c.vk === VK_R || c.vk === VK_P;
+}
+
+/** Keys the OS or the webview keep, whatever the text field is doing. */
+function isSystemReserved(c: KeyCombo): boolean {
+  if (c.alt) return c.vk === VK_F4 || c.vk === VK_SPACE;
+  if (RESERVED_FKEYS.has(c.vk)) return true;
+  if (c.ctrl) return isCtrlSystemReserved(c);
+  return c.shift && c.vk === VK_SHIFT_CONTEXT_MENU;
+}
+
+/** Text editing and caret movement a focused field keeps. */
+function isTextEditReserved(c: KeyCombo): boolean {
+  if (!c.ctrl) return false;
+  if (c.shift ? c.vk === VK_Z : TEXT_EDIT_VKS.has(c.vk)) return true; // Ctrl+Shift+Z is redo
+  return (
     !c.alt &&
     (isArrow(c.vk) ||
       c.vk === VK_HOME ||
       c.vk === VK_END ||
       c.vk === VK_INSERT ||
       c.vk === VK_DELETE)
-  )
-    return true;
-  return false;
+  );
+}
+
+/** Keys the OS, the webview or the text field itself keep. */
+function isReserved(c: KeyCombo): boolean {
+  // AltGr: see comboFromEvent.
+  if (c.ctrl && c.alt) return true;
+  // Text editing. (Shift+arrow selects text but never gets here: needsModifier
+  // refuses a Shift-only non-F key first.)
+  return isSystemReserved(c) || isTextEditReserved(c);
 }
 
 /** App keys that stay fixed. Bare keys (Escape, PageUp/Down, the composer's

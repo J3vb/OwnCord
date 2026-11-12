@@ -188,8 +188,15 @@ export function drawVoiceUserRow(
     badge.style.color = model.verify.color;
     badge.title = model.verify.title;
     badge.appendChild(createIcon(model.verify.icon, 14));
-    // A blocked peer's shield opens the re-trust prompt (bound by the sidebar).
-    if (model.verify.cls === "mismatch") badge.style.cursor = "pointer";
+    // A blocked peer's shield opens the re-trust prompt, any other with an
+    // identity key their trusted keys (both bound by the sidebar).
+    if (
+      model.verify.cls === "mismatch" ||
+      model.verify.cls === "verified" ||
+      model.verify.cls === "changed"
+    ) {
+      badge.style.cursor = "pointer";
+    }
     row.appendChild(badge);
   }
 
@@ -282,15 +289,13 @@ export function drawVoiceChannelChrome(model: VoiceChannelChromeModel): HTMLDivE
   return wrapper;
 }
 
-/**
- * Bring a drawn wrapper to `next`; only `VOICE_CHROME_PATCH_FIELDS` differ.
- * Classes other modules add to the row (a drop indicator) are kept, and
- * `tabindex` is left to the roving navigation that owns it.
- */
-export function patchVoiceChannelChrome(wrapper: Element, next: VoiceChannelChromeModel): void {
-  const item = wrapper.querySelector<HTMLElement>(":scope > .channel-item");
-  if (item === null) return;
+/** Put `drawn` before `later`, the first badge a fresh draw puts after it, else last. */
+function insertBefore(item: HTMLElement, drawn: Element, later: Element | null): void {
+  if (later === null) item.appendChild(drawn);
+  else later.before(drawn);
+}
 
+function patchChromeRow(item: HTMLElement, next: VoiceChannelChromeModel): void {
   const own = new Set(["channel-item", "voice", "active", "disabled"]);
   const foreign = Array.from(item.classList).filter((c) => !own.has(c));
   const classes = [...chromeClasses(next), ...foreign].join(" ");
@@ -303,45 +308,54 @@ export function patchVoiceChannelChrome(wrapper: Element, next: VoiceChannelChro
     item.title = next.frozenReason;
     item.setAttribute("aria-disabled", "true");
   }
+}
 
+function patchPasswordBadge(item: HTMLElement, next: VoiceChannelChromeModel): void {
   const lockBadge = item.querySelector(":scope > .ch-password");
   if (!next.passwordProtected) {
     lockBadge?.remove();
   } else if (lockBadge === null) {
-    const drawn = passwordIndicator(next.channelId);
     // Before the afk, capacity and mention badges, as a fresh draw orders them.
-    const later = item.querySelector(
-      ":scope > .ch-afk, :scope > .ch-capacity, :scope > .mention-badge",
+    insertBefore(
+      item,
+      passwordIndicator(next.channelId),
+      item.querySelector(":scope > .ch-afk, :scope > .ch-capacity, :scope > .mention-badge"),
     );
-    if (later === null) item.appendChild(drawn);
-    else later.before(drawn);
   }
+}
 
+function patchAfkBadge(item: HTMLElement, next: VoiceChannelChromeModel): void {
   const afkBadge = item.querySelector(":scope > .ch-afk");
   if (!next.afk) {
     afkBadge?.remove();
   } else if (afkBadge === null) {
-    const drawn = drawAfk(next.channelId);
     // Before the capacity and mention badges, as a fresh draw orders them.
-    const later = item.querySelector(":scope > .ch-capacity, :scope > .mention-badge");
-    if (later === null) item.appendChild(drawn);
-    else later.before(drawn);
+    insertBefore(
+      item,
+      drawAfk(next.channelId),
+      item.querySelector(":scope > .ch-capacity, :scope > .mention-badge"),
+    );
   }
+}
 
+function patchCapacityBadge(item: HTMLElement, next: VoiceChannelChromeModel): void {
   const badge = item.querySelector(":scope > .ch-capacity");
   if (next.capacity === null) {
     badge?.remove();
   } else if (badge === null) {
     // Before the mention badge, which a fresh draw puts last.
-    const cap = drawCapacity(next.channelId, next.capacity);
-    const mention = item.querySelector(":scope > .mention-badge");
-    if (mention === null) item.appendChild(cap);
-    else mention.before(cap);
+    insertBefore(
+      item,
+      drawCapacity(next.channelId, next.capacity),
+      item.querySelector(":scope > .mention-badge"),
+    );
   } else {
     if (badge.textContent !== next.capacity.label) setText(badge, next.capacity.label);
     badge.setAttribute("title", next.capacity.title);
   }
+}
 
+function patchMentionBadge(item: HTMLElement, next: VoiceChannelChromeModel): void {
   const mentionEl = item.querySelector<HTMLElement>(":scope > .mention-badge");
   if (next.mentionCount === 0) {
     mentionEl?.remove();
@@ -350,8 +364,14 @@ export function patchVoiceChannelChrome(wrapper: Element, next: VoiceChannelChro
   } else if (mentionEl.textContent !== String(next.mentionCount)) {
     mentionEl.replaceWith(mentionBadge(next.channelId, next.mentionCount));
   }
+}
 
-  // Directly after the row: the participant list, when present, follows it.
+/** Directly after the row: the participant list, when present, follows it. */
+function patchTimeoutNotice(
+  wrapper: Element,
+  item: HTMLElement,
+  next: VoiceChannelChromeModel,
+): void {
   const notice = wrapper.querySelector(":scope > .ch-restriction");
   if (next.timeoutReason === null) {
     notice?.remove();
@@ -360,4 +380,20 @@ export function patchVoiceChannelChrome(wrapper: Element, next: VoiceChannelChro
   } else if (notice.textContent !== next.timeoutReason) {
     setText(notice, next.timeoutReason);
   }
+}
+
+/**
+ * Bring a drawn wrapper to `next`; only `VOICE_CHROME_PATCH_FIELDS` differ.
+ * Classes other modules add to the row (a drop indicator) are kept, and
+ * `tabindex` is left to the roving navigation that owns it.
+ */
+export function patchVoiceChannelChrome(wrapper: Element, next: VoiceChannelChromeModel): void {
+  const item = wrapper.querySelector<HTMLElement>(":scope > .channel-item");
+  if (item === null) return;
+  patchChromeRow(item, next);
+  patchPasswordBadge(item, next);
+  patchAfkBadge(item, next);
+  patchCapacityBadge(item, next);
+  patchMentionBadge(item, next);
+  patchTimeoutNotice(wrapper, item, next);
 }

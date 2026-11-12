@@ -34,12 +34,9 @@ func writeErr(w http.ResponseWriter, status int, code httperr.Code, msg string) 
 	writeJSON(w, status, errorResponse{Error: string(code), Message: msg})
 }
 
-// writeSvcErr maps a service-layer sentinel error onto an admin API response.
-// notFound overrides the 404 body text (empty keeps the error's own message);
-// badReqCode overrides the 400 error code (empty keeps "BAD_REQUEST"); fallback
-// is the 500 body text for anything else, including ErrForbidden's absence —
-// every mapper answers ErrForbidden with 403 (previously two call sites
-// (channel, retention) fell through to 500 instead).
+// writeSvcErr maps a service sentinel error onto an admin API response. notFound overrides the 404 text,
+// badReqCode the 400 code (default BAD_REQUEST); fallback is the 500 text for anything else. Every mapper
+// answers ErrForbidden with 403.
 func writeSvcErr(w http.ResponseWriter, err error, notFound string, badReqCode httperr.Code, fallback string) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
@@ -53,13 +50,10 @@ func writeSvcErr(w http.ResponseWriter, err error, notFound string, badReqCode h
 	}
 }
 
-// errPathID is pathInt64's error for an id that is not a positive integer.
 var errPathID = errors.New("id must be a positive integer")
 
-// pathInt64 reads a numeric id from the URL. Ids start at 1, so 0 and negative
-// values are refused here, once, rather than at every caller. Every route
-// reads its ids through it (the path-id invariant keeps a raw
-// strconv.ParseInt(chi.URLParam(...)) out of admin and api).
+// pathInt64 reads a numeric id from the URL. Ids start at 1, so 0 and negatives are refused once here, not at
+// every caller; the path-id invariant keeps raw strconv.ParseInt(chi.URLParam(...)) out of admin and api.
 func pathInt64(r *http.Request, param string) (int64, error) {
 	id, err := strconv.ParseInt(chi.URLParam(r, param), 10, 64)
 	if err != nil {
@@ -71,11 +65,9 @@ func pathInt64(r *http.Request, param string) (int64, error) {
 	return id, nil
 }
 
-// queryInt parses an integer query parameter with a minimum and maximum bound.
-// Use minVal=1 for limit parameters, minVal=0 for offset parameters. maxVal
-// caps limit parameters to prevent unbounded result sets; offset callers pass
-// a large bound — clamping offset with the limit cap would make pagination
-// unable to advance past row maxVal+limit.
+// queryInt parses an integer query parameter within [minVal, maxVal]. maxVal caps limit parameters; offset
+// callers pass a large bound, since clamping offset to the limit cap would stop pagination advancing past
+// maxVal+limit.
 func queryInt(r *http.Request, key string, defaultVal, minVal, maxVal int) int {
 	raw := r.URL.Query().Get(key)
 	if raw == "" {
@@ -91,17 +83,14 @@ func queryInt(r *http.Request, key string, defaultVal, minVal, maxVal int) int {
 	return n
 }
 
-// actorFromContext returns the authenticated user's ID stored in the request
-// context by adminAuthMiddleware. Returns 0 if called outside that middleware
-// (should not happen in production).
+// actorFromContext returns the user ID adminAuthMiddleware stored; 0 outside that middleware.
 func actorFromContext(r *http.Request) int64 {
 	return ActorIDFromContext(r.Context())
 }
 
-// ActorIDFromContext returns the admin principal's user ID that
-// RequireAdminAuth stored in ctx, or 0 outside that middleware. Exported for
-// handlers mounted behind RequireAdminAuth from other packages (the plugin
-// admin surface in api) so their audit rows name the real actor.
+// ActorIDFromContext returns the admin principal's user ID that RequireAdminAuth stored, or 0 outside it.
+// Exported so handlers mounted behind it from other packages (api's plugin admin surface) audit the real
+// actor.
 func ActorIDFromContext(ctx context.Context) int64 {
 	user, ok := ctx.Value(adminUserKey).(*db.User)
 	if !ok || user == nil {
@@ -110,8 +99,7 @@ func ActorIDFromContext(ctx context.Context) int64 {
 	return user.ID
 }
 
-// actorUserFromContext returns the authenticated principal's *db.User stored in
-// the request context by adminAuthMiddleware, or nil outside that middleware.
+// actorUserFromContext returns the *db.User adminAuthMiddleware stored, or nil outside it.
 func actorUserFromContext(r *http.Request) *db.User {
 	user, ok := r.Context().Value(adminUserKey).(*db.User)
 	if !ok {
@@ -120,10 +108,8 @@ func actorUserFromContext(r *http.Request) *db.User {
 	return user
 }
 
-// actorRoleFromContext returns the authenticated principal's *db.Role stored
-// in the request context by adminAuthMiddleware. Returns nil if called
-// outside that middleware (should not happen in production) so callers can
-// fail closed.
+// actorRoleFromContext returns the *db.Role adminAuthMiddleware stored, or nil outside it so callers can fail
+// closed.
 func actorRoleFromContext(r *http.Request) *db.Role {
 	role, ok := r.Context().Value(adminRoleKey).(*db.Role)
 	if !ok {
@@ -132,10 +118,8 @@ func actorRoleFromContext(r *http.Request) *db.Role {
 	return role
 }
 
-// isOwnerFromContext reports whether the authenticated principal holds the
-// Owner role, using the same predicate as ownerOnlyMiddleware. A missing role
-// fails closed (false). It exists for handlers that gate individual keys or
-// fields rather than a whole route.
+// isOwnerFromContext reports whether the principal holds the Owner role (the ownerOnlyMiddleware predicate);
+// a missing role fails closed. For handlers gating individual keys or fields, not a whole route.
 func isOwnerFromContext(r *http.Request) bool {
 	role := actorRoleFromContext(r)
 	return role != nil && permissions.IsOwner(role.ID, role.Position)

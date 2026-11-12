@@ -31,7 +31,7 @@ import {
 } from "../messaging/content/attachments";
 import { clearMediaCaches, renderUrlEmbeds } from "../messaging/content/media";
 import { clearEmbedCaches } from "../messaging/content/embeds";
-import { createGifPicker } from "../../components/GifPicker";
+import { createGifPicker } from "../messaging/GifPicker";
 import { nsfwConsentRequired } from "./nsfw";
 import {
   EXTERNAL_CONSENT_PREF,

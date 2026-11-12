@@ -20,7 +20,7 @@ func e2eeAnnounceMsgDecode(publicKey string, videoDecode any) []byte {
 	if videoDecode != nil {
 		payload["video_decode"] = videoDecode
 	}
-	raw, _ := json.Marshal(map[string]any{"type": "voice_e2ee_announce", "payload": payload})
+	raw := envelope("voice_e2ee_announce", payload)
 	return raw
 }
 
@@ -54,17 +54,13 @@ func payloadVideoDecode(t *testing.T, msg []byte) ([]string, bool) {
 	var env struct {
 		Payload map[string]json.RawMessage `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	raw, ok := env.Payload["video_decode"]
 	if !ok {
 		return nil, false
 	}
 	var out []string
-	if err := json.Unmarshal(raw, &out); err != nil {
-		t.Fatalf("video_decode is not a string list: %v", err)
-	}
+	mustUnmarshal(t, raw, &out)
 	return out, true
 }
 
@@ -168,10 +164,7 @@ func TestVoiceE2EEAnnounce_ReannounceWithoutFieldClears(t *testing.T) {
 	// The stored state must have been cleared too: a late joiner's replay
 	// carries no list.
 	user3 := seedVoiceOwner(t, database, "vd-clear-user3")
-	send3 := make(chan []byte, 32)
-	c3 := ws.NewTestClientWithUser(hub, user3, 0, send3)
-	hub.Register(c3)
-	waitRegistered(t, hub, c3)
+	c3, send3 := connectClient(t, hub, user3, 0, 32)
 	hub.HandleMessageForTest(c3, voiceJoinMsg(chanID))
 	rm := waitMsgOfType(send3, "voice_e2ee_announce", waitTimeout)
 	if rm == nil {
@@ -196,10 +189,7 @@ func TestVoiceE2EEAnnounce_ReannounceWithInvalidListClears(t *testing.T) {
 	}
 
 	user3 := seedVoiceOwner(t, database, "vd-clear-invalid-user3")
-	send3 := make(chan []byte, 32)
-	c3 := ws.NewTestClientWithUser(hub, user3, 0, send3)
-	hub.Register(c3)
-	waitRegistered(t, hub, c3)
+	c3, send3 := connectClient(t, hub, user3, 0, 32)
 	hub.HandleMessageForTest(c3, voiceJoinMsg(chanID))
 	rm := waitMsgOfType(send3, "voice_e2ee_announce", waitTimeout)
 	if rm == nil {
@@ -216,10 +206,7 @@ func TestVoiceE2EEAnnounce_ReplayedVideoDecodeToLateJoiner(t *testing.T) {
 	hub.HandleMessageForTest(c1, e2eeAnnounceMsgDecode(validB64Key(), want))
 
 	user3 := seedVoiceOwner(t, database, "vd-late-user3")
-	send3 := make(chan []byte, 32)
-	c3 := ws.NewTestClientWithUser(hub, user3, 0, send3)
-	hub.Register(c3)
-	waitRegistered(t, hub, c3)
+	c3, send3 := connectClient(t, hub, user3, 0, 32)
 	hub.HandleMessageForTest(c3, voiceJoinMsg(chanID))
 	rm := waitMsgOfType(send3, "voice_e2ee_announce", waitTimeout)
 	if rm == nil {

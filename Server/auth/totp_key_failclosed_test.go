@@ -21,9 +21,7 @@ func TestLoadOrGenerateTOTPKey_ReadErrorFailsClosed(t *testing.T) {
 		t.Setenv("OWNCORD_TOTP_KEY", "")
 		dataDir := t.TempDir()
 		keyPath := filepath.Join(dataDir, "totp.key")
-		if err := os.Mkdir(keyPath, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		mustDo(t, "mkdir", os.Mkdir(keyPath, 0o700))
 
 		key, err := auth.LoadOrGenerateTOTPKey(dataDir)
 		if err == nil {
@@ -78,17 +76,13 @@ func TestLoadOrGenerateTOTPKey_ReadErrorFailsClosed(t *testing.T) {
 		dataDir := t.TempDir()
 		keyPath := filepath.Join(dataDir, "totp.key")
 		original := []byte(hex.EncodeToString(make([]byte, 32)))
-		if err := os.WriteFile(keyPath, original, 0o200); err != nil {
-			t.Fatalf("write key: %v", err)
-		}
+		mustDo(t, "write key", os.WriteFile(keyPath, original, 0o200))
 
 		key, err := auth.LoadOrGenerateTOTPKey(dataDir)
 		if err == nil {
 			t.Fatalf("LoadOrGenerateTOTPKey generated a key (%x) over an unreadable file", key)
 		}
-		if err := os.Chmod(keyPath, 0o600); err != nil {
-			t.Fatalf("chmod back: %v", err)
-		}
+		mustDo(t, "chmod back", os.Chmod(keyPath, 0o600))
 		after, readErr := os.ReadFile(keyPath)
 		if readErr != nil {
 			t.Fatalf("reading key after failure: %v", readErr)
@@ -106,18 +100,12 @@ func TestLoadOrGenerateTOTPKey_AtomicWrite(t *testing.T) {
 	t.Setenv("OWNCORD_TOTP_KEY", "")
 	dataDir := t.TempDir()
 	keyPath := filepath.Join(dataDir, "totp.key")
-	if err := os.WriteFile(keyPath+".tmp", []byte("stale partial write"), 0o600); err != nil {
-		t.Fatalf("write stale temp: %v", err)
-	}
+	mustDo(t, "write stale temp", os.WriteFile(keyPath+".tmp", []byte("stale partial write"), 0o600))
 
 	key, err := auth.LoadOrGenerateTOTPKey(dataDir)
-	if err != nil {
-		t.Fatalf("LoadOrGenerateTOTPKey with a stale temp file: %v", err)
-	}
+	mustDo(t, "LoadOrGenerateTOTPKey with a stale temp file", err)
 	onDisk, err := os.ReadFile(keyPath)
-	if err != nil {
-		t.Fatalf("reading totp.key: %v", err)
-	}
+	mustDo(t, "reading totp.key", err)
 	if string(onDisk) != hex.EncodeToString(key) {
 		t.Fatalf("totp.key = %q, want the generated key %x", onDisk, key)
 	}

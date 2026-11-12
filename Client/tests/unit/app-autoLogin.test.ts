@@ -15,13 +15,13 @@ import { SessionScope } from "@lib/net/sessionScope";
 import type { ProfileManager } from "@lib/presence/profiles";
 
 const hoisted = vi.hoisted(() => ({
-  loadCredential: vi.fn(),
+  resumeSavedSession: vi.fn(),
   startSession: vi.fn(),
   checkHealth: vi.fn(),
   runHealthChecks: vi.fn(),
   warn: vi.fn(),
 }));
-vi.mock("@lib/net/credentials", () => ({ loadCredential: hoisted.loadCredential }));
+vi.mock("@lib/net/credentials", () => ({ resumeSavedSession: hoisted.resumeSavedSession }));
 vi.mock("../../src/app/session", () => ({ startSession: hoisted.startSession }));
 vi.mock("../../src/app/serverHealth", () => ({
   checkHealth: hoisted.checkHealth,
@@ -36,6 +36,7 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
+import { TransportError } from "@lib/api";
 import { connectText } from "../../src/i18n/connect";
 import { createAutoLogin } from "../../src/app/autoLogin";
 
@@ -82,6 +83,7 @@ type PageMethod =
   | "selectServer"
   | "refreshProfiles"
   | "showAutoConnecting"
+  | "resetToIdle"
   | "showError"
   | "showServerWait"
   | "hideServerWait";
@@ -90,6 +92,7 @@ let ensureProfileExists: ReturnType<typeof vi.fn>;
 let startup: () => void;
 let cancel: () => void;
 let forgetHost: (host: string) => void;
+let certAccepted: (host: string) => void;
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -98,7 +101,11 @@ async function flush(): Promise<void> {
 beforeEach(() => {
   sessionStorage.clear();
   for (const m of Object.values(hoisted)) m.mockReset();
-  hoisted.loadCredential.mockResolvedValue({ username: "ann", token: "tok" });
+  hoisted.resumeSavedSession.mockResolvedValue({
+    outcome: "resumed",
+    username: "ann",
+    token: "tok",
+  });
   hoisted.checkHealth.mockResolvedValue(true);
   profiles = [alpha, beta];
   loadGate = gate();
@@ -118,6 +125,7 @@ beforeEach(() => {
     selectServer: vi.fn(),
     refreshProfiles: vi.fn(),
     showAutoConnecting: vi.fn(),
+    resetToIdle: vi.fn(),
     showError: vi.fn(),
     showServerWait: vi.fn(),
     hideServerWait: vi.fn(),
@@ -128,7 +136,7 @@ beforeEach(() => {
     getAll: () => profiles,
     getAutoConnectProfile: () => profiles.find((p) => p.autoConnect),
   } as unknown as ProfileManager;
-  [startup, cancel, forgetHost] = createAutoLogin(
+  [startup, cancel, forgetHost, certAccepted] = createAutoLogin(
     api as never,
     manager,
     owner,
@@ -150,14 +158,18 @@ describe("startup: skip flag", () => {
     loadGate.resolve();
     await flush();
     expect(sessionStorage.getItem(SKIP)).toBeNull();
-    expect(hoisted.loadCredential).not.toHaveBeenCalled();
+    expect(hoisted.resumeSavedSession).not.toHaveBeenCalled();
     expect(hoisted.startSession).not.toHaveBeenCalled();
   });
 
   it("consumes the flag on a quick switch too, and the switch still resumes", async () => {
     sessionStorage.setItem(SKIP, "1");
     sessionStorage.setItem(SWITCH, "beta.example");
-    hoisted.loadCredential.mockResolvedValue({ username: "bob", token: "btok" });
+    hoisted.resumeSavedSession.mockResolvedValue({
+      outcome: "resumed",
+      username: "bob",
+      token: "btok",
+    });
     startup();
     loadGate.resolve();
     await flush();
@@ -170,11 +182,15 @@ describe("startup: skip flag", () => {
 
   it("a quick switch does not fall through to the auto-connect profile", async () => {
     sessionStorage.setItem(SWITCH, "beta.example");
-    hoisted.loadCredential.mockResolvedValue({ username: "bob", token: "btok" });
+    hoisted.resumeSavedSession.mockResolvedValue({
+      outcome: "resumed",
+      username: "bob",
+      token: "btok",
+    });
     startup();
     loadGate.resolve();
     await flush();
-    expect(hoisted.loadCredential).toHaveBeenCalledTimes(1);
+    expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(1);
     expect(hoisted.startSession).toHaveBeenCalledTimes(1);
     expect(hoisted.startSession.mock.calls[0]?.[0]).toBe("beta.example");
   });
@@ -228,7 +244,7 @@ describe("startup: a manual login started while the profiles load", () => {
     api.endSession(); // the manual login supersedes the startup attempt
     loadGate.resolve();
     await flush();
-    expect(hoisted.loadCredential).not.toHaveBeenCalled();
+    expect(hoisted.resumeSavedSession).not.toHaveBeenCalled();
     expect(hoisted.startSession).not.toHaveBeenCalled();
   });
 
@@ -239,7 +255,7 @@ describe("startup: a manual login started while the profiles load", () => {
     loadGate.resolve();
     await flush();
     expect(page.selectServer).toHaveBeenCalledTimes(1);
-    expect(hoisted.loadCredential).not.toHaveBeenCalled();
+    expect(hoisted.resumeSavedSession).not.toHaveBeenCalled();
     expect(hoisted.startSession).not.toHaveBeenCalled();
   });
 
@@ -278,7 +294,7 @@ describe("startup: a manual login started while the profiles load", () => {
     startup();
     loadGate.resolve();
     await flush();
-    expect(hoisted.loadCredential).not.toHaveBeenCalled();
+    expect(hoisted.resumeSavedSession).not.toHaveBeenCalled();
   });
 });
 
@@ -289,14 +305,14 @@ describe("resume guards", () => {
     startup();
     loadGate.resolve();
     await flush();
-    expect(hoisted.loadCredential).not.toHaveBeenCalled();
+    expect(hoisted.resumeSavedSession).not.toHaveBeenCalled();
     expect(hoisted.startSession).not.toHaveBeenCalled();
   });
 
   async function startWithPendingCredential() {
     const cred = gate();
-    hoisted.loadCredential.mockReturnValue(
-      cred.promise.then(() => ({ username: "ann", token: "t" })),
+    hoisted.resumeSavedSession.mockReturnValue(
+      cred.promise.then(() => ({ outcome: "resumed", username: "ann", token: "t" })),
     );
     startup();
     loadGate.resolve();
@@ -324,7 +340,7 @@ describe("resume guards", () => {
   });
 
   it("does nothing for a host with no stored token", async () => {
-    hoisted.loadCredential.mockResolvedValue(null);
+    hoisted.resumeSavedSession.mockResolvedValue(null);
     startup();
     loadGate.resolve();
     await flush();
@@ -334,7 +350,11 @@ describe("resume guards", () => {
   });
 
   it("does nothing for a credential missing its token", async () => {
-    hoisted.loadCredential.mockResolvedValue({ username: "ann" });
+    hoisted.resumeSavedSession.mockResolvedValue({
+      outcome: "resumed",
+      username: "ann",
+      token: "",
+    });
     startup();
     loadGate.resolve();
     await flush();
@@ -363,7 +383,7 @@ describe("resume guards", () => {
 
 describe("resume failure", () => {
   it("shows the error and logs a warning when the credential read fails", async () => {
-    hoisted.loadCredential.mockRejectedValue(new Error("keyring locked"));
+    hoisted.resumeSavedSession.mockRejectedValue(new Error("keyring locked"));
     startup();
     loadGate.resolve();
     await flush();
@@ -378,7 +398,7 @@ describe("resume failure", () => {
   });
 
   it("falls back to the generic text for a failure with no message", async () => {
-    hoisted.loadCredential.mockRejectedValue(undefined);
+    hoisted.resumeSavedSession.mockRejectedValue(undefined);
     startup();
     loadGate.resolve();
     await flush();
@@ -391,7 +411,7 @@ describe("resume failure", () => {
 
   it("paints nothing over the login that superseded the attempt", async () => {
     const cred = gate();
-    hoisted.loadCredential.mockReturnValue(cred.promise);
+    hoisted.resumeSavedSession.mockReturnValue(cred.promise);
     startup();
     loadGate.resolve();
     await flush();
@@ -404,7 +424,7 @@ describe("resume failure", () => {
 
   it("paints nothing after the page left", async () => {
     const cred = gate();
-    hoisted.loadCredential.mockReturnValue(cred.promise);
+    hoisted.resumeSavedSession.mockReturnValue(cred.promise);
     startup();
     loadGate.resolve();
     await flush();
@@ -416,7 +436,7 @@ describe("resume failure", () => {
 
   it("paints nothing after Cancel", async () => {
     const cred = gate();
-    hoisted.loadCredential.mockReturnValue(cred.promise);
+    hoisted.resumeSavedSession.mockReturnValue(cred.promise);
     startup();
     loadGate.resolve();
     await flush();
@@ -424,6 +444,299 @@ describe("resume failure", () => {
     cred.reject(new Error("late"));
     await flush();
     expect(page.showError).not.toHaveBeenCalled();
+  });
+});
+
+describe("a saved server not signed in to yet during this app run", () => {
+  // The backend asks that server before it hands the token over, so a resume
+  // has more answers than a stored token: the server refused it, its
+  // certificate has to be confirmed first, it could not be asked, or another
+  // session is still active.
+  function switchToBeta(): void {
+    sessionStorage.setItem(SWITCH, "beta.example");
+    startup();
+    loadGate.resolve();
+  }
+
+  function expectSignedInToBeta(): void {
+    expect(hoisted.startSession.mock.calls[0]?.slice(0, 3)).toEqual([
+      "beta.example",
+      "btok",
+      "bob",
+    ]);
+  }
+
+  it("signs in once the server accepted the saved sign-in", async () => {
+    hoisted.resumeSavedSession.mockResolvedValue({
+      outcome: "resumed",
+      username: "bob",
+      token: "btok",
+    });
+    switchToBeta();
+    await flush();
+    expect(hoisted.resumeSavedSession).toHaveBeenCalledWith("beta.example");
+    expect(page.showAutoConnecting).toHaveBeenCalledWith("Beta");
+    expectSignedInToBeta();
+    expect(page.showError).not.toHaveBeenCalled();
+  });
+
+  it("leaves the sign-in form up, and says why, when the server refuses the saved sign-in", async () => {
+    hoisted.resumeSavedSession.mockResolvedValue({ outcome: "sign_in_needed" });
+    switchToBeta();
+    await flush();
+    // The switch target is still selected and prefilled; nothing signs in.
+    expect(page.selectServer).toHaveBeenCalledTimes(1);
+    expect(page.selectServer).toHaveBeenCalledWith("beta.example", "bob", false, true);
+    expect(page.showAutoConnecting).not.toHaveBeenCalled();
+    expect(hoisted.startSession).not.toHaveBeenCalled();
+    expect(page.showError).toHaveBeenCalledTimes(1);
+    expect(page.showError).toHaveBeenCalledWith(connectText("error.unauthorized"));
+    expect(page.showServerWait).not.toHaveBeenCalled();
+  });
+
+  it("asks once more when the backend still holds the server it is leaving", async () => {
+    vi.useFakeTimers();
+    hoisted.resumeSavedSession
+      .mockResolvedValueOnce({ outcome: "refused" })
+      .mockResolvedValueOnce({ outcome: "resumed", username: "bob", token: "btok" });
+    switchToBeta();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(1);
+    expect(page.showError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(2);
+    expectSignedInToBeta();
+    expect(page.showError).not.toHaveBeenCalled();
+  });
+
+  it("says the sign-in failed, in the app's own words, when the backend refuses twice", async () => {
+    vi.useFakeTimers();
+    hoisted.resumeSavedSession.mockResolvedValue({ outcome: "refused" });
+    switchToBeta();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(page.selectServer).toHaveBeenCalledWith("beta.example", "bob", false, true);
+    expect(hoisted.startSession).not.toHaveBeenCalled();
+    expect(page.showError).toHaveBeenCalledTimes(1);
+    expect(page.showError).toHaveBeenCalledWith(connectText("session.autoLoginFailed"));
+    expect(hoisted.warn).toHaveBeenCalledWith(
+      "Saved sign-in not resumed: another session is active",
+      { host: "beta.example" },
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not ask again once another sign-in took over", async () => {
+    vi.useFakeTimers();
+    hoisted.resumeSavedSession.mockResolvedValue({ outcome: "refused" });
+    switchToBeta();
+    await vi.advanceTimersByTimeAsync(0);
+    api.endSession();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(1);
+    expect(page.showError).not.toHaveBeenCalled();
+  });
+
+  describe("a certificate that has to be confirmed first", () => {
+    async function heldUp(): Promise<void> {
+      hoisted.resumeSavedSession.mockResolvedValueOnce({ outcome: "certificate_unverified" });
+      switchToBeta();
+      await flush();
+    }
+
+    it("names the certificate and does not wait for an offline server", async () => {
+      await heldUp();
+      expect(hoisted.startSession).not.toHaveBeenCalled();
+      expect(page.showError).toHaveBeenCalledTimes(1);
+      expect(page.showError).toHaveBeenCalledWith(connectText("error.tlsFailed"));
+      expect(page.showServerWait).not.toHaveBeenCalled();
+    });
+
+    it("carries on once that server's certificate is accepted", async () => {
+      await heldUp();
+      hoisted.resumeSavedSession.mockResolvedValue({
+        outcome: "resumed",
+        username: "bob",
+        token: "btok",
+      });
+      certAccepted("other.example");
+      await flush();
+      expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(1);
+      certAccepted("beta.example");
+      await flush();
+      expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(2);
+      expectSignedInToBeta();
+      // Once: a second accept for the same server starts nothing.
+      certAccepted("beta.example");
+      await flush();
+      expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(2);
+    });
+
+    it("stays put when another sign-in took over before the accept", async () => {
+      await heldUp();
+      api.endSession();
+      certAccepted("beta.example");
+      await flush();
+      expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(1);
+      expect(hoisted.startSession).not.toHaveBeenCalled();
+    });
+
+    it("stays put after Cancel", async () => {
+      await heldUp();
+      cancel();
+      certAccepted("beta.example");
+      await flush();
+      expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("progress while the server is asked", () => {
+    type Answer = { outcome: string; username?: string; token?: string } | null;
+    async function pendingFor(ms: number): Promise<Deferred<Answer>> {
+      vi.useFakeTimers();
+      const answer = gate<Answer>();
+      hoisted.resumeSavedSession.mockReturnValue(answer.promise);
+      switchToBeta();
+      await vi.advanceTimersByTimeAsync(ms);
+      return answer;
+    }
+
+    it("shows nothing for an answer that comes at once", async () => {
+      const answer = await pendingFor(399);
+      expect(page.showAutoConnecting).not.toHaveBeenCalled();
+      answer.resolve({ outcome: "sign_in_needed" });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(page.showAutoConnecting).not.toHaveBeenCalled();
+      expect(page.resetToIdle).not.toHaveBeenCalled();
+    });
+
+    it("shows it is busy after a moment and keeps that up into the sign-in", async () => {
+      const answer = await pendingFor(400);
+      expect(page.showAutoConnecting).toHaveBeenCalledTimes(1);
+      expect(page.showAutoConnecting).toHaveBeenCalledWith("Beta");
+      answer.resolve({ outcome: "resumed", username: "bob", token: "btok" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(page.resetToIdle).not.toHaveBeenCalled();
+      expect(hoisted.startSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("takes the progress down before it says the saved sign-in was refused", async () => {
+      const answer = await pendingFor(400);
+      answer.resolve({ outcome: "sign_in_needed" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(page.resetToIdle).toHaveBeenCalledTimes(1);
+      expect(page.showError).toHaveBeenCalledWith(connectText("error.unauthorized"));
+      expect(page.resetToIdle.mock.invocationCallOrder[0]).toBeLessThan(
+        page.showError.mock.invocationCallOrder[0] ?? 0,
+      );
+    });
+
+    it("takes the progress down when nothing usable is stored", async () => {
+      const answer = await pendingFor(400);
+      answer.resolve({ outcome: "resumed", username: "bob", token: "" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(page.resetToIdle).toHaveBeenCalledTimes(1);
+      expect(hoisted.startSession).not.toHaveBeenCalled();
+      expect(page.showError).not.toHaveBeenCalled();
+    });
+
+    it("leaves the form alone when Cancel ended the attempt meanwhile", async () => {
+      const answer = await pendingFor(400);
+      cancel();
+      api.endSession();
+      answer.resolve({ outcome: "sign_in_needed" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(page.resetToIdle).not.toHaveBeenCalled();
+      expect(page.showError).not.toHaveBeenCalled();
+    });
+
+    it("does not come up after another sign-in took over", async () => {
+      await pendingFor(100);
+      api.endSession();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(page.showAutoConnecting).not.toHaveBeenCalled();
+    });
+  });
+
+  it("says the server cannot be reached and waits for it when the check cannot run", async () => {
+    vi.useFakeTimers();
+    hoisted.resumeSavedSession.mockRejectedValueOnce(
+      new TransportError("saved sign-in check: connect failed: refused"),
+    );
+    hoisted.checkHealth.mockResolvedValue(false);
+    switchToBeta();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hoisted.startSession).not.toHaveBeenCalled();
+    expect(page.showError).toHaveBeenCalledTimes(1);
+    expect(page.showError).toHaveBeenCalledWith(connectText("session.connectTimeout"));
+    expect(page.showServerWait).toHaveBeenCalledWith("Beta", "beta.example");
+    expect(hoisted.warn).toHaveBeenCalledWith("Saved sign-in could not be checked", {
+      host: "beta.example",
+      error: "saved sign-in check: connect failed: refused",
+    });
+
+    // The server comes back: the wait resumes once, with the token the
+    // backend now hands over.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(1);
+    hoisted.checkHealth.mockResolvedValue(true);
+    hoisted.resumeSavedSession.mockResolvedValue({
+      outcome: "resumed",
+      username: "bob",
+      token: "btok",
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(page.hideServerWait).toHaveBeenCalledTimes(1);
+    expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(2);
+    expect(hoisted.startSession).toHaveBeenCalledTimes(1);
+    expect(hoisted.startSession.mock.calls[0]?.[1]).toBe("btok");
+    // the resume the wait started does not wait again
+    expect(hoisted.startSession.mock.calls[0]?.[6]).toBeUndefined();
+  });
+
+  it("does not wait a second time when the check fails again after the wait", async () => {
+    vi.useFakeTimers();
+    hoisted.resumeSavedSession.mockRejectedValue(
+      new TransportError("saved sign-in check timed out"),
+    );
+    switchToBeta();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(page.showServerWait).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(2);
+    expect(page.showError).toHaveBeenCalledTimes(2);
+    expect(page.showServerWait).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(2);
+    expect(hoisted.startSession).not.toHaveBeenCalled();
+  });
+
+  it("drops an answer that arrives after another sign-in took over", async () => {
+    const answer = gate<{ outcome: "resumed"; username: string; token: string }>();
+    hoisted.resumeSavedSession.mockReturnValue(answer.promise);
+    switchToBeta();
+    await flush();
+    api.endSession(); // the user picked another server and signed in there
+    page.selectServer.mockClear();
+    answer.resolve({ outcome: "resumed", username: "bob", token: "btok" });
+    await flush();
+    expect(page.selectServer).not.toHaveBeenCalled();
+    expect(page.showAutoConnecting).not.toHaveBeenCalled();
+    expect(hoisted.startSession).not.toHaveBeenCalled();
+    expect(page.showError).not.toHaveBeenCalled();
+  });
+
+  it("drops a failed check that arrives after another sign-in took over", async () => {
+    const answer = gate();
+    hoisted.resumeSavedSession.mockReturnValue(answer.promise);
+    switchToBeta();
+    await flush();
+    api.endSession();
+    answer.reject(new TransportError("saved sign-in check timed out"));
+    await flush();
+    expect(page.showError).not.toHaveBeenCalled();
+    expect(page.showServerWait).not.toHaveBeenCalled();
+    expect(hoisted.warn).not.toHaveBeenCalled();
   });
 });
 
@@ -529,7 +842,7 @@ describe("cancel", () => {
     cancel();
     loadGate.resolve();
     await flush();
-    expect(hoisted.loadCredential).toHaveBeenCalledTimes(1);
+    expect(hoisted.resumeSavedSession).toHaveBeenCalledTimes(1);
     expect(hoisted.startSession).not.toHaveBeenCalled();
   });
 });

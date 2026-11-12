@@ -382,17 +382,13 @@ func TestPersistAudits_SingleTransaction(t *testing.T) {
 		{ActorID: uid, Action: "third", TargetType: "server", TargetID: 0, Detail: ""},
 	}
 	persisted, err := database.PersistAudits(context.Background(), entries)
-	if err != nil {
-		t.Fatalf("PersistAudits() error: %v", err)
-	}
+	mustDo(t, "PersistAudits() error", err)
 	if persisted != 3 {
 		t.Fatalf("PersistAudits() = %d, want 3", persisted)
 	}
 
 	got, err := database.GetAuditLog(context.Background(), 10, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog() error: %v", err)
-	}
+	mustDo(t, "GetAuditLog() error", err)
 	if len(got) != 3 {
 		t.Fatalf("GetAuditLog() = %d entries, want 3", len(got))
 	}
@@ -456,9 +452,7 @@ func TestWriteAudit_SynchronousWithoutWriter(t *testing.T) {
 	db.WriteAudit(context.Background(), database, uid, "cli_action", "api_token", 5, "label")
 
 	got, err := database.GetAuditLog(context.Background(), 10, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog() error: %v", err)
-	}
+	mustDo(t, "GetAuditLog() error", err)
 	if len(got) != 1 || got[0].Action != "cli_action" {
 		t.Fatalf("GetAuditLog() = %+v, want exactly the synchronously written cli_action", got)
 	}
@@ -480,18 +474,14 @@ func TestWriteAudit_AsyncWithInstalledWriter(t *testing.T) {
 	db.WriteAudit(context.Background(), database, uid, "async_action", "user", uid, "detail")
 
 	got, err := database.GetAuditLog(context.Background(), 10, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog() error: %v", err)
-	}
+	mustDo(t, "GetAuditLog() error", err)
 	if len(got) != 0 {
 		t.Fatalf("entry visible before flush: %+v — WriteAudit did not take the async path", got)
 	}
 
 	w.Stop(context.Background())
 	got, err = database.GetAuditLog(context.Background(), 10, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog() after Stop error: %v", err)
-	}
+	mustDo(t, "GetAuditLog() after Stop error", err)
 	if len(got) != 1 || got[0].Action != "async_action" || got[0].Detail != "detail" {
 		t.Fatalf("GetAuditLog() after Stop = %+v, want the drained async_action entry", got)
 	}
@@ -502,21 +492,15 @@ func TestWriteAudit_AsyncWithInstalledWriter(t *testing.T) {
 func auditActions(t *testing.T, database *db.DB) []string {
 	t.Helper()
 	rows, err := database.SQLDb().QueryContext(context.Background(), `SELECT action FROM audit_log ORDER BY id`)
-	if err != nil {
-		t.Fatalf("query audit_log: %v", err)
-	}
+	mustDo(t, "query audit_log", err)
 	defer func() { _ = rows.Close() }()
 	var got []string
 	for rows.Next() {
 		var a string
-		if err := rows.Scan(&a); err != nil {
-			t.Fatalf("scan audit_log: %v", err)
-		}
+		mustDo(t, "scan audit_log", rows.Scan(&a))
 		got = append(got, a)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate audit_log: %v", err)
-	}
+	mustDo(t, "iterate audit_log", rows.Err())
 	return got
 }
 

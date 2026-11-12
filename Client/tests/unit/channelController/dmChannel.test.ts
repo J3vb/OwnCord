@@ -13,10 +13,10 @@ import {
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/dom", () => mocks.domMock());
-vi.mock("@components/MessageList", () => mocks.messageListMock());
-vi.mock("@components/MessageInput", () => mocks.messageInputMock());
-vi.mock("@components/NsfwGate", () => mocks.nsfwGateMock());
-vi.mock("@components/TypingIndicator", () => mocks.typingIndicatorMock());
+vi.mock("../../../src/features/messaging/MessageList", () => mocks.messageListMock());
+vi.mock("../../../src/features/messaging/MessageInput", () => mocks.messageInputMock());
+vi.mock("../../../src/features/content-consent/NsfwGate", () => mocks.nsfwGateMock());
+vi.mock("../../../src/features/messaging/TypingIndicator", () => mocks.typingIndicatorMock());
 vi.mock("@lib/readState", () => mocks.readStateMock());
 vi.mock("@stores/messages.store", () => mocks.messagesStoreMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
@@ -339,6 +339,31 @@ describe("createChannelController", () => {
       channelsStore.flush();
 
       expect(opts.chatHeaderName!.textContent).toBe("renamed");
+    });
+
+    it("shows the header lock for a password channel and follows a password change", () => {
+      setChannels([
+        {
+          id: 42,
+          name: "secret",
+          type: "voice",
+          category: null,
+          position: 0,
+          can_send: true,
+          nsfw: false,
+          password_protected: true,
+        },
+      ]);
+      const chatHeaderRefs = { ...makeChatHeaderRefs(), lockEl: document.createElement("span") };
+      chatHeaderRefs.lockEl.hidden = true;
+      const ctrl = createChannelController(makeOpts({ chatHeaderRefs }));
+
+      ctrl.mountChannel(42, "secret", "voice");
+      expect(chatHeaderRefs.lockEl.hidden).toBe(false);
+
+      updateChannel({ id: 42, password_protected: false });
+      channelsStore.flush();
+      expect(chatHeaderRefs.lockEl.hidden).toBe(true);
     });
   });
 

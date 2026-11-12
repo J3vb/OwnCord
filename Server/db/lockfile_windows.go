@@ -11,9 +11,8 @@ import (
 // open in another process with an incompatible share mode.
 const errorSharingViolation = syscall.Errno(32)
 
-// tryLockFile opens path with an empty share mode, so a second process's open
-// fails with a sharing violation until this handle is closed. The handle is
-// released by the OS when the process exits — no stale-lock failure mode.
+// tryLockFile opens path with an empty share mode, so a second open fails until this
+// handle closes; the OS releases it on exit, so there is no stale lock.
 func tryLockFile(path string) (func(), error) {
 	p, err := syscall.UTF16PtrFromString(path)
 	if err != nil {

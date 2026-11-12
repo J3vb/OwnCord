@@ -6,28 +6,24 @@ import (
 	"strings"
 )
 
-// PromContentType is the Content-Type of the Prometheus text exposition format
-// (version 0.0.4); Prometheus 3 rejects a scrape whose type it cannot parse.
+// PromContentType is the text exposition (0.0.4) Content-Type; Prometheus 3 rejects a scrape type it cannot
+// parse.
 const PromContentType = "text/plain; version=0.0.4; charset=utf-8"
 
-// Prometheus family types.
 const (
 	PromCounter   = "counter"
 	PromGauge     = "gauge"
 	PromHistogram = "histogram"
 )
 
-// PromLabel is one name="value" pair on a sample. Names and values are
-// compile-time constants matching [a-z0-9_]+ (a test pins that), so the writer
-// does not escape them.
+// PromLabel is one name="value" pair; names and values are constants matching
+// [a-z0-9_]+ (a test pins that), so the writer does not escape them.
 type PromLabel struct{ Name, Value string }
 
-// PromText writes the Prometheus text exposition format (0.0.4) by hand, so the
-// default build needs no prometheus client library. The zero value is ready.
-// It is not safe for concurrent use; build one per scrape.
-//
-// Usage is Family, then that family's Sample or Histogram calls, then the next
-// Family. The writer does not check the order; the grammar test does.
+// PromText writes the Prometheus text exposition format by hand, so the default
+// build needs no client library. The zero value is ready; not safe for
+// concurrent use (one per scrape). Call Family, then its Sample or Histogram
+// calls, then the next Family; the grammar test checks the order.
 type PromText struct {
 	buf    bytes.Buffer
 	family string
@@ -36,11 +32,9 @@ type PromText struct {
 // Bytes returns the text written so far.
 func (p *PromText) Bytes() []byte { return p.buf.Bytes() }
 
-// promHelpEscaper escapes the two characters the 0.0.4 format reserves in HELP.
 var promHelpEscaper = strings.NewReplacer(`\`, `\\`, "\n", `\n`)
 
-// Family starts a metric family: its HELP and TYPE lines. Later Sample and
-// Histogram calls belong to it.
+// Family starts a metric family (HELP and TYPE lines); later calls belong to it.
 func (p *PromText) Family(name, typ, help string) {
 	p.family = name
 	p.buf.WriteString("# HELP ")
@@ -59,13 +53,10 @@ func (p *PromText) Sample(labels []PromLabel, v float64) {
 	p.line(p.family, labels, nil, v)
 }
 
-// Histogram writes one labelled histogram of the current family from raw
-// counts: the cumulative _bucket series, +Inf, _sum and _count. Bounds are the
-// shared latency bounds converted to seconds, and SumMicros becomes seconds.
-//
-// Buckets, +Inf and _count come from one pass over the loaded counters, so
-// +Inf == _count holds in every scrape. _sum is a separate atomic load and can
-// differ by one in-flight observation; Prometheus tolerates that.
+// Histogram writes one labelled histogram from raw counts: cumulative _bucket
+// series, +Inf, _sum and _count, in seconds. Buckets, +Inf and _count come from
+// one pass over the counters so +Inf == _count; _sum is a separate load and can
+// differ by one in-flight observation, which Prometheus tolerates.
 func (p *PromText) Histogram(labels []PromLabel, c Counts) {
 	var cumulative uint64
 	for i, bound := range latencyBoundsMs {
@@ -80,7 +71,6 @@ func (p *PromText) Histogram(labels []PromLabel, c Counts) {
 	p.line(p.family+"_count", labels, nil, float64(cumulative))
 }
 
-// line writes `name{labels,le} value`.
 func (p *PromText) line(name string, labels []PromLabel, le *PromLabel, v float64) {
 	p.buf.WriteString(name)
 	if len(labels) > 0 || le != nil {
@@ -111,6 +101,5 @@ func writePromLabel(b *bytes.Buffer, l PromLabel) {
 	b.WriteByte('"')
 }
 
-// formatPromFloat renders a sample value or bucket bound. NaN and the
-// infinities come out as NaN, +Inf and -Inf, which the format accepts.
+// formatPromFloat renders a value or bound; NaN and infinities come out as NaN, +Inf, -Inf.
 func formatPromFloat(v float64) string { return strconv.FormatFloat(v, 'g', -1, 64) }

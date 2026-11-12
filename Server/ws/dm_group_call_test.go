@@ -27,6 +27,32 @@ func seedGroupDM(t *testing.T, database *db.DB, name string, userIDs ...int64) i
 	return ch.ID
 }
 
+// newGroupDMTrio builds a handler hub with an owner, two members and a group
+// DM of the three, named after tag so usernames stay unique per test.
+func newGroupDMTrio(t *testing.T, tag, name string) (*ws.Hub, *db.DB, *db.User, *db.User, *db.User, int64) {
+	t.Helper()
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, tag+"-alice")
+	bob := seedMemberUser(t, database, tag+"-bob")
+	carol := seedMemberUser(t, database, tag+"-carol")
+	chID := seedGroupDM(t, database, name, alice.ID, bob.ID, carol.ID)
+	return hub, database, alice, bob, carol, chID
+}
+
+// connectRingPair registers alice (already in the call, as a ring requires)
+// and bob on chID and returns alice's client and bob's send queue.
+func connectRingPair(t *testing.T, hub *ws.Hub, alice, bob *db.User, chID int64) (*ws.Client, chan []byte) {
+	t.Helper()
+	sendBob := make(chan []byte, 64)
+	cAlice := ws.NewTestClientWithUser(hub, alice, chID, make(chan []byte, 64))
+	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
+	hub.Register(cAlice)
+	hub.Register(cBob)
+	waitRegistered(t, hub, cBob)
+	ws.SetVoiceChIDForTest(cAlice, chID)
+	return cAlice, sendBob
+}
+
 func callMsg(msgType string, channelID int64) []byte {
 	raw, _ := json.Marshal(map[string]any{
 		"type":    msgType,
@@ -40,22 +66,11 @@ func callMsg(msgType string, channelID int64) []byte {
 // A chat_send into a group DM must reach every other participant, not just
 // "the recipient" — the single-recipient assumption the DM path started with.
 func TestGroupDM_ChatSendFansOutToAllParticipants(t *testing.T) {
-	hub, database := newHandlerHub(t)
-	alice := seedOwnerUser(t, database, "grp-send-alice")
-	bob := seedMemberUser(t, database, "grp-send-bob")
-	carol := seedMemberUser(t, database, "grp-send-carol")
-	chID := seedGroupDM(t, database, "Trio", alice.ID, bob.ID, carol.ID)
+	hub, _, alice, bob, carol, chID := newGroupDMTrio(t, "grp-send", "Trio")
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	sendCarol := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	cCarol := ws.NewTestClientWithUser(hub, carol, chID, sendCarol)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	hub.Register(cCarol)
-	waitRegistered(t, hub, cCarol)
+	cAlice, _ := connectClient(t, hub, alice, chID, 64)
+	_, sendBob := connectClient(t, hub, bob, chID, 64)
+	_, sendCarol := connectClient(t, hub, carol, chID, 64)
 
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(chID, "hello everyone"))
 
@@ -70,11 +85,7 @@ func TestGroupDM_ChatSendFansOutToAllParticipants(t *testing.T) {
 // Every recipient's dm_channel_open must describe the group from *their* seat:
 // they never appear in their own recipients list, and the list is the other two.
 func TestGroupDM_ChannelOpenIsPerViewer(t *testing.T) {
-	hub, database := newHandlerHub(t)
-	alice := seedOwnerUser(t, database, "grp-open-alice")
-	bob := seedMemberUser(t, database, "grp-open-bob")
-	carol := seedMemberUser(t, database, "grp-open-carol")
-	chID := seedGroupDM(t, database, "Openers", alice.ID, bob.ID, carol.ID)
+	hub, database, alice, bob, carol, chID := newGroupDMTrio(t, "grp-open", "Openers")
 
 	// A closed DM is what makes the send re-open it and emit dm_channel_open.
 	if err := database.CloseDM(context.Background(), bob.ID, chID); err != nil {
@@ -84,13 +95,8 @@ func TestGroupDM_ChannelOpenIsPerViewer(t *testing.T) {
 		t.Fatalf("CloseDM: %v", err)
 	}
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, _ := connectClient(t, hub, alice, chID, 64)
+	_, sendBob := connectClient(t, hub, bob, chID, 64)
 
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(chID, "ping"))
 
@@ -131,13 +137,8 @@ func TestGroupDM_ReopenOnSendCarriesOwnerID(t *testing.T) {
 		t.Fatalf("CloseDM: %v", err)
 	}
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, _ := connectClient(t, hub, alice, chID, 64)
+	_, sendBob := connectClient(t, hub, bob, chID, 64)
 
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(chID, "ping"))
 
@@ -154,22 +155,11 @@ func TestGroupDM_ReopenOnSendCarriesOwnerID(t *testing.T) {
 // Typing already fanned out over dm_participants; this pins that a group's
 // third member is included and the sender is not.
 func TestGroupDM_TypingReachesAllOthers(t *testing.T) {
-	hub, database := newHandlerHub(t)
-	alice := seedOwnerUser(t, database, "grp-type-alice")
-	bob := seedMemberUser(t, database, "grp-type-bob")
-	carol := seedMemberUser(t, database, "grp-type-carol")
-	chID := seedGroupDM(t, database, "Typers", alice.ID, bob.ID, carol.ID)
+	hub, _, alice, bob, carol, chID := newGroupDMTrio(t, "grp-type", "Typers")
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	sendCarol := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	cCarol := ws.NewTestClientWithUser(hub, carol, chID, sendCarol)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	hub.Register(cCarol)
-	waitRegistered(t, hub, cCarol)
+	cAlice, sendAlice := connectClient(t, hub, alice, chID, 64)
+	_, sendBob := connectClient(t, hub, bob, chID, 64)
+	_, sendCarol := connectClient(t, hub, carol, chID, 64)
 
 	hub.HandleMessageForTest(cAlice, dmTypingMsg(chID))
 
@@ -188,23 +178,14 @@ func TestGroupDM_TypingReachesAllOthers(t *testing.T) {
 // composer gate is a 1:1 rule, and dropping one member's messages for one
 // other member would leave them reading different conversations.
 func TestGroupDM_BlockDoesNotSilenceGroupSend(t *testing.T) {
-	hub, database := newHandlerHub(t)
-	alice := seedOwnerUser(t, database, "grp-blk-alice")
-	bob := seedMemberUser(t, database, "grp-blk-bob")
-	carol := seedMemberUser(t, database, "grp-blk-carol")
-	chID := seedGroupDM(t, database, "Blockers", alice.ID, bob.ID, carol.ID)
+	hub, database, alice, bob, carol, chID := newGroupDMTrio(t, "grp-blk", "Blockers")
 
 	if err := database.BlockUser(context.Background(), bob.ID, alice.ID); err != nil {
 		t.Fatalf("BlockUser: %v", err)
 	}
 
-	sendAlice := make(chan []byte, 64)
-	sendCarol := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-	cCarol := ws.NewTestClientWithUser(hub, carol, chID, sendCarol)
-	hub.Register(cAlice)
-	hub.Register(cCarol)
-	waitRegistered(t, hub, cCarol)
+	cAlice, sendAlice := connectClient(t, hub, alice, chID, 64)
+	_, sendCarol := connectClient(t, hub, carol, chID, 64)
 
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(chID, "still a room"))
 
@@ -227,10 +208,7 @@ func TestOneToOneDM_BlockStillRefusesSend(t *testing.T) {
 		t.Fatalf("BlockUser: %v", err)
 	}
 
-	sendAlice := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-	hub.Register(cAlice)
-	waitRegistered(t, hub, cAlice)
+	cAlice, sendAlice := connectClient(t, hub, alice, chID, 64)
 
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(chID, "blocked"))
 
@@ -242,11 +220,7 @@ func TestOneToOneDM_BlockStillRefusesSend(t *testing.T) {
 // ─── call ringing ───────────────────────────────────────────────────────────
 
 func TestCallRing_ForwardsToOtherParticipants(t *testing.T) {
-	hub, database := newHandlerHub(t)
-	alice := seedOwnerUser(t, database, "ring-alice")
-	bob := seedMemberUser(t, database, "ring-bob")
-	carol := seedMemberUser(t, database, "ring-carol")
-	chID := seedGroupDM(t, database, "Ringers", alice.ID, bob.ID, carol.ID)
+	hub, _, alice, bob, carol, chID := newGroupDMTrio(t, "ring", "Ringers")
 
 	sendAlice := make(chan []byte, 64)
 	sendBob := make(chan []byte, 64)
@@ -289,13 +263,8 @@ func TestCallRing_NonParticipantForbidden(t *testing.T) {
 	mallory := seedMemberUser(t, database, "ring-perm-mallory")
 	chID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendMallory := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cMallory := ws.NewTestClientWithUser(hub, mallory, chID, sendMallory)
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	hub.Register(cMallory)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cMallory, sendMallory := connectClient(t, hub, mallory, chID, 64)
+	_, sendBob := connectClient(t, hub, bob, chID, 64)
 
 	hub.HandleMessageForTest(cMallory, callMsg("call_ring", chID))
 
@@ -313,13 +282,8 @@ func TestCallDecline_ForwardsToOtherParticipants(t *testing.T) {
 	bob := seedMemberUser(t, database, "decline-bob")
 	chID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	_, sendAlice := connectClient(t, hub, alice, chID, 64)
+	cBob, _ := connectClient(t, hub, bob, chID, 64)
 
 	hub.HandleMessageForTest(cBob, callMsg("call_decline", chID))
 
@@ -330,6 +294,49 @@ func TestCallDecline_ForwardsToOtherParticipants(t *testing.T) {
 	payload, _ := env["payload"].(map[string]any)
 	if int64(payload["from_user"].(float64)) != bob.ID {
 		t.Errorf("call_declined carried from_user %v, want %d", payload["from_user"], bob.ID)
+	}
+}
+
+func TestCallDecline_ReachesTheDeclinersOtherDevices(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "decline-dev-alice")
+	bob := seedMemberUser(t, database, "decline-dev-bob")
+	chID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	// Three devices of one account are three connections with their own
+	// sessions. Only the second declares call_sync; the third is an older client.
+	sendBobFirst := make(chan []byte, 64)
+	cBob := ws.NewTestClientWithTokenHash(hub, bob, "decline-dev-hash-1", chID, sendBobFirst)
+	hub.Register(cBob)
+	sendBobSecond := make(chan []byte, 64)
+	cBob2 := ws.NewTestClientWithTokenHash(hub, bob, "decline-dev-hash-2", chID, sendBobSecond)
+	ws.DeclareFeaturesForTest(cBob2, "call_sync")
+	hub.Register(cBob2)
+	sendBobOld := make(chan []byte, 64)
+	cBobOld := ws.NewTestClientWithTokenHash(hub, bob, "decline-dev-hash-3", chID, sendBobOld)
+	hub.Register(cBobOld)
+	waitRegistered(t, hub, cBobOld)
+	_, sendAlice := connectClient(t, hub, alice, chID, 64)
+
+	hub.HandleMessageForTest(cBob, callMsg("call_decline", chID))
+
+	// Bob's second device hears his decline; so does the ringer.
+	env := dmWaitMsgType(sendBobSecond, "call_declined", waitTimeout)
+	if env == nil {
+		t.Fatal("the decliner's other device did not receive call_declined")
+	}
+	payload, _ := env["payload"].(map[string]any)
+	if int64(payload["from_user"].(float64)) != bob.ID {
+		t.Errorf("call_declined carried from_user %v, want %d", payload["from_user"], bob.ID)
+	}
+	if dmWaitMsgType(sendAlice, "call_declined", waitTimeout) == nil {
+		t.Error("the ringer did not receive call_declined")
+	}
+	if dmWaitMsgType(sendAlice, "call_declined", 150*time.Millisecond) != nil {
+		t.Error("the ringer received call_declined twice")
+	}
+	if dmWaitMsgType(sendBobOld, "call_declined", 150*time.Millisecond) != nil {
+		t.Error("a device that did not declare call_sync received its own account's decline")
 	}
 }
 
@@ -359,10 +366,7 @@ func TestCallDecline_RateLimited(t *testing.T) {
 	bob := seedMemberUser(t, database, "declinelimit-bob")
 	chID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendAlice := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-	hub.Register(cAlice)
-	waitRegistered(t, hub, cAlice)
+	cAlice, sendAlice := connectClient(t, hub, alice, chID, 64)
 
 	// Same shape as call_ring: each frame costs participant + block lookups
 	// and a fan-out to every other participant, so it needs the same limit.
@@ -387,13 +391,8 @@ func TestCallRing_BlockedOneToOneForbidden(t *testing.T) {
 		t.Fatalf("BlockUser: %v", err)
 	}
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, sendAlice := connectClient(t, hub, alice, chID, 64)
+	_, sendBob := connectClient(t, hub, bob, chID, 64)
 
 	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
 
@@ -443,13 +442,8 @@ func TestCallDecline_UntrustedRecipientStaysSilent(t *testing.T) {
 	bob := seedMemberUser(t, database, "decl-untrusted-bob")
 	chID := untrustedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, sendAlice := connectClient(t, hub, alice, chID, 64)
+	_, sendBob := connectClient(t, hub, bob, chID, 64)
 
 	hub.HandleMessageForTest(cAlice, callMsg("call_decline", chID))
 
@@ -464,11 +458,7 @@ func TestCallDecline_UntrustedRecipientStaysSilent(t *testing.T) {
 // The group exemption applies to rings exactly as it does to sends: a block
 // between two members must not silence the room's call signal for everyone.
 func TestCallRing_GroupWithInternalBlockStillRings(t *testing.T) {
-	hub, database := newHandlerHub(t)
-	alice := seedOwnerUser(t, database, "ring-gblk-alice")
-	bob := seedMemberUser(t, database, "ring-gblk-bob")
-	carol := seedMemberUser(t, database, "ring-gblk-carol")
-	chID := seedGroupDM(t, database, "BlockedRingers", alice.ID, bob.ID, carol.ID)
+	hub, database, alice, bob, carol, chID := newGroupDMTrio(t, "ring-gblk", "BlockedRingers")
 
 	if err := database.BlockUser(context.Background(), bob.ID, alice.ID); err != nil {
 		t.Fatalf("BlockUser: %v", err)
@@ -499,10 +489,7 @@ func TestCallRing_RejectsNonPositiveChannel(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	alice := seedOwnerUser(t, database, "ringbad-alice")
 
-	sendAlice := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, 0, sendAlice)
-	hub.Register(cAlice)
-	waitRegistered(t, hub, cAlice)
+	cAlice, sendAlice := connectClient(t, hub, alice, 0, 64)
 
 	hub.HandleMessageForTest(cAlice, callMsg("call_ring", 0))
 
@@ -525,13 +512,7 @@ func TestCallRing_ReopensClosedDMBeforeIncoming(t *testing.T) {
 		t.Fatalf("CloseDM: %v", err)
 	}
 
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, make(chan []byte, 64))
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
-	ws.SetVoiceChIDForTest(cAlice, chID)
+	cAlice, sendBob := connectRingPair(t, hub, alice, bob, chID)
 
 	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
 
@@ -561,13 +542,7 @@ func TestCallRing_OpenDMEmitsNoChannelOpen(t *testing.T) {
 	bob := seedMemberUser(t, database, "ring-open-bob")
 	chID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, make(chan []byte, 64))
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
-	ws.SetVoiceChIDForTest(cAlice, chID)
+	cAlice, sendBob := connectRingPair(t, hub, alice, bob, chID)
 
 	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
 
@@ -590,13 +565,7 @@ func TestCallRing_UntrustedRecipientIsNotReopened(t *testing.T) {
 		t.Fatalf("CloseDM: %v", err)
 	}
 
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, make(chan []byte, 64))
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
-	ws.SetVoiceChIDForTest(cAlice, chID)
+	cAlice, sendBob := connectRingPair(t, hub, alice, bob, chID)
 
 	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
 
@@ -619,13 +588,8 @@ func TestCallRing_RefusedWhenCallerNotInCall(t *testing.T) {
 			bob := seedMemberUser(t, database, "ring-notin-bob")
 			chID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-			sendAlice := make(chan []byte, 64)
-			sendBob := make(chan []byte, 64)
-			cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-			cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-			hub.Register(cAlice)
-			hub.Register(cBob)
-			waitRegistered(t, hub, cBob)
+			cAlice, sendAlice := connectClient(t, hub, alice, chID, 64)
+			_, sendBob := connectClient(t, hub, bob, chID, 64)
 			ws.SetVoiceChIDForTest(cAlice, voiceCh(chID))
 
 			hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))

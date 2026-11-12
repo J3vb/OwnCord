@@ -22,9 +22,7 @@ func TestParseSearch_TextOnlyUnchanged(t *testing.T) {
 
 func TestParseSearch_KeysCaseInsensitive(t *testing.T) {
 	p, err := ParseSearch("FROM:Bob In:General word", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ParseSearch", err)
 	if !slices.Equal(p.From, []string{"Bob"}) || !slices.Equal(p.In, []string{"General"}) || p.Text != "word" {
 		t.Errorf("got %+v", p)
 	}
@@ -32,9 +30,7 @@ func TestParseSearch_KeysCaseInsensitive(t *testing.T) {
 
 func TestParseSearch_QuotedValue(t *testing.T) {
 	p, err := ParseSearch(`from:"ann lee" in:"dev chat" hi`, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ParseSearch", err)
 	if !slices.Equal(p.From, []string{"ann lee"}) || !slices.Equal(p.In, []string{"dev chat"}) || p.Text != "hi" {
 		t.Errorf("got %+v", p)
 	}
@@ -42,9 +38,7 @@ func TestParseSearch_QuotedValue(t *testing.T) {
 
 func TestParseSearch_UnterminatedQuoteRunsToEnd(t *testing.T) {
 	p, err := ParseSearch(`hi from:"ann lee  and more`, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ParseSearch", err)
 	if !slices.Equal(p.From, []string{"ann lee  and more"}) || p.Text != "hi" {
 		t.Errorf("got %+v", p)
 	}
@@ -52,9 +46,7 @@ func TestParseSearch_UnterminatedQuoteRunsToEnd(t *testing.T) {
 
 func TestParseSearch_UnknownKeyStaysText(t *testing.T) {
 	p, err := ParseSearch("http://x 12:30 note:x embed:link sticker:x from:bob", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ParseSearch", err)
 	if p.Text != "http://x 12:30 note:x embed:link sticker:x" || !slices.Equal(p.From, []string{"bob"}) {
 		t.Errorf("got %+v", p)
 	}
@@ -74,9 +66,7 @@ func TestParseSearch_EmptyValueDropped(t *testing.T) {
 
 func TestParseSearch_LeadingAtAndHashTrimmed(t *testing.T) {
 	p, err := ParseSearch("from:@bob in:#general", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ParseSearch", err)
 	if !slices.Equal(p.From, []string{"bob"}) || !slices.Equal(p.In, []string{"general"}) || p.Text != "" {
 		t.Errorf("got %+v", p)
 	}
@@ -108,32 +98,24 @@ func TestParseSearch_DateSemantics(t *testing.T) {
 func TestParseSearch_TZ(t *testing.T) {
 	// Amsterdam is UTC+1 in winter, UTC+2 in summer.
 	p, err := ParseSearch("during:2026-01-15", "Europe/Amsterdam")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ParseSearch", err)
 	if p.AfterTS != "2026-01-14 23:00:00" || p.BeforeTS != "2026-01-15 23:00:00" {
 		t.Errorf("winter: got %q..%q", p.AfterTS, p.BeforeTS)
 	}
 	p, err = ParseSearch("during:2026-07-15", "Europe/Amsterdam")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ParseSearch", err)
 	if p.AfterTS != "2026-07-14 22:00:00" || p.BeforeTS != "2026-07-15 22:00:00" {
 		t.Errorf("summer: got %q..%q", p.AfterTS, p.BeforeTS)
 	}
 	// A DST change day is 23 hours long, handled per bound.
 	p, err = ParseSearch("during:2026-03-29", "Europe/Amsterdam")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ParseSearch", err)
 	if p.AfterTS != "2026-03-28 23:00:00" || p.BeforeTS != "2026-03-29 22:00:00" {
 		t.Errorf("dst day: got %q..%q", p.AfterTS, p.BeforeTS)
 	}
 	// Santiago skips 00:00 on 2026-09-06; the next-day bound must stay at midnight.
 	p, err = ParseSearch("during:2026-09-06", "America/Santiago")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ParseSearch", err)
 	if p.AfterTS != "2026-09-06 03:00:00" || p.BeforeTS != "2026-09-07 03:00:00" {
 		t.Errorf("midnight dst: got %q..%q", p.AfterTS, p.BeforeTS)
 	}
@@ -228,9 +210,7 @@ func FuzzParseSearch(f *testing.F) {
 
 func TestParseSearch_HasValues(t *testing.T) {
 	p, err := ParseSearch("HAS:Link has:image has:AUDIO has:sound has:file has:video x", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ParseSearch", err)
 	if want := []string{"link", "image", "sound", "file", "video"}; !slices.Equal(p.Has, want) {
 		t.Errorf("Has = %v, want %v", p.Has, want)
 	}
@@ -241,9 +221,7 @@ func TestParseSearch_HasValues(t *testing.T) {
 
 func TestParseSearch_MentionsAndPinned(t *testing.T) {
 	p, err := ParseSearch(`mentions:@Bob mentions:"ann lee" pinned:TRUE hi`, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ParseSearch", err)
 	if want := []string{"Bob", "ann lee"}; !slices.Equal(p.Mentions, want) {
 		t.Errorf("Mentions = %v, want %v", p.Mentions, want)
 	}

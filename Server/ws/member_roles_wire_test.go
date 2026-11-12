@@ -2,7 +2,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"reflect"
 	"strconv"
 	"testing"
@@ -51,9 +50,7 @@ func TestReady_MembersCarryRoleIDs(t *testing.T) {
 			} `json:"roles"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		t.Fatalf("unmarshal ready: %v", err)
-	}
+	mustUnmarshal(t, raw, &env)
 	if env.Payload.Capabilities["multi_role"] != true {
 		t.Errorf("capabilities = %v, want multi_role true", env.Payload.Capabilities)
 	}
@@ -75,9 +72,7 @@ func TestRemoveUserRole_NonTopRoleRevokesLiveChannel(t *testing.T) {
 	ctx := context.Background()
 	// Neither role reads anything by itself; Member reads chX through its
 	// channel override alone.
-	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = 0 WHERE id IN (3, 4)`); err != nil {
-		t.Fatalf("strip roles: %v", err)
-	}
+	mustExec(t, database, `UPDATE roles SET permissions = 0 WHERE id IN (3, 4)`)
 	chX := seedTestChannel(t, database, "member-only")
 	if err := database.UpsertChannelOverride(ctx, chX, permissions.MemberRoleID, permissions.ReadMessages, 0); err != nil {
 		t.Fatalf("UpsertChannelOverride: %v", err)

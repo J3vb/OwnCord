@@ -12,6 +12,37 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
+// mustPin pins (or unpins) and requires a result, since every caller here
+// goes on to read the pin row or its audience.
+func mustPin(ctx context.Context, t *testing.T, svc interface {
+	SetMessagePinned(ctx context.Context, userID, channelID, msgID int64, pinned bool) (*PinEventResult, error)
+}, label string, userID, channelID, msgID int64, pinned bool) *PinEventResult {
+	t.Helper()
+	res, err := svc.SetMessagePinned(ctx, userID, channelID, msgID, pinned)
+	if err != nil || res == nil {
+		t.Fatalf("%s: res = %v, err = %v", label, res, err)
+	}
+	return res
+}
+
+// dmWithMessage opens the member DM and has from post "hi" in it.
+func (f *moderationActionsFixture) dmWithMessage(ctx context.Context, t *testing.T, from int64, username string) (*CreateDMResult, *SendMessageResult) {
+	t.Helper()
+	direct, err := NewDMService(f.database, f.mod.perms).CreateDM(ctx, fixtureMember, fixtureMember2)
+	mustDo(t, "CreateDM", err)
+	sent := mustSendMessage(ctx, t, f.messages, SendMessageParams{
+		ChannelID: direct.Channel.ID, UserID: from, Username: username, Content: "hi",
+	})
+	return direct, sent
+}
+
+// sortedIDs copies ids before sorting so the result under test is not mutated.
+func sortedIDs(ids []int64) []int64 {
+	out := append([]int64(nil), ids...)
+	slices.Sort(out)
+	return out
+}
+
 // pinFixture is two users, a member and a role moderator, in one text channel
 // holding one message, so the channel-override tests change only the verdict
 // under test.
@@ -34,12 +65,9 @@ func pinFixture(t *testing.T) (svc *MessageService, permSvc *PermissionService, 
 
 	permSvc = NewPermissionService(database, permissions.NewChecker(database))
 	svc = NewMessageService(database, permSvc, nil)
-	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", Content: "pin me",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 	return svc, permSvc, database, sent.MessageID
 }
 
@@ -76,25 +104,11 @@ func TestSetMessagePinned_FollowsChannelOverride(t *testing.T) {
 func TestSetMessagePinned_ErrorsUnchanged(t *testing.T) {
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
-	dms := NewDMService(f.database, f.mod.perms)
-
-	direct, err := dms.CreateDM(ctx, fixtureMember, fixtureMember2)
-	if err != nil {
-		t.Fatalf("CreateDM: %v", err)
-	}
-	dmSent, err := f.messages.SendMessage(ctx, SendMessageParams{
-		ChannelID: direct.Channel.ID, UserID: fixtureMember2, Username: "u5", Content: "hi",
-	})
-	if err != nil {
-		t.Fatalf("SendMessage dm: %v", err)
-	}
+	direct, dmSent := f.dmWithMessage(ctx, t, fixtureMember2, "u5")
 	seedChannel(t, f.database, &db.Channel{ID: 900, Name: "pin-errors", Type: "text"})
-	textSent, err := f.messages.SendMessage(ctx, SendMessageParams{
+	textSent := mustSendMessage(ctx, t, f.messages, SendMessageParams{
 		ChannelID: 900, UserID: fixtureMember, Username: "u3", Content: "hello",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage text: %v", err)
-	}
 
 	if _, err := f.messages.SetMessagePinned(ctx, fixtureOwner, direct.Channel.ID, dmSent.MessageID, true); !errors.Is(err, ErrNotFound) {
 		t.Errorf("DM non-participant (even an administrator) = %v, want ErrNotFound", err)
@@ -125,10 +139,7 @@ func TestSetMessagePinned_ChannelReturnsRowOnce(t *testing.T) {
 	svc, _, database, msgID := pinFixture(t)
 	ctx := context.Background()
 
-	res, err := svc.SetMessagePinned(ctx, 2, 10, msgID, true)
-	if err != nil || res == nil {
-		t.Fatalf("pin: res = %v, err = %v", res, err)
-	}
+	res := mustPin(ctx, t, svc, "pin", 2, 10, msgID, true)
 	if res.IsDM || len(res.ParticipantIDs) != 0 {
 		t.Errorf("channel result: IsDM = %v participants = %v, want a channel result", res.IsDM, res.ParticipantIDs)
 	}
@@ -153,27 +164,12 @@ func TestSetMessagePinned_ChannelReturnsRowOnce(t *testing.T) {
 func TestSetMessagePinned_DMReturnsParticipants(t *testing.T) {
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
-	dms := NewDMService(f.database, f.mod.perms)
-
-	direct, err := dms.CreateDM(ctx, fixtureMember, fixtureMember2)
-	if err != nil {
-		t.Fatalf("CreateDM: %v", err)
-	}
-	sent, err := f.messages.SendMessage(ctx, SendMessageParams{
-		ChannelID: direct.Channel.ID, UserID: fixtureMember2, Username: "u5", Content: "hi",
-	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
-	res, err := f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, true)
-	if err != nil || res == nil {
-		t.Fatalf("pin: res = %v, err = %v", res, err)
-	}
+	direct, sent := f.dmWithMessage(ctx, t, fixtureMember2, "u5")
+	res := mustPin(ctx, t, f.messages, "pin", fixtureMember, direct.Channel.ID, sent.MessageID, true)
 	if !res.IsDM {
 		t.Error("IsDM = false for a DM pin")
 	}
-	got := append([]int64(nil), res.ParticipantIDs...)
-	slices.Sort(got)
+	got := sortedIDs(res.ParticipantIDs)
 	want := []int64{fixtureMember, fixtureMember2}
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
@@ -189,10 +185,7 @@ func TestSetMessagePinned_DMReturnsParticipants(t *testing.T) {
 func TestPinRow_DeleteAndPinRules(t *testing.T) {
 	svc, _, _, msgID := pinFixture(t)
 	ctx := context.Background()
-	res, err := svc.SetMessagePinned(ctx, 2, 10, msgID, true)
-	if err != nil || res == nil {
-		t.Fatalf("pin: res = %v, err = %v", res, err)
-	}
+	res := mustPin(ctx, t, svc, "pin", 2, 10, msgID, true)
 	rowID := res.Row.MessageID
 	if _, err := svc.SetMessagePinned(ctx, 2, 10, rowID, true); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("pin a pin row = %v, want ErrBadRequest", err)
@@ -213,28 +206,13 @@ func TestSetMessagePinned_DMPendingRequestAudience(t *testing.T) {
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	f.messages.SetMessageRequests(NewMessageRequestService(f.database, NewBlockService(f.database)))
-	dms := NewDMService(f.database, f.mod.perms)
-	direct, err := dms.CreateDM(ctx, fixtureMember, fixtureMember2)
-	if err != nil {
-		t.Fatalf("CreateDM: %v", err)
-	}
-	sent, err := f.messages.SendMessage(ctx, SendMessageParams{
-		ChannelID: direct.Channel.ID, UserID: fixtureMember, Username: "u3", Content: "hi",
-	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
-	res, err := f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, true)
-	if err != nil || res == nil {
-		t.Fatalf("pin: res = %v, err = %v", res, err)
-	}
+	direct, sent := f.dmWithMessage(ctx, t, fixtureMember, "u3")
+	res := mustPin(ctx, t, f.messages, "pin", fixtureMember, direct.Channel.ID, sent.MessageID, true)
 	if !slices.Equal(res.ParticipantIDs, []int64{fixtureMember}) {
 		t.Errorf("audience with a pending request = %v, want only the pinner %d", res.ParticipantIDs, fixtureMember)
 	}
 
-	if err := f.database.TrustSender(ctx, fixtureMember2, fixtureMember, "accepted"); err != nil {
-		t.Fatalf("TrustSender: %v", err)
-	}
+	mustDo(t, "TrustSender", f.database.TrustSender(ctx, fixtureMember2, fixtureMember, "accepted"))
 	if _, err := f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, false); err != nil {
 		t.Fatalf("unpin: %v", err)
 	}
@@ -242,12 +220,8 @@ func TestSetMessagePinned_DMPendingRequestAudience(t *testing.T) {
 	if _, err := f.database.ExecContext(ctx, `UPDATE messages SET timestamp = '2000-01-01 00:00:00' WHERE kind = 7`); err != nil {
 		t.Fatalf("backdate: %v", err)
 	}
-	res, err = f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, true)
-	if err != nil || res == nil {
-		t.Fatalf("re-pin: res = %v, err = %v", res, err)
-	}
-	got := append([]int64(nil), res.ParticipantIDs...)
-	slices.Sort(got)
+	res = mustPin(ctx, t, f.messages, "re-pin", fixtureMember, direct.Channel.ID, sent.MessageID, true)
+	got := sortedIDs(res.ParticipantIDs)
 	want := []int64{fixtureMember, fixtureMember2}
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
@@ -259,18 +233,11 @@ func TestSetMessagePinned_GroupDMReachesEveryMember(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	f.messages.SetMessageRequests(NewMessageRequestService(f.database, NewBlockService(f.database)))
-	sent, err := f.messages.SendMessage(ctx, SendMessageParams{
+	sent := mustSendMessage(ctx, t, f.messages, SendMessageParams{
 		ChannelID: f.dm, UserID: fixtureMember, Username: "u3", Content: "hi",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
-	res, err := f.messages.SetMessagePinned(ctx, fixtureMember2, f.dm, sent.MessageID, true)
-	if err != nil || res == nil {
-		t.Fatalf("pin: res = %v, err = %v", res, err)
-	}
-	got := append([]int64(nil), res.ParticipantIDs...)
-	slices.Sort(got)
+	res := mustPin(ctx, t, f.messages, "pin", fixtureMember2, f.dm, sent.MessageID, true)
+	got := sortedIDs(res.ParticipantIDs)
 	if want := f.members(t); !slices.Equal(got, want) {
 		t.Errorf("group audience = %v, want every member %v", got, want)
 	}
@@ -281,10 +248,7 @@ func TestSetMessagePinned_GroupDMReachesEveryMember(t *testing.T) {
 func TestSetMessagePinned_DeletedRowHoldsWindow(t *testing.T) {
 	svc, _, database, msgID := pinFixture(t)
 	ctx := context.Background()
-	res, err := svc.SetMessagePinned(ctx, 2, 10, msgID, true)
-	if err != nil || res == nil {
-		t.Fatalf("pin: res = %v, err = %v", res, err)
-	}
+	res := mustPin(ctx, t, svc, "pin", 2, 10, msgID, true)
 	if _, err := svc.DeleteMessage(ctx, 2, res.Row.MessageID); err != nil {
 		t.Fatalf("delete pin row: %v", err)
 	}

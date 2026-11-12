@@ -323,6 +323,31 @@ describe("downloadAndInstallUpdate", () => {
     unsubscribe();
   });
 
+  it("a version change ends failed with reason version-changed, then idle for later pages", async () => {
+    invoke.mockRejectedValueOnce("update version changed");
+    const state = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(state);
+
+    await expect(downloadAndInstallUpdate("https://s.example", "2.0.0")).rejects.toBe(
+      "update version changed",
+    );
+    expect(state).toHaveBeenCalledWith({
+      status: "failed",
+      restartRequired: false,
+      reason: "version-changed",
+    });
+    expect(state).toHaveBeenLastCalledWith({ status: "idle" });
+    expect(invoke).toHaveBeenCalledWith("download_and_install_update", {
+      serverUrl: "https://s.example",
+      expectedVersion: "2.0.0",
+    });
+    unsubscribe();
+
+    const later = vi.fn();
+    subscribeToUpdateInstall(later)();
+    expect(later).toHaveBeenCalledExactlyOnceWith({ status: "idle" });
+  });
+
   it("an opened Android installer waits for the Install tap without relaunching", async () => {
     invoke.mockImplementationOnce(async () => {
       const opened = listen.mock.calls.find((call) => call[0] === "update-installer-opened");

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createIdentityMismatchModal } from "../../src/components/IdentityMismatchModal";
+import { createIdentityMismatchModal } from "../../src/features/voice/IdentityMismatchModal";
 import {
   checkVisibleOverlay,
   registerWarningModalTests,

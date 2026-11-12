@@ -4,25 +4,16 @@
 
 import { createElement } from "@lib/dom";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { type WsClient, bracketBareIPv6Host } from "@lib/ws";
+import { type WsClient } from "@lib/ws";
 import { type ApiClient } from "@lib/api";
-import { desktop } from "../platform/desktop";
 import { createRateLimiterSet } from "@lib/net/rateLimiter";
-import { createToastContainer } from "@components/Toast";
+import { createToastContainer } from "@lib/ui/toastContainer";
 import { initToast, teardownToast, showToast } from "@lib/ui/toast";
 import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { Disposable } from "@lib/disposable";
 import { onAuthCleared } from "@stores/auth.store";
 import { closeSettings, openSettings, uiStore } from "@stores/ui.store";
-import { loadGlobalShortcutVks } from "@lib/voice/voiceShortcuts";
-import {
-  anyTriggerBound,
-  clearPortalBound,
-  globalKeysErrorCode,
-  portalBoundBefore,
-} from "@lib/ui/globalKeys";
-import { loadPref } from "@lib/prefs/preferences";
-import { createPresenceSender, setActivePresenceSender } from "@lib/presence/presence";
+import { createPresenceSender } from "@lib/presence/presence";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { voiceStore, restoreSavedSelfVoiceState } from "@stores/voice.store";
 import {
@@ -31,40 +22,30 @@ import {
   setServerHost as setLiveKitServerHost,
   setOnError as setVoiceOnError,
 } from "@lib/voice/livekitSession";
-import { setServerHost } from "@components/message-list/renderers";
+import { setServerHost } from "../features/messaging/message-list/renderers";
 import { setAttachmentCacheScope } from "../features/messaging/content/attachments";
 import { closeActiveLightbox } from "../features/messaging/content/media";
-import {
-  setReactionUsersFetcher,
-  clearReactionUsersCache,
-} from "../features/messaging/reactionUsers";
-import { createNotesContext, setNotesContextSource } from "../features/profiles/userNotes";
-import { markAllRead, setMarkReadSender } from "@lib/readState";
-import { setMarkUnreadSender } from "@components/message-list/markUnread";
+import { markAllRead } from "@lib/readState";
 import { onChannelReselect, stepChannel } from "@lib/nav/channelNavigation";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { setAudioVolumeHost } from "@lib/voice/audioElements";
-import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
 import { createMessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
 import { createChannelController } from "./main-page/ChannelController";
-import { createUpdateNotifier } from "@components/UpdateNotifier";
-import { startVoiceUiSounds } from "../features/voice/uiSounds";
 import { log, resolveChannelName, getCurrentUserId } from "./main-page/pageShared";
 import type { PageState, PageApi } from "./main-page/pageState";
-import { createDmProfilePanel } from "./main-page/dmProfilePanel";
-import { createDmCalls } from "./main-page/dmCalls";
+import { createDmProfilePanel } from "../features/direct-messages/dmProfilePanel";
+import { createPageDmCalls } from "./main-page/pageDmCalls";
 import { createPagePresence } from "./main-page/pagePresence";
 import { mountConnectionBanner, mountLayout } from "./main-page/pageMountShell";
 import { mountSettings } from "./main-page/pageMountSettings";
 import { mountCalls, mountVideo } from "./main-page/pageMountCalls";
 import type { MountScope } from "./main-page/pageState";
-
-/** Whether the native voice-shortcut poller runs. App-wide, not per page: the
- *  poller outlives a logout or server switch, so a remount keeps standing down. */
-let globalPollerActive = false;
+import { sessionHooks } from "./main-page/sessionHooks";
+import { backgroundFeatures, overlayFeatures } from "./main-page/pageFeatures";
+import { isGlobalPollerActive, startGlobalVoiceKeys } from "./main-page/globalVoiceKeys";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -120,42 +101,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   const unsubCacheScope = onAuthCleared(() => setAttachmentCacheScope(null));
 
-  // "Mark as Read" affordances need the socket but are reached from deep inside
-  // the sidebar; register the sender once instead of threading ws through.
-  setMarkReadSender((channelId, messageId) => {
-    const payload = { channel_id: channelId };
-    ws.send({
-      type: "mark_read",
-      payload: messageId === undefined ? payload : { ...payload, message_id: messageId },
-    });
-  });
-
-  setMarkUnreadSender((channelId, messageId) =>
-    ws.send({ type: "mark_unread", payload: { channel_id: channelId, message_id: messageId } }),
-  );
-
-  // The native screen-share picker adapter is a lower layer and may not import
-  // a component; the UI registers the dialog here. It is loaded on
-  // demand — the dialog is its own lazy chunk, not part of startup — and
-  // the dynamic import is the sanctioned lower-layer-to-UI seam (Queue.ts's
-  // NsfwGate does the same).
-  setScreenSourcePicker((request) =>
-    import("@components/ScreenSharePicker").then((m) => m.showScreenSharePicker(request)),
-  );
-
-  // The who-reacted tooltip fetches on hover; give it the live REST client the
-  // same way the attachment renderer is given the server host.
-  clearReactionUsersCache();
-
-  setReactionUsersFetcher(async (channelId, messageId, emoji) => {
-    const res = await api.getReactionUsers(channelId, messageId, emoji);
-    return res.users;
-  });
-
-  // Cards opened from anywhere (member list, message author) take the notes
-  // context of this session when they open, never later.
-  setNotesContextSource(() => createNotesContext(api, apiConfig.host ?? ""));
-
   const limiters = createRateLimiterSet();
 
   // The one presence_update sender for this session — owns the limiter
@@ -167,12 +112,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // per producer instead cannot predict that shared, cross-surface budget.
   const presenceSender = createPresenceSender(ws, limiters.presence);
 
-  // Publish this as the session's one PresenceSender so producers wired up
-  // outside MainPage — main.ts's tray "status-change" listener — share the
-  // same limiter token, coalescing retry, and optimistic update instead of
-  // opening a second budget the server doesn't know about. Cleared
-  // in this page's teardown, alongside presenceSender.destroy() below.
-  setActivePresenceSender(presenceSender);
   const st: PageState = {
     options,
     ws: ws,
@@ -224,11 +163,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     ringTimer: null,
     ringJoinWatch: null,
   };
+  for (const hook of sessionHooks) hook.install(st);
   const pg = {} as PageApi;
   Object.assign(
     pg,
     createDmProfilePanel(st, pg),
-    createDmCalls(st, pg),
+    createPageDmCalls(st, pg),
     createPagePresence(st, pg),
   );
 
@@ -263,7 +203,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onSearch: () => ms.chatAreaResult.searchCtrl.open(),
         onOpenSettings: () => openSettings(),
         onOpenShortcuts: () =>
-          void import("@components/ShortcutsOverlay")
+          void import("../features/navigation/ShortcutsOverlay")
             .then((m) => {
               // The page may have unmounted while the chunk loaded.
               if (ms.shortcutsClosed) return;
@@ -291,119 +231,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onDeclineRing: () => st.ringCtrl?.decline(),
         // Don't fire app shortcuts while the settings panel is on top of them.
         isSuspended: () => uiStore.getState().settingsOpen,
-        isGlobalPollerActive: () => globalPollerActive,
+        isGlobalPollerActive,
       }),
     );
 
-    // U6: Ctrl+Shift+M/Ctrl+Shift+D and the tray's Mute/Deafen items work
-    // while the app is unfocused. The native host polls the keys (Windows and
-    // X11 Linux) and the tray emits the same event; both run the same toggles
-    // as the in-app shortcuts, in a call or not.
-    st.unsubscribers.push(
-      desktop.globalShortcuts.onShortcut((action) => {
-        if (action === "mute") ms.voiceKeybindActions.onMuteToggle();
-        else ms.voiceKeybindActions.onDeafenToggle();
-      }),
-    );
-    // Once the poller runs it also sees the keys while the window is focused,
-    // so the in-app handler stands down to avoid a double toggle. The flag is
-    // set before start() so a press during startup is missed, never doubled.
-    // On a Wayland session the desktop's shortcut service is the "poller": it
-    // is live only once both keys are bound, so the flag follows the host's
-    // status changes too (a bind, the user editing the keys, a portal restart).
-    // start() runs whether or not the host says it is supported: the host
-    // decides whether anything can observe keys, and on Wayland it arms the
-    // portal so a press from a key the compositor itself was told to deliver
-    // (Hyprland: the portal names no keys, so it never reads as bound) gets
-    // through. Only the in-app stand-down follows `supported`.
-    // Answers can arrive out of order (a status change during startup), so
-    // only the latest query may set the flag.
-    ms.refreshSeq = 0;
-    ms.refreshGlobalKeys = (): void => {
-      const seq = ++ms.refreshSeq;
-      void desktop.globalShortcuts
-        .supported()
-        .then(async (supported) => {
-          if (seq !== ms.refreshSeq || st.tornDown) return;
-          globalPollerActive = supported;
-          await desktop.globalShortcuts.start();
-        })
-        .catch(() => {
-          // Not a Tauri host, or the command was refused: the tray and the in-app
-          // shortcuts still work; the global key path simply is not live.
-          if (seq === ms.refreshSeq && !st.tornDown) globalPollerActive = false;
-        });
-    };
-    ms.refreshGlobalKeys();
-    st.unsubscribers.push(desktop.globalShortcuts.onStatusChange(ms.refreshGlobalKeys));
-    // An earlier successful portal bind is restored with the saved keys; a
-    // desktop that remembers the approval answers without a dialog. Nothing
-    // is asked when the desktop already holds a trigger, and a dialog the
-    // user cancels forgets the earlier bind, so the next start is quiet.
-    void desktop.globalShortcuts
-      .status()
-      .then(async (status) => {
-        if (st.tornDown || status.backend !== "portal" || !portalBoundBefore()) return;
-        if (anyTriggerBound(status)) return;
-        const keys = loadGlobalShortcutVks();
-        try {
-          await desktop.globalShortcuts.bindPortal({
-            pttVk: loadPref<number>("pttVk", 0),
-            muteVk: keys.mute,
-            deafenVk: keys.deafen,
-          });
-        } catch (err) {
-          if (globalKeysErrorCode(err) === "bind_cancelled") clearPortalBound();
-          return;
-        }
-        if (!st.tornDown) ms.refreshGlobalKeys();
-      })
-      .catch(() => {
-        // The host could not answer: the keys stay as they were.
-      });
-    // Push the persisted rebind onto the running poller at startup, so a
-    // choice made in Settings survives a restart (the native default is
-    // Ctrl+Shift+M / Ctrl+Shift+D).
-    ms.globalKeys = loadGlobalShortcutVks();
-    void desktop.globalShortcuts
-      .setKeys({ muteVk: ms.globalKeys.mute, deafenVk: ms.globalKeys.deafen })
-      .catch(() => {
-        // Not a Tauri host, or the command was refused: keep the native default.
-      });
+    startGlobalVoiceKeys(st, ms.voiceKeybindActions);
 
-    // Timed mutes: redraws the sidebars when one ends. Page-owned, so a socket
-    // reconnect leaves it alone and a server switch remounts a fresh one.
-    // Loaded on demand; the same !tornDown guard as the badge below.
-    void import("@lib/prefs/channelMuteExpiry").then((expiry) => {
-      if (!st.tornDown) st.unsubscribers.push(expiry.startMuteExpiryWatch());
-    });
-
-    // The taskbar and tray unread badge, cleared again on teardown so a
-    // logout or server switch does not leave this session's count behind.
-    // destroy() sets tornDown before it runs unsubscribers, so a stopper
-    // pushed while !tornDown always runs.
-    // With it, the phone's notifications for a channel go once it is read
-    // (its stopper withdraws what is left), and the phone asks once for the
-    // notification permission.
-    void import("../features/unread-badge/unreadBadge").then((badge) => {
-      if (st.tornDown) return;
-      st.unsubscribers.push(badge.startUnreadBadge(desktop.notifier));
-      st.unsubscribers.push(badge.startNotificationClearing(desktop.notifier));
-      void badge.askNotificationPermissionOnce(desktop.notifier);
-    });
-
-    // Shares from other apps (Android): the "Send to" sheet, then the
-    // picked channel's composer.
-    if (desktop.shareSheet.available) {
-      void import("../features/share/shareIn").then((share) => {
-        if (!st.tornDown) st.unsubscribers.push(share.startShareIn(desktop.shareSheet));
-      });
-    }
-
-    // Short voice UI sounds on join/leave and mute/deafen. This module
-    // statically imports stores the page already pulls in, so it rides the
-    // MainPage chunk rather than splitting a new shared one off the entry.
-    if (!st.tornDown) st.unsubscribers.push(startVoiceUiSounds());
+    for (const start of backgroundFeatures) start(st, st.root);
 
     // Toast container
     st.toast = createToastContainer();
@@ -456,27 +290,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     setVoiceOnError((msg) => showToast(msg, "error"));
     mountVideo(st, pg, ms);
 
-    // Auto-update notifier — checks server for newer client version
-    if (st.apiConfig.host) {
-      // A bare IPv6 literal must be bracketed or the URL is unparseable and
-      // the updater silently reports "no update available" forever.
-      // Same helper as ws.ts, admin-panel.ts and attachments.ts.
-      const serverUrl = `https://${bracketBareIPv6Host(st.apiConfig.host)}`;
-      const updateNotifier = createUpdateNotifier({ serverUrl, keepChecking: true });
-      updateNotifier.mount(st.root);
-      st.children.push(updateNotifier);
-    }
-
-    // Release notes, once, on the first start after an update. Loaded on
-    // demand so the prompt stays out of the eager MainPage chunk (bundle budget).
-    ms.promptHost = st.root;
-    void import("../features/whats-new/whatsNewPrompt").then(({ createWhatsNewPrompt }) => {
-      if (st.tornDown) return;
-      // i18n-exempt: settings tab key, not shown text
-      const whatsNewPrompt = createWhatsNewPrompt(() => openSettings("About"));
-      whatsNewPrompt.mount(ms.promptHost);
-      st.unsubscribers.push(() => whatsNewPrompt.destroy?.());
-    });
+    for (const start of overlayFeatures) start(st, st.root);
 
     st.container.appendChild(st.root);
 
@@ -579,7 +393,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         st.contentNav = null;
       });
       step("teardownToast", teardownToast);
-      step("notesContext", () => setNotesContextSource(null));
       // Full voice cleanup — tears down room, callbacks, ws ref, serverHost.
       // Prevents stale module-level state persisting across logout/reconnect cycles.
       step("voiceCleanupAll", voiceCleanupAll);
@@ -605,23 +418,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         st.statusTimerWatcher?.destroy();
         st.statusTimerWatcher = null;
       });
-      step("presenceSender", () => {
-        st.presenceSender.destroy();
-        setActivePresenceSender(null);
-      });
-      // Drop the mark-read sender (and, via setMarkReadSender's own
-      // cancelPendingMarkAll, any still-armed "Mark All as Read" burst
-      // timers) at the moment this connection is abandoned. Without this,
-      // a paced burst survives teardown and fires against whichever server
-      // is live when its timer elapses — channel ids are per-server, so
-      // that can silently mark an unrelated channel read on the NEXT
-      // connection.
-      step("markReadSender", () => setMarkReadSender(null));
-      step("markUnreadSender", () => setMarkUnreadSender(null));
-      // The native screen-share picker is registered per page; drop it so a
-      // torn-down connection cannot leave the next page's dialog pointed at a
-      // dead one (a share with none registered resolves to cancelled).
-      step("screenSourcePicker", () => setScreenSourcePicker(null));
+      // Before the controllers below: a torn-down connection must not leave a
+      // slot pointed at a dead socket.
+      for (const hook of sessionHooks) step(hook.name, () => hook.uninstall(st));
       step("channelCtrl", () => {
         st.channelCtrl?.destroy();
         st.channelCtrl = null;

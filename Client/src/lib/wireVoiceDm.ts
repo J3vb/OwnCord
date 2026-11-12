@@ -30,6 +30,9 @@ export interface VoiceE2EEAnnouncePayload {
   /** The sender stages each new room key in its own slot and switches to it a
    *  moment later. Absent from an old client or server: slot 0 only. */
   readonly key_slots?: boolean;
+  /** The sender unwraps offers that bind sender and recipient (format v3).
+   *  Absent from an old client or server: older formats only. */
+  readonly bound_offers?: boolean;
 }
 
 /** Server→Client relay of an encrypted room key from the key holder. */

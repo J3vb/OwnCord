@@ -16,9 +16,10 @@ import type { TestServer } from "../support/server";
 
 const historyRow = (pane: Locator, reason: string) =>
   pane.locator("[data-testid^='safety-history-']", { hasText: `Reason: ${reason}` });
-// The Safety tab also holds My reports, whose section has its own alert.
+// The appeal panel's own line: the section also has a load-failure alert, and
+// the Safety tab holds My reports, whose section has its own.
 const appealAlert = (pane: Locator) =>
-  pane.getByRole("region", { name: "Appeals" }).getByRole("alert");
+  pane.getByRole("region", { name: "Appeals" }).locator("#safety-appeal-error");
 
 /** Open the form on the history row for `reason`, type, and send. */
 async function fileAppeal(pane: Locator, reason: string, text: string): Promise<void> {

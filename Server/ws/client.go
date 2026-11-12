@@ -17,7 +17,7 @@ const (
 )
 
 // SessionCheckInterval is the number of messages between periodic session-expiry
-// checks in readPump. Exported so tests can trigger the check.
+// checks in readPump; exported for tests.
 const SessionCheckInterval = 10
 
 // Client is a single authenticated WebSocket connection. conn is set by ServeWS and nil in tests.
@@ -28,9 +28,8 @@ type Client struct {
 	userID    int64
 	user      *db.User
 	channelID int64 // currently viewed channel for channel-scoped broadcasts
-	// threadID is the second subscription slot (thread_focus): the thread open beside
-	// the focused channel, 0 for none, a channel id whose topic is
-	// ChannelTopic(threadID). Guarded by mu.
+	// threadID is the second subscription slot (thread_focus), 0 for none.
+	// Guarded by mu.
 	threadID int64
 	// voice is this connection's voice membership (voice_registry.go), guarded by voice.voiceMu.
 	voice     voiceSlot
@@ -38,23 +37,26 @@ type Client struct {
 	held      *db.MemberRoles // the one held-role read of this handshake (refreshUserSnapshot)
 	roleIDs   []int64         // held role ids, top first; set by refreshUserSnapshot before registration
 	tokenHash string          // SHA-256 hex of the session token; used for periodic revalidation
-	// identityKey is this device's E2EE identity public key from its auth frame ("" if
-	// none). Immutable: set in upgradeAndAuth before registerNow publishes the client,
-	// so it needs no lock.
+	// identityKey is this device's E2EE identity public key from its auth frame.
+	// Immutable: set before registerNow publishes the client, so no lock.
 	identityKey string
 	lastSeq     uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
-	// authChannelID is the channel the client says it had open at disconnect, sent
-	// with last_seq in the auth frame (0 = none). It closes a resume-only hole:
-	// registerNow copies the channel subscription from the old client entry, but when
-	// the server already saw the old socket close there is none to copy, so the
-	// resumed connection has no ChannelTopic subscription until its post-auth_ok
-	// channel_focus completes, and every channel broadcast in that window is
-	// unrecoverable (the client reports only max(seq)). UNTRUSTED, like any auth-frame
-	// field: handleReconnect and handleFreshConnect promote it to channelID only after
+	// regGen is the hub connection generation this registration produced; guarded by hub.mu.
+	regGen uint64
+	// resumeReadable is the channel set this connection's replay was filtered by, nil
+	// unless it registered through a replaying resume. Set under hub.seqMu before
+	// registration and never changed, so sendToLateResumes can hand it a frame whose
+	// audience was resolved earlier by the rule its replay used. Read under seqMu.
+	resumeReadable map[int64]bool
+	// authChannelID is the channel the client says it had open at disconnect (0 =
+	// none). It covers a resume where the old socket was already gone, so there is no
+	// subscription to copy until channel_focus completes and broadcasts in that window
+	// are unrecoverable (the client reports only max(seq)). UNTRUSTED:
+	// handleReconnect and handleFreshConnect promote it to channelID only after
 	// checking it against the freshly computed allowed-channel set.
 	authChannelID int64
-	// features is what the auth frame declared (client_features.go). Set once during
-	// the handshake before the client is visible to other goroutines, so no lock.
+	// features is what the auth frame declared; set once during the handshake
+	// before the client is visible, so no lock.
 	features      clientFeatures
 	connectedAt   time.Time                     // when the WS connection was established
 	remoteAddr    string                        // client IP resolved through trusted_proxies (clientip.Resolve), no port
@@ -75,44 +77,35 @@ type Client struct {
 	cseq          cseqState                     // per-socket sequenced-frame count, stamped by the writer (client_cseq.go)
 	mu            syncutil.Ranked[lockRankLeaf] // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 
-	// focusMu serialises every channel_focus apply (the readPump applier and the
-	// deferred-focus drain goroutine) so an older deferred intent never lands after a
-	// newer one. Lock order: focusMu before mu.
-	focusMu syncutil.Ranked[lockRankSerialiser]
-	// focusSeq is bumped on every focus intent, deferred or applied; guarded by mu.
-	focusSeq uint64
-	// pendingFocusChID is the latest deferred focus intent (0 = none); guarded by mu.
-	pendingFocusChID int64
-	// pendingFocusRead is the deferred focus's read flag (false = frame said read:false); guarded by mu.
-	pendingFocusRead bool
-	// pendingFocusReqID is the deferred frame's req_id, echoed on an error; guarded by mu.
+	// focusMu serialises every channel_focus apply (readPump and the deferred-focus
+	// drain) so an older intent never lands after a newer one. Lock order: focusMu
+	// before mu. focusSeq, pendingFocus* and focusDrainActive are guarded by mu.
+	focusMu           syncutil.Ranked[lockRankSerialiser]
+	focusSeq          uint64
+	pendingFocusChID  int64
+	pendingFocusRead  bool
 	pendingFocusReqID string
-	// pendingFocusSeq is the focusSeq assigned to the pending intent; guarded by mu.
-	pendingFocusSeq uint64
-	// focusDrainActive is true while a drainDeferredFocus goroutine runs; guarded by mu.
-	focusDrainActive bool
+	pendingFocusSeq   uint64
+	focusDrainActive  bool
 
-	// presence is the status and custom status this connection last stamped
-	// (applyConnectStatus) or chose (presence_update); nil until the connect stamp.
-	// Atomic because presentableMembers and snapshots read it from other goroutines.
+	// presence is the status this connection last stamped or chose; nil until the
+	// connect stamp. Atomic because other goroutines read it.
 	presence atomic.Pointer[livePresence]
 	// voiceExitAt is when a moderator action last took a call off this connection
-	// (unix nanos, 0 = never; ordinary leaves and moves do not stamp).
-	// SendToVoiceDevice uses it to find the device a moderator's voice_moved /
-	// voice_disconnected belongs to.
+	// (unix nanos, 0 = never); SendToVoiceDevice uses it to find the device a
+	// voice_moved / voice_disconnected belongs to.
 	voiceExitAt atomic.Int64
-	// displaced is set when registerNow replaced this connection with a newer one of
-	// the same session, which then owns its voice session and presence. A connection
-	// removed any other way (kick, stale sweep) is not displaced, so its teardown
-	// parks or ends its own call instead of leaving it to the 60 s sweep.
+	// displaced is set when registerNow replaced this connection with a newer one
+	// of the same session, which then owns its voice session and presence. Any
+	// other removal is not displaced, so its teardown ends its own call instead
+	// of waiting for the sweep.
 	displaced atomic.Bool
 }
 
-// wsConn is the subset of coder/websocket.Conn used by writePump/readPump. An
-// interface keeps the core hub logic free of that import in unit tests.
+// wsConn is the subset of coder/websocket.Conn used by the pumps, an interface so
+// unit tests avoid that import.
 type wsConn any
 
-// newClient creates a real client wrapping a WebSocket connection (set by serve.go).
 func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string, lastSeq uint64, ctx context.Context) *Client {
 	now := time.Now()
 	return &Client{
@@ -131,7 +124,6 @@ func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string, lastSeq u
 	}
 }
 
-// touch updates the last activity time and increments the received counter.
 func (c *Client) touch() {
 	c.mu.Lock()
 	c.lastActivity = time.Now()
@@ -139,69 +131,60 @@ func (c *Client) touch() {
 	c.mu.Unlock()
 }
 
-// getLastActivity returns the last activity timestamp under mu.
 func (c *Client) getLastActivity() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.lastActivity
 }
 
-// getThreadID returns the thread in the second focus slot under mu.
 func (c *Client) getThreadID() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.threadID
 }
 
-// getChannelID returns the currently focused channel ID under mu.
 func (c *Client) getChannelID() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.channelID
 }
 
-// livePresence is a connection's live presence: its status and custom status.
 type livePresence struct {
 	status       string
 	customStatus *string
-	// customStatusExpiresAt is the stored expiry (dbtime.ISOLayout) of customStatus,
-	// "" when none. The expirer's CustomStatusExpired compares it: only a connection
-	// still showing the expired status is cleared.
+	// customStatusExpiresAt is the stored expiry of customStatus ("" when none);
+	// CustomStatusExpired clears only a connection still showing the expired status.
 	customStatusExpiresAt string
-	// idleSince is when status last became "idle" on this connection, zero otherwise.
-	// It is kept while the status stays idle (across a custom-status change and its
-	// expiry) so the AFK sweep measures one unbroken idle stretch. A reconnect re-stamps it.
+	// idleSince is when status last became "idle" here. Kept across custom-status
+	// changes so the AFK sweep measures one unbroken idle stretch; a reconnect
+	// re-stamps it.
 	idleSince time.Time
-	// setAt is when this connection last chose or stamped its status. A user's status
-	// is that of the most recent setter (mergeLivePresence).
+	// setAt is when this connection last chose or stamped its status; a user's
+	// status is the most recent setter's (mergeLivePresence).
 	setAt time.Time
-	// activity is the game this connection reports, nil when none. Memory only and
-	// owned by the connection (a replacement starts without one). Immutable: a change
-	// swaps in a new livePresence, so every writer must carry it over.
+	// activity is the game this connection reports. Memory only and immutable: a
+	// change swaps in a new livePresence, so every writer must carry it over.
 	activity *gameActivity
 	// listening is the song this connection reports; same rules as activity.
 	listening *listeningActivity
 	// mobile is set only on a merged presence (mergeLivePresence): the shown
-	// status comes from a phone-app connection and no desktop connection that is
-	// equally active backs it. A connection's own stored value is always false;
-	// whether it is a phone is a fact of the socket (Client.features).
+	// status comes from a phone-app connection with no equally active desktop. A
+	// connection's own value is always false.
 	mobile bool
-	// selfIdle is whether this connection's own device is idle: set by its own
-	// updates (its connect stamp and its own presence_update) and carried over
-	// when another device's chosen status is stamped on it. status alone cannot
-	// say, since a chosen status overwrites every device's.
+	// selfIdle is whether this connection's own device is idle; carried over when
+	// another device's chosen status is stamped, since status alone cannot say.
 	selfIdle bool
 }
 
-// noActivity reports whether the connection shows neither a game nor a song.
 func (p livePresence) noActivity() bool { return p.activity == nil && p.listening == nil }
 
-// afkNow is the clock the idle stamp and AFK sweep read. A var so tests can move time.
+// afkNow is the clock the idle stamp and AFK sweep read; a var so tests can move
+// time.
 var afkNow = time.Now
 
-// nextLivePresence is the presence that follows prev when the connection takes
-// status: it keeps prev.activity and prev.listening, keeps prev.idleSince while the
-// status stays idle, stamps now on entry to idle, and is zero for other statuses.
+// nextLivePresence is the presence following prev: it keeps activity and
+// listening, keeps idleSince while idle, stamps now on entry to idle, and is zero
+// for other statuses.
 func nextLivePresence(prev *livePresence, status string, customStatus *string, expiresAt string, now time.Time) *livePresence {
 	next := &livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt, setAt: now, selfIdle: isIdleStatus(status)}
 	if prev != nil {
@@ -218,7 +201,6 @@ func nextLivePresence(prev *livePresence, status string, customStatus *string, e
 	return next
 }
 
-// livePresence returns the connection's live presence, zero before the connect stamp.
 func (c *Client) livePresence() livePresence {
 	if p := c.presence.Load(); p != nil {
 		return *p
@@ -226,10 +208,9 @@ func (c *Client) livePresence() livePresence {
 	return livePresence{}
 }
 
-// setLivePresence records the presence this connection just stamped or chose. The
-// idle stamp derives from the previous value, so the swap is a compare-and-swap
-// loop: two writers (presence_update and the connect stamp) cannot read the same
-// prev and drop each other's idleSince.
+// setLivePresence records the stamped or chosen presence. A compare-and-swap
+// loop, so presence_update and the connect stamp cannot both read the same prev
+// and drop each other's idleSince.
 func (c *Client) setLivePresence(status string, customStatus *string, expiresAt string) {
 	now := afkNow()
 	for {
@@ -240,8 +221,6 @@ func (c *Client) setLivePresence(status string, customStatus *string, expiresAt 
 	}
 }
 
-// stampChosenStatus records a status another device chose on this connection. It
-// is setLivePresence except that this device's own idle fact is kept.
 func (c *Client) stampChosenStatus(status string, customStatus *string, expiresAt string) {
 	now := afkNow()
 	for {
@@ -256,9 +235,8 @@ func (c *Client) stampChosenStatus(status string, customStatus *string, expiresA
 	}
 }
 
-// sendMsg queues a normal-priority message. If the buffer is full the client is
-// disconnected to force a reconnect with replay recovery instead of silently
-// losing messages.
+// sendMsg queues a normal-priority message; a full buffer disconnects the client
+// so it reconnects with replay recovery instead of silently losing messages.
 func (c *Client) sendMsg(msg []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -279,12 +257,11 @@ func (c *Client) sendMsg(msg []byte) {
 	}
 }
 
-// sendPresenceMsg queues a presence frame on the normal queue (the FIFO every
-// sequenced frame shares). Unlike sendMsg, a full queue does not close the client:
-// in a connect herd every arrival's presence reaches every client, and kicking the
-// slow ones only made them rejoin the herd. The frame is dropped and the client
-// marked stale; the next presence flush sends a full snapshot and its next resume
-// takes the full ready (presenceDropped), so the unseen seq is not lost for good.
+// sendPresenceMsg queues a presence frame on the normal queue. A full queue does
+// not close the client (kicking slow clients in a connect herd only made them
+// rejoin): the frame is dropped and the client marked stale, so the next presence
+// flush sends a full snapshot and its resume takes the full ready
+// (presenceDropped).
 func (c *Client) sendPresenceMsg(msg []byte) {
 	c.mu.Lock()
 	if c.sendClosed {
@@ -307,8 +284,8 @@ func (c *Client) sendPresenceMsg(msg []byte) {
 }
 
 // sendHighMsg queues a high-priority message (DMs, direct mentions), drained
-// before normal and low by writePump. If the high buffer is full it falls back to
-// the normal buffer; if both are full the client is disconnected.
+// first by writePump; a full high buffer falls back to normal, and if both are
+// full the client is disconnected.
 func (c *Client) sendHighMsg(msg []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -337,9 +314,8 @@ func (c *Client) sendHighMsg(msg []byte) {
 	}
 }
 
-// sendLowMsg queues a low-priority message (typing, moderation and mention-badge
-// notices). If the buffer is full it is dropped and the client is not
-// disconnected: these events are ephemeral.
+// sendLowMsg queues a low-priority ephemeral message (typing, moderation and
+// mention-badge notices); a full buffer drops it without disconnecting.
 func (c *Client) sendLowMsg(msg []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -351,8 +327,8 @@ func (c *Client) sendLowMsg(msg []byte) {
 		c.msgsSent++
 	default:
 		c.msgsDropped++
-		// No disconnect and no per-drop log (typing/presence bursts would flood it); the
-		// aggregate counter is the only place these drops are visible.
+		// No per-drop log (typing/presence bursts would flood it); the aggregate
+		// counter is the only trace.
 		if c.hub != nil {
 			c.hub.stats.BPLowDrops.Add(1)
 		}
@@ -360,8 +336,7 @@ func (c *Client) sendLowMsg(msg []byte) {
 }
 
 // trySendMsg queues a normal-priority message, returning false if the buffer is
-// full or the channel closed. On overflow the client is disconnected to force a
-// reconnect.
+// full or closed; overflow disconnects the client.
 func (c *Client) trySendMsg(msg []byte) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -384,15 +359,14 @@ func (c *Client) trySendMsg(msg []byte) bool {
 	}
 }
 
-// closeSend marks all send channels closed, closing them exactly once. Safe from any goroutine.
 func (c *Client) closeSend() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.closeAllSendLocked()
 }
 
-// markTerminalKick records that the server ended c's session for good, so its
-// teardown ends a voice call at once instead of parking it.
+// markTerminalKick records that the server ended c's session for good, so
+// teardown ends a voice call instead of parking it.
 func (c *Client) markTerminalKick() {
 	c.mu.Lock()
 	c.terminalKick = true
@@ -405,7 +379,6 @@ func (c *Client) isTerminallyKicked() bool {
 	return c.terminalKick
 }
 
-// isSendClosed reports whether the client's send channels have been closed.
 func (c *Client) isSendClosed() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

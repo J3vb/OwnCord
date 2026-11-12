@@ -32,7 +32,7 @@ export interface DownloadProgress {
 }
 
 export type UpdateFailureReason =
-  "cancelled" | "not-authorized" | "android-confirm" | "android-permission";
+  "cancelled" | "not-authorized" | "android-confirm" | "android-permission" | "version-changed";
 
 export type UpdateInstallState =
   | { readonly status: "idle" }
@@ -45,8 +45,9 @@ export type UpdateInstallState =
       /** Why a .deb install did not run, when the system password prompt was
        *  dismissed or could not authorize. On Android: the installer is open
        *  and waits for the user's Install tap (`android-confirm`), or OwnCord
-       *  may not install apps yet (`android-permission`). Absent for every
-       *  other failure. */
+       *  may not install apps yet (`android-permission`). `version-changed`:
+       *  the server now offers a different version from the one shown, and
+       *  nothing was downloaded. Absent for every other failure. */
       readonly reason?: UpdateFailureReason;
     };
 
@@ -66,6 +67,9 @@ export async function checkForUpdate(serverUrl: string): Promise<UpdateCheckResu
  * Download and install a pending update, then relaunch the app.
  * All callers join the same operation, even across page changes.
  */
-export function downloadAndInstallUpdate(serverUrl: string): Promise<void> {
-  return desktop.updater.downloadAndInstallUpdate(serverUrl);
+export function downloadAndInstallUpdate(
+  serverUrl: string,
+  expectedVersion?: string,
+): Promise<void> {
+  return desktop.updater.downloadAndInstallUpdate(serverUrl, expectedVersion);
 }

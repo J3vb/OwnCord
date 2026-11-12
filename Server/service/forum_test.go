@@ -126,9 +126,7 @@ func newForumSettingsService(t *testing.T) (*ChannelService, *db.DB, *db.Channel
 	svc, _, database := newOverrideFixture(t)
 	seedChannel(t, database, &db.Channel{ID: 12, Name: "ideas", Type: "forum"})
 	forum, err := svc.ResolveGuildChannel(context.Background(), 12)
-	if err != nil {
-		t.Fatalf("a forum must resolve on the admin surface: %v", err)
-	}
+	mustDo(t, "a forum must resolve on the admin surface", err)
 	return svc, database, forum
 }
 
@@ -148,10 +146,7 @@ func TestAdminUpdateForumSettings(t *testing.T) {
 		len(got.Forum.Tags) != 2 || got.Forum.Tags[0].Name != "bug" || got.Forum.Tags[1].Emoji != "💡" {
 		t.Fatalf("settings = %+v", got.Forum)
 	}
-	entries, err := database.GetAuditLog(ctx, 10, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	entries := mustGetAuditLog(t, database, 10, 0)
 	audited := false
 	for _, e := range entries {
 		audited = audited || (e.Action == "channel_update" && e.ActorID == 7 && strings.Contains(e.Detail, "forum settings"))
@@ -168,6 +163,28 @@ func TestAdminUpdateForumSettings(t *testing.T) {
 	})
 	if err != nil || len(got.Forum.Tags) != 1 || got.Forum.Tags[0].ID != first || got.Forum.Tags[0].Name != "defect" || got.Forum.RequireTag {
 		t.Fatalf("replace = %+v, %v", got.Forum, err)
+	}
+}
+
+// Requiring a tag with no tag to pick, or deleting the last tag while the
+// switch stays on, is refused and leaves the stored settings as they were.
+func TestAdminUpdateForumSettings_RequireTagNeedsATag(t *testing.T) {
+	svc, _, forum := newForumSettingsService(t)
+	ctx := context.Background()
+	if _, err := svc.AdminUpdateForumSettings(ctx, 7, forum, ForumSettingsInput{
+		RequireTag: true, DefaultAutoArchiveMinutes: 60,
+	}); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("require tag with no tags: err = %v, want ErrBadRequest", err)
+	}
+	if _, err := svc.AdminUpdateForumSettings(ctx, 7, forum, ForumSettingsInput{
+		RequireTag: true, DefaultAutoArchiveMinutes: 60, Tags: []ForumTagInput{{Name: "bug"}},
+	}); err != nil {
+		t.Fatalf("require tag with one tag: %v", err)
+	}
+	if _, err := svc.AdminUpdateForumSettings(ctx, 7, forum, ForumSettingsInput{
+		RequireTag: true, DefaultAutoArchiveMinutes: 60,
+	}); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("deleting the last tag with require tag on: err = %v, want ErrBadRequest", err)
 	}
 }
 
@@ -208,9 +225,7 @@ func TestAdminUpdateForumSettings_RefusalsWriteNothing(t *testing.T) {
 
 	// Only a forum takes settings.
 	text, err := svc.ResolveGuildChannel(ctx, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ResolveGuildChannel", err)
 	if _, err := svc.AdminUpdateForumSettings(ctx, 7, text, ForumSettingsInput{DefaultAutoArchiveMinutes: 60}); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("settings on a text channel: err = %v, want ErrBadRequest", err)
 	}
@@ -250,9 +265,7 @@ func TestSendAndTypingIntoForumRefused(t *testing.T) {
 func msgSvcCount(t *testing.T, database *db.DB, channelID int64) int {
 	t.Helper()
 	var n int
-	if err := database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM messages WHERE channel_id = ?`, channelID).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM messages WHERE channel_id = ?`, channelID).Scan(&n))
 	return n
 }
 

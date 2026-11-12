@@ -6,9 +6,9 @@ const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@lib/logger", () => loggerMock());
 
-import { createUserProfilePopup } from "@components/UserProfilePopup";
-import { createDmProfileSidebar } from "@components/DmProfileSidebar";
-import { createDmSidebar, type DmConversation } from "@components/DmSidebar";
+import { createUserProfilePopup } from "../../src/features/profiles/userProfilePopup";
+import { createDmProfileSidebar } from "../../src/features/direct-messages/DmProfileSidebar";
+import { createDmSidebar, type DmConversation } from "../../src/features/direct-messages/DmSidebar";
 import { buildMusicActivityRows } from "../../src/features/settings/MusicActivityRows";
 import { mountListeningCard } from "../../src/features/members/listeningCard";
 import {
@@ -27,7 +27,7 @@ import { MUSIC_ACTIVITY_PREF_KEY, isMusicActivityShared } from "@lib/prefs/music
 import { loadPref } from "@lib/prefs/preferences";
 import { loadMusicPrefs, recordSeenPlayer, saveMusicPrefs } from "@lib/prefs/musicActivityPrefs";
 import { desktop } from "../../src/platform/desktop";
-import { buildDmConversations } from "../../src/pages/main-page/SidebarDmHelpers";
+import { buildDmConversations } from "../../src/features/direct-messages/SidebarDmHelpers";
 import { dmStore } from "../../src/stores/dm.store";
 
 const NOW = Date.UTC(2026, 9, 24, 12, 0, 0);

@@ -2,7 +2,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -23,10 +22,7 @@ func TestBroadcastMemberUnban_FansOutMemberJoin(t *testing.T) {
 	alice := seedMemberUser(t, database, "unban-alice")
 	bob := seedMemberUser(t, database, "unban-bob")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, bob, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	_, send := connectClient(t, hub, bob, 0, 32)
 	drainChanTimeout(send, 100*time.Millisecond)
 
 	hub.BroadcastMemberUnban(alice.ID)
@@ -45,9 +41,7 @@ func TestBroadcastMemberUnban_FansOutMemberJoin(t *testing.T) {
 				Status string `json:"status"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(m, &parsed); err != nil {
-			t.Fatalf("unmarshal member_join: %v", err)
-		}
+		mustUnmarshal(t, m, &parsed)
 		if parsed.Payload.User.ID != alice.ID {
 			t.Fatalf("member_join user id = %d, want %d", parsed.Payload.User.ID, alice.ID)
 		}
@@ -80,10 +74,7 @@ func TestBroadcastMemberUnban_ConnectedUserKeepsStatus(t *testing.T) {
 	if err := database.UpdateUserStatus(context.Background(), alice.ID, "offline"); err != nil {
 		t.Fatalf("UpdateUserStatus: %v", err)
 	}
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, bob, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	_, send := connectClient(t, hub, bob, 0, 32)
 	drainChanTimeout(send, 100*time.Millisecond)
 
 	hub.BroadcastMemberUnban(alice.ID)
@@ -97,9 +88,7 @@ func TestBroadcastMemberUnban_ConnectedUserKeepsStatus(t *testing.T) {
 				Status string `json:"status"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(m, &parsed); err != nil {
-			t.Fatalf("unmarshal member_join: %v", err)
-		}
+		mustUnmarshal(t, m, &parsed)
 		if parsed.Payload.Status != "idle" {
 			t.Fatalf("member_join status = %q, want idle — the unbanned user is connected", parsed.Payload.Status)
 		}

@@ -199,6 +199,12 @@
       "ts": "GAME_ACTIVITY_POLICY",
       "note": "WP 8.3e-2: whether game activity is shown on this server, unsequenced, after an admin saves the switch; auth_ok carries it on every connect and resume"
     },
+    {
+      "wire": "video_bitrate_cap",
+      "go": "MsgTypeVideoBitrateCap",
+      "ts": "VIDEO_BITRATE_CAP",
+      "note": "the per-person video upload cap in bits/s (0 = none), unsequenced, after an admin saves it; auth_ok carries it on every connect and resume"
+    },
     { "wire": "server_restart", "go": "MsgTypeServerRestart", "ts": "SERVER_RESTART" },
     {
       "wire": "mod_queue",
@@ -417,6 +423,12 @@
         "go": "CodeContainerDeployment",
         "ts": "CONTAINER_DEPLOYMENT"
       },
+      {
+        "wire": "DEVELOPMENT_BUILD",
+        "go": "CodeDevelopmentBuild",
+        "ts": "DEVELOPMENT_BUILD",
+        "note": "A source build (version dev or untagged) never replaces itself with a release."
+      },
       { "wire": "DOWNLOAD_FAILED", "go": "CodeDownloadFailed", "ts": "DOWNLOAD_FAILED" },
       { "wire": "DUPLICATE_REPORT", "go": "CodeDuplicateReport", "ts": "DUPLICATE_REPORT" },
       { "wire": "ENV_OVERRIDDEN", "go": "CodeEnvOverridden", "ts": "ENV_OVERRIDDEN" },
@@ -465,6 +477,12 @@
       { "wire": "PREVIEW_EXPIRED", "go": "CodePreviewExpired", "ts": "PREVIEW_EXPIRED" },
       { "wire": "PUSH_DISABLED", "go": "CodePushDisabled", "ts": "PUSH_DISABLED" },
       { "wire": "RATE_LIMITED", "go": "CodeRateLimited", "ts": "RATE_LIMITED" },
+      {
+        "wire": "RECOVERED_SIGN_IN_REQUIRED",
+        "go": "CodeRecoveredSignInRequired",
+        "ts": "RECOVERED_SIGN_IN_REQUIRED",
+        "note": "Account recovery set the new password and spent the recovery secret, but no session could be started; sign in with the new password instead of retrying the recovery."
+      },
       { "wire": "RESTART_PENDING", "go": "CodeRestartPending", "ts": "RESTART_PENDING" },
       { "wire": "REVERSAL_FAILED", "go": "CodeReversalFailed", "ts": "REVERSAL_FAILED" },
       { "wire": "ROLE_CONFLICT", "go": "CodeRoleConflict", "ts": "ROLE_CONFLICT" },

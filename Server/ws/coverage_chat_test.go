@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── handleChatSend additional branches (handlers.go:127 — 76.2%) ────────────
@@ -19,17 +17,11 @@ func TestHandleChatSend_EmptyContent(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "empty-content-user")
 	chID := seedTestChannel(t, database, "empty-content-chan")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": chID,
-			"content":    "",
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id": chID,
+		"content":    "",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -43,19 +35,13 @@ func TestHandleChatSend_ContentTooLong(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "long-content-user")
 	chID := seedTestChannel(t, database, "long-content-chan")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 16)
 
 	// Content over 4000 characters.
 	longContent := strings.Repeat("x", 4001)
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": chID,
-			"content":    longContent,
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id": chID,
+		"content":    longContent,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -68,17 +54,11 @@ func TestHandleChatSend_ContentTooLong(t *testing.T) {
 func TestHandleChatSend_InvalidChannelID(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "bad-chid-user")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": "not-a-number",
-			"content":    "hello",
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id": "not-a-number",
+		"content":    "hello",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -91,17 +71,11 @@ func TestHandleChatSend_InvalidChannelID(t *testing.T) {
 func TestHandleChatSend_ChannelNotFound(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "notfound-chan-user")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": 99999,
-			"content":    "hello",
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id": 99999,
+		"content":    "hello",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -114,15 +88,9 @@ func TestHandleChatSend_ChannelNotFound(t *testing.T) {
 func TestHandleChatSend_InvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "bad-payload-user")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "chat_send",
-		"payload": "not-an-object",
-	})
+	raw := envelope("chat_send", "not-an-object")
 	hub.HandleMessageForTest(c, raw)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
@@ -134,17 +102,11 @@ func TestHandleChatSend_InvalidPayload(t *testing.T) {
 func TestHandleChatSend_NegativeChannelID(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "neg-chid-user")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": -1,
-			"content":    "hello",
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id": -1,
+		"content":    "hello",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -160,10 +122,7 @@ func TestHandleChatSend_WithReplyTo(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "reply-user")
 	chID := seedTestChannel(t, database, "reply-chan")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 32)
 
 	// Send first message to get an ID.
 	raw1, _ := json.Marshal(map[string]any{
@@ -240,35 +199,19 @@ drainReply:
 
 func TestHandleChatSend_SlowMode_EnforcedForMember(t *testing.T) {
 	hub, database := newCoverageHub(t)
-	_, err := database.CreateUser(context.Background(), "slow-member-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	user, err := database.GetUserByUsername(context.Background(), "slow-member-user")
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByUsername: %v", err)
-	}
+	user := seedUserWithRole(t, database, "slow-member-user", 4)
 
 	// Create channel with slow mode.
-	chID, err := database.CreateChannel(context.Background(), "slow-chan", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "slow-chan", "text")
 	if err := database.SetChannelSlowMode(context.Background(), chID, 60); err != nil {
 		t.Fatalf("SetChannelSlowMode: %v", err)
 	}
 
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 64)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": chID,
-			"content":    "first message",
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id": chID,
+		"content":    "first message",
 	})
 
 	// First message should succeed.
@@ -276,12 +219,9 @@ func TestHandleChatSend_SlowMode_EnforcedForMember(t *testing.T) {
 	drainChanTimeout(send, 50*time.Millisecond)
 
 	// Second message should be rate limited by slow mode.
-	raw2, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": chID,
-			"content":    "second message",
-		},
+	raw2 := envelope("chat_send", map[string]any{
+		"channel_id": chID,
+		"content":    "second message",
 	})
 	hub.HandleMessageForTest(c, raw2)
 
@@ -296,15 +236,9 @@ func TestHandleChatSend_SlowMode_EnforcedForMember(t *testing.T) {
 func TestHandleChatEdit_InvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "edit-bad-payload")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "chat_edit",
-		"payload": "not-an-object",
-	})
+	raw := envelope("chat_edit", "not-an-object")
 	hub.HandleMessageForTest(c, raw)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
@@ -316,17 +250,11 @@ func TestHandleChatEdit_InvalidPayload(t *testing.T) {
 func TestHandleChatEdit_InvalidMessageID(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "edit-bad-msgid")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_edit",
-		"payload": map[string]any{
-			"message_id": -1,
-			"content":    "updated",
-		},
+	raw := envelope("chat_edit", map[string]any{
+		"message_id": -1,
+		"content":    "updated",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -339,17 +267,11 @@ func TestHandleChatEdit_InvalidMessageID(t *testing.T) {
 func TestHandleChatEdit_EmptyContent(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "edit-empty")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_edit",
-		"payload": map[string]any{
-			"message_id": 1,
-			"content":    "",
-		},
+	raw := envelope("chat_edit", map[string]any{
+		"message_id": 1,
+		"content":    "",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -364,15 +286,9 @@ func TestHandleChatEdit_EmptyContent(t *testing.T) {
 func TestHandleChatDelete_InvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "delete-bad-payload")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "chat_delete",
-		"payload": "not-an-object",
-	})
+	raw := envelope("chat_delete", "not-an-object")
 	hub.HandleMessageForTest(c, raw)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
@@ -384,16 +300,10 @@ func TestHandleChatDelete_InvalidPayload(t *testing.T) {
 func TestHandleChatDelete_InvalidMessageID(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "delete-bad-msgid")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_delete",
-		"payload": map[string]any{
-			"message_id": -1,
-		},
+	raw := envelope("chat_delete", map[string]any{
+		"message_id": -1,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -406,16 +316,10 @@ func TestHandleChatDelete_InvalidMessageID(t *testing.T) {
 func TestHandleChatDelete_MessageNotFound(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "delete-notfound")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_delete",
-		"payload": map[string]any{
-			"message_id": 99999,
-		},
+	raw := envelope("chat_delete", map[string]any{
+		"message_id": 99999,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -431,15 +335,9 @@ func TestHandleChatDelete_MessageNotFound(t *testing.T) {
 func TestHandleReaction_InvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "react-bad-payload")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "reaction_add",
-		"payload": "not-an-object",
-	})
+	raw := envelope("reaction_add", "not-an-object")
 	hub.HandleMessageForTest(c, raw)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
@@ -451,17 +349,11 @@ func TestHandleReaction_InvalidPayload(t *testing.T) {
 func TestHandleReaction_EmptyEmoji(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "react-empty-emoji")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "reaction_add",
-		"payload": map[string]any{
-			"message_id": 1,
-			"emoji":      "",
-		},
+	raw := envelope("reaction_add", map[string]any{
+		"message_id": 1,
+		"emoji":      "",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -474,17 +366,11 @@ func TestHandleReaction_EmptyEmoji(t *testing.T) {
 func TestHandleReaction_EmojiTooLong(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "react-long-emoji")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "reaction_add",
-		"payload": map[string]any{
-			"message_id": 1,
-			"emoji":      strings.Repeat("x", 40),
-		},
+	raw := envelope("reaction_add", map[string]any{
+		"message_id": 1,
+		"emoji":      strings.Repeat("x", 40),
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -497,17 +383,11 @@ func TestHandleReaction_EmojiTooLong(t *testing.T) {
 func TestHandleReaction_ControlCharInEmoji(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "react-ctrl-emoji")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "reaction_add",
-		"payload": map[string]any{
-			"message_id": 1,
-			"emoji":      "\x00bad",
-		},
+	raw := envelope("reaction_add", map[string]any{
+		"message_id": 1,
+		"emoji":      "\x00bad",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -525,21 +405,12 @@ func TestHandleChannelFocus_UpdatesReadState(t *testing.T) {
 	chID := seedTestChannel(t, database, "cf-readstate-chan")
 
 	// Insert a message so there's a latest_message_id.
-	_, err := database.CreateMessage(context.Background(), chID, user.ID, "test message", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustCreateMessage(t, database, chID, user.ID, "test message")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "channel_focus",
-		"payload": map[string]any{
-			"channel_id": chID,
-		},
+	raw := envelope("channel_focus", map[string]any{
+		"channel_id": chID,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -554,10 +425,7 @@ func TestHandleChatSend_WithNilAvatar(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "nil-avatar-user")
 	chID := seedTestChannel(t, database, "nil-avatar-chan")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 32)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -570,15 +438,7 @@ func TestHandleChatSend_WithNilAvatar(t *testing.T) {
 	hub.HandleMessageForTest(c, raw)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
-	found := false
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "chat_send_ok" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !containsFrameType(msgs, "chat_send_ok") {
 		t.Error("expected chat_send_ok for nil-avatar user")
 	}
 }
@@ -587,21 +447,12 @@ func TestHandleChatSend_WithNonNilAvatar(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "avatar-user")
 	// Set a non-nil avatar on the user.
-	_, err := database.ExecContext(context.Background(), "UPDATE users SET avatar = 'https://example.com/avatar.png' WHERE id = ?", user.ID)
-	if err != nil {
-		t.Fatalf("UPDATE avatar: %v", err)
-	}
+	mustExec(t, database, "UPDATE users SET avatar = 'https://example.com/avatar.png' WHERE id = ?", user.ID)
 	// Reload user to get updated avatar.
-	user, err = database.GetUserByUsername(context.Background(), "avatar-user")
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByUsername: %v", err)
-	}
+	user = mustGetUser(t, database, user.ID)
 
 	chID := seedTestChannel(t, database, "avatar-chan")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 32)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",

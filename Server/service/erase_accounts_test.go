@@ -16,17 +16,14 @@ func TestModerationService_EraseUser_EraseAccountsBit(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	member, _ := seedErasureMember(t, database, dir) // also creates the owner
+	member, _ := seedErasureMember(ctx, t, database, dir) // also creates the owner
 	owner, _ := database.GetUserByUsername(ctx, "erasure-owner")
 
 	seedRole(t, database, &db.Role{ID: 20, Name: "Eraser", Permissions: permissions.ReadMessages | permissions.EraseAccounts, Position: 70})
 	seedRole(t, database, &db.Role{ID: 21, Name: "Eraser peer", Permissions: permissions.ReadMessages, Position: 70})
 	seedRole(t, database, &db.Role{ID: 22, Name: "Senior", Permissions: permissions.ReadMessages, Position: 75})
 	seedRole(t, database, &db.Role{ID: 23, Name: "Server manager", Permissions: permissions.ManageServer | permissions.KickMembers, Position: 70})
-	eraser, err := database.CreateUser(ctx, "eraser", "hash", 20)
-	if err != nil {
-		t.Fatal(err)
-	}
+	eraser := mustCreateUser(t, database, "eraser", "hash", 20)
 	peer, _ := database.CreateUser(ctx, "eraser-peer", "hash", 21)
 	senior, _ := database.CreateUser(ctx, "eraser-senior", "hash", 22)
 	manager, _ := database.CreateUser(ctx, "eraser-manager", "hash", 23)
@@ -52,9 +49,7 @@ func TestModerationService_EraseUser_EraseAccountsBit(t *testing.T) {
 		t.Fatal("a refused erasure removed the member")
 	}
 	// A holder erases a lower-ranked member without holding ADMINISTRATOR.
-	if err := mod.EraseUser(ctx, eraser, member); err != nil {
-		t.Fatalf("holder erasing a lower-ranked member: %v", err)
-	}
+	mustDo(t, "holder erasing a lower-ranked member", mod.EraseUser(ctx, eraser, member))
 	if u, _ := database.GetUserByID(ctx, member); u != nil {
 		t.Error("member row survived")
 	}

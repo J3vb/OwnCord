@@ -6,6 +6,9 @@
 # Generated, verified by `git diff --exit-code` after regeneration.
 Server/db/dbgen/
 Client/src/lib/protocolTypes.ts
+# Written one shape per line by `npm run gen:wire` in Client/; a unit test checks drift.
+Client/src/lib/net/wireShapes.ts
+Client/src/lib/net/restShapes.ts
 # Frozen wire records, written by `go test ./ws -run TestEpoch1Fixtures -update`.
 # Unlike the two above, drift is caught by that test's own frame comparison, not
 # by `git diff --exit-code`.

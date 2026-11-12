@@ -1,7 +1,13 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { openSettings, switchSettingsTab, startFullSession } from "./helpers";
-import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/accessibility";
+import {
+  Q1,
+  findUnnamedControls,
+  focusIndicator,
+  keyboardReachable,
+  textContrast,
+} from "./support/accessibility";
 import { ZOOM_VIEWPORT, expectScreenReflows } from "./support/zoom-reflow";
 
 // ---------------------------------------------------------------------------
@@ -282,6 +288,18 @@ test.describe("Settings — Voice & Video Tab", () => {
       if (ratio < Q1.text) failures.push(`${selector} ${ratio.toFixed(2)}`);
     }
     expect(failures).toEqual([]);
+  });
+
+  test("lets a keyboard user adjust Voice Buffer by one millisecond", async ({ page }) => {
+    const slider = page.getByRole("slider", { name: "Voice Buffer" });
+    await expect(slider).toBeDisabled();
+    await page.getByRole("switch", { name: "Enhanced Noise Suppression" }).click();
+    await expect(slider).toBeEnabled();
+    expect(await keyboardReachable(page, slider)).toBe(true);
+    await expect(slider).toHaveValue("200");
+    await page.keyboard.press("ArrowRight");
+    await expect(slider).toHaveValue("201");
+    await expect(slider).toHaveAttribute("aria-valuetext", "201 ms");
   });
 
   test("offers the video codec choice with Auto as the default", async ({ page }) => {

@@ -3,14 +3,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NativeFile } from "../../../src/platform/contracts/nativeFiles";
 
-vi.mock("@components/EmojiPicker", () => ({
+vi.mock("../../../src/features/messaging/EmojiPicker", () => ({
   createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
-vi.mock("@components/GifPicker", () => ({
+vi.mock("../../../src/features/messaging/GifPicker", () => ({
   createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
 
-import { createMessageInput } from "@components/MessageInput";
+import { createMessageInput } from "../../../src/features/messaging/MessageInput";
 import { sendShareTo } from "../../../src/features/share/shareInbox";
 import { runSessionResets } from "../../../src/lib/net/sessionRegistry";
 

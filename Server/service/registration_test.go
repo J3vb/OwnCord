@@ -15,9 +15,7 @@ import (
 func newRegistrationService(t *testing.T, mode RegistrationMode) *AuthService {
 	t.Helper()
 	database := newTestDB(t)
-	if err := database.SetSetting(context.Background(), registrationModeKey, string(mode)); err != nil {
-		t.Fatalf("SetSetting: %v", err)
-	}
+	mustDo(t, "SetSetting", database.SetSetting(context.Background(), registrationModeKey, string(mode)))
 	return NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), nil)
 }
 
@@ -41,22 +39,14 @@ func TestRegister_InviteFreeModesAreBudgetedPerAddress(t *testing.T) {
 	if !errors.Is(err, ErrRateLimited) || !strings.Contains(err.Error(), "too many registrations from this address") {
 		t.Fatalf("over-budget registration: err = %v, want the per-address refusal", err)
 	}
-	if err := registerFrom(svc, "elsewhere", "203.0.113.8"); err != nil {
-		t.Fatalf("another address: %v", err)
-	}
+	mustDo(t, "another address", registerFrom(svc, "elsewhere", "203.0.113.8"))
 
 	// The same address is not budgeted in invite mode: the invite is.
-	if err := svc.st.(*db.DB).SetSetting(context.Background(), registrationModeKey, string(RegistrationInvite)); err != nil {
-		t.Fatalf("SetSetting: %v", err)
-	}
+	mustDo(t, "SetSetting", svc.st.(*db.DB).SetSetting(context.Background(), registrationModeKey, string(RegistrationInvite)))
 	owner, err := svc.st.(*db.DB).CreateUser(context.Background(), "owner", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "CreateUser", err)
 	code, err := svc.st.(*db.DB).CreateInvite(context.Background(), owner, 1, nil)
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	mustDo(t, "CreateInvite", err)
 	if _, err := svc.Register(context.Background(), RegisterInput{
 		Username: "invited", Password: "securePass1", InviteCode: code, Device: "test", IP: "203.0.113.7",
 	}); err != nil {
@@ -125,5 +115,40 @@ func TestRegister_ApprovalQueueCapHoldsUnderConcurrency(t *testing.T) {
 	}
 	if n, _ := svc.st.CountPendingUsers(ctx); n != maxPendingRegistrations {
 		t.Fatalf("pending = %d, want the cap %d", n, maxPendingRegistrations)
+	}
+}
+
+// Only a committed registration spends the address's daily budget: a taken
+// username or a busy server refuses the attempt and leaves the budget whole.
+func TestRegister_RefusedAttemptsLeaveTheAddressBudget(t *testing.T) {
+	svc := newRegistrationService(t, RegistrationOpen)
+	const ip = "203.0.113.20"
+	mustDo(t, "seed account", registerFrom(svc, "taken", "198.51.100.99"))
+	for i := range inviteFreeRegistrationsPerIPPerDay + 1 {
+		if err := registerFrom(svc, "taken", ip); !errors.Is(err, ErrRegistrationRejected) {
+			t.Fatalf("taken username, attempt %d: err = %v, want the uniform refusal", i, err)
+		}
+	}
+
+	svc.limiter.SetAdmissionBudget(1)
+	held, ok := svc.limiter.Admission().TryAcquire()
+	if !ok {
+		t.Fatal("could not fill the admission budget")
+	}
+	svc.admissionWait = 0
+	for i := range inviteFreeRegistrationsPerIPPerDay + 1 {
+		if err := registerFrom(svc, fmt.Sprintf("busy%d", i), ip); !errors.Is(err, ErrAuthBusy) {
+			t.Fatalf("busy server, attempt %d: err = %v, want AUTH_BUSY", i, err)
+		}
+	}
+	held()
+
+	for i := range inviteFreeRegistrationsPerIPPerDay {
+		if err := registerFrom(svc, fmt.Sprintf("fresh%d", i), ip); err != nil {
+			t.Fatalf("fresh username %d after refusals: %v", i, err)
+		}
+	}
+	if err := registerFrom(svc, "one-more", ip); !errors.Is(err, ErrRegistrationRateLimited) {
+		t.Fatalf("sixth committed registration: err = %v, want the per-address refusal", err)
 	}
 }

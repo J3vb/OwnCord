@@ -1,6 +1,5 @@
 // LiveKit diagnostics — ICE connection logging and session debug info
-import type { Room } from "livekit-client";
-import { LogLevel, RoomEvent, Track, setLogExtension, setLogLevel } from "livekit-client";
+import { LogLevel, RoomEvent, setLogExtension, setLogLevel } from "livekit-client";
 import { createLogger } from "@lib/logger";
 import { recordEvent } from "@lib/diagnostics/eventSink";
 import { parseUserId } from "../../features/voice/sessionState";
@@ -9,6 +8,7 @@ import { voiceJoinSnapshot } from "@lib/voice/voiceJoinTrace";
 import type { AudioPipeline } from "@lib/voice/audioPipeline";
 import type { AudioElements } from "@lib/voice/audioElements";
 import { attachVoiceEventLog } from "@lib/voice/voiceEventLog";
+import type { VoiceRoom, VoiceStatsTransport } from "@lib/voice/voiceRoom";
 
 const log = createLogger("livekitDiagnostics");
 
@@ -26,7 +26,7 @@ export function installLivekitLogging(): void {
 }
 
 /** Attach lightweight diagnostic-only event listeners to a Room. */
-export function attachDiagnosticListeners(room: Room): void {
+export function attachDiagnosticListeners(room: VoiceRoom): void {
   attachVoiceEventLog(room, onRoom);
   onRoom(room, RoomEvent.Reconnecting, () => {
     log.warn("LiveKit room reconnecting");
@@ -55,6 +55,23 @@ function candidateType(value: string): "host" | "srflx" | "prflx" | "relay" | "u
     : "unknown";
 }
 
+const ICE_STATES = [
+  "new",
+  "checking",
+  "connected",
+  "completed",
+  "failed",
+  "disconnected",
+  "closed",
+] as const;
+
+/** The transport's ICE state as the catalogue's word; null (left out) when unknown. */
+function iceState(value: string | undefined): (typeof ICE_STATES)[number] | null {
+  return (ICE_STATES as readonly string[]).includes(value ?? "")
+    ? (value as (typeof ICE_STATES)[number])
+    : null;
+}
+
 function routeProtocol(value: string): "udp" | "tcp" | "tls" | "unknown" {
   return value === "udp" || value === "tcp" || value === "tls" ? value : "unknown";
 }
@@ -73,10 +90,10 @@ function routeProtocol(value: string): "udp" | "tcp" | "tls" | "unknown" {
  * connection on first read when none exists yet, a side effect a passive
  * diagnostic must never trigger.
  */
-type IceTransport = NonNullable<NonNullable<Room["engine"]>["pcManager"]>["publisher"];
+type IceTransport = VoiceStatsTransport;
 
 function getIceTransports(
-  room: Room,
+  room: VoiceRoom,
 ): Array<{ label: "subscriber" | "publisher"; transport: IceTransport }> {
   const pcManager = room.engine?.pcManager;
   const transports: Array<{ label: "subscriber" | "publisher"; transport: IceTransport }> = [];
@@ -88,11 +105,20 @@ function getIceTransports(
   return transports;
 }
 
+/** A stats field as text, "unknown" when absent. */
+function textOr(value: unknown): string {
+  return typeof value === "string" ? value : "unknown";
+}
+
 /** Log ICE connection details for debugging cross-network voice issues. */
-export function logIceConnectionInfo(room: Room | null): void {
+export function logIceConnectionInfo(room: VoiceRoom | null): void {
   if (room === null) return;
   try {
     for (const { label, transport } of getIceTransports(room)) {
+      recordEvent("ice.state", {
+        transport: label,
+        state: iceState(transport.getICEConnectionState()),
+      });
       log.info(`ICE ${label} connection state`, {
         iceConnectionState: transport.getICEConnectionState(),
         connectionState: transport.getConnectionState(),
@@ -103,6 +129,7 @@ export function logIceConnectionInfo(room: Room | null): void {
       transport
         .getStats()
         ?.then((stats) => {
+          if (stats === undefined) return;
           stats.forEach((report) => {
             if (report.type === "candidate-pair" && report.state === "succeeded") {
               const localId = report.localCandidateId;
@@ -113,11 +140,11 @@ export function logIceConnectionInfo(room: Room | null): void {
 
               stats.forEach((s) => {
                 if (s.id === localId && s.type === "local-candidate") {
-                  localType = s.candidateType ?? "unknown";
-                  localProtocol = s.protocol ?? "unknown";
+                  localType = textOr(s.candidateType);
+                  localProtocol = textOr(s.protocol);
                 }
                 if (s.id === remoteId && s.type === "remote-candidate") {
-                  remoteType = s.candidateType ?? "unknown";
+                  remoteType = textOr(s.candidateType);
                 }
               });
 
@@ -144,7 +171,7 @@ export function logIceConnectionInfo(room: Room | null): void {
 }
 
 /** Get ICE connection state summary for debug panel. */
-export function getIceConnectionState(room: Room | null): Record<string, unknown> | null {
+export function getIceConnectionState(room: VoiceRoom | null): Record<string, unknown> | null {
   if (room === null) return null;
   try {
     if (!room.engine) return null;
@@ -164,7 +191,7 @@ export function getIceConnectionState(room: Room | null): Record<string, unknown
 // --- Debug info ---
 
 export interface SessionDebugDeps {
-  readonly room: Room | null;
+  readonly room: VoiceRoom | null;
   readonly currentChannelId: number | null;
   readonly outputVolumeMultiplier: number;
   readonly audioPipeline: AudioPipeline;
@@ -202,13 +229,14 @@ export function buildSessionDebugInfo(deps: SessionDebugDeps): Record<string, un
     kind: pub.kind,
     isMuted: pub.isMuted,
   }));
+  const rnnoise = audioPipeline.rnnoiseState;
   return {
     hasRoom: true,
     roomName: room.name,
     roomState: room.state,
-    hasRNNoiseProcessor:
-      room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.getProcessor() !==
-      undefined,
+    hasRNNoiseProcessor: rnnoise?.enhanced === true || rnnoise?.speechDetection === true,
+    enhancedNoiseSuppressionActive: rnnoise?.enhanced ?? null,
+    sileroDetectionActive: audioPipeline.sileroDetectionActive,
     currentChannelId,
     outputVolumeMultiplier,
     audioPipelineActive: audioPipeline.isActive,

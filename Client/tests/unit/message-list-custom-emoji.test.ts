@@ -14,7 +14,7 @@ vi.mock("../../src/features/messaging/content/attachments", async (importOrigina
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
 import type { Message } from "@stores/messages.store";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "@stores/emoji.store";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";

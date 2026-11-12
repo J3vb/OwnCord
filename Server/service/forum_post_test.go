@@ -58,9 +58,7 @@ func (f *forumPostFixture) counts(t *testing.T) (threads, msgs, receipts int) {
 		`SELECT COUNT(*) FROM messages`:                       &msgs,
 		`SELECT COUNT(*) FROM message_delivery_receipts`:      &receipts,
 	} {
-		if err := f.database.QueryRowContext(bg(), q).Scan(dst); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "QueryRowContext", f.database.QueryRowContext(bg(), q).Scan(dst))
 	}
 	return threads, msgs, receipts
 }
@@ -68,9 +66,7 @@ func (f *forumPostFixture) counts(t *testing.T) (threads, msgs, receipts int) {
 func TestCreateForumPost_Happy(t *testing.T) {
 	f := newForumPostFixture(t)
 	res, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, "  Dark mode  ", "please <b>add</b> it", 1, 0))
-	if err != nil {
-		t.Fatalf("CreateForumPost: %v", err)
-	}
+	mustDo(t, "CreateForumPost", err)
 	th := res.Thread
 	if res.Duplicate || th.Name != "Dark mode" || th.ParentID != frmForum || th.StarterMessageID != nil ||
 		th.OwnerID == nil || *th.OwnerID != thrOwner || th.AutoArchiveMinutes != 60 {
@@ -168,12 +164,24 @@ func TestCreateForumPost_RequireTag(t *testing.T) {
 		t.Fatalf("no tag in a require-tag forum: err = %v", err)
 	}
 	res, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, "t", "c", 0))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateForumPost", err)
 	if res.Thread.AutoArchiveMinutes != 4320 {
 		t.Fatalf("archive minutes = %d, want the forum's 4320", res.Thread.AutoArchiveMinutes)
 	}
+}
+
+// A forum already saved as require-tag with no tags left cannot be satisfied, so
+// a post without a tag goes through; with a tag present the rule still holds
+// (TestCreateForumPost_RequireTag).
+func TestCreateForumPost_RequireTagWithNoTagsAcceptsUntaggedPost(t *testing.T) {
+	f := newForumPostFixture(t)
+	if _, err := f.database.ReplaceForumSettings(bg(), frmForum, db.ForumSettingsWrite{
+		RequireTag: true, DefaultAutoArchiveMinutes: 60,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, "t", "c"))
+	mustDo(t, "an untagged post in a require-tag forum with no tags", err)
 }
 
 // Pre-flight edge case 1: a lost forum_post_create_ok, retried.
@@ -181,9 +189,7 @@ func TestCreateForumPost_RetryIsIdempotent(t *testing.T) {
 	f := newForumPostFixture(t)
 	p := f.req(thrOwner, "once", "body", 0)
 	first, err := f.limited.CreateForumPost(bg(), p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateForumPost", err)
 	t0, m0, r0 := f.counts(t)
 	again, err := f.limited.CreateForumPost(bg(), p)
 	if err != nil || !again.Duplicate || again.Thread.ID != first.Thread.ID || again.MessageID != first.MessageID || again.Send != nil {
@@ -226,9 +232,7 @@ func TestCreateForumPost_RetryAfterDelete(t *testing.T) {
 	f := newForumPostFixture(t)
 	p := f.req(thrOwner, "gone", "body")
 	first, err := f.limited.CreateForumPost(bg(), p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateForumPost", err)
 	if _, err := f.threads.Delete(bg(), thrMod, first.Thread.ID); err != nil {
 		t.Fatalf("moderator delete: %v", err)
 	}
@@ -247,9 +251,7 @@ func TestCreateForumPost_RetryAfterArchive(t *testing.T) {
 	f := newForumPostFixture(t)
 	p := f.req(thrOwner, "quiet", "body")
 	first, err := f.limited.CreateForumPost(bg(), p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateForumPost", err)
 	archived := true
 	if _, err := f.threads.Update(bg(), UpdateThreadParams{UserID: thrOwner, ThreadID: first.Thread.ID, Archived: &archived}); err != nil {
 		t.Fatalf("archive: %v", err)
@@ -270,9 +272,7 @@ func TestCreateForumPost_RetryAfterLosingView(t *testing.T) {
 	f := newForumPostFixture(t)
 	p := f.req(thrOwner, "hidden", "body")
 	first, err := f.limited.CreateForumPost(bg(), p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateForumPost", err)
 	seedChannelOverride(t, f.database, permissions.MemberRoleID, frmForum, 0, permissions.ReadMessages)
 	f.perms.InvalidateAll()
 	r, err := f.limited.CreateForumPost(bg(), p)
@@ -334,9 +334,7 @@ func TestSendAndThreadCreateRefuseAForum(t *testing.T) {
 func TestCreateForumPost_MentionsRaiseABadgeOnThePost(t *testing.T) {
 	f := newForumPostFixture(t)
 	res, err := f.msgs.CreateForumPost(bg(), f.req(thrOwner, "hey", "hello @bob"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateForumPost", err)
 	if len(res.Send.Mentions) != 1 || res.Send.Mentions[0] != thrOther {
 		t.Fatalf("mentions = %v", res.Send.Mentions)
 	}
@@ -348,9 +346,7 @@ func TestCreateForumPost_MentionsRaiseABadgeOnThePost(t *testing.T) {
 func TestThreadUpdate_PostTags(t *testing.T) {
 	f := newForumPostFixture(t)
 	res, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, "p", "c", 0))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateForumPost", err)
 	id := res.Thread.ID
 	set := func(user int64, ids ...int64) (*db.ThreadInfo, error) {
 		if ids == nil {
@@ -410,9 +406,7 @@ func TestThreadUpdate_PostTags(t *testing.T) {
 func TestEditOpeningMessageIsFlagged(t *testing.T) {
 	f := newForumPostFixture(t)
 	res, err := f.msgs.CreateForumPost(bg(), f.req(thrOwner, "p", "first"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateForumPost", err)
 	reply := f.post(t, res.Thread.ID, thrOther, "a reply")
 	edited, err := f.msgs.EditMessage(bg(), thrOwner, res.MessageID, "first, edited")
 	if err != nil || !edited.PostOpening {
@@ -434,9 +428,7 @@ func TestEditOpeningMessageIsFlagged(t *testing.T) {
 func TestDeletedOpeningMessageKeepsThePost(t *testing.T) {
 	f := newForumPostFixture(t)
 	res, err := f.msgs.CreateForumPost(bg(), f.req(thrOwner, "p", "first"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateForumPost", err)
 	if _, err := f.msgs.DeleteMessage(bg(), thrOwner, res.MessageID); err != nil {
 		t.Fatal(err)
 	}

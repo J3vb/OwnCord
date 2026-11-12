@@ -10,12 +10,11 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // historyAbsentLog reports whether a start-up log says the erasure history is
 // gone. The rule is deliberately the same one the drill's step 6 asserts on
-// (cmd/smoke/drills.go, saysHistoryGone) — including that the two words have to
+// (cmd/smoke/drills_restore_inspect.go, saysHistoryGone) — including that the two words have to
 // fall on one line, because an operator greps a log one line at a time. It is
 // spelled again here because that harness is another package; if the two ever
 // disagree, step 6 is the one that fails.
@@ -48,14 +47,7 @@ func TestOpenMarkers_MissingHistoryBootsAndSaysSo(t *testing.T) {
 	cfg.Server.DataDir = dataDir
 	cfg.Upload.StorageDir = filepath.Join(dataDir, "uploads")
 	cfg.Upload.MaxSizeMB = 1
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatal(err)
-	}
+	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
 	var logs bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&logs, nil))
@@ -123,29 +115,18 @@ func TestOpenMarkers_ReplaysAgainstTheOpenedDatabase(t *testing.T) {
 	cfg.Server.DataDir = dataDir
 	cfg.Upload.StorageDir = filepath.Join(dataDir, "uploads")
 	cfg.Upload.MaxSizeMB = 1
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatal(err)
-	}
+	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
 	if _, err := database.CreateUser(ctx, "markers-owner", "hash", 1); err != nil {
 		t.Fatal(err)
 	}
 	uid, err := database.CreateUser(ctx, "markers-subject", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateUser", err)
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	// First open: generates the key, creates the file, nothing to replay.
 	markers, err := openMarkers(ctx, log, cfg, database, OpenStorage(log, cfg))
-	if err != nil {
-		t.Fatalf("openMarkers: %v", err)
-	}
+	mustDo(t, "openMarkers", err)
 	if _, err := os.Stat(filepath.Join(dataDir, "erasure.key")); err != nil {
 		t.Errorf("erasure.key not generated: %v", err)
 	}
@@ -155,21 +136,13 @@ func TestOpenMarkers_ReplaysAgainstTheOpenedDatabase(t *testing.T) {
 	// An erasure elsewhere recorded a marker; then a "restore" put the
 	// account back (it was never removed from this in-memory database).
 	tok, _, err := markers.RecordPendingAccount(ctx, uid, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := markers.ConfirmAccount(ctx, tok); err != nil {
-		t.Fatal(err)
-	}
-	if err := markers.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RecordPendingAccount", err)
+	mustDo(t, "ConfirmAccount", markers.ConfirmAccount(ctx, tok))
+	mustDo(t, "Close", markers.Close())
 
 	// Second open — the next start-up: the marker is replayed.
 	reopened, err := openMarkers(ctx, log, cfg, database, OpenStorage(log, cfg))
-	if err != nil {
-		t.Fatalf("openMarkers (second): %v", err)
-	}
+	mustDo(t, "openMarkers (second)", err)
 	defer reopened.Close()
 	if u, _ := database.GetUserByID(ctx, uid); u != nil {
 		t.Error("the marked account survived start-up")
@@ -189,20 +162,11 @@ func TestOpenMarkers_ReplaysRetentionMarkers(t *testing.T) {
 	cfg.Server.DataDir = dataDir
 	cfg.Upload.StorageDir = filepath.Join(dataDir, "uploads")
 	cfg.Upload.MaxSizeMB = 1
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatal(err)
-	}
+	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "markers-owner", "hash", 1)
 	chID, err := database.CreateChannel(ctx, "swept", "text", "", "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	for _, ts := range []string{"2026-01-01 00:00:00", "2026-08-01 00:00:00"} {
 		if _, err := database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp) VALUES (?, ?, 'm', ?)`, chID, uid, ts); err != nil {
 			t.Fatal(err)
@@ -210,17 +174,11 @@ func TestOpenMarkers_ReplaysRetentionMarkers(t *testing.T) {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	markers, err := openMarkers(ctx, log, cfg, database, OpenStorage(log, cfg))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := markers.RecordMessagesSweep(ctx, chID, "2026-06-01 00:00:00", 0); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "openMarkers", err)
+	mustDo(t, "RecordMessagesSweep", markers.RecordMessagesSweep(ctx, chID, "2026-06-01 00:00:00", 0))
 	_ = markers.Close()
 	reopened, err := openMarkers(ctx, log, cfg, database, OpenStorage(log, cfg))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "openMarkers", err)
 	defer reopened.Close()
 	var left int
 	_ = database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE channel_id = ?`, chID).Scan(&left)

@@ -11,8 +11,8 @@ import { useMountContainer } from "../helpers/mountContainer";
 // MessageList helpers (we test the exported component's behavior via DOM)
 // ---------------------------------------------------------------------------
 
-import { createMessageList } from "../../src/components/MessageList";
-import type { MessageListOptions } from "../../src/components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import { messagesStore, addMessage, setMessages } from "../../src/stores/messages.store";
 import { membersStore, setMembers } from "../../src/stores/members.store";
 
@@ -327,7 +327,7 @@ describe("MessageList", () => {
 // TypingIndicator
 // ---------------------------------------------------------------------------
 
-import { createTypingIndicator } from "../../src/components/TypingIndicator";
+import { createTypingIndicator } from "../../src/features/messaging/TypingIndicator";
 import { setTyping } from "../../src/stores/members.store";
 
 describe("TypingIndicator", () => {
@@ -432,9 +432,9 @@ describe("TypingIndicator", () => {
 // MessageInput
 // ---------------------------------------------------------------------------
 
-import { createMessageInput } from "../../src/components/MessageInput";
+import { createMessageInput } from "../../src/features/messaging/MessageInput";
 import { makeListOptions } from "../helpers/messageListHarness";
-import type { MessageInputOptions } from "../../src/components/MessageInput";
+import type { MessageInputOptions } from "../../src/features/messaging/MessageInput";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 

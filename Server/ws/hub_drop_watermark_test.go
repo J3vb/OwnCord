@@ -139,18 +139,10 @@ func assertGateFailureForcesResync(t *testing.T, labelled bool, wrap func(Visibi
 	t.Helper()
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
-	subscriberID, err := database.CreateUser(ctx, "gate-fail-subscriber", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	chID, err := database.CreateChannel(ctx, "gate-fail-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	subscriberID := mustCreateUser(t, database, "gate-fail-subscriber", 4)
+	chID := mustCreateChannel(t, database, "gate-fail-channel", "text")
 	if labelled {
-		if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID); err != nil {
-			t.Fatalf("label channel: %v", err)
-		}
+		mustExec(t, database, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID)
 	}
 	hub := newTestHubWith(t, HubOptions{
 		DB:      database,

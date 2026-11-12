@@ -1,6 +1,6 @@
 [package]
 name = "owncord-client"
-version = "2.8.0"
+version = "2.9.0"
 edition = "2021"
 # Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
@@ -26,6 +26,13 @@ unused_unsafe = "warn"
 unwrap_used = "deny"
 expect_used = "deny"
 
+# The app plus the small crate of pure parsers it depends on (property-tested
+# and fuzzed on its own). The fuzz crate has its own lock file and nightly
+# toolchain, so it stays out.
+[workspace]
+members = [".", "crates/owncord-parse"]
+exclude = ["crates/owncord-parse/fuzz"]
+
 [lib]
 name = "owncord_client_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
@@ -41,6 +48,7 @@ devtools = ["tauri/devtools"]
 e2e-auto-confirm = []
 
 [dependencies]
+owncord-parse = { path = "crates/owncord-parse" }
 tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
@@ -176,6 +184,9 @@ windows = { version = "0.58", features = [
     "Media_Control",
     "Foundation",
     "Foundation_Collections",
+    # Graphics card for video (gpu_adapter.rs): DXGI adapter enumeration.
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
 ] }
 # DPAPI (CryptProtectData/CryptUnprotectData) for the last-resort credential
 # fallback in secret_store, and the window lookup that hides WebView2's
@@ -206,6 +217,9 @@ windows-sys = { version = "0.60", features = [
     "Win32_System_LibraryLoader",
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
+    # region.rs: the user's regional format (GetUserDefaultLocaleName), for
+    # date order and the default clock. A feature on the existing dependency.
+    "Win32_Globalization",
 ] }
 # WebView2 profile permission state (windows_media.rs). Both match the
 # versions tauri/wry already build, so no new crate enters the tree.

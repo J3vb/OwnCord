@@ -12,7 +12,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@tauri-apps/plugin-dialog", () => mocks.dialogMock());
 vi.mock("@tauri-apps/plugin-fs", () => mocks.fsMock());
 vi.mock("@lib/icons", () => mocks.iconsMock());
-vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
+vi.mock("/src/features/messaging/content/mediaVisibility", () => mocks.mediaVisibilityMock());
 vi.mock("../../src/features/messaging/content/media", () => mocks.contentMediaMock());
 
 // No-op IndexedDB so fetchImageAsObjectUrl falls through to the network path.

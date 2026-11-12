@@ -35,9 +35,7 @@ func TestReorderRoles_LeavesRoomToCreateBelow(t *testing.T) {
 	// The Admin (user 2) holds MANAGE_ROLES and creates a role without naming a
 	// position, which is what the panel's Create Role form sends.
 	created, err := svc.CreateRole(ctx, 2, RoleInput{Name: new("Helper")})
-	if err != nil {
-		t.Fatalf("CreateRole after a reorder: %v", err)
-	}
+	mustDo(t, "CreateRole after a reorder", err)
 
 	admin := roleByID(t, ctx, svc, permissions.AdminRoleID)
 	if created.Position <= 0 || created.Position >= admin.Position {
@@ -114,9 +112,7 @@ func TestReorderRoles_SpreadsAcrossTheWholeRangeAtHighRoleCounts(t *testing.T) {
 	// Every position must still be distinct, below the owner, and above zero —
 	// and the set must not have collapsed into the bottom of the range.
 	roles, err := svc.st.ListRoles(ctx)
-	if err != nil {
-		t.Fatalf("ListRoles: %v", err)
-	}
+	mustDo(t, "ListRoles", err)
 	seen := make(map[int]bool, len(roles))
 	highestManaged := 0
 	for _, r := range roles {
@@ -150,9 +146,7 @@ func TestReorderRoles_SpreadsAcrossTheWholeRangeAtHighRoleCounts(t *testing.T) {
 func roleByID(t *testing.T, ctx context.Context, svc *RoleService, id int64) *db.Role {
 	t.Helper()
 	roles, err := svc.st.ListRoles(ctx)
-	if err != nil {
-		t.Fatalf("ListRoles: %v", err)
-	}
+	mustDo(t, "ListRoles", err)
 	for _, r := range roles {
 		if r.ID == id {
 			return r

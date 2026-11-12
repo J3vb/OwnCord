@@ -101,7 +101,7 @@ export const MOCK_READY_PAYLOAD = {
 export const MOCK_AUTH_OK = {
   type: "auth_ok",
   payload: {
-    user: { id: 1, username: "testuser", avatar: "", role: "admin" },
+    user: { id: 1, username: "testuser", avatar: "", role: "admin", status: "online" },
     server_name: "Test Server",
     motd: "Welcome to the test server",
   },
@@ -637,8 +637,10 @@ export function buildTauriMockScript(opts: {
    *  to give the connect page saved server profiles (e.g. one with
    *  autoConnect) instead of the default empty store. */
   storedSettings?: Record<string, unknown>;
-  /** Seeds `load_credential`. Default null = nothing stored. `delete_credential`
-   *  stays a no-op, so a test can assert behaviour that must hold even when the
+  /** Seeds the stored sign-in. Default null = nothing stored. As in the app,
+   *  `load_credential` answers the username and `has_password` only, and
+   *  `resume_saved_session` hands the token over. `delete_credential` stays a
+   *  no-op, so a test can assert behaviour that must hold even when the
    *  credential is still readable. */
   storedCredential?: { username: string; token: string; has_password?: boolean } | null;
   /** Seeds `login_with_saved_password` — the relay the client uses when the
@@ -899,12 +901,29 @@ export function buildTauriMockScript(opts: {
 
         // ---- Credentials ----
         window.__mockDeletedCredentials ??= [];
-        // Still a no-op on the stored credential (load_credential keeps
-        // returning it) — only the call is recorded, so a test can assert the
-        // client asked for a delete without that delete winning a race.
+        // Still a no-op on the stored credential (load_credential and
+        // resume_saved_session keep returning it) — only the call is recorded,
+        // so a test can assert the client asked for a delete without that
+        // delete winning a race.
         if (cmd === "delete_credential") { window.__mockDeletedCredentials.push(args?.host); return null; }
         if (cmd === "save_credential") return null;
-        if (cmd === "load_credential") return ${JSON.stringify(opts.storedCredential ?? null)};
+        if (cmd === "load_credential") return ${JSON.stringify(
+          opts.storedCredential
+            ? {
+                username: opts.storedCredential.username,
+                has_password: opts.storedCredential.has_password === true,
+              }
+            : null,
+        )};
+        if (cmd === "resume_saved_session") return ${JSON.stringify(
+          opts.storedCredential
+            ? {
+                outcome: "resumed",
+                username: opts.storedCredential.username,
+                token: opts.storedCredential.token,
+              }
+            : null,
+        )};
         window.__mockSavedPasswordLogins ??= [];
         if (cmd === "login_with_saved_password") {
           window.__mockSavedPasswordLogins.push({ host: args?.host, username: args?.username });
@@ -995,6 +1014,8 @@ export function buildTauriMockScript(opts: {
         // Auto-idle's OS idle poll (DP-33): null is "the OS cannot say", so the
         // mocked app keeps the in-window idle timer it had before the poll.
         if (cmd === "system_idle_ms") return null;
+        // The OS region: unknown, so dates follow the browser language.
+        if (cmd === "system_region_locale") return null;
         // The game scan (WP 8.3): no game is running in the mocked app.
         if (cmd === "detect_game") return null;
         // The song read (WP 8.10): nothing is playing in the mocked app.
@@ -1005,6 +1026,9 @@ export function buildTauriMockScript(opts: {
         if (cmd === "set_unread_badge") return null;
         // The Android call service; calls stay in __invokeLog.
         if (cmd === "set_call_service") return null;
+        if (cmd === "is_metered") return { metered: false };
+        if (["plugin:owncord-metered-network|register_listener",
+             "plugin:owncord-metered-network|remove_listener"].includes(cmd)) return null;
         if (cmd === "ptt_polling_supported") return false;
         // Windows per-app share audio (6.7): no WASAPI host, no picker switch.
         if (cmd === "app_audio_available") return false;
@@ -1016,6 +1040,11 @@ export function buildTauriMockScript(opts: {
         // Close to Tray / Start Minimized (WP 2B-3): the host's defaults.
         if (cmd === "get_window_prefs") return { minimizeToTray: true, startMinimized: false };
         if (cmd === "set_window_pref" || cmd === "show_next_launch") return null;
+        // Graphics card for video: no cards, so the row stays hidden.
+        if (cmd === "get_gpu_adapters")
+          return { cards: [], saved: "auto", active: null, notFound: false, resetAfterCrash: false };
+        if (cmd === "set_gpu_adapter") return null;
+        if (cmd === "native_voice_set_video_bitrate") return;
         // ---- External-content broker (B7-16) ----
         // No external network here: refuse the way the native broker does,
         // with a bare failure-class string. Teardown also names a fresh
@@ -1147,7 +1176,7 @@ export async function startFullSession(
 
 /**
  * Full session where the connect page ALSO has a saved auto-connect profile
- * for the same host, and `load_credential` still returns a usable credential.
+ * for the same host, and `resume_saved_session` still returns a usable credential.
  * `delete_credential` remains a no-op, so a logout test built on this asserts
  * the client refuses to auto-login on its own account rather than relying on
  * the credential delete having already won a race.

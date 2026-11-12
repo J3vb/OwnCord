@@ -14,9 +14,7 @@ import (
 func TestMigration046_GrandfathersEveryOneToOnePair(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
-	if err := db.MigrateFS(database, migrationsBefore(t, "046")); err != nil {
-		t.Fatalf("migrate to 045: %v", err)
-	}
+	mustDo(t, "migrate to 045", db.MigrateFS(database, migrationsBefore(t, "046")))
 	exec := func(q string, args ...any) {
 		t.Helper()
 		if _, err := database.ExecContext(ctx, q, args...); err != nil {
@@ -32,9 +30,7 @@ func TestMigration046_GrandfathersEveryOneToOnePair(t *testing.T) {
 	exec(`INSERT INTO channels (id, name, type, is_group) VALUES (2, 'group', 'dm', 1)`)
 	exec(`INSERT INTO dm_participants (channel_id, user_id) VALUES (2, 12), (2, 13)`)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("046 failed on a pre-existing tree: %v", err)
-	}
+	mustDo(t, "046 failed on a pre-existing tree", db.Migrate(database))
 
 	trusted := func(recipient, sender int64) bool {
 		t.Helper()
@@ -67,9 +63,7 @@ func TestMigration046_GrandfathersEveryOneToOnePair(t *testing.T) {
 func TestMigration058_DropsTrustForBlockedPairsOnly(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
-	if err := db.MigrateFS(database, migrationsBefore(t, "058")); err != nil {
-		t.Fatalf("migrate to 057: %v", err)
-	}
+	mustDo(t, "migrate to 057", db.MigrateFS(database, migrationsBefore(t, "058")))
 	exec := func(q string, args ...any) {
 		t.Helper()
 		if _, err := database.ExecContext(ctx, q, args...); err != nil {
@@ -84,9 +78,7 @@ func TestMigration058_DropsTrustForBlockedPairsOnly(t *testing.T) {
 		(10, 11, 'accepted'), (11, 10, 'accepted'), (12, 13, 'accepted')`)
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (10, 11)`)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("058 failed: %v", err)
-	}
+	mustDo(t, "058 failed", db.Migrate(database))
 
 	trusted := func(recipient, sender int64) bool {
 		t.Helper()

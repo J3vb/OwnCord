@@ -2,7 +2,6 @@ package admin_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -24,13 +23,8 @@ func TestAdminAPI_Attention(t *testing.T) {
 
 	ownerToken := createAdminUser(t, database)
 	w := doRequest(t, handler, http.MethodGet, "/attention", ownerToken, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	var rep service.AttentionReport
-	if err := json.Unmarshal(w.Body.Bytes(), &rep); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, w, http.StatusOK)
+	rep := decodeBody[service.AttentionReport](t, w)
 	if rep.EvaluatedAt == nil || len(rep.Signals) == 0 || rep.Warnings == nil {
 		t.Fatalf("report = %+v, want an evaluated report with signals and a warnings array", rep)
 	}

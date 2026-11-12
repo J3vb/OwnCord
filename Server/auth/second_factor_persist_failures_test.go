@@ -110,9 +110,7 @@ func TestPartialAuthStore_WriteFailuresAfterIssueAreLoggedNotFatal(t *testing.T)
 	p := &flakyPersister{}
 	store := auth.NewPartialAuthStore(time.Minute).WithPersister(p)
 	token, err := store.Issue(ctx, 7, "d", "ip")
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
+	mustDo(t, "Issue", err)
 	p.failWrites = true
 
 	// A failure count that cannot be persisted still counts the attempt as
@@ -145,9 +143,7 @@ func TestPendingTOTPStore_WriteFailuresAndBadKey(t *testing.T) {
 	key := testAESKey()
 	p := &flakyPersister{}
 	store := auth.NewPendingTOTPStore(time.Minute).WithPersister(p, key)
-	if err := store.Put(ctx, 1, "SECRET"); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
+	mustDo(t, "Put", store.Put(ctx, 1, "SECRET"))
 
 	// A different process with a different key cannot unseal the row.
 	other := auth.NewPendingTOTPStore(time.Minute).WithPersister(p, append([]byte{}, make([]byte, 32)...))

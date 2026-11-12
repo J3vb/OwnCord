@@ -17,9 +17,7 @@ import (
 func genTestVAPIDKey(t *testing.T) *ecdh.PrivateKey {
 	t.Helper()
 	priv, err := ecdh.P256().GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generating test VAPID key: %v", err)
-	}
+	mustDo(t, "generating test VAPID key", err)
 	return priv
 }
 
@@ -51,16 +49,12 @@ func TestPushSweep_UsesTheConfiguredWindow(t *testing.T) {
 	seedPushRow(t, database, 1, "https://push.example/new", keyID, time.Now().Add(-29*24*time.Hour))
 
 	n, err := svc.Sweep(context.Background())
-	if err != nil {
-		t.Fatalf("Sweep: %v", err)
-	}
+	mustDo(t, "Sweep", err)
 	if n != 1 {
 		t.Fatalf("Sweep deleted %d rows, want 1", n)
 	}
 	rows, err := svc.List(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
+	mustDo(t, "List", err)
 	if len(rows) != 1 || rows[0].Endpoint != "https://push.example/new" {
 		t.Fatalf("rows after sweep = %+v, want only the 29-day-old one", rows)
 	}
@@ -89,17 +83,13 @@ func TestPushSweep_RotationInvalidatesAndRecollects(t *testing.T) {
 	}
 
 	rows, err := svc.List(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("List after rotation: %v", err)
-	}
+	mustDo(t, "List after rotation", err)
 	if len(rows) != 0 {
 		t.Fatalf("List after rotation = %v, want none (the row is under the old key)", rows)
 	}
 
 	n, err := svc.Sweep(context.Background())
-	if err != nil {
-		t.Fatalf("Sweep: %v", err)
-	}
+	mustDo(t, "Sweep", err)
 	if n != 1 {
 		t.Fatalf("Sweep deleted %d rows, want 1 (the row under the rotated-away key)", n)
 	}
@@ -127,9 +117,7 @@ func TestPushSweep_NoKeyInstalledSweepsByTimeOnly(t *testing.T) {
 	}
 
 	n, err := svc.Sweep(context.Background())
-	if err != nil {
-		t.Fatalf("Sweep: %v", err)
-	}
+	mustDo(t, "Sweep", err)
 	if n != 1 {
 		t.Fatalf("Sweep deleted %d rows, want 1 (time-only: the key mismatch must not also fire)", n)
 	}

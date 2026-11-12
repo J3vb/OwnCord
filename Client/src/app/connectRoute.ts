@@ -7,9 +7,8 @@
 // the health refresh and the invite hook) are returned as a tuple. Nothing
 // here runs at import time.
 
-import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
-import { deleteCredential, loginWithSavedPassword, parseRelayedLogin } from "@lib/net/credentials";
+import { deleteCredential, loginWithSavedPassword, readRelayedLogin } from "@lib/net/credentials";
 import { createLogger } from "@lib/logger";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import type { ProfileManager } from "@lib/presence/profiles";
@@ -19,7 +18,6 @@ import { SessionScope } from "@lib/net/sessionScope";
 import { parseRegistrationMode, retentionNotice } from "@lib/types";
 import type { AuthResponse } from "@lib/types";
 import { bracketBareIPv6Host } from "@lib/ws";
-import { createUpdateNotifier } from "@components/UpdateNotifier";
 import { createConnectPage } from "@pages/ConnectPage";
 import { setUpdateRequiredHost, uiStore } from "@stores/ui.store";
 import type { UpdateRequired } from "@stores/ui.store";
@@ -28,7 +26,8 @@ import { connectText } from "../i18n/connect";
 import { createAutoLogin } from "./autoLogin";
 import { createConnectProfiles } from "./connectProfiles";
 import { probeServerInfo, runHealthChecks, serverInfoFor, serverInfoProbing } from "./serverHealth";
-import { abandonInFlight, startSession } from "./session";
+import { scheduleHealthChecks } from "./healthSchedule";
+import { abandonInFlight, signInPending, startSession } from "./session";
 
 const log = createLogger("main");
 
@@ -46,7 +45,6 @@ export function renderConnect(
   profileManager: ProfileManager,
   appEl: HTMLElement,
   renderRecovery: RenderRecovery,
-  handleUnauthorized: () => void,
   takePendingInvite: () => { code: string; host?: string } | null,
 ): readonly [
   { destroy(): void },
@@ -149,19 +147,12 @@ export function renderConnect(
           throw new Error(connectText("session.savedLoginUnavailable"));
         }
         // The relayed body is the same AuthResponse shape api.login returns,
-        // so from here the flow is literally the typed-password one.
-        let result;
-        try {
-          result = parseRelayedLogin(relayed);
-        } catch (err) {
-          // Run the same side effect `api.ts` runs for a 401 on any other
-          // request, so the two login paths cannot diverge on session state.
-          if (err instanceof ApiClientError && err.status === 401) {
-            handleUnauthorized();
-          }
-          throw err;
-        }
-        completeLogin(host, username, result);
+        // so from here the flow is literally the typed-password one: a
+        // refused credential throws to the form and touches no session state.
+        const auth = await attempt.run(readRelayedLogin(relayed));
+        attempt.assertCurrent();
+        pageOwner.assertCurrent();
+        completeLogin(host, username, auth);
       },
       async onRegister(host, username, password, inviteCode) {
         api.endSession();
@@ -279,11 +270,12 @@ export function renderConnect(
         cancelAutoLogin();
         deactivatePendingMessages();
         api.endSession();
-        // Every read of this flag (in app/autoLogin.ts) runs before the overlay carrying
-        // this Cancel button is ever painted, so by the time a click
-        // reaches here the session is already in flight (startSession has
-        // called ws.connect and registered listeners). Tear it down the
-        // same way the logout path does.
+        // The overlay carrying this Cancel button goes up when the session
+        // is in flight (startSession has registered listeners, and dials once
+        // the dispatcher is wired): tear it down the same way the logout path does. It
+        // also shows while a saved sign-in is still being checked; then
+        // nothing is in flight yet, and ending the API session above drops
+        // the pending answer.
         abandonInFlight();
       },
       onUpdateClient(host) {
@@ -295,14 +287,15 @@ export function renderConnect(
     getProfileList(),
   );
 
-  const [startAutoLogin, cancelAutoLogin, forgetServerWait] = createAutoLogin(
-    api,
-    profileManager,
-    pageOwner,
-    connectPage,
-    ensureProfileExists,
-    getProfileList,
-  );
+  const [startAutoLogin, cancelAutoLogin, forgetServerWait, resumeAfterCertAccept] =
+    createAutoLogin(
+      api,
+      profileManager,
+      pageOwner,
+      connectPage,
+      ensureProfileExists,
+      getProfileList,
+    );
 
   safeMount(connectPage, appEl, renderRecovery);
 
@@ -315,13 +308,24 @@ export function renderConnect(
   // before auth_ok, so the isAuthenticated subscriber below does not
   // navigate).
   let updateNotifier: MountableComponent | null = null;
+  let notifierRequest = 0;
   const mountUpdateNotifier = (host: string): void => {
     // A later refusal (another server tried from this same page) replaces
-    // the banner rather than being ignored.
+    // the banner rather than being ignored. The banner is its own chunk: only
+    // the newest request mounts, and never after this page is gone.
     updateNotifier?.destroy?.();
-    const notifier = createUpdateNotifier({ serverUrl: `https://${bracketBareIPv6Host(host)}` });
-    notifier.mount(appEl);
-    updateNotifier = notifier;
+    updateNotifier = null;
+    const request = ++notifierRequest;
+    import("../features/updates/UpdateNotifier")
+      .then(({ createUpdateNotifier }) => {
+        if (request !== notifierRequest || !pageOwner.isCurrent()) return;
+        const notifier = createUpdateNotifier({
+          serverUrl: `https://${bracketBareIPv6Host(host)}`,
+        });
+        notifier.mount(appEl);
+        updateNotifier = notifier;
+      })
+      .catch((err: unknown) => log.warn("Update banner failed to load", { error: String(err) }));
   };
   const offerUpdate = (required: UpdateRequired | null): void => {
     if (!required) return;
@@ -339,15 +343,17 @@ export function renderConnect(
   const unsubUpdateRequired = uiStore.subscribeSelector((s) => s.updateRequiredHost, offerUpdate);
   offerUpdate(uiStore.getState().updateRequiredHost);
 
-  // Periodic health check — re-run every 15s so offline servers update when they come back
-  const healthCheckInterval = setInterval(() => {
-    runHealthChecks(connectPage, getProfileList(), pageOwner);
-  }, 15_000);
+  // Periodic health check, so offline servers update when they come back.
+  // Paused while hidden or signing in; the page scope stops it.
+  scheduleHealthChecks(
+    pageOwner.signal,
+    () => runHealthChecks(connectPage, getProfileList(), pageOwner),
+    signInPending,
+  );
 
-  pageOwner.addCleanup(() => clearInterval(healthCheckInterval));
   pageOwner.addCleanup(unsubUpdateRequired);
   // Page-owned checks and listeners cannot update a later connect screen: the
-  // scope's cleanups clear the health interval and the store subscription, and
+  // scope's signal stops the health schedule, its cleanup drops the store subscription, and
   // destroy also tears down the update notifier and the page.
   const page = {
     destroy(): void {
@@ -368,10 +374,12 @@ export function renderConnect(
     page,
     // A health-refresh hook so trusting a first-use certificate can re-check
     // the now-reachable server without a full page navigation, and carry on
-    // with the sign-in that certificate refused.
+    // with the sign-in or the saved-session resume that certificate held up.
     (acceptedHost) => {
       runHealthChecks(connectPage, getProfileList(), pageOwner);
-      if (acceptedHost !== undefined) connectPage.resubmitAfterCertAccept(acceptedHost);
+      if (acceptedHost === undefined) return;
+      connectPage.resubmitAfterCertAccept(acceptedHost);
+      resumeAfterCertAccept(acceptedHost);
     },
     (code, host) => connectPage.applyInviteLink(code, host),
   ];

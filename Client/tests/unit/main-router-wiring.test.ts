@@ -46,7 +46,7 @@ vi.mock("../../src/app/connectRoute", () => ({
     return [{ destroy: vi.fn() }, hoisted.rerunHealth, hoisted.applyInvite];
   },
 }));
-vi.mock("@components/CertMismatchModal", () => ({
+vi.mock("../../src/features/connection/CertMismatchModal", () => ({
   createCertFirstUseModal: (opts: { onAccept: () => void }) => {
     hoisted.firstUseModals.push(opts);
     return { mount: vi.fn(), destroy: vi.fn() };
@@ -60,7 +60,7 @@ import { createMainPage } from "@pages/MainPage";
 import { expectConsole } from "../helpers/console";
 
 const lastTakePendingInvite = (): (() => PendingInvite) =>
-  hoisted.renderConnect.mock.lastCall![5] as () => PendingInvite;
+  hoisted.renderConnect.mock.lastCall![4] as () => PendingInvite;
 
 beforeAll(async () => {
   document.body.innerHTML = '<div id="app"></div>';

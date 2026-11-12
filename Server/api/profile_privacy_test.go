@@ -39,17 +39,13 @@ func TestPrivacy_DefaultsRoundTripAndReplace(t *testing.T) {
 	token := profileCreateToken(t, database, "privacy-user", 4)
 
 	rr := noteDo(t, router, http.MethodGet, privacyPath, token, "")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if got := privacyBody(t, rr.Body.String()); got["allow_member_dms"] != true || got["message_requests"] != true || len(got) != 2 {
 		t.Errorf("default body = %v, want both true", got)
 	}
 
 	rr = noteDo(t, router, http.MethodPut, privacyPath, token, `{"allow_member_dms":false,"message_requests":true}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("PUT status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if got := privacyBody(t, rr.Body.String()); got["allow_member_dms"] != false || got["message_requests"] != true {
 		t.Errorf("PUT body = %v", got)
 	}
@@ -131,9 +127,7 @@ func TestPrivacy_NotInProfileResponse(t *testing.T) {
 	noteDo(t, router, http.MethodPut, privacyPath, token, `{"allow_member_dms":false,"message_requests":false}`)
 
 	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{"username": "privacy-renamed"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("PATCH status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	for _, key := range []string{"allow_member_dms", "message_requests"} {
 		if strings.Contains(rr.Body.String(), key) {
 			t.Errorf("profile payload carries %q", key)

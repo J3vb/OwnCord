@@ -6,10 +6,10 @@ import { lightSidebarAreaOpts, resetSidebarStoresAsMember } from "../helpers/sid
 vi.mock("@lib/voice/livekitSession", () => mocks.rePinSessionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.e2eeCryptoMock());
 vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
-vi.mock("@components/UserBar", () => mocks.userBarMock());
-vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
-vi.mock("@components/MemberList", () => mocks.memberListMock());
-vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
+vi.mock("../../src/features/voice/UserBar", () => mocks.userBarMock());
+vi.mock("../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock());
+vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
+vi.mock("../../src/features/navigation/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 const { inviteOpen, openAdminPanel, createModal } = vi.hoisted(() => ({
   inviteOpen: vi.fn().mockResolvedValue(undefined),
   openAdminPanel: vi.fn().mockResolvedValue(undefined),
@@ -17,7 +17,7 @@ const { inviteOpen, openAdminPanel, createModal } = vi.hoisted(() => ({
 }));
 vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.inviteManagerMock(inviteOpen));
 vi.mock("@lib/adminPanel", () => ({ openAdminPanel }));
-vi.mock("@components/CreateChannelModal", () => ({
+vi.mock("../../src/features/channels/CreateChannelModal", () => ({
   createCreateChannelModal: createModal,
 }));
 

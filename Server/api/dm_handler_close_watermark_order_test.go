@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -51,11 +50,8 @@ func TestCloseDM_WatermarkBumpsBeforeTheNotifySend(t *testing.T) {
 	rr1 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr1.Code != http.StatusCreated {
-		t.Fatalf("setup CreateDM: status = %d, want 201; body = %s", rr1.Code, rr1.Body.String())
-	}
-	var createResp map[string]any
-	_ = json.NewDecoder(rr1.Body).Decode(&createResp)
+	requireStatus(t, rr1, http.StatusCreated)
+	createResp := decodeBody[map[string]any](t, rr1)
 	channelID := createResp["channel_id"]
 
 	// Only the close's own calls matter — creation already exercised
@@ -63,9 +59,7 @@ func TestCloseDM_WatermarkBumpsBeforeTheNotifySend(t *testing.T) {
 	bc.calls = nil
 
 	rr := dmDelete(t, router, fmt.Sprintf("/api/v1/dms/%v", channelID), tokenAlice)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("CloseDM: status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 
 	if len(bc.calls) < 2 || bc.calls[0] != "bump" {
 		t.Fatalf("close order = %v, want the watermark bump before the first notify send — "+

@@ -70,7 +70,10 @@ func TestDeliverBroadcast_ShedFrameLeavesNoSeqGap(t *testing.T) {
 readLoop:
 	for {
 		select {
-		case msg := <-send:
+		case msg, ok := <-send:
+			if !ok {
+				break readLoop
+			}
 			var frame struct {
 				Seq uint64 `json:"seq"`
 			}
@@ -103,19 +106,7 @@ readLoop:
 // bump the visibility watermark so any client resuming from a seq at or
 // before the open takes the full-ready path (whose payload includes DMs).
 func TestEmitEvents_DMChannelOpenForcesFullResyncForOlderClients(t *testing.T) {
-	h := newEmitTestHub()
-	atomic.StoreUint64(&h.seq, 40)
-
-	h.EmitEvents(context.Background(), []Event{
-		DMChannelOpenEvent{targetUserID: 7, payload: []byte(`{"type":"dm_channel_open"}`)},
-	})
-
-	if !h.mustFullResync(40) {
-		t.Error("a client resuming from a seq at or before a dm_channel_open must be forced onto the full-ready path")
-	}
-	if h.mustFullResync(41) {
-		t.Error("clients past the open must keep replaying normally")
-	}
+	requireDMChannelOpenRaisesWatermark(t)
 }
 
 // computeAllowedChannels treated a DM-channel lookup failure as non-fatal,
@@ -139,9 +130,7 @@ func TestComputeAllowedChannels_DMLookupErrorIsFatal(t *testing.T) {
 
 	// Fault-inject exactly the DM lookup; the earlier role/channel lookups
 	// keep working.
-	if _, err := database.ExecContext(context.Background(), `DROP TABLE dm_open_state`); err != nil {
-		t.Fatalf("drop dm_open_state: %v", err)
-	}
+	mustExec(t, database, `DROP TABLE dm_open_state`)
 
 	if _, err := h.computeAllowedChannels(context.Background(), database, user); err == nil {
 		t.Error("a failed DM-channel lookup must be an error (forcing full ready), not a silently DM-stripped replay")
@@ -232,10 +221,7 @@ func TestFailedHandshake_MarksUserOfflineWhenNoReplacementRemains(t *testing.T) 
 	// B's auth_ok/ready write fails; the handshake failure path runs.
 	h.unregisterFailedHandshake(context.Background(), newClient)
 
-	user, err := database.GetUserByID(context.Background(), userID)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, userID)
 	if user.Status == "online" {
 		t.Error("user stuck online after a failed handshake with no surviving connection")
 	}
@@ -251,5 +237,25 @@ func TestFailedHandshake_MarksUserOfflineWhenNoReplacementRemains(t *testing.T) 
 		}
 	default:
 		t.Error("no presence broadcast queued after the failed handshake teardown")
+	}
+}
+
+// requireDMChannelOpenRaisesWatermark emits a dm_channel_open at seq 40 and
+// checks that a resume from 40 is forced onto the full ready while a resume
+// from 41 keeps replaying.
+func requireDMChannelOpenRaisesWatermark(t *testing.T) {
+	t.Helper()
+	h := newEmitTestHub()
+	atomic.StoreUint64(&h.seq, 40)
+
+	h.EmitEvents(context.Background(), []Event{
+		DMChannelOpenEvent{targetUserID: 7, payload: []byte(`{"type":"dm_channel_open"}`)},
+	})
+
+	if !h.mustFullResync(40) {
+		t.Error("a client resuming from a seq at or before a dm_channel_open must be forced onto the full-ready path")
+	}
+	if h.mustFullResync(41) {
+		t.Error("clients past the open must keep replaying normally")
 	}
 }

@@ -64,9 +64,7 @@ func countVersions(t *testing.T, database *db.DB) int {
 	t.Helper()
 	var n int
 	err := database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM schema_versions").Scan(&n)
-	if err != nil {
-		t.Fatalf("counting schema_versions: %v", err)
-	}
+	mustDo(t, "counting schema_versions", err)
 	return n
 }
 
@@ -125,9 +123,7 @@ func TestMigrate_SchemaVersionsTableCreated(t *testing.T) {
 		"001_create_foo.sql", "CREATE TABLE IF NOT EXISTS foo (id INTEGER PRIMARY KEY);",
 	)
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, fsys))
 
 	if !tableExists(t, database, "schema_versions") {
 		t.Error("schema_versions table was not created by MigrateFS")
@@ -145,9 +141,7 @@ func TestMigrate_AllMigrationsRecorded(t *testing.T) {
 		"003_gamma.sql", "CREATE TABLE IF NOT EXISTS gamma (id INTEGER PRIMARY KEY);",
 	)
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, fsys))
 
 	for _, name := range []string{"001_alpha.sql", "002_beta.sql", "003_gamma.sql"} {
 		if !hasVersion(t, database, name) {
@@ -169,20 +163,14 @@ func TestMigrate_SkipsAlreadyApplied(t *testing.T) {
 		`,
 	)
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() first run error: %v", err)
-	}
+	mustDo(t, "MigrateFS() first run error", db.MigrateFS(database, fsys))
 
 	// Second run — must not fail even though the INSERT would conflict if re-run.
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() second run error (migration was re-executed): %v", err)
-	}
+	mustDo(t, "MigrateFS() second run error (migration was re-executed)", db.MigrateFS(database, fsys))
 
 	// Confirm the row exists exactly once.
 	var count int
-	if err := database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM unique_check WHERE val='singleton'").Scan(&count); err != nil {
-		t.Fatalf("counting unique_check: %v", err)
-	}
+	mustDo(t, "counting unique_check", database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM unique_check WHERE val='singleton'").Scan(&count))
 	if count != 1 {
 		t.Errorf("unique_check has %d rows, want exactly 1 — migration was re-run", count)
 	}
@@ -197,9 +185,7 @@ func TestMigrate_AppliesNewMigrationsOnly(t *testing.T) {
 		"001_base.sql", "CREATE TABLE IF NOT EXISTS base_tbl (id INTEGER PRIMARY KEY);",
 	)
 
-	if err := db.MigrateFS(database, fsFirst); err != nil {
-		t.Fatalf("MigrateFS() first run error: %v", err)
-	}
+	mustDo(t, "MigrateFS() first run error", db.MigrateFS(database, fsFirst))
 
 	versionsAfterFirst := countVersions(t, database)
 
@@ -209,9 +195,7 @@ func TestMigrate_AppliesNewMigrationsOnly(t *testing.T) {
 		"002_extra.sql", "CREATE TABLE IF NOT EXISTS extra_tbl (id INTEGER PRIMARY KEY);",
 	)
 
-	if err := db.MigrateFS(database, fsSecond); err != nil {
-		t.Fatalf("MigrateFS() second run error: %v", err)
-	}
+	mustDo(t, "MigrateFS() second run error", db.MigrateFS(database, fsSecond))
 
 	versionsAfterSecond := countVersions(t, database)
 
@@ -246,14 +230,10 @@ func TestMigrate_OrderIsLexicographic(t *testing.T) {
 		"001_create.sql", "CREATE TABLE IF NOT EXISTS order_check (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT);",
 	)
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, fsys))
 
 	var label string
-	if err := database.QueryRowContext(context.Background(), "SELECT label FROM order_check LIMIT 1").Scan(&label); err != nil {
-		t.Fatalf("selecting from order_check: %v", err)
-	}
+	mustDo(t, "selecting from order_check", database.QueryRowContext(context.Background(), "SELECT label FROM order_check LIMIT 1").Scan(&label))
 	if label != "second" {
 		t.Errorf("label = %q, want 'second'", label)
 	}
@@ -283,9 +263,7 @@ func TestMigrate_SeedExistingDatabase(t *testing.T) {
 		`,
 	)
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, fsys))
 
 	// The migration must be recorded (seeded).
 	if !hasVersion(t, database, "001_initial.sql") {
@@ -329,20 +307,14 @@ func TestMigrate_SeedDoesNotReRunMigrations(t *testing.T) {
 	)
 
 	// First call — seeds because schema_versions is absent AND users table exists.
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() first run error: %v", err)
-	}
+	mustDo(t, "MigrateFS() first run error", db.MigrateFS(database, fsys))
 
 	// Second call — must be a no-op (migration is already recorded).
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() second run error: %v", err)
-	}
+	mustDo(t, "MigrateFS() second run error", db.MigrateFS(database, fsys))
 
 	// existing table should be empty — the INSERT was never executed (seeded only).
 	var count int
-	if err := database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM existing").Scan(&count); err != nil {
-		t.Fatalf("counting existing: %v", err)
-	}
+	mustDo(t, "counting existing", database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM existing").Scan(&count))
 	if count != 0 {
 		t.Errorf("existing has %d rows, want 0 — seeded migration was re-executed", count)
 	}
@@ -400,9 +372,7 @@ func TestMigrate_InterruptedSeedDoesNotOrphanTrackingTable(t *testing.T) {
 	fsys := simpleFS(pairs...)
 
 	var basePages int
-	if err := database.QueryRowContext(ctx, "PRAGMA page_count").Scan(&basePages); err != nil {
-		t.Fatalf("PRAGMA page_count: %v", err)
-	}
+	mustDo(t, "PRAGMA page_count", database.QueryRowContext(ctx, "PRAGMA page_count").Scan(&basePages))
 	if _, err := database.ExecContext(ctx, fmt.Sprintf("PRAGMA max_page_count = %d", basePages+3)); err != nil {
 		t.Fatalf("PRAGMA max_page_count: %v", err)
 	}
@@ -422,15 +392,11 @@ func TestMigrate_InterruptedSeedDoesNotOrphanTrackingTable(t *testing.T) {
 	// orphaned, empty schema_versions table behind, MigrateFS now believes
 	// tracking is already in place, skips seeding entirely, and applies
 	// every migration for real — including 000_destroy_users.sql.
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() second run error: %v", err)
-	}
+	mustDo(t, "MigrateFS() second run error", db.MigrateFS(database, fsys))
 
 	var name string
 	err := database.QueryRowContext(ctx, "SELECT name FROM users WHERE id = 1").Scan(&name)
-	if err != nil {
-		t.Fatalf("users row id=1 is gone: 000_destroy_users.sql was executed instead of seeded — an interrupted seed orphaned an empty schema_versions table: %v", err)
-	}
+	mustDo(t, "users row id=1 is gone: 000_destroy_users.sql was executed instead of seeded — an interrupted seed orphaned an empty schema_versions table", err)
 	if name != "admin" {
 		t.Errorf("users.name = %q, want %q — users table appears to have been recreated", name, "admin")
 	}
@@ -445,9 +411,7 @@ func TestMigrate_SchemaVersionsAppliedAtRecorded(t *testing.T) {
 		"001_ts.sql", "CREATE TABLE IF NOT EXISTS ts_test (id INTEGER PRIMARY KEY);",
 	)
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, fsys))
 
 	var appliedAt string
 	err := database.QueryRowContext(context.Background(),
@@ -469,9 +433,7 @@ func TestMigrate_AppliedAtIsISO8601(t *testing.T) {
 		"001_dt.sql", "CREATE TABLE IF NOT EXISTS dt_test (id INTEGER PRIMARY KEY);",
 	)
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, fsys))
 
 	var appliedAt string
 	if err := database.QueryRowContext(context.Background(),
@@ -504,9 +466,7 @@ func TestMigrate_EmptyFSSucceeds(t *testing.T) {
 
 	fsys := fstest.MapFS{}
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() with empty FS error: %v", err)
-	}
+	mustDo(t, "MigrateFS() with empty FS error", db.MigrateFS(database, fsys))
 
 	if !tableExists(t, database, "schema_versions") {
 		t.Error("schema_versions should be created even for empty FS")
@@ -574,9 +534,7 @@ func TestMigrate_NonSQLFilesSkipped(t *testing.T) {
 		"002_ok.go":  {Data: []byte("package migrations")},
 	}
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, fsys))
 
 	if hasVersion(t, database, "README.md") {
 		t.Error("README.md should not be recorded in schema_versions")
@@ -595,9 +553,7 @@ func TestMigrate_NonSQLFilesSkipped(t *testing.T) {
 func TestMigrate_WithRealMigrations(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	if !tableExists(t, database, "schema_versions") {
 		t.Fatal("schema_versions not created by Migrate()")
@@ -616,12 +572,8 @@ func TestMigrate_WithRealMigrations(t *testing.T) {
 func TestMigrate_WithRealMigrationsIdempotent(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() first run error: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() second run error: %v", err)
-	}
+	mustDo(t, "Migrate() first run error", db.Migrate(database))
+	mustDo(t, "Migrate() second run error", db.Migrate(database))
 }
 
 // TestMigrate_SeedDetectionUsesKnownTable verifies the seeding heuristic: it
@@ -641,9 +593,7 @@ func TestMigrate_SeedDetectionUsesKnownTable(t *testing.T) {
 		"001_new.sql", "CREATE TABLE IF NOT EXISTS new_table (id INTEGER PRIMARY KEY);",
 	)
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, fsys))
 
 	// Since "users" table was absent, seeding must NOT have occurred and the
 	// migration must have actually been applied.
@@ -691,9 +641,7 @@ func TestMigrate_SchemaVersionsHasPrimaryKey(t *testing.T) {
 		"001_pk.sql", "CREATE TABLE IF NOT EXISTS pk_test (id INTEGER PRIMARY KEY);",
 	)
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, fsys))
 
 	// Attempting a duplicate insert must fail.
 	_, err := database.ExecContext(context.Background(),
@@ -720,9 +668,7 @@ func TestMigrate_SeedRecordsAllFilesFromFS(t *testing.T) {
 		"003_c.sql", "CREATE TABLE IF NOT EXISTS seed_c (id INTEGER PRIMARY KEY);",
 	)
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, fsys))
 
 	for _, name := range []string{"001_a.sql", "002_b.sql", "003_c.sql"} {
 		if !hasVersion(t, database, name) {
@@ -749,9 +695,7 @@ func TestMigrate_FreshDatabaseRunsAllMigrations(t *testing.T) {
 		"002_fresh.sql", "CREATE TABLE IF NOT EXISTS fresh_b (id INTEGER PRIMARY KEY);",
 	)
 
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, fsys))
 
 	for _, tbl := range []string{"fresh_a", "fresh_b"} {
 		if !tableExists(t, database, tbl) {
@@ -792,38 +736,15 @@ func TestMigrate_LargeNumberOfMigrations(t *testing.T) {
 // not, so @everyone stays gated after an upgrade of an existing database.
 func TestMigrate_022SeedsMentionEveryone(t *testing.T) {
 	database := openMemory(t)
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
-	const mentionEveryone = int64(0x200000)
-	for _, tc := range []struct {
-		roleID int64
-		name   string
-		want   bool
-	}{
-		{1, "Owner", true},
-		{2, "Admin", true},
-		{3, "Moderator", true},
-		{4, "Member", false},
-	} {
-		var perms int64
-		if err := database.QueryRowContext(context.Background(),
-			`SELECT permissions FROM roles WHERE id = ?`, tc.roleID).Scan(&perms); err != nil {
-			t.Fatalf("read role %s: %v", tc.name, err)
-		}
-		if got := perms&mentionEveryone != 0; got != tc.want {
-			t.Errorf("%s MENTION_EVERYONE = %v, want %v (perms=0x%X)", tc.name, got, tc.want, perms)
-		}
-	}
+	requireMentionEveryoneSeeded(t, database)
 }
 
 // TestMigrate_022CreatesMentionSchema locks the storage phase 3 relies on.
 func TestMigrate_022CreatesMentionSchema(t *testing.T) {
 	database := openMemory(t)
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 	if !tableExists(t, database, "message_mentions") {
 		t.Error("message_mentions table not created")
 	}
@@ -844,9 +765,7 @@ func TestMigrate_022CreatesMentionSchema(t *testing.T) {
 func TestMigrate_RefusesSchemaAhead(t *testing.T) {
 	database := openMemory(t)
 	fsys := simpleFS("001_a.sql", "CREATE TABLE a (id INTEGER);")
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("first MigrateFS: %v", err)
-	}
+	mustDo(t, "first MigrateFS", db.MigrateFS(database, fsys))
 	// Simulate a newer server having recorded a migration we do not carry.
 	if _, err := database.ExecContext(context.Background(),
 		"INSERT INTO schema_versions (version) VALUES ('054_from_newer.sql')"); err != nil {
@@ -874,12 +793,8 @@ func TestMigrate_SchemaAheadAllowsKnownMigrationsOnly(t *testing.T) {
 		"001_a.sql", "CREATE TABLE a (id INTEGER);",
 		"002_b.sql", "CREATE TABLE b (id INTEGER);",
 	)
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
-	if err := db.MigrateFS(database, fsys); err != nil {
-		t.Fatalf("re-run with no unknowns: %v", err)
-	}
+	mustDo(t, "MigrateFS", db.MigrateFS(database, fsys))
+	mustDo(t, "re-run with no unknowns", db.MigrateFS(database, fsys))
 }
 
 // TestCheckBackupSchemaAhead_NamesUnknownMigrations is the restore half of
@@ -888,24 +803,16 @@ func TestMigrate_SchemaAheadAllowsKnownMigrationsOnly(t *testing.T) {
 func TestCheckBackupSchemaAhead_NamesUnknownMigrations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "newer.db")
 	database, err := db.Open(path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	mustDo(t, "Open", err)
+	mustDo(t, "Migrate", db.Migrate(database))
 	if _, err := database.ExecContext(context.Background(),
 		"INSERT INTO schema_versions (version) VALUES ('999_from_newer.sql')"); err != nil {
 		t.Fatalf("seed newer version: %v", err)
 	}
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", database.Close())
 
 	ahead, err := db.CheckBackupSchemaAhead(context.Background(), path)
-	if err != nil {
-		t.Fatalf("CheckBackupSchemaAhead: %v", err)
-	}
+	mustDo(t, "CheckBackupSchemaAhead", err)
 	if !slices.Equal(ahead, []string{"999_from_newer.sql"}) {
 		t.Errorf("ahead = %v, want [999_from_newer.sql]", ahead)
 	}
@@ -916,20 +823,14 @@ func TestCheckBackupSchemaAhead_NamesUnknownMigrations(t *testing.T) {
 func TestCheckBackupSchemaAhead_NoSchemaVersionsTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "untracked.db")
 	conn, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("sql.Open: %v", err)
-	}
+	mustDo(t, "sql.Open", err)
 	if _, err := conn.Exec("CREATE TABLE t (id INTEGER)"); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
-	if err := conn.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", conn.Close())
 
 	ahead, err := db.CheckBackupSchemaAhead(context.Background(), path)
-	if err != nil {
-		t.Fatalf("CheckBackupSchemaAhead: %v", err)
-	}
+	mustDo(t, "CheckBackupSchemaAhead", err)
 	if len(ahead) != 0 {
 		t.Errorf("ahead = %v, want none", ahead)
 	}
@@ -939,9 +840,7 @@ func TestCheckBackupSchemaAhead_NoSchemaVersionsTable(t *testing.T) {
 // error, never a silent "nothing ahead" that would let the restore proceed.
 func TestCheckBackupSchemaAhead_NotADatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "garbage.db")
-	if err := os.WriteFile(path, []byte(strings.Repeat("not a database ", 100)), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(path, []byte(strings.Repeat("not a database ", 100)), 0o600))
 	if _, err := db.CheckBackupSchemaAhead(context.Background(), path); err == nil {
 		t.Fatal("CheckBackupSchemaAhead accepted a non-SQLite file")
 	}

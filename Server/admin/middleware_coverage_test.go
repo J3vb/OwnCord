@@ -23,10 +23,7 @@ func TestAdminAuthMiddleware_ExpiredSession(t *testing.T) {
 
 	// Create a user and session, then manually expire the session by setting
 	// expires_at to a past timestamp via the exported Exec helper.
-	uid, err := database.CreateUser(context.Background(), "expireduser", "$2a$12$x", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "expireduser", "$2a$12$x", 1)
 	token := "expired-session-token"
 	tokenHash := auth.HashToken(token)
 	if _, err := database.CreateSession(context.Background(), uid, tokenHash, "test", "127.0.0.1"); err != nil {
@@ -44,18 +41,14 @@ func TestAdminAuthMiddleware_ExpiredSession(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expired session status = %d, want 401; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }
 
 // TestAdminAuthMiddleware_BannedAdmin verifies that a banned administrator's
 // still-valid session is rejected with 403 — a ban must revoke admin-panel
 // access immediately, not only when the session expires.
 func TestAdminAuthMiddleware_BannedAdmin(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	if w := doRequest(t, handler, http.MethodGet, "/stats", token, nil); w.Code != http.StatusOK {
 		t.Fatalf("pre-ban status = %d, want 200; body: %s", w.Code, w.Body.String())
@@ -69,9 +62,7 @@ func TestAdminAuthMiddleware_BannedAdmin(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
 
-	if w.Code != http.StatusForbidden {
-		t.Errorf("banned admin status = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 // TestAdminAuthMiddleware_MissingBearer verifies that a request with no
@@ -82,9 +73,7 @@ func TestAdminAuthMiddleware_MissingBearer(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", "", nil)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("missing bearer status = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }
 
 // TestAdminAuthMiddleware_InvalidToken verifies that a token not in the
@@ -95,7 +84,5 @@ func TestAdminAuthMiddleware_InvalidToken(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", "completely-invalid-token", nil)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("invalid token status = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }

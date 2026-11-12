@@ -28,7 +28,7 @@ import {
   MAX_DISPLAY_NAME_LEN,
   runeCount,
 } from "@lib/text/nameLimits";
-import type { ToastType } from "@components/Toast";
+import type { ToastType } from "@lib/ui/toastContainer";
 import { shellText } from "../../i18n/shell";
 import { moderationText as t } from "../../i18n/moderation";
 
@@ -104,7 +104,7 @@ export function openNicknameDialog(options: NicknameDialogOptions): ModalInstanc
   );
   const save = createElement(
     "button",
-    { class: "btn-primary", type: "button", "data-testid": "nickname-save" },
+    { class: "btn-modal-save", type: "button", "data-testid": "nickname-save" },
     t("nicknameDialog.save"),
   );
   footer.append(reset, cancel, save);
@@ -192,7 +192,7 @@ export function openNicknameDialog(options: NicknameDialogOptions): ModalInstanc
 
 /** The server names the field `display_name`; this dialog calls it a nickname. */
 function failureText(err: unknown): string {
-  return errorText(err, t("nicknameDialog.failed")).replace(
+  return errorText(err, shellText("member.nicknameFailed")).replace(
     /^display_name\b/i,
     t("nicknameDialog.label"),
   );

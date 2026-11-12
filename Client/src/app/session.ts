@@ -20,22 +20,23 @@ import {
   PREAUTH_CONNECT_TIMEOUT_MS,
   type WsClient,
 } from "@lib/ws";
-import { wireDispatcher } from "@lib/dispatcher";
+import { loadDispatcher, loadedDispatcher, prefetchDispatcher } from "./sessionDispatcher";
+import type { DispatcherModule } from "./sessionDispatcher";
+import { startReadyDeadline } from "./readyDeadline";
 import { setIdentityKeyProvider } from "@lib/ws";
 import { setLastChannelHost } from "@lib/prefs/lastChannel";
-import { authStore } from "@stores/auth.store";
+import { authStore, clearAuth, type LogoutReason } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { leaveVoiceChannel } from "@stores/voice.store";
-import { createConnectedOverlay } from "@components/ConnectedOverlay";
-import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
+import { createConnectedOverlay } from "../features/connection/ConnectedOverlay";
+import type { ConnectedOverlayControl } from "../features/connection/ConnectedOverlay";
 import { createLogger } from "@lib/logger";
-import {
-  saveCredential,
-  deleteCredential,
-  createUserUpdateCredentialSaver,
-} from "@lib/net/credentials";
+import { deleteCredential, createUserUpdateCredentialSaver } from "@lib/net/credentials";
 import { connectText } from "../i18n/connect";
+import { persistSessionCredential } from "./sessionCredential";
 import type { PageId } from "./context";
+
+export { READY_TIMEOUT_MS } from "./readyDeadline";
 
 const log = createLogger("main");
 
@@ -46,6 +47,12 @@ let currentPage: () => PageId;
 let navigate: (page: PageId) => void;
 
 let dispatcherCleanup: (() => void) | null = null;
+// The UX connection status writer (docs/architecture/ux §3), wired once from
+// the first dispatcher load: nothing dials before it, so no transition is missed.
+let connectionStatusWired = false;
+// Bumped by every startSession and abandonInFlight: a same-host, same-token
+// re-entry keeps the API scope, which alone cannot tell a waiting attempt it lost.
+let attemptSeq = 0;
 // Tears down the session-scoped WS listeners registered in startSession
 // (user_update, onStateChange, ready). dispatcherCleanup only clears
 // dispatcher-registered handlers, so these need their own teardown to avoid
@@ -54,6 +61,10 @@ let sessionCleanup: (() => void) | null = null;
 let connectedOverlay: ConnectedOverlayControl | null = null;
 let lastConnectHost = "";
 let lastConnectToken = "";
+// Whether the session in flight is still signing in: dialing or behind the
+// connected overlay. False once `ready` arrives, or once the first dial ends
+// without auth_ok (an auth_error leaves the user on the form, still targeted).
+let signingIn = false;
 
 /**
  * Hands the controller the services and the router's two operations it works
@@ -73,6 +84,9 @@ export function configureSession(
   appEl = appElement;
   currentPage = currentPageId;
   navigate = navigateTo;
+  // Runs before the first render, but the chunk can only evaluate in a later
+  // task, so the first screen never waits on it.
+  prefetchDispatcher();
 }
 
 // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is loaded
@@ -95,12 +109,18 @@ export function sessionInFlight(): boolean {
   return lastConnectHost !== "";
 }
 
+/** Whether a sign-in is dialing or waiting for `ready`, so the connect page is covered or busy. */
+export function signInPending(): boolean {
+  return lastConnectHost !== "" && signingIn;
+}
+
 /**
  * Tear the in-flight session down directly: listeners, dispatcher, overlay,
  * then the socket. The caller ends the API session first. Used by the
  * auto-login cancel and the invite deep link.
  */
 export function abandonInFlight(): void {
+  attemptSeq += 1;
   sessionCleanup?.();
   sessionCleanup = null;
   dispatcherCleanup?.();
@@ -152,6 +172,7 @@ export function startSession(
   authStore.setState((prev) => ({ ...prev, token }));
   lastConnectHost = host;
   lastConnectToken = token;
+  signingIn = true;
   // Scope the last-channel store to this server before the dispatcher
   // wires, so the first `ready` (which restores it) reads the right key.
   // It has to be here, not MainPage: the first ready arrives before MainPage
@@ -166,10 +187,11 @@ export function startSession(
     (await import("@lib/net/identity")).getDeviceIdentityPublicKey(identityHost),
   );
   owner.addCleanup(() => setIdentityKeyProvider(null));
-  ws.connect({ host, token });
-  dispatcherCleanup = wireDispatcher(ws, api);
-  owner.addCleanup(dispatcherCleanup);
-  log.info("Dispatcher wired, connecting WS");
+  // The dispatcher is wired at the end; its teardown keeps this cleanup slot.
+  const attempt = ++attemptSeq;
+  const stillOwns = (): boolean => attempt === attemptSeq && owner.isCurrent();
+  let attemptUnwire: (() => void) | null = null;
+  owner.addCleanup(() => attemptUnwire?.());
 
   // A stored-token resume (auto-login / quick switch) sends no REST preflight,
   // so a server that is down leaves this handshake behind the "Auto-connecting…"
@@ -181,9 +203,7 @@ export function startSession(
   // host, or when the session tears down. A SERVER_BUSY refusal restarts it,
   // up to PREAUTH_BUSY_CAP_MS after this first attempt (P5-S04).
   const preauthStartedAt = Date.now();
-  const onPreauthDeadline = (): void => {
-    if (!owner.isCurrent()) return;
-    log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
+  const endPreauth = (message: string, retryWait = true): void => {
     // Stop the retry loop and tear the dead attempt down exactly as a
     // cancelled auto-login does, then tell the user on the connect form.
     api.endSession();
@@ -194,15 +214,22 @@ export function startSession(
     dispatcherCleanup = null;
     lastConnectHost = "";
     lastConnectToken = "";
+    setTransientError(message);
+    // A server that answers with a reply we cannot read is not offline: waiting
+    // for it would redial into the same fault.
+    if (retryWait) onPreauthTimeout?.();
+  };
+  const onPreauthDeadline = (): void => {
+    if (!owner.isCurrent()) return;
+    log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
     // A dial that failed on the certificate is not an unreachable server:
     // name it. `getConnectFailureCode` reads the distinct code the transport
     // reported for the rejected connect (ws.ts).
-    setTransientError(
+    endPreauth(
       ws.getConnectFailureCode() === TLS_CERT_CODE
         ? connectText("error.tlsFailed")
         : connectText("session.connectTimeout"),
     );
-    onPreauthTimeout?.();
   };
   let preauthTimer: ReturnType<typeof setTimeout> | null = setTimeout(
     onPreauthDeadline,
@@ -221,6 +248,16 @@ export function startSession(
   sessionUnsubs.push(
     ws.onCertFirstUse((evt) => {
       if (evt.host === normalizeHostForCertCompare(host)) clearPreauthDeadline();
+    }),
+  );
+  // A sign-in or ready the client cannot read: nothing re-requests it and a
+  // redial meets the same server, so end the attempt and say so.
+  sessionUnsubs.push(
+    ws.onHandshakeFault(() => {
+      if (!owner.isCurrent()) return;
+      const message = connectText("session.unreadableReply");
+      if (preauthTimer !== null) endPreauth(message, false);
+      else endAuthedSession(message, "unreadable_reply");
     }),
   );
   sessionUnsubs.push(
@@ -245,59 +282,12 @@ export function startSession(
   // in" saves it session-only (it goes with the tab) rather than not at all,
   // so a reload does not sign the user out.
   const keepToken = __OWNCORD_WEB__ || rememberPassword || autoConnect;
-  if (!keepToken && rememberIsUserChoice) {
-    void (async () => {
-      // The store holds one credential per host (`login_account(host) =
-      // host`), and `save_credential` already overwrites it with no
-      // username check — a remembered login by a second account on this
-      // host would have clobbered it anyway. The stored username is a
-      // stale copy, not an account identity, so guarding the delete on it
-      // can't protect a second account; it can only leave the password the
-      // user just declined sitting on disk. Delete unconditionally for the
-      // host. Cost: if two accounts share a host, opting out as one
-      // removes the credential the other saved.
-      //
-      // A failed delete leaves that password on disk. Silence there would
-      // tell the user the opt-out took effect when it did not, so it is
-      // surfaced the same way a failed save is.
-      const removed = await deleteCredential(host);
-      if (!removed && owner.isCurrent()) {
-        log.warn("Credential delete failed — the saved password is still stored", {
-          host,
-        });
-        setTransientError(connectText("session.passwordRemoveFailed"));
-      }
-    })();
-  }
-  if (keepToken) {
-    // Auto connect without Remember: keep the token only. A user's own login
-    // also erases any password saved under an earlier Remember opt-in
-    // (clearPassword); a stored-token resume never clears anything.
-    const clearPassword = !rememberPassword && rememberIsUserChoice;
-    // The user's own login decides where a portal token lives; a resume says
-    // nothing, so the token stays in the area it was read from.
-    const savedPassword = rememberPassword ? password : undefined;
-    (__OWNCORD_WEB__
-      ? saveCredential(
-          host,
-          username,
-          token,
-          savedPassword,
-          clearPassword,
-          rememberIsUserChoice ? !autoConnect : undefined,
-        )
-      : saveCredential(host, username, token, savedPassword, clearPassword)
-    )
-      .then((ok) => {
-        if (!ok && owner.isCurrent()) {
-          log.warn("Credential save failed — auto-login will not work for this server");
-          setTransientError(connectText("session.credentialsSaveFailed"));
-        }
-      })
-      .catch(() => {
-        // saveCredential already catches internally; this is defence-in-depth
-      });
-  }
+  persistSessionCredential(
+    owner,
+    { host, username, token, password },
+    { rememberPassword, rememberIsUserChoice, autoConnect },
+    keepToken,
+  );
 
   // Update saved credentials when the current user changes their username.
   // Guarded by the same remember-password opt-out as the initial save above.
@@ -338,6 +328,7 @@ export function startSession(
       // (a certificate re-dial after a mismatch).
       clearPreauthDeadline();
       unsubState();
+      if (owner.isCurrent()) signingIn = false;
     }
   });
   sessionUnsubs.push(unsubState);
@@ -351,6 +342,7 @@ export function startSession(
   // sidesteps the race instead of racing it.
   const unsubAuthOk = ws.on("auth_ok", (payload) => {
     unsubAuthOk();
+    signingIn = true;
     // Ensure exactly one overlay exists at a time.
     connectedOverlay?.destroy();
     connectedOverlay = createConnectedOverlay({
@@ -376,11 +368,21 @@ export function startSession(
     appEl.appendChild(connectedOverlay.element);
     connectedOverlay.show();
 
+    const readyDeadline = startReadyDeadline(owner, host, () =>
+      endAuthedSession(connectText("session.readyTimeout")),
+    );
+    const unsubReconnect = ws.onStateChange((wsState) => {
+      if (wsState === "connected") readyDeadline.restart();
+    });
+
     const unsubReady = ws.on("ready", () => {
       unsubReady();
+      unsubReconnect();
+      readyDeadline.clear();
+      signingIn = false;
       connectedOverlay?.markReady();
     });
-    sessionUnsubs.push(unsubReady);
+    sessionUnsubs.push(unsubReady, unsubReconnect, readyDeadline.clear);
   });
   sessionUnsubs.push(unsubAuthOk);
 
@@ -389,6 +391,41 @@ export function startSession(
     sessionUnsubs.length = 0;
   };
   owner.addCleanup(sessionCleanup);
+
+  // Dial only once the handlers are wired, and only if this attempt still owns the session.
+  const wireAndDial = ({ wireDispatcher, wireConnectionStatus }: DispatcherModule): void => {
+    if (!connectionStatusWired) {
+      connectionStatusWired = true;
+      void wireConnectionStatus(ws);
+    }
+    if (!stillOwns()) return;
+    attemptUnwire = wireDispatcher(ws, api);
+    dispatcherCleanup = attemptUnwire;
+    ws.connect({ host, token });
+    log.info("Dispatcher wired, connecting WS");
+  };
+  // Already loaded (nearly always, after the boot prefetch): wire and dial in
+  // this task, so a server switch replaces the old socket at once.
+  const loaded = loadedDispatcher();
+  if (loaded !== null) {
+    wireAndDial(loaded);
+    return;
+  }
+  loadDispatcher()
+    .then(wireAndDial)
+    .catch((err: unknown) => {
+      if (!stillOwns()) return;
+      log.error("Session code failed to load", { error: String(err) });
+      endPreauth(connectText("session.codeLoadFailed"), false);
+    });
+}
+
+/** Ends a session that got past sign-in, keeping the stored sign-in, and says why on the form. */
+function endAuthedSession(message: string, reason: LogoutReason = "user"): void {
+  api.endSession();
+  abandonInFlight();
+  if (authStore.getState().isAuthenticated) clearAuth(reason);
+  setTransientError(message);
 }
 
 /** Handle logout / disconnect. App-lifetime: never unsubscribed. */
@@ -444,13 +481,17 @@ export function installLogoutTeardown(): void {
           // skip flag below — does not survive that relaunch).
           // A quick switch keeps it as well: switching back resumes with it, and
           // the departed session is left for that return.
-          if (reason !== "protocol_epoch" && reason !== "server_switch") {
+          if (
+            reason !== "protocol_epoch" &&
+            reason !== "server_switch" &&
+            reason !== "unreadable_reply"
+          ) {
             if (__OWNCORD_WEB__) void deleteCredential(host, sessionToken || undefined);
             else void deleteCredential(host);
           }
           // Whenever this session must not turn around and auto-login with the
           // credential (removed, or just refused), say so.
-          sessionStorage.setItem("owncord:skip-auto-login", "1");
+          if (reason !== "unreadable_reply") sessionStorage.setItem("owncord:skip-auto-login", "1");
         }
         navigate("connect");
       }

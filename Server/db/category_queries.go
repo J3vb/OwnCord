@@ -11,9 +11,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// ChannelCategory is a row of channel_categories (migration 072). It lives
-// here rather than in models.go because the models.go json-tag count is
-// ratcheted (service/datastore_ratchet_test.go).
+// ChannelCategory is a channel_categories row (migration 072); here because
+// models.go's json-tag count is ratcheted.
 type ChannelCategory struct {
 	ID       int64  `json:"id"`
 	Name     string `json:"name"`
@@ -37,8 +36,7 @@ func (d *DB) ListChannelCategories(ctx context.Context) ([]ChannelCategory, erro
 	return out, nil
 }
 
-// GetChannelCategory returns the category with the given id, or nil when it
-// does not exist.
+// GetChannelCategory returns the category with the given id, or nil.
 func (d *DB) GetChannelCategory(ctx context.Context, id int64) (*ChannelCategory, error) {
 	r, err := d.q.GetChannelCategory(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -51,8 +49,8 @@ func (d *DB) GetChannelCategory(ctx context.Context, id int64) (*ChannelCategory
 	return &c, nil
 }
 
-// FindChannelCategoryByName returns the category whose name equals name
-// ignoring ASCII case, or nil when there is none.
+// FindChannelCategoryByName returns the category whose name equals name ignoring ASCII case, or nil
+// when there is none.
 func (d *DB) FindChannelCategoryByName(ctx context.Context, name string) (*ChannelCategory, error) {
 	r, err := d.q.FindChannelCategoryByName(ctx, name)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -65,8 +63,7 @@ func (d *DB) FindChannelCategoryByName(ctx context.Context, name string) (*Chann
 	return &c, nil
 }
 
-// CreateChannelCategory appends a category after the last one. A name another
-// category already has (ignoring case) is ErrConflict.
+// CreateChannelCategory appends a category; a name another has (ignoring case) is ErrConflict.
 func (d *DB) CreateChannelCategory(ctx context.Context, name string) (*ChannelCategory, error) {
 	var out ChannelCategory
 	err := d.inWriteTx(ctx, "CreateChannelCategory", func(q *dbgen.Queries) error {
@@ -94,9 +91,8 @@ func (d *DB) CreateChannelCategory(ctx context.Context, name string) (*ChannelCa
 	return &out, nil
 }
 
-// RenameChannelCategory renames a category. ErrNotFound when it is gone,
-// ErrConflict when another category already has the name (ignoring case).
-// Renaming a category to a different spelling of its own name is allowed.
+// RenameChannelCategory renames a category; ErrNotFound when gone, ErrConflict when
+// another has the name (case-insensitive).
 func (d *DB) RenameChannelCategory(ctx context.Context, id int64, name string) error {
 	return d.inWriteTx(ctx, "RenameChannelCategory", func(q *dbgen.Queries) error {
 		n, err := q.RenameChannelCategory(ctx, dbgen.RenameChannelCategoryParams{Name: name, ID: id})
@@ -114,12 +110,10 @@ func (d *DB) RenameChannelCategory(ctx context.Context, id int64, name string) e
 }
 
 // ReorderChannelCategories rewrites every category's position to its index in
-// ids. The set must be exactly the current set of category ids, or nothing is
-// written and ErrConflict is returned: an editor holding a stale list (a
-// category was added or deleted by another manager) must reload instead of
-// silently reordering a different set. The read and the writes share one
-// transaction on the single writer connection, so two racing reorders
-// serialise and the second compares against what the first committed.
+// ids. The set must be exactly the current set, or nothing is written and
+// ErrConflict is returned: an editor with a stale list must reload rather than
+// silently reorder a different set. Read and writes share one transaction on
+// the writer connection, so racing reorders serialise.
 func (d *DB) ReorderChannelCategories(ctx context.Context, ids []int64) error {
 	return d.inWriteTx(ctx, "ReorderChannelCategories", func(q *dbgen.Queries) error {
 		cur, err := q.ListChannelCategories(ctx)
@@ -151,10 +145,9 @@ func (d *DB) ReorderChannelCategories(ctx context.Context, ids []int64) error {
 	})
 }
 
-// DeleteChannelCategory removes a category and, by cascade, its permission
-// template. Its channels keep every other field, including the override rows
-// they carry, and become uncategorized (ON DELETE SET NULL) and unsynced.
-// ErrNotFound when it is already gone.
+// DeleteChannelCategory removes a category and, by cascade, its permission template.
+// Its channels keep their other fields, including override rows, and become
+// uncategorized (ON DELETE SET NULL) and unsynced. ErrNotFound when gone.
 func (d *DB) DeleteChannelCategory(ctx context.Context, id int64) error {
 	return d.inWriteTx(ctx, "DeleteChannelCategory", func(q *dbgen.Queries) error {
 		if err := q.UnsyncCategoryChannels(ctx, &id); err != nil {
@@ -171,9 +164,8 @@ func (d *DB) DeleteChannelCategory(ctx context.Context, id int64) error {
 	})
 }
 
-// NewChannel is a channel create request at the db layer. CategoryID wins over
-// CategoryName when both are set. CategoryName is resolved ignoring case and
-// created when missing; both empty means no category.
+// NewChannel is a channel create request; CategoryID wins over CategoryName, which is
+// resolved ignoring case and created when missing.
 type NewChannel struct {
 	Name         string
 	Type         string
@@ -181,18 +173,15 @@ type NewChannel struct {
 	Position     int
 	CategoryID   int64
 	CategoryName string
-	// CreatedCategory, when non-nil, receives the id of the category this
-	// write created because CategoryName matched none, and is left alone
-	// otherwise. The caller owes that creation an audit row and a manager
-	// broadcast, since it bypassed the category routes.
+	// CreatedCategory, when non-nil, receives the id of a category this write
+	// created because CategoryName matched none. The caller owes that creation an
+	// audit row and a manager broadcast, since it bypassed the category routes.
 	CreatedCategory *int64
 }
 
-// CreateChannelIn inserts a channel and returns its id. Resolving or creating
-// the category and the insert share one transaction on the writer connection,
-// so a concurrent rename or delete of the category cannot interleave: the new
-// channel lands on the one category row by id. An unknown CategoryID is
-// ErrNotFound and writes nothing.
+// CreateChannelIn inserts a channel and returns its id; category resolution and the
+// insert share one transaction. An unknown CategoryID is ErrNotFound and writes
+// nothing.
 func (d *DB) CreateChannelIn(ctx context.Context, c NewChannel) (int64, error) {
 	var id, createdID int64
 	err := d.inWriteTx(ctx, "CreateChannel", func(q *dbgen.Queries) error {
@@ -218,8 +207,6 @@ func (d *DB) CreateChannelIn(ctx context.Context, c NewChannel) (int64, error) {
 		if catID == nil {
 			return nil
 		}
-		// The channel starts as a copy of its category's template and synced
-		// to it, in this same transaction.
 		return copyTemplateToNewChannelTx(ctx, q, id, *catID)
 	})
 	if err != nil {
@@ -231,10 +218,6 @@ func (d *DB) CreateChannelIn(ctx context.Context, c NewChannel) (int64, error) {
 	return id, nil
 }
 
-// resolveCategoryTx maps a (category id, legacy name) pair to the id to store:
-// nil for none. An id must exist (ErrNotFound otherwise, or none when
-// ifExists); a name is matched ignoring case and created at the end when
-// missing, in which case created is that new row's id.
 func resolveCategoryTx(ctx context.Context, q *dbgen.Queries, id int64, name string, ifExists bool) (catID *int64, created int64, err error) {
 	if id > 0 {
 		if _, err := q.GetChannelCategory(ctx, id); err != nil {

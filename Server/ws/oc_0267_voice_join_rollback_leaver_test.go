@@ -58,9 +58,7 @@ func TestRollbackVoiceJoin_BroadcastReachesLeaverWithoutReadAccess(t *testing.T)
 		if err := database.UpsertChannelOverride(context.Background(), chID, harvestVoiceRoleID, 0, permissions.ReadMessages); err != nil {
 			t.Fatalf("hook: UpsertChannelOverride: %v", err)
 		}
-		if _, err := database.ExecContext(context.Background(), `ALTER TABLE users RENAME TO users_bak_0267`); err != nil {
-			t.Fatalf("hook: rename users: %v", err)
-		}
+		mustExec(t, database, `ALTER TABLE users RENAME TO users_bak_0267`)
 	}
 	defer func() { voiceJoinPostTokenRaceHook = nil }()
 

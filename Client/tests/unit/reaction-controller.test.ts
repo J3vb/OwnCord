@@ -57,7 +57,7 @@ vi.mock("@lib/dom", () => ({
   }),
 }));
 
-vi.mock("@components/EmojiPicker", () => ({
+vi.mock("../../src/features/messaging/EmojiPicker", () => ({
   createEmojiPicker: mockCreateEmojiPicker,
 }));
 

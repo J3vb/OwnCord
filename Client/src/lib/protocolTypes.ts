@@ -60,6 +60,7 @@ export const ServerMessageType = {
   STICKER_UPDATE: "sticker_update",
   UPLOAD_POLICY: "upload_policy", // the upload file-type lists after the owner saves them in the admin panel
   GAME_ACTIVITY_POLICY: "game_activity_policy", // WP 8.3e-2: whether game activity is shown on this server, unsequenced, after an admin saves the switch; auth_ok carries it on every connect and resume
+  VIDEO_BITRATE_CAP: "video_bitrate_cap", // the per-person video upload cap in bits/s (0 = none), unsequenced, after an admin saves it; auth_ok carries it on every connect and resume
   SERVER_RESTART: "server_restart",
   MOD_QUEUE: "mod_queue", // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
   MOD_ACTION: "mod_action", // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
@@ -202,6 +203,9 @@ export const RestErrorCode = {
   CONFIRMATION_REQUIRED: "CONFIRMATION_REQUIRED",
   CONFLICT: "CONFLICT",
   CONTAINER_DEPLOYMENT: "CONTAINER_DEPLOYMENT",
+  // A source build (version dev or untagged) never replaces itself with a
+  // release.
+  DEVELOPMENT_BUILD: "DEVELOPMENT_BUILD",
   DOWNLOAD_FAILED: "DOWNLOAD_FAILED",
   DUPLICATE_REPORT: "DUPLICATE_REPORT",
   ENV_OVERRIDDEN: "ENV_OVERRIDDEN",
@@ -233,6 +237,10 @@ export const RestErrorCode = {
   PREVIEW_EXPIRED: "PREVIEW_EXPIRED",
   PUSH_DISABLED: "PUSH_DISABLED",
   RATE_LIMITED: "RATE_LIMITED",
+  // Account recovery set the new password and spent the recovery secret, but
+  // no session could be started; sign in with the new password instead of
+  // retrying the recovery.
+  RECOVERED_SIGN_IN_REQUIRED: "RECOVERED_SIGN_IN_REQUIRED",
   RESTART_PENDING: "RESTART_PENDING",
   REVERSAL_FAILED: "REVERSAL_FAILED",
   ROLE_CONFLICT: "ROLE_CONFLICT",

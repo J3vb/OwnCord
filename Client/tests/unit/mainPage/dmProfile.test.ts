@@ -28,7 +28,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/media/notificationSound", () => mocks.mediaNotificationSoundMock());
 vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messagesCallAlertsMock());
-vi.mock("@components/UpdateNotifier", () => mocks.updateNotifierMock());
+vi.mock("../../../src/features/updates/UpdateNotifier", () => mocks.updateNotifierMock());
 vi.mock("@lib/voice/audioElements", () => mocks.voiceAudioElementsMock());
 vi.mock("@lib/presence/autoIdle", () => mocks.presenceAutoIdleMock());
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
@@ -76,7 +76,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       m.container.appendChild(capturedChatAreaRef.current!.dmProfileSlot);
     }
     async function settle(): Promise<void> {
-      await import("@components/DmProfileSidebar");
+      await import("../../../src/features/direct-messages/DmProfileSidebar");
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
@@ -398,6 +398,27 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).not.toBe("none");
   });
 
+  it("keeps an incoming ring alive when Accept is clicked while a channel switch waits", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    m.page = mountPage(m.container, ws);
+    incomingCall(ws);
+    // In a call, with a switch to another channel still at the server.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 7,
+      voiceStatus: "connected" as const,
+      switchingTo: 9,
+    }));
+
+    const banner = incomingBannerEl();
+    (document.querySelector('[data-testid="incoming-call-accept"]') as HTMLElement).click();
+
+    // The join would be dropped, so the ring must survive for the next click.
+    expect(banner.style.display).not.toBe("none");
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+  });
+
   it("keeps an incoming ring alive when Accept is clicked during the join backoff", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
@@ -522,7 +543,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   /** Let the panel's lazy import (and anything it schedules) settle. */
   async function settleDmProfileImport(): Promise<void> {
-    await import("@components/DmProfileSidebar");
+    await import("../../../src/features/direct-messages/DmProfileSidebar");
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 

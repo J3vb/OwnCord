@@ -88,18 +88,9 @@ func TestStampConnections_DisconnectPreservesChosenStatus(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 
-	onlineID, err := database.CreateUser(ctx, "went_online", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	dndID, err := database.CreateUser(ctx, "went_dnd", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	invisID, err := database.CreateUser(ctx, "went_invisible", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	onlineID := mustCreateUser(t, database, "went_online", "hash", 4)
+	dndID := mustCreateUser(t, database, "went_dnd", "hash", 4)
+	invisID := mustCreateUser(t, database, "went_invisible", "hash", 4)
 	_ = database.UpdateUserStatus(ctx, onlineID, db.StatusOnline)
 	_ = database.UpdateUserStatus(ctx, dndID, db.StatusDND)
 	_ = database.UpdateUserStatus(ctx, invisID, db.StatusInvisible)
@@ -133,23 +124,16 @@ func TestStampConnections_DisconnectPreservesChosenStatus(t *testing.T) {
 func TestUpdateUserCustomStatus_RoundTripAndClear(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
-	id, err := database.CreateUser(ctx, "statusy", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	id := mustCreateUser(t, database, "statusy", "hash", 4)
 
 	text := "shipping phase 6"
-	if err := database.UpdateUserCustomStatus(ctx, id, &text); err != nil {
-		t.Fatalf("UpdateUserCustomStatus: %v", err)
-	}
+	mustDo(t, "UpdateUserCustomStatus", database.UpdateUserCustomStatus(ctx, id, &text))
 	u, _ := database.GetUserByID(ctx, id)
 	if u.CustomStatus == nil || *u.CustomStatus != text {
 		t.Fatalf("custom status = %v, want %q", u.CustomStatus, text)
 	}
 
-	if err := database.UpdateUserCustomStatus(ctx, id, nil); err != nil {
-		t.Fatalf("clear: %v", err)
-	}
+	mustDo(t, "clear", database.UpdateUserCustomStatus(ctx, id, nil))
 	u, _ = database.GetUserByID(ctx, id)
 	if u.CustomStatus != nil {
 		t.Fatalf("custom status = %v, want nil after clear", *u.CustomStatus)
@@ -159,10 +143,7 @@ func TestUpdateUserCustomStatus_RoundTripAndClear(t *testing.T) {
 func TestIsAvatarFileURL(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
-	id, err := database.CreateUser(ctx, "pfp", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	id := mustCreateUser(t, database, "pfp", "hash", 4)
 
 	const url = "/api/v1/files/abc-123"
 	if inUse, err := database.IsAvatarFileURL(ctx, url); err != nil || inUse {
@@ -170,18 +151,14 @@ func TestIsAvatarFileURL(t *testing.T) {
 	}
 
 	avatar := url
-	if err := database.UpdateUserProfile(ctx, id, "pfp", &avatar, nil, nil, nil, nil); err != nil {
-		t.Fatalf("UpdateUserProfile: %v", err)
-	}
+	mustDo(t, "UpdateUserProfile", database.UpdateUserProfile(ctx, id, "pfp", &avatar, nil, nil, nil, nil))
 	if inUse, err := database.IsAvatarFileURL(ctx, url); err != nil || !inUse {
 		t.Fatalf("IsAvatarFileURL in use = %v, %v; want true, nil", inUse, err)
 	}
 
 	// Replacing the avatar revokes the old file's public readability.
 	other := "/api/v1/files/def-456"
-	if err := database.UpdateUserProfile(ctx, id, "pfp", &other, nil, nil, nil, nil); err != nil {
-		t.Fatalf("UpdateUserProfile: %v", err)
-	}
+	mustDo(t, "UpdateUserProfile", database.UpdateUserProfile(ctx, id, "pfp", &other, nil, nil, nil, nil))
 	if inUse, _ := database.IsAvatarFileURL(ctx, url); inUse {
 		t.Error("replaced avatar must stop being publicly readable")
 	}
@@ -209,15 +186,10 @@ func TestEffectiveDisplayName(t *testing.T) {
 func TestUpdateUserProfile_WritesDisplayNameAndAbout(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
-	id, err := database.CreateUser(ctx, "bio", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	id := mustCreateUser(t, database, "bio", "hash", 4)
 
 	name, about := "Bio Person", "likes long walks"
-	if err := database.UpdateUserProfile(ctx, id, "bio", nil, &name, &about, nil, nil); err != nil {
-		t.Fatalf("UpdateUserProfile: %v", err)
-	}
+	mustDo(t, "UpdateUserProfile", database.UpdateUserProfile(ctx, id, "bio", nil, &name, &about, nil, nil))
 	u, _ := database.GetUserByID(ctx, id)
 	if u.DisplayName == nil || *u.DisplayName != name {
 		t.Errorf("display_name = %v, want %q", u.DisplayName, name)
@@ -226,9 +198,7 @@ func TestUpdateUserProfile_WritesDisplayNameAndAbout(t *testing.T) {
 		t.Errorf("about = %v, want %q", u.About, about)
 	}
 
-	if err := database.UpdateUserProfile(ctx, id, "bio", nil, nil, nil, nil, nil); err != nil {
-		t.Fatalf("clear: %v", err)
-	}
+	mustDo(t, "clear", database.UpdateUserProfile(ctx, id, "bio", nil, nil, nil, nil, nil))
 	u, _ = database.GetUserByID(ctx, id)
 	if u.DisplayName != nil || u.About != nil {
 		t.Errorf("expected both cleared, got %v / %v", u.DisplayName, u.About)

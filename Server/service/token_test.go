@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -69,9 +70,7 @@ func TestTokenService_CreateStoresOnlyTheHash(t *testing.T) {
 	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
 
 	minted, err := svc.Create(ctx, 1, "", "ci-bot", 0)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	mustDo(t, "Create", err)
 	if minted.Raw == "" || minted.User.Username != "owner" || minted.Label != "ci-bot" {
 		t.Fatalf("Create returned %+v", minted)
 	}
@@ -80,9 +79,7 @@ func TestTokenService_CreateStoresOnlyTheHash(t *testing.T) {
 	// row must not carry anything that could reconstruct it.
 	var stored string
 	row := database.QueryRowContext(ctx, `SELECT token_hash FROM api_tokens WHERE id = ?`, minted.ID)
-	if err := row.Scan(&stored); err != nil {
-		t.Fatalf("reading the stored token: %v", err)
-	}
+	mustDo(t, "reading the stored token", row.Scan(&stored))
 	if stored != auth.HashToken(minted.Raw) {
 		t.Errorf("stored value is not the hash of the raw token")
 	}
@@ -92,9 +89,7 @@ func TestTokenService_CreateStoresOnlyTheHash(t *testing.T) {
 
 	// lifetime 0 is "never expires" — both callers' default.
 	var expires *string
-	if err := database.QueryRowContext(ctx, `SELECT expires_at FROM api_tokens WHERE id = ?`, minted.ID).Scan(&expires); err != nil {
-		t.Fatalf("reading expires_at: %v", err)
-	}
+	mustDo(t, "reading expires_at", database.QueryRowContext(ctx, `SELECT expires_at FROM api_tokens WHERE id = ?`, minted.ID).Scan(&expires))
 	if expires != nil && *expires != "" {
 		t.Errorf("expires_at = %q for a zero lifetime, want never", *expires)
 	}
@@ -136,9 +131,7 @@ func TestTokenService_CreateRefusesUnusableInput(t *testing.T) {
 
 	// Nothing is written for any refusal.
 	list, err := svc.List(ctx)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
+	mustDo(t, "List", err)
 	if len(list) != 1 || list[0].Label != "at-cap" {
 		t.Errorf("refused mints left rows behind: %+v", list)
 	}
@@ -151,13 +144,9 @@ func TestTokenService_RevokeIsNotIdempotentlySilent(t *testing.T) {
 	svc, database, ctx := tokenFixture(t)
 	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
 	minted, err := svc.Create(ctx, 1, "", "one", 0)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	mustDo(t, "Create", err)
 
-	if err := svc.Revoke(ctx, 1, minted.ID); err != nil {
-		t.Fatalf("Revoke: %v", err)
-	}
+	mustDo(t, "Revoke", svc.Revoke(ctx, 1, minted.ID))
 	if err := svc.Revoke(ctx, 1, minted.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("second Revoke: err = %v, want ErrNotFound", err)
 	}
@@ -182,9 +171,7 @@ func TestTokenService_RevokeByLabelTakesEveryMatch(t *testing.T) {
 	}
 
 	affected, err := svc.RevokeByLabel(ctx, 1, "deploy")
-	if err != nil {
-		t.Fatalf("RevokeByLabel: %v", err)
-	}
+	mustDo(t, "RevokeByLabel", err)
 	if affected != 3 {
 		t.Errorf("RevokeByLabel revoked %d, want 3 — a duplicate left active is the one that matters", affected)
 	}
@@ -197,9 +184,7 @@ func TestTokenService_RevokeByLabelTakesEveryMatch(t *testing.T) {
 
 	// The unrelated token is untouched.
 	list, err := svc.List(ctx)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
+	mustDo(t, "List", err)
 	live := 0
 	for _, tok := range list {
 		if tok.RevokedAt == nil || *tok.RevokedAt == "" {
@@ -217,9 +202,7 @@ func TestTokenService_RevokeByLabelTakesEveryMatch(t *testing.T) {
 func TestTokenService_FailsLoud(t *testing.T) {
 	svc, database, ctx := tokenFixture(t)
 	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", database.Close())
 
 	if _, err := svc.List(ctx); !errors.Is(err, ErrInternal) {
 		t.Errorf("List on a closed database: err = %v, want ErrInternal", err)
@@ -250,9 +233,7 @@ func TestTokenService_ActorSelfAttributesToTheBoundUser(t *testing.T) {
 	seedTokenUser(t, database, 2, "ci-account", permissions.MemberRoleID)
 
 	minted, err := svc.Create(ctx, ActorSelf, "ci-account", "ci-bot", 0)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	mustDo(t, "Create", err)
 
 	var actor int64
 	if err := database.QueryRowContext(ctx,
@@ -267,9 +248,7 @@ func TestTokenService_ActorSelfAttributesToTheBoundUser(t *testing.T) {
 
 	// An explicit actor is recorded verbatim: the panel has a real operator.
 	panelMint, err := svc.Create(ctx, 1, "ci-account", "panel-made", 0)
-	if err != nil {
-		t.Fatalf("Create (panel): %v", err)
-	}
+	mustDo(t, "Create (panel)", err)
 	if err := database.QueryRowContext(ctx,
 		`SELECT actor_id FROM audit_log WHERE action = 'api_token_create' AND target_id = ?`,
 		panelMint.ID).Scan(&actor); err != nil {
@@ -290,13 +269,9 @@ func TestTokenService_OwnTokensOnly(t *testing.T) {
 	holder, _ := database.GetUserByID(ctx, 2)
 
 	ownerTok, err := svc.Create(ctx, 1, "", "owner-bot", 0)
-	if err != nil {
-		t.Fatalf("owner mint: %v", err)
-	}
+	mustDo(t, "owner mint", err)
 	otherTok, err := svc.Create(ctx, 1, "other", "other-bot", 0)
-	if err != nil {
-		t.Fatalf("mint for other: %v", err)
-	}
+	mustDo(t, "mint for other", err)
 
 	// Empty username and the holder's own name (any case) bind to the holder.
 	mine1, err := svc.CreateOwn(ctx, holder, "", "mine-1", 0)
@@ -341,10 +316,43 @@ func TestTokenService_OwnTokensOnly(t *testing.T) {
 			t.Errorf("token %d was revoked by a non-owner", it.ID)
 		}
 	}
-	if err := svc.RevokeOwn(ctx, 2, mine1.ID); err != nil {
-		t.Fatalf("RevokeOwn(own token): %v", err)
-	}
+	mustDo(t, "RevokeOwn(own token)", svc.RevokeOwn(ctx, 2, mine1.ID))
 	if err := svc.RevokeOwn(ctx, 2, mine1.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("second RevokeOwn = %v, want ErrNotFound", err)
+	}
+}
+
+// A holder's own tokens stay listable and revocable however many rows other
+// accounts add, and a live token outranks newer revoked ones in every listing.
+func TestTokenService_OwnTokensSurviveTheListCap(t *testing.T) {
+	svc, database, ctx := tokenFixture(t)
+	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
+	seedTokenUser(t, database, 2, "holder", permissions.MemberRoleID)
+	holder, _ := database.GetUserByID(ctx, 2)
+
+	mine, err := svc.CreateOwn(ctx, holder, "", "old-bot", 0)
+	mustDo(t, "CreateOwn", err)
+	for i := range 201 {
+		tok, err := svc.Create(ctx, 1, "", fmt.Sprintf("ci-%d", i), 0)
+		if err != nil {
+			t.Fatalf("Create %d: %v", i, err)
+		}
+		if err := svc.Revoke(ctx, 1, tok.ID); err != nil {
+			t.Fatalf("Revoke %d: %v", i, err)
+		}
+	}
+
+	own, err := svc.ListFor(ctx, 2, false)
+	if err != nil || len(own) != 1 || own[0].ID != mine.ID || own[0].Username != "holder" {
+		t.Fatalf("ListFor(holder) = %+v, %v; want only the holder's token", own, err)
+	}
+	all, err := svc.ListFor(ctx, 1, true)
+	if err != nil || len(all) != 200 || all[0].ID != mine.ID {
+		t.Fatalf("ListFor(owner) = %d rows, first %+v, %v; want 200 with the live token first", len(all), all[0], err)
+	}
+	mustDo(t, "RevokeFor(holder, own token)", svc.RevokeFor(ctx, 2, mine.ID, false))
+	own, _ = svc.ListOwn(ctx, 2)
+	if len(own) != 1 || own[0].RevokedAt == nil {
+		t.Fatalf("ListOwn after revoke = %+v, want the token shown as revoked", own)
 	}
 }

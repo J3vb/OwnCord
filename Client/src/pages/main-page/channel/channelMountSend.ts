@@ -4,8 +4,16 @@
  */
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { VoiceUploadMeta } from "@lib/types";
-import type { QueuedAttachment, SentAttachment } from "@components/MessageInput";
+import type { QueuedAttachment, SentAttachment } from "../../../features/messaging/MessageInput";
 import { loadSendQueue, preloadSendQueue } from "../../../features/messaging/sendQueueLoader";
+import {
+  prepareSend,
+  deliverSend,
+  resolveRetryDraft,
+  retryRefusal,
+  replyWasRefused,
+  type SendOptions,
+} from "../../../features/messaging/outboundSend";
 import type { QueuedSend, QueueDeps } from "../../../features/messaging/sendQueue";
 import {
   getChannelMessages,
@@ -16,23 +24,11 @@ import {
   isWindowDetached,
 } from "@stores/messages.store";
 import { canManageMessages } from "@lib/permissions";
-import { findSticker } from "@stores/stickers.store";
-import { stickersText } from "../../../i18n/stickers";
 import { channelsStore, setNsfwAcknowledged } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
-import { messagingText } from "../../../i18n/messaging";
 import { markChannelRead, markChannelReadSeen } from "@lib/readState";
 import { readPointerEnabled } from "@lib/net/serverCapabilities";
-import {
-  newClientMessageId,
-  pendingMessageExpired,
-  pendingMessageRetryFloor,
-  recoveredPendingText,
-  supportsMessageDeduplication,
-  savePendingText,
-  acknowledgePendingMessage,
-} from "@lib/pendingMessages";
-import { WsErrorCode } from "@lib/protocolTypes";
+import { recoveredPendingText, acknowledgePendingMessage } from "@lib/pendingMessages";
 import { log, currentMessageUser, abortQueued } from "./channelShared";
 import type { ChannelState, ChannelApi, MountScope } from "./channelState";
 
@@ -43,10 +39,10 @@ export function mountSendPipeline(st: ChannelState, cc: ChannelApi, ms: MountSco
    * MainPage budget); the gated path mounts no content while it loads.
    */
   ms.mountConsentUi = function mountConsentUi(
-    build: (ui: typeof import("@components/NsfwGate")) => MountableComponent,
+    build: (ui: typeof import("../../../features/content-consent/NsfwGate")) => MountableComponent,
   ): void {
     const gen = ++st.nsfwConsentUiGen;
-    import("@components/NsfwGate").then(
+    import("../../../features/content-consent/NsfwGate").then(
       (ui) => {
         if (ms.signal.aborted || gen !== st.nsfwConsentUiGen) return;
         st.nsfwConsentUi = build(ui);
@@ -236,175 +232,18 @@ export function mountSendPipeline(st: ChannelState, cc: ChannelApi, ms: MountSco
     files: readonly SentAttachment[],
     existingClientMessageId?: string,
     replyPing = false,
-    sendOptions: {
-      readonly queued?: boolean;
-      readonly sticker?: { readonly id: number; readonly name: string };
-    } = {},
+    sendOptions: SendOptions = {},
   ): void {
-    const sticker = sendOptions.sticker;
-    const attachments = files.map((f) => f.id);
-    const user = currentMessageUser();
-    // A queued send (3A-9) was built by this mount but may post after the
-    // user left the channel: it needs the account, not the mount.
-    const owns = sendOptions.queued === true ? ms.ownsAccountSession : ms.ownsSession;
-    if (user === null || !owns()) return;
-    // Sending while viewing a detached history window jumps to present: the
-    // optimistic row belongs in the live tail, and addMessage would refuse
-    // to append the echo into a detached window anyway. A queued send that
-    // outlived this mount leaves it, since that window is no longer shown.
-    if (isWindowDetached(ms.channelId) && !ms.signal.aborted) ms.jumpToPresentForSend();
-    const timestamp = new Date().toISOString();
-    const clientMessageId =
-      existingClientMessageId ??
-      (supportsMessageDeduplication(ms.owner)
-        ? newClientMessageId(pendingMessageRetryFloor(ms.owner))
-        : undefined);
-    // Set only for a send with a recoverable logical identity: plain text
-    // with a client_message_id, no reply and no attachments.
-    const persistId =
-      replyTo === null && attachments.length === 0 && sticker === undefined
-        ? clientMessageId
-        : undefined;
-    // A sticker send commits with its receipt, so the server requires the id.
-    if (sticker !== undefined && clientMessageId === undefined) {
-      if (owns()) st.showToast(stickersText("send.unsupported"), "error");
-      return;
-    }
-    // The optimistic row's text is the server's fallback for the sticker.
-    const rowContent = sticker === undefined ? content : `[Sticker: ${sticker.name}]`;
-    const live = sticker === undefined ? null : findSticker(sticker.id);
-    const rowSticker = live === null ? undefined : { id: live.id, name: live.name, url: live.url };
-    const rowFields = {
-      content: rowContent,
-      ...(rowSticker === undefined ? {} : { sticker: rowSticker }),
-    };
-    const draftSticker = sticker === undefined ? {} : { sticker };
-    /** Persist before handing text to the socket, so a process crash after
-     *  commit but before ACK can recover the same logical identity. Resolves
-     *  false when the write did not land: callers that send regardless only
-     *  need the toast, but the offline branch has nothing else carrying the
-     *  text and must say so on the row. */
-    function persistPendingText(id: string): Promise<boolean> {
-      return savePendingText(ms.owner, {
-        clientMessageId: id,
-        channelId: ms.channelId,
-        content,
-        createdAt: Number(id.split(":", 1)[0]),
-      }).then(
-        () => true,
-        () => {
-          if (owns()) st.showToast(messagingText("toast.pendingSaveFailed"), "error");
-          return false;
-        },
-      );
-    }
-    if (uiStore.getState().connectionStatus !== "connected") {
-      // Composer gating normally prevents this, but stay consistent: show a
-      // failed row with retry rather than silently dropping the message.
-      const cid = crypto.randomUUID();
-      addOptimisticMessage({
-        correlationId: cid,
-        clientMessageId,
-        channelId: ms.channelId,
-        user,
-        ...rowFields,
-        replyTo,
-        timestamp,
-      });
-      st.draftByCorrelation.set(cid, {
-        content,
-        ...draftSticker,
-        replyTo,
-        ...(replyTo === null ? {} : { replyPing }),
-        attachments: files,
-        channelId: ms.channelId,
-        userId: ms.owner.userId,
-        clientMessageId,
-        sentAt: Date.now(),
-      });
-      markSendFailed(cid, "OFFLINE");
-      if (persistId !== undefined) {
-        // Nothing will deliver this text: it was never handed to a socket, so
-        // a failed write means it is gone at restart. Distinguish that from a
-        // plain offline row, whose retry window is still open.
-        void persistPendingText(persistId).then((saved) => {
-          if (!saved && owns()) markSendFailed(cid, "OFFLINE_NO_RECOVERY");
-        });
-      }
-      return;
-    }
-    const sendNow = (): void => {
-      if (!ms.ownsAccountSession()) return;
-      const cid = st.ws.send({
-        type: "chat_send",
-        payload: {
-          channel_id: ms.channelId,
-          content: sticker === undefined ? content : "",
-          ...(sticker === undefined ? {} : { sticker_id: sticker.id }),
-          reply_to: replyTo,
-          ...(replyTo === null ? {} : { reply_ping: replyPing }),
-          attachments,
-          ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
-        },
-      });
-      addOptimisticMessage({
-        correlationId: cid,
-        clientMessageId,
-        channelId: ms.channelId,
-        user,
-        ...rowFields,
-        replyTo,
-        timestamp,
-      });
-      st.draftByCorrelation.set(cid, {
-        content,
-        ...draftSticker,
-        replyTo,
-        ...(replyTo === null ? {} : { replyPing }),
-        attachments: files,
-        channelId: ms.channelId,
-        userId: ms.owner.userId,
-        clientMessageId,
-        sentAt: Date.now(),
-      });
-      // A live socket can lose an ACK without disconnecting. End the spinner
-      // honestly; only a server ACK/echo ever calls a message delivered.
-      const timer = window.setTimeout(() => {
-        cc.clearSendTimer(cid);
-        if (
-          (ms.session === undefined || ms.session.isCurrent()) &&
-          st.getCurrentUserId() === ms.owner.userId
-        ) {
-          markSendFailed(cid, "UNCONFIRMED");
-        }
-      }, 20_000);
-      st.sendTimers.set(cid, {
-        timer,
-        release: ms.session?.addCleanup(() => cc.clearSendTimer(cid)),
-      });
-    };
-    // Both branches go through the single controller-scoped
-    // sendChain so a synchronous reply/attachment send can never jump a
-    // plain-text send whose persistPendingText IPC is still in flight — and
-    // vice versa. Without this, only guarding the branch a given finding
-    // named would still leave the two branches racing each other. When
-    // nothing is already in flight and this send needs no persistence,
-    // dispatch stays fully synchronous — unchanged from before, and relied
-    // on by every caller (e.g. a same-tick read of ws.send's return value).
-    if (persistId === undefined && !st.sendChainBusy) {
-      sendNow();
-      return;
-    }
-    st.sendChainBusy = true;
-    const myGen = ++st.sendChainGen;
-    st.sendChain = st.sendChain
-      .then(() => (persistId === undefined ? undefined : persistPendingText(persistId)))
-      .then(() => {
-        sendNow();
-        // Only the still-last-queued entry may clear the flag — a newer
-        // send may have queued behind this one while it was persisting.
-        if (st.sendChainGen === myGen) st.sendChainBusy = false;
-      });
+    const plan = prepareSend(st, ms, currentMessageUser(), {
+      content,
+      replyTo,
+      files,
+      existingClientMessageId,
+      replyPing,
+      options: sendOptions,
+    });
+    if (plan === null) return;
+    deliverSend(st, cc, ms, plan, uiStore.getState().connectionStatus === "connected");
   };
 
   ms.retrySend = function retrySend(correlationId: string): void {
@@ -417,37 +256,14 @@ export function mountSendPipeline(st: ChannelState, cc: ChannelApi, ms: MountSco
       ms.startQueued(queued, true);
       return;
     }
-    const recovered = recoveredPendingText(ms.owner, correlationId);
-    const draft =
-      st.draftByCorrelation.get(correlationId) ??
-      (recovered
-        ? {
-            ...recovered,
-            userId: ms.owner.userId,
-            replyTo: null,
-            replyPing: false,
-            attachments: [] as readonly SentAttachment[],
-          }
-        : undefined);
+    const draft = resolveRetryDraft(st, ms, correlationId);
     if (draft === undefined || draft.channelId !== ms.channelId) return;
-    if (
-      draft.clientMessageId &&
-      pendingMessageExpired(draft.clientMessageId, Date.now(), pendingMessageRetryFloor(ms.owner))
-    ) {
-      st.showToast(messagingText("toast.retryExpired"), "error");
+    const refusal = retryRefusal(ms, draft.clientMessageId);
+    if (refusal !== null) {
+      st.showToast(refusal, "error");
       return;
     }
-    if (draft.clientMessageId && !supportsMessageDeduplication(ms.owner)) {
-      st.showToast(messagingText("toast.retryUnsupported"), "error");
-      return;
-    }
-    // A refused reply may point at a message deleted outside the loaded
-    // window. Nothing was stored, so it goes again as a plain message under
-    // a fresh id.
-    const refusedReply =
-      draft.replyTo !== null &&
-      getChannelMessages(ms.channelId).find((m) => m.correlationId === correlationId)?.errorCode ===
-        WsErrorCode.BAD_REQUEST;
+    const refusedReply = replyWasRefused(ms, correlationId, draft.replyTo);
     st.draftByCorrelation.delete(correlationId);
     cc.clearSendTimer(correlationId);
     removeOptimistic(correlationId);

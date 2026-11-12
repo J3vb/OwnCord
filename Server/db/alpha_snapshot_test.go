@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -51,14 +50,7 @@ func openSnapshotCopy(t *testing.T) *DB {
 func TestAlphaSnapshotMigratesOnHead(t *testing.T) {
 	database := openSnapshotCopy(t)
 
-	count := func(q string) int {
-		t.Helper()
-		var n int
-		if err := database.QueryRowContext(context.Background(), q).Scan(&n); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
-		return n
-	}
+	count := rowCounter(t, database)
 
 	// Provenance: the snapshot was created at the alpha.4 migration set.
 	if got := count(`SELECT COUNT(*) FROM schema_versions`); got != alphaSnapshotMigrations {

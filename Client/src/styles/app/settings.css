@@ -102,7 +102,8 @@
 .account-header,
 .account-header-identity,
 .account-field,
-.settings-sidebar-profile {
+.settings-sidebar-profile,
+.settings-sidebar-identity {
   min-width: 0;
 }
 .settings-content h1 {
@@ -145,12 +146,26 @@
 .settings-pane.active {
   display: block;
 }
+/* The one row pattern (features/settings/settingRow.ts): title and
+   description left, control right, a hairline between rows; stacked puts a
+   wide control under its title. */
 .setting-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 16px 0;
   border-bottom: 1px solid var(--border);
+}
+.setting-info {
+  flex: 1;
+  min-width: 0;
+  margin-right: 16px;
+}
+.setting-row.stacked {
+  display: block;
+}
+.setting-row.stacked > .setting-info {
+  margin-bottom: 8px;
 }
 .setting-row:last-child {
   border-bottom: none;
@@ -196,29 +211,58 @@
 .toggle.on::after {
   transform: translateX(16px);
 }
-/* Notification level: All / Mentions only / Nothing, one segmented row. */
+/* A single choice: one segmented track that never wraps. A narrow window
+   shows the same choice as a select. */
 .level-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.level-opt {
-  min-height: 32px;
-  padding: 0 var(--space-3);
+  display: inline-flex;
+  flex-wrap: nowrap;
+  padding: 2px;
   border: 1px solid var(--border-control);
   border-radius: var(--radius-pill);
   background: var(--bg-secondary);
+}
+.level-opt {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  background: transparent;
   color: var(--text-normal);
   font-size: var(--font-size-sm);
+  white-space: nowrap;
   cursor: pointer;
 }
 .level-opt:hover {
-  border-color: var(--border-strong);
+  background: var(--bg-hover);
 }
 .level-opt.active {
   background: var(--accent);
-  border-color: var(--accent);
   color: var(--on-accent);
+}
+.segmented-wrap {
+  flex-shrink: 0;
+}
+.segmented-select {
+  display: none;
+}
+/* A narrow window (a phone, or a desktop window beside the settings
+   sidebar) leaves the pane under about 520 px. */
+@media (max-width: 760px) {
+  .setting-row:has(> .segmented-wrap) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .setting-row:has(> .segmented-wrap) > .setting-info {
+    margin-right: 0;
+  }
+  .segmented-wrap > .segmented {
+    display: none;
+  }
+  .segmented-wrap > .segmented-select {
+    display: block;
+    width: 100%;
+    min-height: 36px;
+  }
 }
 /* Input mode: the mode choice, then the Push to Talk key and delay. */
 .input-mode-options,
@@ -285,7 +329,7 @@
   gap: 12px;
 }
 .setting-row .slider-row {
-  flex: 0 0 220px;
+  flex: 0 1 280px;
 }
 .settings-slider {
   flex: 1;
@@ -489,6 +533,63 @@ details.disclose > summary {
 }
 .account-security {
   margin-top: var(--space-6);
+}
+/* Two-factor enrolment: QR on white (scanners need dark on light), the key, the link. */
+.totp-setup-label {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.totp-qr,
+.totp-key {
+  margin-bottom: 12px;
+}
+.totp-qr-code {
+  width: 180px;
+  max-width: 100%;
+  background: #fff;
+  border-radius: var(--radius-md);
+  line-height: 0;
+}
+.totp-qr-code svg {
+  width: 100%;
+  height: auto;
+}
+.totp-key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.totp-key-value,
+.totp-link-value {
+  background: var(--bg-active);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+.totp-key-value {
+  font-size: 14px;
+  letter-spacing: 0.05em;
+}
+.totp-key-row .ac-btn {
+  margin-left: 0;
+}
+.totp-link {
+  margin-bottom: 12px;
+}
+details.totp-link > summary {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.totp-link-value {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
 }
 /* Section headings in a pane read at 4.5:1 (the generic h3 uses --text-faint). */
 .settings-content h3.setting-group-title,
@@ -849,9 +950,19 @@ details.disclose[open] > summary .icon {
   font-weight: 600;
   color: var(--header-primary);
 }
-.settings-sidebar-edit {
+.settings-sidebar-handle {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.settings-sidebar-edit {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-align: left;
   cursor: pointer;
 }
 .settings-sidebar-edit:hover {

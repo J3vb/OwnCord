@@ -24,9 +24,7 @@ func setChannelPassword(t *testing.T, d *db.DB, ch *db.Channel, change *db.Chann
 func newPasswordChannel(t *testing.T, d *db.DB, name, chType string) *db.Channel {
 	t.Helper()
 	id, err := d.CreateChannel(context.Background(), name, chType, "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	mustDo(t, "CreateChannel", err)
 	ch, err := d.GetChannel(context.Background(), id)
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel: %v", err)
@@ -51,9 +49,7 @@ func TestGrantChannelPassword_OnlyWhileVersionIsCurrent(t *testing.T) {
 	// The password changes between the hash read and the grant write.
 	setChannelPassword(t, d, ch, &db.ChannelPasswordChange{Hash: "hash-two"})
 	written, err := d.GrantChannelPassword(ctx, ch.ID, uid, version)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GrantChannelPassword", err)
 	if written {
 		t.Fatal("a grant for a stale version was written")
 	}
@@ -108,9 +104,7 @@ func TestChannelPassword_VoiceOnlyAndNeverInTheChannelRow(t *testing.T) {
 		t.Fatalf("GetChannel: %+v err=%v, want JoinLocked", got, err)
 	}
 	list, err := d.ListChannels(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListChannels", err)
 	for i := range list {
 		raw, _ := json.Marshal(list[i])
 		if strings.Contains(string(raw), "$2a$") || strings.Contains(string(raw), "password_hash") {
@@ -133,9 +127,7 @@ func TestChannelPasswordGrants_CascadeOnDelete(t *testing.T) {
 	if written, err := d.GrantChannelPassword(ctx, ch.ID, uid, version); err != nil || !written {
 		t.Fatalf("grant: %v %v", written, err)
 	}
-	if err := d.AdminDeleteChannel(ctx, ch.ID); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminDeleteChannel", d.AdminDeleteChannel(ctx, ch.ID))
 	var n int
 	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_password_grants`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("grants left after channel delete = %d err=%v", n, err)

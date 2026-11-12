@@ -62,6 +62,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.chat-header .ch-header-lock {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: 6px;
+  color: var(--text-muted);
+}
+.chat-header .ch-header-lock[hidden] {
+  display: none;
+}
 .chat-header .ch-divider {
   width: 1px;
   height: 24px;
@@ -297,6 +306,11 @@
   color: var(--on-accent);
   font-size: var(--font-size-xxs);
   line-height: 18px;
+}
+.scroll-to-bottom-count.mention {
+  background: var(--danger-fill);
+  color: var(--on-fill);
+  font-weight: 700;
 }
 .scroll-to-bottom-count[hidden] {
   display: none;

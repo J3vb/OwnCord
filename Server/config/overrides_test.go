@@ -102,6 +102,9 @@ var panelExcludedKeys = []string{
 	// Already editable live on the Settings page through their own rows,
 	// which replace config.yaml; a second panel value would be a third source.
 	"upload.blocked_extensions", "upload.allowed_extensions", "server.name",
+	// A voice grant rule the person running the server sets in config.yaml
+	// or the environment, read once at start-up.
+	"voice.restrict_data_publishing",
 }
 
 func TestEditableKeys_ExactInventory(t *testing.T) {
@@ -132,9 +135,9 @@ func TestEditableKeys_ProtectedKeysStayOut(t *testing.T) {
 			t.Errorf("IsEditable(%q) = true for a key that is not a config leaf", key)
 		}
 	}
-	// Every config key is classified exactly once (parity_test pins 78).
-	if n := len(panelEditableKeys) + len(panelExcludedKeys); n != 78 {
-		t.Errorf("editable %d + excluded %d = %d keys, want all 78 classified",
+	// The two lists together hold 79 distinct keys.
+	if n := len(panelEditableKeys) + len(panelExcludedKeys); n != 79 {
+		t.Errorf("editable %d + excluded %d = %d keys, want 79",
 			len(panelEditableKeys), len(panelExcludedKeys), n)
 	}
 }
@@ -171,16 +174,12 @@ func TestSaveOverrides_RoundTripAndRemove(t *testing.T) {
 		t.Fatalf("SaveOverrides: %v", err)
 	}
 	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat overrides file: %v", err)
-	}
+	mustDo(t, "stat overrides file", err)
 	if perm := info.Mode().Perm(); perm&0o077 != 0 && os.PathSeparator == '/' {
 		t.Errorf("overrides file mode = %v, want owner-only (0600)", perm)
 	}
 	got, err := config.ReadOverrides(path)
-	if err != nil {
-		t.Fatalf("ReadOverrides: %v", err)
-	}
+	mustDo(t, "ReadOverrides", err)
 	if got["logging.level"] != "debug" || got["push.enabled"] != true {
 		t.Errorf("ReadOverrides = %v, want logging.level=debug and push.enabled=true", got)
 	}
@@ -189,13 +188,9 @@ func TestSaveOverrides_RoundTripAndRemove(t *testing.T) {
 	}
 
 	// A nil value removes the key: the setting falls back to config.yaml.
-	if err := config.SaveOverrides(path, map[string]any{"logging.level": nil}); err != nil {
-		t.Fatalf("SaveOverrides(remove): %v", err)
-	}
+	mustDo(t, "SaveOverrides(remove)", config.SaveOverrides(path, map[string]any{"logging.level": nil}))
 	got, err = config.ReadOverrides(path)
-	if err != nil {
-		t.Fatalf("ReadOverrides after remove: %v", err)
-	}
+	mustDo(t, "ReadOverrides after remove", err)
 	if _, ok := got["logging.level"]; ok {
 		t.Errorf("logging.level still present after a nil save: %v", got)
 	}
@@ -274,21 +269,15 @@ func TestSaveOverrides_ValidatesValues(t *testing.T) {
 // One bad key refuses the whole batch: the file keeps its previous content.
 func TestSaveOverrides_AllOrNothing(t *testing.T) {
 	path := config.OverridesPath(t.TempDir())
-	if err := config.SaveOverrides(path, map[string]any{"logging.level": "warn"}); err != nil {
-		t.Fatalf("seed SaveOverrides: %v", err)
-	}
+	mustDo(t, "seed SaveOverrides", config.SaveOverrides(path, map[string]any{"logging.level": "warn"}))
 	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read seed: %v", err)
-	}
+	mustDo(t, "read seed", err)
 	err = config.SaveOverrides(path, map[string]any{"logging.level": "debug", "voice.udp_port": float64(-5)})
 	if !errors.Is(err, config.ErrInvalidValue) {
 		t.Fatalf("SaveOverrides(mixed batch) error = %v, want ErrInvalidValue", err)
 	}
 	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read after: %v", err)
-	}
+	mustDo(t, "read after", err)
 	if !slices.Equal(before, after) {
 		t.Errorf("a refused batch changed the file:\nbefore %s\nafter  %s", before, after)
 	}
@@ -299,17 +288,13 @@ func writeYAML(t *testing.T, dataDir, extra string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	body := "server:\n  data_dir: \"" + filepath.ToSlash(dataDir) + "\"\n  max_ws_connections: 10\n" + extra
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatalf("write config.yaml: %v", err)
-	}
+	mustDo(t, "write config.yaml", os.WriteFile(path, []byte(body), 0o600))
 	return path
 }
 
 func writeOverrides(t *testing.T, dataDir, body string) {
 	t.Helper()
-	if err := os.WriteFile(config.OverridesPath(dataDir), []byte(body), 0o600); err != nil {
-		t.Fatalf("write overrides: %v", err)
-	}
+	mustDo(t, "write overrides", os.WriteFile(config.OverridesPath(dataDir), []byte(body), 0o600))
 }
 
 // Precedence: defaults < config.yaml < admin-panel overrides < OWNCORD_* env.
@@ -319,9 +304,7 @@ func TestLoad_OverridesLayerBetweenYAMLAndEnv(t *testing.T) {
 	writeOverrides(t, dataDir, `{"server.max_ws_connections": 20, "logging.level": "debug"}`)
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	mustDo(t, "Load", err)
 	if cfg.Server.MaxWSConnections != 20 {
 		t.Errorf("max_ws_connections = %d, want 20 (panel override beats config.yaml's 10)", cfg.Server.MaxWSConnections)
 	}
@@ -331,9 +314,7 @@ func TestLoad_OverridesLayerBetweenYAMLAndEnv(t *testing.T) {
 
 	t.Setenv("OWNCORD_SERVER_MAX_WS_CONNECTIONS", "30")
 	cfg, err = config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load with env: %v", err)
-	}
+	mustDo(t, "Load with env", err)
 	if cfg.Server.MaxWSConnections != 30 {
 		t.Errorf("max_ws_connections = %d, want 30 (environment beats the panel override)", cfg.Server.MaxWSConnections)
 	}
@@ -342,9 +323,7 @@ func TestLoad_OverridesLayerBetweenYAMLAndEnv(t *testing.T) {
 func TestLoad_NoOverridesFileKeepsYAML(t *testing.T) {
 	dataDir := t.TempDir()
 	cfg, err := config.Load(writeYAML(t, dataDir, ""))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	mustDo(t, "Load", err)
 	if cfg.Server.MaxWSConnections != 10 {
 		t.Errorf("max_ws_connections = %d, want config.yaml's 10", cfg.Server.MaxWSConnections)
 	}
@@ -358,9 +337,7 @@ func TestLoad_OverridesIgnoreProtectedKeys(t *testing.T) {
 	writeOverrides(t, dataDir, `{"server.data_dir": "/elsewhere", "server.max_ws_connections": 20}`)
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	mustDo(t, "Load", err)
 	if cfg.Server.DataDir != filepath.ToSlash(dataDir) && cfg.Server.DataDir != dataDir {
 		t.Errorf("server.data_dir = %q, want config.yaml's %q (not panel-editable)", cfg.Server.DataDir, dataDir)
 	}
@@ -378,9 +355,7 @@ func TestLoad_OverridesIgnoreWrongTypedValue(t *testing.T) {
 	writeOverrides(t, dataDir, `{"logging.level": 5, "server.max_ws_connections": "10", "push.enabled": true}`)
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load with a wrong-typed override: %v", err)
-	}
+	mustDo(t, "Load with a wrong-typed override", err)
 	if cfg.Logging.Level != "info" {
 		t.Errorf("logging.level = %q, want the default info (wrong-typed override dropped)", cfg.Logging.Level)
 	}
@@ -449,21 +424,13 @@ func TestBaseConfig_IgnoresOverridesLayer(t *testing.T) {
 	dataDir := filepath.Join(dir, "data")
 	cfgPath := filepath.Join(dir, "config.yaml")
 	yaml := "server:\n  data_dir: " + filepath.ToSlash(dataDir) + "\n  port: 9000\nupload:\n  max_size_mb: 20\n"
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(cfgPath, []byte(yaml), 0o600))
 	overrides := config.OverridesPath(dataDir)
-	if err := os.MkdirAll(dataDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := config.SaveOverrides(overrides, map[string]any{"server.port": 9443, "upload.max_size_mb": 50}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(dataDir, 0o750))
+	mustDo(t, "SaveOverrides", config.SaveOverrides(overrides, map[string]any{"server.port": 9443, "upload.max_size_mb": 50}))
 
 	base, err := config.BaseConfig(cfgPath)
-	if err != nil {
-		t.Fatalf("BaseConfig: %v", err)
-	}
+	mustDo(t, "BaseConfig", err)
 	if base.Server.Port != 9000 || base.Upload.MaxSizeMB != 20 {
 		t.Errorf("BaseConfig applied the overrides layer: port %d, max_size_mb %d", base.Server.Port, base.Upload.MaxSizeMB)
 	}
@@ -471,17 +438,13 @@ func TestBaseConfig_IgnoresOverridesLayer(t *testing.T) {
 		t.Errorf("data_dir = %q, want %q", base.Server.DataDir, dataDir)
 	}
 	effective, err := config.Preview(cfgPath, overrides, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Preview", err)
 	if effective.Server.Port != 9443 {
 		t.Errorf("Preview port = %d; the overrides file should still apply there", effective.Server.Port)
 	}
 
 	// An unparseable overrides file does not stop BaseConfig.
-	if err := os.WriteFile(overrides, []byte("not json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(overrides, []byte("not json"), 0o600))
 	if _, err := config.BaseConfig(cfgPath); err != nil {
 		t.Errorf("BaseConfig with an unparseable overrides file: %v", err)
 	}
@@ -492,9 +455,7 @@ func TestBaseConfig_MissingFileIsDefaultsAndCreatesNothing(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.yaml")
 
 	base, err := config.BaseConfig(cfgPath)
-	if err != nil {
-		t.Fatalf("BaseConfig: %v", err)
-	}
+	mustDo(t, "BaseConfig", err)
 	if base.Server.Port != 8443 || base.Server.DataDir != "data" {
 		t.Errorf("not the defaults: port %d, data_dir %q", base.Server.Port, base.Server.DataDir)
 	}
@@ -502,9 +463,7 @@ func TestBaseConfig_MissingFileIsDefaultsAndCreatesNothing(t *testing.T) {
 		t.Error("a LiveKit credential was generated; BaseConfig must leave them as configured")
 	}
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReadDir", err)
 	if len(entries) != 0 {
 		t.Errorf("BaseConfig created files: %v", entries)
 	}

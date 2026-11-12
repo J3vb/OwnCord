@@ -6,12 +6,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// eventEntry stores a broadcast event for potential replay.
 type eventEntry struct {
 	seq       uint64
 	channelID int64 // 0 = global broadcast, >0 = channel-scoped
-	// contentBearing is contentBearingKinds[type], read once at Push so a
-	// replay walk never re-parses a frame's type.
+	// contentBearing is contentBearingKinds[type], read once at Push so replay never re-parses a frame's
+	// type.
 	contentBearing bool
 	data           []byte
 }
@@ -33,14 +32,13 @@ func NewEventRingBuffer(size int) *EventRingBuffer {
 	}
 }
 
-// Push adds an event to the ring buffer.
-// channelID identifies the channel scope (0 = global broadcast).
+// Push adds an event to the ring buffer; channelID is the channel scope (0 = global).
 func (rb *EventRingBuffer) Push(seq uint64, channelID int64, data []byte) {
-	rb.pushEntry(seq, channelID, contentBearingKinds[extractEventType(data)], data)
+	rb.pushEntry(seq, channelID, frameIsContentBearing(data), data)
 }
 
-// pushEntry is Push with the content-bearing flag worked out by the caller,
-// so the hub can read a frame's type before it takes the sequencing lock.
+// pushEntry is Push with the content-bearing flag worked out by the caller, so the hub can read a frame's
+// type before taking the sequencing lock.
 func (rb *EventRingBuffer) pushEntry(seq uint64, channelID int64, contentBearing bool, data []byte) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
@@ -51,17 +49,15 @@ func (rb *EventRingBuffer) pushEntry(seq uint64, channelID int64, contentBearing
 	}
 }
 
-// EventsSince returns all events with seq > afterSeq, in order.
-// Returns nil if afterSeq is too old (no longer in the buffer).
+// EventsSince returns events with seq > afterSeq, in order; nil if afterSeq is too old.
 func (rb *EventRingBuffer) EventsSince(afterSeq uint64) [][]byte {
 	return rb.eventsSince(afterSeq, nil, nil, true)
 }
 
-// RemoveWhere drops the data of every buffered event drop reports true for and
-// returns how many. The entry keeps its seq so the coverage window
-// (OldestSeq/NewestSeq) is unchanged; a replay crossing an emptied slot returns nil,
-// so the client takes the full ready instead of acking past a frame it never
-// received. Used by account erasure to take an erased user's frames out of hot replay.
+// RemoveWhere drops the data of every buffered event drop reports true for and returns how
+// many. The entry keeps its seq so the coverage window is unchanged; a replay crossing an
+// emptied slot returns nil (full ready) instead of acking past a frame never received. Used
+// by account erasure.
 func (rb *EventRingBuffer) RemoveWhere(drop func(data []byte) bool) int {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
@@ -76,36 +72,30 @@ func (rb *EventRingBuffer) RemoveWhere(drop func(data []byte) bool) int {
 	return removed
 }
 
-// newestSeqLocked returns the highest sequence number in the buffer. Callers
-// must hold rb.mu and must have checked rb.count > 0.
+// newestSeqLocked returns the highest seq in the buffer; callers hold rb.mu and checked rb.count > 0.
 func (rb *EventRingBuffer) newestSeqLocked() uint64 {
 	return rb.entries[(rb.pos-1+rb.size)%rb.size].seq
 }
 
-// EventsSinceFiltered returns events with seq > afterSeq whose channelID is
-// in allowedChannelIDs or whose channelID is 0 (global broadcasts).
-// Returns nil if afterSeq is too old (same semantics as EventsSince).
+// EventsSinceFiltered returns events with seq > afterSeq whose channelID is in
+// allowedChannelIDs or 0 (global); nil if afterSeq is too old.
 func (rb *EventRingBuffer) EventsSinceFiltered(afterSeq uint64, allowedChannelIDs map[int64]bool) [][]byte {
 	return rb.EventsSinceFilteredContent(afterSeq, allowedChannelIDs, allowedChannelIDs)
 }
 
-// EventsSinceFilteredContent is EventsSinceFiltered plus the NSFW content gate: a
-// buffered event whose channelID is allowed is included UNLESS it is a
-// content-bearing kind (contentBearingKinds) for a channel not in readableChannelIDs,
-// which is silently dropped, so a labelled channel a caller has not acknowledged
-// replays no content though its metadata frames still replay. EventsSinceFiltered is
-// this with readableChannelIDs == allowedChannelIDs.
+// EventsSinceFilteredContent is EventsSinceFiltered plus the NSFW content gate: an allowed
+// channel's content-bearing event (contentBearingKinds) is silently dropped unless the
+// channel is in readableChannelIDs, so an unacknowledged labelled channel replays metadata
+// but no content. EventsSinceFiltered is this with readableChannelIDs == allowedChannelIDs.
 func (rb *EventRingBuffer) EventsSinceFilteredContent(afterSeq uint64, allowedChannelIDs, readableChannelIDs map[int64]bool) [][]byte {
 	return rb.eventsSince(afterSeq, allowedChannelIDs, readableChannelIDs, false)
 }
 
 // eventsSince is the one ring walk behind EventsSince and EventsSinceFilteredContent.
-// unfiltered admits every buffered frame; the filtered path includes channelID 0
-// (a global broadcast) unconditionally and a channel-scoped frame only when allowed
-// admits it and it is either not content-bearing or readable admits its channel.
-// There is deliberately no nil-means-everything sentinel on the maps:
-// computeAllowedChannels only returns a made map and is fail-closed, so a nil map
-// must deny, or a future nil-map bug would read as a cross-channel replay leak.
+// unfiltered admits every frame; otherwise channelID 0 is admitted and a channel-scoped
+// frame only when allowed admits it and it is not content-bearing or readable admits its
+// channel. Deliberately no nil-means-everything sentinel: a nil map must deny, or a future
+// nil-map bug would read as a cross-channel replay leak.
 func (rb *EventRingBuffer) eventsSince(afterSeq uint64, allowed, readable map[int64]bool, unfiltered bool) [][]byte {
 	rb.mu.RLock()
 	defer rb.mu.RUnlock()
@@ -117,23 +107,19 @@ func (rb *EventRingBuffer) eventsSince(afterSeq uint64, allowed, readable map[in
 	oldestIdx := (rb.pos - rb.count + rb.size) % rb.size
 	oldestSeq := rb.entries[oldestIdx].seq
 
-	// If the requested seq is at or older than our oldest, we can't guarantee
-	// full coverage — return nil to trigger a full ready payload.
+	// At or older than our oldest we cannot guarantee full coverage: nil triggers a full ready.
 	if afterSeq <= oldestSeq {
 		return nil
 	}
 
-	// Likewise if the client claims events newer than anything we ever held:
-	// its counter and ours disagree (a restart can reseed seq below a client's
-	// remembered lastSeq), so an empty slice here would be read as "caught up"
-	// and freeze that client. afterSeq == newestSeq is the legitimate caught-up
-	// case and still returns an empty replay.
+	// Likewise if the client claims events newer than anything we held: a restart can reseed
+	// seq below a client's lastSeq, and an empty slice would read as "caught up" and freeze it.
+	// afterSeq == newestSeq is the legitimate caught-up case.
 	if afterSeq > rb.newestSeqLocked() {
 		return nil
 	}
 
-	// Seqs rise through the ring, so the first newer entry starts the tail and
-	// its length bounds the result.
+	// Seqs rise through the ring, so the first newer entry starts the tail and its length bounds the result.
 	first := sort.Search(rb.count, func(i int) bool {
 		return rb.entries[(oldestIdx+i)%rb.size].seq > afterSeq
 	})
@@ -141,8 +127,7 @@ func (rb *EventRingBuffer) eventsSince(afterSeq uint64, allowed, readable map[in
 	for i := first; i < rb.count; i++ {
 		e := &rb.entries[(oldestIdx+i)%rb.size]
 		if e.data == nil {
-			// A slot RemoveWhere cleared: the client would ack past a frame
-			// it never saw. Replay cannot cover the range — full ready.
+			// A slot RemoveWhere cleared: the client would ack past a frame it never saw; full ready.
 			return nil
 		}
 		if unfiltered || e.channelID == 0 || (allowed[e.channelID] &&

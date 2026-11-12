@@ -9,7 +9,7 @@ import * as voiceSession from "../helpers/voiceSessionMock";
 
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
-import { createChannelSidebar } from "../../src/components/ChannelSidebar";
+import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
 import { setChannels } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";

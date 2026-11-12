@@ -11,11 +11,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// Group DM membership: add, remove and owner transfer, plus the
-// system rows those and the leave and rename paths write.
-
-// groupManagementStore is what the group management part of DMService reads and
-// writes. *db.DB satisfies it; each group write is one transaction.
 type groupManagementStore interface {
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
@@ -30,63 +25,50 @@ type groupManagementStore interface {
 	SetGroupDMIcon(ctx context.Context, channelID, actorID int64, iconID *string, content string) (*db.GroupChange, error)
 }
 
-// groupManagement is the part of DMService that changes a group DM after it
-// exists: rename, membership, owner and icon.
 type groupManagement struct {
 	st    groupManagementStore
 	perms *PermissionService
 }
 
-// MaxGroupDMAddPerCall is how many users one add may name (the cap of 10
-// members less the adder).
+// MaxGroupDMAddPerCall is how many users one add may name (the cap of 10 less the adder).
 const MaxGroupDMAddPerCall = db.MaxGroupDMParticipants - 1
 
-// groupDMFullError is ErrGroupDMFull: a conflict the API answers with its own
-// code.
 type groupDMFullError struct{}
 
 func (groupDMFullError) Error() string { return "group DM is full" }
 func (groupDMFullError) Unwrap() error { return ErrConflict }
 
-// ErrGroupDMFull means an add would take a group past db.MaxGroupDMParticipants.
-// It wraps ErrConflict, which it refines into the GROUP_DM_FULL wire code.
+// ErrGroupDMFull means an add would pass db.MaxGroupDMParticipants; it wraps ErrConflict, refined into the
+// GROUP_DM_FULL wire code.
 var ErrGroupDMFull error = groupDMFullError{}
 
-// GroupEventRow is one group DM system row with its author resolved, ready for
-// the hub to turn into a chat_message frame.
+// GroupEventRow is one group DM system row with its author resolved, ready for the hub's chat_message frame.
 type GroupEventRow struct {
 	MessageID int64
-	// Kind is the wire name of the row (group_add, group_remove, group_leave,
-	// group_rename, group_icon).
+	// Kind is the wire name (group_add, group_remove, group_leave, group_rename, group_icon).
 	Kind       string
 	Author     *db.User
 	AuthorRole string
 	// Content is the English fallback sentence only old clients show.
-	Content   string
-	Timestamp string
-	// TargetUserID is the user an add or remove row names, else 0.
+	Content      string
+	Timestamp    string
 	TargetUserID int64
-	// Name is the new group name of a rename row ("" = removed), else nil.
-	Name *string
-	// IconRemoved is true for an icon row that cleared the icon.
-	IconRemoved bool
+	Name         *string
+	IconRemoved  bool
 }
 
-// GroupChangeResult is what a membership or rename mutation tells its caller:
-// the rows to fan out and who receives them.
+// GroupChangeResult is what a membership or rename mutation tells its caller: rows to fan out and who
+// receives them.
 type GroupChangeResult struct {
-	// Rows are the system rows written, in order.
 	Rows []GroupEventRow
-	// Audience is the members after the change, lowest id first. Rows and the
-	// refreshed dm_channel_open go to them.
+	// Audience is the members after the change, lowest id first; rows and the refreshed dm_channel_open go to
+	// them.
 	Audience []int64
-	// Added are the users an add brought in.
-	Added []int64
+	Added    []int64
 }
 
-// dedupeGroupRecipients drops repeats and the caller and rejects a non-positive
-// id. A payload naming someone twice is a client bug, not a refusal, but it must
-// not inflate the participant count or double-insert.
+// dedupeGroupRecipients drops repeats and the caller and rejects a non-positive id. A
+// duplicate is a client bug, not a refusal, but must not inflate the participant count or double-insert.
 func dedupeGroupRecipients(ids []int64, callerID int64) ([]int64, error) {
 	seen := map[int64]bool{callerID: true}
 	unique := make([]int64, 0, len(ids))
@@ -103,23 +85,18 @@ func dedupeGroupRecipients(ids []int64, callerID int64) ([]int64, error) {
 	return unique, nil
 }
 
-// groupReachabilityReader is the one extra read the reachability check needs.
-// *db.DB satisfies it; it is kept out of Store (the Store method ratchet), and a
-// Store lacking it fails closed.
+// groupReachabilityReader is the one extra read the reachability check needs; kept out of
+// Store (the method ratchet), and a Store lacking it fails closed.
 type groupReachabilityReader interface {
 	GroupDMTargetsRefuse(ctx context.Context, actorID int64, targets []int64) (bool, error)
 }
 
 // validateGroupRecipients is the check create and add share. Every target must be
-// dmReachableUser (missing, banned or non-active is "not found"); no pair
-// involving a target may be blocked either way, against the other targets or the
-// people already in the room (others); and each target must be reachable by
-// actorID (not DMs-off without trusting the actor, no unaccepted message request
-// from the actor). Only the actor's trust counts, and staff are checked like
-// anyone else. Every cause gives the one refusal, which never names the target.
-// Pairs already in the room are not re-checked: refusing a newcomer because two
-// others fell out later would make the add unusable. Returns the targets' users in
-// order.
+// dmReachableUser (missing, banned or non-active is "not found"); no pair involving a
+// target may be blocked either way, against other targets or people already in the room;
+// each target must be reachable by actorID (not DMs-off without trusting the actor, no
+// unaccepted request from the actor), staff included. Every cause gives the one refusal,
+// never naming the target. Pairs already in the room are not re-checked.
 func (s *groupManagement) validateGroupRecipients(ctx context.Context, actorID int64, targets, others []int64) ([]*db.User, error) {
 	users := make([]*db.User, 0, len(targets))
 	for _, rid := range targets {
@@ -133,7 +110,6 @@ func (s *groupManagement) validateGroupRecipients(ctx context.Context, actorID i
 		users = append(users, user)
 	}
 
-	// n <= MaxGroupDMParticipants, so the O(n^2) scan is trivial.
 	for i, t := range targets {
 		peers := make([]int64, 0, len(others)+len(targets)-i-1)
 		peers = append(peers, others...)
@@ -163,8 +139,6 @@ func (s *groupManagement) validateGroupRecipients(ctx context.Context, actorID i
 	return users, nil
 }
 
-// groupActorName is the name a fallback sentence uses: the display name, else
-// the username, and "Someone" when the lookup failed.
 func groupActorName(u *db.User) string {
 	if name := u.EffectiveDisplayName(); name != "" {
 		return name
@@ -198,9 +172,6 @@ func groupIconContent(actor *db.User, removed bool) string {
 	return fmt.Sprintf("%s changed the group icon.", groupActorName(actor))
 }
 
-// groupRows resolves the author of each written row (and their role) for the
-// hub. A failed lookup keeps the row with the id alone, so the frame still goes
-// out and the client falls back to its member store.
 func (s *groupManagement) groupRows(ctx context.Context, rows []db.GroupEventRow) []GroupEventRow {
 	type authorInfo struct {
 		user *db.User
@@ -233,7 +204,6 @@ func (s *groupManagement) groupRows(ctx context.Context, rows []db.GroupEventRow
 	return out
 }
 
-// mapGroupDBError turns a group mutation's db error into a service error.
 func mapGroupDBError(what string, err error) error {
 	switch {
 	case errors.Is(err, db.ErrGroupDMFull):
@@ -251,8 +221,8 @@ func mapGroupDBError(what string, err error) error {
 	}
 }
 
-// requireGroupActor is the gate every group mutation starts with: a member (anyone
-// else gets not found), not timed out, in a group channel (a 1:1 answers 400).
+// requireGroupActor is the gate every group mutation starts with: a member (anyone else
+// gets not found), not timed out, in a group channel (a 1:1 answers 400).
 func (s *groupManagement) requireGroupActor(ctx context.Context, userID, channelID int64) error {
 	if channelID <= 0 {
 		return fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
@@ -275,12 +245,11 @@ func (s *groupManagement) requireGroupActor(ctx context.Context, userID, channel
 	return nil
 }
 
-// AddGroupMembers adds users to a group DM on behalf of any member. It takes
-// 1..MaxGroupDMAddPerCall ids; users already in the group are skipped, and if that
-// leaves nobody the call is a 400. The group may not pass
-// db.MaxGroupDMParticipants (ErrGroupDMFull), counted inside the transaction. A
-// target that blocks DMs from non-trusted members or holds an unaccepted request
-// from the caller refuses the whole call (403).
+// AddGroupMembers adds users on behalf of any member: 1..MaxGroupDMAddPerCall ids; users
+// already in are skipped (none left is a 400). The group may not pass
+// db.MaxGroupDMParticipants (ErrGroupDMFull), counted inside the transaction. A target
+// that blocks DMs from non-trusted members or holds an unaccepted request from the caller
+// refuses the whole call (403).
 func (s *groupManagement) AddGroupMembers(ctx context.Context, actorID, channelID int64, userIDs []int64) (*GroupChangeResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.AddGroupMembers",
 		telemetry.Int64("user_id", actorID),
@@ -338,9 +307,8 @@ func (s *groupManagement) AddGroupMembers(ctx context.Context, actorID, channelI
 	return &GroupChangeResult{Rows: s.groupRows(ctx, change.Rows), Audience: change.MemberIDs, Added: added}, nil
 }
 
-// RemoveGroupMember removes targetID on behalf of the owner. Removing yourself is
-// a 400, a non-owner caller a 403, a non-member caller or target a 404. The rows
-// go to the remaining members (Audience), not the removed user.
+// RemoveGroupMember removes targetID on behalf of the owner. Removing yourself is 400, a
+// non-owner caller 403, a non-member caller or target 404. Rows go to the remaining members.
 func (s *groupManagement) RemoveGroupMember(ctx context.Context, ownerID, channelID, targetID int64) (*GroupChangeResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.RemoveGroupMember",
 		telemetry.Int64("user_id", ownerID),
@@ -369,8 +337,8 @@ func (s *groupManagement) RemoveGroupMember(ctx context.Context, ownerID, channe
 	return &GroupChangeResult{Rows: s.groupRows(ctx, change.Rows), Audience: change.MemberIDs}, nil
 }
 
-// TransferGroupOwner makes targetID the owner on behalf of the current owner. It
-// writes no row; Audience gets a refreshed dm_channel_open with the new owner_id.
+// TransferGroupOwner makes targetID the owner on behalf of the current owner. Writes no
+// row; Audience gets a refreshed dm_channel_open with the new owner_id.
 func (s *groupManagement) TransferGroupOwner(ctx context.Context, ownerID, channelID, targetID int64) (*GroupChangeResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.TransferGroupOwner",
 		telemetry.Int64("user_id", ownerID),
@@ -396,16 +364,13 @@ func (s *groupManagement) TransferGroupOwner(ctx context.Context, ownerID, chann
 
 // RenameGroupResult is what a rename did.
 type RenameGroupResult struct {
-	// Rows is the group_rename row, empty when the name did not change.
-	Rows []GroupEventRow
-	// Audience is the members, who receive the refreshed summary and the row.
+	Rows     []GroupEventRow
 	Audience []int64
 }
 
-// RenameGroupDM sets (or, with "", clears) a group DM's name. Any participant may
-// rename (the owner has more authority over membership, not the name). A changed
-// name writes a group_rename row in the same transaction, returned in Rows; an
-// equal name writes none. A 1:1 DM refuses: its name is who is in it.
+// RenameGroupDM sets (or, with "", clears) a group DM's name. Any participant may rename.
+// A changed name writes a group_rename row in the same transaction (in Rows); an equal
+// name writes none. A 1:1 DM refuses: its name is who is in it.
 func (s *groupManagement) RenameGroupDM(ctx context.Context, userID, channelID int64, name string) (*RenameGroupResult, error) {
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
@@ -428,7 +393,7 @@ func (s *groupManagement) RenameGroupDM(ctx context.Context, userID, channelID i
 		return nil, fmt.Errorf("%w: only group DMs can be named", ErrBadRequest)
 	}
 
-	// Bound the raw bytes before cleanText; see cleanTextBounded (user.go).
+	// Bound the raw bytes before cleanText (see cleanTextBounded in user.go).
 	cleanName, err := cleanVisibleBounded(name, MaxGroupDMNameLen, "name")
 	if err != nil {
 		return nil, err
@@ -440,8 +405,7 @@ func (s *groupManagement) RenameGroupDM(ctx context.Context, userID, channelID i
 		return nil, mapGroupDBError("failed to rename group DM", err)
 	}
 
-	// The rename committed: the reads below must not fail on a client hang-up, or
-	// the members never hear of it.
+	// The rename committed: the reads below must not fail on a client hang-up or members never hear of it.
 	ctx = context.WithoutCancel(ctx)
 	return &RenameGroupResult{Rows: s.groupRows(ctx, change.Rows), Audience: change.MemberIDs}, nil
 }

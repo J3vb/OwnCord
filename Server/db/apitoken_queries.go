@@ -11,17 +11,13 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// ─── API Token Operations ───────────────────────────────────────────────────
-//
 // API tokens are long-lived, revocable bearer credentials for headless clients
-// (the MCP introspection tool, bots, CI). They live in their own table so the
-// per-user session cap and password/TOTP session wipes never touch them;
-// sign-out-everywhere and account recovery revoke them with the sessions.
-// Like sessions, only the SHA-256 hash is stored.
+// (MCP tool, bots, CI), in their own table so the session cap and
+// password/TOTP session wipes never touch them; sign-out-everywhere and account
+// recovery revoke them with the sessions. Like sessions, only the SHA-256 hash is stored.
 
-// CreateAPIToken inserts a new API token and returns its ID. tokenHash must
-// already be hashed (never store the raw token). Pass expiresAt = nil for a
-// token that never expires.
+// CreateAPIToken inserts a token and returns its ID; tokenHash must be hashed, nil
+// expiresAt never expires.
 func (d *DB) CreateAPIToken(ctx context.Context, userID int64, tokenHash, label string, expiresAt *time.Time) (int64, error) {
 	var expiresStr *string
 	if expiresAt != nil {
@@ -40,9 +36,7 @@ func (d *DB) CreateAPIToken(ctx context.Context, userID int64, tokenHash, label 
 	return res.LastInsertId()
 }
 
-// GetActiveAPIToken returns the non-revoked, non-expired token matching
-// tokenHash, or nil if none matches (unknown, revoked, or expired). The query
-// itself filters revoked/expired rows, so a returned token is always usable.
+// GetActiveAPIToken returns the usable token matching tokenHash, or nil.
 func (d *DB) GetActiveAPIToken(ctx context.Context, tokenHash string) (*APIToken, error) {
 	t, err := d.q.GetActiveAPIToken(ctx, tokenHash)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -54,7 +48,7 @@ func (d *DB) GetActiveAPIToken(ctx context.Context, tokenHash string) (*APIToken
 	return apiTokenFromGen(t), nil
 }
 
-// ListAPITokens returns all API tokens (newest first, capped), without hashes.
+// ListAPITokens returns all tokens (unrevoked first, then newest, capped), without hashes.
 func (d *DB) ListAPITokens(ctx context.Context) ([]APITokenListItem, error) {
 	rows, err := d.q.ListAPITokens(ctx)
 	if err != nil {
@@ -62,22 +56,38 @@ func (d *DB) ListAPITokens(ctx context.Context) ([]APITokenListItem, error) {
 	}
 	out := make([]APITokenListItem, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, APITokenListItem{
-			ID:        r.ID,
-			UserID:    r.UserID,
-			Username:  r.Username,
-			Label:     r.Label,
-			CreatedAt: r.CreatedAt,
-			LastUsed:  r.LastUsedAt,
-			ExpiresAt: r.ExpiresAt,
-			RevokedAt: r.RevokedAt,
-		})
+		out = append(out, apiTokenListItem(r.ID, r.UserID, r.Username, r.Label, r.CreatedAt, r.LastUsedAt, r.ExpiresAt, r.RevokedAt))
 	}
 	return out, nil
 }
 
-// RevokeAPIToken marks the token with the given ID revoked and returns the
-// number of rows affected (0 if unknown or already revoked).
+// ListAPITokensByUser is ListAPITokens for one account's tokens only.
+func (d *DB) ListAPITokensByUser(ctx context.Context, userID int64) ([]APITokenListItem, error) {
+	rows, err := d.q.ListAPITokensByUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("ListAPITokensByUser: %w", err)
+	}
+	out := make([]APITokenListItem, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, apiTokenListItem(r.ID, r.UserID, r.Username, r.Label, r.CreatedAt, r.LastUsedAt, r.ExpiresAt, r.RevokedAt))
+	}
+	return out, nil
+}
+
+func apiTokenListItem(id, userID int64, username, label, createdAt string, lastUsed, expiresAt, revokedAt *string) APITokenListItem {
+	return APITokenListItem{
+		ID:        id,
+		UserID:    userID,
+		Username:  username,
+		Label:     label,
+		CreatedAt: createdAt,
+		LastUsed:  lastUsed,
+		ExpiresAt: expiresAt,
+		RevokedAt: revokedAt,
+	}
+}
+
+// RevokeAPIToken revokes the token and returns rows affected.
 func (d *DB) RevokeAPIToken(ctx context.Context, id int64) (int64, error) {
 	res, err := d.q.RevokeAPIToken(ctx, id)
 	if err != nil {
@@ -86,8 +96,8 @@ func (d *DB) RevokeAPIToken(ctx context.Context, id int64) (int64, error) {
 	return res.RowsAffected()
 }
 
-// RevokeAPITokenByLabel marks the token(s) with the given label revoked and
-// returns the number of rows affected.
+// RevokeAPITokenByLabel marks the token(s) with the given label revoked and returns the number of
+// rows affected.
 func (d *DB) RevokeAPITokenByLabel(ctx context.Context, label string) (int64, error) {
 	res, err := d.q.RevokeAPITokenByLabel(ctx, label)
 	if err != nil {
@@ -96,8 +106,7 @@ func (d *DB) RevokeAPITokenByLabel(ctx context.Context, label string) (int64, er
 	return res.RowsAffected()
 }
 
-// ListUserActiveAPITokens returns the account's tokens that still work
-// (neither revoked nor expired), newest first, without hashes.
+// ListUserActiveAPITokens returns the account's working tokens, newest first, without hashes.
 func (d *DB) ListUserActiveAPITokens(ctx context.Context, userID int64) ([]APITokenListItem, error) {
 	rows, err := d.q.ListUserActiveAPITokens(ctx, userID)
 	if err != nil {
@@ -117,8 +126,7 @@ func (d *DB) ListUserActiveAPITokens(ctx context.Context, userID int64) ([]APITo
 	return out, nil
 }
 
-// RevokeOwnAPIToken revokes the token with the given ID only if it belongs to
-// userID and is still live, and returns the rows affected (0 otherwise).
+// RevokeOwnAPIToken revokes the token only if it belongs to userID and is live; rows affected.
 func (d *DB) RevokeOwnAPIToken(ctx context.Context, userID, id int64) (int64, error) {
 	res, err := d.q.RevokeOwnAPIToken(ctx, dbgen.RevokeOwnAPITokenParams{ID: id, UserID: userID})
 	if err != nil {
@@ -127,8 +135,7 @@ func (d *DB) RevokeOwnAPIToken(ctx context.Context, userID, id int64) (int64, er
 	return res.RowsAffected()
 }
 
-// RevokeUserAPITokens revokes every live token of the account and returns how
-// many were revoked.
+// RevokeUserAPITokens revokes every live token of the account and returns how many were revoked.
 func (d *DB) RevokeUserAPITokens(ctx context.Context, userID int64) (int64, error) {
 	res, err := d.q.RevokeUserAPITokens(ctx, userID)
 	if err != nil {
@@ -137,8 +144,7 @@ func (d *DB) RevokeUserAPITokens(ctx context.Context, userID int64) (int64, erro
 	return res.RowsAffected()
 }
 
-// TouchAPIToken updates last_used_at for the token with the given hash.
-// Best-effort: callers run this off the hot auth path.
+// TouchAPIToken updates last_used_at; best-effort, run off the hot auth path.
 func (d *DB) TouchAPIToken(ctx context.Context, tokenHash string) error {
 	if err := d.q.TouchAPIToken(ctx, tokenHash); err != nil {
 		return fmt.Errorf("TouchAPIToken: %w", err)
@@ -146,9 +152,7 @@ func (d *DB) TouchAPIToken(ctx context.Context, tokenHash string) error {
 	return nil
 }
 
-// GetOwnerUser returns the highest-privilege user (the role with the greatest
-// position) — the default identity for a CLI-minted API token. Returns nil when
-// there are no users yet.
+// GetOwnerUser returns the highest-position user (default identity for a CLI token), or nil.
 func (d *DB) GetOwnerUser(ctx context.Context) (*User, error) {
 	u, err := d.q.GetOwnerUser(ctx)
 	if errors.Is(err, sql.ErrNoRows) {

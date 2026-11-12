@@ -8,7 +8,6 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/dbtime"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 func setAbout(t *testing.T, database *db.DB, u *db.User, about string) {
@@ -67,10 +66,7 @@ func TestMemberJoin_CarriesAboutAndCreatedAt(t *testing.T) {
 	bob := seedMemberUser(t, database, "join-bob")
 	setAbout(t, database, alice, "about alice")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, bob, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	_, send := connectClient(t, hub, bob, 0, 32)
 	drainChanTimeout(send, 100*time.Millisecond)
 
 	hub.BroadcastMemberUnban(alice.ID)

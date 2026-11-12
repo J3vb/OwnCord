@@ -55,10 +55,7 @@ func TestCreateMessage_ReturnsID(t *testing.T) {
 	userID := seedUser(t, database, "alice")
 	chID := seedChannel(t, database, "general")
 
-	id, err := database.CreateMessage(context.Background(), chID, userID, "hello", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	id := mustCreateMessage(t, database, chID, userID, "hello", nil)
 	if id <= 0 {
 		t.Errorf("expected positive ID, got %d", id)
 	}
@@ -70,10 +67,7 @@ func TestCreateMessage_WithReplyTo(t *testing.T) {
 	chID := seedChannel(t, database, "general")
 
 	parentID, _ := database.CreateMessage(context.Background(), chID, userID, "parent", nil)
-	replyID, err := database.CreateMessage(context.Background(), chID, userID, "reply", &parentID)
-	if err != nil {
-		t.Fatalf("CreateMessage with reply: %v", err)
-	}
+	replyID := mustCreateMessage(t, database, chID, userID, "reply", &parentID)
 
 	msg, _ := database.GetMessage(context.Background(), replyID)
 	if msg.ReplyTo == nil || *msg.ReplyTo != parentID {
@@ -99,9 +93,7 @@ func TestGetMessage_NotFound(t *testing.T) {
 	database := openMigratedMemory(t)
 
 	msg, err := database.GetMessage(context.Background(), 9999)
-	if err != nil {
-		t.Fatalf("GetMessage: %v", err)
-	}
+	mustDo(t, "GetMessage", err)
 	if msg != nil {
 		t.Error("expected nil for non-existent message")
 	}
@@ -115,9 +107,7 @@ func TestGetMessage_Fields(t *testing.T) {
 	id, _ := database.CreateMessage(context.Background(), chID, userID, "hello world", nil)
 
 	msg, err := database.GetMessage(context.Background(), id)
-	if err != nil {
-		t.Fatalf("GetMessage: %v", err)
-	}
+	mustDo(t, "GetMessage", err)
 	if msg == nil {
 		t.Fatal("expected message, got nil")
 	}
@@ -145,9 +135,7 @@ func TestGetMessages_EmptyChannel(t *testing.T) {
 	chID := seedChannel(t, database, "empty")
 
 	msgs, err := database.GetMessages(context.Background(), chID, 0, 50)
-	if err != nil {
-		t.Fatalf("GetMessages: %v", err)
-	}
+	mustDo(t, "GetMessages", err)
 	if len(msgs) != 0 {
 		t.Errorf("expected 0 messages, got %d", len(msgs))
 	}
@@ -166,9 +154,7 @@ func TestGetMessages_ReturnsMessages(t *testing.T) {
 	}
 
 	msgs, err := database.GetMessages(context.Background(), chID, 0, 50)
-	if err != nil {
-		t.Fatalf("GetMessages: %v", err)
-	}
+	mustDo(t, "GetMessages", err)
 	if len(msgs) != 3 {
 		t.Errorf("expected 3 messages, got %d", len(msgs))
 	}
@@ -233,9 +219,7 @@ func TestEditMessage_OwnerCanEdit(t *testing.T) {
 	id, _ := database.CreateMessage(context.Background(), chID, userID, "original", nil)
 
 	updated, err := database.EditMessage(context.Background(), id, userID, "updated")
-	if err != nil {
-		t.Fatalf("EditMessage: %v", err)
-	}
+	mustDo(t, "EditMessage", err)
 	// The RETURNING row must reflect the write without a re-read.
 	if updated == nil || updated.Content != "updated" {
 		t.Errorf("returned row Content = %+v, want 'updated'", updated)
@@ -286,9 +270,7 @@ func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
 
 	id, _ := database.CreateMessage(context.Background(), chID, userID, "bye", nil)
 
-	if err := database.DeleteMessage(context.Background(), id, userID, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "DeleteMessage", database.DeleteMessage(context.Background(), id, userID, false))
 
 	msg, _ := database.GetMessage(context.Background(), id)
 	if msg == nil {
@@ -336,9 +318,7 @@ func TestDeleteMessage_ModCanDeleteAny(t *testing.T) {
 
 	id, _ := database.CreateMessage(context.Background(), chID, ownerID, "msg", nil)
 
-	if err := database.DeleteMessage(context.Background(), id, modID, true); err != nil {
-		t.Fatalf("DeleteMessage by mod: %v", err)
-	}
+	mustDo(t, "DeleteMessage by mod", database.DeleteMessage(context.Background(), id, modID, true))
 
 	msg, _ := database.GetMessage(context.Background(), id)
 	if !msg.Deleted {
@@ -381,9 +361,7 @@ func TestPurgeChannelMessages_DeletesNewestFirst(t *testing.T) {
 	database, chID, ids := purgeSeed(t, 5)
 
 	got, err := database.PurgeChannelMessages(context.Background(), chID, 0, 2)
-	if err != nil {
-		t.Fatalf("PurgeChannelMessages: %v", err)
-	}
+	mustDo(t, "PurgeChannelMessages", err)
 	want := []int64{ids[4], ids[3]}
 	if !slices.Equal(got, want) {
 		t.Fatalf("purged ids = %v, want %v", got, want)
@@ -435,9 +413,7 @@ func TestPurgeChannelMessages_SkipsAlreadyDeleted(t *testing.T) {
 	}
 
 	got, err := database.PurgeChannelMessages(context.Background(), chID, 0, 10)
-	if err != nil {
-		t.Fatalf("second purge: %v", err)
-	}
+	mustDo(t, "second purge", err)
 	want := []int64{ids[2], ids[1], ids[0]}
 	if !slices.Equal(got, want) {
 		t.Fatalf("second purge ids = %v, want %v", got, want)
@@ -448,9 +424,7 @@ func TestPurgeChannelMessages_BeforeCursor(t *testing.T) {
 	database, chID, ids := purgeSeed(t, 5)
 
 	got, err := database.PurgeChannelMessages(context.Background(), chID, ids[2], 10)
-	if err != nil {
-		t.Fatalf("PurgeChannelMessages: %v", err)
-	}
+	mustDo(t, "PurgeChannelMessages", err)
 	want := []int64{ids[1], ids[0]}
 	if !slices.Equal(got, want) {
 		t.Fatalf("purged ids = %v, want %v", got, want)
@@ -482,18 +456,14 @@ func TestPurgeChannelMessages_EmptyChannelAndZeroLimit(t *testing.T) {
 	database, chID, _ := purgeSeed(t, 1)
 
 	got, err := database.PurgeChannelMessages(context.Background(), chID, 0, 0)
-	if err != nil {
-		t.Fatalf("zero limit: %v", err)
-	}
+	mustDo(t, "zero limit", err)
 	if len(got) != 0 {
 		t.Fatalf("zero limit purged %v, want none", got)
 	}
 
 	emptyCh := seedChannel(t, database, "empty")
 	got, err = database.PurgeChannelMessages(context.Background(), emptyCh, 0, 50)
-	if err != nil {
-		t.Fatalf("empty channel: %v", err)
-	}
+	mustDo(t, "empty channel", err)
 	if got == nil || len(got) != 0 {
 		t.Fatalf("empty channel returned %v, want empty non-nil slice", got)
 	}
@@ -507,9 +477,7 @@ func TestAddReaction_Success(t *testing.T) {
 	chID := seedChannel(t, database, "ch")
 	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "hi", nil)
 
-	if err := database.AddReaction(context.Background(), msgID, userID, "👍"); err != nil {
-		t.Fatalf("AddReaction: %v", err)
-	}
+	mustDo(t, "AddReaction", database.AddReaction(context.Background(), msgID, userID, "👍"))
 }
 
 func TestAddReaction_UniqueConstraint(t *testing.T) {
@@ -532,9 +500,7 @@ func TestRemoveReaction_Success(t *testing.T) {
 	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "hi", nil)
 
 	_ = database.AddReaction(context.Background(), msgID, userID, "😂")
-	if err := database.RemoveReaction(context.Background(), msgID, userID, "😂"); err != nil {
-		t.Fatalf("RemoveReaction: %v", err)
-	}
+	mustDo(t, "RemoveReaction", database.RemoveReaction(context.Background(), msgID, userID, "😂"))
 }
 
 func TestRemoveReaction_NotFound(t *testing.T) {
@@ -556,9 +522,7 @@ func TestGetReactions_Empty(t *testing.T) {
 	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "hi", nil)
 
 	counts, err := database.GetReactions(context.Background(), msgID)
-	if err != nil {
-		t.Fatalf("GetReactions: %v", err)
-	}
+	mustDo(t, "GetReactions", err)
 	if len(counts) != 0 {
 		t.Errorf("expected 0 reactions, got %d", len(counts))
 	}
@@ -595,758 +559,6 @@ func TestGetReactions_Counts(t *testing.T) {
 	}
 }
 
-// ─── SearchMessages ───────────────────────────────────────────────────────────
-
-func TestSearchMessages_FindsMatch(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "zara")
-	chID := seedChannel(t, database, "searchch")
-
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello world fts test", nil)
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "unrelated content here", nil)
-
-	results, err := database.SearchMessages(context.Background(), "hello", nil, db.SearchPage{Limit: 10})
-	if err != nil {
-		t.Fatalf("SearchMessages: %v", err)
-	}
-	if len(results) != 1 {
-		t.Errorf("expected 1 result, got %d", len(results))
-	}
-	if results[0].Content != "hello world fts test" {
-		t.Errorf("Content = %q, want 'hello world fts test'", results[0].Content)
-	}
-}
-
-func TestSearchMessages_NFDQueryFindsNFCMessage(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "zara")
-	chID := seedChannel(t, database, "searchch")
-
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "my r\u00e9sum\u00e9 draft", nil)
-
-	results, err := database.SearchMessages(context.Background(), "re\u0301sume\u0301", nil, db.SearchPage{Limit: 10})
-	if err != nil {
-		t.Fatalf("SearchMessages: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("NFD query found %d NFC messages, want 1", len(results))
-	}
-}
-
-func TestSearchMessages_FilterByChannel(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "adam")
-	ch1 := seedChannel(t, database, "ch1")
-	ch2 := seedChannel(t, database, "ch2")
-
-	_, _ = database.CreateMessage(context.Background(), ch1, userID, "needle in channel 1", nil)
-	_, _ = database.CreateMessage(context.Background(), ch2, userID, "needle in channel 2", nil)
-
-	results, _ := database.SearchMessages(context.Background(), "needle", &ch1, db.SearchPage{Limit: 10})
-	if len(results) != 1 {
-		t.Errorf("expected 1 result in ch1, got %d", len(results))
-	}
-	if results[0].ChannelID != ch1 {
-		t.Errorf("ChannelID = %d, want %d", results[0].ChannelID, ch1)
-	}
-}
-
-func TestSearchMessages_NoResults(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "beth")
-	chID := seedChannel(t, database, "ch")
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello there", nil)
-
-	results, _ := database.SearchMessages(context.Background(), "xyzzy", nil, db.SearchPage{Limit: 10})
-	if len(results) != 0 {
-		t.Errorf("expected 0 results, got %d", len(results))
-	}
-}
-
-func TestSearchMessages_LimitRespected(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "carl")
-	chID := seedChannel(t, database, "ch")
-
-	for range 5 {
-		_, _ = database.CreateMessage(context.Background(), chID, userID, "searchable keyword content", nil)
-	}
-
-	results, _ := database.SearchMessages(context.Background(), "keyword", nil, db.SearchPage{Limit: 3})
-	if len(results) != 3 {
-		t.Errorf("expected 3 results (limit), got %d", len(results))
-	}
-}
-
-func TestSearchMessages_DeletedNotReturned(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "diana")
-	chID := seedChannel(t, database, "ch")
-
-	id, _ := database.CreateMessage(context.Background(), chID, userID, "vanishing keyword message", nil)
-	_ = database.DeleteMessage(context.Background(), id, userID, false)
-
-	results, _ := database.SearchMessages(context.Background(), "vanishing", nil, db.SearchPage{Limit: 10})
-	if len(results) != 0 {
-		t.Errorf("expected 0 results (deleted excluded), got %d", len(results))
-	}
-}
-
-// Migration 019 narrows the messages_au trigger to AFTER UPDATE OF content;
-// an edit must still reindex the FTS table (old term gone, new term found).
-func TestSearchMessages_EditReindexes(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "edith")
-	chID := seedChannel(t, database, "ch")
-
-	id, _ := database.CreateMessage(context.Background(), chID, userID, "obsolete wording here", nil)
-	if _, err := database.EditMessage(context.Background(), id, userID, "fresh wording here"); err != nil {
-		t.Fatalf("EditMessage: %v", err)
-	}
-
-	stale, _ := database.SearchMessages(context.Background(), "obsolete", nil, db.SearchPage{Limit: 10})
-	if len(stale) != 0 {
-		t.Errorf("expected 0 results for pre-edit content, got %d", len(stale))
-	}
-	updated, _ := database.SearchMessages(context.Background(), "fresh", nil, db.SearchPage{Limit: 10})
-	if len(updated) != 1 {
-		t.Errorf("expected 1 result for post-edit content, got %d", len(updated))
-	}
-}
-
-// Pinning updates a non-content column, which the narrowed trigger must
-// ignore — the message stays searchable and the FTS index stays consistent.
-func TestSearchMessages_PinnedMessageStaysSearchable(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "pinny")
-	chID := seedChannel(t, database, "ch")
-
-	id, _ := database.CreateMessage(context.Background(), chID, userID, "pinworthy announcement", nil)
-	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1}); err != nil {
-		t.Fatalf("SetMessagePinned: %v", err)
-	}
-
-	results, err := database.SearchMessages(context.Background(), "pinworthy", nil, db.SearchPage{Limit: 10})
-	if err != nil {
-		t.Fatalf("SearchMessages: %v", err)
-	}
-	if len(results) != 1 {
-		t.Errorf("expected pinned message to remain searchable, got %d results", len(results))
-	}
-}
-
-// OC-0096: sanitizeFTSQuery kept '-' as an allowed bareword character, but in
-// FTS5's MATCH grammar '-' introduces a column filter ("-col: expr"), so
-// "well-known" parses as "well" followed by a filter on a nonexistent column
-// "known" and SQLite raises "no such column: known" instead of matching.
-func TestSearchMessages_HyphenatedQuery(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "hyphenuser")
-	chID := seedChannel(t, database, "hyphench")
-
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "a well-known fact", nil)
-
-	results, err := database.SearchMessages(context.Background(), "well-known", nil, db.SearchPage{Limit: 10})
-	if err != nil {
-		t.Fatalf("SearchMessages(%q): %v", "well-known", err)
-	}
-	if len(results) != 1 {
-		t.Errorf("expected 1 result, got %d", len(results))
-	}
-}
-
-// OC-0002: sanitizeFTSQuery only filters characters, not FTS5's bareword
-// boolean keywords (AND, OR, NOT). A query consisting of (or containing) one
-// of those keywords in an operator position makes SQLite raise an
-// "fts5: syntax error", which SearchMessages surfaces as an error (mapped by
-// the service layer to a 500) instead of returning zero results.
-func TestSearchMessages_BooleanKeywordQuery(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "booleanuser")
-	chID := seedChannel(t, database, "booleanch")
-
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello world", nil)
-
-	for _, q := range []string{"AND", "OR", "NOT", "AND world", "hello AND"} {
-		if _, err := database.SearchMessages(context.Background(), q, nil, db.SearchPage{Limit: 10}); err != nil {
-			t.Errorf("SearchMessages(%q): unexpected error: %v", q, err)
-		}
-	}
-}
-
-// Same root cause as TestSearchMessages_BooleanKeywordQuery, but through the
-// SearchMessagesInChannels caller, which sanitizes with the same
-// sanitizeFTSQuery helper.
-func TestSearchMessagesInChannels_BooleanKeywordQuery(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "boolchanuser")
-	chID := seedChannel(t, database, "boolchanch")
-
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello world", nil)
-
-	for _, q := range []string{"AND", "OR", "NOT", "AND world", "hello AND"} {
-		if _, err := database.SearchMessagesInChannels(context.Background(), q, []int64{chID}, db.SearchPage{Limit: 10}); err != nil {
-			t.Errorf("SearchMessagesInChannels(%q): unexpected error: %v", q, err)
-		}
-	}
-}
-
-// DP-20: the last term of a query is a prefix, so a half-typed word still
-// finds the message ("deplo" finds "deploy"). Only the last term: earlier
-// ones were finished words when the user typed past them.
-func TestSearchMessages_LastTermIsAPrefix(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "prefixuser")
-	chID := seedChannel(t, database, "prefixch")
-
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "please deploy the app", nil)
-
-	for _, q := range []string{"deplo", "app deplo", "please-dep"} {
-		results, err := database.SearchMessages(context.Background(), q, nil, db.SearchPage{Limit: 10})
-		if err != nil {
-			t.Fatalf("SearchMessages(%q): %v", q, err)
-		}
-		if len(results) != 1 {
-			t.Errorf("SearchMessages(%q) = %d results, want 1", q, len(results))
-		}
-		results, err = database.SearchMessagesInChannels(context.Background(), q, []int64{chID}, db.SearchPage{Limit: 10})
-		if err != nil {
-			t.Fatalf("SearchMessagesInChannels(%q): %v", q, err)
-		}
-		if len(results) != 1 {
-			t.Errorf("SearchMessagesInChannels(%q) = %d results, want 1", q, len(results))
-		}
-	}
-
-	results, err := database.SearchMessages(context.Background(), "deplo app", nil, db.SearchPage{Limit: 10})
-	if err != nil {
-		t.Fatalf("SearchMessages(%q): %v", "deplo app", err)
-	}
-	if len(results) != 0 {
-		t.Errorf("SearchMessages(%q) = %d results, want 0: only the last term is a prefix", "deplo app", len(results))
-	}
-}
-
-// DP-20: a last term shorter than three runes matches only that exact word,
-// so "de" does not find "deploy" but still finds the word "de"; three runes
-// are enough to prefix.
-func TestSearchMessages_ShortLastTermIsExact(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "shortuser")
-	chID := seedChannel(t, database, "shortch")
-
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "please deploy the app", nil)
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "ciao de mi amigo", nil)
-
-	for q, want := range map[string]int{"de": 1, "please de": 0, "dep": 1} {
-		results, err := database.SearchMessagesInChannels(context.Background(), q, []int64{chID}, db.SearchPage{Limit: 10})
-		if err != nil {
-			t.Fatalf("SearchMessagesInChannels(%q): %v", q, err)
-		}
-		if len(results) != want {
-			t.Errorf("SearchMessagesInChannels(%q) = %d results, want %d", q, len(results), want)
-		}
-	}
-}
-
-// DP-20: a Recent page is newest first, and Before keeps only ids strictly
-// below the cursor.
-func TestSearchMessages_RecentBeforeCursor(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "cursoruser")
-	chID := seedChannel(t, database, "cursorch")
-
-	ids := make([]int64, 5)
-	for i := range ids {
-		ids[i], _ = database.CreateMessage(context.Background(), chID, userID, "cursorword message", nil)
-	}
-	want := []int64{ids[2], ids[1], ids[0]}
-
-	check := func(name string, got []db.MessageSearchResult, err error) {
-		t.Helper()
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		gotIDs := make([]int64, len(got))
-		for i, r := range got {
-			gotIDs[i] = r.MessageID
-		}
-		if !slices.Equal(gotIDs, want) {
-			t.Errorf("%s ids = %v, want %v", name, gotIDs, want)
-		}
-	}
-	page := db.SearchPage{Limit: 10, Recent: true, Before: ids[3]}
-	got, err := database.SearchMessages(context.Background(), "cursorword", &chID, page)
-	check("SearchMessages", got, err)
-	got, err = database.SearchMessagesInChannels(context.Background(), "cursorword", []int64{chID}, page)
-	check("SearchMessagesInChannels", got, err)
-}
-
-// ─── UpdateReadState ──────────────────────────────────────────────────────────
-
-func TestUpdateReadState_Upsert(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "ella")
-	chID := seedChannel(t, database, "ch")
-	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "msg", nil)
-
-	if err := database.UpdateReadState(context.Background(), userID, chID, msgID); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
-
-	// Update again with higher message ID — should not error.
-	msgID2, _ := database.CreateMessage(context.Background(), chID, userID, "msg2", nil)
-	if err := database.UpdateReadState(context.Background(), userID, chID, msgID2); err != nil {
-		t.Fatalf("UpdateReadState second call: %v", err)
-	}
-}
-
-// ─── GetMessagesForAPI ──────────────────────────────────────────────────────
-
-func TestGetMessagesForAPI_Empty(t *testing.T) {
-	database := openMigratedMemory(t)
-	chID := seedChannel(t, database, "apichan")
-	userID := seedUser(t, database, "apiuser")
-
-	msgs, err := database.GetMessagesForAPI(context.Background(), chID, 0, 50, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesForAPI: %v", err)
-	}
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages, got %d", len(msgs))
-	}
-}
-
-func TestGetMessagesForAPI_ReturnsUserObject(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "apiuser2")
-	chID := seedChannel(t, database, "apichan2")
-
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello api", nil)
-
-	msgs, err := database.GetMessagesForAPI(context.Background(), chID, 0, 50, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesForAPI: %v", err)
-	}
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
-	}
-	if msgs[0].User.Username != "apiuser2" {
-		t.Errorf("User.Username = %q, want 'apiuser2'", msgs[0].User.Username)
-	}
-	if msgs[0].User.ID != userID {
-		t.Errorf("User.ID = %d, want %d", msgs[0].User.ID, userID)
-	}
-	if msgs[0].Content != "hello api" {
-		t.Errorf("Content = %q, want 'hello api'", msgs[0].Content)
-	}
-}
-
-func TestGetMessagesForAPI_BeforePagination(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "apipage")
-	chID := seedChannel(t, database, "apich")
-
-	ids := make([]int64, 0, 5)
-	for range 5 {
-		id, _ := database.CreateMessage(context.Background(), chID, userID, "msg", nil)
-		ids = append(ids, id)
-	}
-
-	msgs, err := database.GetMessagesForAPI(context.Background(), chID, ids[3], 50, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesForAPI with before: %v", err)
-	}
-	if len(msgs) != 3 {
-		t.Errorf("expected 3 messages before id %d, got %d", ids[3], len(msgs))
-	}
-}
-
-func TestGetMessagesForAPI_WithReactions(t *testing.T) {
-	database := openMigratedMemory(t)
-	u1 := seedUser(t, database, "reactuser1")
-	u2 := seedUser(t, database, "reactuser2")
-	chID := seedChannel(t, database, "reactchan")
-
-	msgID, _ := database.CreateMessage(context.Background(), chID, u1, "react me", nil)
-	_ = database.AddReaction(context.Background(), msgID, u1, "👍")
-	_ = database.AddReaction(context.Background(), msgID, u2, "👍")
-
-	msgs, err := database.GetMessagesForAPI(context.Background(), chID, 0, 50, u1)
-	if err != nil {
-		t.Fatalf("GetMessagesForAPI: %v", err)
-	}
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
-	}
-	if len(msgs[0].Reactions) != 1 {
-		t.Fatalf("expected 1 reaction type, got %d", len(msgs[0].Reactions))
-	}
-	if msgs[0].Reactions[0].Count != 2 {
-		t.Errorf("reaction count = %d, want 2", msgs[0].Reactions[0].Count)
-	}
-	if !msgs[0].Reactions[0].Me {
-		t.Error("Me should be true for requesting user who reacted")
-	}
-}
-
-func TestGetMessagesForAPI_ExcludesDeleted(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "apidel")
-	chID := seedChannel(t, database, "apidelchan")
-
-	id, _ := database.CreateMessage(context.Background(), chID, userID, "deleted msg", nil)
-	_ = database.DeleteMessage(context.Background(), id, userID, false)
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "visible msg", nil)
-
-	msgs, err := database.GetMessagesForAPI(context.Background(), chID, 0, 50, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesForAPI: %v", err)
-	}
-	if len(msgs) != 1 {
-		t.Errorf("expected 1 message (deleted excluded), got %d", len(msgs))
-	}
-}
-
-// ─── GetMessagesAroundForAPI ────────────────────────────────────────────────
-
-// seedAroundMessages fills a channel with n messages and returns their ids in
-// ascending order.
-func seedAroundMessages(t *testing.T, database *db.DB, chID, userID int64, n int) []int64 {
-	t.Helper()
-	ids := make([]int64, 0, n)
-	for i := range n {
-		id, err := database.CreateMessage(context.Background(), chID, userID, "m"+strconv.Itoa(i), nil)
-		if err != nil {
-			t.Fatalf("CreateMessage %d: %v", i, err)
-		}
-		ids = append(ids, id)
-	}
-	return ids
-}
-
-func TestGetMessagesAroundForAPI_CentersAndOrdersAscending(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "aroundu1")
-	chID := seedChannel(t, database, "aroundc1")
-	ids := seedAroundMessages(t, database, chID, userID, 20)
-
-	msgs, err := database.GetMessagesAroundForAPI(context.Background(), chID, ids[10], 3, 2, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesAroundForAPI: %v", err)
-	}
-	// 3 older + centre + 2 newer.
-	want := []int64{ids[7], ids[8], ids[9], ids[10], ids[11], ids[12]}
-	got := make([]int64, 0, len(msgs))
-	for _, m := range msgs {
-		got = append(got, m.ID)
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("window = %v, want %v", got, want)
-	}
-}
-
-func TestGetMessagesAroundForAPI_ClampsAtChannelEdges(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "aroundu2")
-	chID := seedChannel(t, database, "aroundc2")
-	ids := seedAroundMessages(t, database, chID, userID, 4)
-
-	first, err := database.GetMessagesAroundForAPI(context.Background(), chID, ids[0], 10, 10, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesAroundForAPI(first): %v", err)
-	}
-	if len(first) != 4 || first[0].ID != ids[0] {
-		t.Errorf("window at the first message = %d entries starting at %d, want 4 starting at %d",
-			len(first), first[0].ID, ids[0])
-	}
-
-	last, err := database.GetMessagesAroundForAPI(context.Background(), chID, ids[3], 10, 10, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesAroundForAPI(last): %v", err)
-	}
-	if len(last) != 4 || last[len(last)-1].ID != ids[3] {
-		t.Errorf("window at the last message = %d entries ending at %d, want 4 ending at %d",
-			len(last), last[len(last)-1].ID, ids[3])
-	}
-}
-
-func TestGetMessagesAroundForAPI_ExcludesDeleted(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "aroundu3")
-	chID := seedChannel(t, database, "aroundc3")
-	ids := seedAroundMessages(t, database, chID, userID, 5)
-	if err := database.DeleteMessage(context.Background(), ids[1], userID, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
-
-	msgs, err := database.GetMessagesAroundForAPI(context.Background(), chID, ids[2], 5, 5, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesAroundForAPI: %v", err)
-	}
-	for _, m := range msgs {
-		if m.ID == ids[1] {
-			t.Fatalf("deleted message %d present in the window", ids[1])
-		}
-	}
-	if len(msgs) != 4 {
-		t.Errorf("window size = %d, want 4", len(msgs))
-	}
-}
-
-func TestGetMessagesAroundForAPI_ScopedToChannel(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "aroundu4")
-	chA := seedChannel(t, database, "aroundc4a")
-	chB := seedChannel(t, database, "aroundc4b")
-	idsA := seedAroundMessages(t, database, chA, userID, 3)
-	seedAroundMessages(t, database, chB, userID, 3)
-
-	msgs, err := database.GetMessagesAroundForAPI(context.Background(), chA, idsA[1], 10, 10, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesAroundForAPI: %v", err)
-	}
-	if len(msgs) != 3 {
-		t.Fatalf("window size = %d, want the 3 messages of channel A only", len(msgs))
-	}
-	for _, m := range msgs {
-		if m.ChannelID != chA {
-			t.Errorf("message %d belongs to channel %d, not %d", m.ID, m.ChannelID, chA)
-		}
-	}
-}
-
-func TestGetMessagesAroundForAPI_NegativeCountsClampToZero(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "aroundu5")
-	chID := seedChannel(t, database, "aroundc5")
-	ids := seedAroundMessages(t, database, chID, userID, 5)
-
-	// A negative count must not become a negative SQL LIMIT (which SQLite
-	// reads as "no limit" and would silently return the whole channel).
-	msgs, err := database.GetMessagesAroundForAPI(context.Background(), chID, ids[2], -4, -4, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesAroundForAPI: %v", err)
-	}
-	if len(msgs) != 1 || msgs[0].ID != ids[2] {
-		t.Errorf("window = %d entries, want just the centre %d", len(msgs), ids[2])
-	}
-}
-
-func TestGetMessagesAroundForAPI_UnknownCentreIsEmpty(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "aroundu6")
-	chID := seedChannel(t, database, "aroundc6")
-	seedAroundMessages(t, database, chID, userID, 3)
-
-	msgs, err := database.GetMessagesAroundForAPI(context.Background(), chID, 999999, 5, 5, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesAroundForAPI: %v", err)
-	}
-	// Nothing is <= the centre in this channel below it, and nothing above it.
-	if len(msgs) != 3 {
-		t.Errorf("window size = %d; an out-of-range centre should still be bounded by the channel", len(msgs))
-	}
-}
-
-// ─── GetChannelUnreadCounts ─────────────────────────────────────────────────
-
-func TestGetChannelUnreadCounts_NoMessages(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "unreaduser")
-	_ = seedChannel(t, database, "unreadchan")
-
-	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
-	// Should return entries for text channels even with 0 messages.
-	if counts == nil {
-		t.Fatal("GetChannelUnreadCounts returned nil")
-	}
-}
-
-func TestGetChannelUnreadCounts_WithUnreadMessages(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "unreaduser2")
-	chID := seedChannel(t, database, "unreadchan2")
-
-	// Create 3 messages, mark first as read.
-	msg1, _ := database.CreateMessage(context.Background(), chID, userID, "msg1", nil)
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "msg2", nil)
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "msg3", nil)
-
-	_ = database.UpdateReadState(context.Background(), userID, chID, msg1)
-
-	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
-	cu, ok := counts[chID]
-	if !ok {
-		t.Fatalf("channel %d not in unread counts", chID)
-	}
-	if cu.UnreadCount != 2 {
-		t.Errorf("UnreadCount = %d, want 2", cu.UnreadCount)
-	}
-}
-
-// A channel with more than 100 unread messages reports a capped count: the
-// ready payload only needs "99+" to render, and bounding the subquery keeps a
-// huge never-read channel from scanning every message row on every connect.
-// A small channel is unaffected.
-func TestGetChannelUnreadCounts_CapsAt100(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "unreadcap")
-	bigChID := seedChannel(t, database, "bigchan")
-	smallChID := seedChannel(t, database, "smallchan")
-
-	for range 150 {
-		if _, err := database.CreateMessage(context.Background(), bigChID, userID, "msg", nil); err != nil {
-			t.Fatalf("CreateMessage(big): %v", err)
-		}
-	}
-	for range 3 {
-		if _, err := database.CreateMessage(context.Background(), smallChID, userID, "msg", nil); err != nil {
-			t.Fatalf("CreateMessage(small): %v", err)
-		}
-	}
-
-	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
-	if got := counts[bigChID].UnreadCount; got != 100 {
-		t.Errorf("big channel UnreadCount = %d, want 100 (capped)", got)
-	}
-	if got := counts[smallChID].UnreadCount; got != 3 {
-		t.Errorf("small channel UnreadCount = %d, want 3 (uncapped)", got)
-	}
-}
-
-// A channel with no messages must still yield a 0,0 entry — the correlated
-// subquery rewrite must not silently drop empty channels from the ready
-// payload's unread map.
-func TestGetChannelUnreadCounts_ZeroMessageChannelYieldsZeros(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "unreadzero")
-	chID := seedChannel(t, database, "emptychan")
-
-	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
-	cu, ok := counts[chID]
-	if !ok {
-		t.Fatalf("empty channel %d missing from unread counts", chID)
-	}
-	if cu.LastMessageID != 0 || cu.UnreadCount != 0 {
-		t.Errorf("empty channel = {last:%d unread:%d}, want {0 0}", cu.LastMessageID, cu.UnreadCount)
-	}
-}
-
-func TestGetChannelUnreadCounts_IncludesAnnouncementChannels(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "unreadann")
-	annID, err := database.CreateChannel(context.Background(), "announcements", "announcement", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(announcement): %v", err)
-	}
-
-	msgID, _ := database.CreateMessage(context.Background(), annID, userID, "server news", nil)
-
-	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
-	cu, ok := counts[annID]
-	if !ok {
-		t.Fatalf("announcement channel %d missing from unread counts", annID)
-	}
-	if cu.LastMessageID != msgID {
-		t.Errorf("LastMessageID = %d, want %d", cu.LastMessageID, msgID)
-	}
-	if cu.UnreadCount != 1 {
-		t.Errorf("UnreadCount = %d, want 1", cu.UnreadCount)
-	}
-}
-
-// Deleted messages count neither toward unread nor toward last_msg_id.
-func TestGetChannelUnreadCounts_ExcludesDeleted(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "unreaddel")
-	chID := seedChannel(t, database, "unreaddelchan")
-
-	keepID, _ := database.CreateMessage(context.Background(), chID, userID, "keep", nil)
-	delID, _ := database.CreateMessage(context.Background(), chID, userID, "gone", nil)
-	if err := database.DeleteMessage(context.Background(), delID, userID, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
-
-	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
-	cu := counts[chID]
-	if cu.LastMessageID != keepID {
-		t.Errorf("LastMessageID = %d, want %d (deleted excluded)", cu.LastMessageID, keepID)
-	}
-	if cu.UnreadCount != 1 {
-		t.Errorf("UnreadCount = %d, want 1 (deleted excluded)", cu.UnreadCount)
-	}
-}
-
-// ─── GetLatestMessageID ─────────────────────────────────────────────────────
-
-func TestGetLatestMessageID_Empty(t *testing.T) {
-	database := openMigratedMemory(t)
-	chID := seedChannel(t, database, "latestchan")
-
-	id, err := database.GetLatestMessageID(context.Background(), chID)
-	if err != nil {
-		t.Fatalf("GetLatestMessageID: %v", err)
-	}
-	if id != 0 {
-		t.Errorf("expected 0 for empty channel, got %d", id)
-	}
-}
-
-func TestGetLatestMessageID_ReturnsHighest(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "latestuser")
-	chID := seedChannel(t, database, "latestchan2")
-
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "first", nil)
-	_, _ = database.CreateMessage(context.Background(), chID, userID, "second", nil)
-	lastID, _ := database.CreateMessage(context.Background(), chID, userID, "third", nil)
-
-	id, err := database.GetLatestMessageID(context.Background(), chID)
-	if err != nil {
-		t.Fatalf("GetLatestMessageID: %v", err)
-	}
-	if id != lastID {
-		t.Errorf("GetLatestMessageID = %d, want %d", id, lastID)
-	}
-}
-
-func TestGetLatestMessageID_ExcludesDeleted(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "latestdel")
-	chID := seedChannel(t, database, "latestdelchan")
-
-	id1, _ := database.CreateMessage(context.Background(), chID, userID, "keep", nil)
-	id2, _ := database.CreateMessage(context.Background(), chID, userID, "delete me", nil)
-	_ = database.DeleteMessage(context.Background(), id2, userID, false)
-
-	latestID, err := database.GetLatestMessageID(context.Background(), chID)
-	if err != nil {
-		t.Fatalf("GetLatestMessageID: %v", err)
-	}
-	if latestID != id1 {
-		t.Errorf("GetLatestMessageID = %d, want %d (deleted excluded)", latestID, id1)
-	}
-}
-
 // ─── GetReactionUsers ───────────────────────────────────────────────────────
 
 func TestGetReactionUsers_ReturnsReactorsInReactionOrder(t *testing.T) {
@@ -1358,21 +570,13 @@ func TestGetReactionUsers_ReturnsReactorsInReactionOrder(t *testing.T) {
 	msgID, _ := database.CreateMessage(context.Background(), chID, author, "react to me", nil)
 
 	// second reacts before first, so reaction order (not user id) decides.
-	if err := database.AddReaction(context.Background(), msgID, second, "👍"); err != nil {
-		t.Fatalf("AddReaction(second): %v", err)
-	}
-	if err := database.AddReaction(context.Background(), msgID, first, "👍"); err != nil {
-		t.Fatalf("AddReaction(first): %v", err)
-	}
+	mustDo(t, "AddReaction(second)", database.AddReaction(context.Background(), msgID, second, "👍"))
+	mustDo(t, "AddReaction(first)", database.AddReaction(context.Background(), msgID, first, "👍"))
 	// A different emoji on the same message must not leak in.
-	if err := database.AddReaction(context.Background(), msgID, author, "🎉"); err != nil {
-		t.Fatalf("AddReaction(other emoji): %v", err)
-	}
+	mustDo(t, "AddReaction(other emoji)", database.AddReaction(context.Background(), msgID, author, "🎉"))
 
 	users, err := database.GetReactionUsers(context.Background(), msgID, "👍", 100)
-	if err != nil {
-		t.Fatalf("GetReactionUsers: %v", err)
-	}
+	mustDo(t, "GetReactionUsers", err)
 	if len(users) != 2 {
 		t.Fatalf("len(users) = %d, want 2 (%+v)", len(users), users)
 	}
@@ -1391,9 +595,7 @@ func TestGetReactionUsers_UnknownEmojiIsEmptyNotError(t *testing.T) {
 	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "hi", nil)
 
 	users, err := database.GetReactionUsers(context.Background(), msgID, "🐉", 100)
-	if err != nil {
-		t.Fatalf("GetReactionUsers: %v", err)
-	}
+	mustDo(t, "GetReactionUsers", err)
 	if len(users) != 0 {
 		t.Errorf("len(users) = %d, want 0", len(users))
 	}
@@ -1415,18 +617,14 @@ func TestGetReactionUsers_ClampsLimitToMax(t *testing.T) {
 
 	// A caller asking for more than the cap still gets at most the cap.
 	users, err := database.GetReactionUsers(context.Background(), msgID, "👍", 10_000)
-	if err != nil {
-		t.Fatalf("GetReactionUsers: %v", err)
-	}
+	mustDo(t, "GetReactionUsers", err)
 	if len(users) != db.MaxReactionUsers {
 		t.Errorf("len(users) = %d, want %d", len(users), db.MaxReactionUsers)
 	}
 
 	// A non-positive limit means "the cap", not "nothing".
 	users, err = database.GetReactionUsers(context.Background(), msgID, "👍", 0)
-	if err != nil {
-		t.Fatalf("GetReactionUsers(0): %v", err)
-	}
+	mustDo(t, "GetReactionUsers(0)", err)
 	if len(users) != db.MaxReactionUsers {
 		t.Errorf("len(users) with limit 0 = %d, want %d", len(users), db.MaxReactionUsers)
 	}
@@ -1443,49 +641,9 @@ func TestGetReactionUsers_RespectsSmallerLimit(t *testing.T) {
 	}
 
 	users, err := database.GetReactionUsers(context.Background(), msgID, "👍", 2)
-	if err != nil {
-		t.Fatalf("GetReactionUsers: %v", err)
-	}
+	mustDo(t, "GetReactionUsers", err)
 	if len(users) != 2 {
 		t.Errorf("len(users) = %d, want 2", len(users))
-	}
-}
-
-// ─── GetChannelUnreadCounts: DM rows ────────────────────────────────────────
-
-// DM channels the user participates in must appear, so the ready payload can
-// ship a real mention_count for them instead of resetting the badge to 0 on
-// every reconnect.
-func TestGetChannelUnreadCounts_IncludesParticipatingDMs(t *testing.T) {
-	database := openMigratedMemory(t)
-	alice := seedUser(t, database, "dmunreadalice")
-	bob := seedUser(t, database, "dmunreadbob")
-
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), alice, bob)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
-	msgID, _ := database.CreateMessage(context.Background(), ch.ID, bob, "hey", nil)
-	if err := database.IncrementMentionCounts(context.Background(), ch.ID, msgID, []int64{alice}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
-
-	counts, err := database.GetChannelUnreadCounts(context.Background(), alice)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
-	cu, ok := counts[ch.ID]
-	if !ok {
-		t.Fatalf("DM channel %d missing from unread counts for a participant", ch.ID)
-	}
-	if cu.LastMessageID != msgID {
-		t.Errorf("LastMessageID = %d, want %d", cu.LastMessageID, msgID)
-	}
-	if cu.UnreadCount != 1 {
-		t.Errorf("UnreadCount = %d, want 1", cu.UnreadCount)
-	}
-	if cu.MentionCount != 1 {
-		t.Errorf("MentionCount = %d, want 1", cu.MentionCount)
 	}
 }
 
@@ -1504,10 +662,7 @@ func TestGetPinnedMessages_Capped(t *testing.T) {
 
 	// One pin through the API, the rest set-based: a thousand round trips each
 	// way cost seconds under the race detector.
-	first, err := database.CreateMessage(context.Background(), chID, userID, "msg", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	first := mustCreateMessage(t, database, chID, userID, "msg", nil)
 	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: first, Pinned: true, UserID: 1}); err != nil {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
@@ -1519,9 +674,7 @@ func TestGetPinnedMessages_Capped(t *testing.T) {
 	}
 
 	msgs, err := database.GetPinnedMessages(context.Background(), chID, userID)
-	if err != nil {
-		t.Fatalf("GetPinnedMessages: %v", err)
-	}
+	mustDo(t, "GetPinnedMessages", err)
 	// One row past the cap is returned so the caller can report truncation.
 	if len(msgs) != db.MaxPinnedMessages+1 {
 		t.Errorf("GetPinnedMessages returned %d pins, want MaxPinnedMessages+1 (%d)", len(msgs), db.MaxPinnedMessages+1)
@@ -1536,14 +689,8 @@ func TestGetPinnedMessages_OrdersByPinRecency(t *testing.T) {
 	userID := seedUser(t, database, "pinorder")
 	chID := seedChannel(t, database, "pinsorder")
 
-	first, err := database.CreateMessage(context.Background(), chID, userID, "older message", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(first): %v", err)
-	}
-	second, err := database.CreateMessage(context.Background(), chID, userID, "newer message", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(second): %v", err)
-	}
+	first := mustCreateMessage(t, database, chID, userID, "older message", nil)
+	second := mustCreateMessage(t, database, chID, userID, "newer message", nil)
 
 	// Pin the NEWER message first, then the OLDER one, so message-id order and
 	// pin-recency order disagree.
@@ -1560,119 +707,11 @@ func TestGetPinnedMessages_OrdersByPinRecency(t *testing.T) {
 	}
 
 	msgs, err := database.GetPinnedMessages(context.Background(), chID, userID)
-	if err != nil {
-		t.Fatalf("GetPinnedMessages: %v", err)
-	}
+	mustDo(t, "GetPinnedMessages", err)
 	if len(msgs) != 2 {
 		t.Fatalf("got %d pins, want 2", len(msgs))
 	}
 	if msgs[0].ID != first {
 		t.Errorf("most-recently-pinned should sort first: got id %d, want %d", msgs[0].ID, first)
-	}
-}
-
-func TestGetChannelUnreadCounts_ExcludesForeignDMs(t *testing.T) {
-	database := openMigratedMemory(t)
-	alice := seedUser(t, database, "dmforeignalice")
-	bob := seedUser(t, database, "dmforeignbob")
-	outsider := seedUser(t, database, "dmforeignoutsider")
-
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), alice, bob)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
-	_, _ = database.CreateMessage(context.Background(), ch.ID, bob, "private", nil)
-
-	counts, err := database.GetChannelUnreadCounts(context.Background(), outsider)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
-	if _, ok := counts[ch.ID]; ok {
-		t.Errorf("DM channel %d leaked into a non-participant's unread counts", ch.ID)
-	}
-}
-
-// ─── GetMessagesAfterForAPI ─────────────────────────────────────────────────
-
-func TestGetMessagesAfterForAPI_AscendingAfterCursor(t *testing.T) {
-	database := openMigratedMemory(t)
-	userID := seedUser(t, database, "afteru1")
-	chID := seedChannel(t, database, "afterc1")
-	otherCh := seedChannel(t, database, "afterc2")
-	ids := seedAroundMessages(t, database, chID, userID, 10)
-	seedAroundMessages(t, database, otherCh, userID, 3) // newer ids in another channel
-	if err := database.DeleteMessage(context.Background(), ids[6], userID, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
-
-	msgs, err := database.GetMessagesAfterForAPI(context.Background(), chID, ids[4], 3, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesAfterForAPI: %v", err)
-	}
-	// Oldest-first, strictly after the cursor, deleted row skipped, capped at 3.
-	want := []int64{ids[5], ids[7], ids[8]}
-	got := make([]int64, 0, len(msgs))
-	for _, m := range msgs {
-		got = append(got, m.ID)
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("page = %v, want %v", got, want)
-	}
-
-	none, err := database.GetMessagesAfterForAPI(context.Background(), chID, ids[9], 5, userID)
-	if err != nil {
-		t.Fatalf("GetMessagesAfterForAPI(newest): %v", err)
-	}
-	if len(none) != 0 {
-		t.Errorf("page after the newest = %d rows, want 0", len(none))
-	}
-}
-
-// LastReadMessageID is the caller's own read pointer, distinct from the
-// channel's newest message, and 0 for a channel with no read_states row.
-func TestGetChannelUnreadCounts_LastReadMessageID(t *testing.T) {
-	ctx := context.Background()
-	database := openMigratedMemory(t)
-	reader := seedUser(t, database, "pointerreader")
-	other := seedUser(t, database, "pointerother")
-	read := seedChannel(t, database, "pointer-read")
-	untouched := seedChannel(t, database, "pointer-untouched")
-
-	first, err := database.CreateMessage(ctx, read, reader, "one", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	last, err := database.CreateMessage(ctx, read, reader, "two", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if _, err := database.CreateMessage(ctx, untouched, reader, "x", nil); err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if err := database.UpdateReadState(ctx, reader, read, first); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
-
-	counts, err := database.GetChannelUnreadCounts(ctx, reader)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
-	if got := counts[read].LastReadMessageID; got != first {
-		t.Errorf("LastReadMessageID = %d, want %d", got, first)
-	}
-	if got := counts[read].LastMessageID; got != last {
-		t.Errorf("LastMessageID = %d, want newest message %d", got, last)
-	}
-	if got := counts[untouched].LastReadMessageID; got != 0 {
-		t.Errorf("channel with no read row: LastReadMessageID = %d, want 0", got)
-	}
-
-	// Another user's pointer must not leak into this user's answer.
-	otherCounts, err := database.GetChannelUnreadCounts(ctx, other)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts(other): %v", err)
-	}
-	if got := otherCounts[read].LastReadMessageID; got != 0 {
-		t.Errorf("other user LastReadMessageID = %d, want 0", got)
 	}
 }

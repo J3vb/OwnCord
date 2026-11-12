@@ -12,9 +12,7 @@ import (
 func (f *forwardFixture) seedSticker(t *testing.T, name string) *db.Sticker {
 	t.Helper()
 	st, err := f.database.CreateSticker(context.Background(), name, nil, "file-"+name, "image/png", fwdAlice)
-	if err != nil {
-		t.Fatalf("seed sticker: %v", err)
-	}
+	mustDo(t, "seed sticker", err)
 	return st
 }
 
@@ -29,9 +27,7 @@ func TestSendSticker_StoresFallbackAndRow(t *testing.T) {
 	f := newForwardFixture(t, nil)
 	st := f.seedSticker(t, "Wave")
 	res, err := f.svc.SendMessage(context.Background(), f.stickerParams(fwdBob, fwdDstChan, st.ID))
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
+	mustDo(t, "SendMessage", err)
 	if res.Content != "[Sticker: Wave]" || res.Duplicate {
 		t.Fatalf("result = %+v", res)
 	}
@@ -58,9 +54,7 @@ func TestSendSticker_RetryIsOneMessage(t *testing.T) {
 	st := f.seedSticker(t, "Wave")
 	p := f.stickerParams(fwdBob, fwdDstChan, st.ID)
 	first, err := f.svc.SendMessage(context.Background(), p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SendMessage", err)
 	again, err := f.svc.SendMessage(context.Background(), p)
 	if err != nil || !again.Duplicate || again.MessageID != first.MessageID {
 		t.Fatalf("retry = %+v, %v; want a duplicate of %d", again, err, first.MessageID)
@@ -115,9 +109,7 @@ func TestSendSticker_DeletedStickerIsRefusedAndOldMessageKeepsItsName(t *testing
 	f := newForwardFixture(t, nil)
 	st := f.seedSticker(t, "Wave")
 	sent, err := f.svc.SendMessage(context.Background(), f.stickerParams(fwdBob, fwdDstChan, st.ID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SendMessage", err)
 	if ok, err := f.database.DeleteSticker(context.Background(), st.ID); err != nil || !ok {
 		t.Fatalf("DeleteSticker = %v, %v", ok, err)
 	}
@@ -195,9 +187,7 @@ func TestEditAndForward_RefuseAStickerMessage(t *testing.T) {
 	f := newForwardFixture(t, nil)
 	st := f.seedSticker(t, "Wave")
 	sent, err := f.svc.SendMessage(context.Background(), f.stickerParams(fwdBob, fwdDstChan, st.ID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SendMessage", err)
 	if _, err := f.svc.EditMessage(context.Background(), fwdBob, sent.MessageID, "now text"); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("EditMessage on a sticker message = %v, want ErrBadRequest", err)
 	}

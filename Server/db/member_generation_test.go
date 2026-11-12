@@ -20,9 +20,7 @@ func TestMemberGeneration_MovesOnMemberWritesOnly(t *testing.T) {
 	gen := func() int64 {
 		t.Helper()
 		g, err := database.MemberGeneration(ctx)
-		if err != nil {
-			t.Fatalf("MemberGeneration: %v", err)
-		}
+		mustDo(t, "MemberGeneration", err)
 		return g
 	}
 	must := func(err error) {
@@ -92,9 +90,7 @@ func TestNextMemberBanLapse(t *testing.T) {
 	lapse := func() string {
 		t.Helper()
 		at, err := database.NextMemberBanLapse(ctx)
-		if err != nil {
-			t.Fatalf("NextMemberBanLapse: %v", err)
-		}
+		mustDo(t, "NextMemberBanLapse", err)
 		return at
 	}
 	if got := lapse(); got != "" {
@@ -119,17 +115,10 @@ func TestListMembers_AboutAndCreatedAtRFC3339(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	about := "hello"
-	uid, err := database.CreateUser(ctx, "alice", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.UpdateUserProfile(ctx, uid, "alice", nil, nil, &about, nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	uid := mustCreateUser(t, database, "alice", "hash", 4)
+	mustDo(t, "UpdateUserProfile", database.UpdateUserProfile(ctx, uid, "alice", nil, nil, &about, nil, nil))
 	members, err := database.ListMembers(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListMembers", err)
 	var got *db.MemberSummary
 	for i := range members {
 		if members[i].ID == uid {
@@ -145,10 +134,7 @@ func TestListMembers_AboutAndCreatedAtRFC3339(t *testing.T) {
 	if _, err := time.Parse(dbtime.ISOLayout, got.CreatedAt); err != nil {
 		t.Errorf("CreatedAt %q is not %s: %v", got.CreatedAt, dbtime.ISOLayout, err)
 	}
-	u, err := database.GetUserByID(ctx, uid)
-	if err != nil {
-		t.Fatal(err)
-	}
+	u := mustGetUserByID(t, database, uid)
 	if want := db.FormatMemberCreatedAt(u.CreatedAt); got.CreatedAt != want {
 		t.Errorf("ListMembers created_at %q != FormatMemberCreatedAt(%q) = %q", got.CreatedAt, u.CreatedAt, want)
 	}

@@ -8,11 +8,14 @@ import { clearChildren } from "@lib/dom";
 import type { WsClient } from "@lib/ws";
 import { type ApiClient } from "@lib/api";
 import type { ChannelType, ThreadInfo } from "@lib/types";
-import { type MessageListComponent } from "@components/MessageList";
-import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";
-import { type ComposerDraft, type SentAttachment } from "@components/MessageInput";
+import { type MessageListComponent } from "../../features/messaging/MessageList";
 import { clearReactionUsersCache } from "../../features/messaging/reactionUsers";
-import type { QueuedSend } from "../../features/messaging/sendQueue";
+import { createChannelState } from "../../features/messaging/channelInitialState";
+import {
+  dropMountedComponents,
+  stashAndDestroyComposer,
+} from "../../features/messaging/channelTeardown";
+import { mountForumView } from "../../features/messaging/forumView";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 import { invalidateChannelMessageWindow, clearChannelContent } from "@stores/messages.store";
 import type { MessageController } from "./MessageController";
@@ -23,15 +26,14 @@ import {
   setThreadNavigationConsumer,
   settleThreadNavigation,
 } from "../../features/threads/threadNavigation";
-import { createAvatarElement, pickAvatarColor } from "../../features/profiles/avatar";
 import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
 import { viewChannel } from "@lib/prefs/lastChannel";
 import { messagingText } from "../../i18n/messaging";
 import { leaveChannel, markChannelRead } from "@lib/readState";
 import { readPointerEnabled } from "@lib/net/serverCapabilities";
 import { WsErrorCode } from "@lib/protocolTypes";
-import { log, abortQueued, type TrackedEdit } from "./channel/channelShared";
-import type { ChannelState, ChannelApi } from "./channel/channelState";
+import { log, abortQueued } from "./channel/channelShared";
+import type { ChannelApi } from "./channel/channelState";
 import { createChannelDrafts } from "./channel/channelDrafts";
 import { createChannelSends } from "./channel/channelSends";
 import { mountSendPipeline } from "./channel/channelMountSend";
@@ -98,20 +100,7 @@ export interface ChannelController {
 }
 
 export function createChannelController(opts: ChannelControllerOptions): ChannelController {
-  const {
-    ws,
-    api,
-    msgCtrl,
-    reactionCtrl,
-    typingLimiter,
-    showToast,
-    getCurrentUserId,
-    slots,
-    chatHeaderName,
-    chatHeaderRefs,
-    onContentGated,
-    focusFallback,
-  } = opts;
+  const { ws, api, msgCtrl, slots, showToast } = opts;
 
   // The thread side panel beside the chat column. It belongs to the
   // mounted channel: a channel switch closes it, and `thread_focus` goes null.
@@ -125,74 +114,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           slot: slots.threadSlot,
           showToast: (msg, type) => showToast(msg, type),
         });
-  const st: ChannelState = {
-    opts,
-    ws: ws,
-    api: api,
-    msgCtrl: msgCtrl,
-    reactionCtrl: reactionCtrl,
-    typingLimiter: typingLimiter,
-    showToast: showToast,
-    getCurrentUserId: getCurrentUserId,
-    slots: slots,
-    chatHeaderName: chatHeaderName,
-    chatHeaderRefs: chatHeaderRefs,
-    onContentGated: onContentGated,
-    focusFallback: focusFallback,
-    threadHost: threadHost,
-    threadList: null,
-    currentChannelId: null,
-    channelAbort: null,
-    pinsInFlight: new Set<string>(),
-    messageList: null,
-    messageInput: null,
-    typingIndicator: null,
-    nsfwConsentUi: null,
-    nsfwConsentUiGen: 0,
-    composerGatingUnsubs: [],
-    draftByChannel: new Map<number, ComposerDraft>(),
-    draftSaveTimer: null,
-    draftOwner: null,
-    lastSavedDraft: "",
-    slowModeSentAtByChannel: new Map<number, { sentAt: number; window: number }>(),
-    SLOW_MODE_RETENTION_MS: 5 * 60 * 1000,
-    draftByCorrelation: new Map<
-      string,
-      {
-        content: string;
-        replyTo: number | null;
-        // 3A-12: the reply's @ON/@OFF, part of the retry fingerprint, so a
-        // retry resends the same value.
-        replyPing?: boolean;
-        // A sticker send, kept so a retry posts the same sticker.
-        sticker?: { readonly id: number; readonly name: string };
-        // Each file with its name (and picked File, when there is one), so a
-        // file the server did not attach can go back into the composer (2A-3).
-        attachments: readonly SentAttachment[];
-        // Which channel this cid was actually sent to. chat_send_ok and the
-        // SLOW_MODE error are global ws.on subscriptions with no channel_id of
-        // their own — a late frame for a send made in a channel the
-        // user has since left must not be attributed to whatever channel is
-        // mounted when it arrives.
-        channelId: number;
-        // The account that sent it: a frame for another account's send is ignored.
-        userId: number;
-        clientMessageId?: string;
-        // When the client handed this message to the socket (epoch ms): a late
-        // ack's cooldown starts here, not when the ack is finally received.
-        sentAt: number;
-      }
-    >(),
-    sendChain: Promise.resolve(),
-    sendChainBusy: false,
-    sendChainGen: 0,
-    sendTimers: new Map<string, { timer: number; release?: () => void }>(),
-    queuedSends: new Map<string, QueuedSend>(),
-    sendQueueMod: null,
-    pendingEdits: new Map<string, TrackedEdit>(),
-    pendingDeletes: new Map<string, { channelId: number; messageId: number }>(),
-    trackTimers: new Map<string, number>(),
-  };
+  const st = createChannelState(opts, threadHost);
   const cc = {} as ChannelApi;
   Object.assign(cc, createChannelDrafts(st, cc), createChannelSends(st, cc));
 
@@ -246,40 +168,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       st.channelAbort = null;
     }
 
-    st.nsfwConsentUiGen++;
-    if (st.nsfwConsentUi !== null) {
-      st.nsfwConsentUi.destroy?.();
-      st.nsfwConsentUi = null;
-    }
-    if (st.messageList !== null) {
-      st.messageList.destroy?.();
-      st.messageList = null;
-    }
-    if (st.typingIndicator !== null) {
-      st.typingIndicator.destroy?.();
-      st.typingIndicator = null;
-    }
-    if (st.messageInput !== null) {
-      cc.saveMountedDraft();
-      // Stash the unsent state before the composer is torn down. Empty
-      // drafts are not stored, so switching away from a channel with nothing
-      // typed leaves no entry behind.
-      if (st.currentChannelId !== null) {
-        const draft = st.messageInput.getDraft();
-        if (
-          draft.content !== "" ||
-          draft.replyTo !== null ||
-          draft.attachments.length > 0 ||
-          (draft.uploads?.length ?? 0) > 0
-        ) {
-          st.draftByChannel.set(st.currentChannelId, draft);
-        } else {
-          st.draftByChannel.delete(st.currentChannelId);
-        }
-      }
-      st.messageInput.destroy?.();
-      st.messageInput = null;
-    }
+    dropMountedComponents(st);
+    stashAndDestroyComposer(st, cc);
     clearChildren(st.slots.messagesSlot);
     clearChildren(st.slots.typingSlot);
     clearChildren(st.slots.inputSlot);
@@ -430,36 +320,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // A forum shows its post list in place of the message list, and has no
     // typing row or composer. A post opens in the thread panel.
     if ((ms.storedChannel?.type ?? ms.channelType) === "forum") {
-      const forum = NAVIGATION_DESTINATIONS.forum;
-      if (forum === undefined) return;
-      st.slots.messagesSlot.appendChild(
-        forum.build({
-          channelId: ms.channelId,
-          signal: ms.signal,
-          api: st.api,
-          ws: st.ws,
-          openPost: (threadId) =>
-            st.threadHost?.openById(
-              threadId,
-              ms.channelId,
-              ms.signal,
-              () =>
-                // The post's row, or the New Post button once the row is gone.
-                st.slots.messagesSlot.querySelector<HTMLElement>(`[data-post-id="${threadId}"]`) ??
-                st.slots.messagesSlot.querySelector<HTMLElement>('[data-testid="forum-new-post"]'),
-            ),
-          avatar: (subject, className) =>
-            createAvatarElement(subject, {
-              className,
-              background: pickAvatarColor(subject.username),
-              decorative: true,
-              deferUntilVisible: true,
-            }),
-        }),
-      );
-      if (ms.storedChannel?.nsfw === true) ms.mountConsentBar();
-      // A followed post's sidebar row asked for this forum: open the post now.
-      settleThreadNavigation(ms.channelId);
+      mountForumView(st, ms);
       return;
     }
 
@@ -497,7 +358,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     const host = st.threadHost;
     // A second click while the code loads must not queue a second popover.
     anchor.setAttribute("aria-expanded", "true");
-    import("../../components/ThreadListPopover").then(
+    import("../../features/threads/ThreadListPopover").then(
       ({ openThreadListPopover }) => {
         if (signal.aborted) {
           anchor.setAttribute("aria-expanded", "false");

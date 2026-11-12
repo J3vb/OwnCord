@@ -91,116 +91,15 @@ impl LiveKitProxyState {
 
 use crate::tofu;
 
-// ---------------------------------------------------------------------------
-// Pure helpers
-//
-// Split out of the command / connection-handling functions so the parts that
-// decide what reaches the remote server — host validation, header rewriting and
-// TLS server-name selection — are reachable from unit tests without a Tauri
-// runtime or a live socket.
-// ---------------------------------------------------------------------------
-
-/// Rewrite the `Host` and `Origin` headers of a proxied HTTP request so the
-/// remote server's WebSocket origin check accepts a connection that the
-/// LiveKit SDK opened against `127.0.0.1`.
-///
-/// Every other line is passed through byte-for-byte, including the request
-/// line and the trailing blank line that terminates the header block.
-pub(crate) fn rewrite_proxy_headers(request: &str, remote_host: &str) -> String {
-    rewrite_headers(request, |line| {
-        let lower = line.to_lowercase();
-        if lower.starts_with("host:") {
-            Some(format!("Host: {remote_host}"))
-        } else if lower.starts_with("origin:") {
-            Some(format!("Origin: https://{remote_host}"))
-        } else {
-            None
-        }
-    })
-}
-
-/// Give a request that is not a WebSocket upgrade `Connection: close`, so the
-/// server ends the connection after its response and every request on the
-/// loopback side comes through the tunnel's own path check. An upgrade request
-/// is returned unchanged.
-pub(crate) fn close_unless_upgrade(request: &str) -> String {
-    let head = request.strip_suffix("\r\n\r\n").unwrap_or(request);
-    let lines: Vec<&str> = head.split("\r\n").collect();
-    if lines
-        .iter()
-        .skip(1)
-        .any(|l| l.to_ascii_lowercase().starts_with("upgrade:"))
-    {
-        return request.to_string();
-    }
-    let mut out = String::with_capacity(request.len() + 20);
-    for (i, line) in lines.iter().enumerate() {
-        if i > 0 && line.to_ascii_lowercase().starts_with("connection:") {
-            continue;
-        }
-        out.push_str(line);
-        out.push_str("\r\n");
-    }
-    out.push_str("Connection: close\r\n\r\n");
-    out
-}
-
-/// Move an `Authorization: Bearer` token into the `access_token` query
-/// parameter and drop the header.
-///
-/// The LiveKit Rust SDK (the Linux client's native voice) sends its join token
-/// only as a bearer header, and older servers drop every header
-/// when re-dialling LiveKit, so the join fails with 401. The query string
-/// survives on every server version — it is how the JS SDK sends the token —
-/// so the tunnel rewrites the request into that shape. A request with no bearer
-/// header passes through unchanged.
-pub(crate) fn move_bearer_to_query(request: &str) -> String {
-    let mut lines: Vec<&str> = request.split("\r\n").collect();
-    let bearer = lines.iter().enumerate().skip(1).find_map(|(i, line)| {
-        let (name, value) = line.split_once(':')?;
-        if !name.trim().eq_ignore_ascii_case("authorization") {
-            return None;
-        }
-        let value = value.trim();
-        let (scheme, token) = value.split_once(' ')?;
-        let token = token.trim();
-        (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then_some((i, token))
-    });
-    let Some((header_idx, token)) = bearer else {
-        return request.to_string();
-    };
-    let mut parts = lines[0].splitn(3, ' ');
-    let (Some(method), Some(target), Some(version)) = (parts.next(), parts.next(), parts.next())
-    else {
-        return request.to_string();
-    };
-    let encoded: String = url::form_urlencoded::byte_serialize(token.as_bytes()).collect();
-    let sep = if target.contains('?') { '&' } else { '?' };
-    let request_line = format!("{method} {target}{sep}access_token={encoded} {version}");
-    lines[0] = &request_line;
-    lines.remove(header_idx);
-    lines.join("\r\n")
-}
-
-/// Decide whether an already-running proxy can serve a new start request:
-/// only when both the remote host AND the TOFU-pinned fingerprint are
-/// unchanged. The listener bakes its fingerprint in at spawn, so after the
-/// user accepts a rotated cert (which rewrites the store), reusing the old
-/// listener would fail every TLS handshake against the stale pin until
-/// logout — the caller must tear down and restart instead.
-pub(crate) fn can_reuse_proxy(
-    running_host: &str,
-    running_fingerprint: &str,
-    requested_host: &str,
-    stored_fingerprint: &str,
-) -> bool {
-    running_host == requested_host && running_fingerprint == stored_fingerprint
-}
+// The pure header rewrites live in the owncord-parse crate, where they are
+// property-tested and fuzzed without a Tauri runtime or a live socket.
+use owncord_parse::proxy::{
+    can_reuse_proxy, close_unless_upgrade, move_bearer_to_query, rewrite_proxy_headers,
+};
 
 use crate::proxy_common::{
-    connect_tls, random_tunnel_token, read_request_headers, resolve_remote_target, rewrite_headers,
-    run_accept_loop, spawn_watched, strip_tunnel_token, validate_remote_host, TunnelEndpoint,
-    FORBIDDEN_RESPONSE,
+    connect_tls, random_tunnel_token, read_request_headers, resolve_remote_target, run_accept_loop,
+    spawn_watched, strip_tunnel_token, validate_remote_host, TunnelEndpoint, FORBIDDEN_RESPONSE,
 };
 
 // ---------------------------------------------------------------------------

@@ -234,7 +234,18 @@ async function runCycle(
   await joinVoice(page);
   await expectDecodedMedia(page);
   await page.locator(".voice-widget button[aria-label='Camera']").click();
+  // Complete publication before switching off: consecutive clicks otherwise
+  // alternate between cancelling acquisition and stopping a published camera,
+  // leaving different retained media objects at the lifecycle sample.
+  const cameraStatus = bob.locator(".voice-user-item[data-voice-uid='1'] .vu-status");
+  await expect(cameraStatus).toBeVisible();
+  // The first camera stats poll loads this chunk. Warm its preload node on
+  // every fresh page before comparing lifecycle samples across cycles.
+  await expect(
+    page.locator('link[rel="modulepreload"][href*="/cameraStallWatchdog-"]'),
+  ).toBeAttached();
   await page.locator(".voice-widget button[aria-label='Camera']").click();
+  await expect(cameraStatus).not.toBeVisible();
   await page.locator(".voice-widget button[aria-label='Disconnect']").click();
   await expect(page.locator(".voice-widget")).not.toHaveClass(/visible/);
   await expect.poll(async () => (await mediaStats(page)).liveCapture, { timeout: 30_000 }).toBe(0);

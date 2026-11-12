@@ -10,6 +10,7 @@ import { appMetadata } from "./appMetadata";
 import { appProcess } from "./appProcess";
 import { autostart } from "./autostart";
 import { callService } from "./callService";
+import { meteredNetwork } from "./meteredNetwork";
 import { credentials } from "./credentials";
 import { deepLinks } from "./deepLinks";
 import { devTools } from "./devTools";
@@ -32,6 +33,7 @@ import { settings } from "./settings";
 import { shareSheet } from "./shareSheet";
 import { socket } from "./socket";
 import { systemIdle } from "./systemIdle";
+import { systemRegion } from "./systemRegion";
 import { gameDetector } from "./gameDetector";
 import { mediaDetector } from "./mediaDetector";
 import { trayStatus } from "./trayStatus";
@@ -39,6 +41,7 @@ import { updater } from "./updater";
 import { urlOpener } from "./urlOpener";
 import { windowControl } from "./window";
 import { windowPrefs } from "./windowPrefs";
+import { gpuAdapter } from "./gpuAdapter";
 import type { Platform } from "../contracts";
 
 export const desktop: Platform = {
@@ -47,6 +50,7 @@ export const desktop: Platform = {
   appProcess,
   autostart,
   callService,
+  meteredNetwork,
   credentials,
   deepLinks,
   devTools,
@@ -70,9 +74,11 @@ export const desktop: Platform = {
   shareSheet,
   socket,
   systemIdle,
+  systemRegion,
   trayStatus,
   updater,
   urlOpener,
   window: windowControl,
   windowPrefs,
+  gpuAdapter,
 };

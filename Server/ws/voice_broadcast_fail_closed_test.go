@@ -34,14 +34,7 @@ func (r erroringVisibilityReader) IsGroupDM(ctx context.Context, channelID int64
 
 func newFilterDMAudienceTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := newTeardownTestDB(t)
 	return database
 }
 
@@ -54,14 +47,8 @@ func newFilterDMAudienceTestDB(t *testing.T) *db.DB {
 func TestFilterDMAudience_ChannelLookupErrorFailsClosedToSubjectOnly(t *testing.T) {
 	database := newFilterDMAudienceTestDB(t)
 	ctx := context.Background()
-	alice, err := database.CreateUser(ctx, "fda-chan-alice", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	bob, err := database.CreateUser(ctx, "fda-chan-bob", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	alice := mustCreateUser(t, database, "fda-chan-alice", 4)
+	bob := mustCreateUser(t, database, "fda-chan-bob", 4)
 	ch, _, err := database.GetOrCreateDMChannel(ctx, alice, bob)
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
@@ -79,14 +66,8 @@ func TestFilterDMAudience_ChannelLookupErrorFailsClosedToSubjectOnly(t *testing.
 func TestFilterDMAudience_GroupLookupErrorFailsClosedToSubjectOnly(t *testing.T) {
 	database := newFilterDMAudienceTestDB(t)
 	ctx := context.Background()
-	alice, err := database.CreateUser(ctx, "fda-group-alice", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	bob, err := database.CreateUser(ctx, "fda-group-bob", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	alice := mustCreateUser(t, database, "fda-group-alice", 4)
+	bob := mustCreateUser(t, database, "fda-group-bob", 4)
 	ch, _, err := database.GetOrCreateDMChannel(ctx, alice, bob)
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)

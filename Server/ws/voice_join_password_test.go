@@ -22,14 +22,7 @@ const joinPasswordSecret = "correct horse"
 // rate-limit cases.
 func newPasswordHub(t *testing.T) (*ws.Hub, *db.DB, *auth.RateLimiter) {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	limiter := auth.NewRateLimiter()
 	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, LiveKit: healthyLiveKitClient(t)})
 	go hub.Run()
@@ -63,19 +56,13 @@ func unprotectVoiceChannel(t *testing.T, database *db.DB, chanID int64) {
 }
 
 func voiceJoinPasswordMsg(channelID int64, password string) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_join",
-		"payload": map[string]any{"channel_id": channelID, "password": password},
-	})
+	raw := envelope("voice_join", map[string]any{"channel_id": channelID, "password": password})
 	return raw
 }
 
 func connectPasswordClient(t *testing.T, hub *ws.Hub, user *db.User, chanID int64) (*ws.Client, chan []byte) {
 	t.Helper()
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 64)
 	return c, send
 }
 
@@ -334,7 +321,7 @@ func TestVoiceJoinPassword_ModeratorMoveIntoProtectedChannel(t *testing.T) {
 	}
 	ac, asend := connectPasswordClient(t, hub, actor, fromID)
 	hub.HandleMessageForTest(ac, voiceModMoveMsg(target.ID, toID))
-	if code := receiveErrorCode(asend, 100*time.Millisecond); code != "" {
+	if code := drainForErrorCode(asend, 100*time.Millisecond); code != "" {
 		t.Fatalf("move answered %q", code)
 	}
 
@@ -442,6 +429,37 @@ func TestVoiceJoinPassword_ServerWideBackstop(t *testing.T) {
 	}
 }
 
+// An attempt the server-wide budget refuses spends nothing from the member's
+// own budgets, across channels or for this channel.
+func TestVoiceJoinPassword_ServerWideRefusalSparesTheMembersBudget(t *testing.T) {
+	hub, database, limiter := newPasswordHub(t)
+	chanID := seedVoiceChan(t, database, "pw-backstop-spare")
+	protectVoiceChannel(t, database, chanID, joinPasswordSecret)
+	user := seedVoiceMember(t, database, "pw-backstop-spare-user")
+	c, send := connectPasswordClient(t, hub, user, chanID)
+
+	for range 60 {
+		limiter.Allow("voice_join_password_all", 60, time.Minute)
+	}
+	if code := tryJoin(hub, c, send, chanID, joinPasswordSecret); code != "RATE_LIMITED" {
+		t.Fatalf("code = %q, want RATE_LIMITED", code)
+	}
+	budgets := map[string]struct {
+		key   string
+		limit int
+	}{
+		"across channels":  {auth.Key("voice_join_password_user", user.ID), 10},
+		"for this channel": {auth.Key(auth.Key("voice_join_password", user.ID), chanID), 5},
+	}
+	for name, b := range budgets {
+		for i := range b.limit {
+			if !limiter.Allow(b.key, b.limit, time.Minute) {
+				t.Fatalf("member budget %s: slot %d of %d spent by the refused attempt", name, i+1, b.limit)
+			}
+		}
+	}
+}
+
 // The gate comes after the role rules: a member who may not join the channel
 // is told so, not asked for a password.
 func TestVoiceJoinPassword_RoleRulesAnswerFirst(t *testing.T) {
@@ -485,7 +503,7 @@ func TestVoiceJoinPassword_FailedModeratorMoveStoresNoGrant(t *testing.T) {
 	ac, asend := connectPasswordClient(t, hub, actor, fromID)
 
 	hub.HandleMessageForTest(ac, voiceModMoveMsg(target.ID, toID))
-	if code := receiveErrorCode(asend, 200*time.Millisecond); code != "VOICE_ERROR" {
+	if code := drainForErrorCode(asend, 200*time.Millisecond); code != "VOICE_ERROR" {
 		t.Fatalf("move answered %q, want VOICE_ERROR", code)
 	}
 	if hasGrant(t, database, toID, target.ID) {

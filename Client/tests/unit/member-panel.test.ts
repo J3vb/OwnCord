@@ -8,7 +8,7 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-vi.mock("@components/MemberList", () => ({
+vi.mock("../../src/features/members/MemberList", () => ({
   createMemberList: vi.fn().mockImplementation(() => ({
     mount: vi.fn((container: HTMLElement) => {
       const root = document.createElement("div");
@@ -29,7 +29,7 @@ import { createMemberPanel, type MemberPanelOptions } from "../../src/features/m
 import { memberPanelUi } from "../../src/pages/main-page/SidebarMemberSection";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
-import { createMemberList } from "@components/MemberList";
+import { createMemberList } from "../../src/features/members/MemberList";
 import { Permission } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
 import { signInAsAdmin } from "../helpers/storeSeeds";
@@ -178,6 +178,29 @@ describe("memberPanel", () => {
     setRoles([]);
     await Promise.resolve();
     expect(o.api.adminListUsers).toHaveBeenCalledTimes(1);
+  });
+  it("asks for banned users only and still drops a reply that holds unbanned ones", async () => {
+    const user = (id: number, name: string, banned: boolean) => ({
+      id,
+      username: name,
+      banned,
+      role_id: 4,
+      role_name: "member",
+      status: "offline",
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    const o = opts();
+    vi.mocked(o.api.adminListUsers).mockResolvedValue([
+      user(10, "banned-one", true),
+      user(11, "plain", false),
+    ] as never);
+    const panel = createMemberPanel(o);
+    host.appendChild(panel.element);
+
+    await vi.waitFor(() => expect(panel.element.querySelectorAll(".banned-row")).toHaveLength(1));
+    expect(panel.element.querySelector(".banned-name")?.textContent).toBe("banned-one");
+    expect(o.api.adminListUsers).toHaveBeenCalledWith(undefined, { bannedOnly: true });
+    panel.destroy();
   });
   it("offers Unban only for bans the viewer outranks", async () => {
     channelsStore.setState((prev) => ({

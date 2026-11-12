@@ -28,10 +28,7 @@ func TestCreateMessageWithMentions_AdvancesAuthorReadState(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, 1, 1, "hi @bob", nil, []int64{2}, 0, false, nil)
 	assertReadState(t, database, 1, 1, msg.ID)
 
 	// Only the author: the mentioned recipient still has it unread.
@@ -49,24 +46,15 @@ func TestCreateMessageDelivery_AdvancesAuthorReadStateOnlyOnInsert(t *testing.T)
 
 	p := storageDeliveryParams(author, channel)
 	first, err := database.CreateMessageDelivery(ctx, p)
-	if err != nil {
-		t.Fatalf("CreateMessageDelivery: %v", err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
 	assertReadState(t, database, author, channel, first.Message.ID)
 
 	// The author reads past a later message; a duplicate retry of the first
 	// send must not drag the read state back to it.
-	later, err := database.CreateMessageWithMentions(ctx, channel, other, "later", nil, nil, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
-	if err := database.UpdateReadState(ctx, author, channel, later.ID); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
+	later := mustCreateMessageWithMentions(t, database, channel, other, "later", nil, nil, 0, false, nil)
+	mustDo(t, "UpdateReadState", database.UpdateReadState(ctx, author, channel, later.ID))
 	retry, err := database.CreateMessageDelivery(ctx, p)
-	if err != nil {
-		t.Fatalf("retry CreateMessageDelivery: %v", err)
-	}
+	mustDo(t, "retry CreateMessageDelivery", err)
 	if !retry.Duplicate {
 		t.Fatalf("retry = %+v, want a duplicate", retry)
 	}

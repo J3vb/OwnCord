@@ -55,6 +55,7 @@ export function createMockWs() {
     startCertListener: vi.fn(async () => {}),
     onCertFirstUse: vi.fn(() => () => {}),
     onServerBusy: vi.fn(() => () => {}),
+    onHandshakeFault: vi.fn(() => () => {}),
     onCertMismatch: vi.fn(() => () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
     getConnectFailureCode: vi.fn(() => null),

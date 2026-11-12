@@ -6,9 +6,8 @@ import (
 	"strings"
 )
 
-// insertAllMentionRows writes a message's user mention rows and its role
-// mention rows inside tx. An edit passes replaceRoles to drop the old role rows
-// first (the user rows are replaced by the caller, which keeps a reply ping).
+// insertAllMentionRows writes a message's user and role mention rows inside tx; an
+// edit passes replaceRoles to drop the old role rows first.
 func insertAllMentionRows(ctx context.Context, tx mentionExecer, messageID int64, userIDs []int64, replyPingUserID int64, roleIDs []int64, replaceRoles bool) error {
 	if replaceRoles {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM message_role_mentions WHERE message_id = ?`, messageID); err != nil {
@@ -42,8 +41,8 @@ func insertRoleMentionRows(ctx context.Context, tx mentionExecer, messageID int6
 	return nil
 }
 
-// GetRoleMentionsByMessageIDs returns the mentioned role ids per message id.
-// Messages that pinged no role are absent from the map.
+// GetRoleMentionsByMessageIDs returns mentioned role ids per message; messages that
+// pinged no role are absent.
 func (d *DB) GetRoleMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]int64, error) {
 	result := make(map[int64][]int64)
 	if len(msgIDs) == 0 {
@@ -71,7 +70,6 @@ func (d *DB) GetRoleMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (m
 	return result, nil
 }
 
-// inPlaceholders returns the "?,?,?" list and bound args for an IN clause.
 func inPlaceholders(ids []int64) (string, []any) {
 	ph := make([]string, len(ids))
 	args := make([]any, len(ids))
@@ -82,9 +80,8 @@ func inPlaceholders(ids []int64) (string, []any) {
 	return strings.Join(ph, ","), args
 }
 
-// GetReachableUserIDs filters ids to the users that exist and are not banned,
-// the same "is this user reachable" test an @username token passes
-// (notBannedClause). Order follows ascending id; unknown ids are absent.
+// GetReachableUserIDs filters ids to the users that exist and are not banned, the
+// "reachable" test an @username token passes (notBannedClause). Order is ascending id.
 func (d *DB) GetReachableUserIDs(ctx context.Context, ids []int64) ([]int64, error) {
 	if len(ids) == 0 {
 		return []int64{}, nil
@@ -113,8 +110,7 @@ func (d *DB) GetReachableUserIDs(ctx context.Context, ids []int64) ([]int64, err
 	return out, nil
 }
 
-// ListUserIDsByRoles returns every user holding at least one of roleIDs, each
-// once, ascending. It is the one holders read a role mention costs.
+// ListUserIDsByRoles returns every user holding at least one of roleIDs, once each, ascending.
 func (d *DB) ListUserIDsByRoles(ctx context.Context, roleIDs []int64) ([]int64, error) {
 	if len(roleIDs) == 0 {
 		return []int64{}, nil

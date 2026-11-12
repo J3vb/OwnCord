@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // WP 6.8d: the voice sweep re-runs the stay gate for a client already in a 1:1
@@ -28,10 +27,7 @@ func TestSweepStaleVoiceStates_DMsOffRemovesUntrustedCounterpart(t *testing.T) {
 	trustedDM := seedDMChannel(t, database, carol.ID, dave.ID)
 
 	join := func(u *db.User, ch int64) {
-		send := make(chan []byte, 32)
-		c := ws.NewTestClientWithUser(hub, u, 0, send)
-		hub.Register(c)
-		waitRegistered(t, hub, c)
+		c, send := connectClient(t, hub, u, 0, 32)
 		hub.HandleMessageForTest(c, voiceJoinMsg(ch))
 		if !hasVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond)) {
 			t.Fatalf("%s did not join DM %d", u.Username, ch)

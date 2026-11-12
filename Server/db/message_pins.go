@@ -11,13 +11,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// PinEventWindow is how long a pin row suppresses another for the same
-// message: pin, unpin and pin again inside it writes one row.
+// PinEventWindow is how long a pin row suppresses another for the same message.
 const PinEventWindow = 10 * time.Minute
 
-// SetPinnedParams describes one pin or unpin. UserID and Username are the
-// pinner, who becomes the author of the pin row. Now is the clock for the pin
-// stamp and the row window; the zero value means time.Now().
+// SetPinnedParams describes one pin or unpin. UserID and Username are the pinner; Now
+// is the clock for the pin stamp and row window (zero means time.Now()).
 type SetPinnedParams struct {
 	MessageID int64
 	Pinned    bool
@@ -26,8 +24,7 @@ type SetPinnedParams struct {
 	Now       time.Time
 }
 
-// PinEventRow is the pin row SetMessagePinned wrote: a kind-7 message whose
-// reply_to is the pinned message.
+// PinEventRow is the kind-7 pin row SetMessagePinned wrote; its reply_to is the pinned message.
 type PinEventRow struct {
 	MessageID       int64
 	ChannelID       int64
@@ -37,12 +34,11 @@ type PinEventRow struct {
 	PinnedMessageID int64
 }
 
-// SetMessagePinned updates the pinned column on a message and, when it pins a
-// message that was not already pinned and no pin row for it, deleted or not, was written in
-// the last PinEventWindow, writes a pin row (kind 7) in the same transaction and
-// advances the pinner's read state past it. It returns that row, or nil when
-// none was written (an unpin, a re-pin, or a pin inside the window). A failed
-// row insert rolls the pin back. Returns ErrNotFound if the message does not
+// SetMessagePinned updates the pinned column and, when it pins a message not
+// already pinned and no pin row for it (deleted or not) was written within
+// PinEventWindow, writes a pin row (kind 7) in the same transaction and advances
+// the pinner's read state past it. It returns that row, or nil when none was
+// written. A failed row insert rolls the pin back; ErrNotFound if the message does not
 // exist or is deleted.
 func (d *DB) SetMessagePinned(ctx context.Context, p SetPinnedParams) (*PinEventRow, error) {
 	now := p.Now
@@ -63,9 +59,8 @@ func (d *DB) SetMessagePinned(ctx context.Context, p SetPinnedParams) (*PinEvent
 
 		var pinnedAt *string
 		if p.Pinned {
-			// Stamp pin time so GetPinnedMessages can order by recency. Fixed-width
-			// nanosecond precision keeps lexicographic TEXT ordering correct even
-			// for two pins in the same second.
+			// Stamp pin time so GetPinnedMessages orders by recency; fixed-width nanoseconds keep
+			// TEXT ordering right within a second.
 			t := now.Format("2006-01-02 15:04:05.000000000")
 			pinnedAt = &t
 		}
@@ -113,4 +108,28 @@ func (d *DB) SetMessagePinned(ctx context.Context, p SetPinnedParams) (*PinEvent
 		return nil, err
 	}
 	return out, nil
+}
+
+// MaxPinnedMessages bounds the pins one query returns, keeping the IN (?,?,...) batch
+// lookups under SQLite's bound-parameter limit.
+const MaxPinnedMessages = 1000
+
+// GetPinnedMessages returns up to MaxPinnedMessages+1 pins (the extra signals
+// truncation), newest pin first.
+func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]MessageAPIResponse, error) {
+	rows, err := d.reader.QueryContext(ctx,
+		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
+		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
+		        m.mentions_everyone, m.kind
+		 FROM messages m JOIN users u ON m.user_id = u.id
+		 WHERE m.channel_id = ? AND m.pinned = 1 AND m.deleted = 0
+		 ORDER BY m.pinned_at DESC, m.id DESC LIMIT ?`,
+		channelID, MaxPinnedMessages+1,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetPinnedMessages: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }

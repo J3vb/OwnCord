@@ -13,19 +13,18 @@ import (
 	"time"
 )
 
-// MessageDeliveryClockSkew is the greatest future timestamp a new delivery id
-// may contain. A restore cutoff must cover that entire accepted range.
+// MessageDeliveryClockSkew is the greatest future timestamp a delivery id may carry; a
+// restore cutoff must cover it.
 const MessageDeliveryClockSkew = 5 * time.Minute
 
-// MessageDeliveryFloorMS survives database replacement. A matching receipt can
-// still acknowledge its original message; a receipt miss below this floor must
-// never be interpreted as a new send after a restore erased newer receipts.
+// MessageDeliveryFloorMS survives database replacement: a receipt miss below it must
+// never read as a new send after a restore erased newer receipts.
 func (d *DB) MessageDeliveryFloorMS() int64 { return d.messageDeliveryFloor.Load() }
 
-// AdvanceMessageDeliveryFloorForRestore must run AFTER closing/draining the
-// live database and BEFORE copying a backup over it. Closing first prevents a
-// concurrently accepted id from overtaking the cutoff. Failure aborts the copy.
-// The sidecar is deliberately outside SQLite backups, like deletion markers.
+// AdvanceMessageDeliveryFloorForRestore must run AFTER closing the live database and
+// BEFORE copying a backup over it, so no concurrently accepted id can overtake the
+// cutoff. Failure aborts the copy. The sidecar is outside SQLite backups, like
+// deletion markers.
 func AdvanceMessageDeliveryFloorForRestore(dbPath string) error {
 	return advanceMessageDeliveryFloor(dbPath, time.Now())
 }

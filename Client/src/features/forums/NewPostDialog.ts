@@ -30,8 +30,11 @@ import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/ui/toast";
 import { claimForwardRequest, releaseForwardRequest } from "../messaging/forwardRequests";
 import { forumsText } from "../../i18n/forums";
-import { MAX_POST_TAGS, POST_TITLE_MAX, cleanPostTitle } from "./forumModel";
-import { WsErrorCode } from "@lib/protocolTypes";
+import { POST_TITLE_MAX, cleanPostTitle } from "./forumModel";
+import { buildTagSection, fieldGroup } from "./postTagPicker";
+import { postErrorText, type Attachment, type ErrorField } from "./newPostParts";
+
+export { postErrorText } from "./newPostParts";
 
 const log = createLogger("forum-new-post");
 
@@ -54,45 +57,6 @@ export interface NewPostDialogOptions {
   readonly onClosed?: () => void;
 }
 
-/** The dialog's refusal line for a server error code. */
-export function postErrorText(code: string): string {
-  switch (code) {
-    case WsErrorCode.FORBIDDEN:
-      return forumsText("error.FORBIDDEN");
-    case WsErrorCode.NOT_FOUND:
-      return forumsText("error.NOT_FOUND");
-    case WsErrorCode.RATE_LIMITED:
-      return forumsText("error.RATE_LIMITED");
-    case WsErrorCode.SLOW_MODE:
-      return forumsText("error.SLOW_MODE");
-    case WsErrorCode.CONFLICT:
-      return forumsText("error.CONFLICT");
-    case "UNCONFIRMED":
-      return forumsText("error.UNCONFIRMED");
-    case "OFFLINE":
-      return forumsText("error.OFFLINE");
-    default:
-      return forumsText("error.other");
-  }
-}
-
-interface Attachment {
-  readonly file: File;
-  id: string | null;
-  status: "uploading" | "done" | "failed";
-  readonly owner: Disposable;
-  readonly chip: HTMLElement;
-}
-
-type ErrorField = "title" | "tags" | "message";
-
-/** One labelled field, in the app's shared form-group spacing. */
-function fieldGroup(...children: HTMLElement[]): HTMLElement {
-  const g = createElement("div", { class: "form-group" });
-  g.append(...children);
-  return g;
-}
-
 export function openNewPostDialog(options: NewPostDialogOptions): void {
   const { ws, api, channelId, signal } = options;
   const owner = new Disposable();
@@ -100,7 +64,7 @@ export function openNewPostDialog(options: NewPostDialogOptions): void {
   const tags = (forum?.forum?.tags ?? []).toSorted(
     (a, b) => a.position - b.position || a.id - b.id,
   );
-  const requireTag = forum?.forum?.require_tag === true;
+  const requireTag = forum?.forum?.require_tag === true && tags.length > 0;
   const guidelines = (forum?.topic ?? "").trim();
 
   const titleId = `forum-post-title-${channelId}`;
@@ -163,68 +127,17 @@ export function openNewPostDialog(options: NewPostDialogOptions): void {
   // ── Tags ─────────────────────────────────────────────────────────────────
   const picked = new Set<number>();
   let firstTagChip: HTMLButtonElement | null = null;
-  const tagChips = new Map<number, HTMLButtonElement>();
   if (tags.length > 0) {
-    const hintId = `forum-post-tags-hint-${channelId}`;
-    const hint = createElement(
-      "span",
-      { id: hintId, class: "forum-tags-hint", "data-testid": "forum-post-tags-hint" },
-      requireTag
-        ? forumsText("dialog.tagsRequired")
-        : forumsText("dialog.tagsOptional", { max: MAX_POST_TAGS }),
-    );
-    const tagsHead = createElement("div", { class: "forum-field-head" });
-    const tagsLabel = createElement(
-      "span",
-      { class: "form-label" },
-      forumsText("dialog.tagsLabel"),
-    );
-    if (requireTag) {
-      tagsLabel.appendChild(
-        createElement("span", { class: "forum-required", "aria-hidden": "true" }, " *"),
-      );
-    }
-    tagsHead.append(tagsLabel, hint);
-    const tagBar = createElement("div", {
-      class: "forum-tag-bar forum-dialog-tags",
-      role: "group",
-      "aria-describedby": hintId,
-      "aria-label": forumsText("dialog.tagsLabel"),
-      "data-testid": "forum-post-tags",
+    const section = buildTagSection({
+      tags,
+      requireTag,
+      channelId,
+      picked,
+      onPick: () => clearError("tags"),
+      signal: owner.signal,
     });
-    const paintTags = (): void => {
-      for (const [id, chip] of tagChips) {
-        const on = picked.has(id);
-        chip.classList.toggle("selected", on);
-        chip.setAttribute("aria-pressed", String(on));
-        chip.disabled = !on && picked.size >= MAX_POST_TAGS;
-      }
-    };
-    for (const tag of tags) {
-      const chip = createElement(
-        "button",
-        {
-          type: "button",
-          class: "forum-tag forum-tag-chip",
-          "data-testid": `forum-post-tag-${tag.id}`,
-        },
-        `${tag.emoji ?? ""} ${tag.name}`.trim(),
-      );
-      chip.addEventListener(
-        "click",
-        () => {
-          if (!picked.delete(tag.id)) picked.add(tag.id);
-          paintTags();
-          clearError("tags");
-        },
-        { signal: owner.signal },
-      );
-      tagChips.set(tag.id, chip);
-      firstTagChip ??= chip;
-      tagBar.appendChild(chip);
-    }
-    paintTags();
-    form.append(fieldGroup(tagsHead, tagBar));
+    firstTagChip = section.firstChip;
+    form.append(section.group);
   }
 
   // ── Message and attachments ──────────────────────────────────────────────
@@ -351,6 +264,23 @@ export function openNewPostDialog(options: NewPostDialogOptions): void {
     },
     { signal: owner.signal },
   );
+  // A pasted screenshot or copied file attaches; pasted text stays text.
+  messageInput.addEventListener(
+    "paste",
+    (e: ClipboardEvent) => {
+      if (uploadsOff) return;
+      const files: File[] = [];
+      for (const item of e.clipboardData?.items ?? []) {
+        if (item.kind !== "file") continue;
+        const file = item.getAsFile();
+        if (file !== null) files.push(file);
+      }
+      if (files.length === 0) return;
+      e.preventDefault();
+      addFiles(files);
+    },
+    { signal: owner.signal },
+  );
   form.append(attachBtn, fileInput, chipList);
 
   let errorField: ErrorField | null = null;
@@ -473,56 +403,79 @@ export function openNewPostDialog(options: NewPostDialogOptions): void {
     if (mine) finish(payload);
   });
 
+  /** The checks before sending; null (with the problem shown and focused) when one fails. */
+  function validatePost(): { name: string; text: string; ready: Attachment[] } | null {
+    const name = cleanPostTitle(titleInput.value);
+    if (name === null) {
+      showError(forumsText("error.titleRequired"), "title");
+      titleInput.focus();
+      return null;
+    }
+    if (requireTag && picked.size === 0) {
+      showError(forumsText("error.tagRequired"), "tags");
+      firstTagChip?.focus();
+      return null;
+    }
+    if (attachments.some((a) => a.status === "uploading")) {
+      showError(forumsText("error.uploading"));
+      return null;
+    }
+    const ready = attachments.filter((a) => a.status === "done" && a.id !== null);
+    const text = messageInput.value.trim();
+    if (text === "" && ready.length === 0) {
+      showError(forumsText("error.messageRequired"), "message");
+      messageInput.focus();
+      return null;
+    }
+    return { name, text, ready };
+  }
+
+  /** A new post's content gets a new client id; the old one stays ours, as its ack may still be on the way. */
+  function nextAttempt(key: string): { readonly key: string; readonly clientMessageId: string } {
+    if (attempt !== null) retiredIds.add(attempt.clientMessageId);
+    const user = authStore.getState().user;
+    const sessionOwner = { host: api.getConfig?.().host ?? "", userId: user?.id ?? 0 };
+    return { key, clientMessageId: newClientMessageId(pendingMessageRetryFloor(sessionOwner)) };
+  }
+
+  /** Listen for this request's failure or silence until it settles. */
+  function waitForAck(id: string): void {
+    const unsubs = [
+      ws.on("error", (payload, replyId) => {
+        if (replyId === id) fail(payload.code);
+      }),
+      ws.onSendFailure((failedId) => {
+        if (failedId === id) fail("OFFLINE");
+      }),
+    ];
+    const cancelTimer = setOwnedTimeout(owner.signal, () => fail("UNCONFIRMED"), POST_TIMEOUT_MS);
+    stopWaiting = () => {
+      for (const unsub of unsubs) unsub();
+      cancelTimer();
+    };
+  }
+
   form.addEventListener(
     "submit",
     (e) => {
       e.preventDefault();
       if (requestId !== null) return;
       errorEl.hidden = true;
-      const name = cleanPostTitle(titleInput.value);
-      if (name === null) {
-        showError(forumsText("error.titleRequired"), "title");
-        titleInput.focus();
-        return;
-      }
-      if (requireTag && picked.size === 0) {
-        showError(forumsText("error.tagRequired"), "tags");
-        firstTagChip?.focus();
-        return;
-      }
-      if (attachments.some((a) => a.status === "uploading")) {
-        showError(forumsText("error.uploading"));
-        return;
-      }
-      const ready = attachments.filter((a) => a.status === "done" && a.id !== null);
-      const text = messageInput.value.trim();
-      if (text === "" && ready.length === 0) {
-        showError(forumsText("error.messageRequired"), "message");
-        messageInput.focus();
-        return;
-      }
+      const valid = validatePost();
+      if (valid === null) return;
       if (uiStore.getState().connectionStatus !== "connected") {
         fail("OFFLINE");
         return;
       }
       const body = {
         channel_id: channelId,
-        name,
-        content: text,
-        attachments: ready.map((a) => a.id as string),
+        name: valid.name,
+        content: valid.text,
+        attachments: valid.ready.map((a) => a.id as string),
         tag_ids: tags.filter((t) => picked.has(t.id)).map((t) => t.id),
       };
       const key = JSON.stringify(body);
-      if (attempt?.key !== key) {
-        // The old id stays ours: its ack may still be on the way.
-        if (attempt !== null) retiredIds.add(attempt.clientMessageId);
-        const user = authStore.getState().user;
-        const sessionOwner = { host: api.getConfig?.().host ?? "", userId: user?.id ?? 0 };
-        attempt = {
-          key,
-          clientMessageId: newClientMessageId(pendingMessageRetryFloor(sessionOwner)),
-        };
-      }
+      if (attempt?.key !== key) attempt = nextAttempt(key);
       const id = ws.send({
         type: "forum_post_create",
         payload: { ...body, client_message_id: attempt.clientMessageId },
@@ -531,20 +484,7 @@ export function openNewPostDialog(options: NewPostDialogOptions): void {
       claimForwardRequest(id);
       submit.disabled = true;
       setText(submit, forumsText("dialog.sending"));
-
-      const unsubs = [
-        ws.on("error", (payload, replyId) => {
-          if (replyId === id) fail(payload.code);
-        }),
-        ws.onSendFailure((failedId) => {
-          if (failedId === id) fail("OFFLINE");
-        }),
-      ];
-      const cancelTimer = setOwnedTimeout(owner.signal, () => fail("UNCONFIRMED"), POST_TIMEOUT_MS);
-      stopWaiting = () => {
-        for (const unsub of unsubs) unsub();
-        cancelTimer();
-      };
+      waitForAck(id);
     },
     { signal: owner.signal },
   );

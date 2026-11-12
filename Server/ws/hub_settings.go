@@ -8,126 +8,66 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/ws/hubsettings"
 )
 
 // SettingsReader is the hub's view of the settings family: one keyed read.
-// Defined on the consumer side so ws depends on the capability, not the provider.
-type SettingsReader interface {
-	Setting(ctx context.Context, key string) (string, error)
-}
+type SettingsReader = hubsettings.Reader
 
-// getCachedSettings returns server_name and motd, refreshing the cache if stale.
 func (h *Hub) getCachedSettings(ctx context.Context) (string, string) {
-	h.settings.mu.RLock()
-	if time.Since(h.settings.lastUpdate) < settingsCacheTTL {
-		name, motd := h.settings.name, h.settings.motd
-		h.settings.mu.RUnlock()
-		return name, motd
-	}
-	h.settings.mu.RUnlock()
-
-	h.settings.mu.Lock()
-	defer h.settings.mu.Unlock()
-	if time.Since(h.settings.lastUpdate) < settingsCacheTTL {
-		return h.settings.name, h.settings.motd
-	}
-	h.refreshSettingsLocked(ctx)
-	return h.settings.name, h.settings.motd
+	return h.settings.cache.Get(ctx)
 }
 
-// refreshSettingsLocked reloads server_name and motd through the settings
-// reader, and upload_policy's extension lists. Caller must hold settings.mu
-// (write lock) or call during init.
-func (h *Hub) refreshSettingsLocked(ctx context.Context) {
-	// The refresh serves the hub-wide cache, not the connection that triggered it: a
-	// dying connection's ctx must not fail the fetches, or the TTL stamp below would
-	// pin stale values for 30s.
-	ctx = context.WithoutCancel(ctx)
-	if name, err := h.settings.reader.Setting(ctx, "server_name"); err == nil {
-		h.settings.name = name
-	}
-	if motd, err := h.settings.reader.Setting(ctx, "motd"); err == nil {
-		h.settings.motd = motd
-	}
-	if h.settings.uploadFileTypes != nil {
-		if p, err := h.settings.uploadFileTypes.FileTypePolicy(ctx); err == nil {
-			h.settings.upload.BlockedExtensions, h.settings.upload.AllowedExtensions = p.Blocked, p.Allowed
-		} else {
-			slog.Warn("auth_ok: reading the upload file-type policy failed", "error", err)
-		}
-	}
-	h.settings.lastUpdate = time.Now()
-}
-
-// cachedUploadPolicy returns auth_ok's upload_policy, refreshed with the settings
-// cache when stale.
 func (h *Hub) cachedUploadPolicy(ctx context.Context) UploadPolicy {
-	h.getCachedSettings(ctx)
-	h.settings.mu.RLock()
-	defer h.settings.mu.RUnlock()
-	return h.settings.upload
+	return h.settings.cache.UploadPolicy(ctx)
 }
 
-// uploadPolicyReadTimeout bounds BroadcastUploadPolicy's settings read.
 const uploadPolicyReadTimeout = 5 * time.Second
 
-// BroadcastUploadPolicy re-reads the upload file-type lists into the settings cache
-// and sends them to every connected client as upload_policy, so a list saved in the
-// admin panel reaches open composers without a reconnect. A failed read sends
-// nothing: clients keep their lists, and the upload route stays authoritative.
-//
-// Unsequenced, sent straight to each client: auth_ok already carries the lists on
-// every connect and resume, so a replayed older frame could only overwrite newer
-// lists. A client whose queue is full is disconnected (trySendMsg) and gets the
-// current lists in its next auth_ok.
-//
-// Saves are serialised end to end, so two close together leave clients and the
-// cache on the later one. The admin HubBroadcaster interface carries no context, so
-// the read runs against Background with its own bound.
+// BroadcastUploadPolicy re-reads the upload file-type lists into the settings cache and sends them
+// to every client as upload_policy, so an admin save reaches open composers without a reconnect. A
+// failed read sends nothing (the upload route stays authoritative).
+// Unsequenced, sent straight to each client: auth_ok carries the lists on every connect and resume,
+// so a replayed older frame could only overwrite newer ones. A client with a full queue is
+// disconnected (trySendMsg) and gets current lists in its next auth_ok. Saves are serialised end to
+// end, so two close together leave the later one. The read runs against Background with its own
+// bound (HubBroadcaster carries no context).
 func (h *Hub) BroadcastUploadPolicy() {
-	if h.settings.uploadFileTypes == nil {
+	fileTypes := h.settings.cache.FileTypes()
+	if fileTypes == nil {
 		return
 	}
 	h.settings.uploadPolicyMu.Lock()
 	defer h.settings.uploadPolicyMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), uploadPolicyReadTimeout)
 	defer cancel()
-	p, err := h.settings.uploadFileTypes.FileTypePolicy(ctx)
+	p, err := fileTypes.FileTypePolicy(ctx)
 	if err != nil {
 		slog.Warn("upload_policy: reading the upload file-type policy failed", "error", err)
 		return
 	}
-	h.settings.mu.Lock()
-	h.settings.upload.BlockedExtensions, h.settings.upload.AllowedExtensions = p.Blocked, p.Allowed
-	h.settings.mu.Unlock()
+	h.settings.cache.SetUploadLists(p.Blocked, p.Allowed)
 	msg := buildUploadPolicy(p.Blocked, p.Allowed)
 	for _, c := range h.clientSnapshot() {
 		c.trySendMsg(msg)
 	}
 }
 
-// gameActivityState is the per-server game activity switch: the flag and the
-// serialiser that orders its saves.
 type gameActivityState struct {
-	// on is written only under mu, and once when the hub is built; read
-	// lock-free by the handler, ready and auth_ok, and under presenceFeed.mu by
-	// applyActivity and the presence emitters.
+	// on is written only under mu (and once at build); read lock-free by the handler, ready and
+	// auth_ok, and under presenceFeed.mu by applyActivity and the presence emitters.
 	on atomic.Bool
 	mu syncutil.Ranked[lockRankSerialiser] // orders ApplyGameActivityPolicy's saves
 }
 
-// gameActivityReadTimeout bounds the game activity switch's settings read.
 const gameActivityReadTimeout = 5 * time.Second
 
-// readGameActivitySwitch reads the stored game activity switch: a missing row
-// means on. ok is false when the read failed.
 func (h *Hub) readGameActivitySwitch(ctx context.Context) (enabled, ok bool, err error) {
-	return service.GameActivityEnabledFromRead(h.settings.reader.Setting(ctx, service.GameActivityEnabledKey))
+	return service.GameActivityEnabledFromRead(h.settings.cache.Reader().Setting(ctx, service.GameActivityEnabledKey))
 }
 
-// initGameActivityPolicy sets the switch from the stored setting when the hub is
-// built. An unreadable setting turns it off (fail closed: the admin may have turned
-// it off) and logs a warning.
+// initGameActivityPolicy sets the switch from the stored setting at build; an unreadable setting
+// turns it off (fail closed: the admin may have turned it off) and warns.
 func (h *Hub) initGameActivityPolicy() {
 	ctx, cancel := context.WithTimeout(context.Background(), gameActivityReadTimeout)
 	defer cancel()
@@ -139,22 +79,16 @@ func (h *Hub) initGameActivityPolicy() {
 	h.settings.gameActivity.on.Store(enabled)
 }
 
-// ApplyGameActivityPolicy makes the hub follow the saved game activity switch: it
-// re-reads the stored value (saved is used if that fails), stores it in the flag,
-// clears every shown game when off, and sends game_activity_policy to every
-// connected client.
-//
-// Saves are serialised end to end (gameActivity.mu) and the value is re-read under
-// it, so two close together leave the hub on the database's last one. The flag is
-// stored before the sweep takes presenceFeed.mu: a set reaching applyActivity after the
-// sweep sees false and is dropped, and one that got there first is cleared by the
-// sweep, whose frame has the higher seq. The policy frame goes out after presenceFeed.mu
-// is released, unsequenced and straight to each client (like upload_policy), since
-// auth_ok carries the same value on every connect and resume.
-//
-// Lock order: gameActivity.mu, then the settings read, then presenceFeed.mu, then Hub.mu
-// (read), then the client leaves. The read runs against Background with its own
-// bound (the HubBroadcaster interface carries no context).
+// ApplyGameActivityPolicy makes the hub follow the saved switch: re-read the stored value (saved if
+// that fails), store the flag, clear every shown game when off, and send game_activity_policy to
+// every client.
+// Saves are serialised end to end (gameActivity.mu) and re-read under it, so two close together
+// leave the database's last one. The flag is stored before the sweep takes presenceFeed.mu: a set
+// reaching applyActivity after the sweep sees false and is dropped, one before it is cleared by the
+// sweep (higher seq). The policy frame goes out after presenceFeed.mu is released, unsequenced and
+// direct (like upload_policy; auth_ok carries the value on every connect).
+// Lock order: gameActivity.mu, the settings read, presenceFeed.mu, Hub.mu (read), then the client
+// leaves. The read runs against Background with its own bound.
 func (h *Hub) ApplyGameActivityPolicy(saved bool) {
 	h.settings.gameActivity.mu.Lock()
 	defer h.settings.gameActivity.mu.Unlock()
@@ -175,11 +109,10 @@ func (h *Hub) ApplyGameActivityPolicy(saved bool) {
 	}
 }
 
-// clearAllGameActivity clears every connection's shown game and song through the
-// ordinary clear path (swapActivityLocked): sequenced presence for a visible user,
-// the user's own frame only for an invisible one, and a queued connect entry
-// superseded. presenceFeed.mu is held across the sweep so no set or older presence frame
-// lands between two clears; nothing under it does I/O.
+// clearAllGameActivity clears every connection's game and song through swapActivityLocked
+// (sequenced presence for a visible user, the user's own frame for an invisible one, a queued
+// connect entry superseded). presenceFeed.mu is held across the sweep so no set or older presence
+// lands between clears; no I/O under it.
 func (h *Hub) clearAllGameActivity() {
 	h.presenceFeed.mu.Lock()
 	defer h.presenceFeed.mu.Unlock()
@@ -188,29 +121,18 @@ func (h *Hub) clearAllGameActivity() {
 	}
 }
 
-// clientSnapshot lists the connected clients, taken under Hub.mu (read).
 func (h *Hub) clientSnapshot() []*Client {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.allClientsLocked()
 }
 
-// hubSettings groups the hub's settings cache, the upload-policy state and the
-// game activity switch. It holds two ranked locks, mu and uploadPolicyMu (see
-// lock_order.go), and must never be copied.
+// hubSettings groups the settings cache, upload-policy serialiser, game activity switch and video
+// cap. It holds ranked locks (lock_order.go); never copy it.
+// uploadPolicyMu orders BroadcastUploadPolicy's saves.
 type hubSettings struct {
-	// reader is the read seam the cache refreshes through.
-	reader SettingsReader
-	// uploadFileTypes is HubOptions.UploadFileTypes; may be nil.
-	uploadFileTypes UploadFileTypes
-
-	mu         syncutil.RankedRW[lockRankHubCache]
-	name       string
-	motd       string
-	upload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
-	lastUpdate time.Time
-	// uploadPolicyMu orders BroadcastUploadPolicy's saves.
+	cache          hubsettings.Cache
 	uploadPolicyMu syncutil.Ranked[lockRankSerialiser]
-	// gameActivity is the game activity switch.
-	gameActivity gameActivityState
+	gameActivity   gameActivityState
+	videoCap       videoCapState
 }

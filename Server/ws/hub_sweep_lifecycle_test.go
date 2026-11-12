@@ -124,20 +124,19 @@ func (v stallAfterArmVisibility) GetChannel(ctx context.Context, id int64) (*db.
 	return v.VisibilityReader.GetChannel(ctx, id)
 }
 
-// The post-commit tail runs detached from the sweep's cancellation but must
-// still end at sweepTailTimeout: a stalled DB cannot pin the in-flight guard
-// or keep Done open.
-func TestSweepStaleVoiceStates_StalledTailEndsAtTailTimeout(t *testing.T) {
+// startStalledTailSweep starts a sweep whose cleanup tail stalls on the
+// visibility reader once the ghost's delete has committed, and returns the hub
+// with a deadline for the caller's own polling.
+func startStalledTailSweep(t *testing.T, tailTimeout time.Duration, ghost, voiceCh string) (*Hub, time.Time) {
+	t.Helper()
 	old := sweepTailTimeout
-	sweepTailTimeout = 50 * time.Millisecond
+	sweepTailTimeout = tailTimeout
 	t.Cleanup(func() { sweepTailTimeout = old })
 
 	database := newHarvestVoiceDB(t)
-	ghostUID := seedHarvestVoiceUser(t, database, "tail-ghost")
-	chID := mustCreateVoiceChannel(t, database, "voice-tail-stall")
-	if err := database.JoinVoiceChannel(context.Background(), ghostUID, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel(ghost): %v", err)
-	}
+	ghostUID := seedHarvestVoiceUser(t, database, ghost)
+	chID := mustCreateVoiceChannel(t, database, voiceCh)
+	mustJoinVoice(t, database, ghostUID, chID)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	var armed atomic.Bool
@@ -153,6 +152,14 @@ func TestSweepStaleVoiceStates_StalledTailEndsAtTailTimeout(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+	return h, deadline
+}
+
+// The post-commit tail runs detached from the sweep's cancellation but must
+// still end at sweepTailTimeout: a stalled DB cannot pin the in-flight guard
+// or keep Done open.
+func TestSweepStaleVoiceStates_StalledTailEndsAtTailTimeout(t *testing.T) {
+	h, deadline := startStalledTailSweep(t, 50*time.Millisecond, "tail-ghost", "voice-tail-stall")
 	for h.lifecycle.voiceSweepInFlight.Load() {
 		if time.Now().After(deadline) {
 			t.Fatal("stalled tail never ended: voiceSweepInFlight stayed set")
@@ -171,31 +178,7 @@ func TestSweepStaleVoiceStates_StalledTailEndsAtTailTimeout(t *testing.T) {
 // A tail stalled on the DB with a long budget must still end when the hub
 // stops, so Done does not outlast the shutdown step.
 func TestSweepStaleVoiceStates_StalledTailEndsAtHubStop(t *testing.T) {
-	old := sweepTailTimeout
-	sweepTailTimeout = time.Minute
-	t.Cleanup(func() { sweepTailTimeout = old })
-
-	database := newHarvestVoiceDB(t)
-	ghostUID := seedHarvestVoiceUser(t, database, "tail-stop-ghost")
-	chID := mustCreateVoiceChannel(t, database, "voice-tail-stop")
-	if err := database.JoinVoiceChannel(context.Background(), ghostUID, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel(ghost): %v", err)
-	}
-
-	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	var armed atomic.Bool
-	h.voice = armOnLeaveStore{VoiceStore: h.voice, armed: &armed}
-	h.readers.Visibility = stallAfterArmVisibility{VisibilityReader: h.readers.Visibility, armed: &armed}
-	go h.Run()
-
-	h.startSweep(&h.lifecycle.voiceSweepInFlight, h.sweepStaleVoiceStates)
-	deadline := time.Now().Add(5 * time.Second)
-	for !armed.Load() {
-		if time.Now().After(deadline) {
-			t.Fatal("sweep never committed the ghost delete")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	h, _ := startStalledTailSweep(t, time.Minute, "tail-stop-ghost", "voice-tail-stop")
 
 	h.Stop()
 	select {

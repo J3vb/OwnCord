@@ -19,17 +19,11 @@
  * does nothing for a track that is still being enabled (the enable's end
  * calls `kick`) and waits out a Change source or Quality change.
  *
- * One more switch is not about viewers: MediaCapabilities can say hardware for
- * H.264 while WebRTC falls back to OpenH264 when the encoder starts (a
- * frame the GPU refuses). A share wider than the encoder's limit is shrunk to
- * fit before it is published or its source changes (`fitGpuH264Share`), so on
- * a first publish this is the last resort; after a Change source or Quality
- * change no new check runs.
- * OpenH264 is single-threaded, so the
- * share either drops to a few fps or shrinks to a blur to keep up. So a few seconds after an H.264 screen share goes live off Linux,
- * a sender sample names the encoder (once more if it has no name yet); an
- * OpenH264 one, even on only a lower simulcast layer, republishes the share as
- * VP8 and that share stays VP8 until it ends.
+ * H.264 can fall back to OpenH264 after the encoder starts. Check both
+ * cameras and shares after publication and after capture changes, with one
+ * retry if the encoder name is unavailable. An observed OpenH264 fallback
+ * keeps that track on VP8 until it ends. Each check owns its timer and identity,
+ * so a result from before a change or disconnect cannot alter a newer capture.
  */
 
 import {
@@ -40,7 +34,7 @@ import {
   type LiveCodec,
   type ScreenTrackState,
   type VideoTrackDeps,
-} from "../../lib/voice/screenShare";
+} from "./screenShare";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "../../stores/voice.store";
 import { pickCommonCodec } from "./decodeCaps";
@@ -60,10 +54,20 @@ export const SWITCH_UP_MIN_GAP_MS = 30_000;
 /** How long to wait before looking again at a share that is changing source. */
 export const SWITCH_BUSY_RETRY_MS = 2000;
 
-/** How long a live H.264 screen share runs before its encoder is read. */
+/** How long a live H.264 video runs before its encoder is read. */
 export const SOFTWARE_CHECK_MS = 4000;
 
 type Kind = "camera" | "screen";
+
+interface EncoderCheck {
+  track?: object;
+  timer: ReturnType<typeof setTimeout> | null;
+  fallback?: object;
+}
+
+function newEncoderCheck(): EncoderCheck {
+  return { timer: null };
+}
 
 interface Pending {
   readonly target: PublishCodec;
@@ -87,6 +91,7 @@ export interface CodecSwitchHost {
   readonly getDeps: () => VideoTrackDeps;
   /** One sender stats sample of the live screen share, null where it has none. */
   readonly readScreenSenderSample: () => Promise<ShareSenderSample | null>;
+  readonly readCameraSenderSample: () => Promise<ShareSenderSample | null>;
   /** A switch threw outside republishVideo's own handling. */
   readonly onSwitchError: (err: unknown) => void;
 }
@@ -96,13 +101,11 @@ export class CodecSwitchController {
   private slots: Record<Kind, Slot> = { camera: newSlot(), screen: newSlot() };
   /** Bumped by `stop`: a flight that started before it leaves the new slots alone. */
   private epoch = 0;
-  /** The share track the software-encoder check was scheduled for: one check
-   *  per publish, however often `kick` runs. */
-  private softwareTrack: object | undefined;
-  private softwareTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The share track whose H.264 encoder turned out to be OpenH264: that share
-   *  stays VP8, and a later share never inherits it. */
-  private softwareH264Track: object | undefined;
+  private changes = { camera: 0, screen: 0 };
+  private checks: Record<Kind, EncoderCheck> = {
+    camera: newEncoderCheck(),
+    screen: newEncoderCheck(),
+  };
 
   constructor(private readonly host: CodecSwitchHost) {}
 
@@ -114,7 +117,8 @@ export class CodecSwitchController {
       () => this.evaluateAll(),
     );
     this.evaluateAll();
-    this.scheduleSoftwareCheck();
+    this.scheduleSoftwareCheck("camera");
+    this.scheduleSoftwareCheck("screen");
   }
 
   /** The session ended or is reconnecting: drop the subscription and every
@@ -122,10 +126,12 @@ export class CodecSwitchController {
    *  with the same teardown. */
   stop(): void {
     this.epoch++;
+    this.changes = { camera: 0, screen: 0 };
     this.unsubscribe?.();
     this.unsubscribe = null;
-    this.clearSoftwareCheck();
-    this.softwareH264Track = undefined;
+    this.clearSoftwareCheck("camera");
+    this.clearSoftwareCheck("screen");
+    this.checks = { camera: newEncoderCheck(), screen: newEncoderCheck() };
     for (const slot of Object.values(this.slots)) this.clearPending(slot);
     this.slots = { camera: newSlot(), screen: newSlot() };
   }
@@ -141,7 +147,8 @@ export class CodecSwitchController {
    *  every peer can. Every shipped client plays VP8 and H.264, so a peer list
    *  without them never moves an H.264 or VP8 publish. */
   private pick(kind: Kind, live: LiveCodec): PublishCodec {
-    if (kind === "screen" && this.isSoftwareH264Share()) return "vp8";
+    if (this.checks[kind].fallback !== undefined && this.checks[kind].fallback === this.track(kind))
+      return "vp8";
     if (live.preferred !== "vp9" && live.preferred !== "h265") return live.published;
     return pickCommonCodec(live.preferred, channelPeerDecode());
   }
@@ -156,59 +163,82 @@ export class CodecSwitchController {
       .join("|");
   }
 
-  private isSoftwareH264Share(): boolean {
-    const track = this.softwareH264Track;
-    return track !== undefined && track === this.host.getScreenState().announced;
+  private track(kind: Kind): object | undefined {
+    return kind === "camera"
+      ? this.host.getCameraState().announced
+      : this.host.getScreenState().announced;
   }
 
-  private clearSoftwareCheck(): void {
-    if (this.softwareTimer !== null) clearTimeout(this.softwareTimer);
-    this.softwareTimer = null;
-    this.softwareTrack = undefined;
+  /** Invalidate pending stats before changing capture, including in-place changes
+   * that keep the LocalVideoTrack wrapper. Never restart after session teardown. */
+  async checkAfterChange(kind: Kind, change: () => Promise<void>): Promise<void> {
+    const epoch = this.epoch;
+    this.clearSoftwareCheck(kind);
+    const changes = this.changes;
+    changes[kind]++;
+    try {
+      await change();
+    } finally {
+      changes[kind]--;
+      if (epoch === this.epoch && changes[kind] === 0) this.kick();
+    }
   }
 
-  /** Schedule the software-encoder check for a live H.264 screen share (not
-   *  on Linux, whose native engine names its own encoder). */
-  private scheduleSoftwareCheck(): void {
-    const live = this.live("screen");
-    const track = this.host.getScreenState().announced;
-    if (live === null) {
-      this.clearSoftwareCheck();
+  private clearSoftwareCheck(kind: Kind): void {
+    const check = this.checks[kind];
+    if (check.timer !== null) clearTimeout(check.timer);
+    this.checks[kind] = { ...check, timer: null, track: undefined };
+  }
+
+  private scheduleSoftwareCheck(kind: Kind): void {
+    const live = this.live(kind);
+    const track = this.track(kind);
+    const check = this.checks[kind];
+    if (live === null || live.published !== "h264" || isLinuxDesktop()) {
+      if (check.track !== undefined) this.clearSoftwareCheck(kind);
       return;
     }
-    if (live.published !== "h264" || isLinuxDesktop() || track === this.softwareTrack) return;
-    this.clearSoftwareCheck();
-    this.softwareTrack = track;
-    this.armSoftwareCheck(track, true);
+    if (this.changes[kind] > 0 || track === check.track) return;
+    this.clearSoftwareCheck(kind);
+    this.checks[kind].track = track;
+    this.armSoftwareCheck(kind, true);
   }
 
-  private armSoftwareCheck(track: object | undefined, retry: boolean): void {
-    const epoch = this.epoch;
+  private armSoftwareCheck(kind: Kind, retry: boolean): void {
+    const check = this.checks[kind];
     const timer = setTimeout(() => {
-      if (this.softwareTimer === timer) this.softwareTimer = null;
-      if (epoch !== this.epoch) return;
-      this.checkSoftwareEncoder(epoch, track, retry).catch((err: unknown) =>
+      if (check.timer === timer) check.timer = null;
+      if (check !== this.checks[kind]) return;
+      this.checkSoftwareEncoder(kind, check, retry).catch((err: unknown) =>
         this.host.onSwitchError(err),
       );
     }, SOFTWARE_CHECK_MS);
-    this.softwareTimer = timer;
+    check.timer = timer;
   }
 
   private async checkSoftwareEncoder(
-    epoch: number,
-    track: object | undefined,
+    kind: Kind,
+    check: EncoderCheck,
     retry: boolean,
   ): Promise<void> {
-    const sample = await this.host.readScreenSenderSample();
-    if (epoch !== this.epoch || this.host.getScreenState().announced !== track) return;
+    const track = check.track;
+    const sample = await (kind === "camera"
+      ? this.host.readCameraSenderSample()
+      : this.host.readScreenSenderSample());
+    if (
+      check !== this.checks[kind] ||
+      this.track(kind) !== track ||
+      this.live(kind)?.published !== "h264"
+    )
+      return;
     if (sample?.encoder === undefined) {
-      // The sender may not have named its encoder yet: look once more.
-      if (retry && this.softwareTrack === track) this.armSoftwareCheck(track, false);
+      if (retry) this.armSoftwareCheck(kind, false);
       return;
     }
-    if (!/openh264/i.test(sample.encoder)) return;
-    // What the encoder was given, so a support bundle says why it refused.
-    log.info("H.264 share fell back to the software encoder, switching to VP8", {
+    const software = /openh264/i.test(sample.encoder);
+    // Only media diagnostics, never source names or device identifiers.
+    log.info(software ? "H.264 software fallback to VP8" : "H.264 encoder checked", {
+      kind,
       encoder: sample.encoder,
       width: sample.width,
       height: sample.height,
@@ -216,8 +246,9 @@ export class CodecSwitchController {
       sentFps: sample.sentFps,
       limitation: sample.limitation,
     });
-    this.softwareH264Track = track;
-    await this.run("screen", this.slots.screen);
+    if (!software) return;
+    check.fallback = track;
+    await this.run(kind, this.slots[kind]);
   }
 
   private evaluateAll(): void {

@@ -26,7 +26,7 @@ import type { WsClient } from "../../src/lib/ws";
 import {
   markMessageUnread,
   setMarkUnreadSender,
-} from "../../src/components/message-list/markUnread";
+} from "../../src/features/messaging/message-list/markUnread";
 import { viewChannel } from "../../src/lib/prefs/lastChannel";
 import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
@@ -47,7 +47,7 @@ vi.mock("@lib/voice/livekitSession", () =>
 // id. afterEach waits for that import: one still pending when the file ends
 // resolves after the mocks are gone and loads the real module into a torn-down
 // environment.
-vi.mock("@lib/voice/screenShare", () => dispatcherMocks.screenShareMock());
+vi.mock("../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
 vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
 
@@ -85,7 +85,7 @@ const chan = (id: number) => channelsStore.getState().channels.get(id);
 // is torn down, vitest throws an unhandled EnvironmentTeardownError even though
 // every test passed. Loading it once up front makes the later import a cache hit.
 beforeAll(async () => {
-  await import("../../src/lib/voice/screenShare");
+  await import("../../src/features/voice/screenShare");
 });
 
 describe("read pointer through the dispatcher", () => {

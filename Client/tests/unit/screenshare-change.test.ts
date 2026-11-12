@@ -12,6 +12,10 @@ import type { LocalTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
 import { captureLogs } from "../helpers/log-capture";
+import {
+  applyVideoBitrateCap,
+  resetVideoBitrateCap,
+} from "../../src/features/voice/videoBitrateCap";
 
 const createLocalScreenTracks = vi.fn();
 const savePref = vi.fn();
@@ -38,7 +42,7 @@ vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
 
 vi.mock("@lib/prefs/preferences", () => shareRig.fallbackPrefsMock(savePref));
 
-const { watchScreenEnded } = await import("@lib/voice/screenShare");
+const { watchScreenEnded } = await import("../../src/features/voice/screenShare");
 const { changeScreenshareSource, setScreenshareQuality } =
   await import("../../src/features/voice/screenshareChange");
 const { voiceStore } = await import("@stores/voice.store");
@@ -341,7 +345,7 @@ describe("changeScreenshareSource", () => {
       }),
     );
     const changing = changeScreenshareSource(rig.state, rig.deps);
-    const { disableScreenshare } = await import("@lib/voice/screenShare");
+    const { disableScreenshare } = await import("../../src/features/voice/screenShare");
     await disableScreenshare(rig.state, rig.deps);
     const fresh = track(Track.Kind.Video, "window-b");
     resolvePick([fresh]);
@@ -1163,6 +1167,31 @@ describe("setScreenshareQuality on the web", () => {
 
     expect(params.encodings[0]).not.toHaveProperty("maxBitrate");
     expect(params.encodings[1]).toMatchObject({ maxBitrate: 6_000_000 });
+  });
+
+  it("holds the new quality's layers under the server's video cap", async () => {
+    applyVideoBitrateCap(1_500_000);
+    try {
+      const rig = setup(false);
+      const params = {
+        encodings: [
+          { rid: "q", scaleResolutionDownBy: 2, maxBitrate: 1_200_000 },
+          { rid: "h", scaleResolutionDownBy: 1, maxBitrate: 3_000_000 },
+        ],
+      } as unknown as RTCRtpSendParameters;
+      rig.video.sender = { getParameters: () => params, setParameters: vi.fn() };
+
+      await setScreenshareQuality(rig.state, rig.deps, "high");
+
+      expect(
+        (rig.video.publishOptions as { screenShareEncoding?: { maxBitrate: number } })
+          .screenShareEncoding?.maxBitrate,
+      ).toBe(1_500_000);
+      expect(params.encodings[1]).toMatchObject({ maxBitrate: 1_500_000 });
+      expect(params.encodings[0]).toMatchObject({ maxBitrate: 1_200_000 });
+    } finally {
+      resetVideoBitrateCap();
+    }
   });
 
   it("leaves everything as it was when a stop lands while the capture is re-sized", async () => {

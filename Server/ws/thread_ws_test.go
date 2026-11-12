@@ -23,23 +23,10 @@ type threadWSFixture struct {
 
 func newThreadWSFixture(t *testing.T) *threadWSFixture {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := newTeardownTestDB(t)
 	ctx := context.Background()
-	parent, err := database.CreateChannel(ctx, "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	owner, err := database.CreateUser(ctx, "starter", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	parent := mustCreateChannel(t, database, "general", "text")
+	owner := mustCreateUser(t, database, "starter", 4)
 	res, err := database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content) VALUES (?, ?, 'hi')`, parent, owner)
 	if err != nil {
 		t.Fatalf("starter: %v", err)
@@ -81,7 +68,10 @@ func drainFor(ch <-chan []byte, d time.Duration) [][]byte {
 	var out [][]byte
 	for {
 		select {
-		case m := <-ch:
+		case m, ok := <-ch:
+			if !ok {
+				return out
+			}
 			out = append(out, m)
 		case <-time.After(d):
 			return out

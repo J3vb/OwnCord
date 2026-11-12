@@ -22,9 +22,7 @@ func TestBuildReady_BannerOmittedWhenUnset(t *testing.T) {
 		}
 	}
 
-	if _, err := database.ExecContext(context.Background(), `INSERT INTO attachments (id, uploader_id, filename, stored_as, mime_type, size) VALUES ('ban-1', ?, 'b.png', 's', 'image/png', 1)`, other.ID); err != nil {
-		t.Fatalf("attachment: %v", err)
-	}
+	mustExec(t, database, `INSERT INTO attachments (id, uploader_id, filename, stored_as, mime_type, size) VALUES ('ban-1', ?, 'b.png', 's', 'image/png', 1)`, other.ID)
 	id, color := "ban-1", "#abcdef"
 	if err := database.UpdateUserProfile(context.Background(), other.ID, other.Username, nil, nil, nil, &id, &color); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)

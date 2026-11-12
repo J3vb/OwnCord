@@ -11,9 +11,7 @@ import (
 // than panicking or returning an empty result as if nothing matched.
 func TestMentionQueries_ReportClosedDatabaseErrors(t *testing.T) {
 	database := openMigratedMemory(t)
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", database.Close())
 	ctx := context.Background()
 
 	calls := map[string]func() error{

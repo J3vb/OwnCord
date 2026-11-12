@@ -10,46 +10,59 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// A member may try a channel's password this many times per window. The limit
-// is per member and channel and separate from the voice_join rate limit, so a
-// guesser cannot spend the whole of the join budget on one channel, and the
-// bcrypt work stays bounded.
+// A member may try a channel's password this many times per window. Per member and
+// channel, separate from the voice_join rate limit, so a guesser cannot spend the whole
+// join budget on one channel and the bcrypt work stays bounded.
 const (
 	voiceJoinPasswordRateLimit = 5
 	voiceJoinPasswordWindow    = time.Minute
 )
 
-// Budgets that sit around the per-channel one: a member may try this many
-// passwords per window across all channels, and the whole server this many, so
-// guessing is bounded however many channels are protected.
+// Wider budgets: per member across all channels, and server-wide, so guessing is bounded however many
+// channels are protected.
 const (
 	voiceJoinPasswordUserLimit = 10
 	voiceJoinPasswordAllLimit  = 60
 )
 
-// voiceJoinPasswordAttemptAllowed spends one password attempt from the
-// member's budget across channels, then the member's budget for this channel,
-// then the server-wide one. Without a limiter every attempt is allowed.
+// voiceJoinPasswordAttemptAllowed spends one password attempt from the server-wide budget,
+// the member's per-channel budget and the member's cross-channel budget. All three are
+// checked before any is charged, so a refused attempt spends nothing from the others; they
+// are charged widest first, so a caller losing a check-to-charge race has spent only from
+// budgets wider than the one that refused it. Without a limiter every attempt is allowed.
 func (h *Hub) voiceJoinPasswordAttemptAllowed(userID, channelID int64) bool {
 	if h.limiter == nil {
 		return true
 	}
-	return h.limiter.Allow(auth.Key("voice_join_password_user", userID), voiceJoinPasswordUserLimit, voiceJoinPasswordWindow) &&
-		h.limiter.Allow(auth.Key(auth.Key("voice_join_password", userID), channelID), voiceJoinPasswordRateLimit, voiceJoinPasswordWindow) &&
-		h.limiter.Allow("voice_join_password_all", voiceJoinPasswordAllLimit, voiceJoinPasswordWindow)
+	budgets := [...]struct {
+		key   string
+		limit int
+	}{
+		{"voice_join_password_all", voiceJoinPasswordAllLimit},
+		{auth.Key(auth.Key("voice_join_password", userID), channelID), voiceJoinPasswordRateLimit},
+		{auth.Key("voice_join_password_user", userID), voiceJoinPasswordUserLimit},
+	}
+	for _, b := range budgets {
+		if !h.limiter.Check(b.key, b.limit, voiceJoinPasswordWindow) {
+			return false
+		}
+	}
+	for _, b := range budgets {
+		if !h.limiter.Allow(b.key, b.limit, voiceJoinPasswordWindow) {
+			return false
+		}
+	}
+	return true
 }
 
-// voiceJoinPasswordGate is the extra lock on a password-protected voice
-// channel (permissions.CanPassChannelPassword). It runs only for the user's own
-// voice_join, after CanJoinVoice: a moderator's move, the AFK move and the
-// token refresh never ask for the password. It reports whether the join may
-// go on; when not, the error frame has been sent.
-//
-// A member who entered the current password earlier has a stored grant and is
-// let in without sending it again (a reconnect rejoins this way). A password
-// that was sent is checked against the hash read together with its version,
-// and the grant is written only if the channel still has that version, so a
-// password changed meanwhile never leaves a grant behind.
+// voiceJoinPasswordGate is the extra lock on a password-protected voice channel
+// (permissions.CanPassChannelPassword). It runs only for the user's own voice_join, after
+// CanJoinVoice (moderator move, AFK move and token refresh never ask). It reports whether
+// the join may go on; when not, the error frame has been sent. A member who entered the
+// current password earlier has a stored grant and is let in (a reconnect rejoins this way).
+// A sent password is checked against the hash read with its version, and the grant is
+// written only if the channel still has that version, so a password changed meanwhile never
+// leaves a grant behind.
 func (h *Hub) voiceJoinPasswordGate(ctx context.Context, c *Client, sub permissions.Subject, channelID int64, protected bool, password, reqID string) bool {
 	if permissions.CanPassChannelPassword(sub, protected, false) == nil {
 		return true
@@ -81,7 +94,6 @@ func (h *Hub) voiceJoinPasswordGate(ctx context.Context, c *Client, sub permissi
 		return false
 	}
 	if !found || hash == "" {
-		// The password was removed since the channel row was read.
 		return true
 	}
 	if !auth.CheckPassword(hash, password) {
@@ -96,8 +108,7 @@ func (h *Hub) voiceJoinPasswordGate(ctx context.Context, c *Client, sub permissi
 		return false
 	}
 	if !written {
-		// The password changed after the hash was read: the one just checked
-		// is no longer the channel's.
+		// The password changed after the hash was read: the one just checked is no longer the channel's.
 		slog.Warn("ws voice_join: channel password changed during the join", "user_id", c.userID, "channel_id", channelID)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeWrongPassword, "wrong password", reqID))
 		return false
@@ -105,12 +116,10 @@ func (h *Hub) voiceJoinPasswordGate(ctx context.Context, c *Client, sub permissi
 	return true
 }
 
-// grantPasswordForMove stores the grant a server-driven move needs. A moderator
-// move and the AFK move evict the member and tell their client to re-join the
-// destination with an ordinary voice_join, which would ask a password-protected
-// destination for its password; the move itself never does, so the grant is
-// written here, for the password the destination has right now. A destination
-// without a password writes nothing.
+// grantPasswordForMove stores the grant a server-driven move needs: a moderator or AFK move
+// evicts the member and tells their client to re-join with an ordinary voice_join, which
+// would ask a protected destination for its password. The move never does, so the grant is
+// written here for the destination's current password. No password writes nothing.
 func grantPasswordForMove(ctx context.Context, reader DispatchReader, channelID, userID int64) error {
 	hash, version, found, err := reader.ChannelPasswordState(ctx, channelID)
 	if err != nil {
@@ -125,9 +134,8 @@ func grantPasswordForMove(ctx context.Context, reader DispatchReader, channelID,
 	return nil
 }
 
-// moveGrantStored stores the grant a moderator move needs for a protected
-// destination and reports whether the move may go on. An unprotected
-// destination needs none.
+// moveGrantStored stores the grant a moderator move needs for a protected destination and
+// reports whether the move may go on; an unprotected one needs none.
 func moveGrantStored(ctx context.Context, reader DispatchReader, protected bool, channelID, userID int64) bool {
 	if !protected {
 		return true

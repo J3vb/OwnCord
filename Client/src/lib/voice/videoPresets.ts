@@ -15,6 +15,14 @@ import { loadPref } from "@lib/prefs/preferences";
 import { offeredShareFps } from "@lib/voice/shareFps";
 import { shareMotionArm, getShareMotionPolicy } from "./shareFlags";
 import type { PublishCodec } from "../../features/voice/videoCodec";
+import { budgetedRate, shareBudgetFitsLayers } from "./videoBudget";
+
+export {
+  CAMERA_BUDGET_FLOOR,
+  budgetedRate,
+  shareBudgetFitsLayers,
+  videoBudget,
+} from "./videoBudget";
 
 // ---------------------------------------------------------------------------
 // Stream quality presets
@@ -53,6 +61,7 @@ export function videoLayerOptions(
   codec: PublishCodec,
   quality: StreamQuality,
   fps: number,
+  budget = 0,
 ): Pick<TrackPublishOptions, "simulcast" | "videoSimulcastLayers" | "screenShareSimulcastLayers"> {
   if (codec === "vp9") return { simulcast: false };
   if (kind === "camera") {
@@ -62,7 +71,7 @@ export function videoLayerOptions(
       ...(layers ? { videoSimulcastLayers: layers } : {}),
     };
   }
-  const simulcast = isScreenShareSimulcast(quality, fps);
+  const simulcast = isScreenShareSimulcast(quality, fps) && shareBudgetFitsLayers(budget);
   return {
     simulcast,
     ...(simulcast ? { screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS] } : {}),
@@ -74,17 +83,22 @@ export function cameraMaxFramerate(quality: StreamQuality): number {
   return quality === "low" ? 15 : 30;
 }
 
-/** The camera's video publish options for `codec`. One factory for the first
- *  publish and for the live codec switch, so the two cannot drift. */
+/** The camera's video publish options for `codec`, under `budget` bits per
+ *  second (0 = none). One factory for the first publish and for the live codec
+ *  switch, so the two cannot drift. */
 export function cameraPublishOptions(
   codec: PublishCodec,
   quality: StreamQuality,
+  budget = 0,
 ): TrackPublishOptions {
   const maxFramerate = cameraMaxFramerate(quality);
   return {
     source: Track.Source.Camera,
     ...videoLayerOptions("camera", codec, quality, maxFramerate),
-    videoEncoding: { maxBitrate: CAMERA_PUBLISH_BITRATES[quality], maxFramerate },
+    videoEncoding: {
+      maxBitrate: budgetedRate(CAMERA_PUBLISH_BITRATES[quality], budget),
+      maxFramerate,
+    },
     videoCodec: codec,
   };
 }
@@ -161,14 +175,25 @@ export function getScreenShareQuality(): StreamQuality {
   return loadQuality("screenShareQuality", "medium");
 }
 
+/** Saved "Send a backup copy" choice: whether a screen share also encodes
+ *  the 720p lower layer for viewers on a weak link. */
+export const SCREEN_SHARE_BACKUP_LAYER_PREF = "screenShareBackupLayer";
+
+/** Off by default: the lower layer is encoded whenever anyone watches, even
+ *  when every viewer takes the top one, and that encoder work competes with a
+ *  game for the GPU. Without it a viewer whose link cannot carry the share
+ *  stalls instead of dropping to 720p; the other viewers are unaffected. */
+export function getScreenShareBackupLayer(): boolean {
+  return loadPref<boolean>(SCREEN_SHARE_BACKUP_LAYER_PREF, false) === true;
+}
+
 /** Whether a screen share at `quality` and `fps` is published with
- *  SCREENSHARE_SIMULCAST_LAYERS. Without a lower layer the SFU can only send
- *  a viewer whose link cannot carry the share the full stream, which they
- *  cannot decode at all (a frozen frame), while their keyframe requests raise
- *  the bitrate for every other viewer. Low is already a small stream, and
- *  Source is meant to arrive untouched. High at 120 fps goes out as one layer
- *  too: encoding both layers in turn held 1080p120 to 40-50 fps. */
+ *  SCREENSHARE_SIMULCAST_LAYERS: only when the sharer turned the backup copy
+ *  on. Low is already a small stream, and Source is meant to arrive
+ *  untouched. High at 120 fps goes out as one layer too: encoding both layers
+ *  in turn held 1080p120 to 40-50 fps. */
 export function isScreenShareSimulcast(quality: StreamQuality, fps: number): boolean {
+  if (!getScreenShareBackupLayer()) return false;
   return quality === "medium" || (quality === "high" && fps !== 120);
 }
 
@@ -215,20 +240,22 @@ export function getScreenShareMaxBitrate(quality: StreamQuality, fps: number): n
 }
 
 /** The share's video publish options for `codec` (`fps` is the saved choice,
- *  30 meaning the quality's own rate). One factory for the first publish and
- *  for the live codec switch. livekit-client takes a screen share's encoding
- *  from `screenShareEncoding` and ignores `videoEncoding` for that source. */
+ *  30 meaning the quality's own rate), under `budget` bits per second (0 =
+ *  none). One factory for the first publish and for the live codec switch.
+ *  livekit-client takes a screen share's encoding from `screenShareEncoding`
+ *  and ignores `videoEncoding` for that source. */
 export function screenVideoPublishOptions(
   codec: PublishCodec,
   quality: StreamQuality,
   fps: number,
+  budget = 0,
 ): TrackPublishOptions {
   const effectiveFps = getEffectiveScreenShareFps(quality, fps);
   return {
     source: Track.Source.ScreenShare,
-    ...videoLayerOptions("screen", codec, quality, fps),
+    ...videoLayerOptions("screen", codec, quality, fps, budget),
     screenShareEncoding: {
-      maxBitrate: getScreenShareMaxBitrate(quality, fps),
+      maxBitrate: budgetedRate(getScreenShareMaxBitrate(quality, fps), budget),
       maxFramerate: effectiveFps,
     },
     videoCodec: codec,

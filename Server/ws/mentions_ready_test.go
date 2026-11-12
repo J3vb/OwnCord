@@ -8,8 +8,6 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
-
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // TestChatSend_BroadcastCarriesMentions locks that the chat_message fan-out
@@ -26,17 +24,11 @@ func TestChatSend_BroadcastCarriesMentions(t *testing.T) {
 	target := seedCoverageOwner(t, database, "mention-target")
 	chID := seedTestChannel(t, database, "mention-chan")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, author, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, author, chID, 32)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": chID,
-			"content":    "@everyone please review, @mention-target",
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id": chID,
+		"content":    "@everyone please review, @mention-target",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -88,24 +80,15 @@ func TestChatSend_MentionReachesUnfocusedReaderLive(t *testing.T) {
 	target := seedCoverageOwner(t, database, "live-target")
 	chID := seedTestChannel(t, database, "live-chan")
 
-	authorSend := make(chan []byte, 32)
-	authorClient := ws.NewTestClientWithUser(hub, author, chID, authorSend)
-	hub.Register(authorClient)
-	waitRegistered(t, hub, authorClient)
+	authorClient, _ := connectClient(t, hub, author, chID, 32)
 
 	// The target is connected but viewing no channel: no ChannelTopic(chID)
 	// subscription, so the chat_message broadcast cannot reach it.
-	targetSend := make(chan []byte, 32)
-	targetClient := ws.NewTestClientWithUser(hub, target, 0, targetSend)
-	hub.Register(targetClient)
-	waitRegistered(t, hub, targetClient)
+	_, targetSend := connectClient(t, hub, target, 0, 32)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": chID,
-			"content":    "@live-target please look",
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id": chID,
+		"content":    "@live-target please look",
 	})
 	hub.HandleMessageForTest(authorClient, raw)
 
@@ -147,17 +130,11 @@ func TestChatSend_BroadcastDistinguishesHereFromEveryone(t *testing.T) {
 	author := seedCoverageOwner(t, database, "here-author") // owner role holds MENTION_EVERYONE
 	chID := seedTestChannel(t, database, "here-chan")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, author, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, author, chID, 32)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": chID,
-			"content":    "@here quick question",
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id": chID,
+		"content":    "@here quick question",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -195,22 +172,13 @@ func TestBuildReady_CarriesMentionCount(t *testing.T) {
 	if err != nil || role == nil {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
-	chID, err := database.CreateChannel(ctx, "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	msgID, err := database.CreateMessage(ctx, chID, user.ID, "@you", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "general", "text")
+	msgID := mustCreateMessage(t, database, chID, user.ID, "@you")
 	if err := database.IncrementMentionCounts(ctx, chID, msgID, []int64{user.ID}); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, user.ID, role)
 
 	var env struct {
 		Payload struct {
@@ -220,9 +188,7 @@ func TestBuildReady_CarriesMentionCount(t *testing.T) {
 			} `json:"channels"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 
 	var found bool
 	for _, ch := range env.Payload.Channels {
@@ -257,18 +223,13 @@ func TestBuildReady_MentionCountZeroWithoutReadState(t *testing.T) {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, user.ID, role)
 	var env struct {
 		Payload struct {
 			Channels []map[string]any `json:"channels"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if len(env.Payload.Channels) == 0 {
 		t.Fatal("no channels in ready payload")
 	}

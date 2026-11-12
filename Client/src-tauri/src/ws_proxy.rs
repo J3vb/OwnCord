@@ -37,6 +37,7 @@ const LIVENESS_TIMEOUT: Duration = Duration::from_millis(62_500);
 
 use crate::constants::CERTS_STORE;
 use crate::tofu::{self, TofuOutcome};
+pub(crate) use owncord_parse::pins::{is_valid_cert_fingerprint, pin_needs_confirmation};
 
 /// Sender half kept in Tauri state so `ws_send` can push messages.
 /// `tx` is wrapped in `Arc` so the monitoring task can clone a reference
@@ -81,6 +82,13 @@ impl WsState {
         let claimed = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         on_claimed();
         claimed
+    }
+
+    /// Whether `generation` is still the newest attempt. A lock-free read for
+    /// steps that only need to stop early, such as raising a certificate
+    /// prompt; taking the slot still goes through `install_sender`.
+    fn is_current(&self, generation: u64) -> bool {
+        self.generation.load(Ordering::SeqCst) == generation
     }
 
     /// Install `tx` as the live sender if `generation` is still current.
@@ -207,6 +215,14 @@ pub async fn ws_connect<R: Runtime>(
         })?;
 
     debug!("[ws_proxy] WebSocket handshake complete");
+
+    // A profile switch during the handshake already started a newer attempt:
+    // stop before the certificate check, so the old host's prompt never
+    // appears over the new server.
+    if !state.is_current(my_generation) {
+        info!("[ws_proxy] handshake superseded by a newer connect; skipping the certificate check");
+        return Err("superseded by a newer connection".into());
+    }
 
     // ── TOFU check ───────────────────────────────────────────────────────
     let host = tofu::extract_host(&url);
@@ -534,34 +550,12 @@ pub async fn ws_disconnect(
     // path a superseding connect() already has. The returned generation is
     // unused: nothing will ever install under it.
     state.begin_connection().await;
-    // Logout / server switch: no session is live, so the credential commands
-    // fall back to their pre-session rule, which admits a read only for a host
-    // whose login was verified this app run. That set is kept.
+    // Logout / server switch: no session is live, so the saved-login commands
+    // fall back to their pre-session rules (see `active_session`): a stored
+    // token is handed over as it is only for a host whose login was verified
+    // this app run. That set is kept.
     session.clear_active();
     Ok(())
-}
-
-/// Whether `fingerprint` is a SHA-256 digest in colon-hex form:
-/// `XX:XX:XX:...`, 32 hex pairs separated by colons (95 chars total).
-///
-/// Split out of `accept_cert_fingerprint` so the format check — the guard on
-/// the only code path that writes a cert pin — is reachable from unit tests
-/// without a Tauri runtime.
-pub(crate) fn is_valid_cert_fingerprint(fingerprint: &str) -> bool {
-    fingerprint.len() == 95
-        && fingerprint.bytes().enumerate().all(|(i, b)| {
-            if (i + 1) % 3 == 0 {
-                b == b':'
-            } else {
-                b.is_ascii_hexdigit()
-            }
-        })
-}
-
-/// Whether writing `fingerprint` changes what `host` trusts: a first pin, or a
-/// different one. Restating the stored pin asks nothing.
-pub(crate) fn pin_needs_confirmation(stored: Option<&Value>, fingerprint: &str) -> bool {
-    !matches!(stored, Some(Value::String(s)) if s == fingerprint)
 }
 
 /// Ask the user, in a native dialog, to confirm pinning `fingerprint` for
@@ -894,6 +888,19 @@ mod tests {
             slot.as_ref().is_some_and(|t| t.same_channel(&tx_b)),
             "the live connection's sender must still be installed"
         );
+    }
+
+    #[tokio::test]
+    async fn a_superseded_attempt_is_no_longer_current() {
+        let state = WsState::new();
+        let gen_a = state.begin_connection().await;
+        assert!(state.is_current(gen_a));
+        let gen_b = state.begin_connection().await;
+        assert!(
+            !state.is_current(gen_a),
+            "an attempt replaced during its handshake must not reach the certificate prompt"
+        );
+        assert!(state.is_current(gen_b));
     }
 
     // ── Generation-owned teardown ───────────────────────────────────────────

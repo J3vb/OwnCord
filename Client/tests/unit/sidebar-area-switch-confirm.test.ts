@@ -5,14 +5,14 @@ import { lightSidebarAreaOpts } from "../helpers/sidebarAreaOpts";
 vi.mock("@lib/voice/livekitSession", () => mocks.rePinSessionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.e2eeCryptoMock());
 vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
-vi.mock("@components/UserBar", () => mocks.userBarMock());
-vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
-vi.mock("@components/MemberList", () => mocks.memberListMock());
+vi.mock("../../src/features/voice/UserBar", () => mocks.userBarMock());
+vi.mock("../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock());
+vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
 const { createQuickSwitchOverlay, switchToServer } = vi.hoisted(() => ({
   createQuickSwitchOverlay: vi.fn(),
   switchToServer: vi.fn(),
 }));
-vi.mock("@components/QuickSwitchOverlay", () => ({ createQuickSwitchOverlay }));
+vi.mock("../../src/features/navigation/QuickSwitchOverlay", () => ({ createQuickSwitchOverlay }));
 vi.mock("../../src/features/server-rail/switchServer", () => ({
   switchToServer,
   addServer: vi.fn(),

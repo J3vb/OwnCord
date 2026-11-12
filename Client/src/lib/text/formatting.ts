@@ -7,7 +7,8 @@ import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
-import { getTimeFormat, refreshTimeFormat } from "@lib/text/timeFormat";
+import { getTimeFormat, refreshDateFormat, refreshTimeFormat } from "@lib/text/timeFormat";
+import { formatDate } from "../../i18n/format";
 import { setOwnedTimeout } from "@lib/dom";
 import { messageStatusText } from "../../i18n/messageStatus";
 import { isServerRowKind } from "./messageKind";
@@ -49,33 +50,25 @@ export function parseTimestamp(raw: string): Date {
   return date;
 }
 
-// Cached formatters — Intl.DateTimeFormat construction is expensive and these
-// run for every rendered message. Only the FORMATTER is cached, never a
-// formatted string: "Today"/"Yesterday" flips at midnight, so strings are
-// recomputed per call from the cached formatter.
-const FULL_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
+// The clock time as the message header writes it: "2:34 PM" in 12-hour mode,
+// "14:34" in 24-hour mode, in the device's date locale.
+const CLOCK_12H: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+const CLOCK_24H: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" };
+const FULL_DATE: Intl.DateTimeFormatOptions = { year: "numeric", month: "long", day: "numeric" };
+const NUMERIC_DATE: Intl.DateTimeFormatOptions = {
   year: "numeric",
-  month: "long",
+  month: "2-digit",
+  day: "2-digit",
+};
+const SHORT_DATE: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+const SHORT_DATE_YEAR: Intl.DateTimeFormatOptions = {
+  month: "short",
   day: "numeric",
-});
-
-// One clock formatter per preference. `getTimeFormat()` is a cached read, and
-// the 24h variant only exists once a user opts in.
-const CLOCK_TIME_FORMATS: Record<"12h" | "24h", Intl.DateTimeFormat> = {
-  "12h": new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }),
-  "24h": new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }),
+  year: "numeric",
 };
 
-function clockTimeFormat(): Intl.DateTimeFormat {
-  return CLOCK_TIME_FORMATS[getTimeFormat()];
+function clockTime(date: Date): string {
+  return formatDate(date, getTimeFormat() === "12h" ? CLOCK_12H : CLOCK_24H);
 }
 
 export function formatTime(iso: string): string {
@@ -84,22 +77,23 @@ export function formatTime(iso: string): string {
 }
 
 export function formatFullDate(iso: string): string {
-  return FULL_DATE_FORMAT.format(parseTimestamp(iso));
+  return formatDate(parseTimestamp(iso), FULL_DATE);
 }
 
 /** The clock time alone ("2:34 PM", or "14:34" in 24-hour mode), as the
  *  message header writes it. */
 export function formatClockTime(iso: string): string {
-  return clockTimeFormat().format(parseTimestamp(iso));
+  return clockTime(parseTimestamp(iso));
 }
 
 /** Discord-style relative timestamp: "Today at 2:34 PM", "Yesterday at 2:34 PM",
- *  or "MM/DD/YYYY H:MM AM/PM" for older dates. */
+ *  or the numeric date and time for older ones, in the device's date order
+ *  ("11/01/2026 2:34 PM" in en-US, "01/11/2026 14:34" in nl-BE). */
 export function formatMessageTimestamp(iso: string): string {
   const date = parseTimestamp(iso);
   const now = new Date();
 
-  const timeStr = clockTimeFormat().format(date);
+  const timeStr = clockTime(date);
 
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   // Built from the calendar date, not todayStart - 24h: a DST-transition day
@@ -113,18 +107,8 @@ export function formatMessageTimestamp(iso: string): string {
     return messageStatusText("date.yesterday", { time: timeStr });
   }
 
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const yyyy = date.getFullYear();
-  return `${mm}/${dd}/${yyyy} ${timeStr}`;
+  return `${formatDate(date, NUMERIC_DATE)} ${timeStr}`;
 }
-
-const SHORT_DATE_FORMAT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
-const SHORT_DATE_YEAR_FORMAT = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
 
 /** A DM row's compact time: the clock time for today ("3:04 PM"), else a short
  *  date ("Sep 29", with the year when it is not this one). "" stays "". The
@@ -135,11 +119,9 @@ export function formatDmRowTime(iso: string): string {
   const date = parseTimestamp(iso);
   const now = new Date();
   if (date >= new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
-    return clockTimeFormat().format(date);
+    return clockTime(date);
   }
-  return date.getFullYear() === now.getFullYear()
-    ? SHORT_DATE_FORMAT.format(date)
-    : SHORT_DATE_YEAR_FORMAT.format(date);
+  return formatDate(date, date.getFullYear() === now.getFullYear() ? SHORT_DATE : SHORT_DATE_YEAR);
 }
 
 /** Run `fn` at every local midnight until `signal` aborts. */
@@ -196,8 +178,9 @@ export function shouldGroup(prev: Message, curr: Message): boolean {
 
 /** Cached value of the roleColors preference. Invalidated on pref change. */
 let roleColorsEnabled = loadPref<boolean>("roleColors", true);
-onPrefChange(["roleColors", "timeFormat"], (key) => {
+onPrefChange(["roleColors", "timeFormat", "dateFormat"], (key) => {
   if (key === "roleColors") roleColorsEnabled = loadPref<boolean>("roleColors", true);
+  else if (key === "dateFormat") refreshDateFormat();
   else refreshTimeFormat();
 });
 
@@ -240,7 +223,7 @@ export function userRoleColorVar(userId: number): string {
 export function resolveAuthor(user: {
   id: number;
   username: string;
-  avatar: string | null;
+  avatar?: string | null;
   display_name?: string | null;
 }): { username: string; displayName: string | null; avatar: string | null } {
   const member = membersStore.getState().members.get(user.id);
@@ -254,7 +237,7 @@ export function resolveAuthor(user: {
   return {
     username: user.username,
     displayName: user.display_name ?? null,
-    avatar: user.avatar,
+    avatar: user.avatar ?? null,
   };
 }
 

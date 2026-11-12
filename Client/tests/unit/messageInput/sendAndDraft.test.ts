@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/messageInputMocks";
-import { createMessageInput } from "@components/MessageInput";
+import { createMessageInput } from "../../../src/features/messaging/MessageInput";
 import {
   makeOptions,
   mountMessageInput,
@@ -10,8 +10,8 @@ import {
 } from "../../helpers/messageInputHarness";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
-vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
+vi.mock("../../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../../src/features/messaging/GifPicker", () => mocks.gifPickerMock());
 
 describe("MessageInput", () => {
   let container: HTMLDivElement;
@@ -262,6 +262,35 @@ describe("MessageInput", () => {
 
     const replyBar = container.querySelector(".reply-bar") as HTMLDivElement;
     expect(replyBar.classList.contains("visible")).toBe(false);
+
+    comp.destroy?.();
+  });
+
+  it("tells the host which message the reply bar answers, and when it closes", () => {
+    const onReplyTargetChange = vi.fn();
+    const { comp } = mountMessageInput(container, { onReplyTargetChange });
+
+    comp.setReplyTo(42, "testuser");
+    expect(onReplyTargetChange).toHaveBeenLastCalledWith(42);
+    comp.clearReply();
+    expect(onReplyTargetChange).toHaveBeenLastCalledWith(null);
+
+    comp.destroy?.();
+  });
+
+  it("a disabled composer marks itself for the no-buttons style and keeps the whole reason as the title", () => {
+    const { comp } = mountMessageInput(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    const reason = "Only moderators can post in announcement channels";
+
+    comp.setDisabled(reason);
+    expect(container.querySelector(".message-input-wrap.composer-disabled")).not.toBeNull();
+    expect(textarea.placeholder).toBe(reason);
+    expect(textarea.title).toBe(reason);
+
+    comp.setDisabled(null);
+    expect(container.querySelector(".composer-disabled")).toBeNull();
+    expect(textarea.hasAttribute("title")).toBe(false);
 
     comp.destroy?.();
   });

@@ -72,9 +72,7 @@ func TestUserNoteQueries_UpsertGetDeleteScoped(t *testing.T) {
 	if ok, err := database.UpsertUserNote(ctx, a, 99999, "x"); err != nil || ok {
 		t.Errorf("upsert for missing target: ok=%v err=%v, want false", ok, err)
 	}
-	if err := database.DeleteUserNote(ctx, a, c); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteUserNote", database.DeleteUserNote(ctx, a, c))
 	if got, _ := database.GetUserNote(ctx, a, c); got != "" {
 		t.Errorf("note after delete = %q", got)
 	}

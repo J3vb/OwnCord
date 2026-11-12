@@ -18,6 +18,7 @@ const log = vi.hoisted(() => ({
 }));
 const loggerTags = vi.hoisted(() => [] as string[]);
 const codecSwitch = vi.hoisted(() => ({
+  checkAfterChange: vi.fn((_kind: string, action: () => Promise<void>) => action()),
   kick: vi.fn(),
   stop: vi.fn(),
   options: null as null | {
@@ -30,6 +31,7 @@ const codecSwitch = vi.hoisted(() => ({
       reapplyAudioPipeline(): void;
     };
     readScreenSenderSample(): unknown;
+    readCameraSenderSample(): unknown;
     onSwitchError(err: unknown): void;
   },
 }));
@@ -73,6 +75,21 @@ vi.mock("./codecSwitch", () => ({
     stop(): void {
       codecSwitch.stop();
     }
+    checkAfterChange(kind: string, action: () => Promise<void>): Promise<void> {
+      return codecSwitch.checkAfterChange(kind, action);
+    }
+  },
+}));
+const capFollow = vi.hoisted(() => ({ kick: vi.fn(), stop: vi.fn() }));
+// The video cap follower has its own tests (videoCapFollow.test.ts).
+vi.mock("./videoCapFollow", () => ({
+  VideoCapFollower: class {
+    kick(): void {
+      capFollow.kick();
+    }
+    stop(): void {
+      capFollow.stop();
+    }
   },
 }));
 const changeScreenshareSource = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => undefined));
@@ -82,13 +99,14 @@ const setH264GpuProfiles = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
 vi.mock("./videoCodec", () => ({ h264GpuPublish: (codec: string) => codec === "h264" }));
 const inPlaceSource = vi.hoisted(() => ({ value: null as { changeSource: () => void } | null }));
-vi.mock("../../lib/voice/screenShare", () => ({
+vi.mock("./screenShare", () => ({
   enableCamera: vi.fn(async (..._args: unknown[]) => undefined),
   disableCamera: vi.fn(async (..._args: unknown[]) => undefined),
   enableScreenshare: vi.fn(async (..._args: unknown[]) => undefined),
   disableScreenshare: vi.fn(async (..._args: unknown[]) => undefined),
   reconcileVideoFlags: vi.fn(),
   inPlaceSourceChange: vi.fn(() => inPlaceSource.value),
+  getLocalCameraStats: vi.fn((room: unknown) => ({ cameraSampleOf: room })),
   getLocalScreenshareStats: vi.fn((room: unknown) => ({ sampleOf: room })),
 }));
 
@@ -106,7 +124,7 @@ import {
   disableScreenshare,
   reconcileVideoFlags,
   inPlaceSourceChange,
-} from "../../lib/voice/screenShare";
+} from "./screenShare";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "./cameraSwitch";
 import { voiceText } from "../../i18n/voice";
 import { MediaControl, syncShareGrant, type MediaControlHost } from "./mediaControl";
@@ -227,6 +245,8 @@ beforeEach(() => {
   for (const fn of [log.debug, log.info, log.warn, log.error]) fn.mockClear();
   codecSwitch.kick.mockClear();
   codecSwitch.stop.mockClear();
+  capFollow.kick.mockClear();
+  capFollow.stop.mockClear();
 });
 
 describe("setMuted / setDeafened", () => {
@@ -961,6 +981,7 @@ describe("session wiring", () => {
     vi.mocked(enableScreenshare).mockClear();
     vi.mocked(disableScreenshare).mockClear();
     vi.mocked(reconcileVideoFlags).mockClear();
+    codecSwitch.checkAfterChange.mockClear();
     changeScreenshareSource.mockClear();
     setScreenshareQuality.mockClear();
   });
@@ -979,6 +1000,7 @@ describe("session wiring", () => {
     expect(options.getCameraState()).toBe(made.camera);
     expect(options.getScreenState()).toBe(made.screen);
     expect(options.readScreenSenderSample()).toEqual({ sampleOf: room });
+    expect(options.readCameraSenderSample()).toEqual({ cameraSampleOf: room });
     const deps = options.getDeps();
     expect(deps.getRoom()).toBe(room);
     expect(deps.getWs()).toBe(ws);
@@ -1023,6 +1045,15 @@ describe("session wiring", () => {
     const { media } = setup();
     media.stopCodecSwitch();
     expect(codecSwitch.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the video cap follower after a camera or share finished starting, and stops it with the session", async () => {
+    const { media } = setup();
+    await media.enableCamera();
+    await media.enableScreenshare();
+    expect(capFollow.kick).toHaveBeenCalledTimes(2);
+    media.stopCodecSwitch();
+    expect(capFollow.stop).toHaveBeenCalledTimes(1);
   });
 
   it("passes the server's video flags to the reconcile", () => {
@@ -1081,6 +1112,8 @@ describe("session wiring", () => {
     expect(setScreenshareQuality).toHaveBeenCalledTimes(1);
     expect(setScreenshareQuality.mock.calls[0]?.[0]).toBe(made.screen);
     expect(setScreenshareQuality.mock.calls[0]?.[2]).toBe("high");
+    expect(codecSwitch.checkAfterChange).toHaveBeenNthCalledWith(1, "screen", expect.any(Function));
+    expect(codecSwitch.checkAfterChange).toHaveBeenNthCalledWith(2, "screen", expect.any(Function));
   });
 
   it("reports the live share's quality, or null while nothing is published", () => {

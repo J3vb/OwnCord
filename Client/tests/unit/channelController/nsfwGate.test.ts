@@ -8,15 +8,15 @@ import {
   updateChannel,
   setNsfwAcknowledged,
 } from "@stores/channels.store";
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../../src/features/messaging/MessageList";
 import { makeOpts, useChannelControllerHarness } from "../../helpers/channelControllerHarness";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/dom", () => mocks.domMock());
-vi.mock("@components/MessageList", () => mocks.messageListMock());
-vi.mock("@components/MessageInput", () => mocks.messageInputMock());
-vi.mock("@components/NsfwGate", () => mocks.nsfwGateMock());
-vi.mock("@components/TypingIndicator", () => mocks.typingIndicatorMock());
+vi.mock("../../../src/features/messaging/MessageList", () => mocks.messageListMock());
+vi.mock("../../../src/features/messaging/MessageInput", () => mocks.messageInputMock());
+vi.mock("../../../src/features/content-consent/NsfwGate", () => mocks.nsfwGateMock());
+vi.mock("../../../src/features/messaging/TypingIndicator", () => mocks.typingIndicatorMock());
 vi.mock("@lib/readState", () => mocks.readStateMock());
 vi.mock("@stores/messages.store", () => mocks.messagesStoreMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
@@ -104,7 +104,7 @@ describe("createChannelController", () => {
     // The first import of the (mocked) lazy module resolves after its async
     // factory; load it once so every test measures the controller, not that.
     beforeAll(async () => {
-      await import("@components/NsfwGate");
+      await import("../../../src/features/content-consent/NsfwGate");
     });
 
     beforeEach(() => {

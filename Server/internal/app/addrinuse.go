@@ -3,10 +3,8 @@ package app
 import "strings"
 
 // isAddrInUse reports whether err is an "address already in use" bind failure.
-// The errno check (addrinuse_unix.go / addrinuse_windows.go) is authoritative;
-// the string checks are a fallback for errors with the errno wrapped away.
-// String matching alone silently disabled the bind retry on non-English
-// Windows, where the system error text is localized.
+// The errno check is authoritative; the string match is a fallback, since text
+// alone fails on localized Windows.
 func isAddrInUse(err error) bool {
 	if err == nil {
 		return false

@@ -62,6 +62,16 @@ export function hasReceivedReady(): boolean {
 }
 
 /**
+ * Whether every refusal of a voice_join carries the join's envelope id. Servers
+ * gained that before they gained voice messages, and advertise no flag of its
+ * own, so the later flag stands in. False (an older server, or no `ready` yet)
+ * keeps the id-less fallback.
+ */
+export function joinRefusalsCarryIds(): boolean {
+  return caps?.voice_messages === true;
+}
+
+/**
  * Whether the server keeps a read pointer: focus without marking
  * read, `mark_read` by message id, `mark_unread` and `read_state`. False keeps
  * today's behaviour: mark on focus and on switch, a count-based NEW line.

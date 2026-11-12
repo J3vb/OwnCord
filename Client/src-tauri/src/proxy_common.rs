@@ -6,7 +6,8 @@
 //! pinned) — and pulls the rest from here. The long-lived data phase of the
 //! LiveKit tunnel deliberately keeps a plain `io::copy_bidirectional` (a WS
 //! connection may idle for hours), while the request/response HTTP tunnel
-//! wraps the same copy in [`copy_with_deadline`].
+//! wraps the same copy in [`copy_with_deadline`], which cuts it only after a
+//! stretch with no bytes moving.
 
 use log::{debug, error, info, warn};
 use rustls::pki_types::ServerName;
@@ -21,48 +22,11 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-/// Reject remote_host values that could inject headers or are not plausible
-/// host:port strings.
-pub(crate) fn validate_remote_host(remote_host: &str) -> Result<(), String> {
-    if remote_host.is_empty() || remote_host.len() > 260 {
-        return Err("remote_host is empty or too long".into());
-    }
-    if remote_host.contains('\r') || remote_host.contains('\n') || remote_host.contains('\0') {
-        return Err("remote_host contains invalid characters".into());
-    }
-    if !remote_host
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
-    {
-        return Err("remote_host contains unexpected characters".into());
-    }
-    Ok(())
-}
-
-/// Bracket-aware split of a `remote_host` string into (hostname, port).
-/// Defaults to port 443 (standard HTTPS) when none is specified.
-///
-/// A leading `[` consumes up to the matching `]` as the hostname, so a
-/// bracketed IPv6 literal parses correctly whether or not it copies an
-/// explicit port (`[::1]`, `[::1]:8443`). Without brackets, a single
-/// trailing colon is a `host:port` split — but a *bare* (unbracketed) IPv6
-/// literal contains more than one colon, and RFC 3986 gives it no way to
-/// carry a port without brackets, so that case is returned whole with the
-/// default port instead of being mis-split on its last colon.
-pub(crate) fn split_host_port(remote_host: &str) -> Result<(&str, &str), String> {
-    if let Some(rest) = remote_host.strip_prefix('[') {
-        let (host, tail) = rest
-            .split_once(']')
-            .ok_or_else(|| format!("unterminated '[' in remote_host '{remote_host}'"))?;
-        let port = tail.strip_prefix(':').unwrap_or("443");
-        Ok((host, port))
-    } else {
-        match remote_host.rsplit_once(':') {
-            Some((host, port)) if !host.contains(':') => Ok((host, port)),
-            _ => Ok((remote_host, "443")),
-        }
-    }
-}
+#[cfg(test)]
+use owncord_parse::proxy::content_length;
+pub(crate) use owncord_parse::proxy::{
+    header_value, split_host_port, strip_tunnel_token, validate_remote_host,
+};
 
 /// Derive the TLS `ServerName` (SNI) and the TCP dial target from a
 /// `remote_host` string.
@@ -90,10 +54,8 @@ pub(crate) fn resolve_remote_target(
 ///
 /// Both steps must be bounded. A peer that accepts the TCP connection and then
 /// never answers the ClientHello blocks the handshake forever, and the calling
-/// task holds `local` without polling it — so the SDK closing its side never
-/// cancels it. Those tasks and their sockets accumulate on every SDK retry and
-/// survive the proxy's stop command, whose shutdown oneshot only stops the
-/// accept loop; the per-connection tasks are detached.
+/// task holds `local` without polling it, so the SDK closing its side never
+/// cancels it.
 pub(crate) async fn connect_tls(
     connector: &tokio_rustls::TlsConnector,
     server_name: ServerName<'static>,
@@ -171,51 +133,126 @@ pub(crate) async fn read_request_headers(
     Ok(buf)
 }
 
-/// Run io::copy_bidirectional under a deadline.
+/// When bytes last moved on a tunneled connection, for an idle deadline that a
+/// slow but progressing transfer never reaches.
+pub(crate) struct Activity {
+    start: tokio::time::Instant,
+    last_ms: AtomicU64,
+}
+
+impl Activity {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            start: tokio::time::Instant::now(),
+            last_ms: AtomicU64::new(0),
+        })
+    }
+
+    fn mark(&self) {
+        let ms = u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.last_ms.fetch_max(ms, Ordering::Relaxed);
+    }
+
+    fn last(&self) -> tokio::time::Instant {
+        self.start + Duration::from_millis(self.last_ms.load(Ordering::Relaxed))
+    }
+}
+
+/// Run `work` until it finishes or `idle` passes with no byte moved through a
+/// stream wrapped in [`ActivityStream`] over the same `activity`.
+pub(crate) async fn until_idle<F: std::future::Future>(
+    activity: &Activity,
+    idle: Duration,
+    work: F,
+) -> Result<F::Output, io::Error> {
+    tokio::pin!(work);
+    loop {
+        let deadline = activity.last() + idle;
+        tokio::select! {
+            out = &mut work => return Ok(out),
+            () = tokio::time::sleep_until(deadline) => {
+                if activity.last() + idle <= tokio::time::Instant::now() {
+                    return Err(io::Error::new(io::ErrorKind::TimedOut, "data phase idle"));
+                }
+            }
+        }
+    }
+}
+
+/// Run io::copy_bidirectional until it ends or no byte has moved either way
+/// for `idle`. A stuck remote (one that completes the handshake, then neither
+/// answers nor closes) is reclaimed; a slow upload that keeps moving is not,
+/// so the server's own transfer limit is the one that ends it, with an answer
+/// the webview can show.
 pub(crate) async fn copy_with_deadline<A, B>(
     local: &mut A,
     remote: &mut B,
-    dur: Duration,
+    idle: Duration,
 ) -> io::Result<(u64, u64)>
 where
     A: io::AsyncRead + io::AsyncWrite + Unpin + ?Sized,
     B: io::AsyncRead + io::AsyncWrite + Unpin + ?Sized,
 {
-    match timeout(dur, io::copy_bidirectional(local, remote)).await {
-        Ok(result) => result,
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "data phase timed out",
-        )),
+    let activity = Activity::new();
+    let mut local = ActivityStream::new(local, Arc::clone(&activity));
+    let mut remote = ActivityStream::new(remote, Arc::clone(&activity));
+    until_idle(
+        &activity,
+        idle,
+        io::copy_bidirectional(&mut local, &mut remote),
+    )
+    .await?
+}
+
+/// Marks its [`Activity`] whenever a read or write moves at least one byte.
+pub(crate) struct ActivityStream<A> {
+    inner: A,
+    activity: Arc<Activity>,
+}
+
+impl<A> ActivityStream<A> {
+    pub(crate) fn new(inner: A, activity: Arc<Activity>) -> Self {
+        Self { inner, activity }
     }
 }
 
-/// The value of a request header, matched case-insensitively, from the raw
-/// request head (`read_request_headers` output, ending in `\r\n\r\n`).
-///
-/// The request line (first line) is skipped: a request target may contain a
-/// colon, so only lines after it are split on the first colon. Surrounding
-/// whitespace is trimmed the way an HTTP field value is.
-pub(crate) fn header_value(raw: &[u8], name: &str) -> Option<String> {
-    let text = String::from_utf8_lossy(raw);
-    for line in text.split("\r\n").skip(1) {
-        if line.is_empty() {
-            continue;
+impl<A: AsyncRead + Unpin> AsyncRead for ActivityStream<A> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        let before = buf.filled().len();
+        let result = Pin::new(&mut this.inner).poll_read(cx, buf);
+        if matches!(result, Poll::Ready(Ok(()))) && buf.filled().len() > before {
+            this.activity.mark();
         }
-        let Some((field, value)) = line.split_once(':') else {
-            continue;
-        };
-        if field.trim().eq_ignore_ascii_case(name) {
-            return Some(value.trim().to_string());
-        }
+        result
     }
-    None
 }
 
-/// The request body length declared by `Content-Length`, if it is a valid
-/// non-negative integer. Absent for a chunked or bodyless request.
-pub(crate) fn content_length(raw: &[u8]) -> Option<u64> {
-    header_value(raw, "content-length")?.parse::<u64>().ok()
+impl<A: AsyncWrite + Unpin> AsyncWrite for ActivityStream<A> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        let result = Pin::new(&mut this.inner).poll_write(cx, buf);
+        if matches!(result, Poll::Ready(Ok(n)) if n > 0) {
+            this.activity.mark();
+        }
+        result
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
 }
 
 /// Wraps a stream so every byte *read* from it is added to `read_bytes`;
@@ -270,6 +307,16 @@ impl<A: AsyncWrite + Unpin> AsyncWrite for CountingStream<A> {
     }
 }
 
+/// Aborts the wrapped task when dropped, so a helper task cannot outlive the
+/// future that started it.
+pub(crate) struct AbortOnDrop(pub(crate) JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Maximum consecutive accept errors before [`run_accept_loop`] exits.
 pub(crate) const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 5;
 
@@ -285,7 +332,8 @@ pub(crate) fn spawn_watched(tag: &'static str, handle: JoinHandle<()>) {
     });
 }
 
-/// Accept loop shared by both proxies: hand each connection to `on_conn` and,
+/// Accept loop shared by both proxies: run each connection from `on_conn` in a
+/// task owned by this loop (all are aborted and awaited when the loop exits) and,
 /// once `MAX_CONSECUTIVE_ACCEPT_ERRORS` is hit, run `on_dead` before exiting.
 ///
 /// `on_dead` must run HERE, while `listener` is still held, and not by the
@@ -306,15 +354,23 @@ pub(crate) async fn run_accept_loop<C, Fut, D, DFut>(
 {
     let mut consecutive_errors: u32 = 0;
     let mut on_dead = Some(on_dead);
+    let mut conns: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
 
     loop {
         tokio::select! {
+            Some(joined) = conns.join_next(), if !conns.is_empty() => {
+                if let Err(e) = joined {
+                    if e.is_panic() {
+                        error!("[{tag}] connection task panicked: {e:?}");
+                    }
+                }
+            }
             result = listener.accept() => {
                 match result {
                     Ok((stream, addr)) => {
                         consecutive_errors = 0;
                         debug!("[{tag}] accepted connection from {}", addr);
-                        tokio::spawn(on_conn(stream));
+                        conns.spawn(on_conn(stream));
                     }
                     Err(e) => {
                         consecutive_errors += 1;
@@ -338,28 +394,8 @@ pub(crate) async fn run_accept_loop<C, Fut, D, DFut>(
             _ = &mut shutdown_rx => break,
         }
     }
-}
 
-/// Rewrite the header lines of an HTTP request with `rewrite`; every line it
-/// returns `None` for is passed through byte-for-byte.
-///
-/// The plain `split("\r\n")` / re-join round-trips the trailing `\r\n\r\n`
-/// terminator exactly, so the request the remote server sees stays well-formed.
-pub(crate) fn rewrite_headers(
-    request: &str,
-    mut rewrite: impl FnMut(&str) -> Option<String>,
-) -> String {
-    let mut modified = String::with_capacity(request.len() + 128);
-    for (i, line) in request.split("\r\n").enumerate() {
-        if i > 0 {
-            modified.push_str("\r\n");
-        }
-        match rewrite(line) {
-            Some(replacement) => modified.push_str(&replacement),
-            None => modified.push_str(line),
-        }
-    }
-    modified
+    conns.shutdown().await;
 }
 
 /// A tunnel's loopback address and the path token every request through it
@@ -381,36 +417,6 @@ pub(crate) fn random_tunnel_token() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
-/// Check that a request's target starts with `/{token}/` and return the
-/// request head with that prefix removed. `None` when the request line is
-/// malformed or the token is missing or wrong.
-pub(crate) fn strip_tunnel_token(head: &[u8], token: &str) -> Option<Vec<u8>> {
-    let line_end = head.windows(2).position(|w| w == b"\r\n")?;
-    let line = &head[..line_end];
-    let method_end = line.iter().position(|&b| b == b' ')?;
-    let target_start = method_end + 1;
-    let target_len = line[target_start..].iter().position(|&b| b == b' ')?;
-    let target = &line[target_start..target_start + target_len];
-
-    let rest = target.strip_prefix(b"/")?;
-    let slash = rest.iter().position(|&b| b == b'/')?;
-    if !constant_time_eq(&rest[..slash], token.as_bytes()) {
-        return None;
-    }
-    let stripped = &rest[slash..];
-
-    let mut out = Vec::with_capacity(head.len());
-    out.extend_from_slice(&line[..target_start]);
-    out.extend_from_slice(stripped);
-    out.extend_from_slice(&line[target_start + target_len..]);
-    out.extend_from_slice(&head[line_end..]);
-    Some(out)
-}
-
 /// The response for a request that does not carry the tunnel's token.
 pub(crate) const FORBIDDEN_RESPONSE: &[u8] =
     b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -418,7 +424,137 @@ pub(crate) const FORBIDDEN_RESPONSE: &[u8] =
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::time::{timeout, Duration};
+
+    async fn echo_conn(mut stream: TcpStream) {
+        let mut buf = [0u8; 64];
+        while let Ok(n) = stream.read(&mut buf).await {
+            if n == 0 || stream.write_all(&buf[..n]).await.is_err() {
+                break;
+            }
+        }
+    }
+
+    async fn start_loop(
+        on_conn: impl FnMut(TcpStream) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+            + Send
+            + 'static,
+    ) -> (
+        std::net::SocketAddr,
+        tokio::sync::oneshot::Sender<()>,
+        JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let handle = tokio::spawn(run_accept_loop(listener, rx, "test", on_conn, || async {}));
+        (addr, tx, handle)
+    }
+
+    fn echo_loop_conn(
+        s: TcpStream,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+        Box::pin(echo_conn(s))
+    }
+
+    #[tokio::test]
+    async fn shutdown_closes_open_connections() {
+        let (addr, tx, handle) = start_loop(echo_loop_conn).await;
+        let mut client = TcpStream::connect(addr).await.expect("connect");
+        client.write_all(b"hi").await.expect("write");
+        let mut buf = [0u8; 2];
+        client.read_exact(&mut buf).await.expect("echo");
+
+        tx.send(()).expect("signal");
+        timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("loop returns")
+            .expect("join");
+        let n = timeout(Duration::from_secs(5), client.read(&mut buf))
+            .await
+            .expect("client sees close");
+        assert!(matches!(n, Ok(0) | Err(_)));
+    }
+
+    #[tokio::test]
+    async fn stopping_one_loop_leaves_another_loop_connections_working() {
+        let (addr_a, tx_a, handle_a) = start_loop(echo_loop_conn).await;
+        let (addr_b, tx_b, handle_b) = start_loop(echo_loop_conn).await;
+        let mut client_a = TcpStream::connect(addr_a).await.expect("connect a");
+        let mut client_b = TcpStream::connect(addr_b).await.expect("connect b");
+        client_a.write_all(b"a").await.expect("write a");
+        client_b.write_all(b"b").await.expect("write b");
+        let mut one = [0u8; 1];
+        client_a.read_exact(&mut one).await.expect("echo a");
+        client_b.read_exact(&mut one).await.expect("echo b");
+
+        tx_a.send(()).expect("signal a");
+        timeout(Duration::from_secs(5), handle_a)
+            .await
+            .expect("loop a returns")
+            .expect("join a");
+
+        client_b.write_all(b"x").await.expect("write b after");
+        timeout(Duration::from_secs(5), client_b.read_exact(&mut one))
+            .await
+            .expect("b responds")
+            .expect("read b");
+        assert_eq!(&one, b"x");
+
+        tx_b.send(()).expect("signal b");
+        timeout(Duration::from_secs(5), handle_b)
+            .await
+            .expect("loop b returns")
+            .expect("join b");
+    }
+
+    #[tokio::test]
+    async fn many_short_connections_are_served_and_loop_stops_cleanly() {
+        let (addr, tx, handle) = start_loop(|mut s| {
+            Box::pin(async move {
+                let _ = s.write_all(b"ok").await;
+            })
+        })
+        .await;
+        for _ in 0..200 {
+            let mut c = TcpStream::connect(addr).await.expect("connect");
+            let mut buf = Vec::new();
+            timeout(Duration::from_secs(5), c.read_to_end(&mut buf))
+                .await
+                .expect("read")
+                .expect("io");
+            assert_eq!(buf, b"ok");
+        }
+        tx.send(()).expect("signal");
+        timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("loop returns")
+            .expect("join");
+    }
+
+    #[tokio::test]
+    async fn abort_on_drop_stops_the_task_when_its_future_is_cancelled() {
+        let marker = Arc::new(());
+        let held = Arc::clone(&marker);
+        let outer = tokio::spawn(async move {
+            let _guard = AbortOnDrop(tokio::spawn(async move {
+                let _held = held;
+                std::future::pending::<()>().await;
+            }));
+            std::future::pending::<()>().await;
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(Arc::strong_count(&marker), 2);
+        outer.abort();
+        timeout(Duration::from_secs(5), async {
+            while Arc::strong_count(&marker) != 1 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("helper task stops with its owner");
+    }
 
     #[test]
     fn strip_tunnel_token_requires_the_exact_token() {
@@ -582,6 +718,36 @@ mod tests {
     // forever. Simulate the stall with two in-memory duplex pairs where
     // neither peer ever writes or disconnects, so raw `io::copy_bidirectional`
     // would block forever.
+    #[tokio::test(start_paused = true)]
+    async fn a_transfer_that_keeps_moving_outlives_the_idle_deadline() {
+        let (mut local_near, mut local_far) = tokio::io::duplex(64);
+        let (mut remote_near, mut remote_far) = tokio::io::duplex(64);
+        let idle = Duration::from_millis(200);
+
+        // One byte every 50 ms for ten times the idle window, then a close.
+        let writer = tokio::spawn(async move {
+            for _ in 0..40 {
+                local_far.write_all(b"x").await.expect("write");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            local_far.shutdown().await.expect("shutdown");
+        });
+        let reader = tokio::spawn(async move {
+            let mut sink = Vec::new();
+            remote_far.read_to_end(&mut sink).await.expect("read");
+            remote_far.shutdown().await.expect("shutdown");
+            sink.len()
+        });
+
+        let copied = copy_with_deadline(&mut local_near, &mut remote_near, idle).await;
+        assert_eq!(
+            copied.expect("a progressing transfer must not be cut").0,
+            40
+        );
+        writer.await.expect("writer");
+        assert_eq!(reader.await.expect("reader"), 40);
+    }
+
     #[tokio::test]
     async fn copy_with_deadline_reclaims_a_stalled_connection() {
         let (mut local_near, _local_far) = tokio::io::duplex(64);

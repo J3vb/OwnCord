@@ -10,11 +10,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { observers } = vi.hoisted(() => ({ observers: [] as Array<() => void> }));
 
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
-import { clearRowHeights } from "@components/message-list/rowHeights";
+import { clearRowHeights } from "../../src/features/messaging/message-list/rowHeights";
 import { buildMessage } from "../helpers/messageFactory";
 import { resetMembersState, resetMessagesState } from "../helpers/storeResets";
 import { makeListOptions } from "../helpers/messageListHarness";

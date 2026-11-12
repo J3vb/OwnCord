@@ -37,9 +37,8 @@ export default tseslint.config(
       ],
       "consistent-return": "error",
 
-      // `any` is banned in src/ (CLAUDE.md, "AI Quality Guardrails"). The
-      // residue in lib/voice/livekitReconnect.ts carries a reasoned eslint-disable
-      // and only shrinks; a new `any` fails the build.
+      // `any` is banned in src/ (CLAUDE.md, "AI Quality Guardrails"); none is
+      // left, and a new `any` fails the build.
       "@typescript-eslint/no-explicit-any": "error",
 
       // --- Relax rules that conflict with project style ---
@@ -143,6 +142,15 @@ export default tseslint.config(
     plugins: { local: localRules },
     rules: {
       "local/layer-direction": ["error", { baseline: layerBaseline }],
+    },
+  },
+  {
+    // No function over complexity 15 or nesting depth 4.
+    files: ["src/**/*.ts"],
+    ignores: ["src/**/*.test.ts"],
+    rules: {
+      complexity: ["error", 15],
+      "max-depth": ["error", 4],
     },
   },
   {

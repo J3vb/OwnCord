@@ -1,38 +1,33 @@
-// AudioPipeline — owns the microphone's MicProcessor (lib/voice/micProcessor.ts)
-// and the voice detector that drives its gate.
-//
-// The processor is attached to the LocalAudioTrack before its first publish
-// (MediaControl.enableMicrophone → attach) and stays on it for the track's
-// life: livekit-client's mute, unmute, device switch, processing restart and
-// full-reconnect republish all keep it, so the sender only ever carries the
-// processor's gated output. This class holds the settings (input volume,
-// sensitivity, push-to-talk) and re-applies them to whichever processor is
-// live, runs the VAD worklet on the processor's tap, and mirrors the
-// Enhanced Noise Suppression preference into it. The Linux native room has
-// no web mic track and so no processor: push-to-talk and the sensitivity
-// threshold go to its own gates.
+// Owns the outbound mic processor and sensitivity detector. Track restarts
+// keep the processor attached, so LiveKit always publishes the gated output.
+// Native rooms apply the same settings to their own capture.
 
-import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-client";
+import { Track, TrackEvent, type LocalAudioTrack } from "livekit-client";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
-import { publicAssetUrl } from "@lib/media/publicAssets";
 import {
   createMicProcessor,
   GATE_LOOKAHEAD_S,
-  workletStopped,
+  sileroBufferMs,
   type MicProcessor,
 } from "@lib/voice/micProcessor";
 import { voiceText } from "../../i18n/voice";
 import { effectiveVoiceGate, effectiveVoiceSensitivity } from "@lib/ui/inputMode";
-import { NoiseFloorTracker } from "@lib/voice/noiseFloor";
 import { vadThreshold } from "@lib/voice/gateScale";
 
 const log = createLogger("audioPipeline");
 
-/** Hysteresis: the gate closes only this far below the level it opens at
- *  (vad-worklet.js HYSTERESIS_DB). */
-export const GATE_HYSTERESIS_DB = 6;
-const GATE_CLOSE_RATIO = 10 ** (-GATE_HYSTERESIS_DB / 20);
+import type {
+  AudioProcessingRoom,
+  InputGainRoom,
+  PttGatedRoom,
+  VoiceGatedRoom,
+} from "./audioRoomCapabilities";
+import { startVadDetector, type SpeechDetection, type VadDetector } from "./vadDetector";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
+
+export { startVadDetector } from "./vadDetector";
+export type { SpeechDetection, VadDetector } from "./vadDetector";
 
 export { vadLevelPosition, vadThreshold, vadThresholdDb } from "@lib/voice/gateScale";
 
@@ -86,253 +81,8 @@ export function isMissingDeviceError(err: unknown, options: { deviceId?: unknown
   );
 }
 
-export interface VadDetector {
-  /** Resolves once the worklet has stopped: only then may its context close. */
-  stop(): Promise<void>;
-  /** Move the threshold without restarting, or hand it to the automatic
-   *  noise-floor estimate ("auto"). */
-  setThreshold(threshold: number | "auto"): void;
-  /** The input gain ahead of the detector moved: relearn the floor. */
-  resetFloor(): void;
-}
-
-/** RNNoise's speech probability for the detector's second input, and the
- *  switch that runs RNNoise for it (MicProcessor.setSpeechDetection). */
-export interface SpeechDetection {
-  readonly source: AudioNode;
-  /** Resolves whether RNNoise runs; false leaves the gate on its level. */
-  setOn(on: boolean): Promise<boolean>;
-}
-
-export interface VadDetectorHandlers {
-  /** The gate verdict: true = closed (silence). */
-  onGate(gated: boolean): void;
-  /** The loudest smoothed level since the last report, for a level meter. */
-  onRms?(rms: number): void;
-  /** Which path is running once it has started. */
-  onStarted?(usingWorklet: boolean): void;
-  /** The automatic threshold moved (only while running "auto"). */
-  onThreshold?(threshold: number): void;
-}
-
-/**
- * Run the voice detector over `analyser`: the AudioWorklet (vad-worklet.js)
- * when it loads, otherwise a setTimeout poll with the same timing. Both apply
- * the same attack (~32 ms), hysteresis (closing 6 dB under the threshold)
- * and hold (~500 ms), so the settings meter and the live gate open and
- * close alike. `gate` "auto" runs the threshold a margin
- * above the noise floor of the levels the detector reports (lib/voice/noiseFloor.ts),
- * starting at `seed`. With `speech`, the gate also asks RNNoise whether a
- * frame is a voice (vad-worklet.js's speech gate) once it runs, at the
- * automatic threshold and at the slider's alike; the fallback has no
- * worklets, so no RNNoise, and gates on the level alone. Stopping leaves
- * RNNoise running: whoever owns the processor turns it off when no gate
- * follows (a restart's detector asks for it again at once).
- */
-export function startVadDetector(
-  ctx: AudioContext,
-  analyser: AnalyserNode,
-  gate: number | "auto",
-  handlers: VadDetectorHandlers,
-  seed?: number,
-  speech?: SpeechDetection,
-): VadDetector {
-  let tracker = gate === "auto" ? new NoiseFloorTracker(seed) : null;
-  let threshold = tracker?.threshold ?? (gate as number);
-  let stopped = false;
-  let workletNode: AudioWorkletNode | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  /** Run RNNoise's verdict for the gate. The worklet is told once RNNoise
-   *  answers, so the gate never waits on a signal that is not there. */
-  const startSpeechGate = (): void => {
-    if (speech === undefined) return;
-    speech.setOn(true).then(
-      (on) => {
-        if (stopped || !on) return;
-        // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-        workletNode?.port.postMessage({ type: "speechGate", on: true });
-      },
-      (err: unknown) => log.warn("Speech detection could not start", err),
-    );
-  };
-
-  /** Every level report: the meter's, and the automatic estimate's input. */
-  const onLevel = (rms: number): void => {
-    handlers.onRms?.(rms);
-    const moved = tracker?.push(rms, performance.now()) ?? null;
-    if (moved === null) return;
-    threshold = moved;
-    // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-    workletNode?.port.postMessage({ type: "threshold", threshold });
-    handlers.onThreshold?.(moved);
-  };
-
-  const startFallback = (): void => {
-    // setTimeout instead of rAF: rAF pauses when the Tauri window is
-    // backgrounded, which freezes the VAD gate. setTimeout continues firing
-    // (throttled ~1Hz when hidden), still fast enough for VAD gate timing.
-    const dataArray = new Float32Array(analyser.fftSize);
-    let quietSince = 0; // Date.now() of the first poll below the close level, 0 = none
-    let speechFrames = 0;
-    let gated = false;
-    const GATE_HOLD_MS = 500; // as vad-worklet.js holds; elapsed time, as timers throttle
-    const GATE_OFF_FRAMES = 2;
-    let startupFrames = 0;
-    const STARTUP_GRACE = 30;
-    let frameCounter = 0;
-    const poll = (): void => {
-      if (stopped) return;
-      analyser.getFloatTimeDomainData(dataArray);
-      let sum = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        const v = dataArray[i] ?? 0;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / dataArray.length);
-      frameCounter++;
-      // One poll's level, not the worklet's 50 ms peak: the automatic
-      // margin absorbs the difference.
-      // The start-up grace is the capture settling: the meter shows it, the
-      // automatic floor does not learn from it (the worklet reports none).
-      if (frameCounter >= 3) {
-        frameCounter = 0;
-        if (startupFrames < STARTUP_GRACE) handlers.onRms?.(rms);
-        else onLevel(rms);
-      }
-      if (startupFrames < STARTUP_GRACE) {
-        startupFrames++;
-      } else if (gated) {
-        // The attack counts up at the threshold and down below it, as the
-        // worklet's does, so one dip inside an onset does not start it over.
-        if (rms >= threshold) speechFrames++;
-        else if (speechFrames > 0) speechFrames--;
-        if (speechFrames >= GATE_OFF_FRAMES) {
-          gated = false;
-          speechFrames = 0;
-          quietSince = 0;
-          handlers.onGate(false);
-        }
-      } else if (rms < threshold * GATE_CLOSE_RATIO) {
-        const now = Date.now();
-        if (quietSince === 0) quietSince = now;
-        if (now - quietSince >= GATE_HOLD_MS) {
-          gated = true;
-          quietSince = 0;
-          speechFrames = 0;
-          handlers.onGate(true);
-        }
-      } else {
-        quietSince = 0;
-      }
-      timer = setTimeout(poll, 16);
-    };
-    timer = setTimeout(poll, 16);
-    handlers.onStarted?.(false);
-    log.info("VAD setTimeout fallback started", { threshold });
-  };
-
-  ctx.audioWorklet
-    .addModule(publicAssetUrl("vad-worklet.js"))
-    .then(() => {
-      if (stopped) return;
-      try {
-        workletNode = new AudioWorkletNode(ctx, "vad-processor", { numberOfInputs: 2 });
-      } catch (err) {
-        log.warn("Failed to create VAD AudioWorkletNode, falling back", err);
-        startFallback();
-        return;
-      }
-      // Analysis only: the worklet's output goes nowhere.
-      analyser.connect(workletNode);
-      speech?.source.connect(workletNode, 0, 1);
-      // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-      workletNode.port.postMessage({ type: "config", threshold });
-      startSpeechGate();
-      // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
-      workletNode.port.onmessage = (event: MessageEvent) => {
-        if (event.data.type === "gate") handlers.onGate(event.data.gated as boolean);
-        else if (event.data.type === "rms") onLevel(event.data.value as number);
-      };
-      handlers.onStarted?.(true);
-      log.info("VAD AudioWorklet started", { threshold });
-    })
-    .catch((err) => {
-      if (stopped) return;
-      log.warn("AudioWorklet unavailable, falling back to setTimeout VAD", err);
-      startFallback();
-    });
-
-  const stop = (): Promise<void> => {
-    stopped = true;
-    if (timer !== null) clearTimeout(timer);
-    const node = workletNode;
-    if (node === null) return Promise.resolve();
-    workletNode = null;
-    // Swap the handler first — the worklet's `process()` loop only observes
-    // `stop` on its next audio-thread callback, so it can still post one more
-    // {type:"gate"} message after this postMessage.
-    const done = workletStopped(node);
-    // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-    node.port.postMessage({ type: "stop" });
-    node.disconnect();
-    return done;
-  };
-  return {
-    stop,
-    setThreshold(next: number | "auto"): void {
-      tracker = next === "auto" ? new NoiseFloorTracker(tracker?.threshold) : null;
-      threshold = tracker?.threshold ?? (next as number);
-      // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-      workletNode?.port.postMessage({ type: "config", threshold });
-    },
-    resetFloor(): void {
-      tracker?.reset(performance.now());
-    },
-  };
-}
-
-/** The processor's RNNoise verdict for the detector, once the processor has
- *  its graph. */
-export function speechDetectionOf(processor: MicProcessor): SpeechDetection | undefined {
-  const source = processor.speechProbability;
-  if (source === null) return undefined;
-  return { source, setOn: (on) => processor.setSpeechDetection(on) };
-}
-
-/** A room that gates its own capture for push-to-talk: the Linux NativeRoom,
- *  whose microphone is the Rust session's and never has a web processor. */
-interface PttGatedRoom {
-  setPttGated(gated: boolean): void;
-}
-
-/** A room that runs the sensitivity gate on its own capture (NativeRoom),
- *  reporting its verdicts as the detector's `onGate` would; "auto" runs the
- *  noise-floor estimate there, seeded and reported as the detector's. */
-interface VoiceGatedRoom {
-  setVoiceGate(
-    gate: number | "auto",
-    onSpeaking: (speaking: boolean | null) => void,
-    auto?: { seed?: number; onThreshold?: (threshold: number) => void },
-  ): void;
-}
-
-/** A room whose own capture takes the input volume and reports its level
- *  (NativeRoom): the meter's feed where no web processor runs. */
-interface InputGainRoom {
-  setInputGain(percent: number): void;
-  setInputLevelListener(listener: ((rms: number | null, open: boolean) => void) | null): void;
-}
-
-/** A room whose own capture takes the four processing toggles live
- *  (NativeRoom): there is no web mic track to restart or processor to
- *  reroute. */
-interface AudioProcessingRoom {
-  setAudioProcessing(audio: {
-    echoCancellation: boolean;
-    noiseSuppression: boolean;
-    autoGainControl: boolean;
-    enhancedNoiseSuppression: boolean;
-  }): void;
+export function enhancedNoiseSuppressionEnabled(): boolean {
+  return loadPref("noiseSuppression", true) && loadPref("enhancedNoiseSuppression", false);
 }
 
 /** A capture level report: the detector's RMS and whether the gate is open. */
@@ -340,13 +90,16 @@ interface AudioProcessingRoom {
 export type InputLevelListener = (rms: number | null, open: boolean) => void;
 
 export class AudioPipeline {
-  private room: Room | null = null;
+  private room: VoiceRoom | null = null;
   private processor: MicProcessor | null = null;
 
   /** `pttPollingLive` reports whether a Push to Talk key can gate the mic
    *  right now (the voice store's isPttPollingLive), injected so this module
    *  stays off the store graph. */
-  constructor(private readonly pttPollingLive: () => boolean = () => false) {}
+  constructor(
+    private readonly pttPollingLive: () => boolean = () => false,
+    private readonly speechDetectionOf?: (processor: MicProcessor) => SpeechDetection | undefined,
+  ) {}
 
   /** Bumped on every teardown so an attach that outlived it is discarded. */
   private generation = 0;
@@ -361,7 +114,7 @@ export class AudioPipeline {
    *  across calls on purpose: it only seeds the first second, until the new
    *  detector's own estimate replaces it. */
   private lastAutoThreshold: number | undefined = undefined;
-  /** Last value passed to setVoiceSensitivity, so a repeat does not rebuild VAD. */
+  /** Last value passed to setVoiceSensitivity, so a repeat needs no retune. */
   private voiceSensitivity: number | null = null;
   /** The track whose SDK restarts are watched, see onMicRestarted. */
   private watchedTrack: LocalAudioTrack | null = null;
@@ -373,7 +126,7 @@ export class AudioPipeline {
    *  ring so it matches the slider and what transmits. */
   onGateSpeaking: ((speaking: boolean | null) => void) | null = null;
 
-  setRoom(room: Room | null): void {
+  setRoom(room: VoiceRoom | null): void {
     const previous = this.room as Partial<InputGainRoom> | null;
     if (previous?.setInputLevelListener) {
       previous.setInputLevelListener(null);
@@ -420,6 +173,18 @@ export class AudioPipeline {
   /** Whether a mic processor is live. */
   get isActive(): boolean {
     return this.processor !== null;
+  }
+
+  /** Distinguish RNNoise classifying audio from RNNoise filtering the output. */
+  get rnnoiseState(): { speechDetection: boolean; enhanced: boolean } | null {
+    const processor = this.processor;
+    return processor === null
+      ? null
+      : { speechDetection: processor.speechDetection, enhanced: processor.enhanced };
+  }
+
+  get sileroDetectionActive(): boolean {
+    return this.processor?.sileroActive ?? false;
   }
 
   /** Current gain value from the processor's GainNode, or null if inactive. */
@@ -482,6 +247,7 @@ export class AudioPipeline {
     const processor = createMicProcessor();
     processor.setInputGain(this.currentInputGain);
     processor.setGate("ptt", this.pttGated);
+    processor.setGate("vad", effectiveVoiceGate(this.pttPollingLive()) !== "off");
     await track.setAudioContext(processor.context);
     await track.setProcessor(processor);
     if (gen !== this.generation) {
@@ -490,6 +256,7 @@ export class AudioPipeline {
       return;
     }
     this.processor = processor;
+    processor.setSileroBufferMs(sileroBufferMs());
     this.watchedTrack = track;
     track.on(TrackEvent.Restarted, this.onMicRestarted);
     log.info("Mic processor attached", { inputGain: this.currentInputGain });
@@ -548,7 +315,9 @@ export class AudioPipeline {
   private async applyEnhancedPreference(): Promise<void> {
     const processor = this.processor;
     if (processor === null) return;
-    await processor.setEnhanced(loadPref<boolean>("enhancedNoiseSuppression", false));
+    const enabled = enhancedNoiseSuppressionEnabled();
+    this.vad?.setSpeechDetection(enabled);
+    await processor.setEnhanced(enabled);
   }
 
   /** Route the live processor through or around RNNoise for the saved
@@ -559,7 +328,7 @@ export class AudioPipeline {
     if (processor === null) return;
     await this.applyEnhancedPreference();
     // The user just asked for it: say so when it could not start.
-    if (loadPref<boolean>("enhancedNoiseSuppression", false) && !processor.enhanced) {
+    if (enhancedNoiseSuppressionEnabled() && !processor.enhanced) {
       onError?.(voiceText("audio.settingsFailed"));
     }
   }
@@ -574,12 +343,16 @@ export class AudioPipeline {
       echoCancellation: loadPref("echoCancellation", true),
       noiseSuppression: loadPref("noiseSuppression", true),
       autoGainControl: loadPref("autoGainControl", true),
-      enhancedNoiseSuppression: loadPref("enhancedNoiseSuppression", false),
+      enhancedNoiseSuppression: enhancedNoiseSuppressionEnabled(),
     });
     return true;
   }
 
   // --- Volume / gates ---
+
+  setSileroBufferMs(ms: number): void {
+    this.processor?.setSileroBufferMs(ms);
+  }
 
   setInputVolume(volume: number): void {
     const clamped = Math.max(0, Math.min(200, volume));
@@ -625,13 +398,13 @@ export class AudioPipeline {
 
   // --- VAD ---
 
-  /** (Re)start the detector on the live processor for the saved sensitivity. */
+  /** Start, stop or retune the live detector for the saved sensitivity. */
   startVadPolling(): void {
-    void this.stopVadPolling();
     const processor = this.processor;
     if (processor === null || processor.analyser === null) return;
     const gate = effectiveVoiceGate(this.pttPollingLive());
     if (gate === "off") {
+      void this.stopVadPolling();
       processor.setLookahead(0);
       // No gate to ask: RNNoise runs on for Enhanced Noise Suppression only.
       processor
@@ -639,9 +412,12 @@ export class AudioPipeline {
         .catch((err: unknown) => log.debug("Speech detection stop", err));
       return;
     }
-    processor.setLookahead(GATE_LOOKAHEAD_S);
-    this.onGateSpeaking?.(true);
     const threshold = gate === "auto" ? "auto" : vadThreshold(gate);
+    if (this.vad !== null) {
+      this.vad.setThreshold(threshold);
+      return;
+    }
+    processor.setLookahead(GATE_LOOKAHEAD_S);
     this.vad = startVadDetector(
       processor.context,
       processor.analyser,
@@ -664,7 +440,8 @@ export class AudioPipeline {
         },
       },
       this.lastAutoThreshold,
-      speechDetectionOf(processor),
+      this.speechDetectionOf?.(processor),
+      enhancedNoiseSuppressionEnabled(),
     );
   }
 
@@ -698,6 +475,7 @@ export class AudioPipeline {
       return;
     }
     const captureOptions = micCaptureOptions();
+    const enhanced = this.applyEnhancedPreference();
     try {
       // restartTrack re-acquires the mic with new constraints without unpublishing
       await track.restartTrack(captureOptions).catch((err: unknown) => {
@@ -709,5 +487,6 @@ export class AudioPipeline {
       log.error("Failed to reapply audio processing", err);
       onError?.(voiceText("audio.settingsFailed"));
     }
+    await enhanced;
   }
 }

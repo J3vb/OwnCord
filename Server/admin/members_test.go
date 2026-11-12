@@ -2,7 +2,6 @@ package admin_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -42,10 +41,7 @@ func TestAdminAPI_ListUsers_SearchFilterAndBanned(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET /users%s = %d; body: %s", query, w.Code, w.Body.String())
 		}
-		var rows []map[string]any
-		if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
+		rows := decodeBody[[]map[string]any](t, w)
 		return rows
 	}
 	names := func(query string) string {
@@ -115,10 +111,7 @@ func listUsersRows(t *testing.T, handler http.Handler, token, query string) []ma
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET /users%s = %d; body: %s", query, w.Code, w.Body.String())
 	}
-	var rows []map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	rows := decodeBody[[]map[string]any](t, w)
 	return rows
 }
 

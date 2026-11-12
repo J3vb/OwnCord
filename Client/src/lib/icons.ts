@@ -35,6 +35,9 @@ export type IconName =
   | "menu"
   | "pin"
   | "pin-off"
+  | "size-small"
+  | "size-medium"
+  | "size-large"
   | "search"
   | "settings"
   | "smile"
@@ -90,6 +93,7 @@ export type IconName =
   | "flag"
   | "ban"
   | "ellipsis"
+  | "square-user"
   | "gamepad-2"
   | "music"
   | "zap"
@@ -158,6 +162,11 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Pin with slash
   "pin-off": `<line x1="2" x2="22" y1="2" y2="22"/><path d="M12 17.001V22"/><path d="M9 9a3 3 0 0 0 5.12 2.12"/><path d="M20 10a8 8 0 0 0-8-8 8 8 0 0 0-5.46 2.13"/>`,
+
+  // A tile size: a rectangle of growing size
+  "size-small": `<rect width="11" height="8" x="6.5" y="8" rx="1"/>`,
+  "size-medium": `<rect width="15" height="11" x="4.5" y="6.5" rx="1"/>`,
+  "size-large": `<rect width="20" height="15" x="2" y="4.5" rx="1.5"/>`,
 
   // Gear / settings cog
   settings: `<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>`,
@@ -284,6 +293,8 @@ const ICON_PATHS: Record<IconName, string> = {
   moon: `<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>`,
   // More actions.
   ellipsis: `<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>`,
+  // The call view's "show my camera" toggle: your own tile, not a camera.
+  "square-user": `<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M7 21v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/>`,
 
   // Block.
   ban: `<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>`,

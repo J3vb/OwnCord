@@ -26,9 +26,7 @@ func TestChannelMeta_NameCountsRunesNotBytes(t *testing.T) {
 	// runes; a byte-counting bound would reject it.
 	name100 := strings.Repeat("é", 100)
 	meta, err := cleanChannelMeta(name100, "", "")
-	if err != nil {
-		t.Fatalf("100-rune multibyte name rejected: %v", err)
-	}
+	mustDo(t, "100-rune multibyte name rejected", err)
 	if meta.Name != name100 {
 		t.Fatalf("name mangled: %q", meta.Name)
 	}
@@ -51,9 +49,7 @@ func TestChannelMeta_TopicAndCategoryBounds(t *testing.T) {
 
 func TestChannelMeta_SanitizesAndTrimsLikeEverySidebarField(t *testing.T) {
 	meta, err := cleanChannelMeta("  <b>general</b>  ", " topic <i>x</i> ", "  Chat  ")
-	if err != nil {
-		t.Fatalf("cleanChannelMeta: %v", err)
-	}
+	mustDo(t, "cleanChannelMeta", err)
 	if meta.Name != "general" {
 		t.Errorf("name = %q, want %q", meta.Name, "general")
 	}
@@ -114,9 +110,7 @@ func TestAdminCreateChannel_DefaultsTypeValidatesAndAudits(t *testing.T) {
 	svc, database := newChannelAdminService(t)
 
 	ch, _, err := svc.AdminCreateChannel(context.Background(), 7, AdminChannelCreate{Name: " lounge "}, nil)
-	if err != nil {
-		t.Fatalf("AdminCreateChannel: %v", err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
 	if ch.Type != "text" || ch.Name != "lounge" {
 		t.Fatalf("created %q/%q, want lounge/text", ch.Name, ch.Type)
 	}
@@ -132,10 +126,7 @@ func TestAdminCreateChannel_DefaultsTypeValidatesAndAudits(t *testing.T) {
 		t.Fatalf("forum created as %q with settings %v, want a forum carrying its settings", forum.Type, forum.Forum)
 	}
 
-	entries, err := database.GetAuditLog(context.Background(), 10, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, database, 10, 0)
 	found := false
 	for _, e := range entries {
 		if e.Action == "channel_create" && e.ActorID == 7 {
@@ -207,20 +198,14 @@ func TestAdminChannel_DuplicateNameIsConflict(t *testing.T) {
 	svc, _ := newChannelAdminService(t)
 	ctx := context.Background()
 	first, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "Lobby", Type: "text", Category: "Chat"}, nil)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	mustDo(t, "create", err)
 	if _, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "LOBBY", Type: "text", Category: "Chat"}, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate create: err = %v, want ErrConflict", err)
 	}
 	second, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", Type: "voice", Category: "Chat"}, nil)
-	if err != nil {
-		t.Fatalf("same name, other type: %v", err)
-	}
+	mustDo(t, "same name, other type", err)
 	third, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "hall", Type: "text", Category: "Chat"}, nil)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	mustDo(t, "create", err)
 	if _, _, err := svc.AdminUpdateChannel(ctx, 1, third, AdminChannelUpdate{Name: "lobby", Category: new("Chat")}, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("rename onto a sibling: err = %v, want ErrConflict", err)
 	}
@@ -230,4 +215,128 @@ func TestAdminChannel_DuplicateNameIsConflict(t *testing.T) {
 	if _, _, err := svc.AdminUpdateChannel(ctx, 1, second, AdminChannelUpdate{Name: "lobby", Category: new("Chat"), Topic: "t"}, nil); err != nil {
 		t.Fatalf("unchanged name on another type: %v", err)
 	}
+}
+
+// fullUpdateFrom builds the request a PATCH handler pre-fills from the row it
+// read: every field at the snapshot's value, ready to have the body laid over it.
+func fullUpdateFrom(ch *db.Channel) AdminChannelUpdate {
+	return AdminChannelUpdate{
+		Name: ch.Name, Topic: ch.Topic, CategoryID: ch.CategoryID, KeepCategory: true,
+		SlowMode: ch.SlowMode, Position: ch.Position, Archived: ch.Archived, NSFW: ch.NSFW,
+		VoiceMaxUsers: ch.VoiceMaxUsers, VoiceMaxVideo: ch.VoiceMaxVideo,
+	}
+}
+
+func TestAdminUpdateChannel_StaleSnapshotKeepsAConcurrentEdit(t *testing.T) {
+	f := newCatPermFixture(t)
+	ctx := context.Background()
+	other := f.newChannel(t, "gamma", f.cat.ID)
+	snap := *f.a
+
+	// Edit A commits first, then edit B (built from the same snapshot) names only
+	// a position.
+	a := fullUpdateFrom(&snap)
+	a.Name, a.Topic, a.SlowMode, a.NSFW, a.Archived = "renamed", "new topic", 30, true, true
+	_, _, err := f.svc.AdminUpdateChannel(ctx, 7, &snap, a, nil)
+	mustDo(t, "edit A", err)
+
+	var before db.Channel
+	b := fullUpdateFrom(&snap)
+	b.Position += 5
+	b.Before = &before
+	got, _, err := f.svc.AdminUpdateChannel(ctx, 7, &snap, b, nil)
+	mustDo(t, "edit B", err)
+
+	if got.Name != "renamed" || got.Topic != "new topic" || got.SlowMode != 30 || !got.NSFW || !got.Archived {
+		t.Errorf("after B: name=%q topic=%q slow=%d nsfw=%v archived=%v, want A's edit kept",
+			got.Name, got.Topic, got.SlowMode, got.NSFW, got.Archived)
+	}
+	if got.Position != snap.Position+5 {
+		t.Errorf("position = %d, want B's %d", got.Position, snap.Position+5)
+	}
+	if got.CategoryID != f.cat.ID || other.CategoryID != f.cat.ID {
+		t.Errorf("category = %d, want %d", got.CategoryID, f.cat.ID)
+	}
+	if !before.Archived || before.Name != "renamed" {
+		t.Errorf("Before = %+v, want the row A left (archived, renamed)", before)
+	}
+}
+
+func TestAdminUpdateChannel_StaleSnapshotStillAppliesWhatTheRequestChanged(t *testing.T) {
+	f := newCatPermFixture(t)
+	ctx := context.Background()
+	snap := *f.a
+
+	a := fullUpdateFrom(&snap)
+	a.Name, a.Topic = "renamed", "kept topic"
+	_, _, err := f.svc.AdminUpdateChannel(ctx, 7, &snap, a, nil)
+	mustDo(t, "edit A", err)
+
+	// B renames too: its own change wins for the name, A's topic stays.
+	b := fullUpdateFrom(&snap)
+	b.Name = "second"
+	got, _, err := f.svc.AdminUpdateChannel(ctx, 7, &snap, b, nil)
+	mustDo(t, "edit B", err)
+	if got.Name != "second" || got.Topic != "kept topic" {
+		t.Errorf("after B: name=%q topic=%q, want \"second\" and \"kept topic\"", got.Name, got.Topic)
+	}
+}
+
+// otherCategoryWith creates a second category holding one channel named name.
+func (f *catPermFixture) otherCategoryWith(t *testing.T, name string) *db.ChannelCategory {
+	t.Helper()
+	change, err := f.svc.CreateCategory(context.Background(), 1, "Other")
+	mustDo(t, "CreateCategory", err)
+	f.newChannel(t, name, change.Category.ID)
+	return change.Category
+}
+
+func (f *catPermFixture) requireNameAndCategory(t *testing.T, id int64, name string, categoryID int64) {
+	t.Helper()
+	got, err := f.database.GetChannel(context.Background(), id)
+	if err != nil || got == nil || got.Name != name || got.CategoryID != categoryID {
+		t.Errorf("channel = %+v, %v; want %q in category %d", got, err, name, categoryID)
+	}
+}
+
+// A move built from a snapshot keeps a rename that landed since. The name the
+// move was checked with is then not the name it would write, so the name is
+// checked again inside the write.
+func TestAdminUpdateChannel_StaleMoveIsRefusedWhenTheKeptNameIsTakenThere(t *testing.T) {
+	f := newCatPermFixture(t)
+	ctx := context.Background()
+	other := f.otherCategoryWith(t, "lobby")
+	snap := *f.a
+
+	a := fullUpdateFrom(&snap)
+	a.Name = "Lobby"
+	_, _, err := f.svc.AdminUpdateChannel(ctx, 7, &snap, a, nil)
+	mustDo(t, "edit A (rename)", err)
+
+	b := fullUpdateFrom(&snap)
+	b.CategoryID, b.KeepCategory = other.ID, false
+	if _, _, err := f.svc.AdminUpdateChannel(ctx, 7, &snap, b, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("edit B (move) = %v, want ErrConflict: the kept name is taken in the target category", err)
+	}
+	f.requireNameAndCategory(t, snap.ID, "Lobby", f.cat.ID)
+}
+
+// The mirror: a rename built from a snapshot keeps a move that landed since.
+func TestAdminUpdateChannel_StaleRenameIsRefusedWhenTheNameIsTakenInTheKeptCategory(t *testing.T) {
+	f := newCatPermFixture(t)
+	ctx := context.Background()
+	other := f.otherCategoryWith(t, "lobby")
+	snap := *f.a
+
+	a := fullUpdateFrom(&snap)
+	a.CategoryID, a.KeepCategory = other.ID, false
+	_, _, err := f.svc.AdminUpdateChannel(ctx, 7, &snap, a, nil)
+	mustDo(t, "edit A (move)", err)
+
+	b := fullUpdateFrom(&snap)
+	b.Name = "lobby"
+	if _, _, err := f.svc.AdminUpdateChannel(ctx, 7, &snap, b, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("edit B (rename) = %v, want ErrConflict: the name is taken in the category the channel moved to", err)
+	}
+	f.requireNameAndCategory(t, snap.ID, snap.Name, other.ID)
 }

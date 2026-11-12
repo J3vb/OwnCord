@@ -20,8 +20,8 @@ vi.mock("@lib/voice/livekitSession", () =>
 
 vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true));
 
-import { createVoiceWidget } from "../../src/components/VoiceWidget";
-import { createVideoGrid, type TileConfig } from "../../src/components/VideoGrid";
+import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
+import { createVideoGrid, type TileConfig } from "../../src/features/voice/videoGrid/VideoGrid";
 import { voiceStore } from "../../src/stores/voice.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 

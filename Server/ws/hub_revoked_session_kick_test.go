@@ -11,19 +11,9 @@ import (
 // sessions. The account's socket goes at once when its own session was among
 // them, and stays when it rode the session that was kept.
 func TestDisconnectIfSessionRevoked_KicksOnlyARevokedSessionsSocket(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := newTeardownTestDB(t)
 	ctx := context.Background()
-	uid, err := database.CreateUser(ctx, "changer", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "changer", 4)
 	keep, err := database.CreateSession(ctx, uid, "hash-kept", "laptop", "10.0.0.1")
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)

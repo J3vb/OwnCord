@@ -20,10 +20,7 @@ import (
 func replyPingFixture(t *testing.T) (svc *MessageService, database *db.DB, parent int64) {
 	t.Helper()
 	svc, _, database = newMentionFixture(t)
-	parent, err := database.CreateMessage(context.Background(), 10, 2, "the parent", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(parent): %v", err)
-	}
+	parent = mustCreateMessage(t, database, 10, 2, "the parent", nil)
 	return svc, database, parent
 }
 
@@ -53,10 +50,7 @@ func eachSendPath(t *testing.T, fn func(t *testing.T, keyed bool)) {
 
 func storedMentions(t *testing.T, database *db.DB, msgID int64) []int64 {
 	t.Helper()
-	got, err := database.GetMentionsByMessageIDs(context.Background(), []int64{msgID})
-	if err != nil {
-		t.Fatalf("GetMentionsByMessageIDs: %v", err)
-	}
+	got := mustGetMentionsByMessageIDs(t, database, []int64{msgID})
 	ids := slices.Clone(got[msgID])
 	slices.Sort(ids)
 	return ids
@@ -105,12 +99,9 @@ func TestSendMessage_ReplyPingOffOrAbsentNoMention(t *testing.T) {
 
 func TestSendMessage_ReplyPingWithoutReplyToIgnored(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
-	res, err := svc.SendMessage(context.Background(), SendMessageParams{
+	res := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", Content: "hello", ReplyPing: true,
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(res.Mentions) != 0 {
 		t.Errorf("Mentions = %v, want none", res.Mentions)
 	}
@@ -122,10 +113,7 @@ func TestSendMessage_ReplyPingWithoutReplyToIgnored(t *testing.T) {
 func TestSendMessage_ReplyPingSelfReplyNoPing(t *testing.T) {
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, _ := replyPingFixture(t)
-		own, err := database.CreateMessage(context.Background(), 10, 1, "my own", nil)
-		if err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		own := mustCreateMessage(t, database, 10, 1, "my own", nil)
 
 		res := replyAs(t, svc, keyed, 1, own, true, "following up")
 		if len(res.Mentions) != 0 {
@@ -159,9 +147,7 @@ func TestSendMessage_ReplyPingBlockedByParentNoBadge(t *testing.T) {
 func TestSendMessage_ReplyPingParentCannotReadNoBadge(t *testing.T) {
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, parent := replyPingFixture(t)
-		if err := database.UpsertChannelUserOverride(context.Background(), 10, 2, 0, permissions.ReadMessages); err != nil {
-			t.Fatalf("UpsertChannelUserOverride: %v", err)
-		}
+		mustDo(t, "UpsertChannelUserOverride", database.UpsertChannelUserOverride(context.Background(), 10, 2, 0, permissions.ReadMessages))
 
 		replyAs(t, svc, keyed, 1, parent, true, "agreed")
 		if got := mentionCount(t, database, 2); got != 0 {
@@ -226,9 +212,7 @@ func TestReplyPing_TargetNamedInContentTakesNoSlot(t *testing.T) {
 		}
 
 		edited, err := svc.EditMessage(context.Background(), 1, res.MessageID, content+" (edited)")
-		if err != nil {
-			t.Fatalf("EditMessage: %v", err)
-		}
+		mustDo(t, "EditMessage", err)
 		if len(edited.Mentions) != maxMentionsPerMessage+1 || !slices.Contains(edited.Mentions, last) {
 			t.Errorf("edit Mentions = %v, want %d ids including %d", edited.Mentions, maxMentionsPerMessage+1, last)
 		}
@@ -243,19 +227,14 @@ func TestReplyPing_TargetNamedInContentTakesNoSlot(t *testing.T) {
 func TestSendMessage_NoReplyPingStillCapsAtTwenty(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 	content := seedExtras(t, database, maxMentionsPerMessage+1)
-	res, err := svc.SendMessage(context.Background(), SendMessageParams{
+	res := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", Content: content,
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(res.Mentions) != maxMentionsPerMessage {
 		t.Errorf("Mentions = %d ids, want %d", len(res.Mentions), maxMentionsPerMessage)
 	}
 	edited, err := svc.EditMessage(context.Background(), 1, res.MessageID, content+" (edited)")
-	if err != nil {
-		t.Fatalf("EditMessage: %v", err)
-	}
+	mustDo(t, "EditMessage", err)
 	if len(edited.Mentions) != maxMentionsPerMessage {
 		t.Errorf("edit Mentions = %d ids, want %d", len(edited.Mentions), maxMentionsPerMessage)
 	}
@@ -270,9 +249,7 @@ func TestEditMessage_KeepsReplyPing(t *testing.T) {
 		res := replyAs(t, svc, keyed, 1, parent, true, "agreed")
 
 		edited, err := svc.EditMessage(context.Background(), 1, res.MessageID, "agreed, with @carol")
-		if err != nil {
-			t.Fatalf("EditMessage: %v", err)
-		}
+		mustDo(t, "EditMessage", err)
 		if !slices.Contains(edited.Mentions, 2) || !slices.Contains(edited.Mentions, 3) {
 			t.Errorf("edited Mentions = %v, want 2 and 3", edited.Mentions)
 		}
@@ -310,10 +287,7 @@ func TestDeleteMessage_ReversesReplyPingBadgeAfterEdit(t *testing.T) {
 
 func TestSendMessage_ReplyPingFingerprint(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
-	parent, err := database.CreateMessage(context.Background(), 10, 2, "the parent", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	parent := mustCreateMessage(t, database, 10, 2, "the parent", nil)
 	key := deliveryTestID(time.Now())
 	base := SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", Content: "agreed",
@@ -355,17 +329,13 @@ func TestSendMessage_ReplyPingFalseHashIsUnchanged(t *testing.T) {
 	want := sha256.Sum256(legacy)
 
 	got, err := messageDeliveryParams(p, 0)
-	if err != nil {
-		t.Fatalf("messageDeliveryParams: %v", err)
-	}
+	mustDo(t, "messageDeliveryParams", err)
 	if !bytes.Equal(got.PayloadHash, want[:]) {
 		t.Error("a false reply_ping changed the fingerprint")
 	}
 	p.ReplyPing = true
 	pinged, err := messageDeliveryParams(p, 0)
-	if err != nil {
-		t.Fatalf("messageDeliveryParams: %v", err)
-	}
+	mustDo(t, "messageDeliveryParams", err)
 	if bytes.Equal(pinged.PayloadHash, want[:]) {
 		t.Error("reply_ping=true must change the fingerprint")
 	}

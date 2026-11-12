@@ -15,13 +15,13 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@lib/logger", () => logMock.loggerMock());
-vi.mock("@components/MessageList", () => ({
+vi.mock("../../src/features/messaging/MessageList", () => ({
   createMessageList: vi.fn((opts: unknown) => {
     h.listOpts.value = opts;
     return { mount: vi.fn(), destroy: vi.fn(), startEdit: vi.fn(), isEditing: vi.fn(() => false) };
   }),
 }));
-vi.mock("@components/MessageInput", () => ({
+vi.mock("../../src/features/messaging/MessageInput", () => ({
   createMessageInput: vi.fn((opts: unknown) => {
     h.inputOpts.value = opts;
     return {
@@ -39,7 +39,7 @@ vi.mock("@components/MessageInput", () => ({
     };
   }),
 }));
-vi.mock("@components/TypingIndicator", () => ({
+vi.mock("../../src/features/messaging/TypingIndicator", () => ({
   createTypingIndicator: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
 vi.mock("../../src/pages/main-page/ChatHeader", () => ({ updateChatHeaderForDm: vi.fn() }));
@@ -65,7 +65,7 @@ vi.mock("../../src/features/messaging/sendQueueLoader", async () => {
 
 import { createChannelController } from "../../src/pages/main-page/ChannelController";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
-import type { QueuedAttachment, DraftUpload } from "@components/MessageInput";
+import type { QueuedAttachment, DraftUpload } from "../../src/features/messaging/MessageInput";
 import { Disposable } from "@lib/disposable";
 import {
   addMessage,

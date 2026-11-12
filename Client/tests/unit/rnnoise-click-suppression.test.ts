@@ -6,7 +6,7 @@
 // The shipped WASM used to be @jitsi/rnnoise-wasm's dist/rnnoise.wasm, which
 // is RNNoise's 2018 model: over ordinary room noise it took nothing off the
 // click. The same package's sync build embeds the current model, which takes
-// off 28 dB or more.
+// off 28 dB or more at most places in its 10 ms frame, and 16 dB at the worst.
 import { describe, expect, it, vi } from "vitest";
 import { useFakeWorkletHost } from "../helpers/workletHost";
 import { readFileSync } from "node:fs";
@@ -81,22 +81,41 @@ describe("RNNoise worklet on recorded audio", () => {
     expect(Math.max(...speech.slice(0, Math.round(0.4 * quantaPerSecond)))).toBeLessThan(0.15);
   });
 
+  /** How many dB RNNoise takes off the click placed `ms` into a frame. */
+  async function clickReduction(ms: number): Promise<number> {
+    const at = 1 + ms / 1000;
+    const input = placeInRoomTone(readAudioFixture("mouse-click.wav"), at, 2);
+
+    const output = await denoise(input);
+
+    // 80 ms from the click: its 60 ms plus the worklet's buffering delay.
+    const window = (samples: Float32Array) =>
+      samples.subarray(at * FIXTURE_SAMPLE_RATE, (at + 0.08) * FIXTURE_SAMPLE_RATE);
+    return toDb(rms(window(input))) - toDb(rms(window(output)));
+  }
+
   // RNNoise works on 10 ms frames, so how much of a click survives depends on
-  // where in a frame it lands; each offset has to clear the bar.
+  // where in a frame it lands. These are the placements it handles well.
   it.each([0, 3, 7])(
     "takes over 25 dB off a mouse click landing %i ms into a frame",
     async (ms) => {
-      const at = 1 + ms / 1000;
-      const input = placeInRoomTone(readAudioFixture("mouse-click.wav"), at, 2);
-
-      const output = await denoise(input);
-
-      // 80 ms from the click: its 60 ms plus the worklet's buffering delay.
-      const window = (samples: Float32Array) =>
-        samples.subarray(at * FIXTURE_SAMPLE_RATE, (at + 0.08) * FIXTURE_SAMPLE_RATE);
-      expect(toDb(rms(window(input))) - toDb(rms(window(output)))).toBeGreaterThan(25);
+      expect(await clickReduction(ms)).toBeGreaterThan(25);
     },
   );
+
+  // A click that starts near the middle of a frame is split over two of the
+  // model's overlapping windows, which reads as the start of a word, and less
+  // comes off. A microphone starts at an arbitrary point in a frame, so the
+  // promise to a user is the worst placement, checked every half millisecond.
+  it("takes over 15 dB off a mouse click wherever it lands in a frame", async () => {
+    const reductions = await Promise.all(
+      Array.from({ length: 20 }, (_, halfMs) => clickReduction(halfMs / 2)),
+    );
+
+    expect(Math.min(...reductions)).toBeGreaterThan(15);
+    // Most placements still clear the higher bar.
+    expect(reductions.filter((dB) => dB > 25).length).toBeGreaterThanOrEqual(12);
+  }, 30_000);
 
   it("keeps speech within 3 dB of its level", async () => {
     const input = placeInRoomTone(readAudioFixture("speech.wav"), 0.5, 2);

@@ -1,9 +1,9 @@
 /** The mutable state one main page instance keeps, shared by its modules. */
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
-import type { VideoGridComponent } from "@components/VideoGrid";
-import type { ServerBannerControl } from "@components/ServerBanner";
-import type { ToastContainer } from "@components/Toast";
+import type { VideoGridComponent } from "../../features/voice/videoGrid/VideoGrid";
+import type { ServerBannerControl } from "../../features/server-rail/ServerBanner";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import type { AutoIdleController } from "@lib/presence/autoIdle";
 import type { GameActivityLoop } from "@lib/presence/gameActivity";
 import type { MusicActivityLoop } from "@lib/presence/musicActivity";
@@ -13,9 +13,9 @@ import type { MessageController } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
 import type { VideoModeController, VideoPanelHost } from "./VideoModeController";
 import type { ChannelController } from "./ChannelController";
-import type { DmProfileSidebarComponent } from "@components/DmProfileSidebar";
-import type { GroupMemberPanelController } from "./GroupMemberPanelController";
-import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
+import type { DmProfileSidebarComponent } from "../../features/direct-messages/DmProfileSidebar";
+import type { GroupMemberPanelController } from "../../features/direct-messages/GroupMemberPanelController";
+import type { IncomingCallBannerComponent } from "../../features/direct-messages/IncomingCallBanner";
 import type { RingController, OutgoingCall } from "@lib/voice/callRing";
 import type { DmCallPanelComponent } from "../../features/direct-messages/DmCallPanel";
 import type { SidebarDrawer } from "./SidebarDrawer";
@@ -24,15 +24,13 @@ import type { ContentNavigator } from "../../features/navigation/contentView";
 import type { MainPageOptions } from "../MainPage";
 
 import type { Disposable } from "@lib/disposable";
-import type { ApiClient } from "@lib/api";
 import type { VoiceState } from "@stores/voice.store";
 import type { SidebarAreaResult } from "./SidebarArea";
 import type { ChatAreaResult } from "./ChatArea";
 import type { QuickSwitcherManager } from "./OverlayManagers";
 import type { VoiceWidgetCallbacks } from "./VoiceCallbacks";
-import type { GlobalShortcutVks } from "../../lib/voice/voiceShortcuts";
 import type { Channel } from "../../stores/channels.store";
-import type { VoiceModMenuOptions } from "../../components/channel-sidebar/volumeMenu";
+import type { VoiceModMenuOptions } from "../../features/channels/sidebar/volumeMenu";
 export interface PageState {
   readonly options: MainPageOptions;
   readonly ws: MainPageOptions["ws"];
@@ -206,11 +204,7 @@ export interface MountScope {
   layoutOwner: Disposable;
   // --- Moderation notices: persistent, above the app row ---
   notices: Disposable;
-  // Settings overlay
-  // Bumped by every local 2FA change so an in-flight profile refresh
-  // cannot overwrite it with an older answer.
-  totpEpoch: number;
-  safety: { readonly build: (signal: AbortSignal, api: ApiClient) => HTMLDivElement } | undefined;
+  // Settings overlay (built by features/settings/mountSettings)
   settingsOverlay: MountableComponent & { open(): void; close(): void };
   // Quick switcher (Ctrl+K)
   // Don't fire while the settings panel is on top of it — same guard as
@@ -218,27 +212,8 @@ export interface MountScope {
   qsManager: QuickSwitcherManager;
   // The rest of the shortcuts listed on the settings Keybinds tab.
   voiceKeybindActions: VoiceWidgetCallbacks;
-  shortcutsOverlay: typeof import("@components/ShortcutsOverlay") | null;
+  shortcutsOverlay: typeof import("../../features/navigation/ShortcutsOverlay") | null;
   shortcutsClosed: boolean;
-  // Once the poller runs it also sees the keys while the window is focused,
-  // so the in-app handler stands down to avoid a double toggle. The flag is
-  // set before start() so a press during startup is missed, never doubled.
-  // On a Wayland session the desktop's shortcut service is the "poller": it
-  // is live only once both keys are bound, so the flag follows the host's
-  // status changes too (a bind, the user editing the keys, a portal restart).
-  // start() runs whether or not the host says it is supported: the host
-  // decides whether anything can observe keys, and on Wayland it arms the
-  // portal so a press from a key the compositor itself was told to deliver
-  // (Hyprland: the portal names no keys, so it never reads as bound) gets
-  // through. Only the in-app stand-down follows `supported`.
-  // Answers can arrive out of order (a status change during startup), so
-  // only the latest query may set the flag.
-  refreshSeq: number;
-  refreshGlobalKeys: () => void;
-  // Push the persisted rebind onto the running poller at startup, so a
-  // choice made in Settings survives a restart (the native default is
-  // Ctrl+Shift+M / Ctrl+Shift+D).
-  globalKeys: GlobalShortcutVks;
   // The label shown on a video tile: memberDisplayName when known —
   // the same identity a rename shows everywhere else (ChannelSidebar's
   // voice roster, message rows, the member list) — falling back to the
@@ -268,9 +243,6 @@ export interface MountScope {
   prevTileLabels: Map<number, string>;
   // A page rebuilt while already in voice (reconnect) loads the grid now.
   gridLoadChannel: number | null;
-  // Release notes, once, on the first start after an update. Loaded on
-  // demand so the prompt stays out of the eager MainPage chunk (bundle budget).
-  promptHost: HTMLDivElement;
   // Only the channel that owns the current call keeps the grid up: the joined
   // voice channel (its chat sits beside the grid) or the DM whose
   // call panel shows the video above the chat (its own update re-seats the

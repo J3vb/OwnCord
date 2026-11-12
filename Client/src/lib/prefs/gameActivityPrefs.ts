@@ -81,47 +81,57 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function parseManual(raw: unknown): ManualGameEntry[] {
+  const manual: ManualGameEntry[] = [];
+  if (!Array.isArray(raw)) return manual;
+  const paths = new Set<string>();
+  for (const item of raw as unknown[]) {
+    if (manual.length >= MAX_MANUAL) break;
+    if (!isRecord(item) || typeof item.path !== "string") continue;
+    const path = item.path.trim();
+    const name = cleanGameName(item.name);
+    if (path === "" || path.length > MAX_PATH_CHARS || name === null) continue;
+    if (paths.has(pathKey(path))) continue;
+    paths.add(pathKey(path));
+    manual.push({ path, name });
+  }
+  return manual;
+}
+
+function parseHidden(raw: unknown): string[] {
+  const hidden: string[] = [];
+  if (!Array.isArray(raw)) return hidden;
+  const keys = new Set<string>();
+  for (const item of raw as unknown[]) {
+    if (hidden.length >= MAX_HIDDEN) break;
+    const name = cleanGameName(item);
+    if (name === null || keys.has(gameKey(name))) continue;
+    keys.add(gameKey(name));
+    hidden.push(name);
+  }
+  return hidden;
+}
+
+function parseRenames(raw: unknown): Record<string, string> {
+  const renames: Record<string, string> = {};
+  if (!isRecord(raw)) return renames;
+  for (const [from, to] of Object.entries(raw)) {
+    if (Object.keys(renames).length >= MAX_RENAMES) break;
+    const source = cleanGameName(from);
+    const shown = cleanGameName(to);
+    if (source !== null && shown !== null) renames[source] = shown;
+  }
+  return renames;
+}
+
 /** The prefs a stored value holds; anything invalid is dropped, never thrown. */
 export function parseGamePrefs(raw: unknown): GamePrefs {
   if (!isRecord(raw)) return EMPTY_GAME_PREFS;
-
-  const manual: ManualGameEntry[] = [];
-  const paths = new Set<string>();
-  if (Array.isArray(raw.manual)) {
-    for (const item of raw.manual as unknown[]) {
-      if (manual.length >= MAX_MANUAL) break;
-      if (!isRecord(item) || typeof item.path !== "string") continue;
-      const path = item.path.trim();
-      const name = cleanGameName(item.name);
-      if (path === "" || path.length > MAX_PATH_CHARS || name === null) continue;
-      if (paths.has(pathKey(path))) continue;
-      paths.add(pathKey(path));
-      manual.push({ path, name });
-    }
-  }
-
-  const hidden: string[] = [];
-  const hiddenKeys = new Set<string>();
-  if (Array.isArray(raw.hidden)) {
-    for (const item of raw.hidden as unknown[]) {
-      if (hidden.length >= MAX_HIDDEN) break;
-      const name = cleanGameName(item);
-      if (name === null || hiddenKeys.has(gameKey(name))) continue;
-      hiddenKeys.add(gameKey(name));
-      hidden.push(name);
-    }
-  }
-
-  const renames: Record<string, string> = {};
-  if (isRecord(raw.renames)) {
-    for (const [from, to] of Object.entries(raw.renames)) {
-      if (Object.keys(renames).length >= MAX_RENAMES) break;
-      const source = cleanGameName(from);
-      const shown = cleanGameName(to);
-      if (source !== null && shown !== null) renames[source] = shown;
-    }
-  }
-  return { manual, hidden, renames };
+  return {
+    manual: parseManual(raw.manual),
+    hidden: parseHidden(raw.hidden),
+    renames: parseRenames(raw.renames),
+  };
 }
 
 /** The detected names a stored value holds: valid, distinct, at most 50. */

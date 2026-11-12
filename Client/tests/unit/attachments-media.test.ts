@@ -26,7 +26,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@tauri-apps/plugin-dialog", () => mocks.dialogMock(saveMock));
 vi.mock("@tauri-apps/plugin-fs", () => mocks.fsMock(writeFileMock));
 vi.mock("@lib/icons", () => mocks.iconsMock());
-vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
+vi.mock("/src/features/messaging/content/mediaVisibility", () => mocks.mediaVisibilityMock());
 vi.mock("../../src/features/messaging/content/media", () => mocks.contentMediaMock());
 vi.mock("@stores/auth.store", () => mocks.authStoreMock(() => "session-token"));
 

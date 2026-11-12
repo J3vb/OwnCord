@@ -7,6 +7,7 @@
 // and with "Default" saved the capture follows the system default.
 
 import { Room, Track, type LocalAudioTrack } from "livekit-client";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 import { voiceStore } from "@stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
@@ -18,6 +19,9 @@ const log = createLogger("deviceManager");
 
 /** Debounce interval for device change events (ms). */
 const DEVICE_CHANGE_DEBOUNCE_MS = 500;
+
+/** A device list from the native host or the webview. */
+type ListedDevices = ReadonlyArray<{ deviceId: string; label: string; groupId?: string }>;
 
 /** True when a mute/deafen/server-mute means the mic must stay off
  *  regardless of a caller's own request to (re-)enable it. Push-to-talk is
@@ -43,7 +47,7 @@ export function isMicPolicyGated(): boolean {
 }
 
 export class DeviceManager {
-  private room: Room | null = null;
+  private room: VoiceRoom | null = null;
   private audioPipeline: AudioPipeline | null = null;
   private onErrorCallback: ((message: string) => void) | null = null;
   private onToast: ((message: string) => void) | null = null;
@@ -55,7 +59,7 @@ export class DeviceManager {
    *  was unplugged. Kept across rooms so a reconnect still restores it. */
   private fallbackFrom: { audioinput?: string; audiooutput?: string } = {};
 
-  setRoom(room: Room | null): void {
+  setRoom(room: VoiceRoom | null): void {
     this.room = room;
     if (room !== null) {
       this.startDeviceChangeListener();
@@ -70,7 +74,7 @@ export class DeviceManager {
    *  to the default when it is not, so a missing saved device counts as
    *  fallen back (restored when it is listed again) and a listed one does
    *  not (its next unplug falls back again). */
-  private async reconcileFallbacks(room: Room): Promise<void> {
+  private async reconcileFallbacks(room: VoiceRoom): Promise<void> {
     const saved = [
       ["audioinput", "audioInputDevice"],
       ["audiooutput", "audioOutputDevice"],
@@ -107,7 +111,7 @@ export class DeviceManager {
    *  handleDeviceChange's device-removed fallback and switchInputDevice('')
    *  — both drive the exact same reset + false/true cycle, and both were
    *  unconditionally republishing a gated mic before this guard. */
-  private async cycleMicForDeviceSwitch(room: Room): Promise<void> {
+  private async cycleMicForDeviceSwitch(room: VoiceRoom): Promise<void> {
     // A previous switchActiveDevice pins audioCaptureDefaults.deviceId as an
     // exact constraint that survives the off/on cycle, so the cycle alone
     // re-acquires the old device. Reset the pin to the system default first;
@@ -178,105 +182,151 @@ export class DeviceManager {
       if (this.room !== room) return;
       // Kinds this run switched back, which the native re-apply below skips.
       const restored = new Set<MediaDeviceKind>();
-      const savedInput = loadPref<string>("audioInputDevice", "");
-      const inputListed = devices.some((d) => d.deviceId === savedInput);
-
-      if (savedInput !== "" && !inputListed && this.fallbackFrom.audioinput !== savedInput) {
-        log.warn("Saved audio input device removed — falling back to default", { savedInput });
-        this.fallbackFrom.audioinput = savedInput;
-        await this.fallBackToDefaultInput(room);
-        if (this.room !== room) return;
-      } else if (inputListed && this.fallbackFrom.audioinput === savedInput) {
-        log.info("Saved audio input device is back — switching to it", { savedInput });
-        delete this.fallbackFrom.audioinput;
-        restored.add("audioinput");
-        try {
-          // While muted this only records the device.
-          await room.switchActiveDevice("audioinput", savedInput);
-          if (this.room !== room) return;
-          this.setupPipelineAfterSwitch();
-        } catch (err) {
-          if (this.room !== room) return;
-          // The failed restart already stopped the capture: re-acquire the
-          // default rather than leave a dead mic that reads as unmuted.
-          log.warn("Failed to switch back to the saved input device", err);
-          this.fallbackFrom.audioinput = savedInput;
-          await this.fallBackToDefaultInput(room);
-          if (this.room !== room) return;
-        }
-      } else if (savedInput === "" && nativeInputs === null) {
-        await this.followDefaultInput(room, devices);
-        if (this.room !== room) return;
-      }
+      if (!(await this.syncSavedInput(room, devices, nativeInputs === null, restored))) return;
 
       // Check output device
       const outputDevices =
         (await nativeAudioDevices("audiooutput")) ?? (await Room.getLocalDevices("audiooutput"));
       if (this.room !== room) return;
-      const savedOutput = loadPref<string>("audioOutputDevice", "");
-      const outputListed = outputDevices.some((d) => d.deviceId === savedOutput);
-      // LiveKit's own undebounced devicechange handler moves output to the
-      // default the moment the saved device disappears, so a replug inside
-      // our debounce finds it listed with no fallback recorded. The native
-      // room has no getActiveDevice; its re-apply loop below covers it.
-      const activeOutput = room.getActiveDevice?.("audiooutput");
-      if (outputListed && activeOutput !== undefined && activeOutput !== savedOutput) {
-        this.fallbackFrom.audiooutput = savedOutput;
-      }
-      if (savedOutput !== "" && !outputListed && this.fallbackFrom.audiooutput !== savedOutput) {
-        log.warn("Saved audio output device removed — falling back to default", { savedOutput });
-        try {
-          await room.switchActiveDevice("audiooutput", "");
-          if (this.room !== room || loadPref<string>("audioOutputDevice", "") !== savedOutput)
-            return;
-          this.fallbackFrom.audiooutput = savedOutput;
-          this.onToast?.(voiceText("device.outputDisconnected"));
-        } catch (err) {
-          if (this.room !== room || loadPref<string>("audioOutputDevice", "") !== savedOutput)
-            return;
-          log.error("Failed to fallback to default output device", err);
-          this.onErrorCallback?.(voiceText("device.defaultSpeakerFailed"));
-        }
-      } else if (outputListed && this.fallbackFrom.audiooutput === savedOutput) {
-        log.info("Saved audio output device is back — switching to it", { savedOutput });
-        delete this.fallbackFrom.audiooutput;
-        restored.add("audiooutput");
-        try {
-          await room.switchActiveDevice("audiooutput", savedOutput);
-        } catch (err) {
-          if (this.room !== room) return;
-          log.error("Failed to switch back to the saved output device", err);
-          this.fallbackFrom.audiooutput = savedOutput;
-          this.onErrorCallback?.(voiceText("device.speakerFailed"));
-        }
-        if (this.room !== room) return;
-      }
+      if (!(await this.syncSavedOutput(room, outputDevices, restored))) return;
 
-      // The native backend opens its capture and playout streams on concrete
-      // devices, so the saved devices are re-applied after a hot-plug, a
-      // saved "System default" included: that moves capture and playout to a
-      // hot-plugged default (the backend leaves a stream on an unchanged
-      // device alone).
-      if (nativeInputs === null) return;
-      const saved = [
-        ["audioinput", "audioInputDevice", devices],
-        ["audiooutput", "audioOutputDevice", outputDevices],
-      ] as const;
-      for (const [kind, key, listed] of saved) {
-        const pref = loadPref<string>(key, "");
-        const deviceId = this.fallbackFrom[kind] === pref ? "" : pref;
-        const reapply = deviceId === "" || listed.some((d) => d.deviceId === deviceId);
-        if (!reapply || restored.has(kind)) continue;
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- sequential by design: the room-supersession check must run between the two switches
-          await room.switchActiveDevice(kind, deviceId);
-        } catch (err) {
-          log.warn("Failed to re-apply saved device after change", { kind, err });
-        }
-        if (this.room !== room) return;
-      }
+      // The steps above resolve a tick later than inline code did: check the
+      // room again before the native re-apply switches it.
+      if (nativeInputs === null || this.room !== room) return;
+      await this.reapplyNativeDevices(room, devices, outputDevices, restored);
     } catch (err) {
       log.warn("Failed to enumerate devices after change", err);
+    }
+  }
+
+  /** Fall back from an unplugged saved input, switch back to a replugged
+   *  one, or follow the system default. False when the room went away. */
+  private async syncSavedInput(
+    room: VoiceRoom,
+    devices: ListedDevices,
+    webview: boolean,
+    restored: Set<MediaDeviceKind>,
+  ): Promise<boolean> {
+    const savedInput = loadPref<string>("audioInputDevice", "");
+    const inputListed = devices.some((d) => d.deviceId === savedInput);
+    if (savedInput !== "" && !inputListed && this.fallbackFrom.audioinput !== savedInput) {
+      log.warn("Saved audio input device removed — falling back to default", { savedInput });
+      this.fallbackFrom.audioinput = savedInput;
+      await this.fallBackToDefaultInput(room);
+      return this.room === room;
+    }
+    if (inputListed && this.fallbackFrom.audioinput === savedInput) {
+      log.info("Saved audio input device is back — switching to it", { savedInput });
+      delete this.fallbackFrom.audioinput;
+      restored.add("audioinput");
+      return this.restoreSavedInput(room, savedInput);
+    }
+    if (savedInput === "" && webview) {
+      await this.followDefaultInput(room, devices);
+      return this.room === room;
+    }
+    return true;
+  }
+
+  private async restoreSavedInput(room: VoiceRoom, savedInput: string): Promise<boolean> {
+    try {
+      // While muted this only records the device.
+      await room.switchActiveDevice("audioinput", savedInput);
+      if (this.room !== room) return false;
+      this.setupPipelineAfterSwitch();
+    } catch (err) {
+      if (this.room !== room) return false;
+      // The failed restart already stopped the capture: re-acquire the
+      // default rather than leave a dead mic that reads as unmuted.
+      log.warn("Failed to switch back to the saved input device", err);
+      this.fallbackFrom.audioinput = savedInput;
+      await this.fallBackToDefaultInput(room);
+      if (this.room !== room) return false;
+    }
+    return true;
+  }
+
+  /** The output twin of syncSavedInput. False when the room went away or
+   *  the saved output changed while it switched. */
+  private async syncSavedOutput(
+    room: VoiceRoom,
+    outputDevices: ListedDevices,
+    restored: Set<MediaDeviceKind>,
+  ): Promise<boolean> {
+    const savedOutput = loadPref<string>("audioOutputDevice", "");
+    const outputListed = outputDevices.some((d) => d.deviceId === savedOutput);
+    // LiveKit's own undebounced devicechange handler moves output to the
+    // default the moment the saved device disappears, so a replug inside
+    // our debounce finds it listed with no fallback recorded. The native
+    // room has no getActiveDevice; its re-apply loop below covers it.
+    const activeOutput = room.getActiveDevice?.("audiooutput");
+    if (outputListed && activeOutput !== undefined && activeOutput !== savedOutput) {
+      this.fallbackFrom.audiooutput = savedOutput;
+    }
+    if (savedOutput !== "" && !outputListed && this.fallbackFrom.audiooutput !== savedOutput) {
+      log.warn("Saved audio output device removed — falling back to default", { savedOutput });
+      return this.fallBackToDefaultOutput(room, savedOutput);
+    }
+    if (outputListed && this.fallbackFrom.audiooutput === savedOutput) {
+      log.info("Saved audio output device is back — switching to it", { savedOutput });
+      delete this.fallbackFrom.audiooutput;
+      restored.add("audiooutput");
+      try {
+        await room.switchActiveDevice("audiooutput", savedOutput);
+      } catch (err) {
+        if (this.room !== room) return false;
+        log.error("Failed to switch back to the saved output device", err);
+        this.fallbackFrom.audiooutput = savedOutput;
+        this.onErrorCallback?.(voiceText("device.speakerFailed"));
+      }
+      return this.room === room;
+    }
+    return true;
+  }
+
+  private async fallBackToDefaultOutput(room: VoiceRoom, savedOutput: string): Promise<boolean> {
+    const current = (): boolean =>
+      this.room === room && loadPref<string>("audioOutputDevice", "") === savedOutput;
+    try {
+      await room.switchActiveDevice("audiooutput", "");
+      if (!current()) return false;
+      this.fallbackFrom.audiooutput = savedOutput;
+      this.onToast?.(voiceText("device.outputDisconnected"));
+    } catch (err) {
+      if (!current()) return false;
+      log.error("Failed to fallback to default output device", err);
+      this.onErrorCallback?.(voiceText("device.defaultSpeakerFailed"));
+    }
+    return true;
+  }
+
+  /** The native backend opens its capture and playout streams on concrete
+   *  devices, so the saved devices are re-applied after a hot-plug, a
+   *  saved "System default" included: that moves capture and playout to a
+   *  hot-plugged default (the backend leaves a stream on an unchanged
+   *  device alone). */
+  private async reapplyNativeDevices(
+    room: VoiceRoom,
+    devices: ListedDevices,
+    outputDevices: ListedDevices,
+    restored: Set<MediaDeviceKind>,
+  ): Promise<void> {
+    const saved = [
+      ["audioinput", "audioInputDevice", devices],
+      ["audiooutput", "audioOutputDevice", outputDevices],
+    ] as const;
+    for (const [kind, key, listed] of saved) {
+      const pref = loadPref<string>(key, "");
+      const deviceId = this.fallbackFrom[kind] === pref ? "" : pref;
+      const reapply = deviceId === "" || listed.some((d) => d.deviceId === deviceId);
+      if (!reapply || restored.has(kind)) continue;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- sequential by design: the room-supersession check must run between the two switches
+        await room.switchActiveDevice(kind, deviceId);
+      } catch (err) {
+        log.warn("Failed to re-apply saved device after change", { kind, err });
+      }
+      if (this.room !== room) return;
     }
   }
 
@@ -288,10 +338,7 @@ export class DeviceManager {
    * the SDK does not switch microphones on a device change. The browser's
    * `default` entry shares its groupId with the device it stands for.
    */
-  private async followDefaultInput(
-    room: Room,
-    devices: ReadonlyArray<{ deviceId: string; label: string; groupId?: string }>,
-  ): Promise<void> {
+  private async followDefaultInput(room: VoiceRoom, devices: ListedDevices): Promise<void> {
     try {
       const osDefault = devices.find((d) => d.deviceId === "default");
       const track = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track as
@@ -314,7 +361,7 @@ export class DeviceManager {
   /** Move capture to the system default while the saved input is unusable.
    *  The pref keeps the user's pick so the device is restored when it is
    *  listed again. */
-  private async fallBackToDefaultInput(room: Room): Promise<void> {
+  private async fallBackToDefaultInput(room: VoiceRoom): Promise<void> {
     try {
       await this.cycleMicForDeviceSwitch(room);
       if (this.room !== room) return;

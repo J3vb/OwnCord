@@ -119,9 +119,7 @@ func TestRoleMention_RaisesHoldersBadge(t *testing.T) {
 	}
 
 	stored, err := database.GetRoleMentionsByMessageIDs(context.Background(), []int64{res.MessageID})
-	if err != nil {
-		t.Fatalf("GetRoleMentionsByMessageIDs: %v", err)
-	}
+	mustDo(t, "GetRoleMentionsByMessageIDs", err)
 	if !slices.Equal(stored[res.MessageID], []int64{devsRoleID}) {
 		t.Errorf("stored role mentions = %v, want [%d]", stored[res.MessageID], devsRoleID)
 	}
@@ -171,12 +169,9 @@ func TestRoleMention_UnknownRoleAndDMStayText(t *testing.T) {
 	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
 	seedDMParticipant(t, database, 50, 1)
 	seedDMParticipant(t, database, 50, 2)
-	res, err := svc.SendMessage(context.Background(), SendMessageParams{
+	res := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "<@&7> <@2>",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(res.MentionRoles) != 0 {
 		t.Errorf("DM mention_roles = %v, want none: roles have no meaning in a DM", res.MentionRoles)
 	}
@@ -205,9 +200,7 @@ func TestRoleMention_EditRaisesNothing(t *testing.T) {
 
 	res := sendAs(t, svc, 1, "plain")
 	edited, err := svc.EditMessage(context.Background(), 1, res.MessageID, "<@&7> now")
-	if err != nil {
-		t.Fatalf("EditMessage: %v", err)
-	}
+	mustDo(t, "EditMessage", err)
 	if !slices.Equal(edited.MentionRoles, []int64{devsRoleID}) {
 		t.Errorf("edit mention_roles = %v, want [%d]: the wire keeps the role", edited.MentionRoles, devsRoleID)
 	}
@@ -255,9 +248,7 @@ func TestRoleMention_DeletedRoleDoesNotFailTheSend(t *testing.T) {
 	_, _, database := newMentionFixture(t)
 	ctx := context.Background()
 	msg, err := database.CreateMessageWithMentions(ctx, 10, 1, "x", nil, nil, 0, false, []int64{devsRoleID, 4})
-	if err != nil {
-		t.Fatalf("a role missing from roles failed the write: %v", err)
-	}
+	mustDo(t, "a role missing from roles failed the write", err)
 	stored, err := database.GetRoleMentionsByMessageIDs(ctx, []int64{msg.ID})
 	if err != nil || !slices.Equal(stored[msg.ID], []int64{4}) {
 		t.Errorf("stored = %v (%v), want only the role that still exists", stored[msg.ID], err)

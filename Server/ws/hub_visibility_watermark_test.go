@@ -4,8 +4,10 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // TestBumpVisibilityWatermark_RatchetsUpwardOnly locks the core invariant all
@@ -153,17 +155,52 @@ func TestEmitEvents_DMChannelOpen_WatermarkNeverRegresses(t *testing.T) {
 // behaviour these functions must still provide: a genuine, later seq still
 // moves the watermark forward so mustFullResync keeps working.
 func TestEmitEvents_DMChannelOpen_WatermarkStillAdvances(t *testing.T) {
-	h := newEmitTestHub()
-	atomic.StoreUint64(&h.seq, 40)
+	requireDMChannelOpenRaisesWatermark(t)
+}
 
-	h.EmitEvents(context.Background(), []Event{
-		DMChannelOpenEvent{targetUserID: 7, payload: []byte(`{"type":"dm_channel_open"}`)},
-	})
+// A permission read that never returns on its own cannot hold a visibility walk
+// past its budget: the call returns, the watermark moves, and every client it
+// did not reach is marked to resync.
+func TestRefreshChannelVisibility_StalledReaderTimesOutAndMarksClients(t *testing.T) {
+	f := newRRFixture(t, false)
+	ids := []int64{
+		f.addUser("vis-to-1", rrModRole, f.chA),
+		f.addUser("vis-to-2", rrModRole, f.chA),
+		f.addUser("vis-to-3", rrModRole, f.chA),
+	}
+	f.hub.perms = nil
+	f.hub.permChecker = permissions.NewChecker(f.database)
+	f.hub.readers.Dispatch = stalledRoleReader{f.hub.readers.Dispatch}
+	oldBase, oldPer := channelVisibilityBaseBudget, channelVisibilityPerClientBudget
+	channelVisibilityBaseBudget, channelVisibilityPerClientBudget = 100*time.Millisecond, 0
+	t.Cleanup(func() { channelVisibilityBaseBudget, channelVisibilityPerClientBudget = oldBase, oldPer })
+	ch, err := f.database.GetChannel(context.Background(), f.chA)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+	// A sequenced frame so the watermark has somewhere to move to.
+	f.hub.deliverBroadcast(broadcastMsg{channelID: 0, msg: []byte(`{"type":"server_filler"}`)})
+	before := f.hub.visibilityChangeSeq.Load()
 
-	if !h.mustFullResync(40) {
-		t.Error("a client resuming from a seq at or before a dm_channel_open must be forced onto the full-ready path")
+	start := time.Now()
+	f.hub.RefreshChannelVisibility(ch)
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("RefreshChannelVisibility took %v with a stalled reader, want about its 100ms budget", took)
 	}
-	if h.mustFullResync(41) {
-		t.Error("clients past the open must keep replaying normally")
+	if got := f.hub.visibilityChangeSeq.Load(); got <= before {
+		t.Errorf("watermark = %d, want above %d", got, before)
 	}
+	for _, id := range ids {
+		if !f.clients[id].cseq.lossPending.Load() {
+			t.Errorf("user %d was not marked to resync", id)
+		}
+	}
+}
+
+// stalledRoleReader blocks every role lookup until its context ends.
+type stalledRoleReader struct{ DispatchReader }
+
+func (stalledRoleReader) GetMemberRoles(ctx context.Context, _ int64) (*db.MemberRoles, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
 }

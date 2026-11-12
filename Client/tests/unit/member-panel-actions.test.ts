@@ -48,7 +48,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { Permission } from "../../src/lib/types";
-import type { MemberListOptions } from "../../src/components/MemberList";
+import type { MemberListOptions } from "../../src/features/members/MemberList";
 import { resetMembersState } from "../helpers/storeResets";
 import { signInAsAdmin } from "../helpers/storeSeeds";
 

@@ -24,36 +24,32 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { createElement, appendChildren, setText, clearChildren } from "@lib/dom";
-import { createIcon } from "@lib/icons";
-import { loadPref, savePref } from "@lib/prefs/preferences";
+import { createElement, appendChildren } from "@lib/dom";
+import { loadPref } from "@lib/prefs/preferences";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { claimBack, type BackClaim } from "@lib/ui/backHistory";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { RingState, OutgoingCallState } from "@lib/voice/callRing";
-import { voiceStore, isSelfMuted } from "@stores/voice.store";
+import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore } from "@stores/ui.store";
-import { isConnecting, formatElapsed } from "../voice/voiceStatusText";
-import type { VideoGridComponent } from "@components/VideoGrid";
-import { voiceText as t } from "../../i18n/voice";
+import type { VideoGridComponent } from "../voice/videoGrid/VideoGrid";
 import { dmCallText as d } from "../../i18n/dmCall";
-import { shareBlockReason } from "../voice/shareGate";
 import {
   type AvatarRef,
   callName,
   currentUserId,
   deriveCallView,
   type DmCallView,
-  resolvePerson,
-  swapIcon,
-  voiceUser,
 } from "./DmCallViewModel";
-import { HEIGHT_PREF, MIN_HEIGHT, MESSAGES_MIN_HEIGHT, KEY_STEP } from "./dm-call/dmCallShared";
+import { HEIGHT_PREF, MIN_HEIGHT } from "./dm-call/dmCallShared";
 import type { DmCallState, DmCallApi } from "./dm-call/dmCallState";
-import { connectedStatus, createDmCallRender } from "./dm-call/dmCallRender";
+import { createDmCallRender } from "./dm-call/dmCallRender";
+import { createDmCallRefresh } from "./dm-call/dmCallRefresh";
+import { createDmCallRebuild } from "./dm-call/dmCallRebuild";
+import { createDmCallResize } from "./dm-call/dmCallResize";
 import { createDmCallVerify, identitiesOf } from "./dm-call/dmCallVerify";
 import { createTalkSlot } from "../voice/talkSlot";
 
@@ -111,6 +107,23 @@ export {
 const isCallView = (kind: DmCallView["kind"]): boolean =>
   kind === "outgoing" || kind === "connected";
 
+/** Voice fields that tick without changing anything this panel draws: the
+ *  local input gate's verdict and other channels' rosters (speaking flips). */
+const UNDRAWN_VOICE_FIELDS: ReadonlySet<string> = new Set(["voiceUsers", "localGateSpeaking"]);
+
+/** What the panel reads from the voice store, as a flat list for the store's
+ *  element-wise compare: every other field, plus the rosters of the DM rooms
+ *  and the room you are in. */
+export function panelVoiceKey(voice: VoiceState): unknown[] {
+  const key: unknown[] = [];
+  for (const [field, value] of Object.entries(voice)) {
+    if (!UNDRAWN_VOICE_FIELDS.has(field)) key.push(field, value);
+  }
+  if (voice.currentChannelId !== null) key.push(voice.voiceUsers.get(voice.currentChannelId));
+  for (const dm of dmStore.getState().channels) key.push(voice.voiceUsers.get(dm.channelId));
+  return key;
+}
+
 export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelComponent {
   const disposable = new Disposable();
   const st: DmCallState = {
@@ -155,7 +168,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     avatars: new Map<number, AvatarRef>(),
     controls: { mute: null, deafen: null, camera: null, share: null },
     statusEl: null,
-    securedEl: null,
+    secured: null,
     timerEls: [],
     speakingEl: null,
     timerInterval: null,
@@ -167,6 +180,10 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   disposable.addCleanup(() => st.talkSlot.clear());
   const dc = {} as DmCallApi;
   Object.assign(dc, createDmCallRender(st, dc), createDmCallVerify(st, dc), { update });
+
+  const { applyHeight } = createDmCallResize(st);
+  const { rebuild } = createDmCallRebuild(st, dc, applyHeight);
+  const { refresh, tick } = createDmCallRefresh(st, dc);
 
   st.root.hidden = true;
 
@@ -256,292 +273,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     }
   }
 
-  // --- Resize -------------------------------------------------------------
-
-  /** Only the expanded panel resizes; collapsed and strip rows keep their own
-   *  height. The stylesheet clamps the height to the chat column. */
-  function applyHeight(): void {
-    const expanded = st.root.classList.contains("dm-call-panel--expanded");
-    st.resizer.hidden = !expanded;
-    if (!expanded) {
-      endDrag();
-      st.root.style.removeProperty("--dcp-height");
-      return;
-    }
-    if (st.savedHeight > 0)
-      st.root.style.setProperty("--dcp-height", `${String(st.savedHeight)}px`);
-    else st.root.style.removeProperty("--dcp-height");
-    st.resizer.setAttribute("aria-valuemax", String(maxHeight()));
-    st.resizer.setAttribute("aria-valuenow", String(drawnHeight()));
-  }
-
-  function drawnHeight(): number {
-    return Math.round(st.root.getBoundingClientRect().height);
-  }
-
-  /** The tallest the panel may be: the chat column less its fixed rows (the
-   *  header, typing line and composer, at their current heights) and room for
-   *  a few messages. */
-  function maxHeight(): number {
-    let column = st.root.parentElement;
-    while (column !== null && getComputedStyle(column).display === "contents") {
-      column = column.parentElement;
-    }
-    if (column === null) return MIN_HEIGHT;
-    let fixed = 0;
-    for (const child of Array.from(column.children)) {
-      if (child.contains(st.root) || parseFloat(getComputedStyle(child).flexGrow) > 0) continue;
-      fixed += child.getBoundingClientRect().height;
-    }
-    const available = column.getBoundingClientRect().height - fixed - MESSAGES_MIN_HEIGHT;
-    return Math.max(MIN_HEIGHT, Math.round(available));
-  }
-
-  /** Saves what is actually drawn: an audio-only panel never goes below its
-   *  content (min-height: fit-content), so the saved height cannot sit under it. */
-  function setHeight(height: number, max: number): void {
-    st.savedHeight = Math.round(Math.max(MIN_HEIGHT, Math.min(height, max)));
-    applyHeight();
-    const drawn = drawnHeight();
-    if (drawn > 0 && drawn !== st.savedHeight) {
-      st.savedHeight = drawn;
-      applyHeight();
-    }
-  }
-
-  function endDrag(): void {
-    if (st.drag === null) return;
-    st.drag = null;
-    st.root.classList.remove("dm-call-panel--resizing");
-    savePref(HEIGHT_PREF, st.savedHeight);
-  }
-
-  st.resizer.addEventListener(
-    "pointerdown",
-    (e: PointerEvent) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      st.drag = {
-        startY: e.clientY,
-        startHeight: st.root.getBoundingClientRect().height,
-        max: maxHeight(),
-      };
-      st.root.classList.add("dm-call-panel--resizing");
-      try {
-        st.resizer.setPointerCapture(e.pointerId);
-      } catch {
-        // No capture (the pointer is already gone): moves over the handle still resize.
-      }
-    },
-    st.resizeOpts,
-  );
-
-  st.resizer.addEventListener(
-    "pointermove",
-    (e: PointerEvent) => {
-      if (st.drag !== null)
-        setHeight(st.drag.startHeight + e.clientY - st.drag.startY, st.drag.max);
-    },
-    st.resizeOpts,
-  );
-
-  st.resizer.addEventListener("pointerup", endDrag, st.resizeOpts);
-
-  st.resizer.addEventListener("pointercancel", endDrag, st.resizeOpts);
-
-  st.resizer.addEventListener("lostpointercapture", endDrag, st.resizeOpts);
-
-  st.resizer.addEventListener(
-    "keydown",
-    (e: KeyboardEvent) => {
-      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-      e.preventDefault();
-      const step = e.key === "ArrowUp" ? -KEY_STEP : KEY_STEP;
-      setHeight(st.root.getBoundingClientRect().height + step, maxHeight());
-      savePref(HEIGHT_PREF, st.savedHeight);
-    },
-    st.resizeOpts,
-  );
-
-  // Double-click puts the default height back.
-  st.resizer.addEventListener(
-    "dblclick",
-    () => {
-      st.savedHeight = 0;
-      applyHeight();
-      savePref(HEIGHT_PREF, 0);
-    },
-    st.resizeOpts,
-  );
-
   // --- Update ---------------------------------------------------------------
-
-  function rebuild(): void {
-    // Keep keyboard focus on the same control across a rebuild (a mute click
-    // must not drop focus to <body>); fall back to the region itself.
-    const active = document.activeElement;
-    const hadFocus = active instanceof HTMLElement && st.root.contains(active);
-    const focusId = hadFocus ? (active.dataset.testid ?? "") : "";
-
-    for (const child of Array.from(st.body.childNodes)) if (child !== st.videoEl) child.remove();
-    for (const ref of st.avatars.values()) ref.verify?.remove();
-    st.focusedShield = null;
-    st.avatars = new Map();
-    st.people = [];
-    st.controls = { mute: null, deafen: null, camera: null, share: null };
-    st.statusEl = null;
-    st.securedEl = null;
-    st.speakingEl = null;
-    st.timerEls = [];
-    st.root.classList.remove(
-      "dm-call-panel--expanded",
-      "dm-call-panel--collapsed",
-      "dm-call-panel--strip",
-      "dm-call-panel--video",
-    );
-
-    switch (st.view.kind) {
-      case "none":
-        break;
-      case "incoming":
-        dc.renderIncoming(st.view);
-        break;
-      case "live":
-        dc.renderLive(st.view);
-        break;
-      case "outgoing":
-        dc.renderOutgoing(st.view);
-        break;
-      case "unanswered":
-        dc.renderUnanswered(st.view);
-        break;
-      case "connected":
-        dc.renderConnected(st.view);
-        break;
-    }
-    if (!st.root.classList.contains("dm-call-panel--video")) st.videoEl.remove();
-    if (st.people.length > 0 || st.peopleGiven) {
-      st.options.videoGrid?.setPeople(st.people);
-      st.peopleGiven = st.people.length > 0;
-    }
-    st.root.hidden = st.view.kind === "none";
-    // After the reveal, so the separator's value is measured from a drawn panel.
-    applyHeight();
-    if (st.view.kind === "none") st.root.removeAttribute("aria-label");
-    else
-      st.root.setAttribute(
-        "aria-label",
-        d("region", { name: callName(st.view.dm, currentUserId()) }),
-      );
-    st.root.dataset.state = st.view.kind;
-
-    if (hadFocus) {
-      const same =
-        active.isConnected && st.videoEl.contains(active)
-          ? active
-          : focusId === ""
-            ? null
-            : st.body.querySelector<HTMLElement>(`[data-testid="${focusId}"]`);
-      if (same !== null) same.focus();
-      else if (!st.root.hidden) st.root.focus();
-    }
-  }
-
-  /** In-place updates that never rebuild: rings, badges, controls, status. */
-  function refresh(): void {
-    if (st.view.kind === "none") return;
-    const voice = voiceStore.getState();
-    const me = currentUserId();
-    const channelId = st.view.dm.channelId;
-    let speaker = "";
-    for (const [userId, ref] of st.avatars) {
-      const inCallHere = voice.currentChannelId === channelId;
-      const u = voiceUser(voice, channelId, userId);
-      const isSelf = userId === me;
-      const muted = isSelf && inCallHere ? isSelfMuted(voice) : (u?.muted ?? false);
-      const deafened = isSelf && inCallHere ? voice.localDeafened : (u?.deafened ?? false);
-      const speaking = u?.speaking === true && !muted;
-      ref.wrap.classList.toggle("dcp-avatar--speaking", speaking);
-      const badge = deafened ? "headphones-off" : muted ? "mic-off" : null;
-      ref.badge.hidden = badge === null;
-      if (badge !== null && ref.badge.dataset.icon !== badge) {
-        clearChildren(ref.badge);
-        ref.badge.appendChild(createIcon(badge, 14));
-        ref.badge.dataset.icon = badge;
-        ref.badge.title = deafened ? d("deafened") : d("muted");
-      }
-      if (speaking && !isSelf && speaker === "") {
-        speaker = resolvePerson(userId, st.view.dm, voice, me).name;
-      }
-      if (isSelf) dc.syncOwnShield(userId, ref, inCallHere ? voice : null);
-      else dc.syncVerify(userId, ref, voice, st.view.dm);
-    }
-    if (st.speakingEl !== null) {
-      const text = speaker === "" ? "" : ` · ${d("speaking", { name: speaker })}`;
-      if (st.speakingEl.textContent !== text) setText(st.speakingEl, text);
-    }
-
-    if (st.view.kind === "connected" && st.statusEl !== null) {
-      setText(st.statusEl, connectedStatus(st.view, voice.voiceStatus));
-    }
-    if (st.securedEl !== null) {
-      const connected = voice.voiceStatus === "connected";
-      const degraded = connected && voice.encryptionDegraded === true;
-      st.securedEl.hidden = !connected;
-      st.securedEl.classList.toggle("dcp-secured--degraded", degraded);
-      setText(st.securedEl, degraded ? t("encryption.unsecured") : t("encryption.secured"));
-      st.securedEl.title = degraded ? t("encryption.unsecuredLabel") : t("encryption.securedLabel");
-    }
-
-    // Controls: the widget's rules. Socket down freezes camera and share
-    // (Leave stays live; mute and deafen apply locally and are restated when
-    // the socket returns); a moderator mute is not ours to lift.
-    const frozen = uiStore.getState().connectionStatus !== "connected";
-    const reason = frozen ? t("status.notConnected") : "";
-    // No room to attach a camera or screen to until the join has connected.
-    const connecting = isConnecting(voice.voiceStatus);
-    const { mute, deafen, camera, share } = st.controls;
-    if (mute !== null) {
-      const selfMuted = isSelfMuted(voice);
-      mute.setAttribute("aria-pressed", String(selfMuted));
-      swapIcon(mute, selfMuted || voice.listenOnly ? "mic-off" : "mic", 20);
-      mute.disabled = voice.localServerMuted === true || voice.listenOnly;
-      mute.title =
-        voice.localServerMuted === true
-          ? t("widget.mutedByModerator")
-          : voice.listenOnly
-            ? t("widget.control.listenOnly")
-            : t("widget.control.mute");
-    }
-    if (deafen !== null) {
-      deafen.setAttribute("aria-pressed", String(voice.localDeafened));
-      swapIcon(deafen, voice.localDeafened ? "headphones-off" : "headphones", 20);
-      deafen.disabled = voice.localServerDeafened === true;
-      deafen.title =
-        voice.localServerDeafened === true
-          ? t("widget.deafenedByModerator")
-          : t("widget.control.deafen");
-    }
-    if (camera !== null) {
-      camera.setAttribute("aria-pressed", String(voice.localCamera));
-      swapIcon(camera, voice.localCamera ? "camera-off" : "camera", 20);
-      camera.disabled = frozen || connecting;
-      camera.title = reason || (connecting ? t("status.joining") : t("widget.control.camera"));
-    }
-    if (share !== null) {
-      share.setAttribute("aria-pressed", String(voice.localScreenshare));
-      swapIcon(share, voice.localScreenshare ? "monitor-off" : "monitor", 20);
-      const block = shareBlockReason(voice);
-      share.disabled = frozen || connecting || block !== null;
-      share.title = reason || (connecting ? t("status.joining") : (block ?? d("share")));
-    }
-    tick();
-  }
-
-  function tick(): void {
-    const text = st.answeredAt === null ? "00:00" : formatElapsed(Date.now() - st.answeredAt);
-    for (const el of st.timerEls) if (el.textContent !== text) setText(el, text);
-  }
 
   function syncTimer(): void {
     const running = st.timerEls.length > 0;
@@ -625,7 +357,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       // Turning the device moves the window onto or off the phone layout.
       st.disposable.onEvent(window, "resize", () => update());
       st.unsubs.push(
-        voiceStore.subscribe(() => update()),
+        voiceStore.subscribeSelector(panelVoiceKey, () => update()),
         channelsStore.subscribeSelector(
           (s) => s.activeChannelId,
           () => update(),

@@ -1,7 +1,7 @@
 import { expect } from "vitest";
 import { resetMessagesState } from "./storeResets";
 import { type Message } from "@stores/messages.store";
-import type { messageActionGates } from "@components/message-list/messageActions";
+import type { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
 
 type Gates = ReturnType<typeof messageActionGates>;
 
@@ -30,7 +30,7 @@ export function openRowMenu(row: HTMLElement): void {
 /** Right-clicks `row` and asserts no message menu ever appears. */
 export async function expectNoRowMenu(row: HTMLElement): Promise<void> {
   openRowMenu(row);
-  await import("@components/message-list/messageMenu");
+  await import("../../src/features/messaging/message-list/messageMenu");
   await new Promise((r) => setTimeout(r, 0));
   expect(document.querySelector(".message-context-menu")).toBeNull();
 }

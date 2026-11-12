@@ -36,10 +36,7 @@ func newFocusHub(t *testing.T, n int) (*Hub, *Client, []int64, context.CancelFun
 	limiter := auth.NewRateLimiter()
 	hub := newTestHub(t, database, limiter, service.New(database, limiter))
 
-	uid, err := database.CreateUser(context.Background(), "fastswitch", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "fastswitch", 1)
 	user, err := database.GetUserByUsername(context.Background(), "fastswitch")
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByUsername: %v", err)
@@ -188,5 +185,34 @@ func TestDeferredFocus_KeepsReadFlag(t *testing.T) {
 	waitFor(t, "drain goroutine to exit", func() bool { return !drainActive(c) })
 	if _, _, found, err := hub.db.GetReadState(ctx, c.userID, chans[1]); err != nil || !found {
 		t.Errorf("deferred default focus left no read state (found=%v err=%v)", found, err)
+	}
+}
+
+// A focus still parked when the socket drops must not land after the hub has
+// stripped the connection's topics: nothing would ever remove that subscription.
+func TestDeferredFocus_DoesNotLandAfterDisconnect(t *testing.T) {
+	hub, c, chans, _ := newFocusHub(t, 6)
+	hub.registerNowTest(c, nil)
+	for _, id := range chans {
+		hub.HandleMessageForTest(c, focusFrame(id))
+	}
+	if !drainActive(c) {
+		t.Fatal("setup: the sixth focus should be parked with a drain running")
+	}
+
+	// The read loop ended: its teardown unregisters first, and the voice leave
+	// and presence stamps follow.
+	if replaced := hub.unregisterNow(c); replaced {
+		t.Fatal("setup: a plain disconnect, not a replacement")
+	}
+	waitFor(t, "drain goroutine to exit", func() bool { return !drainActive(c) })
+
+	last := chans[len(chans)-1]
+	if n := hub.pubsub.SubscriberCount(ChannelTopic(last)); n != 0 {
+		t.Fatalf("disconnected client still subscribed to channel %d (%d subscribers, topics %v)",
+			last, n, hub.pubsub.TopicsForClient(c))
+	}
+	if topics := hub.pubsub.TopicsForClient(c); len(topics) != 0 {
+		t.Fatalf("disconnected client kept topics %v", topics)
 	}
 }

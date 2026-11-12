@@ -12,9 +12,12 @@ vi.mock("../../src/features/messaging/content/attachments", () => ({
   resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
 }));
 
-import { createPinnedMessages } from "@components/PinnedMessages";
+import { createPinnedMessages } from "../../src/features/messaging/PinnedMessages";
 import { setMembers } from "@stores/members.store";
-import type { PinnedMessage, PinnedMessagesOptions } from "@components/PinnedMessages";
+import type {
+  PinnedMessage,
+  PinnedMessagesOptions,
+} from "../../src/features/messaging/PinnedMessages";
 
 const samplePins: PinnedMessage[] = [
   {

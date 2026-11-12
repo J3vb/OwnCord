@@ -15,12 +15,15 @@ window.__test = {
   get state(){return state}, get sysHealth(){return sysHealth},
   renderSystemHealth: renderSystemHealth, pollSystemHealth: pollSystemHealth,
   sectionAllowed: sectionAllowed, copySystemHealth: copySystemHealth,
+  restartVoiceServer: restartVoiceServer,
 };
 </script>`;
 const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 const ADMINISTRATOR = 0x40000000;
 const MANAGE_CHANNELS = 0x20000;
+const VIEW_DIAGNOSTICS = 0x100;
+const MANAGE_CONFIG = 0x4;
 
 interface Bridge {
   state: { me: unknown; section: string; token: string };
@@ -29,6 +32,7 @@ interface Bridge {
   pollSystemHealth: (seq: number, token: string) => Promise<void>;
   sectionAllowed: (id: string) => boolean;
   copySystemHealth: () => void;
+  restartVoiceServer: () => Promise<void>;
 }
 
 type Responder = (path: string) => Promise<unknown> | unknown;
@@ -109,6 +113,19 @@ function holdable() {
   return gate;
 }
 
+const GAVE_UP = {
+  ...HEALTH,
+  livekit: { managed: true },
+  snapshot: {
+    ...HEALTH.snapshot,
+    livekit_managed: true,
+    livekit_healthy: false,
+    livekit_gave_up: true,
+    livekit_restarts: 5,
+    livekit_next_retry_at: "2026-11-03T19:06:30Z",
+  },
+};
+
 function fact(host: Element, card: string, label: string): string | undefined {
   const dts = Array.from(host.querySelectorAll(`#${card} dt`));
   const dt = dts.find((d) => d.textContent === label);
@@ -179,22 +196,52 @@ describe("Server/admin/static — System health page", () => {
   });
 
   it("shows the managed LiveKit's supervisor state", async () => {
-    const managed = {
-      ...HEALTH,
-      livekit: { managed: true },
-      snapshot: {
-        ...HEALTH.snapshot,
-        livekit_managed: true,
-        livekit_healthy: false,
-        livekit_gave_up: true,
-        livekit_restarts: 5,
-      },
-    };
-    const booted = await boot([], () => managed);
+    const booted = await boot([], () => GAVE_UP);
     dom = booted.dom;
+    booted.bridge.state.me = { permissions: VIEW_DIAGNOSTICS | MANAGE_CONFIG };
     const host = render(dom, await booted.bridge.renderSystemHealth());
     expect(fact(host, "sysVoice", "State")).toBe("Stopped restarting");
     expect(fact(host, "sysVoice", "Restarts")).toBe("5");
+    expect(fact(host, "sysVoice", "Next try")).toBe("in 7 minutes");
+    expect(host.querySelector('#sysVoice [data-action="restartVoiceServer"]')?.textContent).toBe(
+      "Restart voice server",
+    );
+  });
+
+  it("restarts the voice server from the card and refreshes it", async () => {
+    const paths: string[] = [];
+    let restarted = false;
+    const booted = await boot(paths, (p) => {
+      if (p === "/system/livekit/restart") {
+        restarted = true;
+        return { restarting: true };
+      }
+      return restarted
+        ? {
+            ...GAVE_UP,
+            snapshot: { ...GAVE_UP.snapshot, livekit_gave_up: false, livekit_healthy: true },
+          }
+        : GAVE_UP;
+    });
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: VIEW_DIAGNOSTICS | MANAGE_CONFIG };
+    render(dom, await booted.bridge.renderSystemHealth());
+    expect(dom.window.document.querySelector('[data-action="restartVoiceServer"]')).not.toBeNull();
+    await booted.bridge.restartVoiceServer();
+    expect(paths).toContain("/system/livekit/restart");
+    expect(fact(dom.window.document.body, "sysVoice", "State")).toBe("Running");
+    expect(dom.window.document.querySelector('[data-action="restartVoiceServer"]')).toBeNull();
+  });
+
+  // Like the server restart button: an Administrator without Manage Config
+  // sees the state but not the button.
+  it("hides the restart button without Manage Config", async () => {
+    const booted = await boot([], () => GAVE_UP);
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: ADMINISTRATOR };
+    const host = render(dom, await booted.bridge.renderSystemHealth());
+    expect(fact(host, "sysVoice", "State")).toBe("Stopped restarting");
+    expect(host.querySelector('[data-action="restartVoiceServer"]')).toBeNull();
   });
 
   // A locked or slow database: the server answers "timeout" for that card

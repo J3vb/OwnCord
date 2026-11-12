@@ -20,6 +20,10 @@ use tauri::{AppHandle, Runtime};
 
 use crate::constants::{CERTS_STORE, CERT_WEB_PKI_STORE};
 
+pub(crate) use owncord_parse::pins::{
+    cert_store_key, decide, extract_host, web_pki_record, Observed, TofuOutcome,
+};
+
 /// The distinct code a loopback proxy reports for a TLS/certificate failure.
 /// The webview maps it to its own certificate copy: without
 /// it, a refused or failed handshake is indistinguishable from an unreachable
@@ -32,14 +36,6 @@ pub(crate) const TLS_CERT_ERROR_CODE: &str = "TLS_CERT_UNVERIFIED";
 /// failure apart from an unreachable server.
 pub(crate) fn cert_connect_error(message: &str) -> String {
     serde_json::json!({ "error": TLS_CERT_ERROR_CODE, "message": message }).to_string()
-}
-
-/// What the handshake showed: the leaf's fingerprint, and whether the chain
-/// validated against the public web-PKI roots for the connection's DNS name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Observed {
-    pub(crate) fingerprint: String,
-    pub(crate) web_pki_valid: bool,
 }
 
 /// Shared observation captured during the TLS handshake.
@@ -368,55 +364,6 @@ impl rustls::client::danger::ServerCertVerifier for HostScopedVerifier {
 
 // ── store keys ──────────────────────────────────────────────────────────────
 
-/// Cert-store key for a host. Strips a default `:443` so the ws proxy (which
-/// keys off `wss://host` with no explicit 443) and the http/livekit proxies
-/// (which see `host:443`) resolve the SAME pin. Non-default ports are kept.
-/// Case-folded (DNS names are case-insensitive): the host reaches this from
-/// several places (a profile-entered host verbatim, a `wss://` URL, a URL
-/// parsed on the TS side, which lowercases) — without folding case here, two
-/// callers with the same server in different case would pin/read different
-/// entries, opening a second, unpinned proxy tunnel.
-///
-/// Also strips brackets from a *portless* bracketed IPv6 literal ("[::1]" →
-/// "::1"), after the `:443` strip above runs (so "[::1]:443" also unwraps).
-/// The ws proxy computes this key from a bracketed `wss://[::1]/...`
-/// authority (ws.ts's `bracketBareIPv6Host` has to bracket a bare IPv6 host
-/// for the URL to parse at all), while the http/livekit proxies
-/// may see the bare or default-port-bracketed form of the very same server —
-/// without unwrapping here those resolve to different keys and the same
-/// server's certificate gets pinned (and re-confirmed by the user) twice. A
-/// *non-default* port keeps its brackets: "[::1]:8443" stays its own distinct
-/// key, matching how a plain "host:8443" is never collapsed into "host".
-pub(crate) fn cert_store_key(host: &str) -> String {
-    // Only strip a trailing ":443" when what's left is unambiguously a host
-    // (no remaining colon) or a bracketed IPv6 literal (ends in `]`, as in
-    // "[::1]:443"). Without this guard, a BARE IPv6 literal whose final
-    // hextet is "443" — e.g. "fd00::443" — would have that hextet eaten as
-    // if it were a port, truncating the address to "fd00:" and pinning the
-    // same server under a different key than the ws/livekit proxies use for
-    // the bracketed form of the same address.
-    let stripped = match host.strip_suffix(":443") {
-        Some(rest) if !rest.contains(':') || rest.ends_with(']') => rest,
-        _ => host,
-    };
-    let unbracketed = stripped
-        .strip_prefix('[')
-        .and_then(|rest| rest.strip_suffix(']'))
-        .unwrap_or(stripped);
-    unbracketed.to_ascii_lowercase()
-}
-
-/// Extract the host (with any non-default port) from a `wss://` URL.
-pub(crate) fn extract_host(url: &str) -> String {
-    cert_store_key(
-        url.strip_prefix("wss://")
-            .unwrap_or(url)
-            .split('/')
-            .next()
-            .unwrap_or(url),
-    )
-}
-
 /// Load the stored pin for `host` from the Tauri cert store.
 pub(crate) fn load_stored_fingerprint<R: Runtime>(
     app: &AppHandle<R>,
@@ -431,53 +378,6 @@ pub(crate) fn load_stored_fingerprint<R: Runtime>(
 }
 
 // ── the TOFU decision (pure) ────────────────────────────────────────────────
-
-/// The trust decision for an observed fingerprint given the stored pin.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum TofuOutcome {
-    /// A pin exists and matches — proceed.
-    Trusted,
-    /// No pin exists — do NOT trust or forward; ask the user to confirm.
-    FirstUse,
-    /// A pin exists but differs — reject; possible MITM or cert rotation.
-    Mismatch { stored: String },
-    /// A pin exists and differs, but the pinned leaf was publicly valid for
-    /// this host and so is the new one: a routine public-CA renewal. Proceed;
-    /// `evaluate` has already re-pinned.
-    Renewed { stored: String },
-}
-
-/// Pure trust decision. No I/O, no persistence — this is the whole point of the
-/// F4/F8 fix: deciding never writes a pin. `web_pki_pin` is the pinned leaf
-/// recorded as publicly valid for this host, if any; it vouches only while it
-/// equals the stored pin.
-pub(crate) fn decide(
-    stored: Option<String>,
-    web_pki_pin: Option<&str>,
-    current: &Observed,
-) -> TofuOutcome {
-    match stored {
-        None => TofuOutcome::FirstUse,
-        Some(s) if s == current.fingerprint => TofuOutcome::Trusted,
-        Some(s) if current.web_pki_valid && web_pki_pin == Some(s.as_str()) => {
-            TofuOutcome::Renewed { stored: s }
-        }
-        Some(s) => TofuOutcome::Mismatch { stored: s },
-    }
-}
-
-/// The fingerprint to record as the publicly valid pinned leaf after
-/// `outcome`, or `None` to leave the record alone. Only a leaf that is pinned
-/// and seen publicly valid is ever recorded.
-pub(crate) fn web_pki_record(
-    outcome: &TofuOutcome,
-    current: &Observed,
-    recorded: Option<&str>,
-) -> Option<String> {
-    let pinned = matches!(outcome, TofuOutcome::Trusted | TofuOutcome::Renewed { .. });
-    (pinned && current.web_pki_valid && recorded != Some(current.fingerprint.as_str()))
-        .then(|| current.fingerprint.clone())
-}
 
 /// Load the stored pin and decide. Persists only the automatic cases: the
 /// web-PKI record of a publicly valid pinned leaf, and a renewal's new pin.

@@ -18,9 +18,7 @@ func TestErasureRetentionMarkers_ErrorsOnAClosedStore(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, database, "closed-store")
 	chID := seedChannel(t, database, "closed-chan")
-	if err := database.SetChannelRetention(ctx, chID, 3, uid); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetChannelRetention", database.SetChannelRetention(ctx, chID, 3, uid))
 	// The read paths that have rows to return before the close.
 	if list, err := database.ListChannelRetention(ctx); err != nil || len(list) != 1 || list[0].Days != 3 {
 		t.Fatalf("ListChannelRetention = %+v, %v", list, err)
@@ -34,9 +32,7 @@ func TestErasureRetentionMarkers_ErrorsOnAClosedStore(t *testing.T) {
 	if days, err := database.ServerRetentionDays(ctx); err != nil || days != 0 {
 		t.Fatalf("a negative retention_days = %d, %v; want 0", days, err)
 	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", database.Close())
 
 	calls := map[string]func() error{
 		"EraseAccount":                func() error { _, err := database.EraseAccount(ctx, uid, ""); return err },
@@ -70,12 +66,8 @@ func TestErasureRetentionMarkers_ErrorsOnAClosedStore(t *testing.T) {
 	}
 
 	m, err := db.OpenMarkerStore(filepath.Join(t.TempDir(), "erasure", "markers.sqlite"), make([]byte, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "OpenMarkerStore", err)
+	mustDo(t, "Close", m.Close())
 	if err := m.Close(); err != nil { // a second close is harmless
 		t.Errorf("second Close = %v", err)
 	}
@@ -105,9 +97,7 @@ func TestErasureRetentionMarkers_ErrorsOnAClosedStore(t *testing.T) {
 	}
 	// A marker file whose directory cannot be created.
 	blocked := filepath.Join(t.TempDir(), "not-a-dir")
-	if err := writeFile(blocked, "x"); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "writeFile", writeFile(blocked, "x"))
 	if _, err := db.OpenMarkerStore(filepath.Join(blocked, "erasure", "markers.sqlite"), make([]byte, 32)); err == nil {
 		t.Error("OpenMarkerStore under a file succeeded")
 	}
@@ -120,9 +110,7 @@ func TestMarkerStore_ReplayPropagatesCallbackErrors(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, database, "replay-error")
 	m, err := db.OpenMarkerStore(filepath.Join(t.TempDir(), "markers.sqlite"), make([]byte, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "OpenMarkerStore", err)
 	t.Cleanup(func() { _ = m.Close() })
 	tok, _, _ := m.RecordPendingAccount(ctx, uid, 0)
 	_ = m.ConfirmAccount(ctx, tok)

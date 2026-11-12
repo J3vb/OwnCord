@@ -1,3 +1,4 @@
+use owncord_parse::pins::{identity_pin_key, validate_identity_pin_args};
 use serde_json::Value;
 
 use crate::constants::{CERTS_STORE, IDENTITY_PINS_STORE, SETTINGS_STORE};
@@ -120,17 +121,6 @@ fn read_cert_pin<R: tauri::Runtime>(
 // keyed on `{host}:{userId}` and the value is a peer's base64 identity public
 // key (opaque here — the JS side parses it) instead of a SHA-256 fingerprint.
 
-/// Max length for a base64 identity public key (DoS guard). A raw P-256 key is
-/// 65 bytes (~88 base64 chars); an SPKI-wrapped one ~124. 512 is generous.
-const MAX_IDENTITY_PIN_LEN: usize = 512;
-
-/// Store key for a peer's identity pin. A mismatch here (wrong separator, etc.)
-/// would make pins silently fail to match and accept a MITM'd key, so it is a
-/// pure, testable helper shared by both commands.
-fn identity_pin_key(host: &str, user_id: &str) -> String {
-    format!("{host}:{user_id}")
-}
-
 #[tauri::command(async)]
 pub fn store_identity_pin(
     app: tauri::AppHandle,
@@ -142,36 +132,7 @@ pub fn store_identity_pin(
     // Never pre-session: peer pins are written during an authenticated voice
     // session. Only its host's pins may be written.
     session.ensure(&host, false)?;
-    if host.is_empty() || host.len() > 253 {
-        return Err("host must be 1-253 characters".into());
-    }
-    // Validate host format: alphanumeric, dots, hyphens, colons (port), brackets (IPv6)
-    if !host
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
-    {
-        return Err("host contains invalid characters".into());
-    }
-    if user_id.is_empty() || user_id.len() > 64 {
-        return Err("user_id must be 1-64 characters".into());
-    }
-    if !user_id
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
-    {
-        return Err("user_id contains invalid characters".into());
-    }
-    if pin.is_empty() || pin.len() > MAX_IDENTITY_PIN_LEN {
-        return Err("pin must be 1-512 characters".into());
-    }
-    // Base64 charset (standard + url-safe + padding). Guards against garbage/DoS;
-    // the actual key parsing/verification happens on the JS side.
-    if !pin
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '-' | '_'))
-    {
-        return Err("pin contains invalid characters".into());
-    }
+    validate_identity_pin_args(&host, &user_id, &pin)?;
 
     let store = crate::json_store::open(&app, IDENTITY_PINS_STORE)
         .map_err(|e| format!("failed to open identity pins store: {e}"))?;

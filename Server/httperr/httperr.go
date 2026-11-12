@@ -1,7 +1,5 @@
-// Package httperr writes the standard JSON error reply,
-// {"error": CODE, "message": text}, for HTTP handlers outside api and admin
-// (the plugin asset server, the LiveKit webhook, the WebSocket upgrade), so
-// every error the server answers has the same shape as a REST error.
+// Package httperr writes the standard JSON error reply {"error": CODE, "message": text} for handlers
+// outside api and admin (plugin assets, LiveKit webhook, WebSocket upgrade), matching REST errors.
 package httperr
 
 import (

@@ -32,18 +32,12 @@ func TestHandleWithdrawAppeal_BroadcastsToModeratorNotToAppellant(t *testing.T) 
 	// The appellant independently holds MODERATE_MEMBERS (role 3), so the
 	// exclusion this test pins is F5's appellant rule, not a plain member's
 	// lack of the bit.
-	appellantID, err := database.CreateUser(ctx, "wh-appellant-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser(appellant): %v", err)
-	}
+	appellantID := mustCreateUser(t, database, "wh-appellant-mod", 3)
 	actingModID, err := database.CreateUser(ctx, "wh-acting-mod", "hash", 1) // Owner: outranks role 3
 	if err != nil {
 		t.Fatalf("CreateUser(acting mod): %v", err)
 	}
-	otherModID, err := database.CreateUser(ctx, "wh-other-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser(other mod): %v", err)
-	}
+	otherModID := mustCreateUser(t, database, "wh-other-mod", 3)
 
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
@@ -68,13 +62,7 @@ func TestHandleWithdrawAppeal_BroadcastsToModeratorNotToAppellant(t *testing.T) 
 	api.MountAppealRoutes(r, svc)
 	api.MountModerationAppealRoutes(r, svc)
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, appellantID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, appellantID)
 
 	actionID, err := database.WarnUser(ctx, appellantID, actingModID, nil, "x")
 	if err != nil {

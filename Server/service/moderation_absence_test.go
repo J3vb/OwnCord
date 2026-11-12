@@ -28,9 +28,7 @@ var forbiddenModerationIdentifiers = []string{
 // all, and reviewing that touch is exactly the point.
 func TestAbsenceContract_NoPluginModerationCapability(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("..", "plugin", "host_*.go"))
-	if err != nil {
-		t.Fatalf("glob host_*.go: %v", err)
-	}
+	mustDo(t, "glob host_*.go", err)
 	var scanned int
 	var hits []string
 	for _, f := range files {
@@ -85,9 +83,7 @@ func TestModerationService_RefusesNonHumanActor(t *testing.T) {
 		{"ban", func(actorID int64) error { return f.mod.BanUser(ctx, actorID, fixtureMember, "x", nil) }},
 		{"removal", func(actorID int64) error {
 			msgID, err := f.database.CreateMessage(ctx, fixtureChannel, fixtureMember2, "hi", nil)
-			if err != nil {
-				t.Fatalf("CreateMessage: %v", err)
-			}
+			mustDo(t, "CreateMessage", err)
 			_, err = f.mod.ActOnReport(ctx, ActOnReportParams{ActorID: actorID, Kind: "removal", MessageID: msgID, ReportID: 1})
 			return err
 		}},

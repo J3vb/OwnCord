@@ -43,7 +43,8 @@ export function select<const S extends readonly Source<unknown>[], R>(
 ): Selection<R> {
   const { signal, equals = shallowEqual } = opts;
   const distinct = [...new Set<Source<unknown>>(sources)];
-  const run = (): R => project(...(sources.map((s) => s.getState()) as unknown as StatesOf<S>));
+  // map() loses the tuple: each entry is still the state of the source at its index.
+  const run = (): R => project(...(sources.map((s) => s.getState()) as StatesOf<S>));
   let current = run();
 
   if (signal.aborted) return { get: () => current };

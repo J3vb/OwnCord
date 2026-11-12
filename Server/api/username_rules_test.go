@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -76,9 +75,7 @@ func TestUpdateProfile_RenameRefusesStrictInvalidUsername(t *testing.T) {
 // directly, as every account made before 3C-9 is) still logs in and recovers,
 // can still edit the rest of its profile, and is refused only a rename.
 func TestLegacyUsername_StillLogsInRecoversAndEditsProfile(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 	profileRouter := buildProfileRouter(database)
 	const legacy = "old name"
 	uid := seedUser(t, database, legacy, "LegacyPass1!", 4)
@@ -89,32 +86,23 @@ func TestLegacyUsername_StillLogsInRecoversAndEditsProfile(t *testing.T) {
 	}
 
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/recovery-kit", token, map[string]string{"password": "LegacyPass1!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("enrolment = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var issue struct {
+	requireStatus(t, rr, http.StatusOK)
+	issue := decodeBody[struct {
 		KitSecret string `json:"kit_secret"`
-	}
-	_ = json.NewDecoder(rr.Body).Decode(&issue)
+	}](t, rr)
 	rr = postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": legacy, "kit_secret": issue.KitSecret, "new_password": "Recovered-Pass2!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("recovery with a legacy name = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	// Recovery revoked every session; sign in again for the profile calls.
 	token = issueSessionToken(t, database, uid)
 
 	// Resending the same name while editing another field is not a rename.
 	rr = patchJSON(t, profileRouter, "/api/v1/users/me", token, map[string]string{"username": legacy, "display_name": "Old Name"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("display-name edit that resends the legacy name = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	// Only an actual rename is held to the strict rules.
 	rr = patchJSON(t, profileRouter, "/api/v1/users/me", token, map[string]string{"username": "another name"})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("rename to a name with a space = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestUpdateProfile_DisplayNameCharacterRules(t *testing.T) {
@@ -130,22 +118,18 @@ func TestUpdateProfile_DisplayNameCharacterRules(t *testing.T) {
 			t.Errorf("display_name %q = %d, want 400; body = %s", name, rr.Code, rr.Body.String())
 			continue
 		}
-		var e struct {
+		e := decodeBody[struct {
 			Error string `json:"error"`
-		}
-		_ = json.NewDecoder(rr.Body).Decode(&e)
+		}](t, rr)
 		if e.Error != "INVALID_INPUT" {
 			t.Errorf("display_name %q error code = %q, want INVALID_INPUT", name, e.Error)
 		}
 	}
 	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{"username": "dnrules", "display_name": "  Ada    Lovelace  "})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("display_name with extra spaces = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var got struct {
+	requireStatus(t, rr, http.StatusOK)
+	got := decodeBody[struct {
 		DisplayName string `json:"display_name"`
-	}
-	_ = json.NewDecoder(rr.Body).Decode(&got)
+	}](t, rr)
 	if got.DisplayName != "Ada Lovelace" {
 		t.Errorf("display_name = %q, want collapsed %q", got.DisplayName, "Ada Lovelace")
 	}
@@ -163,28 +147,20 @@ func TestLegacyApostropheUsername_ProfileEditAndRecovery(t *testing.T) {
 	token := issueSessionToken(t, database, uid)
 
 	rr := patchJSON(t, profileRouter, "/api/v1/users/me", token, map[string]string{"username": legacy, "display_name": "Paddy"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("PATCH with the legacy name and a new display name = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var got struct {
+	requireStatus(t, rr, http.StatusOK)
+	got := decodeBody[struct {
 		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
-	}
-	_ = json.NewDecoder(rr.Body).Decode(&got)
+	}](t, rr)
 	if got.Username != legacy || got.DisplayName != "Paddy" {
 		t.Errorf("response username=%q display_name=%q, want %q / %q", got.Username, got.DisplayName, legacy, "Paddy")
 	}
 
 	rr = postJSONWithToken(t, router, "/api/v1/users/me/recovery-kit", token, map[string]string{"password": "LegacyPass1!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("enrolment = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var issue struct {
+	requireStatus(t, rr, http.StatusOK)
+	issue := decodeBody[struct {
 		KitSecret string `json:"kit_secret"`
-	}
-	_ = json.NewDecoder(rr.Body).Decode(&issue)
+	}](t, rr)
 	rr = postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": legacy, "kit_secret": issue.KitSecret, "new_password": "Recovered-Pass2!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("recovery with a legacy apostrophe name = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 }

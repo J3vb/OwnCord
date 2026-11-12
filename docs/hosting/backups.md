@@ -104,7 +104,11 @@ Dashboard tells you how it went.
 Good to know:
 
 - Everything after the backup is gone: new messages, accounts and settings.
-- Uploads are never in a backup, so they stay as they are.
+- Uploads are never in a backup, so they stay as they are. The server's
+  clean-up of files no message uses stands down for 7 days after a restore, so
+  going back to the safety copy still finds the files it names. After that,
+  files uploaded since the backup that the restored database does not name are
+  removed.
 - A restore is **not** going back a version. The running version opens the
   restored database. To go back a version, see
   [Upgrades](upgrades.md#going-back-a-version).

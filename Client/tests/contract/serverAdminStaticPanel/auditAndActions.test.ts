@@ -314,19 +314,19 @@ describe("Server/admin/static — panel behaviour", () => {
       "owner changed who can join",
       "owner changed the message retention policy",
       "owner reordered the roles",
-      "owner created role #5",
-      "owner deleted a message #55",
-      "owner signed out a session #12",
-      "owner created an invite #3",
-      "owner removed an emoji #5",
-      "owner created an API token #3",
+      "owner created a role",
+      "owner deleted a message",
+      "owner signed out a session",
+      "owner created an invite",
+      "owner removed an emoji",
+      "owner created an API token",
       "owner revoked an API token",
-      "owner took an appeal #3",
-      "owner appealed a moderation action #4",
-      "owner previewed permissions for channel #3",
+      "owner took an appeal",
+      "owner appealed a moderation action",
+      "owner previewed permissions for a channel",
       "owner deleted an account",
       "owner installed a plugin",
-      "owner disconnected user #9",
+      "owner disconnected a member",
       "owner took a backup",
       "owner banned an erased account",
     ]);
@@ -382,6 +382,38 @@ describe("Server/admin/static — panel behaviour", () => {
       }),
     ).toBe("An erased account changed their encryption key");
     expect(text({ ...backup, actor_id: 9, actor_name: "" })).toBe("user #9 took a backup");
+  });
+
+  // A target reads by the name the server lists with it, never by its row
+  // id; one without a name reads as its kind (the Details column names it).
+  it("names an audit target by its listed name, else by its kind", async () => {
+    const booted = await boot([], (p) =>
+      p === "/setup/status" ? { json: { needs_setup: false } } : { json: {} },
+    );
+    dom = booted.dom;
+    const { bridge } = booted;
+    const div = booted.dom.window.document.createElement("div");
+    const text = (e: object) => {
+      div.innerHTML = bridge.auditSentence({ actor_id: 1, actor_name: "owner", ...e });
+      return div.textContent!;
+    };
+    const row = (action: string, target_type: string, target_name?: string) =>
+      text({ action, target_type, target_id: 5, target_name });
+    expect(row("role_update", "role", "Helpers")).toBe("owner edited role Helpers");
+    expect(row("role_update", "role")).toBe("owner edited a role");
+    expect(row("user_kick", "user", "alice")).toBe("owner kicked alice");
+    expect(row("channel_update", "channel", "general")).toBe("owner edited #general");
+    expect(row("category_perms_update", "category", "Games")).toBe(
+      "owner changed role access on category Games",
+    );
+    expect(row("category_perms_update", "category")).toBe(
+      "owner changed role access on a category",
+    );
+    expect(row("invite_revoke", "invite")).toBe("owner revoked an invite");
+    expect(row("api_token_revoke", "api_token")).toBe("owner revoked an API token");
+    expect(row("something_new", "widget")).toBe("owner something new a widget");
+    // Markup in a name stays text.
+    expect(row("role_create", "role", "<b>x</b>")).toBe("owner created role <b>x</b>");
   });
 
   // Every client connection writes user_login and ws_connect, so the
@@ -531,7 +563,7 @@ describe("Server/admin/static — panel behaviour", () => {
 
     const rows = [...doc.querySelectorAll("#auditTbody tr.audit-row")];
     expect(rows.map((r) => r.querySelector(".audit-what")!.textContent)).toEqual([
-      "owner deleted channel #7",
+      "owner deleted a channel",
       "owner updated their profile",
       "bob made up thing",
     ]);

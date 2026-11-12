@@ -7,8 +7,7 @@ import (
 	"syscall"
 )
 
-// stopLiveKitProcess gives LiveKit a chance to close rooms and listeners.
-// exec.Cmd.WaitDelay escalates to Kill if the grace period expires.
+// stopLiveKitProcess lets LiveKit close rooms; exec.Cmd.WaitDelay escalates to Kill.
 func stopLiveKitProcess(process *os.Process) error {
 	return process.Signal(syscall.SIGTERM)
 }

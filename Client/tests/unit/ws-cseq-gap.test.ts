@@ -12,7 +12,7 @@ import { emitAuthOk, trackStates } from "../helpers/wsSuiteHarness";
 
 function frame(seq: number, cseq?: number, extra = ""): string {
   const head = cseq === undefined ? "" : `"cseq":${cseq},`;
-  return `{${head}"seq":${seq},"type":"typing","payload":{"channel_id":1${extra}}}`;
+  return `{${head}"seq":${seq},"type":"typing","payload":{"channel_id":1,"user_id":2,"username":"u"${extra}}}`;
 }
 
 function dials(): number {

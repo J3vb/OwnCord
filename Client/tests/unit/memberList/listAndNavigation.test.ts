@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createMemberList } from "@components/MemberList";
-import type { MemberListOptions } from "@components/MemberList";
+import { createMemberList } from "../../../src/features/members/MemberList";
+import type { MemberListOptions } from "../../../src/features/members/MemberList";
 import { membersStore, updatePresence, updateMemberRole } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
@@ -11,8 +11,8 @@ import {
   applyReadyCapabilities,
   resetServerCapabilities,
 } from "../../../src/lib/net/serverCapabilities";
-import "@components/UserProfilePopup";
-import "@components/AdminActions";
+import "../../../src/features/profiles/userProfilePopup";
+import "../../../src/features/moderation/AdminActions";
 import { lastResizeCallback } from "../../helpers/memberListMocks";
 import {
   useDarkSurfaces,

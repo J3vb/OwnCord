@@ -25,9 +25,7 @@ func TestTakeInventory_LockoutClassMatchesExactSuffixNotLIKE(t *testing.T) {
 	}
 
 	out, err := database.TakeInventory(ctx, subjectUID, "a_b")
-	if err != nil {
-		t.Fatalf("TakeInventory: %v", err)
-	}
+	mustDo(t, "TakeInventory", err)
 	if got := out["6 rate-limit keys"]; got != 0 {
 		t.Errorf(`TakeInventory("a_b") class 6 = %d, want 0 (login_user_lock:axb belongs to a different account and must not match)`, got)
 	}

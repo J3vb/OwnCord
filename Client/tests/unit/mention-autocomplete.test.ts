@@ -12,9 +12,9 @@ import {
   createMentionAutocomplete,
   filterMentionSuggestions,
   MAX_MENTION_SUGGESTIONS,
-} from "../../src/components/MentionAutocomplete";
-import { createMessageInput } from "../../src/components/MessageInput";
-import type { MessageInputOptions } from "../../src/components/MessageInput";
+} from "../../src/features/messaging/composer/MentionAutocomplete";
+import { createMessageInput } from "../../src/features/messaging/MessageInput";
+import type { MessageInputOptions } from "../../src/features/messaging/MessageInput";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
@@ -507,6 +507,18 @@ describe("composer integration", () => {
     ta.dispatchEvent(new Event("input", { bubbles: true }));
     press("Enter");
     expect(ta.value).toBe("hey @Alan  world");
+  });
+
+  it("Escape with the popup open closes it and leaves the reply in place", () => {
+    seedMembers(["aaron", "alice"]);
+    input.setReplyTo(5, "alice");
+    type("hello @a");
+    expect(popupEl()).not.toBeNull();
+    press("Escape");
+    expect(popupEl()).toBeNull();
+    expect(container.querySelector(".reply-bar")?.classList.contains("visible")).toBe(true);
+    press("Escape");
+    expect(container.querySelector(".reply-bar")?.classList.contains("visible")).toBe(false);
   });
 
   it("lets Enter send once the popup is closed", () => {

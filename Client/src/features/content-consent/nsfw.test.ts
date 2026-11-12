@@ -22,6 +22,7 @@ import {
 import { handleNsfwAck } from "../channels/wsHandlers";
 import { expectConsole } from "../../../tests/helpers/console";
 import { NSFW_ACKNOWLEDGEMENT_REQUIRED, nsfwConsentRequired, nsfwContentBlocked } from "./nsfw";
+import { validReply } from "../../../tests/helpers/restReplyFixtures";
 
 const SPICY = 7;
 const PLAIN = 8;
@@ -165,7 +166,7 @@ describe("content admission at the API client", () => {
     const read = api.getMessages(SPICY);
     await vi.waitFor(() => expect(mockFetch).toHaveBeenCalled());
     setNsfwAcknowledged(SPICY, false);
-    respond(json({ messages: [{ id: 1 }], has_more: false }));
+    respond(json(validReply("MessagesResponse")));
     expect((await refusal(read)).code).toBe(NSFW_ACKNOWLEDGEMENT_REQUIRED);
   });
 

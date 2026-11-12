@@ -24,12 +24,8 @@ func newTwoRoleFixture(t *testing.T) (*MessageService, *ChannelService, *Permiss
 	})
 	seedUser(t, database, &db.User{ID: 5, Username: "dave", Status: "online"})
 	seedUserRole(t, database, 5, permissions.MemberRoleID)
-	if err := database.AddUserRole(context.Background(), 5, helperRoleID); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
-	if err := database.UpsertChannelOverride(context.Background(), 10, permissions.MemberRoleID, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelOverride: %v", err)
-	}
+	mustDo(t, "AddUserRole", database.AddUserRole(context.Background(), 5, helperRoleID))
+	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(context.Background(), 10, permissions.MemberRoleID, 0, permissions.ReadMessages))
 	return svc, chSvc, svc.perms, database
 }
 
@@ -42,14 +38,10 @@ func TestMentionReaders_TwoRoleHolderCounted(t *testing.T) {
 	// dave's TOP role is one that cannot read the channel, so only a join on
 	// user_roles (not the users.role_id mirror) finds him through Helper.
 	seedRole(t, database, &db.Role{ID: 9, Name: "lead", Position: 30, Permissions: permissions.SendMessages})
-	if err := database.AddUserRole(ctx, 5, 9); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, 5, 9))
 
 	readers, err := svc.mentionReaders(ctx, 10, false, nil)
-	if err != nil {
-		t.Fatalf("mentionReaders: %v", err)
-	}
+	mustDo(t, "mentionReaders", err)
 	ids := make([]int64, 0, len(readers))
 	for _, r := range readers {
 		ids = append(ids, r.UserID)
@@ -77,16 +69,10 @@ func TestMentionReaders_AdminInLowerRoleBypassesUserDeny(t *testing.T) {
 	svc, _, _, database := newTwoRoleFixture(t)
 	ctx := context.Background()
 	seedRole(t, database, &db.Role{ID: 8, Name: "warden", Position: 5, Permissions: permissions.Administrator})
-	if err := database.AddUserRole(ctx, 5, 8); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
-	if err := database.UpsertChannelUserOverride(ctx, 10, 5, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelUserOverride: %v", err)
-	}
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, 5, 8))
+	mustDo(t, "UpsertChannelUserOverride", database.UpsertChannelUserOverride(ctx, 10, 5, 0, permissions.ReadMessages))
 	readers, err := svc.mentionReaders(ctx, 10, false, nil)
-	if err != nil {
-		t.Fatalf("mentionReaders: %v", err)
-	}
+	mustDo(t, "mentionReaders", err)
 	if !slices.ContainsFunc(readers, func(r db.MentionTarget) bool { return r.UserID == 5 }) {
 		t.Fatalf("an Administrator role below the top must bypass the per-user deny, readers = %+v", readers)
 	}
@@ -100,16 +86,12 @@ func TestPermissionService_UserDenyBeatsOtherRoleGrant(t *testing.T) {
 	ctx := context.Background()
 	seedRole(t, database, &db.Role{ID: 11, Name: "pinner", Position: 15,
 		Permissions: permissions.ReadMessages | permissions.ManageMessages})
-	if err := database.AddUserRole(ctx, 5, 11); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, 5, 11))
 	perms.InvalidateUser(5)
 	if !perms.HasChannelPerm(ctx, 5, 10, permissions.ManageMessages) {
 		t.Fatal("precondition: the second role grants ManageMessages")
 	}
-	if err := database.UpsertChannelUserOverride(ctx, 10, 5, 0, permissions.ManageMessages); err != nil {
-		t.Fatalf("UpsertChannelUserOverride: %v", err)
-	}
+	mustDo(t, "UpsertChannelUserOverride", database.UpsertChannelUserOverride(ctx, 10, 5, 0, permissions.ManageMessages))
 	perms.InvalidateUser(5)
 	if perms.HasChannelPerm(ctx, 5, 10, permissions.ManageMessages) {
 		t.Error("a per-user deny must beat the bit another held role grants")
@@ -138,9 +120,7 @@ func TestPermissionService_TwoRoleSubject(t *testing.T) {
 	}
 
 	sub, err := perms.Subject(ctx, 5, 10)
-	if err != nil {
-		t.Fatalf("Subject: %v", err)
-	}
+	mustDo(t, "Subject", err)
 	if len(sub.Layers) != 2 {
 		t.Fatalf("Subject.Layers = %+v, want one per held role", sub.Layers)
 	}
@@ -180,9 +160,7 @@ func TestPermissionService_LoadRacingRoleAddIsDiscarded(t *testing.T) {
 	seedRole(t, database, &db.Role{ID: helperRoleID, Name: "helper", Position: 20, Permissions: permissions.ReadMessages})
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "private", Type: "text"})
-	if err := database.UpsertChannelOverride(ctx, 10, permissions.MemberRoleID, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelOverride: %v", err)
-	}
+	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(ctx, 10, permissions.MemberRoleID, 0, permissions.ReadMessages))
 
 	store := &raceHookStore{DB: database}
 	svc := NewPermissionService(store, permissions.NewChecker(database))

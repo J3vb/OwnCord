@@ -11,8 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import {
   attachCategoryDragHandlers,
   attachDragHandlers,
-} from "@components/channel-sidebar/dragReorder";
-import type { ChannelReorderData } from "@components/ChannelSidebar";
+} from "../../src/features/channels/sidebar/dragReorder";
+import type { ChannelReorderData } from "../../src/features/channels/ChannelSidebar";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setCategories, setRoles } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";

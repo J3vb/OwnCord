@@ -12,7 +12,7 @@ import (
 // TestFileSizes_Rule locks OC-0400 and the default-ceiling inversion: an
 // unlisted file is capped at DefaultFileLimit, a declared exemption is capped
 // at its own ceiling, a file at exactly its limit passes, one line over fails,
-// and cmd/ is out of scope entirely.
+// and cmd/ is held to the default like the rest of the tree.
 func TestFileSizes_Rule(t *testing.T) {
 	// build returns a syntactically valid file of exactly n lines: a package
 	// clause, then n-1 blank comment lines.
@@ -36,13 +36,9 @@ func TestFileSizes_Rule(t *testing.T) {
 		{"unlisted file at the default", "ws/unrelated.go", build(500), 0},
 		{"unlisted file one line over the default", "ws/unrelated.go", build(501), 1},
 		{"unlisted file, arbitrarily long", "ws/unrelated.go", build(5000), 1},
-		{"exempt file under the default is not capped by it", "db/markers.go", build(600), 0},
-		// cmd/ holds entry points and one-shot tooling; a long main there is a
-		// shape, not a smell. The largest Go file in the tree lives in it.
-		{"cmd/ is out of scope", "cmd/smoke/drills.go", build(5000), 0},
-		{"cmd/ at the root is out of scope", "cmd/seed/main.go", build(5000), 0},
-		// Not a cmd/ prefix: a sibling directory whose name merely starts with it.
-		{"a directory named cmdfoo/ is not cmd/", "cmdfoo/x.go", build(501), 1},
+		// cmd/ is tooling and entry points, held to the same default.
+		{"cmd/ file at the default", "cmd/seed/main.go", build(500), 0},
+		{"cmd/ file one line over the default", "cmd/smoke/drills.go", build(501), 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,7 +75,7 @@ func lineCountOf(t *testing.T, root, rel string) int {
 
 // TestFileSizeOverridesAreSane keeps the exemption table itself honest: every
 // row names a real file, carries a class the rule defines and a note that lets
-// a reader judge it, sits on the right side of the default for its class, and
+// a reader judge it, is at or under the default (nothing is exempted upward), and
 // is not already exceeded. A row that has outlived its reason is deleted
 // rather than left behind as a licence.
 func TestFileSizeOverridesAreSane(t *testing.T) {
@@ -87,15 +83,10 @@ func TestFileSizeOverridesAreSane(t *testing.T) {
 	for rel, o := range FileSizeOverrides {
 		lines := lineCountOf(t, root, rel)
 		switch o.Class {
-		case classB3ExitTarget:
+		case classB3ExitTarget, classRegistrationPoint:
 			if o.Ceiling > DefaultFileLimit {
-				t.Errorf("%s: b3-exit-target ceiling %d is looser than the %d default",
-					rel, o.Ceiling, DefaultFileLimit)
-			}
-		case classGrandfathered:
-			if o.Ceiling <= DefaultFileLimit {
-				t.Errorf("%s: grandfathered ceiling %d is at or under the %d default — "+
-					"delete the row instead", rel, o.Ceiling, DefaultFileLimit)
+				t.Errorf("%s: %s ceiling %d is looser than the %d default",
+					rel, o.Class, o.Ceiling, DefaultFileLimit)
 			}
 		default:
 			t.Errorf("%s: class %q is not one the rule defines", rel, o.Class)

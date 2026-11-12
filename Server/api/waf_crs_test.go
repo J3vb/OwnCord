@@ -86,15 +86,10 @@ func TestWAFMiddleware_CRSDetectMode_DetectsXSSProbeWithoutBlocking(t *testing.T
 	middleware := newWAFMiddleware(2, CRSModeDetect, rec.record)
 
 	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	handler := middleware(noContent(&called))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels?q=<script>alert(1)</script>", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if !called {
 		t.Fatal("detect mode must never block: downstream handler was not called")
@@ -115,14 +110,10 @@ func TestWAFMiddleware_CRSDetectMode_DetectsPathTraversalProbe(t *testing.T) {
 	rec := &matchRecorder{}
 	middleware := newWAFMiddleware(2, CRSModeDetect, rec.record)
 
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	handler := middleware(noContent(nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/files?name=..%2f..%2f..%2fetc%2fpasswd", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
@@ -140,9 +131,7 @@ func TestWAFMiddleware_CRSDetectMode_DetectsPathTraversalProbe(t *testing.T) {
 // "WAF enabled" startup log doesn't count.
 func TestWAFMiddleware_CRSDetectMode_AggregatesMatchLoggingPerRequest(t *testing.T) {
 	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	handler := middleware(noContent(nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels?q=<script>alert(1)</script>", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
@@ -175,9 +164,7 @@ func TestWAFMiddleware_CRSDetectMode_AggregatesMatchLoggingPerRequest(t *testing
 func TestWAFMiddleware_CRSDetectMode_CustomCallbackStillPerRule(t *testing.T) {
 	rec := &matchRecorder{}
 	middleware := newWAFMiddleware(2, CRSModeDetect, rec.record)
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	handler := middleware(noContent(nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels?q=<script>alert(1)</script>", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
@@ -218,9 +205,7 @@ func TestWAFMiddleware_CRSDetectMode_AllowsBenignSQLishChatMessage(t *testing.T)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/messages", strings.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "OwnCordClient/1.0")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
@@ -236,9 +221,7 @@ func TestWAFMiddleware_CRSBlockMode_BlocksXSSProbe(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels?q=<script>alert(1)</script>", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403; body = %s", rr.Code, rr.Body.String())
@@ -254,17 +237,12 @@ func TestWAFMiddleware_CRSBlockMode_AllowsBenignJSONRequest(t *testing.T) {
 	middleware := NewWAFMiddlewareCRS(2, CRSModeBlock)
 
 	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	handler := middleware(noContent(&called))
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/users/me", strings.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "OwnCordClient/1.0")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if !called {
 		t.Fatal("expected downstream handler to be called")
@@ -291,9 +269,7 @@ func TestWAFMiddleware_CRSBlockMode_FalsePositivesOnSQLishChatProse(t *testing.T
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/messages", strings.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "OwnCordClient/1.0")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 (documented CRS false positive); body = %s", rr.Code, rr.Body.String())
@@ -307,15 +283,10 @@ func TestWAFMiddleware_CRSOffMode_SkipsCRSEntirely(t *testing.T) {
 	middleware := newWAFMiddleware(2, CRSModeOff, rec.record)
 
 	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	handler := middleware(noContent(&called))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels?q=<script>alert(1)</script>", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if !called {
 		t.Fatal("expected downstream handler to be called")
@@ -340,9 +311,7 @@ func TestWAFMiddleware_InlineRulesStillBlockInEveryCRSMode(t *testing.T) {
 
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/channels", nil)
 			req.Header.Set("User-Agent", "sqlmap/1.8")
-			req.RemoteAddr = "127.0.0.1:9999"
-			rr := httptest.NewRecorder()
-			handler.ServeHTTP(rr, req)
+			rr := serveLocal(handler, req)
 
 			if rr.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403; body = %s", rr.Code, rr.Body.String())
@@ -373,9 +342,7 @@ func TestWAFMiddleware_UploadBodyNotBufferedOrEmptied(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", strings.NewReader(requestBody))
 			req.Header.Set("Content-Type", "application/octet-stream")
 			req.Header.Set("User-Agent", "OwnCordClient/1.0")
-			req.RemoteAddr = "127.0.0.1:9999"
-			rr := httptest.NewRecorder()
-			handler.ServeHTTP(rr, req)
+			rr := serveLocal(handler, req)
 
 			if rr.Code != http.StatusNoContent {
 				t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
@@ -392,9 +359,7 @@ func TestWAFMiddleware_CRSLogsOmitTheQuery(t *testing.T) {
 	for _, mode := range []string{CRSModeDetect, CRSModeBlock} {
 		for _, host := range []string{"10.0.0.1", "127.0.0.1"} {
 			t.Run(mode+"/"+host, func(t *testing.T) {
-				handler := NewWAFMiddlewareCRS(2, mode)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(http.StatusNoContent)
-				}))
+				handler := NewWAFMiddlewareCRS(2, mode)(noContent(nil))
 				req := httptest.NewRequest(http.MethodGet, "/api/v1/files/abc?link="+token+"&q=<script>alert(1)</script>", nil)
 				req.Host = host
 				req.RemoteAddr = "127.0.0.1:9999"

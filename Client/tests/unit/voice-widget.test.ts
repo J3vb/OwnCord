@@ -36,7 +36,7 @@ vi.mock("@lib/voice/livekitSession", () =>
 
 vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true));
 
-import { createVoiceWidget } from "../../src/components/VoiceWidget";
+import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
 import { createConnectionStatsPoller } from "@lib/voice/connectionStats";
 import { voiceStore, type VoiceStatus } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
@@ -350,6 +350,28 @@ describe("VoiceWidget", () => {
     const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
     expect(cameraBtn.classList.contains("active-ctrl")).toBe(true);
     expect(cameraBtn.getAttribute("aria-pressed")).toBe("true");
+
+    widget.destroy?.();
+  });
+
+  it("swaps the camera and share icons only when they change, not on every tick", () => {
+    setVoiceChannel(1, []);
+    const widget = mountVoiceWidget();
+    const icon = (label: string) =>
+      container.querySelector(`[aria-label="${label}"] svg`) as SVGElement;
+    const camera = icon("Camera");
+    const share = icon("Screenshare");
+
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+    voiceStore.flush();
+    expect(icon("Camera")).toBe(camera);
+    expect(icon("Screenshare")).toBe(share);
+
+    voiceStore.setState((prev) => ({ ...prev, localCamera: true }));
+    voiceStore.flush();
+    expect(icon("Camera").getAttribute("data-icon")).toBe("camera-off");
+    expect(container.querySelectorAll('[aria-label="Camera"] svg')).toHaveLength(1);
+    expect(icon("Screenshare")).toBe(share);
 
     widget.destroy?.();
   });
@@ -876,6 +898,22 @@ describe("VoiceWidget", () => {
       } finally {
         mockIsLinuxDesktop.mockReturnValue(false);
       }
+    });
+
+    it("disables Enhanced Noise Suppression while the master switch is off", () => {
+      savePref("enhancedNoiseSuppression", true);
+      const { widget, btn } = mountWithButton();
+
+      savePref("noiseSuppression", false);
+      expect(btn.disabled).toBe(true);
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
+      btn.click();
+      expect(mockReapplyEnhanced).not.toHaveBeenCalled();
+
+      savePref("noiseSuppression", true);
+      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-pressed")).toBe("true");
+      widget.destroy?.();
     });
 
     it("starts from the saved pref and follows a change made in Settings", () => {

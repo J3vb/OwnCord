@@ -96,6 +96,7 @@ describe("E2EEIdentity", () => {
       identity_public_key: "device-pub",
       video_decode: ["vp8", "h264"],
       key_slots: true,
+      bound_offers: true,
     });
     expect(exportPublicKey).toHaveBeenCalledWith("pub");
     expect(getOrCreateIdentityKeyPair).toHaveBeenCalledWith("chat.example", 7);
@@ -108,6 +109,7 @@ describe("E2EEIdentity", () => {
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
       key_slots: true,
+      bound_offers: true,
     });
     expect(getOrCreateIdentityKeyPair).not.toHaveBeenCalled();
   });
@@ -119,6 +121,7 @@ describe("E2EEIdentity", () => {
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
       key_slots: true,
+      bound_offers: true,
     });
     expect(getOrCreateIdentityKeyPair).not.toHaveBeenCalled();
   });
@@ -158,6 +161,7 @@ describe("E2EEIdentity", () => {
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
       key_slots: true,
+      bound_offers: true,
     });
     // The stale pair was not cached: the next announce loads again.
     await identity.buildAnnouncePayload(EPHEMERAL);
@@ -178,6 +182,7 @@ describe("E2EEIdentity", () => {
         public_key: EPHEMERAL,
         video_decode: ["vp8", "h264"],
         key_slots: true,
+        bound_offers: true,
       });
       expect(signEphemeralKey).not.toHaveBeenCalled();
     },
@@ -198,6 +203,7 @@ describe("E2EEIdentity", () => {
       identity_public_key: "device-pub",
       video_decode: ["vp8", "h264"],
       key_slots: true,
+      bound_offers: true,
     });
   });
 
@@ -216,6 +222,7 @@ describe("E2EEIdentity", () => {
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
       key_slots: true,
+      bound_offers: true,
     });
   });
 });
@@ -227,6 +234,7 @@ describe("E2EEIdentity unsigned announces", () => {
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
       key_slots: true,
+      bound_offers: true,
     });
   });
 
@@ -237,6 +245,7 @@ describe("E2EEIdentity unsigned announces", () => {
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
       key_slots: true,
+      bound_offers: true,
     });
   });
 
@@ -247,6 +256,7 @@ describe("E2EEIdentity unsigned announces", () => {
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
       key_slots: true,
+      bound_offers: true,
     });
   });
 

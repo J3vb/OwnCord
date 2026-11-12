@@ -7,8 +7,8 @@ import { resetChannelsState, signInAs } from "../helpers/storeSeeds";
 vi.mock("@lib/voice/livekitSession", () => mocks.rePinOnlySessionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.inertE2eeCryptoMock());
 
-import { createChannelSidebar } from "../../src/components/ChannelSidebar";
-import { attachChannelContextMenu } from "../../src/components/channel-sidebar/contextMenu";
+import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
+import { attachChannelContextMenu } from "../../src/features/channels/sidebar/contextMenu";
 import {
   channelsStore,
   setChannels,

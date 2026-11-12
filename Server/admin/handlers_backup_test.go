@@ -3,7 +3,6 @@ package admin_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -43,20 +42,13 @@ func chdirTemp(t *testing.T) string {
 // file and returns 200 with path and created fields.
 func TestHandleBackup_Success(t *testing.T) {
 	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("POST /backup status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
+	resp := decodeBody[map[string]string](t, w)
 	if resp["path"] == "" {
 		t.Error("response missing 'path' field")
 	}
@@ -81,15 +73,13 @@ func TestHandleBackup_RequiresOwner(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 
-	adminUID, _ := database.CreateUser(context.Background(), "backupadmin", "hash", 2)
+	adminUID := mustCreateUser(t, database, "backupadmin", "hash", 2)
 	token := "backup-admin-token"
 	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", token, nil)
 
-	if w.Code != http.StatusForbidden {
-		t.Errorf("admin user on /backup status = %d, want 403", w.Code)
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 // ─── GET /backups ─────────────────────────────────────────────────────────────
@@ -98,20 +88,13 @@ func TestHandleBackup_RequiresOwner(t *testing.T) {
 // an empty JSON array when the backups directory does not exist.
 func TestHandleListBackups_EmptyWhenNoDirExists(t *testing.T) {
 	_ = chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/backups", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /backups status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
-	var backups []any
-	if err := json.Unmarshal(w.Body.Bytes(), &backups); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	backups := decodeBody[[]any](t, w)
 	if len(backups) != 0 {
 		t.Errorf("expected 0 backups when dir missing, got %d", len(backups))
 	}
@@ -121,26 +104,17 @@ func TestHandleListBackups_EmptyWhenNoDirExists(t *testing.T) {
 // POST /backup appears in GET /backups.
 func TestHandleListBackups_ReturnsCreatedBackup(t *testing.T) {
 	_ = chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	// Create a backup first.
 	wBackup := doRequest(t, handler, http.MethodPost, "/backup", token, nil)
-	if wBackup.Code != http.StatusOK {
-		t.Fatalf("POST /backup failed: %d %s", wBackup.Code, wBackup.Body.String())
-	}
+	requireStatus(t, wBackup, http.StatusOK)
 
 	// Now list them.
 	w := doRequest(t, handler, http.MethodGet, "/backups", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /backups status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
-	var backups []map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &backups); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	backups := decodeBody[[]map[string]any](t, w)
 	if len(backups) == 0 {
 		t.Fatal("expected at least 1 backup in list after POST /backup")
 	}
@@ -163,9 +137,7 @@ func TestHandleListBackups_ReturnsCreatedBackup(t *testing.T) {
 // deleted and 204 is returned.
 func TestHandleDeleteBackup_Success(t *testing.T) {
 	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	// Create a real backup file to delete.
 	backupDir := filepath.Join(tmpDir, "data", "backups")
@@ -194,24 +166,18 @@ func TestHandleDeleteBackup_Success(t *testing.T) {
 // returns 404.
 func TestHandleDeleteBackup_NotFound(t *testing.T) {
 	_ = chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodDelete, "/backups/nonexistent.db", token, nil)
 
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", w.Code)
-	}
+	expectStatus(t, w, http.StatusNotFound)
 }
 
 // TestHandleDeleteBackup_InvalidNameTraversal verifies that path traversal
 // names are rejected with 400.
 func TestHandleDeleteBackup_InvalidNameTraversal(t *testing.T) {
 	_ = chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	// The chi router URL-decodes the path parameter, so ".." arrives decoded.
 	// The handler checks for ".." and returns 400.
@@ -230,7 +196,7 @@ func TestHandleDeleteBackup_RequiresOwner(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 
-	adminUID, _ := database.CreateUser(context.Background(), "deladmin", "hash", 2)
+	adminUID := mustCreateUser(t, database, "deladmin", "hash", 2)
 	token := "del-admin-token"
 	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
@@ -241,9 +207,7 @@ func TestHandleDeleteBackup_RequiresOwner(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodDelete, "/backups/test.db", token, nil)
 
-	if w.Code != http.StatusForbidden {
-		t.Errorf("admin user on delete-backup status = %d, want 403", w.Code)
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 // ─── POST /backups/{name}/restore ─────────────────────────────────────────────
@@ -252,9 +216,7 @@ func TestHandleDeleteBackup_RequiresOwner(t *testing.T) {
 // with the expected message and backup name.
 func TestHandleRestoreBackup_Success(t *testing.T) {
 	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	// Set up backup and data directories.
 	backupDir := filepath.Join(tmpDir, "data", "backups")
@@ -284,10 +246,7 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 		t.Fatalf("POST /backups/%s/restore status = %d, want 200; body: %s", backupName, w.Code, w.Body.String())
 	}
 
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	resp := decodeBody[map[string]string](t, w)
 	if resp["message"] == "" {
 		t.Error("response missing 'message' field")
 	}
@@ -361,9 +320,7 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 // refused with 409 SCHEMA_TOO_NEW before the live database is touched.
 func TestHandleRestoreBackup_RefusesNewerSchema(t *testing.T) {
 	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	backupDir := filepath.Join(tmpDir, "data", "backups")
 	if err := os.MkdirAll(backupDir, 0o750); err != nil {
@@ -389,9 +346,7 @@ func TestHandleRestoreBackup_RefusesNewerSchema(t *testing.T) {
 	}
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("restore of a newer-schema backup = %d, want 409; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusConflict)
 	if !strings.Contains(w.Body.String(), "SCHEMA_TOO_NEW") {
 		t.Errorf("body = %s, want SCHEMA_TOO_NEW", w.Body.String())
 	}
@@ -410,9 +365,7 @@ func TestHandleRestoreBackup_RefusesNewerSchema(t *testing.T) {
 // safety copy, and overwriting the live database without one is unrecoverable.
 func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	backupDir := filepath.Join(tmpDir, "data", "backups")
 	if err := os.MkdirAll(backupDir, 0o750); err != nil {
@@ -430,21 +383,32 @@ func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 	restarted, restoreHook := admin.StubRestart()
 	defer restoreHook()
 
-	// Make the safety copy impossible: VACUUM INTO refuses a destination that
-	// already exists. The name is pre_restore_<UTC seconds>.db, so occupy the
-	// next two minutes' worth of candidates — a 4-second window flaked on slow
-	// Windows CI runners where the request itself outlived it.
-	for i := range 120 {
-		name := "pre_restore_" + time.Now().UTC().Add(time.Duration(i)*time.Second).Format("20060102_150405") + ".db"
-		if err := os.WriteFile(filepath.Join(backupDir, name), []byte("occupied"), 0o644); err != nil {
+	// Occupy the actual VACUUM destination after it is allocated. Predicting
+	// timestamped names races the clock, and can skip seconds during slow writes.
+	previousHook := db.BackupVACUUMPreExecHook
+	t.Cleanup(func() { db.BackupVACUUMPreExecHook = previousHook })
+	blocked := false
+	db.BackupVACUUMPreExecHook = func() {
+		paths, err := filepath.Glob(filepath.Join(backupDir, "pre_restore_*.tmp"))
+		if err != nil || len(paths) != 1 {
+			t.Fatalf("safety backup temporary paths = %v, %v; want one", paths, err)
+		}
+		if err := os.WriteFile(paths[0], []byte("occupied"), 0o644); err != nil {
 			t.Fatalf("WriteFile blocker: %v", err)
 		}
+		blocked = true
 	}
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 (restore must abort); body: %s", w.Code, w.Body.String())
+	requireStatus(t, w, http.StatusInternalServerError)
+	if !blocked || !strings.Contains(w.Body.String(), "could not create the pre-restore safety backup") {
+		t.Fatalf("request did not reach the injected safety backup failure: %s", w.Body.String())
+	}
+	for _, suffix := range []string{".restore-staged", ".restore-pending.json"} {
+		if _, err := os.Stat(dbFile + suffix); !os.IsNotExist(err) {
+			t.Errorf("aborted restore left %s: %v", suffix, err)
+		}
 	}
 	if restarted() {
 		t.Error("aborted restore must not restart the process")
@@ -499,9 +463,7 @@ func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
 	defer restoreHook()
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for !restarted() && time.Now().Before(deadline) {
@@ -539,24 +501,18 @@ func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
 // returns 404.
 func TestHandleRestoreBackup_NotFound(t *testing.T) {
 	_ = chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/missing.db/restore", token, nil)
 
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", w.Code)
-	}
+	expectStatus(t, w, http.StatusNotFound)
 }
 
 // TestHandleRestoreBackup_InvalidName verifies that a name containing ".." is
 // rejected with 400.
 func TestHandleRestoreBackup_InvalidName(t *testing.T) {
 	_ = chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/..evil.db/restore", token, nil)
 
@@ -570,9 +526,7 @@ func TestHandleRestoreBackup_InvalidName(t *testing.T) {
 // exists but is a file (not a directory), the endpoint returns 500.
 func TestHandleListBackups_ErrorReadingDir(t *testing.T) {
 	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	// Create data/ directory but make "backups" a file instead of a directory.
 	dataDir := filepath.Join(tmpDir, "data")
@@ -601,7 +555,7 @@ func TestHandleRestoreBackup_RequiresOwner(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 
-	adminUID, _ := database.CreateUser(context.Background(), "restoreadmin", "hash", 2)
+	adminUID := mustCreateUser(t, database, "restoreadmin", "hash", 2)
 	token := "restore-admin-token"
 	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
@@ -614,9 +568,7 @@ func TestHandleRestoreBackup_RequiresOwner(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/test.db/restore", token, nil)
 
-	if w.Code != http.StatusForbidden {
-		t.Errorf("admin user on restore status = %d, want 403", w.Code)
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 // restorePruneFixture sets up a handler, a restore source backup and a backup
@@ -687,9 +639,7 @@ func TestHandleRestoreBackup_PrunesSafetyCopiesKeepsSourceAndNew(t *testing.T) {
 	defer restoreHook()
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/"+olds[0]+"/restore", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	deadline := time.Now().Add(2 * time.Second)
 	for !restarted() && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
@@ -756,9 +706,7 @@ func TestHandleRestoreBackup_PruneErrorDoesNotFailRestore(t *testing.T) {
 	}
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/"+src+"/restore", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 despite the prune error; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	deadline := time.Now().Add(2 * time.Second)
 	for !restarted() && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)

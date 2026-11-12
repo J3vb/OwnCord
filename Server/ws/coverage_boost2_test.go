@@ -1,7 +1,6 @@
 package ws_test
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -22,10 +21,7 @@ func TestIsUserConnected_NotConnected(t *testing.T) {
 func TestIsUserConnected_Connected(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "connected-user")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	connectClient(t, hub, user, 0, 16)
 
 	if !hub.IsUserConnected(user.ID) {
 		t.Error("expected true for registered user")
@@ -35,10 +31,7 @@ func TestIsUserConnected_Connected(t *testing.T) {
 func TestIsUserConnected_AfterUnregister(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "unreg-user")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 16)
 
 	hub.Unregister(c)
 	waitFor(t, waitTimeout, func() bool { return !hub.IsUserConnected(user.ID) },
@@ -120,9 +113,7 @@ func TestBuildDMChannelOpen_ValidRecipient(t *testing.T) {
 			} `json:"recipient"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(result, &msg); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, result, &msg)
 	if msg.Payload.ChannelID != 100 {
 		t.Errorf("ChannelID = %d, want 100", msg.Payload.ChannelID)
 	}
@@ -163,259 +154,91 @@ func TestBuildDMChannelOpen_NilAvatar(t *testing.T) {
 	}
 }
 
-// ─── handleVoiceMute via HandleMessageForTest ───────────────────────────────
-
-func TestHandleVoiceMute_NotInVoice2(t *testing.T) {
+// registerVoiceTestClient registers a client for a fresh Owner user; when
+// inVoice is set it is also placed in a new voice channel (DB row and
+// in-memory state), carrying joinToken when non-empty.
+func registerVoiceTestClient(t *testing.T, name string, inVoice bool, joinToken string) (*ws.Hub, *ws.Client, chan []byte) {
+	t.Helper()
 	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "mute-not-in-voice")
+	user := seedCoverageOwner(t, database, name)
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	if inVoice {
+		chanID := seedVoiceChannel(t, database, name+"-ch")
+		mustJoinVoice(t, database, user.ID, chanID)
+		ws.SetClientVoiceChID(c, chanID)
+		if joinToken != "" {
+			ws.SetClientVoiceStateForTest(c, chanID, joinToken)
+		}
+	}
 	hub.RegisterNowForTest(c)
-
-	payload := `{"muted":true}`
-	raw, _ := json.Marshal(map[string]any{"type": "voice_mute", "payload": json.RawMessage(payload)})
-	hub.HandleMessageForTest(c, raw)
-
-	// Should receive an error about not being in a voice channel.
-	// Error replies are sent synchronously by handleMessage — already buffered.
-	found := false
-	for len(send) > 0 {
-		msg := <-send
-		var m struct {
-			Type    string `json:"type"`
-			Payload struct {
-				Message string `json:"message"`
-			} `json:"payload"`
-		}
-		_ = json.Unmarshal(msg, &m)
-		if m.Type == "error" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected error message when not in voice channel")
-	}
+	return hub, c, send
 }
 
-// ─── handleVoiceDeafen not in voice ─────────────────────────────────────────
-
-func TestHandleVoiceDeafen_NotInVoice2(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "deafen-not-voice")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.RegisterNowForTest(c)
-
-	payload := `{"deafened":true}`
-	raw, _ := json.Marshal(map[string]any{"type": "voice_deafen", "payload": json.RawMessage(payload)})
+// expectErrorReply handles raw and asserts an error frame is already buffered:
+// error replies are sent synchronously by handleMessage.
+func expectErrorReply(t *testing.T, hub *ws.Hub, c *ws.Client, send chan []byte, raw []byte, msg string) {
+	t.Helper()
 	hub.HandleMessageForTest(c, raw)
-
-	// Error replies are sent synchronously by handleMessage — already buffered.
 	found := false
 	for len(send) > 0 {
-		msg := <-send
 		var m struct {
 			Type string `json:"type"`
 		}
-		_ = json.Unmarshal(msg, &m)
+		_ = json.Unmarshal(<-send, &m)
 		if m.Type == "error" {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("expected error message when not in voice channel")
+		t.Error(msg)
 	}
 }
 
-// ─── handleVoiceCamera not in voice ─────────────────────────────────────────
+// ─── voice self-state commands outside a voice channel ──────────────────────
 
-func TestHandleVoiceCamera_NotInVoice2(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "cam-not-voice")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.RegisterNowForTest(c)
-
-	payload := `{"enabled":true}`
-	raw, _ := json.Marshal(map[string]any{"type": "voice_camera", "payload": json.RawMessage(payload)})
-	hub.HandleMessageForTest(c, raw)
-
-	// Error replies are sent synchronously by handleMessage — already buffered.
-	found := false
-	for len(send) > 0 {
-		msg := <-send
-		var m struct {
-			Type string `json:"type"`
-		}
-		_ = json.Unmarshal(msg, &m)
-		if m.Type == "error" {
-			found = true
-		}
+func TestHandleVoiceSelfState_NotInVoice2(t *testing.T) {
+	cases := []struct {
+		name, user, msgType, payload string
+	}{
+		{"mute", "mute-not-in-voice", "voice_mute", `{"muted":true}`},
+		{"deafen", "deafen-not-voice", "voice_deafen", `{"deafened":true}`},
+		{"camera", "cam-not-voice", "voice_camera", `{"enabled":true}`},
+		{"screenshare", "share-not-voice", "voice_screenshare", `{"enabled":true}`},
 	}
-	if !found {
-		t.Error("expected error message when not in voice channel")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hub, c, send := registerVoiceTestClient(t, tc.user, false, "")
+			raw := envelope(tc.msgType, json.RawMessage(tc.payload))
+			expectErrorReply(t, hub, c, send, raw, "expected error message when not in voice channel")
+		})
 	}
 }
 
-// ─── handleVoiceScreenshare not in voice ────────────────────────────────────
+// ─── voice self-state commands with a malformed payload ─────────────────────
 
-func TestHandleVoiceScreenshare_NotInVoice2(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "share-not-voice")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.RegisterNowForTest(c)
-
-	payload := `{"enabled":true}`
-	raw, _ := json.Marshal(map[string]any{"type": "voice_screenshare", "payload": json.RawMessage(payload)})
-	hub.HandleMessageForTest(c, raw)
-
-	// Error replies are sent synchronously by handleMessage — already buffered.
-	found := false
-	for len(send) > 0 {
-		msg := <-send
-		var m struct {
-			Type string `json:"type"`
-		}
-		_ = json.Unmarshal(msg, &m)
-		if m.Type == "error" {
-			found = true
-		}
+func TestHandleVoiceSelfState_BadPayload(t *testing.T) {
+	cases := []struct {
+		name, user, msgType, payload string
+		fakeJoinToken                bool
+	}{
+		{"mute", "mute-bad-payload", "voice_mute", `"not an object"`, false},
+		{"deafen", "deafen-bad-payload", "voice_deafen", `[1, 2]`, false},
+		{"camera", "cam-bad-payload", "voice_camera", `42`, true},
+		{"screenshare", "share-bad-payload", "voice_screenshare", `"not an object"`, true},
 	}
-	if !found {
-		t.Error("expected error message when not in voice channel")
-	}
-}
-
-// ─── handleVoiceMute/Deafen bad payload ─────────────────────────────────────
-
-func TestHandleVoiceMute_BadPayload(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "mute-bad-payload")
-	chanID, _ := database.CreateChannel(context.Background(), "mute-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	ws.SetClientVoiceChID(c, chanID)
-	hub.RegisterNowForTest(c)
-
-	raw, _ := json.Marshal(map[string]any{"type": "voice_mute", "payload": json.RawMessage(`{invalid json`)})
-	hub.HandleMessageForTest(c, raw)
-
-	// Error replies are sent synchronously by handleMessage — already buffered.
-	found := false
-	for len(send) > 0 {
-		msg := <-send
-		var m struct {
-			Type string `json:"type"`
-		}
-		_ = json.Unmarshal(msg, &m)
-		if m.Type == "error" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected error for bad payload")
-	}
-}
-
-func TestHandleVoiceDeafen_BadPayload(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "deafen-bad-payload")
-	chanID, _ := database.CreateChannel(context.Background(), "deafen-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	ws.SetClientVoiceChID(c, chanID)
-	hub.RegisterNowForTest(c)
-
-	raw, _ := json.Marshal(map[string]any{"type": "voice_deafen", "payload": json.RawMessage(`not json`)})
-	hub.HandleMessageForTest(c, raw)
-
-	// Error replies are sent synchronously by handleMessage — already buffered.
-	found := false
-	for len(send) > 0 {
-		msg := <-send
-		var m struct {
-			Type string `json:"type"`
-		}
-		_ = json.Unmarshal(msg, &m)
-		if m.Type == "error" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected error for bad payload")
-	}
-}
-
-// ─── handleVoiceCamera bad payload ──────────────────────────────────────────
-
-func TestHandleVoiceCamera_BadPayload(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "cam-bad-payload")
-	chanID, _ := database.CreateChannel(context.Background(), "cam-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	ws.SetClientVoiceChID(c, chanID)
-	ws.SetClientVoiceStateForTest(c, chanID, "join-token-fake")
-	hub.RegisterNowForTest(c)
-
-	raw, _ := json.Marshal(map[string]any{"type": "voice_camera", "payload": json.RawMessage(`{bad`)})
-	hub.HandleMessageForTest(c, raw)
-
-	// Error replies are sent synchronously by handleMessage — already buffered.
-	found := false
-	for len(send) > 0 {
-		msg := <-send
-		var m struct {
-			Type string `json:"type"`
-		}
-		_ = json.Unmarshal(msg, &m)
-		if m.Type == "error" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected error for bad payload")
-	}
-}
-
-// ─── handleVoiceScreenshare bad payload ─────────────────────────────────────
-
-func TestHandleVoiceScreenshare_BadPayload(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "share-bad-payload")
-	chanID, _ := database.CreateChannel(context.Background(), "share-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	ws.SetClientVoiceChID(c, chanID)
-	ws.SetClientVoiceStateForTest(c, chanID, "join-token-fake")
-	hub.RegisterNowForTest(c)
-
-	raw, _ := json.Marshal(map[string]any{"type": "voice_screenshare", "payload": json.RawMessage(`{bad`)})
-	hub.HandleMessageForTest(c, raw)
-
-	// Error replies are sent synchronously by handleMessage — already buffered.
-	found := false
-	for len(send) > 0 {
-		msg := <-send
-		var m struct {
-			Type string `json:"type"`
-		}
-		_ = json.Unmarshal(msg, &m)
-		if m.Type == "error" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected error for bad payload")
+	// Each payload is valid JSON of the wrong shape, so the envelope parses and
+	// the handler's own payload decoding is what refuses it.
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			token := ""
+			if tc.fakeJoinToken {
+				token = "join-token-fake"
+			}
+			hub, c, send := registerVoiceTestClient(t, tc.user, true, token)
+			raw := envelope(tc.msgType, json.RawMessage(tc.payload))
+			expectErrorReply(t, hub, c, send, raw, "expected error for bad payload")
+		})
 	}
 }
 

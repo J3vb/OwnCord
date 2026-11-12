@@ -122,8 +122,7 @@ func TestRenameGroupDM_FanOutSurvivesContextCancelledAfterCommit(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+tokens[1])
 	req.RemoteAddr = "127.0.0.1:9999"
 	req = req.WithContext(reqCtx)
-	rr := httptest.NewRecorder()
-	renameRouter.ServeHTTP(rr, req)
+	serveRequest(renameRouter, req)
 
 	if !reqCtx.armed.Load() {
 		t.Fatal("test bug: the request context was never armed/cancelled — this run does not exercise the repro")

@@ -42,40 +42,30 @@ func TestApp_MalformedTOTPKeyFailsNamedStage(t *testing.T) {
 // load reads the same bytes back rather than regenerating.
 func TestApp_TOTPKeyGeneratedOnce(t *testing.T) {
 	a := bootTestApp(t, "0", "")
-	if err := a.startDataDir(); err != nil {
-		t.Fatalf("startDataDir: %v", err)
-	}
+	mustDo(t, "startDataDir", a.startDataDir())
 	path := filepath.Join(a.cfg.Server.DataDir, "totp.key")
 	if _, err := os.Stat(path); err == nil {
 		t.Fatalf("%s exists before the stage ran", path)
 	}
 
-	if err := a.startTOTPKey(); err != nil {
-		t.Fatalf("startTOTPKey (generate): %v", err)
-	}
+	mustDo(t, "startTOTPKey (generate)", a.startTOTPKey())
 	first := a.totpKey
 	if len(first) != 32 {
 		t.Fatalf("generated key is %d bytes, want 32", len(first))
 	}
 	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("key file not written: %v", err)
-	}
+	mustDo(t, "key file not written", err)
 	if got := info.Mode().Perm(); got != 0o600 && runtime.GOOS != "windows" {
 		t.Errorf("key file mode = %v, want 0600", got)
 	}
 	onDisk, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read key file: %v", err)
-	}
+	mustDo(t, "read key file", err)
 	if want := hex.EncodeToString(first); string(onDisk) != want {
 		t.Errorf("key file does not hold the loaded key")
 	}
 
 	a.totpKey = nil
-	if err := a.startTOTPKey(); err != nil {
-		t.Fatalf("startTOTPKey (reload): %v", err)
-	}
+	mustDo(t, "startTOTPKey (reload)", a.startTOTPKey())
 	if !bytes.Equal(first, a.totpKey) {
 		t.Error("second load returned a different key: it was regenerated, orphaning every stored TOTP secret")
 	}

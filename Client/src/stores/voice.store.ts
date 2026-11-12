@@ -18,188 +18,42 @@ import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { noteJoinSucceeded } from "../features/voice/joinBackoff";
 import { setVoiceDeafened, setVoiceInSession } from "@lib/voice/voiceDeafened";
-import { loadPref, savePref } from "@lib/prefs/preferences";
+import type { VoiceState, VoiceUser, PeerVerification, VoiceStatus } from "./voiceModel";
+import { createVoiceState } from "./voiceModel";
+import { saveSelfVoicePrefs, loadSelfVoicePrefs } from "./voiceSelfPrefs";
+import {
+  rosterFromReady,
+  ownReadyRow,
+  withVoiceState,
+  withVoiceUsername,
+  withoutVoiceUser,
+  withJoinedChannel,
+  withLeftChannel,
+  withSwitchingTo,
+  withLocalRing,
+  withSpeakers,
+} from "./voiceRoster";
+import {
+  withPeerVideoDecode,
+  withPeerKeySlots,
+  withPeerBoundOffers,
+  withPeerWatching,
+  withPeerVerification,
+  withoutPeerVerification,
+  withVoiceConfig,
+  viewersOfShare,
+  selfVoiceFrames,
+} from "./voicePeers";
 
-export interface VoiceUser {
-  readonly userId: number;
-  readonly username: string;
-  readonly muted: boolean;
-  readonly deafened: boolean;
-  readonly speaking: boolean;
-  readonly camera: boolean;
-  readonly screenshare: boolean;
-  /** Moderator-imposed (MUTE_MEMBERS). muted/deafened are always set alongside
-   *  these, so they only change how the row is presented. The store always sets
-   *  them; optional only so the inline VoiceUser test fixtures need not restate
-   *  them (same convention as VoiceState.peerVerifications). */
-  readonly serverMuted?: boolean;
-  readonly serverDeafened?: boolean;
-}
+export type {
+  VoiceUser,
+  VoiceStatus,
+  VoiceConfig,
+  PeerVerification,
+  VoiceState,
+} from "./voiceModel";
 
-/** Observable voice-session lifecycle status, surfaced so the UI can
- *  distinguish "connecting to the room" (joining) from "securing E2EE"
- *  (securing) from a live, encrypted call (connected). Written from
- *  livekitSession.ts. See docs/architecture/ux/voice-and-e2ee.md §1–2. */
-export type VoiceStatus = "idle" | "joining" | "securing" | "connected" | "reconnecting";
-
-export interface VoiceConfig {
-  readonly quality: string;
-  readonly bitrate: number;
-  readonly threshold_mode: string;
-  readonly mixing_threshold: number;
-  readonly top_speakers: number;
-  readonly max_users: number;
-}
-
-/** Per-peer E2EE identity verification result (F3 TOFU), surfaced so the voice
- *  panel can show a verified/unverified badge and the out-of-band safety number.
- *  Written from livekitSession.ts as each peer's announce is verified.
- *   - "verified":   announce signature checked against the peer's pinned key.
- *   - "changed":    as "verified", but the peer's key differed from the pin
- *                   earlier this session and was accepted (and re-pinned)
- *                   automatically; kept for the rest of the session.
- *   - "unverified": peer published no identity key (legacy) — pin-pending.
- *   - "mismatch":   a pinned peer's identity key is no longer delivered, or
- *                   the announce signature did not verify; the peer is blocked.
- *   - "unknown":    the local pin store could not be read (keyring error), so
- *                   no trust decision was possible — the announce was rejected
- *                   (fail closed). Distinct from "unverified" so a
- *                   storage fault never reads as "never pinned". */
-export interface PeerVerification {
-  readonly userId: number;
-  readonly status: "verified" | "changed" | "unverified" | "mismatch" | "unknown";
-  /** Safety number (identity-key fingerprint) for out-of-band verification;
-   *  null for legacy/unverified/mismatch/unknown peers. */
-  readonly safetyNumber: string | null;
-  /** Fingerprint of the peer's ephemeral session key. Set whenever
-   *  the announce was accepted (verified or unverified), null when it was
-   *  rejected. Changes every call, so it is NOT an identity — it is the only
-   *  thing an unverified peer has that can be compared out of band. */
-  readonly sessionFingerprint: string | null;
-}
-
-export interface VoiceState {
-  readonly currentChannelId: number | null;
-  readonly voiceUsers: ReadonlyMap<number, ReadonlyMap<number, VoiceUser>>; // channelId -> userId -> VoiceUser
-  readonly voiceConfigs: ReadonlyMap<number, VoiceConfig>; // channelId -> VoiceConfig
-  readonly localMuted: boolean;
-  readonly localDeafened: boolean;
-  /** Set from the local user's own voice_state: while true the widget refuses
-   *  to send an unmute, which the server would reject anyway. Always written by
-   *  the store; optional for the same fixture reason as peerVerifications. */
-  readonly localServerMuted?: boolean;
-  readonly localServerDeafened?: boolean;
-  /** True while the current channel is the server's AFK channel, which is
-   *  listen-only: the mic is not published and its control is locked muted.
-   *  Derived from the channel store (see syncInAfkChannel); optional for the
-   *  fixture reason above. */
-  readonly inAfkChannel?: boolean;
-  /** The local deafen in effect is the one a moderator's deafen applied, not
-   *  the member's own: the moderator's lift releases it, while a deafen the
-   *  member chose survives the lift. Follows localDeafened, so it outlives a
-   *  leave (a moderator move) and clears on any undeafen. */
-  readonly moderatorDeafened?: boolean;
-  /** The member was already muted when they deafened, so undeafening restores
-   *  that mute instead of lifting it. Written by the widget's deafen toggle and
-   *  cleared by the widget's undeafen. Like localDeafened it outlives a leave, so a
-   *  re-join restates the same pair. Optional for the fixture reason above. */
-  readonly mutedBeforeDeafen?: boolean;
-  /** True while push-to-talk is bound and the key is NOT currently held —
-   *  i.e. the mic processor's push-to-talk gate is closed. Deliberately a
-   *  separate flag from localMuted: PTT never writes the flag that represents
-   *  the user's own explicit mute (livekitSession.setPttGated only closes and
-   *  opens the gate), so a press can't undo a self-mute and a release can't
-   *  corrupt the mute toggle's state. Always written by the store; optional
-   *  only for the same fixture reason as localServerMuted. */
-  readonly pttGated?: boolean;
-  readonly localCamera: boolean;
-  readonly localScreenshare: boolean;
-  /** Bumped when the live camera's capture is replaced without the camera
-   *  going off (a device switch): the self tile redraws on the new track. */
-  readonly localCameraRev?: number;
-  /** Bumped when the live share changes source or quality without stopping:
-   *  its preview and the stream card redraw. */
-  readonly localShareRev?: number;
-  /** The SFU grant leaves out screen share (no Share Screen permission here).
-   *  Absent reads as allowed. Written from the voice session. */
-  readonly shareDenied?: boolean;
-  /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
-  readonly joinedAt: number | null;
-  /** True when joined in listen-only mode (mic permission denied or no mic found). */
-  readonly listenOnly: boolean;
-  /** Voice-session lifecycle status (drives the widget's connecting/securing/
-   *  secured indicators). Written from livekitSession.ts. */
-  readonly voiceStatus: VoiceStatus;
-  /** True once livekit-client reports a live E2EE encryption failure
-   *  (RoomEvent.EncryptionError — the per-room worker died after the room key
-   *  exchange already succeeded, e.g. a lazily-loaded worker chunk blocked by
-   *  CSP or a WASM load failure). voiceStatus alone reaches "connected" in
-   *  that case, so the Secured badge must also read this flag rather than
-   *  deriving "secured" from voiceStatus === "connected" in isolation.
-   *  Written from roomEventHandlers.ts; latches until the next join/leave.
-   *  Always written by the store; optional only so the many inline VoiceState
-   *  test fixtures need not restate it (same convention as localServerMuted). */
-  readonly encryptionDegraded?: boolean;
-  /** Per-peer E2EE identity verification (F3 TOFU), keyed by userId. The store
-   *  always sets it; optional only so the many inline VoiceState test fixtures
-   *  need not restate it. */
-  readonly peerVerifications?: ReadonlyMap<number, PeerVerification>;
-  /** Video codecs each peer reported decoding in its `voice_e2ee_announce`,
-   *  keyed by userId; no entry means the baseline (VP8, H.264). Written only
-   *  from the dispatcher's announce handler, and deliberately not cleared with
-   *  peerVerifications (that runs at key setup, after a list may have arrived).
-   *  Reset at session end. Optional for the same fixture reason. */
-  readonly peerVideoDecode?: ReadonlyMap<number, readonly string[]>;
-  /** Peers whose last `voice_e2ee_announce` said `key_slots`: they stage a new
-   *  room key in its own slot and switch to it a moment later. The key holder
-   *  rotates that way only when every peer is in here. Same writer and
-   *  lifetime as peerVideoDecode. */
-  readonly peerKeySlots?: ReadonlySet<number>;
-  /** Whose screen share each member of the current channel watches, from
-   *  their `voice_watching` frames (sorted user ids). Written only from the
-   *  dispatcher's handler; removeVoiceUser drops a member, leaveVoiceChannel
-   *  and resetVoiceStore clear it. Your own watching is read from the local
-   *  RemoteTracks set, not from here. Optional for the fixture reason above. */
-  readonly peerWatching?: ReadonlyMap<number, readonly number[]>;
-  /** Fingerprint of the local user's own ephemeral session key, so
-   *  it can be read out to a peer who sees us as unverified. Null outside a
-   *  voice session. Optional for the same fixture reason as peerVerifications. */
-  readonly localSessionFingerprint?: string | null;
-  /** The local user's own safety number (identity-key fingerprint), the
-   *  number peers see on our shield, so it can be compared out of band. Null
-   *  outside a voice session or when our announce went out unsigned. Optional
-   *  for the same fixture reason as peerVerifications. */
-  readonly localSafetyNumber?: string | null;
-  /** The input-sensitivity gate's verdict (true = open = above the slider's
-   *  threshold), or null when no gate runs (sensitivity 100).
-   *  When set it, not LiveKit, drives the local speaking ring, so the ring,
-   *  the slider and what transmits agree. Optional for the fixture reason above. */
-  readonly localGateSpeaking?: boolean | null;
-}
-
-const INITIAL_STATE: VoiceState = {
-  currentChannelId: null,
-  voiceUsers: new Map(),
-  voiceConfigs: new Map(),
-  localMuted: false,
-  localDeafened: false,
-  localServerMuted: false,
-  localServerDeafened: false,
-  moderatorDeafened: false,
-  mutedBeforeDeafen: false,
-  pttGated: false,
-  localCamera: false,
-  localScreenshare: false,
-  joinedAt: null,
-  listenOnly: false,
-  voiceStatus: "idle",
-  encryptionDegraded: false,
-  peerVerifications: new Map(),
-  peerVideoDecode: new Map(),
-  peerKeySlots: new Set(),
-  peerWatching: new Map(),
-  localGateSpeaking: null,
-};
+const INITIAL_STATE: VoiceState = createVoiceState();
 
 export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
 
@@ -244,30 +98,7 @@ export function resetVoiceStore(): void {
   watchingResyncAt = Number.NEGATIVE_INFINITY;
   setVoiceDeafened(false);
   setVoiceInSession(false);
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localServerMuted: false,
-    localServerDeafened: false,
-    inAfkChannel: false,
-    moderatorDeafened: false,
-    mutedBeforeDeafen: false,
-    pttGated: false,
-    localGateSpeaking: null,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-    encryptionDegraded: false,
-    peerVerifications: new Map(),
-    peerVideoDecode: new Map(),
-    peerKeySlots: new Set(),
-    peerWatching: new Map(),
-  }));
+  voiceStore.setState(() => ({ ...createVoiceState(), inAfkChannel: false }));
 }
 
 registerVoiceLogoutTeardown({ snapshot: () => voiceStore.getState() });
@@ -283,51 +114,18 @@ void registerSessionReset(
 
 /** Bulk set voice states from the ready payload. */
 export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
-  const channelMap = new Map<number, Map<number, VoiceUser>>();
+  const channelMap = rosterFromReady(
+    states,
+    (userId) => membersStore.getState().members.get(userId)?.username ?? "",
+  );
 
-  for (const vs of states) {
-    let userMap = channelMap.get(vs.channel_id);
-    if (!userMap) {
-      userMap = new Map();
-      channelMap.set(vs.channel_id, userMap);
-    }
-    const member = membersStore.getState().members.get(vs.user_id);
-    userMap.set(vs.user_id, {
-      userId: vs.user_id,
-      username: member?.username ?? "",
-      muted: vs.muted,
-      deafened: vs.deafened,
-      speaking: false,
-      // The ready payload carries the authoritative DB flags; blanking them
-      // on a mid-call resync would hide a peer's live camera/screenshare
-      // until they toggled it. Absent (older server) still defaults false.
-      camera: vs.camera ?? false,
-      screenshare: vs.screenshare ?? false,
-      serverMuted: vs.server_muted ?? false,
-      serverDeafened: vs.server_deafened ?? false,
-    });
-  }
-
-  // Check if current user is in any voice channel, and capture their own
-  // row so the moderator-imposed flags below can be derived from it — a
-  // full-ready reconnect (mustFullResync / replay-buffer miss) that
-  // preserves a live voice session must not leave localServerMuted/
-  // localServerDeafened stuck at their pre-reconnect values (v049).
+  // Capture the user's own row so the moderator-imposed flags below can be
+  // derived from it — a full-ready reconnect (mustFullResync / replay-buffer
+  // miss) that preserves a live voice session must not leave localServerMuted/
+  // localServerDeafened stuck at their pre-reconnect values.
   const currentUserId = authStore.getState().user?.id ?? 0;
-  let autoJoinChannel: number | null = null;
-  let selfState: ReadyVoiceState | undefined;
-  // Only a device that holds the call adopts its self row: while idle, that row
-  // is another device's call and stays a roster entry (the sidebar still shows
-  // the user in the channel) without becoming this device's channel.
-  if (currentUserId !== 0 && voiceStore.getState().voiceStatus !== "idle") {
-    for (const vs of states) {
-      if (vs.user_id === currentUserId) {
-        autoJoinChannel = vs.channel_id;
-        selfState = vs;
-        break;
-      }
-    }
-  }
+  const selfState = ownReadyRow(states, currentUserId, voiceStore.getState().voiceStatus);
+  const autoJoinChannel = selfState?.channel_id ?? null;
 
   voiceStore.setState((prev) => ({
     ...prev,
@@ -347,46 +145,8 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
  *  into localServerMuted/localServerDeafened, which gate the widget controls. */
 export function updateVoiceState(payload: VoiceStatePayload): void {
   const currentUserId = authStore.getState().user?.id ?? 0;
-  const serverMuted = payload.server_muted ?? false;
-  const serverDeafened = payload.server_deafened ?? false;
   voiceRosterRevision++;
-  voiceStore.setState((prev) => {
-    const nextChannels = new Map(prev.voiceUsers);
-    const existingChannel = prev.voiceUsers.get(payload.channel_id);
-    const nextUsers = new Map(existingChannel ?? []);
-    // Preserve the LiveKit-authoritative speaking flag on an existing user:
-    // setSpeakers is the only writer (LiveKit's ActiveSpeakersChanged). The
-    // server's voice_state always ships speaking:false, so writing
-    // payload.speaking verbatim here cleared the speaking ring on any
-    // unrelated toggle that arrived between ActiveSpeakersChanged ticks. A
-    // brand-new user has no prior value, so the payload seeds it.
-    const existingUser = existingChannel?.get(payload.user_id);
-    const speaking = existingUser !== undefined ? existingUser.speaking : payload.speaking;
-
-    nextUsers.set(payload.user_id, {
-      userId: payload.user_id,
-      username: payload.username,
-      muted: payload.muted,
-      deafened: payload.deafened,
-      speaking,
-      camera: payload.camera,
-      screenshare: payload.screenshare,
-      serverMuted,
-      serverDeafened,
-    });
-
-    nextChannels.set(payload.channel_id, nextUsers);
-    // An idle device's own row is another device's call: roster only.
-    if (payload.user_id !== currentUserId || prev.voiceStatus === "idle") {
-      return { ...prev, voiceUsers: nextChannels };
-    }
-    return {
-      ...prev,
-      voiceUsers: nextChannels,
-      localServerMuted: serverMuted,
-      localServerDeafened: serverDeafened,
-    };
-  });
+  voiceStore.setState((prev) => withVoiceState(prev, payload, currentUserId));
 }
 
 /** Patch a user's username in every voice channel they currently occupy.
@@ -396,44 +156,13 @@ export function updateVoiceState(payload: VoiceStatePayload): void {
  *  USER_UPDATE must patch it too, or the voice roster keeps showing the old
  *  name for the rest of the call, until the user leaves and rejoins voice. */
 export function updateVoiceUserProfile(userId: number, patch: { readonly username: string }): void {
-  voiceStore.setState((prev) => {
-    let changed = false;
-    const nextChannels = new Map(prev.voiceUsers);
-    for (const [channelId, users] of prev.voiceUsers) {
-      const existing = users.get(userId);
-      if (existing === undefined) continue;
-      const nextUsers = new Map(users);
-      nextUsers.set(userId, { ...existing, username: patch.username });
-      nextChannels.set(channelId, nextUsers);
-      changed = true;
-    }
-    return changed ? { ...prev, voiceUsers: nextChannels } : prev;
-  });
+  voiceStore.setState((prev) => withVoiceUsername(prev, userId, patch.username));
 }
 
 /** Remove a user from a voice channel. */
 export function removeVoiceUser(payload: VoiceLeavePayload): void {
   voiceRosterRevision++;
-  voiceStore.setState((prev) => {
-    const existingChannel = prev.voiceUsers.get(payload.channel_id);
-    if (!existingChannel || !existingChannel.has(payload.user_id)) return prev;
-
-    const nextChannels = new Map(prev.voiceUsers);
-    const nextUsers = new Map(existingChannel);
-    nextUsers.delete(payload.user_id);
-
-    if (nextUsers.size === 0) {
-      nextChannels.delete(payload.channel_id);
-    } else {
-      nextChannels.set(payload.channel_id, nextUsers);
-    }
-
-    const watching = prev.peerWatching;
-    if (watching?.has(payload.user_id) !== true) return { ...prev, voiceUsers: nextChannels };
-    const nextWatching = new Map(watching);
-    nextWatching.delete(payload.user_id);
-    return { ...prev, voiceUsers: nextChannels, peerWatching: nextWatching };
-  });
+  voiceStore.setState((prev) => withoutVoiceUser(prev, payload));
 }
 
 /**
@@ -453,84 +182,21 @@ export function clearChannelVoiceUsers(channelId: number): void {
   });
 }
 
-/** No LiveKit update reaches a channel this client is no longer in, so a ring
- *  lit there as it left would never clear. */
-function withoutRings(
-  voiceUsers: VoiceState["voiceUsers"],
-  channelId: number | null,
-): VoiceState["voiceUsers"] {
-  const channel = channelId === null ? undefined : voiceUsers.get(channelId);
-  if (channelId === null || channel === undefined) return voiceUsers;
-  const next = new Map(voiceUsers);
-  next.set(
-    channelId,
-    new Map(
-      [...channel].map(([id, user]) => [id, user.speaking ? { ...user, speaking: false } : user]),
-    ),
-  );
-  return next;
-}
-
 /** Set the current voice channel (local join) and record the join timestamp.
  *  Only resets joinedAt if the user is joining a different channel (or was not in one). */
 export function joinVoiceChannel(channelId: number): void {
-  voiceStore.setState((prev) => {
-    // Already in this channel — don't reset the timer
-    if (prev.currentChannelId === channelId) return prev;
-    return {
-      ...prev,
-      // A direct switch: the old channel's watch sets are not this one's.
-      peerWatching: new Map<number, readonly number[]>(),
-      voiceUsers: withoutRings(prev.voiceUsers, prev.currentChannelId),
-      currentChannelId: channelId,
-      joinedAt: Date.now(),
-      // Optimistic: the widget shows "Connecting…" the moment the user clicks,
-      // before the voice_token round-trip. livekitSession advances it from here.
-      voiceStatus: "joining",
-      shareDenied: false,
-      // A fresh join starts clean — any degraded flag belongs to the
-      // previous session's worker, not this one.
-      encryptionDegraded: false,
-    };
-  });
+  voiceStore.setState((prev) => withJoinedChannel(prev, channelId, Date.now()));
+}
+
+/** The channel a switch out of a live call waits for (see VoiceState.switchingTo). */
+export function setSwitchingTo(channelId: number | null): void {
+  voiceStore.setState((prev) => withSwitchingTo(prev, channelId));
 }
 
 /** Clear the current voice channel and remove current user from voice users. */
 export function leaveVoiceChannel(): void {
   const currentUserId = authStore.getState().user?.id ?? 0;
-  voiceStore.setState((prev) => {
-    const cleared = {
-      currentChannelId: null,
-      joinedAt: null,
-      voiceStatus: "idle" as const,
-      // Server mute lives with the voice session; a new session starts clean.
-      localServerMuted: false,
-      localServerDeafened: false,
-      encryptionDegraded: false,
-      shareDenied: false,
-      peerVideoDecode: new Map<number, readonly string[]>(),
-      peerKeySlots: new Set<number>(),
-      peerWatching: new Map<number, readonly number[]>(),
-    };
-    const channelId = prev.currentChannelId;
-    const voiceUsers = withoutRings(prev.voiceUsers, channelId);
-    if (channelId === null || currentUserId === 0) {
-      return { ...prev, ...cleared, voiceUsers };
-    }
-    const existingChannel = voiceUsers.get(channelId);
-    if (!existingChannel || !existingChannel.has(currentUserId)) {
-      return { ...prev, ...cleared, voiceUsers };
-    }
-    const nextChannels = new Map(voiceUsers);
-    const nextUsers = new Map(existingChannel);
-    nextUsers.delete(currentUserId);
-    if (nextUsers.size === 0) {
-      nextChannels.delete(channelId);
-    } else {
-      nextChannels.set(channelId, nextUsers);
-    }
-    return { ...prev, ...cleared, voiceUsers: nextChannels };
-  });
+  voiceStore.setState((prev) => withLeftChannel(prev, currentUserId));
 }
 
 /** Set the voice-session lifecycle status. Single-writer from livekitSession.ts
@@ -566,7 +232,7 @@ export function setMutedBeforeDeafen(muted: boolean): void {
 
 /** Toggle local mute state. */
 export function setLocalMuted(muted: boolean): void {
-  voiceStore.setState((prev) => withLocalRing({ ...prev, localMuted: muted }));
+  voiceStore.setState((prev) => withLocalRing({ ...prev, localMuted: muted }, ownUserId()));
 }
 
 /** Toggle local deafen state. */
@@ -582,34 +248,19 @@ export function setLocalDeafened(deafened: boolean): void {
   }));
 }
 
-const SELF_MUTED_PREF = "localMuted";
-const SELF_DEAFENED_PREF = "localDeafened";
-const MUTED_BEFORE_DEAFEN_PREF = "mutedBeforeDeafen";
-
 /** Save the member's own mute and deafen so they survive a restart. Called
- *  after the member's own toggles only. A moderator's deafen is not saved,
- *  and while a moderator's mute holds the saved mute keeps its last value. */
+ *  after the member's own toggles only. */
 export function saveSelfVoiceState(): void {
-  const state = voiceStore.getState();
-  if (state.localServerMuted !== true) savePref(SELF_MUTED_PREF, state.localMuted);
-  savePref(SELF_DEAFENED_PREF, state.localDeafened && state.moderatorDeafened !== true);
-  savePref(MUTED_BEFORE_DEAFEN_PREF, state.mutedBeforeDeafen === true);
+  saveSelfVoicePrefs(voiceStore.getState());
 }
 
 /** Load the saved mute and deafen into the store at session start. Outside a
  *  call only: a live call already carries the state its join applied. */
 export function restoreSavedSelfVoiceState(): void {
   if (voiceStore.getState().currentChannelId !== null) return;
-  const deafened = loadPref<boolean>(SELF_DEAFENED_PREF, false);
-  setVoiceDeafened(deafened);
-  voiceStore.setState((prev) => ({
-    ...prev,
-    // A deafen always mutes, as the deafen toggle does.
-    localMuted: deafened || loadPref<boolean>(SELF_MUTED_PREF, false),
-    localDeafened: deafened,
-    moderatorDeafened: false,
-    mutedBeforeDeafen: loadPref<boolean>(MUTED_BEFORE_DEAFEN_PREF, false),
-  }));
+  const saved = loadSelfVoicePrefs();
+  setVoiceDeafened(saved.localDeafened);
+  voiceStore.setState((prev) => ({ ...prev, ...saved, moderatorDeafened: false }));
 }
 
 /** Record whether push-to-talk is currently gating (silencing) the mic —
@@ -619,7 +270,7 @@ export function restoreSavedSelfVoiceState(): void {
  *  own explicit mute (see the VoiceState.pttGated doc comment). */
 export function setPttGated(gated: boolean): void {
   voiceStore.setState((prev) =>
-    prev.pttGated === gated ? prev : withLocalRing({ ...prev, pttGated: gated }),
+    prev.pttGated === gated ? prev : withLocalRing({ ...prev, pttGated: gated }, ownUserId()),
   );
 }
 
@@ -630,27 +281,18 @@ export function isSelfMuted(state: VoiceState): boolean {
   return state.localMuted;
 }
 
-/** Whether the Rust-side PTT key poller is actually able to report key state
- *  on this platform. Module-level rather than store state: it is a process-wide
- *  platform capability, not per-session voice state, so `resetVoiceStore()` on
- *  logout must NOT clear it.
- *
- *  It lives here rather than in livekitSession.ts so `ptt.ts` can write it
- *  during startup without importing that module — livekitSession pulls in the
- *  ~1.3 MB livekit-client SDK, which is deliberately kept off the startup path.
- *
- *  Defaults to false so an un-wired or unsupported poller never causes a
- *  join-time mute that nothing can later lift. */
+/** Whether the Rust-side PTT key poller can report key state on this platform.
+ *  A process-wide platform capability, not per-session state, so
+ *  `resetVoiceStore()` must NOT clear it. It lives here, not in
+ *  livekitSession.ts, so `ptt.ts` can write it at startup without pulling in
+ *  the livekit-client SDK. Defaults to false so an unsupported poller never
+ *  causes a join-time mute that nothing can later lift. */
 let pttPollingLive = false;
 const pttPollingListeners = new Set<() => void>();
 
-/** Report whether the PTT key-polling backend can actually observe key state.
- *  Callers MUST reflect REAL backend capability (the `ptt_polling_supported`
- *  Tauri command), not merely whether a key is bound in preferences: on macOS
- *  `is_key_down` is a stub returning false and on pure-Wayland Linux key
- *  polling cannot observe keys, so no `ptt-state` event arrives to lift a
- *  join-time mute unless the portal backend is live. This flag reflects
- *  whichever backend is live. */
+/** Report whether the PTT key-polling backend can actually observe key state
+ *  (the `ptt_polling_supported` command), not merely whether a key is bound:
+ *  without a live backend no `ptt-state` event arrives to lift a join-time mute. */
 export function setPttPollingLive(live: boolean): void {
   if (pttPollingLive === live) return;
   pttPollingLive = live;
@@ -671,34 +313,22 @@ export function isPttPollingLive(): boolean {
 
 /** Toggle local camera state. */
 export function setLocalCamera(enabled: boolean): void {
-  voiceStore.setState((prev) => ({
-    ...prev,
-    localCamera: enabled,
-  }));
+  voiceStore.setState((prev) => ({ ...prev, localCamera: enabled }));
 }
 
 /** Toggle local screenshare state. */
 export function setLocalScreenshare(enabled: boolean): void {
-  voiceStore.setState((prev) => ({
-    ...prev,
-    localScreenshare: enabled,
-  }));
+  voiceStore.setState((prev) => ({ ...prev, localScreenshare: enabled }));
 }
 
 /** The live camera's capture was replaced (a device switch). */
 export function bumpLocalCameraRev(): void {
-  voiceStore.setState((prev) => ({
-    ...prev,
-    localCameraRev: (prev.localCameraRev ?? 0) + 1,
-  }));
+  voiceStore.setState((prev) => ({ ...prev, localCameraRev: (prev.localCameraRev ?? 0) + 1 }));
 }
 
 /** The live share changed source or quality. */
 export function bumpLocalShareRev(): void {
-  voiceStore.setState((prev) => ({
-    ...prev,
-    localShareRev: (prev.localShareRev ?? 0) + 1,
-  }));
+  voiceStore.setState((prev) => ({ ...prev, localShareRev: (prev.localShareRev ?? 0) + 1 }));
 }
 
 export function setShareDenied(denied: boolean): void {
@@ -709,44 +339,16 @@ export function setShareDenied(denied: boolean): void {
 
 /** Set listen-only mode (mic permission denied or no mic found). */
 export function setListenOnly(listenOnly: boolean): void {
-  voiceStore.setState((prev) => ({
-    ...prev,
-    listenOnly,
-  }));
+  voiceStore.setState((prev) => ({ ...prev, listenOnly }));
 }
 
 /** Store voice config for a channel from a voice_config event. */
 export function setVoiceConfig(payload: VoiceConfigPayload): void {
-  voiceStore.setState((prev) => {
-    const nextConfigs = new Map(prev.voiceConfigs);
-    nextConfigs.set(payload.channel_id, {
-      quality: payload.quality,
-      bitrate: payload.bitrate,
-      threshold_mode: payload.threshold_mode,
-      mixing_threshold: payload.mixing_threshold,
-      top_speakers: payload.top_speakers,
-      max_users: payload.max_users,
-    });
-    return { ...prev, voiceConfigs: nextConfigs };
-  });
+  voiceStore.setState((prev) => withVoiceConfig(prev, payload));
 }
 
-/** Apply the input-sensitivity gate to the local user's ring. A no-op when no
- *  gate runs (LiveKit then decides). The ring lights only while the gate is
- *  open and nothing silences the mic (self-mute, push-to-talk). */
-function withLocalRing(state: VoiceState): VoiceState {
-  const gate = state.localGateSpeaking;
-  const channelId = state.currentChannelId;
-  const userId = authStore.getState().user?.id ?? 0;
-  if (gate === null || gate === undefined || channelId === null) return state;
-  const channel = state.voiceUsers.get(channelId);
-  const user = channel?.get(userId);
-  if (channel === undefined || user === undefined) return state;
-  const speaking = gate && !state.localMuted && state.pttGated !== true;
-  if (user.speaking === speaking) return state;
-  const voiceUsers = new Map(state.voiceUsers);
-  voiceUsers.set(channelId, new Map(channel).set(userId, { ...user, speaking }));
-  return { ...state, voiceUsers };
+function ownUserId(): number {
+  return authStore.getState().user?.id ?? 0;
 }
 
 /** Record the input-sensitivity gate's verdict (null = no gate). It is read
@@ -756,7 +358,7 @@ export function setLocalGateSpeaking(speaking: boolean | null): void {
   voiceStore.setState((prev) =>
     prev.localGateSpeaking === speaking
       ? prev
-      : withLocalRing({ ...prev, localGateSpeaking: speaking }),
+      : withLocalRing({ ...prev, localGateSpeaking: speaking }, ownUserId()),
   );
 }
 
@@ -764,47 +366,18 @@ export function setLocalGateSpeaking(speaking: boolean | null): void {
  *  Updates every remote user. The local user too, unless the input-sensitivity
  *  gate runs: then the gate decides (see setLocalGateSpeaking). */
 export function setSpeakers(payload: VoiceSpeakersPayload): void {
-  voiceStore.setState((prev) => {
-    if (payload.channel_id !== prev.currentChannelId) return prev;
-    const existingChannel = prev.voiceUsers.get(payload.channel_id);
-    if (!existingChannel) return prev;
-
-    const speakerSet = new Set(payload.speakers);
-    const nextUsers = new Map<number, VoiceUser>();
-
-    for (const [userId, user] of existingChannel) {
-      const isSpeaking = speakerSet.has(userId);
-      if (user.speaking !== isSpeaking) {
-        nextUsers.set(userId, { ...user, speaking: isSpeaking });
-      } else {
-        nextUsers.set(userId, user);
-      }
-    }
-
-    const nextChannels = new Map(prev.voiceUsers);
-    nextChannels.set(payload.channel_id, nextUsers);
-    return withLocalRing({ ...prev, voiceUsers: nextChannels });
-  });
+  voiceStore.setState((prev) => withSpeakers(prev, payload, ownUserId()));
 }
 
-/** Record a peer's E2EE identity verification result (F3 TOFU). Written from
+/** Record a peer's E2EE identity verification result. Written from
  *  livekitSession.ts as each peer's ephemeral-key announce is verified. */
 export function setPeerVerification(v: PeerVerification): void {
-  voiceStore.setState((prev) => {
-    const next = new Map(prev.peerVerifications);
-    next.set(v.userId, v);
-    return { ...prev, peerVerifications: next };
-  });
+  voiceStore.setState((prev) => withPeerVerification(prev, v));
 }
 
 /** Drop a single peer's verification (e.g. when they leave the channel). */
 export function clearPeerVerification(userId: number): void {
-  voiceStore.setState((prev) => {
-    if (!prev.peerVerifications?.has(userId)) return prev;
-    const next = new Map(prev.peerVerifications);
-    next.delete(userId);
-    return { ...prev, peerVerifications: next };
-  });
+  voiceStore.setState((prev) => withoutPeerVerification(prev, userId));
 }
 
 /** Publish (or clear, with null) the local user's own session fingerprint. */
@@ -829,31 +402,19 @@ export function setLocalSafetyNumber(safetyNumber: string | null): void {
  *  without the field) deletes the entry. Single writer: the dispatcher's
  *  voice_e2ee_announce handler. */
 export function setPeerVideoDecode(userId: number, list: readonly string[] | undefined): void {
-  voiceStore.setState((prev) => {
-    const current = prev.peerVideoDecode;
-    if (list === undefined) {
-      if (!current?.has(userId)) return prev;
-      const next = new Map(current);
-      next.delete(userId);
-      return { ...prev, peerVideoDecode: next };
-    }
-    const next = new Map(current);
-    next.set(userId, [...list]);
-    return { ...prev, peerVideoDecode: next };
-  });
+  voiceStore.setState((prev) => withPeerVideoDecode(prev, userId, list));
 }
 
 /** Record whether a peer's announce said `key_slots`. Single writer: the
  *  dispatcher's voice_e2ee_announce handler. */
 export function setPeerKeySlots(userId: number, keySlots: boolean): void {
-  voiceStore.setState((prev) => {
-    const current = prev.peerKeySlots;
-    if ((current?.has(userId) ?? false) === keySlots) return prev;
-    const next = new Set(current);
-    if (keySlots) next.add(userId);
-    else next.delete(userId);
-    return { ...prev, peerKeySlots: next };
-  });
+  voiceStore.setState((prev) => withPeerKeySlots(prev, userId, keySlots));
+}
+
+/** Record whether a peer's announce said `bound_offers`. Single writer: the
+ *  dispatcher's voice_e2ee_announce handler. */
+export function setPeerBoundOffers(userId: number, boundOffers: boolean): void {
+  voiceStore.setState((prev) => withPeerBoundOffers(prev, userId, boundOffers));
 }
 
 /** When the socket last resumed, for `isWatchingResync`. Module state: a
@@ -885,27 +446,7 @@ export function isWatchingResync(windowMs = 2000): boolean {
  *  left, or another channel's) is ignored; an empty list clears the entry.
  *  Single writer: the dispatcher's voice_watching handler. */
 export function setPeerWatching(userId: number, watching: readonly number[]): void {
-  voiceStore.setState((prev) => {
-    const channelId = prev.currentChannelId;
-    if (channelId === null || prev.voiceUsers.get(channelId)?.has(userId) !== true) return prev;
-    const current = prev.peerWatching;
-    const had = current?.get(userId);
-    if (watching.length === 0) {
-      if (had === undefined) return prev;
-      const next = new Map(current);
-      next.delete(userId);
-      return { ...prev, peerWatching: next };
-    }
-    if (
-      had !== undefined &&
-      had.length === watching.length &&
-      had.every((v, i) => v === watching[i])
-    )
-      return prev;
-    const next = new Map(current);
-    next.set(userId, [...watching]);
-    return { ...prev, peerWatching: next };
-  });
+  voiceStore.setState((prev) => withPeerWatching(prev, userId, watching));
 }
 
 /** Who watches a member's screen share, as user ids: the channel members
@@ -917,18 +458,7 @@ export function streamViewers(
   watchingLocally = false,
   state: VoiceState = voiceStore.getState(),
 ): number[] {
-  const channelId = state.currentChannelId;
-  if (channelId === null) return [];
-  const members = state.voiceUsers.get(channelId);
-  if (members?.get(sharerId)?.screenshare !== true) return [];
-  const self = authStore.getState().user?.id ?? 0;
-  const out: number[] = [];
-  for (const id of members.keys()) {
-    if (id === sharerId) continue;
-    if (id === self ? watchingLocally : state.peerWatching?.get(id)?.includes(sharerId) === true)
-      out.push(id);
-  }
-  return out.toSorted((a, b) => a - b);
+  return viewersOfShare(state, sharerId, watchingLocally, ownUserId());
 }
 
 /** Drop all peer verifications (on voice leave). */
@@ -963,26 +493,6 @@ export function restateSelfVoiceState(
   skipMute = false,
   skipDeafen = false,
 ): void {
-  const state = voiceStore.getState();
-  if (state.currentChannelId === null) return;
-  const userId = authStore.getState().user?.id ?? 0;
-  if (userId === 0) return;
-
-  const row = state.voiceUsers.get(state.currentChannelId)?.get(userId);
-
-  // A moderator's mute or deafen is not the member's own state to restate:
-  // sending it would turn it into a self-mute that outlives the lift.
-  const moderated = state.localServerDeafened === true || state.moderatorDeafened === true;
-
-  if (
-    !skipMute &&
-    !moderated &&
-    state.localServerMuted !== true &&
-    state.localMuted !== (row?.muted ?? false)
-  ) {
-    ws.send({ type: "voice_mute", payload: { muted: state.localMuted } });
-  }
-  if (!skipDeafen && !moderated && state.localDeafened !== (row?.deafened ?? false)) {
-    ws.send({ type: "voice_deafen", payload: { deafened: state.localDeafened } });
-  }
+  const frames = selfVoiceFrames(voiceStore.getState(), ownUserId(), skipMute, skipDeafen);
+  for (const frame of frames) ws.send(frame);
 }

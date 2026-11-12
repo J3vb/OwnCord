@@ -17,13 +17,8 @@ func seedMessageRequestPair(t *testing.T, database *db.DB, senderName, recipient
 	senderID = seedUser(t, database, senderName)
 	recipientID = seedUser(t, database, recipientName)
 	ch, _, err := database.GetOrCreateDMChannel(context.Background(), senderID, recipientID)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
-	messageID, err = database.CreateMessage(context.Background(), ch.ID, senderID, "hi", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
+	messageID = mustCreateMessage(t, database, ch.ID, senderID, "hi", nil)
 	return senderID, recipientID, ch.ID, messageID
 }
 
@@ -35,9 +30,7 @@ func TestIsTrustedSender_TrustSender(t *testing.T) {
 	if trusted, err := database.IsTrustedSender(ctx, recipient, sender); err != nil || trusted {
 		t.Fatalf("IsTrustedSender before any trust row = %v, %v; want false, nil", trusted, err)
 	}
-	if err := database.TrustSender(ctx, recipient, sender, "accepted"); err != nil {
-		t.Fatalf("TrustSender: %v", err)
-	}
+	mustDo(t, "TrustSender", database.TrustSender(ctx, recipient, sender, "accepted"))
 	if trusted, err := database.IsTrustedSender(ctx, recipient, sender); err != nil || !trusted {
 		t.Fatalf("IsTrustedSender after TrustSender = %v, %v; want true, nil", trusted, err)
 	}
@@ -47,9 +40,7 @@ func TestIsTrustedSender_TrustSender(t *testing.T) {
 	}
 	// INSERT OR IGNORE: a second call with a different source does not
 	// overwrite the first.
-	if err := database.TrustSender(ctx, recipient, sender, "sent_first"); err != nil {
-		t.Fatalf("TrustSender (repeat): %v", err)
-	}
+	mustDo(t, "TrustSender (repeat)", database.TrustSender(ctx, recipient, sender, "sent_first"))
 	var source string
 	if err := database.QueryRowContext(ctx, `SELECT source FROM trusted_senders WHERE recipient_id = ? AND sender_id = ?`,
 		recipient, sender).Scan(&source); err != nil || source != "accepted" {
@@ -80,13 +71,8 @@ func TestCreateMessageRequest_OneRowPerPairEver(t *testing.T) {
 	// A different pair is a different row.
 	third := seedUser(t, database, "mrq-create-third")
 	otherCh, _, err := database.GetOrCreateDMChannel(ctx, sender, third)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
-	otherMsgID, err := database.CreateMessage(ctx, otherCh.ID, sender, "hi", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
+	otherMsgID := mustCreateMessage(t, database, otherCh.ID, sender, "hi", nil)
 	out, err = database.CreateMessageRequest(ctx, sender, third, otherCh.ID, otherMsgID)
 	created = out.Created
 	if err != nil || !created {
@@ -131,18 +117,13 @@ func TestGetMessageRequest_ScopedToRecipient(t *testing.T) {
 	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
-	byPair, err := database.GetMessageRequestByPair(ctx, sender, recipient)
-	if err != nil {
-		t.Fatalf("GetMessageRequestByPair: %v", err)
-	}
+	byPair := mustGetMessageRequestByPair(t, database, sender, recipient)
 	if byPair.SenderID != sender || byPair.RecipientID != recipient || byPair.State != "pending" {
 		t.Errorf("GetMessageRequestByPair = %+v", byPair)
 	}
 
 	got, err := database.GetMessageRequest(ctx, byPair.ID, recipient)
-	if err != nil {
-		t.Fatalf("GetMessageRequest(correct recipient): %v", err)
-	}
+	mustDo(t, "GetMessageRequest(correct recipient)", err)
 	if got.ID != byPair.ID {
 		t.Errorf("GetMessageRequest id = %d, want %d", got.ID, byPair.ID)
 	}
@@ -163,18 +144,13 @@ func TestListPendingMessageRequests_JoinsSenderAndPreview(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, channelID, _ := seedMessageRequestPair(t, database, "mrq-list-sender", "mrq-list-recipient")
-	msgID, err := database.CreateMessage(ctx, channelID, sender, "hello there", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, channelID, sender, "hello there", nil)
 	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
 
 	views, err := database.ListPendingMessageRequests(ctx, recipient)
-	if err != nil {
-		t.Fatalf("ListPendingMessageRequests: %v", err)
-	}
+	mustDo(t, "ListPendingMessageRequests", err)
 	if len(views) != 1 {
 		t.Fatalf("views = %d, want 1", len(views))
 	}
@@ -191,9 +167,7 @@ func TestListPendingMessageRequests_JoinsSenderAndPreview(t *testing.T) {
 		t.Fatalf("TransitionMessageRequest: %v", err)
 	}
 	views, err = database.ListPendingMessageRequests(ctx, recipient)
-	if err != nil {
-		t.Fatalf("ListPendingMessageRequests (after ignore): %v", err)
-	}
+	mustDo(t, "ListPendingMessageRequests (after ignore)", err)
 	if len(views) != 0 {
 		t.Errorf("views after ignore = %d, want 0", len(views))
 	}
@@ -218,9 +192,7 @@ func TestListPendingMessageRequests_DeletedOriginalHasNoPreview(t *testing.T) {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
 
-	if err := database.DeleteMessage(ctx, msgID, sender, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, msgID, sender, false))
 	// The row's content survives soft delete — this is what would leak
 	// without the query's own deleted = 0 filter.
 	var content string
@@ -229,9 +201,7 @@ func TestListPendingMessageRequests_DeletedOriginalHasNoPreview(t *testing.T) {
 	}
 
 	views, err := database.ListPendingMessageRequests(ctx, recipient)
-	if err != nil {
-		t.Fatalf("ListPendingMessageRequests: %v", err)
-	}
+	mustDo(t, "ListPendingMessageRequests", err)
 	if len(views) != 1 {
 		t.Fatalf("views = %d, want 1 (the request itself is unaffected by the message's deletion)", len(views))
 	}
@@ -248,10 +218,7 @@ func TestTransitionMessageRequest_GuardedUpdate(t *testing.T) {
 	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
-	req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
-	if err != nil {
-		t.Fatalf("GetMessageRequestByPair: %v", err)
-	}
+	req := mustGetMessageRequestByPair(t, database, sender, recipient)
 
 	ok, err := database.TransitionMessageRequest(ctx, req.ID, recipient, "ignored")
 	if err != nil || !ok {
@@ -272,10 +239,7 @@ func TestTransitionMessageRequest_GuardedUpdate(t *testing.T) {
 	if _, err := database.CreateMessageRequest(ctx, sender2, recipient2, channelID2, msgID2); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
-	req2, err := database.GetMessageRequestByPair(ctx, sender2, recipient2)
-	if err != nil {
-		t.Fatalf("GetMessageRequestByPair: %v", err)
-	}
+	req2 := mustGetMessageRequestByPair(t, database, sender2, recipient2)
 	ok, err = database.TransitionMessageRequest(ctx, req2.ID, sender2, "ignored")
 	if err != nil || ok {
 		t.Fatalf("transition by the sender instead of the recipient = %v, %v; want false, nil", ok, err)
@@ -296,9 +260,7 @@ func TestMessageRequest_ErasingEitherPartyRemovesRequestAndTrust(t *testing.T) {
 			if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 				t.Fatalf("CreateMessageRequest: %v", err)
 			}
-			if err := database.TrustSender(ctx, sender, recipient, "sent_first"); err != nil {
-				t.Fatalf("TrustSender: %v", err)
-			}
+			mustDo(t, "TrustSender", database.TrustSender(ctx, sender, recipient, "sent_first"))
 
 			target := sender
 			if eraseWho == "recipient" {
@@ -334,15 +296,10 @@ func TestAcceptMessageRequest(t *testing.T) {
 	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
-	req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
-	if err != nil {
-		t.Fatalf("GetMessageRequestByPair: %v", err)
-	}
+	req := mustGetMessageRequestByPair(t, database, sender, recipient)
 
 	updated, err := database.AcceptMessageRequest(ctx, req.ID, recipient)
-	if err != nil {
-		t.Fatalf("AcceptMessageRequest: %v", err)
-	}
+	mustDo(t, "AcceptMessageRequest", err)
 	if updated.State != "accepted" || updated.DecidedAt == nil {
 		t.Errorf("updated = %+v", updated)
 	}
@@ -368,10 +325,7 @@ func TestAcceptMessageRequest(t *testing.T) {
 	if _, err := database.CreateMessageRequest(ctx, sender2, recipient2, channelID2, msgID2); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
-	req2, err := database.GetMessageRequestByPair(ctx, sender2, recipient2)
-	if err != nil {
-		t.Fatalf("GetMessageRequestByPair: %v", err)
-	}
+	req2 := mustGetMessageRequestByPair(t, database, sender2, recipient2)
 	if _, err := database.AcceptMessageRequest(ctx, req2.ID, sender2); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("AcceptMessageRequest(by the sender) = %v, want ErrNotFound", err)
 	}
@@ -389,13 +343,8 @@ func TestMessageRequestQueries_GenericDBErrorsAreWrappedNotMistakenForNotFound(t
 	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 		t.Fatalf("CreateMessageRequest: %v", err)
 	}
-	req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
-	if err != nil {
-		t.Fatalf("GetMessageRequestByPair: %v", err)
-	}
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	req := mustGetMessageRequestByPair(t, database, sender, recipient)
+	mustDo(t, "Close", database.Close())
 
 	notFoundLike := func(label string, err error) {
 		t.Helper()

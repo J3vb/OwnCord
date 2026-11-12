@@ -809,23 +809,27 @@ for (const profile of PROFILES) {
       await expect(sheet).toHaveCount(0);
     });
 
-    test("the status dot opens the status picker as a sheet", async ({ page }) => {
+    test("the status dot opens the profile card as a sheet, the one status menu", async ({
+      page,
+    }) => {
       await signIn(page);
       await page.locator("[data-testid='sidebar-toggle']").click();
-      await page.locator(".status-picker-dot").tap();
-      const sheet = page.locator("[data-testid='status-sheet']");
+      // The dot is part of the profile button: a tap on it lands on the button.
+      const dot = page.locator("[data-testid='user-bar-status-dot']");
+      const box = await dot.boundingBox();
+      expect(box).not.toBeNull();
+      await page.touchscreen.tap(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      const sheet = page.locator("[data-testid='self-profile-sheet']");
       await expect(sheet).toBeVisible();
-      await expect(page.locator(".status-picker-dropdown--open")).toHaveCount(0);
-      await expect(sheet.locator("[role='radio']")).toHaveCount(4);
-      await expect(sheet.locator("[data-testid='status-sheet-online']")).toHaveAttribute(
+      await expect(sheet.locator("[role='menuitemradio']")).toHaveCount(4);
+      await expect(sheet.locator("[data-testid='spc-status-online']")).toHaveAttribute(
         "aria-checked",
         "true",
       );
-      const idle = sheet.locator("[data-testid='status-sheet-idle']");
-      expect((await idle.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-      await idle.tap();
+      await expect(sheet.locator("[data-testid='spc-clear-after']")).toBeVisible();
+      await sheet.locator("[data-testid='spc-status-idle']").tap();
       await expect(sheet).toHaveCount(0);
-      await expect(page.locator(".status-picker-dot")).toHaveCSS("background-color", /rgb\(/);
+      await expect(dot).toHaveCSS("background-color", /rgb\(/);
     });
 
     test("a message's header shows the time alone, with the full date on hover", async ({
@@ -1202,13 +1206,13 @@ for (const profile of PROFILES) {
 
       await tile(page, 1002).locator(".video-cell-select").tap();
       await expect(tile(page, 1002)).toHaveClass(/focused/);
-      await expect(tile(page, 3)).toHaveClass(/thumb/);
+      await expect(tile(page, 3)).not.toHaveClass(/focused/);
 
       await tile(page, 1002).tap({ position: { x: 60, y: 60 } });
       await expect(tile(page, 1002)).not.toHaveClass(/focused/);
-      await expect(page.locator("#call-grid-host .focus-mode")).toHaveCount(0);
+      await expect(page.locator("#call-grid-host .video-cell.focused")).toHaveCount(0);
 
-      // A thumb in the strip takes the focus when tapped.
+      // Another tile takes the focus when tapped.
       await tile(page, 3).locator(".video-cell-select").tap();
       await tile(page, 4).tap();
       await expect(tile(page, 4)).toHaveClass(/focused/);
@@ -1283,7 +1287,7 @@ for (const profile of PROFILES) {
           httpRoutes: [
             ...BASE_SESSION_ROUTES,
             { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
-            { pattern: "GET /api/v1/dms", status: 200, body: RING_DM_CHANNELS },
+            { pattern: "GET /api/v1/dms", status: 200, body: { dm_channels: RING_DM_CHANNELS } },
           ],
           simulateWsFlow: true,
           wsHandlers: voiceJoinWithTokenHandlers(),

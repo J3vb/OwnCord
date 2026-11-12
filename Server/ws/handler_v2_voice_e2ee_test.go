@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"strings"
 	"testing"
 )
@@ -53,17 +52,7 @@ func TestVoiceE2EEAnnounceV2_NotInVoiceChannel(t *testing.T) {
 
 	result := handleVoiceE2EEAnnounceV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error for not in voice channel")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeVoiceError {
-		t.Errorf("expected code %q, got %q", ErrCodeVoiceError, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeVoiceError, "expected error for not in voice channel")
 }
 
 func TestVoiceE2EEAnnounceV2_EmptyPublicKey(t *testing.T) {
@@ -73,17 +62,7 @@ func TestVoiceE2EEAnnounceV2_EmptyPublicKey(t *testing.T) {
 
 	result := handleVoiceE2EEAnnounceV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error for empty public_key")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeBadPayload {
-		t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeBadPayload, "expected error for empty public_key")
 }
 
 func TestVoiceE2EEAnnounceV2_PublicKeyTooLarge(t *testing.T) {
@@ -94,17 +73,7 @@ func TestVoiceE2EEAnnounceV2_PublicKeyTooLarge(t *testing.T) {
 
 	result := handleVoiceE2EEAnnounceV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error for oversized public_key")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeBadPayload {
-		t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeBadPayload, "expected error for oversized public_key")
 }
 
 func TestVoiceE2EEAnnounceV2_InvalidBase64(t *testing.T) {
@@ -114,17 +83,7 @@ func TestVoiceE2EEAnnounceV2_InvalidBase64(t *testing.T) {
 
 	result := handleVoiceE2EEAnnounceV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error for invalid base64")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeBadPayload {
-		t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeBadPayload, "expected error for invalid base64")
 }
 
 func TestVoiceE2EEAnnounceV2_NoReply(t *testing.T) {
@@ -196,17 +155,7 @@ func TestVoiceE2EEAnnounceV2_SignatureInvalidBase64(t *testing.T) {
 
 	result := handleVoiceE2EEAnnounceV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error for invalid signature base64")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeBadPayload {
-		t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeBadPayload, "expected error for invalid signature base64")
 	if result.SetE2EEAnnounce != nil {
 		t.Error("invalid signature must not store the public key")
 	}
@@ -220,15 +169,5 @@ func TestVoiceE2EEAnnounceV2_SignatureTooLarge(t *testing.T) {
 
 	result := handleVoiceE2EEAnnounceV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error for oversized signature")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeBadPayload {
-		t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeBadPayload, "expected error for oversized signature")
 }

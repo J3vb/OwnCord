@@ -9,22 +9,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// afkChannelRequest is the JSON body for PUT /admin/api/afk-channel.
-// channel_id must be present: a number flags that channel as the AFK channel,
-// an explicit null clears the flag. An absent key is a bad request rather than
-// a silent clear.
+// afkChannelRequest is the body for PUT /admin/api/afk-channel. channel_id must be present: a number flags
+// that channel as AFK, an explicit null clears it; an absent key is a bad request, not a silent clear.
 type afkChannelRequest struct {
 	ChannelID json.RawMessage `json:"channel_id"`
 }
 
-// afkChannelResponse echoes the flag's new owner (null when cleared).
 type afkChannelResponse struct {
 	ChannelID *int64 `json:"channel_id"`
 }
 
-// voicePermissionReconciler is implemented by the hub. It is asserted rather
-// than added to HubBroadcaster so the many HubBroadcaster test doubles stay
-// as they are.
+// voicePermissionReconciler is implemented by the hub; asserted, not added to HubBroadcaster, so its many
+// test doubles stay unchanged.
 type voicePermissionReconciler interface {
 	ReconcileChannelVoicePermissions(channelID int64)
 }

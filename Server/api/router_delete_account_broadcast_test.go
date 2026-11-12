@@ -31,11 +31,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/J3vb/OwnCord/Server/api"
-	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/internal/app"
 )
 
 // dialAndAuthWS opens a WS connection against srv and completes the auth
@@ -80,14 +76,7 @@ func dialAndAuthWS(t *testing.T, srv *httptest.Server, token string) *websocket.
 }
 
 func TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{
@@ -98,27 +87,11 @@ func TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(t *testing.T) {
 		},
 	}
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
-	if rtErr != nil {
-		t.Fatalf("app.StartRuntime: %v", rtErr)
-	}
-	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
-	t.Cleanup(cleanup)
+	handler, _ := startRouter(t, cfg, database)
 
 	newUserSession := func(username string) (int64, string) {
-		hash, _ := auth.HashPassword("correctPass1")
 		// role_id=4 ("Member") so the last-admin check doesn't block deletion.
-		uid, err := database.CreateUser(context.Background(), username, hash, 4)
-		if err != nil {
-			t.Fatalf("CreateUser(%s): %v", username, err)
-		}
-		token, err := auth.GenerateToken()
-		if err != nil {
-			t.Fatalf("GenerateToken: %v", err)
-		}
-		if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-			t.Fatalf("CreateSession: %v", err)
-		}
+		uid, token := seedUserSession(t, database, username, 4)
 		return uid, token
 	}
 
@@ -138,12 +111,8 @@ func TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(t *testing.T) {
 		strings.NewReader(`{"password":"correctPass1"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+doomedToken)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("DELETE /api/v1/auth/account status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	rr := serveLocal(handler, req)
+	requireStatus(t, rr, http.StatusNoContent)
 
 	// The hub must fan out member_ban for the deleted user to the observer's
 	// still-open connection. Loop with an overall deadline: other broadcasts

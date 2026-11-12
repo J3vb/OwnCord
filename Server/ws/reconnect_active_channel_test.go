@@ -17,50 +17,20 @@ package ws
 
 import (
 	"context"
-	"encoding/json"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
-
-	"github.com/coder/websocket"
-
-	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 func TestReconnect_AuthFrameActiveChannelRestoresSubscription(t *testing.T) {
-	database := newTeardownTestDB(t)
+	rig := newServeRig(t)
+	hub := rig.hub
 	ctx := context.Background()
-
-	userID, err := database.CreateUser(ctx, "resume-focus-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	user, err := database.GetUserByID(ctx, userID)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
-
-	chID, err := database.CreateChannel(ctx, "resume-room", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	user, token := rig.seedOwner(t, "resume-focus-user")
+	chID := mustCreateTextChannel(t, rig.db, "resume-room")
 
 	// Precondition: the channel IS readable, so the auth-frame id is eligible
 	// to be honoured (an unreadable one must be ignored — covered below).
-	allowed, err := hub.computeAllowedChannels(ctx, database, user)
+	allowed, err := hub.computeAllowedChannels(ctx, rig.db, user)
 	if err != nil {
 		t.Fatalf("computeAllowedChannels: %v", err)
 	}
@@ -82,65 +52,16 @@ func TestReconnect_AuthFrameActiveChannelRestoresSubscription(t *testing.T) {
 	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{}}`))
 	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{}}`))
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "auth",
-		"payload": map[string]any{
-			"token":             token,
-			"last_seq":          uint64(99),
-			"active_channel_id": chID,
-		},
-	})
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-
-	readCtx, readCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer readCancel()
-	_, msg, err := conn.Read(readCtx)
-	if err != nil {
-		t.Fatalf("read handshake response: %v", err)
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal(msg, &parsed); err != nil {
-		t.Fatalf("unmarshal handshake response: %v", err)
-	}
-	if parsed["type"] != MsgTypeAuthOK {
-		t.Fatalf("expected auth_ok (buffer-tier resume), got %v", parsed["type"])
+	conn := rig.dialAuth(t, ctx, token, 99, chID)
+	if typ, _ := readFrameType(t, ctx, conn); typ != MsgTypeAuthOK {
+		t.Fatalf("expected auth_ok (buffer-tier resume), got %v", typ)
 	}
 
 	// The registered client must already be focused on — and subscribed to —
 	// the channel, with no channel_focus ever sent.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		hub.mu.Lock()
-		c := hub.newestLocked(userID)
-		hub.mu.Unlock()
-		if c != nil && c.getChannelID() == chID {
-			break
-		}
-		if time.Now().After(deadline) {
-			got := int64(-1)
-			if c != nil {
-				got = c.getChannelID()
-			}
-			t.Fatalf("resumed client channelID = %d, want %d — the socket is unsubscribed until channel_focus, "+
-				"so every broadcast to that channel in the meantime is lost", got, chID)
-		}
-		time.Sleep(10 * time.Millisecond)
+	if _, got, ok := rig.waitFocused(user.ID, chID); !ok {
+		t.Fatalf("resumed client channelID = %d, want %d — the socket is unsubscribed until channel_focus, "+
+			"so every broadcast to that channel in the meantime is lost", got, chID)
 	}
 }
 
@@ -148,43 +69,24 @@ func TestReconnect_AuthFrameActiveChannelRestoresSubscription(t *testing.T) {
 // be honoured — it would hand out a ChannelTopic subscription (and with it the
 // channel's live message stream) that the permission set denies.
 func TestReconnect_AuthFrameActiveChannelIsReadGated(t *testing.T) {
-	database := newTeardownTestDB(t)
+	rig := newServeRig(t)
+	hub := rig.hub
 	ctx := context.Background()
-
-	userID, err := database.CreateUser(ctx, "resume-gated-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	noPerms, err := database.CreateRole(ctx, "no-perms-resume", nil, 0, 1, false, false)
+	user, token := rig.seedOwner(t, "resume-gated-user")
+	noPerms, err := rig.db.CreateRole(ctx, "no-perms-resume", nil, 0, 1, false, false)
 	if err != nil || noPerms == nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
-	if err := database.UpdateUserRole(ctx, userID, noPerms.ID); err != nil {
+	if err := rig.db.UpdateUserRole(ctx, user.ID, noPerms.ID); err != nil {
 		t.Fatalf("UpdateUserRole: %v", err)
 	}
-	user, err := database.GetUserByID(ctx, userID)
+	user, err = rig.db.GetUserByID(ctx, user.ID)
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
+	secretID := mustCreateTextChannel(t, rig.db, "secret-resume")
 
-	secretID, err := database.CreateChannel(ctx, "secret-resume", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	allowed, err := hub.computeAllowedChannels(ctx, database, user)
+	allowed, err := hub.computeAllowedChannels(ctx, rig.db, user)
 	if err != nil {
 		t.Fatalf("computeAllowedChannels: %v", err)
 	}
@@ -198,43 +100,12 @@ func TestReconnect_AuthFrameActiveChannelIsReadGated(t *testing.T) {
 	hub.ReplayBuffer().Push(99, 0, []byte(`{"seq":99,"type":"presence","payload":{}}`))
 	hub.ReplayBuffer().Push(100, 0, []byte(`{"seq":100,"type":"presence","payload":{}}`))
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "auth",
-		"payload": map[string]any{
-			"token":             token,
-			"last_seq":          uint64(99),
-			"active_channel_id": secretID,
-		},
-	})
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-
-	readCtx, readCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer readCancel()
-	if _, _, err := conn.Read(readCtx); err != nil {
-		t.Fatalf("read handshake response: %v", err)
-	}
+	conn := rig.dialAuth(t, ctx, token, 99, secretID)
+	readFrameType(t, ctx, conn)
 
 	// Give registration a moment, then assert the claim was refused.
 	time.Sleep(200 * time.Millisecond)
-	hub.mu.Lock()
-	c := hub.newestLocked(userID)
-	hub.mu.Unlock()
+	c := rig.newestClient(user.ID)
 	if c == nil {
 		t.Fatal("client was not registered")
 	}

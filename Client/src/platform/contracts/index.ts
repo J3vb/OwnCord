@@ -29,11 +29,14 @@ export type { TrayStatus } from "./trayStatus";
 export type { ExternalContentBroker } from "./externalContent";
 export type { NativeVoice } from "./nativeVoice";
 export type { SystemIdle } from "./systemIdle";
+export type { SystemRegion } from "./systemRegion";
 export type { GameDetector } from "./gameDetector";
 export type { MediaDetector } from "./mediaDetector";
 export type { WindowPrefs } from "./windowPrefs";
+export type { GpuAdapter } from "./gpuAdapter";
 export type { AppAudio } from "./appAudio";
 export type { CallService } from "./callService";
+export type { MeteredNetwork } from "./meteredNetwork";
 export type { ServerScope } from "./serverScope";
 
 import type { HttpClient } from "./http";
@@ -60,11 +63,14 @@ import type { TrayStatus } from "./trayStatus";
 import type { ExternalContentBroker } from "./externalContent";
 import type { NativeVoice } from "./nativeVoice";
 import type { SystemIdle } from "./systemIdle";
+import type { SystemRegion } from "./systemRegion";
 import type { GameDetector } from "./gameDetector";
 import type { MediaDetector } from "./mediaDetector";
 import type { WindowPrefs } from "./windowPrefs";
+import type { GpuAdapter } from "./gpuAdapter";
 import type { AppAudio } from "./appAudio";
 import type { CallService } from "./callService";
+import type { MeteredNetwork } from "./meteredNetwork";
 import type { ServerScope } from "./serverScope";
 import type { ShareSheet } from "./shareSheet";
 
@@ -95,11 +101,14 @@ export interface Platform {
   readonly externalContent: ExternalContentBroker;
   readonly nativeVoice: NativeVoice;
   readonly systemIdle: SystemIdle;
+  readonly systemRegion: SystemRegion;
   readonly gameDetector: GameDetector;
   readonly mediaDetector: MediaDetector;
   readonly windowPrefs: WindowPrefs;
+  readonly gpuAdapter: GpuAdapter;
   readonly appAudio: AppAudio;
   readonly callService: CallService;
+  readonly meteredNetwork: MeteredNetwork;
   readonly serverScope: ServerScope;
   readonly shareSheet: ShareSheet;
 }

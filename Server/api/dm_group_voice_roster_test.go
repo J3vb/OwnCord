@@ -39,9 +39,7 @@ func newRosterMembersFixture(t *testing.T, inCall ...int64) (*membersFixture, *r
 	for _, name := range []string{"alice", "bob", "carol", "dave", "erin"} {
 		tokens = append(tokens, dmCreateToken(t, database, name, 4))
 	}
-	group := decodeDMInfo(t, dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
-		"recipient_ids": []int64{2, 3},
-	}))
+	group := createGroupDM(t, router, tokens[0])
 	bc.participants[group.ChannelID] = inCall
 	rec.reset()
 	return &membersFixture{database: database, router: router, bc: rec, tokens: tokens, group: group.ChannelID}, rec

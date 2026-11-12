@@ -10,9 +10,7 @@ import (
 // Migration 077 resets user_roles to exactly the role users.role_id names.
 func TestMigrate_077ReconcilesUserRolesWithMirror(t *testing.T) {
 	database := openMemory(t)
-	if err := db.MigrateFS(database, migrationsUpTo(t, "077_")); err != nil {
-		t.Fatalf("pre-077 schema: %v", err)
-	}
+	mustDo(t, "pre-077 schema", db.MigrateFS(database, migrationsUpTo(t, "077_")))
 	execAll(t, database,
 		// 1 consistent, 2 demoted from Admin (mirror 4, still holds 2),
 		// 3 left with zero rows (role delete cascade), 4 names a missing role.
@@ -23,9 +21,7 @@ func TestMigrate_077ReconcilesUserRolesWithMirror(t *testing.T) {
 		`INSERT INTO users (id, username, password, role_id) VALUES (4, 'd', 'h', 999)`,
 		`PRAGMA foreign_keys = ON`,
 	)
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	mustDo(t, "Migrate", db.Migrate(database))
 	for uid, want := range map[int64]int64{1: 4, 2: 4, 3: 4} {
 		if got := userRoleIDs(t, database, uid); !slices.Equal(got, []int64{want}) {
 			t.Errorf("user %d user_roles = %v, want [%d]", uid, got, want)

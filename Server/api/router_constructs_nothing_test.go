@@ -6,7 +6,6 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/internal/app"
 )
 
@@ -17,14 +16,7 @@ import (
 // malformed OWNCORD_TOTP_KEY is now refused by the totp-key stage
 // (internal/app TestApp_MalformedTOTPKeyFailsNamedStage), before any router.
 func TestNewRouter_ConstructsNothing(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := openMigratedDB(t)
 	cfg := &config.Config{Server: config.ServerConfig{Name: "Test Server", Port: 8443}}
 
 	rt, err := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))

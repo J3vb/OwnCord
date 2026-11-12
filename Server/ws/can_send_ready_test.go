@@ -20,18 +20,13 @@ func TestBuildReady_IncludesCanSend(t *testing.T) {
 	if _, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0); err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
-	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, user.ID, role)
 	var env struct {
 		Payload struct {
 			Channels []map[string]any `json:"channels"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if len(env.Payload.Channels) == 0 {
 		t.Fatal("expected at least one channel")
 	}
@@ -65,18 +60,13 @@ func TestBuildReady_CanModerateVoice(t *testing.T) {
 		if err != nil || role == nil {
 			t.Fatalf("GetRoleByID(%d): %v", tc.roleID, err)
 		}
-		msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-		if err != nil {
-			t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-		}
+		msg := mustBuildReadyWithRole(t, hub, database, user.ID, role)
 		var env struct {
 			Payload struct {
 				Channels []map[string]any `json:"channels"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(msg, &env); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		mustUnmarshal(t, msg, &env)
 		if len(env.Payload.Channels) == 0 {
 			t.Fatalf("role %d: expected at least one channel", tc.roleID)
 		}
@@ -149,28 +139,16 @@ func TestBuildReady_MessageAffordances(t *testing.T) {
 		permissions.ManageMessages|permissions.AddReactions); err != nil {
 		t.Fatalf("pin Moderator permissions: %v", err)
 	}
-	general, err := database.CreateChannel(ctx, "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	staff, err := database.CreateChannel(ctx, "staff", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	general := mustCreateChannel(t, database, "general", "text")
+	staff := mustCreateChannel(t, database, "staff", "text")
 	news, err := database.CreateChannel(ctx, "news", "announcement", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 	member := seedTestUser(t, database, "affordance-member")
 	peer := seedTestUser(t, database, "affordance-peer")
-	mod, err := database.CreateUser(ctx, "affordance-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser mod: %v", err)
-	}
-	denied, err := database.CreateUser(ctx, "affordance-denied", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser denied: %v", err)
-	}
+	mod := mustCreateUser(t, database, "affordance-mod", 3)
+	denied := mustCreateUser(t, database, "affordance-denied", 3)
 	admin := seedCoverageOwner(t, database, "affordance-admin")
 	if err := database.UpsertChannelUserOverride(ctx, staff, denied, 0, permissions.ManageMessages); err != nil {
 		t.Fatalf("UpsertChannelUserOverride: %v", err)

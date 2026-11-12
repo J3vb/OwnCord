@@ -13,8 +13,8 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import { messagesStore, addMessage } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { setActiveChannel } from "@stores/channels.store";

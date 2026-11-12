@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 262 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 263 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -122,6 +122,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/support-bundles/preview`                                 |
 | GET     | `/admin/api/system/health`                                           |
 | GET     | `/admin/api/system/livekit`                                          |
+| POST    | `/admin/api/system/livekit/restart`                                  |
 | GET     | `/admin/api/system/slow-requests`                                    |
 | GET     | `/admin/api/system/stats`                                            |
 | GET     | `/admin/api/tokens`                                                  |
@@ -395,7 +396,8 @@ setting (B4-1; the admin panel's Settings page, or the setup wizard):
 
 `approval` and `open` also budget 5 registrations per client address per 24
 hours, and `approval` caps the pending queue at 100 applications; both refusals
-are `429 RATE_LIMITED`. A fresh install is `invite`; an upgraded server keeps
+are `429 RATE_LIMITED`. Only a registration that went through counts against
+the address: a taken username, a busy server or a full queue does not. A fresh install is `invite`; an upgraded server keeps
 its former `registration_open` choice as `invite` (1) or `closed` (0), never
 `open`. The first user is created via `/admin/api/setup` instead.
 
@@ -508,13 +510,14 @@ The login shape: `token` and `user`, `requires_2fa` false.
 
 #### Errors
 
-| Status | Code                  | Cause                                                       |
-| ------ | --------------------- | ----------------------------------------------------------- |
-| 400    | `INVALID_INPUT`       | A field missing, or a weak new password                     |
-| 401    | `INVALID_CREDENTIALS` | Unknown account, no live kit or credential, or wrong secret |
-| 403    | `FORBIDDEN`           | The account is banned                                       |
-| 429    | `RATE_LIMITED`        | Recovery lockout                                            |
-| 429    | `AUTH_BUSY`           | The admission budget is full                                |
+| Status | Code                         | Cause                                                                                                                  |
+| ------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`              | A field missing, or a weak new password                                                                                |
+| 401    | `INVALID_CREDENTIALS`        | Unknown account, no live kit or credential, or wrong secret                                                            |
+| 403    | `FORBIDDEN`                  | The account is banned                                                                                                  |
+| 429    | `RATE_LIMITED`               | Recovery lockout                                                                                                       |
+| 429    | `AUTH_BUSY`                  | The admission budget is full                                                                                           |
+| 500    | `RECOVERED_SIGN_IN_REQUIRED` | The recovery committed (new password set, secret spent) but no session could be started; sign in with the new password |
 
 ---
 
@@ -925,6 +928,10 @@ Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
 `display_name` and `about` are HTML-sanitized and trimmed server-side, and the
 length caps count characters, not bytes.
 
+The request is all-or-nothing: the profile fields and `identity_public_key`
+are written in one transaction, so an error response means nothing was
+saved, and a retry of the whole request is safe.
+
 While a moderator timeout is active on your account, a `display_name` or
 `username` that differs from your current one is refused with `403`
 `TIMED_OUT`, and the whole request is not applied. Resending the current
@@ -1129,7 +1136,7 @@ starts `true` and stays so until the account lists its sessions from
 another device. This listing is that acknowledgement — every row's flag
 clears except the caller's own, so the device that just signed in never
 acknowledges itself, and the response carries the flags as they were before
-it.
+it. A listing with no unseen row other than the caller's own writes nothing.
 No push transport exists for the signal; a client that wants it polls this
 route.
 
@@ -1836,7 +1843,9 @@ only while a page brings GIFs it has not seen.
 ### GET /api/v1/gif/trending
 
 Same auth, rate limit, response shape, and error codes as
-`/api/v1/gif/search`, minus the `q` parameter.
+`/api/v1/gif/search`, minus the `q` parameter. A page is answered from memory
+for 60 seconds after the provider returns it (per `limit` and `pos`), so
+opening the picker again does not call the provider each time.
 
 | Param   | Type   | Default | Range       | Description               |
 | ------- | ------ | ------- | ----------- | ------------------------- |
@@ -2818,7 +2827,7 @@ Send both or neither; with neither the upload is an ordinary one, exactly as bef
 
 Withdraw a file you uploaded and never sent. The file and its row are deleted
 and its size stops counting against `upload.user_quota_mb` at once, instead of
-when the hourly sweep of unsent uploads removes it. The client calls this when
+when the sweep of unsent uploads removes it a day after upload. The client calls this when
 you remove an attachment from the composer, and before it re-uploads one that
 has been waiting too long.
 
@@ -2936,11 +2945,14 @@ at `GET /api/v1/files/{id}`.
 unlinked file, and any NSFW acknowledgement) and the same headers.
 
 A JPEG or PNG larger than 800×800 is scaled to fit an 800×800 box, in the same
-format, turned upright by its EXIF orientation. Any other image — one that
-already fits, a GIF (kept animated), another format, one too large to decode
-within the server's memory bound (judged from its header, so a 16-bit image
-or a progressive JPEG reaches it at fewer pixels) or one that does not decode —
-is served as the original bytes. A file that is not an image is a `404`.
+format, turned upright by its EXIF orientation. A still WebP larger than the box
+is scaled the same way into a JPEG (`Content-Type: image/jpeg`), or a PNG
+(`image/png`) when it has transparent pixels. Any other image — one that
+already fits, a GIF or an animated WebP (kept animated), another format, one
+too large to decode within the server's memory bound (judged from its header,
+so a 16-bit image, a progressive JPEG or a WebP reaches it at fewer pixels) or
+one that does not decode — is served as the original bytes. A file that is not
+an image is a `404`.
 
 A HEIC, HEIF or TIFF file (stored as `image/heic`, `image/heif` or `image/tiff`,
 which the server tells apart by the file's own bytes) is the exception, because
@@ -2971,8 +2983,12 @@ was stored as `application/octet-stream` and stays a plain file.
 
 A thumbnail is made on the first request, kept beside the original under
 `upload.storage_dir/thumbs/`, and removed with it; an image that fails to
-decode is remembered there too and not tried again. A server that has this
-route says so with `upload_policy.thumbnails` on `auth_ok`.
+decode is remembered there too and not tried again. Previews are made a few
+at a time (half the server's CPUs, one to four); a request that waits more
+than 5 seconds for its turn gets the original bytes instead, or for a HEIC,
+HEIF or TIFF a `503` with `Retry-After`, and nothing is remembered, so a later
+request makes the preview. A server that has this route says so with
+`upload_policy.thumbnails` on `auth_ok`.
 
 ---
 
@@ -4459,6 +4475,7 @@ Authorization is two-layered:
 | `GET/PATCH /admin/api/settings`, `PUT /admin/api/afk-channel`                                                                                        | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
 | `GET /admin/api/config`                                                                                                                              | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
 | `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                                                                    | Owner role **or** `MANAGE_CONFIG` (`permissions.CanManageConfig`; `ADMINISTRATOR` does not pass) — WP 8.4d                                                                                                                                                                                                   |
+| `POST /admin/api/system/livekit/restart`                                                                                                             | Owner role **or** `MANAGE_CONFIG` (`permissions.CanManageConfig`; `ADMINISTRATOR` does not pass)                                                                                                                                                                                                             |
 | `GET /admin/api/retention`, `GET /admin/api/retention/channels`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                                                                                                                                                                                                                                      |
 | `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                                                           | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                                                          | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes); the stream re-checks it on every write — WP 8.4d                                                                                                                                                                                                                |
@@ -4744,8 +4761,9 @@ Nothing here is exported off the host.
   with the reason in `detail`.
 - `voice` reports LiveKit. An OwnCord-managed companion reports its
   supervisor's local state — `running`, plus a `not running` warning when it is
-  down and a `gave up` critical when the backoff stopped restarting it; a
-  restart count appears in the detail. An externally managed LiveKit is
+  down and a `gave up` critical when the quick restarts ran out (it then
+  tries every 10 minutes, or at once on `POST /admin/api/system/livekit/restart`);
+  a restart count appears in the detail. An externally managed LiveKit is
   probed over HTTP and reports `unreachable` as a warning when it does not
   answer; an unconfigured voice path is `unknown`.
 - The first disk or voice level is reported at once, and a stopped dispatch
@@ -4838,6 +4856,30 @@ space and the cached upload total.
 - `disk.low` is `free` below `server.min_free_disk_mb` (`min_free`, bytes),
   where uploads are refused; it is `null` when that floor is `0` or `free` is
   unknown. `uploads` is every upload's size summed.
+
+---
+
+### POST /admin/api/system/livekit/restart
+
+The System health page's **Restart voice server** button. When OwnCord runs
+LiveKit and the companion crashed 10 times in a row, the supervisor stops its
+quick restarts and tries once every 10 minutes; this route makes it try now,
+with the full set of quick restarts again. It never stops a running LiveKit.
+Each accepted press writes a `voice_server_restart_requested` audit entry.
+
+**Auth:** Owner role **or** `MANAGE_CONFIG` (like `POST /admin/api/restart`)
+
+#### Response 202 Accepted
+
+```json
+{ "restarting": true }
+```
+
+`409 CONFLICT` when there is nothing to restart: LiveKit is running or still in
+its quick restarts, or it runs on its own (not managed by OwnCord).
+
+The snapshot on `GET /admin/api/system/health` carries `livekit_gave_up` and,
+while the supervisor waits for its next try, `livekit_next_retry_at` (UTC).
 
 ---
 
@@ -5421,10 +5463,16 @@ an array of:
   "action": "user_ban",
   "target_type": "user",
   "target_id": 7,
+  "target_name": "spammer",
   "detail": "spam",
   "created_at": "2026-08-04T12:00:00Z"
 }
 ```
+
+`target_name` is the target's name as it is now, read when the log is listed,
+for a user, role, channel or category target. It is omitted when the
+target is gone or is of another kind (an invite, an emoji, the server);
+`detail` keeps the name the target had when the row was written.
 
 Rows about an erased account (B4-10) carry the deletion marker's token in
 place of the id — `"subject_token"` where the erased account was the target,
@@ -5527,7 +5575,8 @@ A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
 `upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
-`voice_owner_movable`, `game_activity_enabled`, `welcome_channel_id`.
+`voice_owner_movable`, `game_activity_enabled`, `welcome_channel_id`,
+`voice_max_video_kbps`, `server_upload_mbps`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -5567,6 +5616,22 @@ is not owner-only: `MANAGE_SERVER` may change it. A save hands the value to the
 running hub, which clears every shown game and song when it is `false` and sends the
 [`game_activity_policy`](protocol.md#game_activity_policy-server---client-broadcast)
 frame to every connected client; an unreadable row at start-up counts as `false`.
+
+`voice_max_video_kbps` is the most video one person may send, camera and screen
+share together, in kbit/s: `0` (the default while no row exists) for no limit,
+otherwise `300` to `50000`; anything else is refused with `400`. `MANAGE_SERVER`
+may change it. LiveKit cannot cap one publisher, so the server only states the
+cap and OwnCord clients keep their video under it. A save hands the value to the
+running hub, which sends the
+[`video_bitrate_cap`](protocol.md#video_bitrate_cap-server---client-broadcast)
+frame to every connected client, so streams already live follow it; an
+unreadable row at start-up counts as no limit.
+
+`server_upload_mbps` is the server's own upload speed in Mbit/s, typed by the
+admin: `0` (or no row) for not set, otherwise `1` to `100000`; anything else is
+refused with `400`. `MANAGE_SERVER` may change it. Only the admin panel reads
+it, to show roughly how many people can watch one stream at once under the
+video cap; nothing is sent to clients.
 
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change
@@ -5976,8 +6041,12 @@ works, and `apply_blocked` (present only then) says why:
 
 - `container`: a container deployment (detected via `OWNCORD_CONTAINER`, which
   the shipped Dockerfile sets, or the engine marker files). The admin SPA
-  replaces the apply button with an image-upgrade note. This wins when both
-  reasons apply.
+  replaces the apply button with an image-upgrade note. This wins over the
+  other reasons.
+- `development_build`: the server runs a source build (version `dev`, not a
+  semantic version, or a `git describe` string past a tag). The admin SPA
+  shows "Development build" and no apply button, and hides the update badge
+  and the Dashboard strip. This wins over `install_read_only`.
 - `install_read_only`: the service cannot create files in the folder that holds
   its program file. The admin SPA says to install the new release by hand.
 
@@ -6009,6 +6078,7 @@ re-verification against TOCTOU swaps), spawns the new process and shuts down.
 | Status | Code                                                         | Cause                                                                                                                                                       |
 | ------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 503    | `CONTAINER_DEPLOYMENT`                                       | Container deployment — the binary is image content; upgrade by pulling the new image (opt back in with `OWNCORD_CONTAINER=0` if the binary is bind-mounted) |
+| 409    | `DEVELOPMENT_BUILD`                                          | The server runs a development build; a source build is never replaced with a release. Install the release by hand                                           |
 | 503    | `INSTALL_READ_ONLY`                                          | The service cannot write to the folder that holds its program file; checked before any download. Install the new release by hand                            |
 | 503    | `UPDATE_UNAVAILABLE`                                         | Update checking is not configured                                                                                                                           |
 | 503    | `SHUTTING_DOWN`                                              | The server has begun shutting down, so the update was not downloaded or applied (checked before the download and again before the restart countdown starts) |

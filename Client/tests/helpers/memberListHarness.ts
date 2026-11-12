@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import type { MemberListOptions } from "@components/MemberList";
+import type { MemberListOptions } from "../../src/features/members/MemberList";
 import { membersStore } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { setRoles } from "@stores/channels.store";

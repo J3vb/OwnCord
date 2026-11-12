@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── roles_update ────────────────────────────────────────────────────────────
@@ -17,10 +16,7 @@ func TestBroadcastRolesUpdate_CarriesFullList(t *testing.T) {
 	defer hub.Stop()
 
 	user := seedOwnerUser(t, database, "roles-owner")
-	send := make(chan []byte, 16)
-	client := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	_, send := connectClient(t, hub, user, 0, 16)
 
 	roles, err := database.ListRoles(context.Background())
 	if err != nil {
@@ -59,10 +55,7 @@ func TestBroadcastRolesUpdate_NilEntriesAreSkipped(t *testing.T) {
 	defer hub.Stop()
 
 	user := seedOwnerUser(t, database, "roles-nil-owner")
-	send := make(chan []byte, 16)
-	client := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	_, send := connectClient(t, hub, user, 0, 16)
 
 	// A nil in the slice must not produce a null entry the client would have
 	// to defend against.
@@ -76,9 +69,7 @@ func TestBroadcastRolesUpdate_NilEntriesAreSkipped(t *testing.T) {
 	var payload struct {
 		Roles []db.Role `json:"roles"`
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
+	mustUnmarshal(t, raw, &payload)
 	if len(payload.Roles) != 1 || payload.Roles[0].Name != "Helper" {
 		t.Fatalf("roles = %+v, want just the non-nil entry", payload.Roles)
 	}
@@ -95,14 +86,8 @@ func TestRefreshAllChannelVisibility_CoversEveryChannel(t *testing.T) {
 	secondID := seedTestChannel(t, database, "room-two")
 
 	memberID := seedTestUser(t, database, "vis-all-member")
-	member, err := database.GetUserByID(context.Background(), memberID)
-	if err != nil || member == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
-	send := make(chan []byte, 32)
-	client := ws.NewTestClientWithUser(hub, member, firstID, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	member := mustGetUser(t, database, memberID)
+	_, send := connectClient(t, hub, member, firstID, 32)
 
 	// Strip READ_MESSAGES from the Member role itself — the case a role edit
 	// produces, where no single channel's overrides changed but every channel's
@@ -140,20 +125,14 @@ func TestRefreshAllChannelVisibility_SkipsDMChannels(t *testing.T) {
 	defer hub.Stop()
 
 	memberID := seedTestUser(t, database, "vis-dm-member")
-	member, err := database.GetUserByID(context.Background(), memberID)
-	if err != nil || member == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	member := mustGetUser(t, database, memberID)
 	otherID := seedTestUser(t, database, "vis-dm-other")
 	dm, _, err := database.GetOrCreateDMChannel(context.Background(), memberID, otherID)
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
 
-	send := make(chan []byte, 32)
-	client := ws.NewTestClientWithUser(hub, member, dm.ID, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	_, send := connectClient(t, hub, member, dm.ID, 32)
 
 	// A DM's access is participation, which no role change can revoke — so a
 	// role-driven visibility sweep must leave it alone.

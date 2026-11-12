@@ -9,9 +9,9 @@ vi.mock("@tauri-apps/plugin-http", () => mocks.httpPluginMock(fetchMock));
 vi.mock("@lib/net/httpProxy", () => mocks.httpProxyMock());
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/icons", () => mocks.iconsMock());
-vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
+vi.mock("/src/features/messaging/content/mediaVisibility", () => mocks.mediaVisibilityMock());
 
-import { renderMessage } from "../../src/components/message-list/renderers";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import { renderAttachment } from "../../src/features/messaging/content/attachments";
 import { messagesStore, type Message } from "../../src/stores/messages.store";
 import {

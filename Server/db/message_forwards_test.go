@@ -97,9 +97,7 @@ func TestCreateMessageDelivery_ForwardAtomic(t *testing.T) {
 	// and the clone link together.
 	p := f.params("the original", f.cloneID)
 	saved, err := f.database.CreateMessageDelivery(ctx, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
 	if saved.Duplicate || len(saved.LinkedAttachmentIDs) != 1 {
 		t.Fatalf("saved = %+v", saved)
 	}
@@ -130,9 +128,7 @@ func TestCreateMessageDelivery_ForwardSourceDeletedInTx(t *testing.T) {
 	f := newForwardFixture(t)
 	ctx := context.Background()
 	// A delete that commits before the forward's transaction wins.
-	if err := f.database.DeleteMessage(ctx, f.srcID, f.author, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", f.database.DeleteMessage(ctx, f.srcID, f.author, false))
 	_, err := f.database.CreateMessageDelivery(ctx, f.params("the original", f.cloneID))
 	if !errors.Is(err, db.ErrForwardSourceGone) {
 		t.Fatalf("err = %v, want ErrForwardSourceGone", err)
@@ -159,9 +155,7 @@ func TestForward_SourcePurgedNullsLink(t *testing.T) {
 	f := newForwardFixture(t)
 	ctx := context.Background()
 	saved, err := f.database.CreateMessageDelivery(ctx, f.params("the original", f.cloneID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
 	// A purge (retention, erasure) hard-deletes the source row.
 	if _, err := f.database.ExecContext(ctx, `DELETE FROM messages WHERE id = ?`, f.srcID); err != nil {
 		t.Fatal(err)
@@ -180,12 +174,8 @@ func TestForward_SourcePurgedNullsLink(t *testing.T) {
 	p := f.params("second", clone2)
 	p.Forward.SourceMessageID, p.Forward.ForwardedID = &second, second
 	saved2, err := f.database.CreateMessageDelivery(ctx, p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.database.DeleteChannel(ctx, f.srcChannel); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
+	mustDo(t, "DeleteChannel", f.database.DeleteChannel(ctx, f.srcChannel))
 	row2, err := f.database.GetMessageForward(ctx, saved2.Message.ID)
 	if err != nil || row2 == nil || row2.SourceMessageID != nil {
 		t.Fatalf("row after channel delete = %+v, %v", row2, err)
@@ -196,9 +186,7 @@ func TestEditMessageContent_RefusesForward(t *testing.T) {
 	f := newForwardFixture(t)
 	ctx := context.Background()
 	saved, err := f.database.CreateMessageDelivery(ctx, f.params("the original", f.cloneID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
 	if _, err := f.database.EditMessage(ctx, saved.Message.ID, f.forwarder, "rewritten"); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("EditMessage(forward) err = %v, want ErrNotFound", err)
 	}
@@ -208,9 +196,7 @@ func TestEditMessageContent_RefusesForward(t *testing.T) {
 	}
 	// An ordinary message by the same user still edits.
 	id, err := f.database.CreateMessage(ctx, f.target, f.forwarder, "mine", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessage", err)
 	if _, err := f.database.EditMessage(ctx, id, f.forwarder, "mine, edited"); err != nil {
 		t.Fatalf("ordinary edit: %v", err)
 	}
@@ -220,19 +206,13 @@ func TestAttachForwards_DeletedSourceHidesLink(t *testing.T) {
 	f := newForwardFixture(t)
 	ctx := context.Background()
 	saved, err := f.database.CreateMessageDelivery(ctx, f.params("the original", f.cloneID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
 	plain, err := f.database.CreateMessage(ctx, f.target, f.forwarder, "plain", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessage", err)
 	page := func() map[int64]db.MessageAPIResponse {
 		t.Helper()
 		msgs, err := f.database.GetMessagesForAPI(ctx, f.target, 0, 50, f.forwarder)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "GetMessagesForAPI", err)
 		out := map[int64]db.MessageAPIResponse{}
 		for i := range msgs {
 			out[msgs[i].ID] = msgs[i]
@@ -253,18 +233,14 @@ func TestAttachForwards_DeletedSourceHidesLink(t *testing.T) {
 	}
 
 	// A soft delete of the source leaves the id in the row but reports it null.
-	if err := f.database.DeleteMessage(ctx, f.srcID, f.author, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", f.database.DeleteMessage(ctx, f.srcID, f.author, false))
 	fw = page()[saved.Message.ID].Forward
 	if fw == nil || fw.SourceMessageID != nil || fw.SourceChannelID != f.srcChannel {
 		t.Fatalf("forward block after the source was deleted = %+v", fw)
 	}
 
 	// A deleted forward carries no block at all.
-	if err := f.database.DeleteMessage(ctx, saved.Message.ID, f.forwarder, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", f.database.DeleteMessage(ctx, saved.Message.ID, f.forwarder, false))
 	if d, ok := page()[saved.Message.ID]; ok && d.Forward != nil {
 		t.Errorf("a deleted forward still carries its block: %+v", d.Forward)
 	}

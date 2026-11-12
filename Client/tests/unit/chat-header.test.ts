@@ -5,6 +5,7 @@ import {
   setChatHeaderChannelType,
   setChatHeaderCallChat,
   setChatHeaderTopic,
+  setChatHeaderLock,
 } from "../../src/pages/main-page/ChatHeader";
 import { useMountContainer } from "../helpers/mountContainer";
 
@@ -190,6 +191,29 @@ describe("ChatHeader", () => {
 // ---------------------------------------------------------------------------
 // updateChatHeaderForDm
 // ---------------------------------------------------------------------------
+
+describe("setChatHeaderLock", () => {
+  it("shows a labelled lock after the name only while the channel has a password", () => {
+    const { refs } = buildChatHeader({ onTogglePins: vi.fn() });
+    const lock = refs.lockEl!;
+    expect(lock.hidden).toBe(true);
+    expect(lock.previousElementSibling).toBe(refs.nameEl);
+    expect(lock.getAttribute("role")).toBe("img");
+    expect(lock.getAttribute("aria-label")).toBe("Password protected");
+    expect(lock.querySelector("svg")).not.toBeNull();
+    setChatHeaderLock(refs, true);
+    expect(lock.hidden).toBe(false);
+    setChatHeaderLock(refs, false);
+    expect(lock.hidden).toBe(true);
+  });
+
+  it("hides the lock when the header switches to a DM", () => {
+    const { refs } = buildChatHeader({ onTogglePins: vi.fn() });
+    setChatHeaderLock(refs, true);
+    updateChatHeaderForDm(refs, { username: "alice", status: "Online" });
+    expect(refs.lockEl!.hidden).toBe(true);
+  });
+});
 
 describe("updateChatHeaderForDm", () => {
   let container: HTMLDivElement;

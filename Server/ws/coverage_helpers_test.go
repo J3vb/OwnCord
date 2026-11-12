@@ -5,10 +5,8 @@ package ws_test
 // coverage_boost_test.go, which added tests for low-coverage functions).
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -66,18 +64,7 @@ CREATE TABLE IF NOT EXISTS attachments (
 
 func openCoverageDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	migrFS := fstest.MapFS{
-		"001_schema.sql": {Data: coverageSchema},
-	}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
-	return database
+	return openSchemaDB(t, coverageSchema)
 }
 
 func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
@@ -99,21 +86,14 @@ func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
 
 func seedCoverageOwner(t *testing.T, database *db.DB, username string) *db.User {
 	t.Helper()
-	_, err := database.CreateUser(context.Background(), username, "hash", 1)
-	if err != nil {
-		t.Fatalf("seedCoverageOwner CreateUser: %v", err)
-	}
-	user, err := database.GetUserByUsername(context.Background(), username)
-	if err != nil || user == nil {
-		t.Fatalf("seedCoverageOwner GetUserByUsername: %v", err)
-	}
-	return user
+	return seedUserWithRole(t, database, username, 1)
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-// drainForErrorCode reads from ch until an error message is found or deadline passes.
-func drainForErrorCode(ch <-chan []byte, deadline time.Duration) string {
+// waitEnvelope reads ch until a frame accepted by match arrives, returning
+// its decoded envelope, or nil once deadline passes.
+func waitEnvelope(ch <-chan []byte, deadline time.Duration, match func(env map[string]any) bool) map[string]any {
 	timer := time.NewTimer(deadline)
 	defer timer.Stop()
 	for {
@@ -123,23 +103,48 @@ func drainForErrorCode(ch <-chan []byte, deadline time.Duration) string {
 			if err := json.Unmarshal(msg, &env); err != nil {
 				continue
 			}
-			if env["type"] == "error" {
-				if payload, ok := env["payload"].(map[string]any); ok {
-					code, _ := payload["code"].(string)
-					return code
-				}
+			if match(env) {
+				return env
 			}
 		case <-timer.C:
-			return ""
+			return nil
 		}
 	}
+}
+
+// waitErrorEnvelope is waitEnvelope restricted to error frames.
+func waitErrorEnvelope(ch <-chan []byte, deadline time.Duration, match func(env map[string]any) bool) map[string]any {
+	return waitEnvelope(ch, deadline, func(env map[string]any) bool { return env["type"] == "error" && match(env) })
+}
+
+// errorPayload returns the payload object of an error envelope.
+func errorPayload(env map[string]any) (map[string]any, bool) {
+	payload, ok := env["payload"].(map[string]any)
+	return payload, ok
+}
+
+// drainForErrorCode reads from ch until an error message is found or deadline passes.
+func drainForErrorCode(ch <-chan []byte, deadline time.Duration) string {
+	env := waitErrorEnvelope(ch, deadline, func(env map[string]any) bool {
+		_, ok := errorPayload(env)
+		return ok
+	})
+	if env == nil {
+		return ""
+	}
+	payload, _ := errorPayload(env)
+	code, _ := payload["code"].(string)
+	return code
 }
 
 // drainChanBuf drains all buffered messages from a channel.
 func drainChanBuf(ch <-chan []byte) {
 	for {
 		select {
-		case <-ch:
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
 		default:
 			return
 		}
@@ -153,7 +158,10 @@ func drainChanTimeout(ch <-chan []byte, d time.Duration) [][]byte {
 	defer timer.Stop()
 	for {
 		select {
-		case msg := <-ch:
+		case msg, ok := <-ch:
+			if !ok {
+				return msgs
+			}
 			msgs = append(msgs, msg)
 		case <-timer.C:
 			return msgs
@@ -163,17 +171,24 @@ func drainChanTimeout(ch <-chan []byte, d time.Duration) [][]byte {
 
 func seedVoiceChannel(t *testing.T, database *db.DB, name string) int64 {
 	t.Helper()
-	id, err := database.CreateChannel(context.Background(), name, "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel voice: %v", err)
-	}
-	return id
+	return mustCreateChannel(t, database, name, "voice")
 }
 
 func voiceTokenRefreshMsg() []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_token_refresh",
-		"payload": map[string]any{},
-	})
+	raw := envelope("voice_token_refresh", map[string]any{})
 	return raw
+}
+
+// hasErrorCode reports whether any drained frame is an error with the given code.
+func hasErrorCode(msgs [][]byte, code string) bool {
+	for _, m := range msgs {
+		var env map[string]any
+		if json.Unmarshal(m, &env) != nil || env["type"] != "error" {
+			continue
+		}
+		if payload, ok := errorPayload(env); ok && payload["code"] == code {
+			return true
+		}
+	}
+	return false
 }

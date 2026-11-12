@@ -6,7 +6,7 @@
  * is ignored rather than guessed at.
  */
 
-import type { ReplyTarget } from "@components/MessageInput";
+import type { ReplyTarget } from "../../features/messaging/MessageInput";
 import { loadStoredJson, removeStored, saveStoredJson } from "./preferences";
 
 const KEY_PREFIX = "owncord:drafts:";

@@ -28,22 +28,14 @@ import (
 // Store interface directly (D3 removed the store abstraction).
 func openPluginTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	return database
 }
 
 func TestPluginsHandlerListEmptyWhenRegistryNil(t *testing.T) {
 	h := NewPluginAdminHandler(nil, nil, nil)
 	req := httptest.NewRequest("GET", "/", nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := serveRequest(h, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200", rec.Code)
 	}
@@ -57,8 +49,7 @@ func TestPluginsHandlerInstallRejectsWhenRegistryNil(t *testing.T) {
 	body, contentType := buildZipUpload(t, validPluginZip(t))
 	req := httptest.NewRequest("POST", "/install", body)
 	req.Header.Set("Content-Type", contentType)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := serveRequest(h, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status: got %d, want 503", rec.Code)
 	}
@@ -85,8 +76,7 @@ func TestPluginsHandlerInstallRejectsNonZipContentType(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/install", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := serveRequest(h, req)
 	if rec.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("status: got %d, want 415; body=%s", rec.Code, rec.Body.String())
 	}
@@ -99,8 +89,7 @@ func TestPluginsHandlerInstallRejectsNonZipMagic(t *testing.T) {
 	body, contentType := buildZipUpload(t, []byte("this is definitely not a zip"))
 	req := httptest.NewRequest("POST", "/install", body)
 	req.Header.Set("Content-Type", contentType)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := serveRequest(h, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
@@ -115,8 +104,7 @@ func TestPluginsHandlerInstallHappyPath(t *testing.T) {
 	body, contentType := buildZipUpload(t, validPluginZip(t))
 	req := httptest.NewRequest("POST", "/install", body)
 	req.Header.Set("Content-Type", contentType)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := serveRequest(h, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status: got %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
@@ -152,8 +140,7 @@ func TestPluginsHandlerListUsesSnakeCaseJSON(t *testing.T) {
 	body, contentType := buildZipUpload(t, validPluginZip(t))
 	req := httptest.NewRequest("POST", "/install", body)
 	req.Header.Set("Content-Type", contentType)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := serveRequest(h, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("install: got %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
@@ -185,8 +172,7 @@ func TestPluginsHandlerEnableDisableUninstallReturn503WhenRegistryNil(t *testing
 		{"DELETE", "/1"},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
+		rec := serveRequest(h, req)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("%s %s status: got %d, want 503", tc.method, tc.path, rec.Code)
 		}
@@ -197,8 +183,7 @@ func TestPluginsHandlerLifecycleInvalidID(t *testing.T) {
 	reg := newTestPluginRegistry(t)
 	h := NewPluginAdminHandler(reg, nil, nil)
 	req := httptest.NewRequest("POST", "/not-an-int/enable", nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := serveRequest(h, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d, want 400", rec.Code)
 	}

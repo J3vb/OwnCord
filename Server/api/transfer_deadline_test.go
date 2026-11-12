@@ -136,9 +136,7 @@ func TestServeFile_SlowProgressingClientSurvivesWriteTimeout(t *testing.T) {
 
 	content := bytes.Repeat([]byte("y"), 2<<20) // 2 MiB
 	rr := doUpload(t, router, token, "file", "big.bin", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("fixture upload: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	var up struct {
 		ID string `json:"id"`
 	}
@@ -225,8 +223,7 @@ func TestUpload_ConcurrentUploadsPerUserCapped(t *testing.T) {
 		req.Header.Set("Content-Type", contentType)
 		req.Header.Set("Authorization", "Bearer "+token)
 		go func() {
-			rr := httptest.NewRecorder()
-			router.ServeHTTP(rr, req)
+			rr := serveRequest(router, req)
 			h.done <- rr
 		}()
 		wrote := make(chan error, 1)
@@ -267,7 +264,5 @@ func TestUpload_ConcurrentUploadsPerUserCapped(t *testing.T) {
 
 	resetRate()
 	rr = doUpload(t, router, token, "file", "after.txt", []byte("after"))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload after a slot freed = %d %s, want 201", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 }

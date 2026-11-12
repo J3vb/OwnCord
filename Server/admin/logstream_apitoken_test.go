@@ -25,10 +25,7 @@ func TestAdminAPI_LogStreamTicketFlow_APIToken(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, logBuf, nil, nil, newTestServices(database))
 
 	// An admin user authenticated only by an API token — no session row exists.
-	uid, err := database.CreateUser(context.Background(), "apitokenadmin", "$2a$12$placeholder", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "apitokenadmin", "$2a$12$placeholder", 1)
 	rawToken := "test-api-token-" + t.Name()
 	tokenID, err := database.CreateAPIToken(context.Background(), uid, auth.HashToken(rawToken), "mcp-introspect", nil)
 	if err != nil {
@@ -36,9 +33,7 @@ func TestAdminAPI_LogStreamTicketFlow_APIToken(t *testing.T) {
 	}
 
 	ticketResp := doRequest(t, handler, http.MethodPost, "/logs/ticket", rawToken, nil)
-	if ticketResp.Code != http.StatusOK {
-		t.Fatalf("POST /logs/ticket with API token status = %d, want 200; body: %s", ticketResp.Code, ticketResp.Body.String())
-	}
+	requireStatus(t, ticketResp, http.StatusOK)
 	var payload struct {
 		Ticket string `json:"ticket"`
 	}
@@ -83,9 +78,7 @@ func TestAdminAPI_LogStreamTicketFlow_APIToken(t *testing.T) {
 
 	// A ticket minted before revocation must not redeem after it.
 	ticketResp = doRequest(t, handler, http.MethodPost, "/logs/ticket", rawToken, nil)
-	if ticketResp.Code != http.StatusOK {
-		t.Fatalf("POST /logs/ticket (second) status = %d, want 200; body: %s", ticketResp.Code, ticketResp.Body.String())
-	}
+	requireStatus(t, ticketResp, http.StatusOK)
 	if err := json.Unmarshal(ticketResp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal second ticket response: %v", err)
 	}

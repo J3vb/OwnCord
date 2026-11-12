@@ -860,7 +860,7 @@ const subscriptionResultKept = {
 //
 //   6  main.ts, app/
 //   5  pages/
-//   4  components/, features/        (peers)
+//   4  features/
 //   3  stores/
 //   2  lib/, platform/, i18n/        (peers)
 //   1  styles/, assets/
@@ -873,7 +873,7 @@ const subscriptionResultKept = {
 // so it counts; write `import type`. Colocated `*.test.ts(x)` files are exempt.
 //
 // The rule is string and path based. An alias (`@lib`, `@stores`,
-// `@components`, `@pages`, `@styles`, as in tsconfig.json) and a relative
+// `@pages`, `@styles`, as in tsconfig.json) and a relative
 // specifier that name the same module get the same verdict and the same
 // baseline key: the resolved file relative to src/ (a directory import
 // resolves to its index.ts). The filesystem is read only for a site that is
@@ -891,7 +891,6 @@ const LAYER_RANK = new Map([
   ["main", 6],
   ["app", 6],
   ["pages", 5],
-  ["components", 4],
   ["features", 4],
   ["stores", 3],
   ["lib", 2],
@@ -901,11 +900,10 @@ const LAYER_RANK = new Map([
   ["assets", 1],
 ]);
 
-/** The five tsconfig `paths` aliases, as alias -> directory under src/. */
+/** The four tsconfig `paths` aliases, as alias -> directory under src/. */
 const LAYER_ALIASES = new Map([
   ["@lib", "lib"],
   ["@stores", "stores"],
-  ["@components", "components"],
   ["@pages", "pages"],
   ["@styles", "styles"],
 ]);
@@ -998,7 +996,7 @@ const layerDirection = {
     type: "problem",
     docs: {
       description:
-        "A lower layer must not import a higher one (main/app > pages > components/features > stores > lib/platform/i18n > styles/assets). Existing upward imports are listed in scripts/layer-baseline.json and only shrink.",
+        "A lower layer must not import a higher one (main/app > pages > features > stores > lib/platform/i18n > styles/assets). Existing upward imports are listed in scripts/layer-baseline.json and only shrink.",
     },
     schema: [
       {

@@ -45,10 +45,7 @@ func newTestReportService(t *testing.T) (*ReportService, *db.DB) {
 // seedReportMessage inserts a message by userID in channelID and returns its id.
 func seedReportMessage(t *testing.T, database *db.DB, channelID, userID int64, content string) int64 {
 	t.Helper()
-	id, err := database.CreateMessage(context.Background(), channelID, userID, content, nil)
-	if err != nil {
-		t.Fatalf("seedReportMessage: %v", err)
-	}
+	id := mustCreateMessage(t, database, channelID, userID, content, nil)
 	return id
 }
 
@@ -63,22 +60,15 @@ func TestReport_FileMessageSnapshotsElevenRowsByReference(t *testing.T) {
 	}
 	centre := ids[5]
 	// One attachment on the reported message, to prove the reference shape.
-	if err := database.CreateAttachment(ctx, "att-1", 11, "f.png", "att-1", "image/png", 5, nil, nil); err != nil {
-		t.Fatalf("CreateAttachment: %v", err)
-	}
+	mustDo(t, "CreateAttachment", database.CreateAttachment(ctx, "att-1", 11, "f.png", "att-1", "image/png", 5, nil, nil))
 	if _, err := database.LinkAttachmentsToMessage(ctx, centre, 11, []string{"att-1"}); err != nil {
 		t.Fatalf("LinkAttachmentsToMessage: %v", err)
 	}
 
 	reportID, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(centre, 10), Reason: "spam"})
-	if err != nil {
-		t.Fatalf("File: %v", err)
-	}
+	mustDo(t, "File", err)
 
-	evidence, err := database.ListReportEvidence(ctx, reportID)
-	if err != nil {
-		t.Fatalf("ListReportEvidence: %v", err)
-	}
+	evidence := mustListReportEvidence(t, database, reportID)
 	if len(evidence) != 11 {
 		t.Fatalf("evidence rows = %d, want 11", len(evidence))
 	}
@@ -98,10 +88,7 @@ func TestReport_FileMessageSnapshotsElevenRowsByReference(t *testing.T) {
 		t.Errorf("centre attachments = %q, want a reference to att-1 and never stored_as", centreRow.Attachments)
 	}
 
-	report, err := database.GetReport(ctx, reportID)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
+	report := mustGetReport(t, database, reportID)
 	if report.SubjectID != 11 {
 		t.Errorf("subject_id = %d, want 11 (the message author, derived)", report.SubjectID)
 	}
@@ -123,31 +110,21 @@ func TestReport_FileAttachmentByReference(t *testing.T) {
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 101, Name: "general"})
 	msgID := seedReportMessage(t, database, 101, 11, "hello")
-	if err := database.CreateAttachment(ctx, "att-2", 11, "pic.png", "att-2", "image/png", 9, nil, nil); err != nil {
-		t.Fatalf("CreateAttachment: %v", err)
-	}
+	mustDo(t, "CreateAttachment", database.CreateAttachment(ctx, "att-2", 11, "pic.png", "att-2", "image/png", 9, nil, nil))
 	if _, err := database.LinkAttachmentsToMessage(ctx, msgID, 11, []string{"att-2"}); err != nil {
 		t.Fatalf("LinkAttachmentsToMessage: %v", err)
 	}
 
 	reportID, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetAttachment, TargetID: "att-2", Reason: "nsfw_unlabelled"})
-	if err != nil {
-		t.Fatalf("File: %v", err)
-	}
-	evidence, err := database.ListReportEvidence(ctx, reportID)
-	if err != nil {
-		t.Fatalf("ListReportEvidence: %v", err)
-	}
+	mustDo(t, "File", err)
+	evidence := mustListReportEvidence(t, database, reportID)
 	if len(evidence) != 1 {
 		t.Fatalf("evidence rows = %d, want 1", len(evidence))
 	}
 	if !containsSubstr(evidence[0].Attachments, `"id":"att-2"`) || containsSubstr(evidence[0].Attachments, "stored_as") {
 		t.Errorf("attachment evidence = %q", evidence[0].Attachments)
 	}
-	report, err := database.GetReport(ctx, reportID)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
+	report := mustGetReport(t, database, reportID)
 	if report.SubjectID != 11 {
 		t.Errorf("subject_id = %d, want 11 (the uploader, derived)", report.SubjectID)
 	}
@@ -158,20 +135,12 @@ func TestReport_FileUserHasNoEvidence(t *testing.T) {
 	ctx := context.Background()
 
 	reportID, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetUser, TargetID: "11", Reason: "harassment"})
-	if err != nil {
-		t.Fatalf("File: %v", err)
-	}
-	evidence, err := database.ListReportEvidence(ctx, reportID)
-	if err != nil {
-		t.Fatalf("ListReportEvidence: %v", err)
-	}
+	mustDo(t, "File", err)
+	evidence := mustListReportEvidence(t, database, reportID)
 	if len(evidence) != 0 {
 		t.Fatalf("evidence rows = %d, want 0 for a user target", len(evidence))
 	}
-	report, err := database.GetReport(ctx, reportID)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
+	report := mustGetReport(t, database, reportID)
 	if report.SubjectID != 11 {
 		t.Errorf("subject_id = %d, want 11", report.SubjectID)
 	}
@@ -190,18 +159,14 @@ func TestReport_TargetMustBeVisibleToReporter(t *testing.T) {
 
 	// (b) A DM the reporter is not in.
 	dm, _, err := database.GetOrCreateDMChannel(ctx, 12, 13)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	dmMsg := seedReportMessage(t, database, dm.ID, 12, "private")
 	if _, err := svc.File(ctx, FileReportParams{ReporterID: 14, TargetType: TargetMessage, TargetID: strconv.FormatInt(dmMsg, 10), Reason: "spam"}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("non-participant DM: err = %v, want ErrNotFound", err)
 	}
 
 	// (c) An attachment Authorize refuses: unlinked, uploaded by someone else.
-	if err := database.CreateAttachment(ctx, "att-private", 12, "f.png", "att-private", "image/png", 4, nil, nil); err != nil {
-		t.Fatalf("CreateAttachment: %v", err)
-	}
+	mustDo(t, "CreateAttachment", database.CreateAttachment(ctx, "att-private", 12, "f.png", "att-private", "image/png", 4, nil, nil))
 	if _, err := svc.File(ctx, FileReportParams{ReporterID: 13, TargetType: TargetAttachment, TargetID: "att-private", Reason: "spam"}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unauthorized attachment: err = %v, want ErrNotFound", err)
 	}
@@ -248,21 +213,14 @@ func TestReport_SnapshotSurvivesEditAndDelete(t *testing.T) {
 	msgID := seedReportMessage(t, database, 400, 11, "original content")
 
 	reportID, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
-	if err != nil {
-		t.Fatalf("File: %v", err)
-	}
+	mustDo(t, "File", err)
 
 	if _, err := database.EditMessage(ctx, msgID, 11, "edited away"); err != nil {
 		t.Fatalf("EditMessage: %v", err)
 	}
-	if err := database.DeleteMessage(ctx, msgID, 11, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, msgID, 11, false))
 
-	evidence, err := database.ListReportEvidence(ctx, reportID)
-	if err != nil {
-		t.Fatalf("ListReportEvidence: %v", err)
-	}
+	evidence := mustListReportEvidence(t, database, reportID)
 	var centre *db.ReportEvidenceRow
 	for i := range evidence {
 		if evidence[i].Seq == 0 {
@@ -284,18 +242,14 @@ func TestReport_SubjectIsDerivedNeverSupplied(t *testing.T) {
 	msgID := seedReportMessage(t, database, 500, 11, "hi")
 
 	id, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
-	if err != nil {
-		t.Fatalf("File: %v", err)
-	}
+	mustDo(t, "File", err)
 	r, _ := database.GetReport(ctx, id)
 	if r.SubjectID != 11 {
 		t.Errorf("message target subject = %d, want the author 11", r.SubjectID)
 	}
 
 	id2, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetUser, TargetID: "12", Reason: "spam"})
-	if err != nil {
-		t.Fatalf("File(user): %v", err)
-	}
+	mustDo(t, "File(user)", err)
 	r2, _ := database.GetReport(ctx, id2)
 	if r2.SubjectID != 12 {
 		t.Errorf("user target subject = %d, want 12", r2.SubjectID)
@@ -310,9 +264,7 @@ func TestModerationQueue_RequiresTheBit(t *testing.T) {
 	seedChannel(t, database, &db.Channel{ID: 600, Name: "general"})
 	msgID := seedReportMessage(t, database, 600, 11, "hi")
 	id, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
-	if err != nil {
-		t.Fatalf("File: %v", err)
-	}
+	mustDo(t, "File", err)
 
 	// A plain member (no bit) is refused on every route.
 	if _, err := svc.Queue(ctx, 12, ""); !errors.Is(err, ErrForbidden) {
@@ -348,9 +300,7 @@ func TestModerationQueue_StateMachine(t *testing.T) {
 		seedChannel(t, database, &db.Channel{ID: 700, Name: "general"})
 		msgID := seedReportMessage(t, database, 700, 11, "hi")
 		id, _ := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
-		if err := svc.Assign(ctx, 2, id, false); err != nil {
-			t.Fatalf("Assign: %v", err)
-		}
+		mustDo(t, "Assign", svc.Assign(ctx, 2, id, false))
 		if _, err := svc.Close(ctx, 2, id, "actioned"); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
@@ -391,9 +341,7 @@ func TestModerationQueue_AssignConflictAndForce(t *testing.T) {
 	id, _ := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
 
 	// mod2 (role 3, position 60) assigns first.
-	if err := svc.Assign(ctx, 3, id, false); err != nil {
-		t.Fatalf("first assign: %v", err)
-	}
+	mustDo(t, "first assign", svc.Assign(ctx, 3, id, false))
 	// mod (role 2, position 80) tries to take it without force: 409.
 	if err := svc.Assign(ctx, 2, id, false); !errors.Is(err, ErrConflict) {
 		t.Errorf("reassign without force: %v, want ErrConflict", err)
@@ -418,16 +366,12 @@ func TestModerationQueue_NotesNeverReachEitherParty(t *testing.T) {
 	seedChannel(t, database, &db.Channel{ID: 900, Name: "general"})
 	msgID := seedReportMessage(t, database, 900, 11, "hi")
 	id, _ := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
-	if err := svc.Note(ctx, 2, id, "internal moderator note"); err != nil {
-		t.Fatalf("Note: %v", err)
-	}
+	mustDo(t, "Note", svc.Note(ctx, 2, id, "internal moderator note"))
 
 	// The reporter's own view carries no notes field at all (db.ReportSummary
 	// has none) and Mine() never touches report_notes.
 	mine, err := svc.Mine(ctx, 10)
-	if err != nil {
-		t.Fatalf("Mine: %v", err)
-	}
+	mustDo(t, "Mine", err)
 	if len(mine) != 1 {
 		t.Fatalf("Mine() = %d rows, want 1", len(mine))
 	}
@@ -445,9 +389,7 @@ func TestModerationQueue_NotesNeverReachEitherParty(t *testing.T) {
 
 	// A moderator DOES see it via Get.
 	detail, err := svc.Get(ctx, 2, id)
-	if err != nil {
-		t.Fatalf("Get as moderator: %v", err)
-	}
+	mustDo(t, "Get as moderator", err)
 	if len(detail.Notes) != 1 || detail.Notes[0].Body != "internal moderator note" {
 		t.Errorf("moderator's Get notes = %+v", detail.Notes)
 	}
@@ -487,9 +429,7 @@ func TestReport_SubjectSeesNothing(t *testing.T) {
 	seedChannel(t, database, &db.Channel{ID: 1000, Name: "general"})
 	msgID := seedReportMessage(t, database, 1000, 11, "hi")
 	id, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
-	if err != nil {
-		t.Fatalf("File: %v", err)
-	}
+	mustDo(t, "File", err)
 
 	// The subject, without the bit: Forbidden, same as any non-holder.
 	if _, err := svc.Get(ctx, 11, id); !errors.Is(err, ErrForbidden) {
@@ -509,9 +449,7 @@ func TestReport_SubjectSeesNothing(t *testing.T) {
 
 	// And it is absent from their own queue view.
 	rows, err := svc.Queue(ctx, 11, "")
-	if err != nil {
-		t.Fatalf("Queue as subject-with-bit: %v", err)
-	}
+	mustDo(t, "Queue as subject-with-bit", err)
 	for _, r := range rows {
 		if r.ID == id {
 			t.Errorf("the subject's own report appears in their queue view")
@@ -525,20 +463,12 @@ func TestReport_ReporterSeesOnlyTheirOwnStatus(t *testing.T) {
 	seedChannel(t, database, &db.Channel{ID: 1100, Name: "general"})
 	msgID := seedReportMessage(t, database, 1100, 11, "hi")
 	id, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
-	if err != nil {
-		t.Fatalf("File: %v", err)
-	}
-	if err := svc.Assign(ctx, 2, id, false); err != nil {
-		t.Fatalf("Assign: %v", err)
-	}
-	if err := svc.Note(ctx, 2, id, "note"); err != nil {
-		t.Fatalf("Note: %v", err)
-	}
+	mustDo(t, "File", err)
+	mustDo(t, "Assign", svc.Assign(ctx, 2, id, false))
+	mustDo(t, "Note", svc.Note(ctx, 2, id, "note"))
 
 	mine, err := svc.Mine(ctx, 10)
-	if err != nil {
-		t.Fatalf("Mine: %v", err)
-	}
+	mustDo(t, "Mine", err)
 	if len(mine) != 1 {
 		t.Fatalf("Mine() = %d rows, want 1", len(mine))
 	}
@@ -549,9 +479,7 @@ func TestReport_ReporterSeesOnlyTheirOwnStatus(t *testing.T) {
 
 	// Another user's Mine() never sees this report.
 	otherMine, err := svc.Mine(ctx, 12)
-	if err != nil {
-		t.Fatalf("Mine(other): %v", err)
-	}
+	mustDo(t, "Mine(other)", err)
 	for _, r := range otherMine {
 		if r.ID == id {
 			t.Errorf("another user's Mine() sees a report they did not file")
@@ -599,21 +527,15 @@ func TestReportEvents_EveryMutationWritesOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("File: %v", err)
 	}
-	if err := svc.Assign(ctx, 2, id, false); err != nil {
-		t.Fatalf("Assign: %v", err)
-	}
+	mustDo(t, "Assign", svc.Assign(ctx, 2, id, false))
 	const noteBody = "moderator note mentioning password: hunter2secret"
-	if err := svc.Note(ctx, 2, id, noteBody); err != nil {
-		t.Fatalf("Note: %v", err)
-	}
+	mustDo(t, "Note", svc.Note(ctx, 2, id, noteBody))
 	if _, err := svc.Close(ctx, 2, id, "actioned"); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
 	events, err := database.ListReportEvents(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportEvents: %v", err)
-	}
+	mustDo(t, "ListReportEvents", err)
 	wantActions := []string{"created", "assigned", "noted", "closed"}
 	if len(events) != len(wantActions) {
 		t.Fatalf("report_events = %d rows (%+v), want %d: %v", len(events), events, len(wantActions), wantActions)
@@ -640,9 +562,7 @@ func TestReportEvents_EveryMutationWritesOne(t *testing.T) {
 
 	// No route to any of this through the shared audit_log at all.
 	var auditRows int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE target_type = 'report'`).Scan(&auditRows); err != nil {
-		t.Fatalf("count audit_log report rows: %v", err)
-	}
+	mustDo(t, "count audit_log report rows", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE target_type = 'report'`).Scan(&auditRows))
 	if auditRows != 0 {
 		t.Errorf("audit_log has %d row(s) naming a report, want 0 (report lifecycle events live only in report_events)", auditRows)
 	}
@@ -684,18 +604,12 @@ func TestReport_ModeratorReporterCannotActOnOwnReport(t *testing.T) {
 	msgID := seedReportMessage(t, database, 1502, 11, "hi")
 	// User 2 is a moderator (role 2, ModerateMembers) AND files this report.
 	id, err := svc.File(ctx, FileReportParams{ReporterID: 2, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
-	if err != nil {
-		t.Fatalf("File: %v", err)
-	}
+	mustDo(t, "File", err)
 	// A different moderator adds a note before the reporter-moderator looks.
-	if err := svc.Note(ctx, 3, id, "internal note the reporter must not see"); err != nil {
-		t.Fatalf("Note(other moderator): %v", err)
-	}
+	mustDo(t, "Note(other moderator)", svc.Note(ctx, 3, id, "internal note the reporter must not see"))
 
 	detail, err := svc.Get(ctx, 2, id)
-	if err != nil {
-		t.Fatalf("Get(moderator-reporter): %v", err)
-	}
+	mustDo(t, "Get(moderator-reporter)", err)
 	if len(detail.Notes) != 0 {
 		t.Errorf("Get(moderator-reporter).Notes = %+v, want empty", detail.Notes)
 	}
@@ -747,9 +661,7 @@ func TestReport_ConcurrentFilingExactlyOneSucceeds(t *testing.T) {
 		t.Errorf("concurrent filings: %d saw ErrDuplicateReport, want %d", duplicates.Load(), attempts-1)
 	}
 	var rows int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports WHERE reporter_id = 10 AND target_ref = ?`, strconv.FormatInt(msgID, 10)).Scan(&rows); err != nil {
-		t.Fatalf("count reports: %v", err)
-	}
+	mustDo(t, "count reports", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports WHERE reporter_id = 10 AND target_ref = ?`, strconv.FormatInt(msgID, 10)).Scan(&rows))
 	if rows != 1 {
 		t.Errorf("reports rows for the raced target = %d, want 1", rows)
 	}
@@ -765,9 +677,7 @@ func TestModerationQueue_ConcurrentUnforcedAssignOneWins(t *testing.T) {
 	seedChannel(t, database, &db.Channel{ID: 1504, Name: "general"})
 	msgID := seedReportMessage(t, database, 1504, 11, "hi")
 	id, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam"})
-	if err != nil {
-		t.Fatalf("File: %v", err)
-	}
+	mustDo(t, "File", err)
 
 	var wg sync.WaitGroup
 	var successes, conflicts atomic.Int32
@@ -791,10 +701,7 @@ func TestModerationQueue_ConcurrentUnforcedAssignOneWins(t *testing.T) {
 	if conflicts.Load() != 1 {
 		t.Errorf("concurrent unforced assigns: %d saw ErrConflict, want 1", conflicts.Load())
 	}
-	report, err := database.GetReport(ctx, id)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
+	report := mustGetReport(t, database, id)
 	if report.AssigneeID != 2 && report.AssigneeID != 3 {
 		t.Errorf("final assignee = %d, want 2 or 3", report.AssigneeID)
 	}

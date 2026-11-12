@@ -8,7 +8,12 @@
 import type { IconName } from "../../lib/icons";
 import type { MountableComponent } from "../../lib/text/safeRender";
 import type { PeerVerification } from "../../stores/voice.store";
-import { rePinPeerIdentity, peerAnnouncedIdentityKey } from "../../lib/voice/livekitSession";
+import {
+  rePinPeerIdentity,
+  peerAnnouncedIdentityKey,
+  trustedPeerKeys,
+  forgetPeerKey,
+} from "../../lib/voice/livekitSession";
 import { showToast } from "../../lib/ui/toast";
 import { createLogger } from "../../lib/logger";
 import { membersStore } from "../../stores/members.store";
@@ -34,7 +39,7 @@ export function verifyPresentation(v: PeerVerification): {
     return {
       icon: "shield-alert",
       color: "var(--yellow, #f0b232)",
-      title: shellText("identity.newDevice", { safetyNumber: v.safetyNumber ?? "" }),
+      title: shellText("identity.keyChanged", { safetyNumber: v.safetyNumber ?? "" }),
     };
   }
   if (v.status === "verified") {
@@ -101,6 +106,64 @@ function closeIdentityModal(): void {
   }
 }
 
+/** Whether a peer's shield opens something: the re-trust prompt when they
+ *  are blocked, their trusted keys when they have an identity key. */
+export function shieldOpens(v: PeerVerification): "mismatch" | "keys" | null {
+  if (v.status === "mismatch") return "mismatch";
+  if (v.status === "verified" || v.status === "changed") return "keys";
+  return null;
+}
+
+/** What a shield click opens for a peer in `status` (see shieldOpens). */
+export function openPeerShield(
+  status: PeerVerification["status"],
+  userId: number,
+  username: string,
+  lifetimeSignal: AbortSignal,
+  focusFallback?: () => HTMLElement | null,
+): void {
+  if (status === "mismatch") {
+    void openIdentityMismatchModal(userId, username, lifetimeSignal, focusFallback);
+  } else {
+    void openTrustedKeysPanel(
+      userId,
+      username,
+      status === "changed",
+      lifetimeSignal,
+      focusFallback,
+    );
+  }
+}
+
+/** Open the keys trusted for a peer, with "Forget this key" on the ones not
+ *  in the call. `lifetimeSignal` is the opening surface's own lifetime. */
+export async function openTrustedKeysPanel(
+  userId: number,
+  username: string,
+  changed: boolean,
+  lifetimeSignal: AbortSignal,
+  focusFallback?: () => HTMLElement | null,
+): Promise<void> {
+  closeIdentityModal();
+  // Lazy: the panel loads on its first open.
+  const { createTrustedKeysPanel } = await import("./trustedKeysPanel");
+  if (lifetimeSignal.aborted) return;
+  closeIdentityModal();
+  const panel = createTrustedKeysPanel({
+    userId,
+    username,
+    changed,
+    loadKeys: () => trustedPeerKeys(userId),
+    keyInCall: () => peerAnnouncedIdentityKey(userId),
+    forget: (key) => forgetPeerKey(userId, key),
+    focusFallback,
+    onClose: closeIdentityModal,
+  });
+  panel.mount(document.body);
+  activeIdentityModal = panel;
+  lifetimeSignal.addEventListener("abort", closeIdentityModal, { once: true });
+}
+
 /** Open the re-pin prompt for a blocked peer. `lifetimeSignal` is the opening
  *  surface's own lifetime, never a per-render signal. */
 export async function openIdentityMismatchModal(
@@ -114,7 +177,7 @@ export async function openIdentityMismatchModal(
   // out-of-band before trusting — the whole purpose of the mismatch prompt (the
   // same importIdentityPublicKey→computeKeyFingerprint round-trip verifyPeerAnnounce
   // runs on the verified path). Without it the modal's "verify out-of-band"
-  // instruction is unfollowable and "Trust New Key" is a blind accept.
+  // instruction is unfollowable and "Trust this key as well" is a blind accept.
   let fingerprint: string | null = null;
   // The key of the device actually in the call: the one its current announce
   // was checked against. A peer with several devices has several keys, so the
@@ -141,7 +204,7 @@ export async function openIdentityMismatchModal(
   if (lifetimeSignal.aborted) return;
   closeIdentityModal();
   // Lazy: a feature must not statically import the UI layer.
-  const { createIdentityMismatchModal } = await import("../../components/IdentityMismatchModal");
+  const { createIdentityMismatchModal } = await import("./IdentityMismatchModal");
   if (lifetimeSignal.aborted) return;
   const modal = createIdentityMismatchModal({
     username,

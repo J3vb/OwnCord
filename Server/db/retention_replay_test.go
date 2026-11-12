@@ -14,20 +14,14 @@ import (
 func persistFrame(t *testing.T, database *db.DB, seq, channelID int64, frameType string, payload map[string]any) {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{"seq": seq, "type": frameType, "payload": payload})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.PersistEvent(context.Background(), seq, frameType, channelID, raw); err != nil {
-		t.Fatalf("PersistEvent: %v", err)
-	}
+	mustDo(t, "Marshal", err)
+	mustDo(t, "PersistEvent", database.PersistEvent(context.Background(), seq, frameType, channelID, raw))
 }
 
 func countEvents(t *testing.T, database *db.DB, where string, args ...any) int {
 	t.Helper()
 	var n int
-	if err := database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE `+where, args...).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE `+where, args...).Scan(&n))
 	return n
 }
 
@@ -55,9 +49,7 @@ func TestDeleteEventsForMessages_MatchesTheMessageFamily(t *testing.T) {
 		t.Fatalf("an empty purge touched rows: %d left of 8", n)
 	}
 	n, err := database.DeleteEventsForMessages(ctx, []int64{100, 101, 102})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteEventsForMessages", err)
 	if n != 5 {
 		t.Errorf("rows deleted = %d, want 5", n)
 	}
@@ -80,18 +72,10 @@ func TestRetentionRuns_PurgeJournal(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	runID, err := database.StartRetentionRun(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.RecordRetentionRunFiles(ctx, runID, 1, 3, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.RecordRetentionRunPurge(ctx, runID, []int64{10, 11, 12}); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.FinishRetentionRun(ctx, runID, 0, ""); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "StartRetentionRun", err)
+	mustDo(t, "RecordRetentionRunFiles", database.RecordRetentionRunFiles(ctx, runID, 1, 3, nil))
+	mustDo(t, "RecordRetentionRunPurge", database.RecordRetentionRunPurge(ctx, runID, []int64{10, 11, 12}))
+	mustDo(t, "FinishRetentionRun", database.FinishRetentionRun(ctx, runID, 0, ""))
 	runs, err := database.ListUnfinishedRetentionRuns(ctx)
 	if err != nil || len(runs) != 1 || !slices.Equal(runs[0].PurgePending, []int64{10, 11, 12}) {
 		t.Fatalf("unfinished runs = %+v, %v; want the finished run listed for its pending purge", runs, err)
@@ -100,9 +84,7 @@ func TestRetentionRuns_PurgeJournal(t *testing.T) {
 	if err != nil || !slices.Equal(got.PurgePending, []int64{10, 11, 12}) {
 		t.Fatalf("GetRetentionRun = %+v, %v", got, err)
 	}
-	if err := database.RecordRetentionRunPurge(ctx, runID, nil); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RecordRetentionRunPurge", database.RecordRetentionRunPurge(ctx, runID, nil))
 	if runs, _ := database.ListUnfinishedRetentionRuns(ctx); len(runs) != 0 {
 		t.Errorf("a run with nothing pending is still listed: %+v", runs)
 	}

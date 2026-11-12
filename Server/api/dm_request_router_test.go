@@ -23,11 +23,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/J3vb/OwnCord/Server/api"
-	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/internal/app"
 )
 
 // readUntil polls conn until frameType arrives (unmarshalling into want) or
@@ -64,40 +60,17 @@ func readUntil(t *testing.T, conn *websocket.Conn, frameType string, want any, d
 }
 
 func TestNewRouter_DMRequestTransition_ReachesLiveConnection(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			Name: "Test Server", Port: 8443, DataDir: t.TempDir(), AllowedOrigins: []string{"*"},
 		},
 	}
-	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
-	if rtErr != nil {
-		t.Fatalf("app.StartRuntime: %v", rtErr)
-	}
-	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
-	t.Cleanup(cleanup)
+	handler, _ := startRouter(t, cfg, database)
 
 	newUserSession := func(username string) (int64, string) {
-		hash, _ := auth.HashPassword("correctPass1")
-		uid, err := database.CreateUser(context.Background(), username, hash, 4)
-		if err != nil {
-			t.Fatalf("CreateUser(%s): %v", username, err)
-		}
-		token, err := auth.GenerateToken()
-		if err != nil {
-			t.Fatalf("GenerateToken: %v", err)
-		}
-		if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-			t.Fatalf("CreateSession: %v", err)
-		}
+		uid, token := seedUserSession(t, database, username, 4)
 		return uid, token
 	}
 	aliceID, aliceToken := newUserSession("dmreqrouteralice")
@@ -136,14 +109,8 @@ func TestNewRouter_DMRequestTransition_ReachesLiveConnection(t *testing.T) {
 	}
 
 	// Decide over REST — not a WebSocket session at all.
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/dm-requests/"+strconv.FormatInt(created.ID, 10)+"/ignore", nil)
-	req.Header.Set("Authorization", "Bearer "+bobToken)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("POST .../ignore = %d, body=%s", rr.Code, rr.Body.String())
-	}
+	rr := doAPI(t, handler, http.MethodPost, "/api/v1/dm-requests/"+strconv.FormatInt(created.ID, 10)+"/ignore", bobToken, nil)
+	requireStatus(t, rr, http.StatusOK)
 
 	var transitioned struct {
 		State string `json:"state"`
@@ -185,40 +152,17 @@ func readSeqFrame(t *testing.T, conn *websocket.Conn) (frameType string, seq uin
 // nor the chat_message — his only signal is the dm_request his REST inbox
 // already carries independently of replay.
 func TestNewRouter_MessageRequest_CreationAndSendDoNotLeakToReplay(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			Name: "Test Server", Port: 8443, DataDir: t.TempDir(), AllowedOrigins: []string{"*"},
 		},
 	}
-	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
-	if rtErr != nil {
-		t.Fatalf("app.StartRuntime: %v", rtErr)
-	}
-	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
-	t.Cleanup(cleanup)
+	handler, _ := startRouter(t, cfg, database)
 
 	newUserSession := func(username string) (int64, string) {
-		hash, _ := auth.HashPassword("correctPass1")
-		uid, err := database.CreateUser(context.Background(), username, hash, 4)
-		if err != nil {
-			t.Fatalf("CreateUser(%s): %v", username, err)
-		}
-		token, err := auth.GenerateToken()
-		if err != nil {
-			t.Fatalf("GenerateToken: %v", err)
-		}
-		if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-			t.Fatalf("CreateSession: %v", err)
-		}
+		uid, token := seedUserSession(t, database, username, 4)
 		return uid, token
 	}
 	_, aliceToken := newUserSession("replayleakalice")
@@ -264,11 +208,8 @@ func TestNewRouter_MessageRequest_CreationAndSendDoNotLeakToReplay(t *testing.T)
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("Authorization", "Bearer "+aliceToken)
 	createReq.RemoteAddr = "127.0.0.1:9999"
-	createRR := httptest.NewRecorder()
-	handler.ServeHTTP(createRR, createReq)
-	if createRR.Code != http.StatusCreated {
-		t.Fatalf("POST /dms = %d, body=%s", createRR.Code, createRR.Body.String())
-	}
+	createRR := serveRequest(handler, createReq)
+	requireStatus(t, createRR, http.StatusCreated)
 	var created struct {
 		ChannelID int64 `json:"channel_id"`
 	}

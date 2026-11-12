@@ -11,25 +11,18 @@ func TestListOwnModerationActions(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
-	warnID, err := database.WarnUser(ctx, memberID, ownerID, nil, "be nice")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
+	warnID := mustWarn(t, database, memberID, ownerID, "be nice")
 	if _, err := database.ForceLogoutWithAction(ctx, memberID, ownerID, nil, ""); err != nil {
 		t.Fatalf("ForceLogoutWithAction: %v", err)
 	}
 	banID, err := database.BanUserWithAction(ctx, memberID, "spam", nil, ownerID, nil)
-	if err != nil {
-		t.Fatalf("BanUserWithAction: %v", err)
-	}
+	mustDo(t, "BanUserWithAction", err)
 	if _, err := database.InsertAppeal(ctx, "pub-own", warnID, memberID, "please"); err != nil {
 		t.Fatalf("InsertAppeal: %v", err)
 	}
 
 	rows, err := database.ListOwnModerationActions(ctx, memberID, 200)
-	if err != nil {
-		t.Fatalf("ListOwnModerationActions: %v", err)
-	}
+	mustDo(t, "ListOwnModerationActions", err)
 	if len(rows) != 2 || rows[0].ID != banID || rows[1].ID != warnID {
 		t.Fatalf("rows = %+v, want ban %d then warning %d (no kick)", rows, banID, warnID)
 	}

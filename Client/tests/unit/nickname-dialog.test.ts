@@ -249,7 +249,7 @@ describe("nickname dialog markup", () => {
     expect(buttons.map((b) => b.className)).toEqual([
       "btn-ghost",
       "btn-modal-cancel",
-      "btn-primary",
+      "btn-modal-save",
     ]);
     for (const b of buttons) expect(b.getAttribute("type")).toBe("button");
   });

@@ -99,27 +99,17 @@ func TestForumShapeTriggers(t *testing.T) {
 	f := newForumFixture(t)
 	ctx := context.Background()
 	voice, err := f.db.CreateChannel(ctx, "voice", "voice", "", "", 2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	otherForum, err := f.db.CreateChannel(ctx, "other-forum", "forum", "", "", 3)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	otherPost := f.insertPost(t, otherForum)
 	otherMsg, err := f.db.CreateMessage(ctx, otherPost, f.user, "someone else's post", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessage", err)
 	postTwo := f.insertPost(t, f.forum)
 	postTwoMsg, err := f.db.CreateMessage(ctx, postTwo, f.user, "second post", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessage", err)
 	threadMsg, err := f.db.CreateMessage(ctx, f.textThrd, f.user, "reply in a text thread", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessage", err)
 
 	refusedInserts := map[string]struct {
 		q    string
@@ -172,9 +162,7 @@ func TestForumShapeTriggers(t *testing.T) {
 		"archive period outside the set":         {`UPDATE channels SET forum_default_auto_archive_minutes = 7 WHERE id = ?`, []any{f.forum}},
 	}
 	// "empty forum becomes text" needs a forum with no posts: otherForum has one.
-	if err := f.exec(t, `DELETE FROM channels WHERE id = ?`, otherPost); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "exec", f.exec(t, `DELETE FROM channels WHERE id = ?`, otherPost))
 	for name, c := range refusedUpdates {
 		err := f.exec(t, c.q, c.args...)
 		if err == nil {
@@ -205,9 +193,7 @@ func TestForumShapeTriggers(t *testing.T) {
 		}
 	}
 	// Deleting the opening message (retention) nulls the pointer and the post stays.
-	if err := f.exec(t, `DELETE FROM messages WHERE id = ?`, f.postMsg); err != nil {
-		t.Fatalf("hard delete of the opening message: %v", err)
-	}
+	mustDo(t, "hard delete of the opening message", f.exec(t, `DELETE FROM messages WHERE id = ?`, f.postMsg))
 	if got := f.count(t, `SELECT COUNT(*) FROM channels WHERE id = ? AND thread_post_message_id IS NULL`, f.post); got != 1 {
 		t.Error("the post did not survive its opening message's hard delete with a NULL pointer")
 	}
@@ -260,14 +246,10 @@ func TestThreadTagMustMatchForum(t *testing.T) {
 	f := newForumFixture(t)
 	ctx := context.Background()
 	otherForum, err := f.db.CreateChannel(ctx, "other-forum", "forum", "", "", 3)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	otherPost := f.insertPost(t, otherForum)
 
-	if err := f.exec(t, `INSERT INTO thread_tags (thread_id, tag_id) VALUES (?, ?)`, f.post, f.tag); err != nil {
-		t.Fatalf("matching link: %v", err)
-	}
+	mustDo(t, "matching link", f.exec(t, `INSERT INTO thread_tags (thread_id, tag_id) VALUES (?, ?)`, f.post, f.tag))
 	refused := map[string][]any{
 		"tag of another forum on a post": {otherPost, f.tag},
 		"tag on a text thread":           {f.textThrd, f.tag},
@@ -309,9 +291,7 @@ func TestForumDeleteCascades(t *testing.T) {
 	f := newForumFixture(t)
 	ctx := context.Background()
 	f.must(t, `INSERT INTO thread_tags (thread_id, tag_id) VALUES (?, ?)`, f.post, f.tag)
-	if err := f.db.DeleteChannel(ctx, f.forum); err != nil {
-		t.Fatalf("DeleteChannel(forum): %v", err)
-	}
+	mustDo(t, "DeleteChannel(forum)", f.db.DeleteChannel(ctx, f.forum))
 	for name, q := range map[string]string{
 		"the forum":           `SELECT COUNT(*) FROM channels WHERE id = ?`,
 		"its posts":           `SELECT COUNT(*) FROM channels WHERE parent_channel_id = ?`,
@@ -351,9 +331,7 @@ func TestTagDeleteCascadesLinksOnly(t *testing.T) {
 	}
 	idea := tags[1].ID
 	f.must(t, `INSERT INTO thread_tags (thread_id, tag_id) VALUES (?, ?), (?, ?)`, f.post, f.tag, f.post, idea)
-	if err := f.exec(t, `DELETE FROM forum_tags WHERE id = ?`, f.tag); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "exec", f.exec(t, `DELETE FROM forum_tags WHERE id = ?`, f.tag))
 	if n := f.count(t, `SELECT COUNT(*) FROM thread_tags WHERE tag_id = ?`, f.tag); n != 0 {
 		t.Error("the deleted tag's link survived")
 	}
@@ -381,9 +359,7 @@ func TestListChannelsCarriesForumSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	all, err := f.db.ListChannels(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListChannels", err)
 	var forum *db.Channel
 	for i := range all {
 		switch all[i].ID {
@@ -411,9 +387,7 @@ func TestListChannelsCarriesForumSettings(t *testing.T) {
 		t.Fatalf("GetChannel(forum) = %+v, %v", one, err)
 	}
 	empty, err := f.db.CreateChannel(ctx, "empty", "forum", "", "", 5)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	e, _ := f.db.GetChannel(ctx, empty)
 	if e == nil || e.Forum == nil || e.Forum.Tags == nil || len(e.Forum.Tags) != 0 || e.Forum.DefaultAutoArchiveMinutes != 4320 {
 		t.Errorf("fresh forum = %+v, want defaults and an empty non-nil tag list", e)
@@ -461,13 +435,9 @@ func TestReplaceForumSettings(t *testing.T) {
 		t.Errorf("unknown tag id: err = %v, want ErrNotFound", err)
 	}
 	other, err := f.db.CreateChannel(ctx, "other", "forum", "", "", 7)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	foreign, err := f.db.ReplaceForumSettings(ctx, other, db.ForumSettingsWrite{DefaultAutoArchiveMinutes: 4320, Tags: []db.ForumTagWrite{{Name: "theirs"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReplaceForumSettings", err)
 	if _, err := write(db.ForumTagWrite{ID: foreign[0].ID, Name: "stolen"}); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("another forum's tag id: err = %v, want ErrNotFound", err)
 	}

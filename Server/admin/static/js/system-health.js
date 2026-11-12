@@ -71,10 +71,10 @@ function paintSystemHealth(){
 /* The same health snapshot the support bundle carries as health.json. */
 function copySystemHealth(){
   const d=sysHealth.data;
-  if(!d||!d.snapshot){showToast('Nothing to copy yet','error');return}
+  if(!d||!d.snapshot){showToast('Nothing to copy yet','warning');return}
   const text=JSON.stringify({captured_at:d.captured_at,health:d.snapshot,database:d.database,build:d.process&&d.process.build},null,2);
-  try{navigator.clipboard.writeText(text).then(()=>showToast('Copied','info')).catch(()=>showToast('Copy failed','error'))}
-  catch(e){showToast('Copy failed','error')}
+  try{navigator.clipboard.writeText(text).then(()=>showToast('Copied','info')).catch(()=>showToast('Copy failed','warning'))}
+  catch(e){showToast('Copy failed','warning')}
 }
 
 function sysNum(v){return typeof v==='number'?v.toLocaleString():SYS_DASH}
@@ -85,6 +85,14 @@ function sysUptime(s){
   if(typeof s!=='number')return SYS_DASH;
   const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
   return d?d+'d '+h+'h':h?h+'h '+m+'m':m+'m';
+}
+/* Minutes until the slow retry, counted from the snapshot's own time so a
+   skewed browser clock cannot show a wrong wait. */
+function sysRetryIn(at,from){
+  const ms=Date.parse(at)-Date.parse(from);
+  if(!Number.isFinite(ms))return SYS_DASH;
+  const m=Math.ceil(ms/60000);
+  return m<=1?'in under a minute':'in '+m+' minutes';
 }
 function sysFacts(rows){
   return'<dl class="facts">'+rows.map(r=>'<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>').join('')+'</dl>';
@@ -154,7 +162,11 @@ function systemHealthBody(d,error){
   let voiceBody;
   if(lk.managed){
     const lkState=s.livekit_gave_up?'<span class="badge badge-red">Stopped restarting</span>':s.livekit_healthy?'<span class="badge badge-green">Running</span>':'<span class="badge badge-yellow">Not running</span>';
-    voiceBody=sysFacts([['LiveKit','Run by OwnCord'],['State',lkState],['Restarts',sysNum(s.livekit_restarts)]]);
+    const facts=[['LiveKit','Run by OwnCord'],['State',lkState],['Restarts',sysNum(s.livekit_restarts)]];
+    if(s.livekit_gave_up&&s.livekit_next_retry_at)facts.push(['Next try',sysRetryIn(s.livekit_next_retry_at,d.captured_at)]);
+    voiceBody=sysFacts(facts);
+    if(s.livekit_gave_up)voiceBody+='<p class="muted">OwnCord stopped its quick restarts and tries again every 10 minutes. Fix what the Server logs show, then restart it now.</p>'
+      +(ownerOrHolds(PERM.MANAGE_CONFIG)?'<button class="btn btn-primary btn-sm" data-action="restartVoiceServer">Restart voice server</button>':'');
   }else{
     voiceBody='<p class="muted">LiveKit runs on its own. Its CPU, memory and traffic are on the Dashboard\'s LiveKit card.</p>';
   }
@@ -178,4 +190,18 @@ function systemHealthBody(d,error){
   return stale+'<div class="sys-health-grid">'+hubCard+dbCard+voiceCard+procCard+'</div>';
 }
 
-Object.assign(ACTIONS,{copySystemHealth});
+/* Wakes the voice server after it stopped restarting, then refreshes the page
+   so the card shows it coming up. */
+async function restartVoiceServer(){
+  if(this instanceof HTMLButtonElement){if(this.disabled)return;this.disabled=true}
+  const seq=sysHealth.seq,token=state.token;
+  try{
+    await api('POST','/system/livekit/restart');
+    showToast('Restarting the voice server','info');
+  }catch(e){
+    showToast((e&&e.message)||'Could not restart the voice server','error');
+  }
+  if(await loadSystemHealth(seq,token)&&sysHealthOwns(seq,token))paintSystemHealth();
+}
+
+Object.assign(ACTIONS,{copySystemHealth,restartVoiceServer});

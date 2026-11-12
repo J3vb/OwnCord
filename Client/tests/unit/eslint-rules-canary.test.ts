@@ -155,7 +155,7 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/no-raw-html-sink",
     shape: "insertAdjacentHTML",
-    filePath: "src/components/EmojiPicker.ts",
+    filePath: "src/features/messaging/EmojiPicker.ts",
     code: `function f(el, html) { el.insertAdjacentHTML("beforeend", html); }`,
     messageId: "htmlSink",
   },
@@ -199,7 +199,7 @@ const CANARIES: readonly Canary[] = [
     rule: "local/layer-direction",
     shape: "relative",
     filePath: "src/stores/voice.store.ts",
-    code: `import { x } from "../components/Foo";`,
+    code: `import { x } from "../pages/Foo";`,
     messageId: "upwardImport",
     hasOptions: true,
   },

@@ -15,25 +15,16 @@ import (
 // ─── GET /api/v1/channels/{id}/messages: response shape ─────────────────────
 
 func TestContract_Messages_HasRequiredFields(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "contract-msg1", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "contract-msg1")
-	chID, _ := database.CreateChannel(context.Background(), "contract-ch", "text", "", "", 0)
-	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "contract test message", nil)
+	database, router, token, user, chID := newChannelEnv(t, "contract-msg1", 1, "contract-ch", "text")
+	_ = mustCreateMessage(t, database, chID, user.ID, "contract test message")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		Messages []json.RawMessage `json:"messages"`
 		HasMore  *bool             `json:"has_more"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	if resp.HasMore == nil {
 		t.Error("response missing 'has_more' field")
 	}
@@ -83,20 +74,14 @@ func TestContract_Messages_HasRequiredFields(t *testing.T) {
 // TestContract_Messages_ReactionsHaveMeFlag verifies that when a reaction
 // exists, the response includes the 'me' boolean per docs/api.md.
 func TestContract_Messages_ReactionsHaveMeFlag(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "contract-react1", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "contract-react1")
-	chID, _ := database.CreateChannel(context.Background(), "react-ch", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "reaction target", nil)
+	database, router, token, user, chID := newChannelEnv(t, "contract-react1", 1, "react-ch", "text")
+	msgID := mustCreateMessage(t, database, chID, user.ID, "reaction target")
 	_ = database.AddReaction(context.Background(), msgID, user.ID, "👍")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		Messages []struct {
 			Reactions []struct {
 				Emoji string `json:"emoji"`
@@ -104,10 +89,7 @@ func TestContract_Messages_ReactionsHaveMeFlag(t *testing.T) {
 				Me    *bool  `json:"me"`
 			} `json:"reactions"`
 		} `json:"messages"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	if len(resp.Messages) == 0 {
 		t.Fatal("expected at least 1 message")
 	}
@@ -131,24 +113,15 @@ func TestContract_Messages_ReactionsHaveMeFlag(t *testing.T) {
 // ─── GET /api/v1/search: response shape ─────────────────────────────────────
 
 func TestContract_Search_HasRequiredFields(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "contract-search1", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "contract-search1")
-	chID, _ := database.CreateChannel(context.Background(), "search-ch", "text", "", "", 0)
-	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "contractsearchterm in body", nil)
+	database, router, token, user, chID := newChannelEnv(t, "contract-search1", 1, "search-ch", "text")
+	_ = mustCreateMessage(t, database, chID, user.ID, "contractsearchterm in body")
 
 	rr := chGet(t, router, "/api/v1/search?q=contractsearchterm", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		Results []json.RawMessage `json:"results"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	if len(resp.Results) == 0 {
 		t.Fatal("expected at least 1 search result")
 	}

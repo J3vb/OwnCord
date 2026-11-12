@@ -2,7 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";
-import { voiceStore } from "../../../src/stores/voice.store";
+import {
+  joinVoiceChannel,
+  setSwitchingTo,
+  setVoiceStatus,
+  voiceStore,
+} from "../../../src/stores/voice.store";
 import { dmStore } from "../../../src/stores/dm.store";
 import { membersStore } from "../../../src/stores/members.store";
 import { openImageLightbox } from "../../../src/features/messaging/content/media";
@@ -42,7 +47,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/media/notificationSound", () => mocks.mediaNotificationSoundMock());
 vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messagesCallAlertsMock());
-vi.mock("@components/UpdateNotifier", () => mocks.updateNotifierMock());
+vi.mock("../../../src/features/updates/UpdateNotifier", () => mocks.updateNotifierMock());
 vi.mock("@lib/voice/audioElements", () => mocks.voiceAudioElementsMock());
 vi.mock("@lib/presence/autoIdle", () => mocks.presenceAutoIdleMock());
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
@@ -244,6 +249,47 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       expect(rings(ws)).toHaveLength(0);
       expect(panel.dataset.state).not.toBe("outgoing");
       m.page.destroy?.();
+    });
+
+    describe("when the call starts from another live call", () => {
+      async function callFromAnotherCall(): Promise<FakeWsClient> {
+        const { ws } = await mountCaller();
+        joinVoiceChannel(7);
+        setVoiceStatus("connected");
+        voiceStore.flush();
+        startCall();
+        // The other call stays until the server acts on the switch.
+        expect(voiceStore.getState()).toMatchObject({ currentChannelId: 7, switchingTo: 50 });
+        expect(rings(ws)).toHaveLength(0);
+        return ws;
+      }
+
+      it("rings once the server moved the caller and the join finished", async () => {
+        const ws = await callFromAnotherCall();
+
+        joinVoiceChannel(50);
+        voiceStore.flush();
+        expect(rings(ws)).toHaveLength(0);
+
+        finishCallJoin();
+        expect(rings(ws)).toHaveLength(1);
+        m.page.destroy?.();
+      });
+
+      it("sends no ring when the server refuses the switch", async () => {
+        const ws = await callFromAnotherCall();
+
+        setSwitchingTo(null);
+        voiceStore.flush();
+
+        expect(rings(ws)).toHaveLength(0);
+        expect(voiceStore.getState()).toMatchObject({
+          currentChannelId: 7,
+          voiceStatus: "connected",
+        });
+        expect(callPanelEl().dataset.state).not.toBe("outgoing");
+        m.page.destroy?.();
+      });
     });
 
     it("a second Call 1 s after a ring waits for the server's 3 s window", async () => {
@@ -559,6 +605,29 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "alice" });
 
     expect(banner.style.display).toBe("none");
+  });
+
+  it("stops ringing when this account declines on another device, and does not ring for a room it is already in", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+
+    m.page = mountPage(m.container, ws);
+    incomingCall(ws);
+    const banner = incomingBannerEl();
+    expect(banner.style.display).not.toBe("none");
+
+    // The server sends the account's own other devices the decline too.
+    ws.emit("call_declined", { channel_id: 50, from_user: 1, username: "alice" });
+    expect(banner.style.display).toBe("none");
+
+    // Another device of this account (user 1) is already in the room: a
+    // re-ring from inside the call does not ring this one.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: roster(50, [voiceUser(1, { username: "alice" })]),
+    }));
+    incomingCall(ws);
+    expect(incomingBannerEl().style.display).toBe("none");
   });
 
   it("does not cancel an incoming ring on a voice_leave for a different channel from the ringer", async () => {

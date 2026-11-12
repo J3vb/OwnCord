@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -12,19 +11,10 @@ import (
 // pending at shutdown reaches the sessions row instead of vanishing with the
 // process (P5-S07).
 func TestConnWritesStop_FlushesPendingTouches(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
 	uid, err := database.CreateUser(ctx, "sleeper", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "CreateUser", err)
 	if _, err := database.CreateSession(ctx, uid, "tok", "dev", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -38,12 +28,8 @@ func TestConnWritesStop_FlushesPendingTouches(t *testing.T) {
 	sessions.SetConnWrites(w)
 	stop := startConnWrites(ctx, w, nil, nil, nil)
 
-	if err := sessions.TouchSession(ctx, "tok"); err != nil {
-		t.Fatalf("TouchSession: %v", err)
-	}
-	if err := stop(ctx); err != nil {
-		t.Fatalf("stop: %v", err)
-	}
+	mustDo(t, "TouchSession", sessions.TouchSession(ctx, "tok"))
+	mustDo(t, "stop", stop(ctx))
 
 	var fresh bool
 	if err := database.QueryRowContext(ctx,
@@ -59,23 +45,12 @@ func TestConnWritesStop_FlushesPendingTouches(t *testing.T) {
 // final flush: the stopped hub's readPump defers queue their own stamps too
 // late, which left them "online" with last_seen at connect time.
 func TestConnWritesStop_StampsUsersStillConnected(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
 	online, err := database.CreateUser(ctx, "online", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "CreateUser", err)
 	dnd, err := database.CreateUser(ctx, "dnd", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "CreateUser", err)
 	if _, err := database.ExecContext(ctx,
 		`UPDATE users SET status = CASE id WHEN ? THEN 'online' ELSE 'dnd' END,
 		 last_seen = datetime('now', '-2 days') WHERE id IN (?, ?)`, online, online, dnd); err != nil {
@@ -86,9 +61,7 @@ func TestConnWritesStop_StampsUsersStillConnected(t *testing.T) {
 	users := service.NewUserService(database)
 	users.SetConnWrites(w)
 	stop := startConnWrites(ctx, w, users, func() []int64 { return []int64{online, dnd} }, nil)
-	if err := stop(ctx); err != nil {
-		t.Fatalf("stop: %v", err)
-	}
+	mustDo(t, "stop", stop(ctx))
 
 	for id, want := range map[int64]string{online: "offline", dnd: "dnd"} {
 		var status string
@@ -108,18 +81,10 @@ func TestConnWritesStop_StampsUsersStillConnected(t *testing.T) {
 // instead of failing teardown: that failure made the restarting process exit
 // 1, which broke the restart handoff the restore asked for.
 func TestConnWritesStop_DatabaseClosedByRestore(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
 	uid, err := database.CreateUser(ctx, "restored", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "CreateUser", err)
 	if _, err := database.CreateSession(ctx, uid, "tok", "dev", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -131,12 +96,8 @@ func TestConnWritesStop_DatabaseClosedByRestore(t *testing.T) {
 	sessions.SetConnWrites(w)
 	stop := startConnWrites(ctx, w, users, func() []int64 { return []int64{uid} }, database.Closed)
 
-	if err := sessions.TouchSession(ctx, "tok"); err != nil {
-		t.Fatalf("TouchSession: %v", err)
-	}
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "TouchSession", sessions.TouchSession(ctx, "tok"))
+	mustDo(t, "Close", database.Close())
 	if err := stop(ctx); err != nil {
 		t.Fatalf("stop after the database was closed: %v, want nil", err)
 	}
@@ -145,19 +106,10 @@ func TestConnWritesStop_DatabaseClosedByRestore(t *testing.T) {
 // The restore exemption is only for a closed database: a final flush that
 // fails against an open one still fails teardown.
 func TestConnWritesStop_FlushFailureStillReported(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
 	uid, err := database.CreateUser(ctx, "stamped", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "CreateUser", err)
 	if _, err := database.ExecContext(ctx, `ALTER TABLE users RENAME TO users_gone`); err != nil {
 		t.Fatalf("break users table: %v", err)
 	}

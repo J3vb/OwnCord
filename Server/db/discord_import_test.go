@@ -40,9 +40,7 @@ func TestEnsureImportAccount_IsOneRowAndNeverAMember(t *testing.T) {
 	member := seedUser(t, database, "alice")
 
 	id, err := database.EnsureImportAccount(ctx)
-	if err != nil {
-		t.Fatalf("EnsureImportAccount: %v", err)
-	}
+	mustDo(t, "EnsureImportAccount", err)
 	again, err := database.EnsureImportAccount(ctx)
 	if err != nil || again != id {
 		t.Fatalf("second EnsureImportAccount = %d, %v; want %d", again, err, id)
@@ -74,14 +72,10 @@ func TestImportAccount_HiddenFromEveryListing(t *testing.T) {
 	database := openMigratedMemory(t)
 	seedUser(t, database, "alice")
 	importID, err := database.EnsureImportAccount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "EnsureImportAccount", err)
 
 	members, err := database.ListMembers(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListMembers", err)
 	for _, m := range members {
 		if m.ID == importID {
 			t.Error("ListMembers returned the import account")
@@ -89,9 +83,7 @@ func TestImportAccount_HiddenFromEveryListing(t *testing.T) {
 	}
 
 	all, err := database.ListAllUsers(ctx, db.UserListFilter{}, 100, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListAllUsers", err)
 	for _, u := range all {
 		if u.ID == importID {
 			t.Error("ListAllUsers returned the import account")
@@ -102,17 +94,13 @@ func TestImportAccount_HiddenFromEveryListing(t *testing.T) {
 		t.Errorf("UserCount = %d, %v; want 1 (the import account is not a member)", n, err)
 	}
 	stats, err := database.GetServerStats(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetServerStats", err)
 	if stats.UserCount != 1 {
 		t.Errorf("stats user_count = %d, want 1", stats.UserCount)
 	}
 
 	counts, err := database.CountRoleMembers(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CountRoleMembers", err)
 	if counts[4] != 1 {
 		t.Errorf("Member role count = %d, want 1", counts[4])
 	}
@@ -127,40 +115,30 @@ func TestImportAccount_NotMentionable(t *testing.T) {
 	database := openMigratedMemory(t)
 	alice := seedUser(t, database, "alice")
 	importID, err := database.EnsureImportAccount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "EnsureImportAccount", err)
 
 	byName, err := database.GetUserIDsByUsernames(ctx, []string{"alice", "[imported]"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetUserIDsByUsernames", err)
 	if _, ok := byName["[imported]"]; ok || byName["alice"] != alice {
 		t.Errorf("GetUserIDsByUsernames = %v, want only alice", byName)
 	}
 
 	byID, err := database.ListMentionTargetsByUserIDs(ctx, []int64{alice, importID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListMentionTargetsByUserIDs", err)
 	if len(byID) != 1 || byID[0].UserID != alice {
 		t.Errorf("ListMentionTargetsByUserIDs = %+v, want only alice", byID)
 	}
 
 	// @everyone and role mentions fan out by role: the account holds none.
 	byRole, err := database.ListMentionTargetsByRoles(ctx, []int64{4})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListMentionTargetsByRoles", err)
 	for _, m := range byRole {
 		if m.UserID == importID {
 			t.Error("a role mention reached the import account")
 		}
 	}
 	held, err := database.GetMemberRoles(ctx, importID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetMemberRoles", err)
 	if held != nil {
 		t.Errorf("import account holds roles: %+v", held)
 	}
@@ -174,9 +152,7 @@ func TestPendingChannel_HiddenFromClientReads(t *testing.T) {
 	pending, _ := startTestImport(ctx, t, database, "history")
 
 	list, err := database.ListChannels(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListChannels", err)
 	if len(list) != 1 || list[0].ID != visible {
 		t.Errorf("ListChannels = %+v, want only the visible channel", list)
 	}
@@ -185,22 +161,16 @@ func TestPendingChannel_HiddenFromClientReads(t *testing.T) {
 		t.Errorf("GetChannel(pending) = %v, %v; want nil, nil", ch, err)
 	}
 	unread, err := database.GetChannelUnreadCounts(ctx, member)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetChannelUnreadCounts", err)
 	if _, ok := unread[pending]; ok {
 		t.Error("GetChannelUnreadCounts lists the pending channel")
 	}
 	if _, ok := unread[visible]; !ok {
 		t.Error("GetChannelUnreadCounts lost the visible channel")
 	}
-	if err := database.SetSetting(ctx, db.RetentionDaysKey, "30"); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetSetting", database.SetSetting(ctx, db.RetentionDaysKey, "30"))
 	windows, err := database.RetentionWindows(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RetentionWindows", err)
 	if len(windows) != 1 {
 		t.Errorf("retention windows = %+v, want only the visible channel", windows)
 	}
@@ -210,9 +180,7 @@ func TestPendingChannel_HiddenFromClientReads(t *testing.T) {
 		}
 	}
 	stats, err := database.GetServerStats(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetServerStats", err)
 	if stats.ChannelCount != 1 {
 		t.Errorf("stats channel_count = %d, want 1", stats.ChannelCount)
 	}
@@ -233,9 +201,7 @@ func TestStartImport_SecondStartIsRefusedWhileRunning(t *testing.T) {
 		t.Errorf("refused start left %d channels (%v)", n, err)
 	}
 
-	if err := database.AbandonImport(ctx, job, ch, db.ImportCancelled, "stopped", db.ImportProgress{}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AbandonImport", database.AbandonImport(ctx, job, ch, db.ImportCancelled, "stopped", db.ImportProgress{}))
 	if _, _, err := database.StartImport(ctx, db.StartImportParams{Name: "two"}); err != nil {
 		t.Errorf("StartImport after the first ended: %v", err)
 	}
@@ -246,9 +212,7 @@ func TestImportChunk_MapsRepliesAndPublishMarksRead(t *testing.T) {
 	database := openMigratedMemory(t)
 	member := seedUser(t, database, "alice")
 	author, err := database.EnsureImportAccount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "EnsureImportAccount", err)
 	ch, job := startTestImport(ctx, t, database, "history")
 
 	msgs := importMessages(3, "m")
@@ -300,17 +264,13 @@ func TestImportChunk_MapsRepliesAndPublishMarksRead(t *testing.T) {
 		t.Errorf("message_mentions rows = %d (%v)", mentions, err)
 	}
 
-	if err := database.PublishImport(ctx, job, ch, later["n"], db.ImportProgress{Total: 4, Imported: 4}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PublishImport", database.PublishImport(ctx, job, ch, later["n"], db.ImportProgress{Total: 4, Imported: 4}))
 	got, err := database.GetChannel(ctx, ch)
 	if err != nil || got == nil {
 		t.Fatalf("published channel not visible: %v %v", got, err)
 	}
 	unread, err := database.GetChannelUnreadCounts(ctx, member)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetChannelUnreadCounts", err)
 	if u := unread[ch]; u.UnreadCount != 0 || u.MentionCount != 0 || u.LastReadMessageID != later["n"] {
 		t.Errorf("unread after publish = %+v, want 0 unread past message %d", u, later["n"])
 	}
@@ -331,9 +291,7 @@ func TestFailInterruptedImports_RestartAfterChunkTwoOfFive(t *testing.T) {
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	author, err := database.EnsureImportAccount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "EnsureImportAccount", err)
 	ch, job := startTestImport(ctx, t, database, "history")
 
 	known := map[string]int64{}
@@ -341,9 +299,7 @@ func TestFailInterruptedImports_RestartAfterChunkTwoOfFive(t *testing.T) {
 		prefix := string(rune('A' + chunk))
 		msgs := importMessages(2, prefix)
 		attID := "att-" + prefix
-		if err := database.CreateAttachment(ctx, attID, author, "pic.txt", "stored-"+prefix, "text/plain", 3, nil, nil); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "CreateAttachment", database.CreateAttachment(ctx, attID, author, "pic.txt", "stored-"+prefix, "text/plain", 3, nil, nil))
 		msgs[0].AttachmentIDs = []string{attID}
 		ids, err := database.ImportChunk(ctx, db.ImportChunkParams{
 			JobID: job, ChannelID: ch, AuthorID: author, Messages: msgs, KnownIDs: known,
@@ -355,9 +311,7 @@ func TestFailInterruptedImports_RestartAfterChunkTwoOfFive(t *testing.T) {
 		maps.Copy(known, ids)
 	}
 	// A file stored for chunk 3 whose rows never landed.
-	if err := database.CreateAttachment(ctx, "att-C", author, "pic.txt", "stored-C", "text/plain", 3, nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateAttachment", database.CreateAttachment(ctx, "att-C", author, "pic.txt", "stored-C", "text/plain", 3, nil, nil))
 
 	// The process "restarts": boot runs the clean-up.
 	failed, err := database.FailInterruptedImports(ctx)
@@ -377,9 +331,7 @@ func TestFailInterruptedImports_RestartAfterChunkTwoOfFive(t *testing.T) {
 		}
 	}
 	j, err := database.GetImportJob(ctx, job)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetImportJob", err)
 	if j.Status != db.ImportFailed || j.Error == nil || *j.Error != db.ImportInterruptedMessage || j.FinishedAt == nil {
 		t.Errorf("job after restart = %+v", j)
 	}
@@ -393,9 +345,7 @@ func TestFailInterruptedImports_RestartAfterChunkTwoOfFive(t *testing.T) {
 	// The files are reclaimed by the orphan sweep: every attachment is now
 	// unlinked, so a sweep past their grace period takes all three.
 	files, err := database.DeleteOrphanedAttachments(ctx, time.Now().Add(48*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteOrphanedAttachments", err)
 	if len(files) != 3 {
 		t.Errorf("orphan sweep reclaimed %v, want the 3 stored files", files)
 	}
@@ -418,9 +368,7 @@ func TestFailInterruptedImports_LeavesPublishedChannelAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PublishImport", database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}))
 	if n, err := database.FailInterruptedImports(ctx); err != nil || n != 0 {
 		t.Fatalf("FailInterruptedImports = %d, %v", n, err)
 	}
@@ -487,16 +435,12 @@ func TestDateBounds_SurviveAPublishedImportOfOlderMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.PublishImport(ctx, job, ch, ids["mc"], db.ImportProgress{Imported: 3}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PublishImport", database.PublishImport(ctx, job, ch, ids["mc"], db.ImportProgress{Imported: 3}))
 
 	search := func(q db.SearchQuery) int {
 		t.Helper()
 		got, err := database.SearchMessagesFiltered(ctx, q, db.SearchPage{Limit: 50, Recent: true})
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "SearchMessagesFiltered", err)
 		return len(got)
 	}
 	both := []int64{native, ch}
@@ -540,19 +484,13 @@ func TestRetention_ServerWindowCoversPublishedImportsNotPendingOnes(t *testing.T
 	}
 	published, pubJob := startTestImport(ctx, t, database, "history")
 	ids := chunk(published, pubJob)
-	if err := database.PublishImport(ctx, pubJob, published, ids["mb"], db.ImportProgress{Imported: 2}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PublishImport", database.PublishImport(ctx, pubJob, published, ids["mb"], db.ImportProgress{Imported: 2}))
 	pending, pendJob := startTestImport(ctx, t, database, "building")
 	chunk(pending, pendJob)
 
-	if err := database.SetSetting(ctx, db.RetentionDaysKey, "30"); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetSetting", database.SetSetting(ctx, db.RetentionDaysKey, "30"))
 	windows, err := database.RetentionWindows(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RetentionWindows", err)
 	got := map[int64]int{}
 	for _, w := range windows {
 		got[w.ChannelID] = w.Days
@@ -578,9 +516,7 @@ func TestCreateOwnerIfEmpty_IgnoresTheImportAccount(t *testing.T) {
 	if _, err := database.EnsureImportAccount(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.SetSetting(ctx, db.SetupCompletedKey, db.SetupOpen); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetSetting", database.SetSetting(ctx, db.SetupCompletedKey, db.SetupOpen))
 	if _, err := database.CreateOwnerIfEmpty(ctx, "the-owner", "hash", 1); err != nil {
 		t.Fatalf("CreateOwnerIfEmpty with only the import account: %v", err)
 	}
@@ -605,9 +541,7 @@ func TestPublishImport_MarksReadForPendingApplicantsToo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PublishImport", database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}))
 	var n int
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM read_states WHERE channel_id = ? AND last_message_id = ?`, ch, ids["ma"]).Scan(&n); err != nil || n != 1 {
 		t.Errorf("read states past the import = %d (%v), want the applicant's 1", n, err)
@@ -638,9 +572,7 @@ func TestPublishImport_DuplicateNamesGetAnImportedSuffix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "PublishImport", database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}))
 		got, _ := database.GetChannel(ctx, ch)
 		return got.Name
 	}
@@ -655,9 +587,7 @@ func TestPublishImport_DuplicateNamesGetAnImportedSuffix(t *testing.T) {
 	ids, _ := database.ImportChunk(ctx, db.ImportChunkParams{
 		JobID: job, ChannelID: ch, AuthorID: author, Messages: importMessages(1, "m"), Progress: db.ImportProgress{Imported: 1},
 	})
-	if err := database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PublishImport", database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}))
 	if got, _ := database.GetChannel(ctx, ch); got.Name != "elsewhere" {
 		t.Errorf("free name changed to %q", got.Name)
 	}
@@ -677,9 +607,7 @@ func TestPublishImport_NameClashFoldsNonASCIICase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PublishImport", database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}))
 	if got, _ := database.GetChannel(ctx, ch); got.Name != "\u00c4RGER (imported)" {
 		t.Errorf("name = %q, want the imported suffix", got.Name)
 	}
@@ -758,9 +686,7 @@ func TestGetLatestImportJob_ReturnsNewestAndNotFoundWhenEmpty(t *testing.T) {
 		t.Fatalf("empty err = %v, want ErrNotFound", err)
 	}
 	ch, first := startTestImport(ctx, t, database, "one")
-	if err := database.AbandonImport(ctx, first, ch, db.ImportCancelled, "stopped", db.ImportProgress{}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AbandonImport", database.AbandonImport(ctx, first, ch, db.ImportCancelled, "stopped", db.ImportProgress{}))
 	_, second := startTestImport(ctx, t, database, "two")
 	got, err := database.GetLatestImportJob(ctx)
 	if err != nil || got.ID != second || got.Status != db.ImportRunning {

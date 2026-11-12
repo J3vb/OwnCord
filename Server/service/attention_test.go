@@ -702,3 +702,52 @@ func TestAttention_CertificateExpiry(t *testing.T) {
 	wantStatus(t, evalLife("manual", 90, 22), "certificate", AttentionStatusOK)
 	wantStatus(t, evalLife("manual", 90, 6), "certificate", AttentionStatusCritical)
 }
+
+// RefreshBackup re-evaluates only the backup signal, in place: a backup taken
+// between samples shows at once, and the rate signals keep their cadence.
+func TestAttention_RefreshBackupUpdatesOnlyTheBackupSignal(t *testing.T) {
+	f := newAttentionFixture(t)
+	f.schedule, f.last = "daily", time.Time{}
+
+	// Before the first sample there is nothing to replace.
+	f.s.RefreshBackup(context.Background(), f.now)
+	if rep := f.s.Report(); len(rep.Signals) != 0 || rep.EvaluatedAt != nil {
+		t.Fatalf("refresh before the first sample added state: %+v", rep)
+	}
+
+	before := f.step()
+	wantStatus(t, before, "backup", AttentionStatusUnknown)
+	index := func(rep AttentionReport) int {
+		for i, s := range rep.Signals {
+			if s.ID == "backup" {
+				return i
+			}
+		}
+		return -1
+	}
+
+	f.last = f.now
+	f.waitMs = 999_999 // a rate source moving between samples must not be sampled
+	f.s.RefreshBackup(context.Background(), f.now.Add(10*time.Second))
+	after := f.s.Report()
+
+	wantStatus(t, after, "backup", AttentionStatusOK)
+	if got := signal(t, after, "backup").ObservedAt; !got.Equal(f.now.Add(10 * time.Second)) {
+		t.Errorf("backup ObservedAt = %v, want the refresh time", got)
+	}
+	if len(after.Signals) != len(before.Signals) || index(after) != index(before) {
+		t.Fatalf("signals = %d with backup at %d, want %d with backup at %d",
+			len(after.Signals), index(after), len(before.Signals), index(before))
+	}
+	for i := range before.Signals {
+		if before.Signals[i].ID != "backup" && before.Signals[i] != after.Signals[i] {
+			t.Errorf("signal %q changed on a backup refresh: %+v -> %+v", before.Signals[i].ID, before.Signals[i], after.Signals[i])
+		}
+	}
+	if !after.EvaluatedAt.Equal(*before.EvaluatedAt) {
+		t.Errorf("EvaluatedAt moved on a backup refresh: %v -> %v", before.EvaluatedAt, after.EvaluatedAt)
+	}
+
+	var nilService *AttentionService
+	nilService.RefreshBackup(context.Background(), f.now)
+}

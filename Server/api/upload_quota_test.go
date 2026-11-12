@@ -46,14 +46,8 @@ type quotaHarness struct {
 
 func newQuotaHarness(t *testing.T, store api.FileStore) *quotaHarness {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
+	var err error
 	h := &quotaHarness{database: database, dir: t.TempDir()}
 	if store == nil {
 		h.store, err = storage.New(h.dir, 10)
@@ -140,9 +134,7 @@ func TestUploadQuota_ExceededIs507WithItsOwnCode(t *testing.T) {
 		t.Fatalf("counter = %d after a refusal, want 0", got)
 	}
 	rr = doUpload(t, h.router, h.token, "file", "ok.bin", bytes.Repeat([]byte("x"), 1024))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("exactly-at-quota upload: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	if got := h.used(t); got != 1024 {
 		t.Fatalf("counter = %d, want 1024 (Resize corrected the envelope charge down to the true size)", got)
 	}
@@ -169,8 +161,7 @@ func TestUploadQuota_LowDiskIs507BeforeTheBodyIsSpooled(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", bytes.NewReader([]byte("not multipart at all")))
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=nope")
 	req.Header.Set("Authorization", "Bearer "+h.token)
-	rr = httptest.NewRecorder()
-	h.router.ServeHTTP(rr, req)
+	rr = serveRequest(h.router, req)
 	assertErrorCode(t, rr, http.StatusInsufficientStorage, "STORAGE_LOW_DISK")
 }
 
@@ -224,9 +215,7 @@ func TestUploadQuota_ChargeReleasedWhenTheWriteFails(t *testing.T) {
 	h := newQuotaHarness(t, nil)
 	h.limits(t, 1<<20, 0, nil)
 	rr := doUpload(t, h.router, h.token, "file", "evil.exe", append([]byte("MZ"), make([]byte, 100)...))
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("blocked type: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadRequest)
 	if got := h.used(t); got != 0 {
 		t.Fatalf("counter = %d after a failed write, want 0", got)
 	}
@@ -241,9 +230,7 @@ func TestUploadQuota_ChargeReleasedWhenTheRowFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := doUpload(t, h.router, h.token, "file", "f.bin", []byte("payload"))
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("row failure: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusInternalServerError)
 	if h.filesOnDisk(t) != 0 {
 		t.Fatal("the orphan file was not removed")
 	}
@@ -291,14 +278,7 @@ func TestUploadQuota_ChargeReleasedOnPanicAfterTheWrite(t *testing.T) {
 // TestAvatarUpload_IsChargedAndQuotaGated: an avatar is an attachment and
 // counts against its uploader's quota.
 func TestAvatarUpload_IsChargedAndQuotaGated(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatal(err)
-	}
+	database := openMigratedDB(t)
 	dir := t.TempDir()
 	store, err := storage.New(dir, 10)
 	if err != nil {
@@ -319,8 +299,7 @@ func TestAvatarUpload_IsChargedAndQuotaGated(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/avatar", body)
 		req.Header.Set("Content-Type", contentType)
 		req.Header.Set("Authorization", "Bearer "+token)
-		rr := httptest.NewRecorder()
-		r.ServeHTTP(rr, req)
+		rr := serveRequest(r, req)
 		return rr
 	}
 	svc.Uploads.SetStorageLimits(service.StorageLimits{UserQuotaBytes: int64(len(png)), Dir: dir})
@@ -362,9 +341,7 @@ func TestUploadQuota_RestoreWithoutStorageDirRowsOutliveFiles(t *testing.T) {
 	h := newQuotaHarness(t, nil)
 	h.limits(t, 0, 0, nil)
 	rr := doUpload(t, h.router, h.token, "file", "f.bin", []byte("survives in the database only"))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	var resp struct{ ID string }
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
@@ -401,17 +378,13 @@ func TestHandleMetrics_StoragePressureFields(t *testing.T) {
 		UploadBytes: func(context.Context) (int64, error) { return 3 << 20, nil },
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-	var m struct {
+	rr := serveRequest(r, req)
+	m := decodeBody[struct {
 		DiskFreeMB          float64  `json:"disk_free_mb"`
 		DiskMinFreeMB       float64  `json:"disk_min_free_mb"`
 		DiskLow             *bool    `json:"disk_low"`
 		UploadStorageUsedMB *float64 `json:"upload_storage_used_mb"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &m); err != nil {
-		t.Fatalf("metrics body: %v", err)
-	}
+	}](t, rr)
 	if m.DiskFreeMB != 100 || m.DiskMinFreeMB != 256 {
 		t.Fatalf("disk_free_mb=%v disk_min_free_mb=%v", m.DiskFreeMB, m.DiskMinFreeMB)
 	}

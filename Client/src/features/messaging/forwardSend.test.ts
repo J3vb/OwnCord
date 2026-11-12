@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockWsClient, type MockWsClient } from "../../../tests/helpers/mock-ws";
+import { activatePendingMessages, deactivatePendingMessages } from "../../lib/pendingMessages";
 import { isForwardRequest } from "./forwardRequests";
 import {
   FORWARD_REPLY_TIMEOUT_MS,
@@ -287,5 +288,27 @@ describe("forwardSend", () => {
     ackForward(sent()[0]!);
     await done;
     expect(changes.map((c) => c[0]!.status)).toEqual(["sending", "sent"]);
+  });
+
+  it("keys the forward and the comment at or above the server's restore floor", async () => {
+    const floor = Date.now() + 10 * 60 * 1000;
+    activatePendingMessages(
+      { host: "h", userId: 7 },
+      { id: 7, username: "me", avatar: null },
+      true,
+      floor,
+    );
+    try {
+      const session = make([5], "note");
+      void session.start();
+      await flush();
+      const id = (m: Sent): number => Number(String(m.payload["client_message_id"]).split(":")[0]);
+      expect(id(sent()[0]!)).toBeGreaterThanOrEqual(floor);
+      ackForward(sent()[0]!);
+      await flush();
+      expect(id(sent()[1]!)).toBeGreaterThanOrEqual(floor);
+    } finally {
+      deactivatePendingMessages();
+    }
   });
 });

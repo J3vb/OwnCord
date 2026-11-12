@@ -25,13 +25,9 @@ func generateFor(t *testing.T, cfg *config.VoiceConfig) generatedRTC {
 	t.Helper()
 	proc := livekitproc.New(cfg, &config.TLSConfig{}, t.TempDir())
 	cfgPath, err := proc.GenerateConfigForTest()
-	if err != nil {
-		t.Fatalf("generateConfig: %v", err)
-	}
+	mustDo(t, "generateConfig", err)
 	content, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("reading config file: %v", err)
-	}
+	mustDo(t, "reading config file", err)
 	var parsed struct {
 		Rtc generatedRTC `yaml:"rtc"`
 	}

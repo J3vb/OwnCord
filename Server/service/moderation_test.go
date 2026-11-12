@@ -64,9 +64,7 @@ func TestBanUser_HierarchyEnforced(t *testing.T) {
 func TestBanUser_AuthorizedSucceeds(t *testing.T) {
 	svc, database := newTestModerationService(t)
 
-	if err := svc.BanUser(context.Background(), 2, 3, "spam", nil); err != nil {
-		t.Fatalf("authorized ban: %v", err)
-	}
+	mustDo(t, "authorized ban", svc.BanUser(context.Background(), 2, 3, "spam", nil))
 	target, _ := database.GetUserByID(context.Background(), 3)
 	if !target.Banned {
 		t.Fatal("target should be banned")
@@ -191,10 +189,7 @@ func TestChangeUserRole_AuditWritten(t *testing.T) {
 	if _, err := svc.ChangeUserRole(context.Background(), 1, 4, 3); err != nil {
 		t.Fatalf("owner role change: %v", err)
 	}
-	entries, err := database.GetAuditLog(context.Background(), 10, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, database, 10, 0)
 	found := false
 	for _, e := range entries {
 		if e.Action == "role_change" && e.TargetID == 4 && e.ActorID == 1 {
@@ -210,9 +205,7 @@ func TestForceLogout_AuthorizationMatrix(t *testing.T) {
 	svc, database := newTestRoleService(t)
 
 	ctx := context.Background()
-	if _, err := database.CreateSession(ctx, 4, "victim-hash", "web", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, 4, "victim-hash", "web", "127.0.0.1")
 
 	// No KICK_MEMBERS → Forbidden (member 5 targeting member 4).
 	if err := svc.ForceLogout(ctx, 5, 4); !errors.Is(err, ErrForbidden) {
@@ -232,9 +225,7 @@ func TestForceLogout_AuthorizationMatrix(t *testing.T) {
 	}
 
 	// Authorized: mod outranks member and holds KICK_MEMBERS.
-	if err := svc.ForceLogout(ctx, 3, 4); err != nil {
-		t.Fatalf("authorized force-logout: %v", err)
-	}
+	mustDo(t, "authorized force-logout", svc.ForceLogout(ctx, 3, 4))
 	sessions, _ = database.GetUserSessions(ctx, 4)
 	if len(sessions) != 0 {
 		t.Fatalf("sessions = %d after force logout, want 0", len(sessions))
@@ -248,9 +239,7 @@ func TestForceLogout_AuthorizationMatrix(t *testing.T) {
 func TestUnbanUser_AuthorizationMatrix(t *testing.T) {
 	svc, database := newTestModerationService(t)
 
-	if err := svc.BanUser(context.Background(), 1, 3, "setup", nil); err != nil {
-		t.Fatalf("setup ban: %v", err)
-	}
+	mustDo(t, "setup ban", svc.BanUser(context.Background(), 1, 3, "setup", nil))
 
 	// No BAN_MEMBERS → Forbidden (member 4 trying to unban member 3).
 	if err := svc.UnbanUser(context.Background(), 4, 3); !errors.Is(err, ErrForbidden) {
@@ -261,9 +250,7 @@ func TestUnbanUser_AuthorizationMatrix(t *testing.T) {
 		t.Fatalf("equal-rank unban: want ErrForbidden, got %v", err)
 	}
 	// Authorized → succeeds.
-	if err := svc.UnbanUser(context.Background(), 2, 3); err != nil {
-		t.Fatalf("authorized unban: %v", err)
-	}
+	mustDo(t, "authorized unban", svc.UnbanUser(context.Background(), 2, 3))
 	target, _ := database.GetUserByID(context.Background(), 3)
 	if target.Banned {
 		t.Fatal("target should be unbanned")
@@ -277,9 +264,7 @@ func TestBanUser_LogOmitsFreeTextReason(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	if err := svc.BanUser(context.Background(), 2, 3, "posted 'meet me at 12 Oak St'", nil); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "BanUser", svc.BanUser(context.Background(), 2, 3, "posted 'meet me at 12 Oak St'", nil))
 
 	if out := buf.String(); !strings.Contains(out, "user banned") || strings.Contains(out, "Oak St") {
 		t.Fatalf("ban log = %s", out)

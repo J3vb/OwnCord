@@ -19,9 +19,8 @@ type supportHubMetrics interface {
 	ConnRejectCount() uint64
 }
 
-// supportHubLatency is the shipped in-process latency surface (SRE-M1). Kept
-// a separate interface so the health snapshot stays usable from a fake that
-// predates it.
+// supportHubLatency is the in-process latency surface, a separate interface so the snapshot works from a fake
+// that predates it.
 type supportHubLatency interface {
 	TopicShedCount() uint64
 	BroadcastMs() metrics.Summary
@@ -31,9 +30,8 @@ type supportHubLatency interface {
 	SeqMuMaxHoldMs() float64
 }
 
-// supportHubVoice reports the supervised LiveKit companion's local state.
-// Reading it probes nothing and discovers no address — it is the supervisor's
-// own running/restart flags, the same values the attention panel reads.
+// supportHubVoice reports the supervised LiveKit companion's local state (supervisor flags, as the attention
+// panel reads); it probes nothing and discovers no address.
 type supportHubVoice interface {
 	LiveKitProcessStatus() livekitproc.Status
 	LiveKitManaged() bool
@@ -41,10 +39,8 @@ type supportHubVoice interface {
 
 const supportHealthScope = "database, process and local hub counters; LiveKit is reported from the supervisor's own state, never probed"
 
-// healthSnapshot is health.json in the support bundle and the snapshot on the
-// System health page. Fields are in JSON-key order and the ones a hub may not
-// report are pointers left nil, so the bundle's bytes match the map this
-// replaced: a field the hub cannot report is absent, never a made-up zero.
+// healthSnapshot is health.json in the support bundle and on the System health page. Fields are in JSON-key
+// order and unreported ones are nil pointers: a field the hub cannot report is absent, never a made-up zero.
 type healthSnapshot struct {
 	BroadcastDrops         *uint64          `json:"broadcast_drops,omitempty"`
 	CapturedAt             time.Time        `json:"captured_at"`
@@ -61,6 +57,7 @@ type healthSnapshot struct {
 	LiveKitGaveUp          *bool            `json:"livekit_gave_up,omitempty"`
 	LiveKitHealthy         *bool            `json:"livekit_healthy,omitempty"`
 	LiveKitManaged         *bool            `json:"livekit_managed,omitempty"`
+	LiveKitNextRetryAt     *time.Time       `json:"livekit_next_retry_at,omitempty"`
 	LiveKitRestarts        *int             `json:"livekit_restarts,omitempty"`
 	LowPriorityDrops       *uint64          `json:"low_priority_drops,omitempty"`
 	QueueDisconnects       *uint64          `json:"queue_disconnects,omitempty"`
@@ -92,8 +89,7 @@ func supportHealth(hub HubBroadcaster, at time.Time) healthSnapshot {
 		rb, rd, rf := h.ReconnectTierStats()
 		out.ReconnectBuffer, out.ReconnectDatabase, out.ReconnectFull = &rb, &rd, &rf
 	}
-	// SRE-M1's shipped latency surface: aggregate distributions and gauges,
-	// no per-user labels.
+	// Latency surface: aggregate distributions and gauges, no per-user labels.
 	if h, ok := hub.(supportHubLatency); ok {
 		out.TopicShedsTotal = new(h.TopicShedCount())
 		out.WSBroadcastMs = new(h.BroadcastMs())
@@ -108,6 +104,9 @@ func supportHealth(hub HubBroadcaster, at time.Time) healthSnapshot {
 		out.LiveKitHealthy = new(status.Running)
 		out.LiveKitRestarts = new(status.Restarts)
 		out.LiveKitGaveUp = new(status.GaveUp)
+		if !status.NextRetryAt.IsZero() {
+			out.LiveKitNextRetryAt = new(status.NextRetryAt.UTC())
+		}
 	}
 	return out
 }

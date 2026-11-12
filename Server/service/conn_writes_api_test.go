@@ -47,25 +47,17 @@ func TestConnWrites_APITokenTouchesCoalescePerInterval(t *testing.T) {
 	ctx := context.Background()
 
 	for range 1000 {
-		if err := sessions.TouchAPIToken(ctx, "tok-a"); err != nil {
-			t.Fatalf("TouchAPIToken: %v", err)
-		}
+		mustDo(t, "TouchAPIToken", sessions.TouchAPIToken(ctx, "tok-a"))
 	}
-	if err := sessions.TouchAPIToken(ctx, "tok-b"); err != nil {
-		t.Fatalf("TouchAPIToken: %v", err)
-	}
+	mustDo(t, "TouchAPIToken", sessions.TouchAPIToken(ctx, "tok-b"))
 	if len(spy.touchCalls) != 0 {
 		t.Fatalf("touches wrote %v before the flush, want nothing", spy.touchCalls)
 	}
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
+	mustDo(t, "Flush", w.Flush(ctx))
 	if spy.touchCalls["tok-a"] != 1 || spy.touchCalls["tok-b"] != 1 {
 		t.Fatalf("flush calls = %v, want one per distinct token", spy.touchCalls)
 	}
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("second Flush: %v", err)
-	}
+	mustDo(t, "second Flush", w.Flush(ctx))
 	if spy.touchCalls["tok-a"] != 1 {
 		t.Fatalf("an empty flush wrote again: %v", spy.touchCalls)
 	}
@@ -78,9 +70,7 @@ func TestConnWrites_DiscardsFlushAndRequeueOnFailure(t *testing.T) {
 	ctx := context.Background()
 
 	for i := range 3 {
-		if err := sessions.DiscardSession(ctx, fmt.Sprintf("dead-%d", i%2)); err != nil {
-			t.Fatalf("DiscardSession: %v", err)
-		}
+		mustDo(t, "DiscardSession", sessions.DiscardSession(ctx, fmt.Sprintf("dead-%d", i%2)))
 	}
 	if len(spy.deleteCalls) != 0 {
 		t.Fatalf("discards wrote %v before the flush, want nothing", spy.deleteCalls)
@@ -95,15 +85,11 @@ func TestConnWrites_DiscardsFlushAndRequeueOnFailure(t *testing.T) {
 	}
 
 	spy.failDeletes = false
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("retry Flush: %v", err)
-	}
+	mustDo(t, "retry Flush", w.Flush(ctx))
 	if spy.deleteCalls["dead-0"] != 1 || spy.deleteCalls["dead-1"] != 1 {
 		t.Fatalf("retry deletes = %v, want each hash once: a failed flush lost its hashes", spy.deleteCalls)
 	}
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("third Flush: %v", err)
-	}
+	mustDo(t, "third Flush", w.Flush(ctx))
 	if spy.deleteCalls["dead-0"] != 1 {
 		t.Fatalf("a flushed discard was written again: %v", spy.deleteCalls)
 	}

@@ -99,13 +99,9 @@ func perturb(v reflect.Value) any {
 func loadBody(t *testing.T, body string) *config.Config {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(path, []byte(body), 0o600))
 	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	mustDo(t, "Load", err)
 	return cfg
 }
 
@@ -121,13 +117,9 @@ func TestConfigExampleMatchesGeneratedTemplate(t *testing.T) {
 		t.Fatalf("Load(missing file): %v", err)
 	}
 	generated, err := os.ReadFile(generatedPath)
-	if err != nil {
-		t.Fatalf("read generated template: %v", err)
-	}
+	mustDo(t, "read generated template", err)
 	example, err := os.ReadFile(filepath.Join("..", "config.yaml.example"))
-	if err != nil {
-		t.Fatalf("read config.yaml.example: %v", err)
-	}
+	mustDo(t, "read config.yaml.example", err)
 	if !bytes.Equal(example, generated) {
 		t.Errorf("Server/config.yaml.example has drifted from the first-boot template; regenerate it from config.defaultYAML")
 	}
@@ -139,18 +131,12 @@ func TestConfigExampleMatchesGeneratedTemplate(t *testing.T) {
 // voice.auto_download_livekit: true that defaults() leaves off) are blanked.
 func TestParityDefaults(t *testing.T) {
 	empty := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(empty, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(empty, nil, 0o600))
 	compiled, err := config.Load(empty)
-	if err != nil {
-		t.Fatalf("Load(empty file): %v", err)
-	}
+	mustDo(t, "Load(empty file)", err)
 	// A missing path makes Load write defaultYAML first.
 	shipped, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"))
-	if err != nil {
-		t.Fatalf("Load(missing file): %v", err)
-	}
+	mustDo(t, "Load(missing file)", err)
 
 	blank := func(c *config.Config) {
 		c.Voice.LiveKitAPIKey, c.Voice.LiveKitAPISecret = "", ""
@@ -186,14 +172,12 @@ func TestParityEveryLeafRoundTrips(t *testing.T) {
 		want[key] = p
 	})
 	// A walk that silently loses a key would make the rest of this test vacuous.
-	if len(want) != 81 {
-		t.Fatalf("walked %d config leaves, want the full 81-key surface", len(want))
+	if len(want) != 82 {
+		t.Fatalf("walked %d config leaves, want the full 82-key surface", len(want))
 	}
 
 	body, err := goyaml.Marshal(tree)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	mustDo(t, "marshal", err)
 	got := loadBody(t, string(body))
 	walkLeaves(t, got, func(key string, v reflect.Value) {
 		if !reflect.DeepEqual(v.Interface(), want[key]) {
@@ -383,9 +367,7 @@ func TestLoadEmptySectionKeepsDefaults(t *testing.T) {
 // the offending value, is the point of moving to yaml.v3.
 func TestLoadQuotedScalarRejected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("server:\n  port: \"9000\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(path, []byte("server:\n  port: \"9000\"\n"), 0o600))
 	cfg, err := config.Load(path)
 	if err == nil {
 		t.Fatalf("Load() accepted a quoted int (port = %d); want a refusal", cfg.Server.Port)

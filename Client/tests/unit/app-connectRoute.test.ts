@@ -21,10 +21,12 @@ const hoisted = vi.hoisted(() => ({
   page: {} as Record<string, ReturnType<typeof vi.fn>>,
   notifiers: [] as Array<{ mount: ReturnType<typeof vi.fn>; destroy: ReturnType<typeof vi.fn> }>,
   startSession: vi.fn(),
+  inFlight: false,
   runHealthChecks: vi.fn(),
   ensureProfileExists: vi.fn(),
   persistProfiles: vi.fn(),
   startAutoLogin: vi.fn(),
+  resumeAfterCertAccept: vi.fn(),
   logError: vi.fn(),
 }));
 
@@ -33,7 +35,7 @@ vi.mock("@lib/text/safeRender", () => ({ safeMount: vi.fn() }));
 vi.mock("@lib/net/credentials", () => ({
   deleteCredential: vi.fn(),
   loginWithSavedPassword: vi.fn(),
-  parseRelayedLogin: vi.fn(),
+  readRelayedLogin: vi.fn(),
 }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("@pages/ConnectPage", () => ({
@@ -42,7 +44,7 @@ vi.mock("@pages/ConnectPage", () => ({
     return hoisted.page;
   },
 }));
-vi.mock("@components/UpdateNotifier", () => ({
+vi.mock("../../src/features/updates/UpdateNotifier", () => ({
   createUpdateNotifier: () => {
     const entry = { mount: vi.fn(), destroy: vi.fn() };
     hoisted.notifiers.push(entry);
@@ -50,7 +52,7 @@ vi.mock("@components/UpdateNotifier", () => ({
   },
 }));
 vi.mock("../../src/app/autoLogin", () => ({
-  createAutoLogin: () => [hoisted.startAutoLogin, vi.fn(), vi.fn()],
+  createAutoLogin: () => [hoisted.startAutoLogin, vi.fn(), vi.fn(), hoisted.resumeAfterCertAccept],
 }));
 vi.mock("../../src/app/connectProfiles", () => ({
   createConnectProfiles: () => [
@@ -68,10 +70,12 @@ vi.mock("../../src/app/serverHealth", () => ({
 }));
 vi.mock("../../src/app/session", () => ({
   abandonInFlight: vi.fn(),
+  signInPending: () => hoisted.inFlight,
   startSession: hoisted.startSession,
 }));
 
 import { setUpdateRequiredHost, uiStore } from "@stores/ui.store";
+import { loginWithSavedPassword, readRelayedLogin } from "@lib/net/credentials";
 import { renderConnect } from "../../src/app/connectRoute";
 
 const PAGE_METHODS = [
@@ -121,7 +125,6 @@ function mount(takePendingInvite: () => { code: string; host?: string } | null =
     profileManager as unknown as ProfileManager,
     appEl,
     recovery,
-    vi.fn(),
     takePendingInvite,
   );
   mounted.push(route[0]);
@@ -136,6 +139,7 @@ beforeEach(() => {
   hoisted.page["getRememberPassword"]!.mockReturnValue(false);
   hoisted.page["getAutoConnect"]!.mockReturnValue(false);
   api.getSession.mockReturnValue({ assertCurrent: vi.fn() });
+  hoisted.inFlight = false;
   setUpdateRequiredHost(null);
 });
 
@@ -232,7 +236,64 @@ describe("renderConnect", () => {
     });
   });
 
+  describe("saved-password login", () => {
+    let ended = false;
+    beforeEach(() => {
+      ended = false;
+      api.getSession.mockReturnValue({
+        run: <T>(work: Promise<T>): Promise<T> => work,
+        assertCurrent: () => {
+          if (ended) throw new DOMException("superseded", "AbortError");
+        },
+      });
+      vi.mocked(loginWithSavedPassword).mockResolvedValue({ status: 200, body: "{}" });
+    });
+
+    it("signs in with a reply that passes the check", async () => {
+      mount();
+      vi.mocked(readRelayedLogin).mockResolvedValue({ token: "t", requires_2fa: false });
+      await cb("onLoginWithSavedPassword")("host.example", "ann");
+      expect(hoisted.startSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("hands a reply that fails the check to the form and starts no session", async () => {
+      mount();
+      vi.mocked(readRelayedLogin).mockRejectedValue(new Error("unreadable reply"));
+      await expect(cb("onLoginWithSavedPassword")("host.example", "ann")).rejects.toThrow(
+        "unreadable reply",
+      );
+      expect(hoisted.startSession).not.toHaveBeenCalled();
+    });
+
+    it("starts no session when a newer attempt replaced it during the check", async () => {
+      mount();
+      let finishCheck: (auth: { token: string; requires_2fa: boolean }) => void = () => {};
+      vi.mocked(readRelayedLogin).mockReturnValue(
+        new Promise((resolve) => {
+          finishCheck = resolve;
+        }),
+      );
+      const login = cb("onLoginWithSavedPassword")("host.example", "ann");
+      await flushStore();
+      ended = true;
+      finishCheck({ token: "t", requires_2fa: false });
+      await expect(login).rejects.toMatchObject({ name: "AbortError" });
+      expect(hoisted.startSession).not.toHaveBeenCalled();
+    });
+  });
+
   describe("health interval", () => {
+    it("skips its ticks while a sign-in is in flight", () => {
+      vi.useFakeTimers();
+      mount();
+      hoisted.inFlight = true;
+      vi.advanceTimersByTime(30_000);
+      expect(hoisted.runHealthChecks).not.toHaveBeenCalled();
+      hoisted.inFlight = false;
+      vi.advanceTimersByTime(15_000);
+      expect(hoisted.runHealthChecks).toHaveBeenCalledTimes(1);
+    });
+
     it("re-checks every 15 s and stops once the route is destroyed", () => {
       vi.useFakeTimers();
       const [page] = mount();
@@ -254,13 +315,15 @@ describe("renderConnect", () => {
         expect.anything(),
       );
       expect(hoisted.page["resubmitAfterCertAccept"]).not.toHaveBeenCalled();
+      expect(hoisted.resumeAfterCertAccept).not.toHaveBeenCalled();
     });
 
-    it("rerunHealth with a trusted host also resubmits the sign-in it refused", () => {
+    it("rerunHealth with a trusted host also carries on with the sign-in or resume it held up", () => {
       const [, rerunHealth] = mount();
       rerunHealth("chat.example:8443");
       expect(hoisted.runHealthChecks).toHaveBeenCalledTimes(1);
       expect(hoisted.page["resubmitAfterCertAccept"]).toHaveBeenCalledWith("chat.example:8443");
+      expect(hoisted.resumeAfterCertAccept).toHaveBeenCalledWith("chat.example:8443");
     });
   });
 
@@ -293,6 +356,7 @@ describe("renderConnect", () => {
       expect(hoisted.notifiers).toHaveLength(0);
       setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
       await flushStore();
+      await vi.dynamicImportSettled();
       expect(hoisted.page["showIncompatible"]).toHaveBeenCalledWith("s.example", 5, 3);
       expect(hoisted.notifiers).toHaveLength(1);
       expect(uiStore.getState().updateRequiredHost).toBeNull();
@@ -302,15 +366,40 @@ describe("renderConnect", () => {
       const [page] = mount();
       setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
       await flushStore();
+      await vi.dynamicImportSettled();
       expect(hoisted.notifiers).toHaveLength(1);
       expect(hoisted.notifiers[0]!.destroy).not.toHaveBeenCalled();
       page.destroy();
       expect(hoisted.notifiers[0]!.destroy).toHaveBeenCalledTimes(1);
     });
 
-    it("offers a refusal that was recorded before mount", () => {
+    it("never mounts a banner whose chunk arrives after the route is gone", async () => {
+      const [page] = mount();
+      setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
+      await flushStore();
+      page.destroy();
+      await vi.dynamicImportSettled();
+      expect(hoisted.notifiers).toHaveLength(0);
+    });
+
+    it("a later refusal replaces the banner", async () => {
+      mount();
+      setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
+      await flushStore();
+      await vi.dynamicImportSettled();
+      setUpdateRequiredHost({ host: "t.example", serverEpoch: 6, clientEpoch: 3 });
+      await flushStore();
+      await vi.dynamicImportSettled();
+      expect(hoisted.notifiers).toHaveLength(2);
+      expect(hoisted.notifiers[0]!.destroy).toHaveBeenCalledTimes(1);
+      expect(hoisted.notifiers[1]!.destroy).not.toHaveBeenCalled();
+      expect(hoisted.notifiers[1]!.mount).toHaveBeenCalledTimes(1);
+    });
+
+    it("offers a refusal that was recorded before mount", async () => {
       setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
       mount();
+      await vi.dynamicImportSettled();
       expect(hoisted.notifiers).toHaveLength(1);
       expect(uiStore.getState().updateRequiredHost).toBeNull();
     });

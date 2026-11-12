@@ -18,6 +18,7 @@ import {
   dialogShows,
   dialogEl,
   clickDialog,
+  readyFrame,
   useMainHarness,
 } from "../../helpers/mainHarness";
 
@@ -34,7 +35,7 @@ vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
-vi.mock("@components/CertMismatchModal", () => mocks.certMismatchModalMock());
+vi.mock("../../../src/features/connection/CertMismatchModal", () => mocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mocks.netCertReconnectMock());
 vi.mock("@lib/presence/profiles", (importOriginal) => mocks.presenceProfilesMock(importOriginal));
 vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());
@@ -391,7 +392,7 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
 
     // The real dispatcher's auth_error handler records the host when the
@@ -405,6 +406,8 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
+    // The banner is its own chunk.
+    await vi.dynamicImportSettled();
 
     // The notifier checks 3 s after mount (UpdateNotifier.ts mount()).
     await vi.advanceTimersByTimeAsync(3000);
@@ -466,7 +469,7 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
 
     vi.mocked(deleteCredential).mockClear();
@@ -490,7 +493,7 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
     clearAuth("user");
     await Promise.resolve();
@@ -547,7 +550,7 @@ describe("main.ts session ownership", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
     clearAuth();
     await Promise.resolve();
@@ -601,7 +604,7 @@ describe("main.ts session ownership", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
     clearAuth();
     for (let i = 0; i < 4; i++) await Promise.resolve();

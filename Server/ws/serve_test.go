@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"slices"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -49,18 +48,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 func openServeTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	migrFS := fstest.MapFS{
-		"001_schema.sql": {Data: serveTestSchema},
-	}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
-	return database
+	return openSchemaDB(t, serveTestSchema)
 }
 
 func newServeHub(t *testing.T) (*ws.Hub, *db.DB) {
@@ -76,15 +64,7 @@ func newServeHub(t *testing.T) (*ws.Hub, *db.DB) {
 // seedServeUser inserts an Owner-role user and returns the full *db.User.
 func seedServeUser(t *testing.T, database *db.DB, username string) *db.User {
 	t.Helper()
-	_, err := database.CreateUser(context.Background(), username, "hash", 1)
-	if err != nil {
-		t.Fatalf("seedServeUser: %v", err)
-	}
-	user, err := database.GetUserByUsername(context.Background(), username)
-	if err != nil || user == nil {
-		t.Fatalf("seedServeUser GetUserByUsername: %v", err)
-	}
-	return user
+	return seedUserWithRole(t, database, username, 1)
 }
 
 // ownerRole fetches the Owner role (ID=1) for permission-aware buildReady calls.
@@ -107,9 +87,7 @@ func TestBuildAuthOK_Type(t *testing.T) {
 	var env struct {
 		Type string `json:"type"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if env.Type != "auth_ok" {
 		t.Errorf("type = %q, want auth_ok", env.Type)
 	}
@@ -131,9 +109,7 @@ func TestBuildAuthOK_UserPayload(t *testing.T) {
 			MOTD       string `json:"motd"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if env.Payload.User.ID != user.ID {
 		t.Errorf("payload.user.id = %d, want %d", env.Payload.User.ID, user.ID)
 	}
@@ -155,9 +131,7 @@ func TestBuildAuthOK_ContainsServerName(t *testing.T) {
 			ServerName string `json:"server_name"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	// server_name is seeded from settings table; must be non-empty.
 	if env.Payload.ServerName == "" {
 		t.Error("payload.server_name must not be empty")
@@ -177,9 +151,7 @@ func TestBuildAuthOK_NilAvatar(t *testing.T) {
 			} `json:"user"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if env.Payload.User.Avatar != nil {
 		t.Errorf("payload.user.avatar = %v, want nil", env.Payload.User.Avatar)
 	}
@@ -210,9 +182,7 @@ func TestBuildAuthOK_UploadPolicy(t *testing.T) {
 			} `json:"upload_policy"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(hub.BuildAuthOKForTest(user, "member"), &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, hub.BuildAuthOKForTest(user, "member"), &env)
 	if got := env.Payload.UploadPolicy.MaxUploadBytes; got != 150<<20 {
 		t.Errorf("payload.upload_policy.max_upload_bytes = %d, want %d", got, 150<<20)
 	}
@@ -246,9 +216,7 @@ func TestBuildAuthOK_UploadPolicyFileTypes(t *testing.T) {
 			} `json:"upload_policy"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(hub.BuildAuthOKForTest(user, "member"), &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, hub.BuildAuthOKForTest(user, "member"), &env)
 	got := env.Payload.UploadPolicy
 	if got.MaxUploadBytes != 10<<20 || !slices.Equal(got.BlockedExtensions, []string{"bat", "ps1"}) || !slices.Equal(got.AllowedExtensions, []string{"txt"}) {
 		t.Errorf("payload.upload_policy = %+v, want the size cap and both lists", got)
@@ -261,16 +229,11 @@ func TestBuildReady_Type(t *testing.T) {
 	hub, database := newServeHub(t)
 	user := seedServeUser(t, database, "ready-user1")
 
-	msg, err := hub.BuildReadyForTest(database, user.ID)
-	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
-	}
+	msg := mustBuildReady(t, hub, database, user.ID)
 	var env struct {
 		Type string `json:"type"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if env.Type != "ready" {
 		t.Errorf("type = %q, want ready", env.Type)
 	}
@@ -280,10 +243,7 @@ func TestBuildReady_ContainsRequiredFields(t *testing.T) {
 	hub, database := newServeHub(t)
 	user := seedServeUser(t, database, "ready-user2")
 
-	msg, err := hub.BuildReadyForTest(database, user.ID)
-	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
-	}
+	msg := mustBuildReady(t, hub, database, user.ID)
 
 	var env struct {
 		Payload struct {
@@ -295,9 +255,7 @@ func TestBuildReady_ContainsRequiredFields(t *testing.T) {
 			MOTD        string `json:"motd"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	// channels, members, voice_states, roles must all be present (even if empty slices).
 	if env.Payload.Channels == nil {
 		t.Error("payload.channels must not be nil")
@@ -322,15 +280,9 @@ func TestBuildReady_IncludesSeededChannel(t *testing.T) {
 	role := ownerRole(t, database)
 
 	// Seed a text channel.
-	chID, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "general", "text")
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, user.ID, role)
 
 	var env struct {
 		Payload struct {
@@ -341,9 +293,7 @@ func TestBuildReady_IncludesSeededChannel(t *testing.T) {
 			} `json:"channels"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 
 	found := false
 	for _, ch := range env.Payload.Channels {
@@ -362,24 +312,16 @@ func TestBuildReady_TextChannelHasUnreadCount(t *testing.T) {
 	user := seedServeUser(t, database, "ready-user4")
 	role := ownerRole(t, database)
 
-	_, err := database.CreateChannel(context.Background(), "unread-chan", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	mustCreateChannel(t, database, "unread-chan", "text")
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, user.ID, role)
 
 	var env struct {
 		Payload struct {
 			Channels []map[string]any `json:"channels"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 
 	for _, ch := range env.Payload.Channels {
 		if ch["type"] == "text" {
@@ -411,10 +353,7 @@ func TestBuildReady_ChannelsCarryLastReadMessageID(t *testing.T) {
 	}
 	var pointers = map[string]int64{}
 	for _, name := range []string{"lr-text", "lr-news"} {
-		first, err := database.CreateMessage(ctx, ids[name], user.ID, "one", nil)
-		if err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		first := mustCreateMessage(t, database, ids[name], user.ID, "one")
 		if _, err := database.CreateMessage(ctx, ids[name], user.ID, "two", nil); err != nil {
 			t.Fatalf("CreateMessage: %v", err)
 		}
@@ -424,18 +363,13 @@ func TestBuildReady_ChannelsCarryLastReadMessageID(t *testing.T) {
 		pointers[name] = first
 	}
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, user.ID, role)
 	var env struct {
 		Payload struct {
 			Channels []map[string]any `json:"channels"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	byID := map[int64]map[string]any{}
 	for _, ch := range env.Payload.Channels {
 		byID[int64(ch["id"].(float64))] = ch
@@ -458,10 +392,7 @@ func TestBuildReady_ChannelsCarryLastReadMessageID(t *testing.T) {
 func TestBuildReady_ValidJSON(t *testing.T) {
 	hub, database := newServeHub(t)
 	user := seedServeUser(t, database, "ready-validjson")
-	msg, err := hub.BuildReadyForTest(database, user.ID)
-	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
-	}
+	msg := mustBuildReady(t, hub, database, user.ID)
 	if !json.Valid(msg) {
 		t.Errorf("buildReady output is not valid JSON: %s", msg)
 	}
@@ -474,18 +405,13 @@ func TestReadyVoiceStates_EmptyChannels(t *testing.T) {
 	user := seedServeUser(t, database, "collect-empty-user")
 
 	// No channels exist — ready should return empty voice_states.
-	msg, err := hub.BuildReadyForTest(database, user.ID)
-	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
-	}
+	msg := mustBuildReady(t, hub, database, user.ID)
 	var env struct {
 		Payload struct {
 			VoiceStates []any `json:"voice_states"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if len(env.Payload.VoiceStates) != 0 {
 		t.Errorf("voice_states = %d entries, want 0 with no channels", len(env.Payload.VoiceStates))
 	}
@@ -496,23 +422,15 @@ func TestReadyVoiceStates_SkipsTextChannels(t *testing.T) {
 	user := seedServeUser(t, database, "collect-text-user")
 
 	// Only text channels — no voice states should be collected.
-	_, err := database.CreateChannel(context.Background(), "text-only", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	mustCreateChannel(t, database, "text-only", "text")
 
-	msg, err := hub.BuildReadyForTest(database, user.ID)
-	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
-	}
+	msg := mustBuildReady(t, hub, database, user.ID)
 	var env struct {
 		Payload struct {
 			VoiceStates []any `json:"voice_states"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if len(env.Payload.VoiceStates) != 0 {
 		t.Errorf("voice_states = %d entries, want 0 for text-only channels", len(env.Payload.VoiceStates))
 	}
@@ -526,23 +444,13 @@ func TestReadyVoiceStates_IncludesVoiceParticipants(t *testing.T) {
 	user2 := seedServeUser(t, database, "collect-voice-u2")
 	requester := seedServeUser(t, database, "collect-voice-req")
 
-	chID, err := database.CreateChannel(context.Background(), "voice-room", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "voice-room", "voice")
 
 	// Insert voice states for user1 and user2.
-	if err := database.JoinVoiceChannel(context.Background(), user1.ID, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel user1: %v", err)
-	}
-	if err := database.JoinVoiceChannel(context.Background(), user2.ID, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel user2: %v", err)
-	}
+	mustJoinVoice(t, database, user1.ID, chID)
+	mustJoinVoice(t, database, user2.ID, chID)
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, requester.ID, role)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, requester.ID, role)
 	var env struct {
 		Payload struct {
 			VoiceStates []struct {
@@ -551,9 +459,7 @@ func TestReadyVoiceStates_IncludesVoiceParticipants(t *testing.T) {
 			} `json:"voice_states"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if len(env.Payload.VoiceStates) != 2 {
 		t.Errorf("voice_states count = %d, want 2", len(env.Payload.VoiceStates))
 	}
@@ -570,24 +476,14 @@ func TestBuildReady_VoiceStatesFilteredByVisibility(t *testing.T) {
 	hub, database := newServeHub(t)
 
 	// Create a member user (role 4, permissions=1635, includes ReadMessages).
-	_, err := database.CreateUser(context.Background(), "vs-member", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	member, err := database.GetUserByUsername(context.Background(), "vs-member")
-	if err != nil || member == nil {
-		t.Fatalf("GetUserByUsername: %v", err)
-	}
+	member := seedUserWithRole(t, database, "vs-member", 4)
 	memberRole, err := database.GetRoleByID(context.Background(), 4)
 	if err != nil || memberRole == nil {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
 
 	// Create two voice channels: one visible, one denied.
-	visibleCh, err := database.CreateChannel(context.Background(), "public-voice", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel visible: %v", err)
-	}
+	visibleCh := mustCreateChannel(t, database, "public-voice", "voice")
 	hiddenCh, err := database.CreateChannel(context.Background(), "hidden-voice", "voice", "", "", 1)
 	if err != nil {
 		t.Fatalf("CreateChannel hidden: %v", err)
@@ -605,18 +501,11 @@ func TestBuildReady_VoiceStatesFilteredByVisibility(t *testing.T) {
 	// Create users in both voice channels.
 	u1 := seedServeUser(t, database, "vs-visible-user")
 	u2 := seedServeUser(t, database, "vs-hidden-user")
-	if err := database.JoinVoiceChannel(context.Background(), u1.ID, visibleCh); err != nil {
-		t.Fatalf("JoinVoiceChannel visible: %v", err)
-	}
-	if err := database.JoinVoiceChannel(context.Background(), u2.ID, hiddenCh); err != nil {
-		t.Fatalf("JoinVoiceChannel hidden: %v", err)
-	}
+	mustJoinVoice(t, database, u1.ID, visibleCh)
+	mustJoinVoice(t, database, u2.ID, hiddenCh)
 
 	// Build ready for the member — should only see voice states for visible channel.
-	msg, err := hub.BuildReadyWithRoleForTest(database, member.ID, memberRole)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, member.ID, memberRole)
 
 	var env struct {
 		Payload struct {
@@ -625,9 +514,7 @@ func TestBuildReady_VoiceStatesFilteredByVisibility(t *testing.T) {
 			} `json:"voice_states"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if len(env.Payload.VoiceStates) != 1 {
 		t.Fatalf("voice_states count = %d, want 1 (only visible channel)", len(env.Payload.VoiceStates))
 	}
@@ -739,9 +626,7 @@ func TestHub_BroadcastServerRestart_DeliversToAllClients(t *testing.T) {
 					DelaySeconds int    `json:"delay_seconds"`
 				} `json:"payload"`
 			}
-			if err := json.Unmarshal(msg, &env); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
+			mustUnmarshal(t, msg, &env)
 			if env.Type != "server_restart" {
 				t.Errorf("type = %q, want server_restart", env.Type)
 			}
@@ -795,9 +680,7 @@ func TestHub_BroadcastChannelCreate_DeliversToAllClients(t *testing.T) {
 				Name string  `json:"name"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(msg, &env); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		mustUnmarshal(t, msg, &env)
 		if env.Type != "channel_create" {
 			t.Errorf("type = %q, want channel_create", env.Type)
 		}
@@ -842,9 +725,7 @@ func TestHub_BroadcastChannelUpdate_DeliversToAllClients(t *testing.T) {
 				Name string  `json:"name"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(msg, &env); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		mustUnmarshal(t, msg, &env)
 		if env.Type != "channel_update" {
 			t.Errorf("type = %q, want channel_update", env.Type)
 		}
@@ -876,9 +757,7 @@ func TestHub_BroadcastChannelDelete_DeliversToAllClients(t *testing.T) {
 				ID float64 `json:"id"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(msg, &env); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		mustUnmarshal(t, msg, &env)
 		if env.Type != "channel_delete" {
 			t.Errorf("type = %q, want channel_delete", env.Type)
 		}
@@ -910,9 +789,7 @@ func TestHub_BroadcastMemberBan_DeliversToAllClients(t *testing.T) {
 				UserID float64 `json:"user_id"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(msg, &env); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		mustUnmarshal(t, msg, &env)
 		if env.Type != "member_ban" {
 			t.Errorf("type = %q, want member_ban", env.Type)
 		}
@@ -945,9 +822,7 @@ func TestHub_BroadcastMemberUpdate_DeliversToAllClients(t *testing.T) {
 				Role   string  `json:"role"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(msg, &env); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		mustUnmarshal(t, msg, &env)
 		if env.Type != "member_update" {
 			t.Errorf("type = %q, want member_update", env.Type)
 		}
@@ -993,10 +868,7 @@ func TestGetCachedSettings_CacheMiss_RefreshesFromDB(t *testing.T) {
 	hub, database := newServeHub(t)
 
 	// Update the DB settings value so we can detect a refresh.
-	_, err := database.ExecContext(context.Background(), "UPDATE settings SET value='Refreshed Server' WHERE key='server_name'")
-	if err != nil {
-		t.Fatalf("UPDATE settings: %v", err)
-	}
+	mustExec(t, database, "UPDATE settings SET value='Refreshed Server' WHERE key='server_name'")
 
 	// Force the cache to appear stale.
 	hub.ExpireSettingsCacheForTest()
@@ -1039,23 +911,15 @@ func TestBuildReady_NoVoiceChannels_EmptyVoiceStates(t *testing.T) {
 	user := seedServeUser(t, database, "ready-novch")
 
 	// Create only a text channel — voice_states list must still be non-nil.
-	_, err := database.CreateChannel(context.Background(), "text-chan", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	mustCreateChannel(t, database, "text-chan", "text")
 
-	msg, err := hub.BuildReadyForTest(database, user.ID)
-	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
-	}
+	msg := mustBuildReady(t, hub, database, user.ID)
 	var env struct {
 		Payload struct {
 			VoiceStates []any `json:"voice_states"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	// readyVoiceStates returns []db.VoiceState{} (not nil) when no voice channels exist.
 	if env.Payload.VoiceStates == nil {
 		t.Error("voice_states must be a non-null JSON array even when empty")

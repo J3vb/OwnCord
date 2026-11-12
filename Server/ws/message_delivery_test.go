@@ -36,10 +36,7 @@ func TestChatDelivery_LostAckRetryDoesNotBroadcastAgain(t *testing.T) {
 	author := seedCoverageOwner(t, database, "delivery-author")
 	target := seedCoverageOwner(t, database, "delivery-target")
 	channelID := seedTestChannel(t, database, "delivery-general")
-	frames := make(chan []byte, 32)
-	client := ws.NewTestClientWithUser(hub, author, channelID, frames)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	client, frames := connectClient(t, hub, author, channelID, 32)
 	key := fmt.Sprintf("%d:%s", time.Now().UnixMilli(), uuid.NewString())
 	send := func(requestID string) {
 		t.Helper()
@@ -140,10 +137,7 @@ func newSkippedAttachmentFixture(t *testing.T) (send func(reqID string, payload 
 	if err := database.CreateAttachment(context.Background(), "real-att", author.ID, "a.png", "s-a.png", "image/png", 1, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	frames := make(chan []byte, 32)
-	client := ws.NewTestClientWithUser(hub, author, channelID, frames)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	client, frames := connectClient(t, hub, author, channelID, 32)
 	send = func(reqID string, payload map[string]any) []skippedTestFrame {
 		t.Helper()
 		payload["channel_id"] = channelID

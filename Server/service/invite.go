@@ -9,7 +9,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// inviteStore is what InviteService reads and writes. *db.DB satisfies it.
 type inviteStore interface {
 	db.Auditor
 	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
@@ -29,7 +28,6 @@ func NewInviteService(st inviteStore) *InviteService {
 	return &InviteService{st: st}
 }
 
-// maxInviteExpiryHoursVal caps invite expiry to 30 days.
 const maxInviteExpiryHoursVal = 720
 
 // MaxInviteExpiryHours returns the maximum invite expiry in hours.
@@ -42,12 +40,10 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 	)
 	defer done()
 
-	// Cap expiry.
 	if expiresInHours > maxInviteExpiryHoursVal {
 		expiresInHours = maxInviteExpiryHoursVal
 	}
-	// A negative count or expiry silently meant "unlimited"/"never expires"; reject it
-	// so the caller cannot create a state they did not ask for.
+	// A negative count or expiry silently meant "unlimited"/"never expires"; reject it.
 	if maxUses < 0 || expiresInHours < 0 {
 		return nil, fmt.Errorf("%w: max_uses and expires_in_hours must not be negative", ErrBadRequest)
 	}
@@ -63,15 +59,14 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 		return nil, fmt.Errorf("%w: failed to create invite: %w", ErrInternal, err)
 	}
 
-	// The invite is committed from here on: a request canceled during the
-	// read-back must neither fail the creation nor skip its audit row.
+	// Committed from here on: a request canceled during the read-back must neither fail the creation nor skip
+	// its audit row.
 	tailCtx := context.WithoutCancel(ctx)
 	invite, err := s.st.GetInvite(tailCtx, code)
 	if err != nil || invite == nil {
 		return nil, fmt.Errorf("%w: failed to retrieve invite: %w", ErrInternal, err)
 	}
-	// The row names the invite by id, never by code; the code is the
-	// credential.
+	// The row names the invite by id, never by code; the code is the credential.
 	db.WriteAudit(tailCtx, s.st, createdBy, "invite_create", "invite", invite.ID,
 		fmt.Sprintf("max_uses=%d expires_in_hours=%d", maxUses, expiresInHours))
 	return invite, nil
@@ -86,9 +81,8 @@ func (s *InviteService) ListInvites(ctx context.Context) ([]*db.Invite, error) {
 	return invites, nil
 }
 
-// ListInviteRedemptions returns who redeemed an invite, newest first, so an owner
-// can trace a leaked invite to its redeemer. The invite is resolved by code first;
-// an unknown code is ErrNotFound rather than an empty history.
+// ListInviteRedemptions returns who redeemed an invite, newest first, so an owner can
+// trace a leaked invite. The invite is resolved by code first; an unknown code is ErrNotFound.
 func (s *InviteService) ListInviteRedemptions(ctx context.Context, code string) ([]*db.InviteRedemption, error) {
 	invite, err := s.st.GetInvite(ctx, code)
 	if err != nil || invite == nil {

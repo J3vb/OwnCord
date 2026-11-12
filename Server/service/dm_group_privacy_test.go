@@ -33,9 +33,7 @@ func seedRequest(t *testing.T, database *db.DB, sender, recipient int64, state s
 	t.Helper()
 	ctx := context.Background()
 	ch, _, err := database.GetOrCreateDMChannel(ctx, sender, recipient)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	if _, err = database.ExecContext(ctx,
 		`INSERT INTO message_requests (sender_id, recipient_id, channel_id, state) VALUES (?, ?, ?, ?)`,
 		sender, recipient, ch.ID, state); err != nil {
@@ -63,17 +61,13 @@ func TestAddGroupMembers_TargetTrustsAdderAllowed(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	setAllowDMs(t, f.database, fixtureOwner, false)
-	if err := f.database.TrustSender(ctx, fixtureOwner, fixtureMember2, "accepted"); err != nil {
-		t.Fatalf("TrustSender: %v", err)
-	}
+	mustDo(t, "TrustSender", f.database.TrustSender(ctx, fixtureOwner, fixtureMember2, "accepted"))
 	// The owner of the group does not have the target's trust, the adder does.
 	if _, err := f.dms.AddGroupMembers(ctx, fixtureMember, f.dm, []int64{fixtureOwner}); err == nil {
 		t.Fatal("add by an untrusted member succeeded")
 	}
 	res, err := f.dms.AddGroupMembers(ctx, fixtureMember2, f.dm, []int64{fixtureOwner})
-	if err != nil {
-		t.Fatalf("add by the trusted member: %v", err)
-	}
+	mustDo(t, "add by the trusted member", err)
 	if !slices.Equal(res.Added, []int64{fixtureOwner}) {
 		t.Errorf("Added = %v, want [%d]", res.Added, fixtureOwner)
 	}
@@ -85,9 +79,7 @@ func TestAddGroupMembers_OtherMembersTrustDoesNotCount(t *testing.T) {
 	ctx := context.Background()
 	setAllowDMs(t, f.database, fixtureOwner, false)
 	for _, m := range []int64{fixtureMember2, fixtureMod} {
-		if err := f.database.TrustSender(ctx, fixtureOwner, m, "accepted"); err != nil {
-			t.Fatalf("TrustSender: %v", err)
-		}
+		mustDo(t, "TrustSender", f.database.TrustSender(ctx, fixtureOwner, m, "accepted"))
 	}
 	_, err := f.dms.AddGroupMembers(ctx, fixtureMember, f.dm, []int64{fixtureOwner})
 	assertGroupRefused(t, err)
@@ -98,9 +90,7 @@ func TestAddGroupMembers_StaffDoNotBypass(t *testing.T) {
 	setAllowDMs(t, f.database, fixtureMember2, false)
 	// fixtureOwner is an administrator; fixtureMod is a moderator in the group.
 	_, err := f.dms.AddGroupMembers(context.Background(), fixtureMod, f.dm, []int64{fixturePeerMod})
-	if err != nil {
-		t.Fatalf("control add: %v", err)
-	}
+	mustDo(t, "control add", err)
 	setAllowDMs(t, f.database, fixtureOwner, false)
 	_, err = f.dms.AddGroupMembers(context.Background(), fixtureMod, f.dm, []int64{fixtureOwner})
 	assertGroupRefused(t, err)
@@ -132,9 +122,7 @@ func TestAddGroupMembers_AcceptedRequestAllowed(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	seedRequest(t, f.database, fixtureMember, fixtureOwner, "accepted")
-	if err := f.database.TrustSender(ctx, fixtureOwner, fixtureMember, "accepted"); err != nil {
-		t.Fatalf("TrustSender: %v", err)
-	}
+	mustDo(t, "TrustSender", f.database.TrustSender(ctx, fixtureOwner, fixtureMember, "accepted"))
 	if _, err := f.dms.AddGroupMembers(ctx, fixtureMember, f.dm, []int64{fixtureOwner}); err != nil {
 		t.Fatalf("add after the request was accepted: %v", err)
 	}
@@ -265,9 +253,7 @@ func TestAddGroupMembers_RefusalBodyIdentical(t *testing.T) {
 	causes := map[string]func(t *testing.T, f *groupMembershipFixture){
 		"privacy": func(t *testing.T, f *groupMembershipFixture) { setAllowDMs(t, f.database, fixtureOwner, false) },
 		"block": func(t *testing.T, f *groupMembershipFixture) {
-			if err := f.database.BlockUser(context.Background(), fixtureOwner, fixtureMember2); err != nil {
-				t.Fatalf("BlockUser: %v", err)
-			}
+			mustDo(t, "BlockUser", f.database.BlockUser(context.Background(), fixtureOwner, fixtureMember2))
 		},
 		"request": func(t *testing.T, f *groupMembershipFixture) {
 			seedRequest(t, f.database, fixtureMember, fixtureOwner, "pending")

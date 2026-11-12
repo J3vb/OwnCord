@@ -13,10 +13,7 @@ import (
 // modID creates an Owner-role moderator, who outranks every test target.
 func modID(t *testing.T, database *db.DB) int64 {
 	t.Helper()
-	id, err := database.CreateUser(context.Background(), "timeout-stay-mod", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser mod: %v", err)
-	}
+	id := mustCreateUser(t, database, "timeout-stay-mod", 1)
 	return id
 }
 

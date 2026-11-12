@@ -9,15 +9,13 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// Channel categories: a category is a row with an id, a name and a position
-// (migration 072). Rename, reorder and delete change the category fields of every
-// channel in the touched categories, so each returns the changed channels for the
-// caller to re-broadcast as channel_update before telling managers the new list
-// (channel_categories).
+// Channel categories: a row with an id, name and position. Rename, reorder and delete
+// change the category fields of channels in touched categories, so each returns the changed
+// channels for the caller to re-broadcast as channel_update before the new list.
 
-// CategoryStore is the persistence behind the category operations. *db.DB
-// satisfies it; a Store that does not makes them answer ErrInternal. Kept beside
-// Store because Store's surface is ratcheted (datastore_ratchet_test.go).
+// CategoryStore is the persistence behind the category operations; a Store that is not a
+// *db.DB makes them answer ErrInternal. Kept beside Store because Store's surface is
+// ratcheted (datastore_ratchet_test.go).
 type CategoryStore interface {
 	ListChannelCategories(ctx context.Context) ([]db.ChannelCategory, error)
 	GetChannelCategory(ctx context.Context, id int64) (*db.ChannelCategory, error)
@@ -29,10 +27,9 @@ type CategoryStore interface {
 	CreateChannelIn(ctx context.Context, c db.NewChannel) (int64, error)
 }
 
-// CategoryChange is the committed outcome of a category mutation. Categories
-// is the full list after the change, Category the touched row (nil after a
-// delete), and Channels every channel whose category fields differ from before
-// the change, read after it committed.
+// CategoryChange is the committed outcome of a category mutation: Categories is the full
+// list after, Category the touched row (nil after a delete), Channels every channel whose
+// category fields changed, read after commit.
 type CategoryChange struct {
 	Categories []db.ChannelCategory
 	Category   *db.ChannelCategory
@@ -46,8 +43,6 @@ func (s *ChannelService) categoryStore() (CategoryStore, error) {
 	return s.cats, nil
 }
 
-// cleanCategoryName applies the channel metadata text contract to a category name: it is
-// sanitized, trimmed, bounded by runes and required.
 func cleanCategoryName(name string) (string, error) {
 	cleaned, err := cleanChannelField(name, MaxChannelCategoryLen, "category name")
 	if err != nil {
@@ -72,8 +67,7 @@ func (s *ChannelService) ListCategories(ctx context.Context) ([]db.ChannelCatego
 	return cats, nil
 }
 
-// CreateCategory appends a category. A name another category has, ignoring
-// case, is ErrConflict.
+// CreateCategory appends a category; a name another category has, ignoring case, is ErrConflict.
 func (s *ChannelService) CreateCategory(ctx context.Context, actorID int64, name string) (CategoryChange, error) {
 	cs, err := s.categoryStore()
 	if err != nil {
@@ -94,8 +88,7 @@ func (s *ChannelService) CreateCategory(ctx context.Context, actorID int64, name
 	return s.categoryChange(tail, cat, nil)
 }
 
-// RenameCategory renames a category. ErrNotFound when it is gone, ErrConflict
-// when another category has the name, ignoring case.
+// RenameCategory renames a category: ErrNotFound when gone, ErrConflict on a taken name (case-insensitive).
 func (s *ChannelService) RenameCategory(ctx context.Context, actorID, id int64, name string) (CategoryChange, error) {
 	cs, err := s.categoryStore()
 	if err != nil {
@@ -130,9 +123,8 @@ func (s *ChannelService) RenameCategory(ctx context.Context, actorID, id int64, 
 	return s.categoryChange(tail, cat, before)
 }
 
-// ReorderCategories sets the category order to ids, which must be exactly the
-// current set of category ids. A stale set (a category was added or deleted
-// since the editor loaded) is ErrConflict and nothing is written.
+// ReorderCategories sets the order to ids, which must be exactly the current set. A stale
+// set is ErrConflict and nothing is written.
 func (s *ChannelService) ReorderCategories(ctx context.Context, actorID int64, ids []int64) (CategoryChange, error) {
 	cs, err := s.categoryStore()
 	if err != nil {
@@ -162,8 +154,7 @@ func (s *ChannelService) ReorderCategories(ctx context.Context, actorID int64, i
 	return s.categoryChange(tail, nil, before)
 }
 
-// DeleteCategory removes a category. Its channels are never deleted: they keep
-// their overrides and every other field and become uncategorized.
+// DeleteCategory removes a category; its channels survive with their overrides and become uncategorized.
 func (s *ChannelService) DeleteCategory(ctx context.Context, actorID, id int64) (CategoryChange, error) {
 	cs, err := s.categoryStore()
 	if err != nil {
@@ -190,8 +181,6 @@ func (s *ChannelService) DeleteCategory(ctx context.Context, actorID, id int64) 
 	return s.categoryChange(tail, nil, before)
 }
 
-// mapCategoryErr maps a db sentinel onto the service sentinels the transport
-// understands.
 func mapCategoryErr(err error, op string) error {
 	switch {
 	case errors.Is(err, db.ErrConflict):
@@ -206,8 +195,6 @@ func mapCategoryErr(err error, op string) error {
 	}
 }
 
-// channelsSnapshot reads every channel, the "before" half of a category
-// change's channel diff.
 func (s *ChannelService) channelsSnapshot(ctx context.Context) ([]db.Channel, error) {
 	chs, err := s.st.ListChannels(ctx)
 	if err != nil {
@@ -216,10 +203,9 @@ func (s *ChannelService) channelsSnapshot(ctx context.Context) ([]db.Channel, er
 	return chs, nil
 }
 
-// categoryChange assembles the outcome after a committed mutation: the new
-// category list and, when a before snapshot is given, the channels whose
-// category fields moved. Runs on the uncancellable tail, because the change
-// has committed and the caller must still be able to tell clients.
+// categoryChange assembles the outcome after a committed mutation: the new list and, given
+// a before snapshot, the channels whose category fields moved. Runs on the uncancellable
+// tail so clients can still be told.
 func (s *ChannelService) categoryChange(ctx context.Context, cat *db.ChannelCategory, before []db.Channel) (CategoryChange, error) {
 	cats, err := s.cats.ListChannelCategories(ctx)
 	if err != nil {
@@ -237,9 +223,6 @@ func (s *ChannelService) categoryChange(ctx context.Context, cat *db.ChannelCate
 	return out, nil
 }
 
-// changedCategoryFields returns the channels in after whose category name, id
-// or position differ from the same channel in before. A channel that did not
-// exist before is not a category change and is left out.
 func changedCategoryFields(before, after []db.Channel) []db.Channel {
 	prev := make(map[int64]*db.Channel, len(before))
 	for i := range before {
@@ -258,24 +241,20 @@ func changedCategoryFields(before, after []db.Channel) []db.Channel {
 	return out
 }
 
-// categoryTarget is where a channel create or update puts the channel.
 type categoryTarget struct {
-	// id is the category the channel lands in, 0 for none. For a by-name
-	// request whose name matches no category it is 0 and fresh is true.
+	// id is the category the channel lands in, 0 for none; for an unmatched by-name request it is 0 and fresh is
+	// true.
 	id int64
-	// name, when non-nil, is the cleaned legacy name to resolve (or create)
-	// at write time.
+	// name, when non-nil, is the cleaned legacy name to resolve (or create) at write time.
 	name *string
-	// fresh: a legacy name that matches no category yet. The write creates
-	// it, so no channel can share it and the name check has nothing to find.
+	// fresh: a legacy name matching no category yet; the write creates it, so the name check has nothing to
+	// find.
 	fresh bool
 }
 
-// resolveCategoryTarget turns a request's category fields into a target. A
-// legacy name (byName non-nil) is cleaned, matched ignoring case and created
-// at write time when missing; empty means none. Otherwise categoryID is used
-// (0 = none) and must exist (ErrBadRequest when it does not). The caller
-// guarantees only one of the two is meaningful (category_id wins).
+// resolveCategoryTarget turns a request's category fields into a target. A legacy name
+// is cleaned, matched ignoring case and created at write time when missing; empty means
+// none. Otherwise categoryID must exist (ErrBadRequest). category_id wins.
 func (s *ChannelService) resolveCategoryTarget(ctx context.Context, categoryID int64, byName *string) (categoryTarget, error) {
 	if categoryID < 0 {
 		return categoryTarget{}, fmt.Errorf("category_id must not be negative%.0w", ErrBadRequest)
@@ -316,11 +295,10 @@ func (s *ChannelService) resolveCategoryTarget(ctx context.Context, categoryID i
 	return categoryTarget{id: found.ID, name: &clean}, nil
 }
 
-// auditCreatedCategory covers a category a channel write created through the
-// legacy category string, which bypassed the category routes: it writes the
-// category_create audit row those routes would have and returns the fresh list for
-// managers, or nil when created is 0. The channel write already committed, so a
-// failure here is logged and the list dropped rather than failing the request.
+// auditCreatedCategory covers a category a channel write created through the legacy
+// string (bypassing the category routes): it writes the category_create audit row and
+// returns the fresh list, or nil when created is 0. The channel write already committed,
+// so a failure here is logged and the list dropped.
 func (s *ChannelService) auditCreatedCategory(tail context.Context, actorID, created int64) []db.ChannelCategory {
 	if created == 0 || s.cats == nil {
 		return nil
@@ -341,10 +319,9 @@ func (s *ChannelService) auditCreatedCategory(tail context.Context, actorID, cre
 	return cats
 }
 
-// resolveUpdateTarget is resolveCategoryTarget for an update. A category the
-// request merely carries forward (KeepCategory with no legacy name) that no
-// longer exists resolves to uncategorized rather than ErrBadRequest: the
-// caller never asked for it.
+// resolveUpdateTarget is resolveCategoryTarget for an update. A category merely carried
+// forward (KeepCategory, no legacy name) that no longer exists resolves to uncategorized,
+// not ErrBadRequest: the caller never asked for it.
 func (s *ChannelService) resolveUpdateTarget(ctx context.Context, req AdminChannelUpdate, legacy *string) (categoryTarget, error) {
 	target, err := s.resolveCategoryTarget(ctx, req.CategoryID, legacy)
 	if err != nil && req.KeepCategory && req.Category == nil && req.CategoryID > 0 && errors.Is(err, ErrBadRequest) {

@@ -2,13 +2,19 @@
   "_doc": "Top-level per-server-looking state that registers no session reset (tests/unit/session-state-ownership.test.ts). This list only shrinks: the test fails an entry whose binding is gone or whose file now registers a reset. Keys are file + binding, never a line number. Categories: app-lifetime, host-keyed, dom-owned, pure-cache, transient, reset-elsewhere.",
   "entries": [
     {
+      "file": "features/messaging/readingAnchor.ts",
+      "binding": "lookups",
+      "category": "dom-owned",
+      "reason": "Lookups of the mounted message lists, each added on mount and removed by that list's own destroy; a session reset must not drop the registration of a list that stays mounted"
+    },
+    {
       "file": "app/serverHealth.ts",
       "binding": "serverInfoByHost",
       "category": "host-keyed",
       "reason": "Advisory per-host server-info snapshot, rewritten or dropped by each probe of that host; moved verbatim from main.ts, whose registered reset never cleared it"
     },
     {
-      "file": "features/messaging/content/imageViewer.ts",
+      "file": "features/messaging/content/fileDownload.ts",
       "binding": "inFlight",
       "category": "transient",
       "reason": "Saves and shares in flight, each removed in its own finally, so a second tap does not save twice"
@@ -20,19 +26,25 @@
       "reason": "Hosts with a probe in flight, removed in the probe's finally; moved verbatim from main.ts"
     },
     {
+      "file": "i18n/format.ts",
+      "binding": "dateFormats",
+      "category": "pure-cache",
+      "reason": "Intl date formatters keyed by locale, clock, time-zone offset and options; holds no server data"
+    },
+    {
       "file": "stores/followedThreads.store.ts",
       "binding": "followedThreadsStore",
       "category": "reset-elsewhere",
       "reason": "Projection of threads.store, which publishes the empty view from its own registered reset; it holds nothing until that store has loaded"
     },
     {
-      "file": "components/ChannelSidebar.ts",
+      "file": "features/channels/voiceSidebarRows.ts",
       "binding": "volumeMenuAttempts",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the sidebar's lifetime AbortSignal; entries go with the destroyed sidebar"
     },
     {
-      "file": "components/channel-sidebar/dragReorder.ts",
+      "file": "features/channels/sidebar/dragReorder.ts",
       "binding": "listenerOwners",
       "category": "dom-owned",
       "reason": "AbortSignals of mounted sidebars; removed when the sidebar's signal aborts"
@@ -45,42 +57,54 @@
     },
     {
       "file": "features/profiles/avatar.ts",
+      "binding": "flyingTimer",
+      "category": "transient",
+      "reason": "Settle timer of a flying list; fires within 100 ms and holds no server data"
+    },
+    {
+      "file": "features/profiles/avatar.ts",
+      "binding": "flyingWaiters",
+      "category": "dom-owned",
+      "reason": "Keyed by live avatar element; emptied when the list settles or the element leaves the page"
+    },
+    {
+      "file": "features/profiles/avatar.ts",
       "binding": "visibilityCallbacks",
       "category": "dom-owned",
       "reason": "Keyed by live avatar element; removed when the element leaves the page"
     },
     {
-      "file": "features/messaging/content/contentParser.ts",
+      "file": "features/messaging/content/contentMentions.ts",
       "binding": "rolesById",
       "category": "pure-cache",
       "reason": "WeakMap keyed by the channels store's roles array snapshot; a new roster is a new key and an old one is collected with it, so nothing outlives the session that built it"
     },
     {
-      "file": "features/messaging/content/contentParser.ts",
+      "file": "features/messaging/content/contentParse.ts",
       "binding": "parseCache",
       "category": "pure-cache",
       "reason": "Key is message id + editedAt + content, and the cache is cleared on MessageList destroy (clearContentParseCache)"
     },
     {
-      "file": "components/message-list/quickReactions.ts",
+      "file": "features/messaging/message-list/quickReactions.ts",
       "binding": "passCache",
       "category": "pure-cache",
       "reason": "Derived from the emoji and preferences, not from server data"
     },
     {
-      "file": "components/message-list/reactionTooltip.ts",
+      "file": "features/messaging/message-list/reactionTooltip.ts",
       "binding": "hoverStates",
       "category": "dom-owned",
       "reason": "WeakMap keyed by live elements or their AbortSignal"
     },
     {
-      "file": "components/message-list/reactionTooltip.ts",
+      "file": "features/messaging/message-list/reactionTooltip.ts",
       "binding": "hoveringChips",
       "category": "dom-owned",
       "reason": "WeakMap keyed by live elements or their AbortSignal"
     },
     {
-      "file": "components/message-list/reactions.ts",
+      "file": "features/messaging/message-list/reactions.ts",
       "binding": "defaultTitles",
       "category": "dom-owned",
       "reason": "WeakMap keyed by live elements"
@@ -140,7 +164,7 @@
       "reason": "Keyed by emoji glyph; the still is derived from the bundled catalog"
     },
     {
-      "file": "features/messaging/wsHandlers.ts",
+      "file": "features/messaging/dmPreview.ts",
       "binding": "dmPreviewRefetches",
       "category": "transient",
       "reason": "Documented in the 5.2 design note: endSession drops the stale answer, so the leftover entry is harmless"
@@ -242,31 +266,31 @@
       "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "lib/readStateAway.ts",
       "binding": "liveTailOutOfView",
       "category": "dom-owned",
       "reason": "Scroll state of mounted lists; each list sets it again from its scroll handler"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "lib/readStateBulk.ts",
       "binding": "markQueue",
       "category": "reset-elsewhere",
       "reason": "Emptied by setMarkReadSender, which MainPage's teardown calls with null and the next mount re-registers"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "lib/readStateBulk.ts",
       "binding": "markSentAt",
       "category": "reset-elsewhere",
       "reason": "Emptied by setMarkReadSender, which MainPage's teardown calls with null and the next mount re-registers"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "lib/readStateBulk.ts",
       "binding": "markTimer",
       "category": "reset-elsewhere",
       "reason": "Emptied by setMarkReadSender, which MainPage's teardown calls with null and the next mount re-registers"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "lib/readStateNotices.ts",
       "binding": "markUnreadFailListeners",
       "category": "dom-owned",
       "reason": "Listeners removed by the disposer each mounted list holds"
@@ -290,7 +314,7 @@
       "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
-      "file": "lib/voice/screenShare.ts",
+      "file": "features/voice/videoTrackState.ts",
       "binding": "pendingVideoEnables",
       "category": "transient",
       "reason": "Request-id keyed bookkeeping for an enable in flight; a newer enable of the same kind supersedes it"
@@ -498,6 +522,30 @@
       "binding": "eventBuffer",
       "category": "transient",
       "reason": "Event lines waiting for the next debounced disk write, like the log buffer beside it"
+    },
+    {
+      "file": "lib/diagnostics/appEvents.ts",
+      "binding": "lastExitTimer",
+      "category": "app-lifetime",
+      "reason": "One delayed read of the native log per app start, copying how the previous run ended; nothing per-server"
+    },
+    {
+      "file": "lib/voice/senderLayers.ts",
+      "binding": "layersBySender",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by the live RTCRtpSender; its layer rates go with the sender when a stop or leave drops it, so nothing outlives the session"
+    },
+    {
+      "file": "features/messaging/message-list/messageActionBar.ts",
+      "binding": "pendingFills",
+      "category": "dom-owned",
+      "reason": "Fill still owed by each message row that shows only its \"...\" button; keyed by the row element, dropped with it, so a session reset has nothing to clear"
+    },
+    {
+      "file": "features/messaging/message-list/messageActionBar.ts",
+      "binding": "filledRows",
+      "category": "dom-owned",
+      "reason": "Rows whose hover bar is built; keyed by the row element and dropped with it"
     }
   ]
 }

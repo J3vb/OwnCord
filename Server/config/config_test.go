@@ -19,9 +19,7 @@ func TestLoadDefaults(t *testing.T) {
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() with missing file returned error: %v", err)
-	}
+	mustDo(t, "Load() with missing file returned error", err)
 
 	tests := []struct {
 		name string
@@ -52,9 +50,7 @@ func TestLoadGeneratesDefaultFile(t *testing.T) {
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
 	_, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 
 	if _, statErr := os.Stat(cfgPath); os.IsNotExist(statErr) {
 		t.Error("Load() did not generate default config.yaml")
@@ -73,14 +69,10 @@ server:
 database:
   path: "custom/path.db"
 `
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
-		t.Fatalf("failed to write yaml: %v", err)
-	}
+	mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(yaml), 0o644))
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 
 	if cfg.Server.Port != 9000 {
 		t.Errorf("Server.Port = %d, want 9000", cfg.Server.Port)
@@ -111,9 +103,7 @@ func TestLoadEnvironmentVariableOverrides(t *testing.T) {
 	t.Setenv("OWNCORD_TLS_MODE", "manual")
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 
 	if cfg.Server.Port != 7777 {
 		t.Errorf("Server.Port = %d, want 7777", cfg.Server.Port)
@@ -136,9 +126,7 @@ func TestLoadInvalidYAML(t *testing.T) {
 
 	// Tabs in YAML indentation are illegal per the YAML spec.
 	invalidYAML := "server:\n\tport: 9000\n"
-	if err := os.WriteFile(cfgPath, []byte(invalidYAML), 0o644); err != nil {
-		t.Fatalf("failed to write yaml: %v", err)
-	}
+	mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(invalidYAML), 0o644))
 
 	_, err := config.Load(cfgPath)
 	if err == nil {
@@ -156,14 +144,10 @@ func TestLoadTLSModeValues(t *testing.T) {
 			cfgPath := filepath.Join(tmpDir, "config.yaml")
 
 			yaml := "tls:\n  mode: " + mode + "\n"
-			if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
-				t.Fatalf("failed to write yaml: %v", err)
-			}
+			mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(yaml), 0o644))
 
 			cfg, err := config.Load(cfgPath)
-			if err != nil {
-				t.Fatalf("Load() returned error: %v", err)
-			}
+			mustDo(t, "Load() returned error", err)
 			if cfg.TLS.Mode != mode {
 				t.Errorf("TLS.Mode = %q, want %q", cfg.TLS.Mode, mode)
 			}
@@ -181,9 +165,7 @@ func TestLoadEnvVarNoUnderscore(t *testing.T) {
 
 	// Load should succeed without panicking.
 	_, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 }
 
 func TestLoadEnvVarStorageDir(t *testing.T) {
@@ -193,9 +175,7 @@ func TestLoadEnvVarStorageDir(t *testing.T) {
 	t.Setenv("OWNCORD_UPLOAD_STORAGE_DIR", "/mnt/data/uploads")
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.Upload.StorageDir != "/mnt/data/uploads" {
 		t.Errorf("Upload.StorageDir = %q, want '/mnt/data/uploads'", cfg.Upload.StorageDir)
 	}
@@ -212,14 +192,10 @@ tls:
   key_file: "/etc/ssl/key.pem"
   domain: "example.com"
 `
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
-		t.Fatalf("failed to write yaml: %v", err)
-	}
+	mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(yaml), 0o644))
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.TLS.CertFile != "/etc/ssl/cert.pem" {
 		t.Errorf("TLS.CertFile = %q, want '/etc/ssl/cert.pem'", cfg.TLS.CertFile)
 	}
@@ -236,9 +212,7 @@ func TestLoadVoiceConfigDefaults(t *testing.T) {
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 
 	if cfg.Voice.Quality != "medium" {
 		t.Errorf("Voice.Quality = %q, want 'medium'", cfg.Voice.Quality)
@@ -273,14 +247,10 @@ voice:
   livekit_url: "ws://lk.example.com:7880"
   advertise_internal_ip: true
 `
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
-		t.Fatalf("failed to write yaml: %v", err)
-	}
+	mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(yaml), 0o644))
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 
 	if cfg.Voice.Quality != "high" {
 		t.Errorf("Voice.Quality = %q, want 'high'", cfg.Voice.Quality)
@@ -302,16 +272,12 @@ voice:
 func TestLoadVoiceAdvertiseInternalIPFromEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("voice:\n  quality: high\n"), 0o644); err != nil {
-		t.Fatalf("failed to write yaml: %v", err)
-	}
+	mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte("voice:\n  quality: high\n"), 0o644))
 
 	t.Setenv("OWNCORD_VOICE_ADVERTISE_INTERNAL_IP", "true")
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if !cfg.Voice.AdvertiseInternalIP {
 		t.Error("Voice.AdvertiseInternalIP = false, want true from env override")
 	}
@@ -327,17 +293,13 @@ server:
   port: 9000
   name: "YAML Server"
 `
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
-		t.Fatalf("failed to write yaml: %v", err)
-	}
+	mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(yaml), 0o644))
 
 	t.Setenv("OWNCORD_SERVER_PORT", "5555")
 	t.Setenv("OWNCORD_SERVER_NAME", "Env Wins")
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 
 	if cfg.Server.Port != 5555 {
 		t.Errorf("Server.Port = %d, want 5555 (env should override YAML)", cfg.Server.Port)
@@ -353,9 +315,7 @@ func TestLoadUnreadableConfigFile(t *testing.T) {
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
 	// Create a directory where a file is expected — os.ReadFile will fail.
-	if err := os.Mkdir(cfgPath, 0o755); err != nil {
-		t.Fatalf("failed to create directory: %v", err)
-	}
+	mustDo(t, "failed to create directory", os.Mkdir(cfgPath, 0o755))
 
 	_, err := config.Load(cfgPath)
 	if err == nil {
@@ -373,14 +333,10 @@ voice:
   livekit_api_key: "devkey"
   livekit_api_secret: "owncord-dev-secret-key-min-32chars"
 `
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
-		t.Fatalf("failed to write yaml: %v", err)
-	}
+	mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(yaml), 0o644))
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 
 	if cfg.Voice.LiveKitAPIKey != "" {
 		t.Errorf("Voice.LiveKitAPIKey = %q, want empty (dev creds should be cleared)", cfg.Voice.LiveKitAPIKey)
@@ -396,14 +352,10 @@ func TestLoadVoiceEmptySectionGetsDefaults(t *testing.T) {
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
 	yaml := "voice:\n"
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
-		t.Fatalf("failed to write yaml: %v", err)
-	}
+	mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(yaml), 0o644))
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 
 	if cfg.Voice.LiveKitURL != "ws://localhost:7880" {
 		t.Errorf("Voice.LiveKitURL = %q, want default 'ws://localhost:7880'", cfg.Voice.LiveKitURL)
@@ -458,14 +410,10 @@ func TestLoadGitHubToken(t *testing.T) {
 github:
   token: "ghp_test123"
 `
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
-		t.Fatalf("failed to write yaml: %v", err)
-	}
+	mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(yaml), 0o644))
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.GitHub.Token != "ghp_test123" {
 		t.Errorf("GitHub.Token = %q, want 'ghp_test123'", cfg.GitHub.Token)
 	}
@@ -476,14 +424,10 @@ func TestLoadUploadBoundaryValues(t *testing.T) {
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
 	yaml := "upload:\n  max_size_mb: 0\n"
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
-		t.Fatalf("failed to write yaml: %v", err)
-	}
+	mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(yaml), 0o644))
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.Upload.MaxSizeMB != 0 {
 		t.Errorf("Upload.MaxSizeMB = %d, want 0", cfg.Upload.MaxSizeMB)
 	}
@@ -502,14 +446,10 @@ func TestLoadUploadNegativeMaxSizeMB(t *testing.T) {
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
 	yaml := "upload:\n  max_size_mb: -1\n"
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
-		t.Fatalf("failed to write yaml: %v", err)
-	}
+	mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(yaml), 0o644))
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.Upload.MaxSizeMB != 100 {
 		t.Errorf("Upload.MaxSizeMB = %d, want 100 (the compiled default)", cfg.Upload.MaxSizeMB)
 	}
@@ -529,9 +469,7 @@ func TestLoadEnvOverride_EventPersistence(t *testing.T) {
 	t.Setenv("OWNCORD_EVENT_PERSISTENCE_RETENTION_HOURS", "48")
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.EventPersistence.Enabled {
 		t.Error("EventPersistence.Enabled = true, want env override false")
 	}
@@ -547,9 +485,7 @@ func TestLoadRestartMode(t *testing.T) {
 	// server_restart_mode -> server.restart_mode mapping.
 	t.Run("default", func(t *testing.T) {
 		cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"))
-		if err != nil {
-			t.Fatalf("Load() returned error: %v", err)
-		}
+		mustDo(t, "Load() returned error", err)
 		if cfg.Server.RestartMode != "auto" {
 			t.Errorf("Server.RestartMode = %q, want %q", cfg.Server.RestartMode, "auto")
 		}
@@ -558,13 +494,9 @@ func TestLoadRestartMode(t *testing.T) {
 	t.Run("yaml override", func(t *testing.T) {
 		cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 		yaml := "server:\n  restart_mode: \"supervised\"\n"
-		if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
-			t.Fatalf("failed to write yaml: %v", err)
-		}
+		mustDo(t, "failed to write yaml", os.WriteFile(cfgPath, []byte(yaml), 0o644))
 		cfg, err := config.Load(cfgPath)
-		if err != nil {
-			t.Fatalf("Load() returned error: %v", err)
-		}
+		mustDo(t, "Load() returned error", err)
 		if cfg.Server.RestartMode != "supervised" {
 			t.Errorf("Server.RestartMode = %q, want %q", cfg.Server.RestartMode, "supervised")
 		}
@@ -573,9 +505,7 @@ func TestLoadRestartMode(t *testing.T) {
 	t.Run("env override", func(t *testing.T) {
 		t.Setenv("OWNCORD_SERVER_RESTART_MODE", "spawn")
 		cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"))
-		if err != nil {
-			t.Fatalf("Load() returned error: %v", err)
-		}
+		mustDo(t, "Load() returned error", err)
 		if cfg.Server.RestartMode != "spawn" {
 			t.Errorf("Server.RestartMode = %q, want %q", cfg.Server.RestartMode, "spawn")
 		}
@@ -592,17 +522,13 @@ func TestLoadBrowserClientHostingDisabledByDefault(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.Server.BrowserClientEnabled {
 		t.Error("server.browser_client_enabled is true on a fresh install; browser hosting must be owner opt-in (BG-01)")
 	}
 
 	written, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("read generated config: %v", err)
-	}
+	mustDo(t, "read generated config", err)
 	for line := range strings.Lines(string(written)) {
 		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "browser_client_enabled:") {
 			t.Errorf("the shipped template sets the key live: %q — keep it commented so the compiled default wins", trimmed)
@@ -617,9 +543,7 @@ func TestLoadPushDisabledByDefault(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.Push.Enabled {
 		t.Error("push.enabled is true on a fresh install; Web Push must be owner opt-in")
 	}
@@ -628,9 +552,7 @@ func TestLoadPushDisabledByDefault(t *testing.T) {
 	}
 
 	written, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("read generated config: %v", err)
-	}
+	mustDo(t, "read generated config", err)
 	for line := range strings.Lines(string(written)) {
 		if strings.TrimSpace(line) == "push:" {
 			t.Error("the shipped template sets the push: section live — keep it commented so the compiled default wins")
@@ -647,9 +569,7 @@ func TestLoadPushDispatchDisabledByDefault(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.Push.DispatchEnabled {
 		t.Error("push.dispatch_enabled is true on a fresh install; dispatch must be its own owner opt-in")
 	}
@@ -658,9 +578,7 @@ func TestLoadPushDispatchDisabledByDefault(t *testing.T) {
 	}
 
 	written, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("read generated config: %v", err)
-	}
+	mustDo(t, "read generated config", err)
 	for line := range strings.Lines(string(written)) {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "dispatch_enabled:") || strings.HasPrefix(trimmed, "contact:") {
@@ -676,9 +594,7 @@ func TestLoadPushDispatchEnvOverride(t *testing.T) {
 	t.Setenv("OWNCORD_PUSH_DISPATCH_ENABLED", "true")
 	t.Setenv("OWNCORD_PUSH_CONTACT", "ops@example.invalid")
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if !cfg.Push.DispatchEnabled {
 		t.Error("push.dispatch_enabled = false, want true from OWNCORD_PUSH_DISPATCH_ENABLED")
 	}
@@ -697,9 +613,7 @@ func TestLoadPushDispatchEnvOverride(t *testing.T) {
 func TestLoadStorageBoundsDefaults(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.Upload.UserQuotaMB != 0 || cfg.Upload.UserQuotaBytes() != 0 {
 		t.Errorf("upload.user_quota_mb = %d (bytes %d), want 0 = unlimited", cfg.Upload.UserQuotaMB, cfg.Upload.UserQuotaBytes())
 	}
@@ -707,9 +621,7 @@ func TestLoadStorageBoundsDefaults(t *testing.T) {
 		t.Errorf("server.min_free_disk_mb = %d (bytes %d), want 256", cfg.Server.MinFreeDiskMB, cfg.Server.MinFreeDiskBytes())
 	}
 	written, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("read generated config: %v", err)
-	}
+	mustDo(t, "read generated config", err)
 	for line := range strings.Lines(string(written)) {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "user_quota_mb:") || strings.HasPrefix(trimmed, "min_free_disk_mb:") {
@@ -725,9 +637,7 @@ func TestLoadStorageBoundsEnvOverride(t *testing.T) {
 	t.Setenv("OWNCORD_UPLOAD_USER_QUOTA_MB", "512")
 	t.Setenv("OWNCORD_SERVER_MIN_FREE_DISK_MB", "1024")
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.Upload.UserQuotaMB != 512 {
 		t.Errorf("upload.user_quota_mb = %d, want 512 from the environment", cfg.Upload.UserQuotaMB)
 	}
@@ -744,9 +654,7 @@ func TestLoadPushEnvOverride(t *testing.T) {
 	t.Setenv("OWNCORD_PUSH_ENABLED", "true")
 	t.Setenv("OWNCORD_PUSH_SUBSCRIPTION_TTL_DAYS", "30")
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if !cfg.Push.Enabled {
 		t.Error("push.enabled = false, want true from OWNCORD_PUSH_ENABLED")
 	}
@@ -765,9 +673,7 @@ func TestLoadPushEnvOverride(t *testing.T) {
 func TestLoadStorageBoundsAreClamped(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	yaml := "server:\n  min_free_disk_mb: -5\nupload:\n  user_quota_mb: 9223372036854775807\npush:\n  subscription_ttl_days: 0\n"
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(cfgPath, []byte(yaml), 0o600))
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("Load() returned error: %v — out-of-range values must warn and clamp, never fail", err)
@@ -779,16 +685,12 @@ func TestLoadStorageBoundsAreClamped(t *testing.T) {
 		t.Errorf("push.subscription_ttl_days = %d after 0 (below the minimum of 1), want the default 90", cfg.Push.SubscriptionTTLDays)
 	}
 	pushHigh := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(pushHigh, []byte("push:\n  subscription_ttl_days: 5000\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(pushHigh, []byte("push:\n  subscription_ttl_days: 5000\n"), 0o600))
 	if high, err := config.Load(pushHigh); err != nil || high.Push.SubscriptionTTLDays != 3650 {
 		t.Errorf("push.subscription_ttl_days after 5000 = %v, %v; want clamped to 3650", high, err)
 	}
 	explicitOff := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(explicitOff, []byte("server:\n  min_free_disk_mb: 0\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(explicitOff, []byte("server:\n  min_free_disk_mb: 0\n"), 0o600))
 	if off, err := config.Load(explicitOff); err != nil || off.Server.MinFreeDiskMB != 0 {
 		t.Errorf("an explicit 0 must stay 0 (the operator's opt-out): got %v, err %v", off, err)
 	}
@@ -811,9 +713,7 @@ func TestLoadVoiceUDPPortOutOfRangeFallsBackToRange(t *testing.T) {
 		want  int
 	}{{"70000", 0}, {"-5", 0}, {"7882", 7882}} {
 		cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-		if err := os.WriteFile(cfgPath, []byte("voice:\n  udp_port: "+tc.value+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "WriteFile", os.WriteFile(cfgPath, []byte("voice:\n  udp_port: "+tc.value+"\n"), 0o600))
 		cfg, err := config.Load(cfgPath)
 		if err != nil {
 			t.Fatalf("Load() with udp_port %s returned error: %v", tc.value, err)
@@ -835,17 +735,13 @@ func TestLoadReachabilityReportDisabledByDefault(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if cfg.Server.ReachabilityReportEnabled {
 		t.Error("server.reachability_report_enabled is true on a fresh install; the interface enumeration must be owner opt-in (B6-6)")
 	}
 
 	written, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("read generated config: %v", err)
-	}
+	mustDo(t, "read generated config", err)
 	for line := range strings.Lines(string(written)) {
 		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "reachability_report_enabled:") {
 			t.Errorf("the shipped template sets the key live: %q — keep it commented so the compiled default wins", trimmed)
@@ -917,13 +813,9 @@ func TestLoadWarnsOnEmptyAdminCIDRs(t *testing.T) {
 	}
 
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("server:\n  admin_allowed_cidrs: []\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	mustDo(t, "write config", os.WriteFile(cfgPath, []byte("server:\n  admin_allowed_cidrs: []\n"), 0o600))
 	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("Load() returned error: %v", err)
-	}
+	mustDo(t, "Load() returned error", err)
 	if len(cfg.Server.AdminAllowedCIDRs) != 0 {
 		t.Fatalf("config.yaml did not clear the allowlist: got %v", cfg.Server.AdminAllowedCIDRs)
 	}
@@ -957,9 +849,7 @@ func TestLoadDoesNotWarnOnDefaultAdminCIDRs(t *testing.T) {
 func TestLoadEventPersistenceBoundsAreClamped(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	yaml := "event_persistence:\n  batch_size: 9223372036854775807\n  replay_ring_size: 9223372036854775807\n  retention_hours: 9223372036854775807\n  batch_flush_ms: 0\n"
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(cfgPath, []byte(yaml), 0o600))
 	t.Setenv("OWNCORD_EVENT_PERSISTENCE_REPLAY_COLD_LIMIT", "9223372036854775807")
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -981,9 +871,7 @@ func TestLoadRefusesCatchAllTrustedProxy(t *testing.T) {
 	write := func(t *testing.T, body string) string {
 		t.Helper()
 		cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-		if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "WriteFile", os.WriteFile(cfgPath, []byte(body), 0o600))
 		return cfgPath
 	}
 

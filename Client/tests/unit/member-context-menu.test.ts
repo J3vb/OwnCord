@@ -5,8 +5,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { createMemberList } from "@components/MemberList";
-import type { MemberListOptions } from "@components/MemberList";
+import { createMemberList } from "../../src/features/members/MemberList";
+import type { MemberListOptions } from "../../src/features/members/MemberList";
 import { membersStore } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
@@ -16,8 +16,8 @@ import {
   applyReadyCapabilities,
   resetServerCapabilities,
 } from "../../src/lib/net/serverCapabilities";
-import "@components/UserProfilePopup";
-import "@components/AdminActions";
+import "../../src/features/profiles/userProfilePopup";
+import "../../src/features/moderation/AdminActions";
 import { resetAuthState } from "../helpers/storeSeeds";
 
 globalThis.ResizeObserver = class {

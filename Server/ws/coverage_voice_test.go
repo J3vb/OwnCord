@@ -19,16 +19,10 @@ import (
 func TestHandleVoiceJoin_InvalidChannelID(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vj-bad-chid")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": "not-a-number",
-		},
+	raw := envelope("voice_join", map[string]any{
+		"channel_id": "not-a-number",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -41,16 +35,10 @@ func TestHandleVoiceJoin_InvalidChannelID(t *testing.T) {
 func TestHandleVoiceJoin_NegativeChannelID(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vj-neg-chid")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": -1,
-		},
+	raw := envelope("voice_join", map[string]any{
+		"channel_id": -1,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -63,18 +51,12 @@ func TestHandleVoiceJoin_NegativeChannelID(t *testing.T) {
 func TestHandleVoiceMute_InvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vm-bad-payload")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	// Put client in voice so the "not in voice" guard doesn't fire first.
 	ws.SetClientVoiceChID(c, 999)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_mute",
-		"payload": "not-an-object",
-	})
+	raw := envelope("voice_mute", "not-an-object")
 	hub.HandleMessageForTest(c, raw)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
@@ -86,18 +68,12 @@ func TestHandleVoiceMute_InvalidPayload(t *testing.T) {
 func TestHandleVoiceDeafen_InvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vd-bad-payload")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	// Put client in voice so the "not in voice" guard doesn't fire first.
 	ws.SetClientVoiceChID(c, 999)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_deafen",
-		"payload": "not-an-object",
-	})
+	raw := envelope("voice_deafen", "not-an-object")
 	hub.HandleMessageForTest(c, raw)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
@@ -111,16 +87,10 @@ func TestHandleVoiceDeafen_InvalidPayload(t *testing.T) {
 func TestHandleVoiceCamera_NotInVoice(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vc-not-in-voice")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_camera",
-		"payload": map[string]any{
-			"enabled": true,
-		},
+	raw := envelope("voice_camera", map[string]any{
+		"enabled": true,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -133,22 +103,13 @@ func TestHandleVoiceCamera_NotInVoice(t *testing.T) {
 func TestHandleVoiceCamera_InvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vc-bad-payload")
-	vcID, err := database.CreateChannel(context.Background(), "cam-vc", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	vcID := mustCreateChannel(t, database, "cam-vc", "voice")
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	// Set voice channel so the not-in-voice check passes.
 	ws.SetClientVoiceChID(c, vcID)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_camera",
-		"payload": "not-an-object",
-	})
+	raw := envelope("voice_camera", "not-an-object")
 	hub.HandleMessageForTest(c, raw)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
@@ -160,16 +121,10 @@ func TestHandleVoiceCamera_InvalidPayload(t *testing.T) {
 func TestHandleVoiceScreenshare_NotInVoice(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vs-not-in-voice")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_screenshare",
-		"payload": map[string]any{
-			"enabled": true,
-		},
+	raw := envelope("voice_screenshare", map[string]any{
+		"enabled": true,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -182,21 +137,12 @@ func TestHandleVoiceScreenshare_NotInVoice(t *testing.T) {
 func TestHandleVoiceScreenshare_InvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vs-bad-payload")
-	vcID, err := database.CreateChannel(context.Background(), "screen-vc", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	vcID := mustCreateChannel(t, database, "screen-vc", "voice")
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	ws.SetClientVoiceChID(c, vcID)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_screenshare",
-		"payload": "not-an-object",
-	})
+	raw := envelope("voice_screenshare", "not-an-object")
 	hub.HandleMessageForTest(c, raw)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
@@ -211,16 +157,10 @@ func TestHandleVoiceJoin_FullFlow(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vj-flow-user")
 	vcID := seedVoiceChannel(t, database, "vj-flow-vc")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 64)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
+	raw := envelope("voice_join", map[string]any{
+		"channel_id": vcID,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -286,15 +226,9 @@ func TestVoiceState_NotDeliveredToRolesDeniedRead(t *testing.T) {
 	hub.Register(ws.NewTestClientWithUser(hub, insider, 0, insiderSend))
 	hub.Register(ws.NewTestClientWithUser(hub, outsider, 0, outsiderSend))
 
-	joinerSend := make(chan []byte, 64)
-	jc := ws.NewTestClientWithUser(hub, joiner, 0, joinerSend)
-	hub.Register(jc)
-	waitRegistered(t, hub, jc)
+	jc, _ := connectClient(t, hub, joiner, 0, 64)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_join",
-		"payload": map[string]any{"channel_id": vcID},
-	})
+	raw := envelope("voice_join", map[string]any{"channel_id": vcID})
 	hub.HandleMessageForTest(jc, raw)
 
 	countVoiceState := func(ch <-chan []byte) int {
@@ -319,19 +253,9 @@ func TestHandleVoiceJoin_AlreadyInSameChannel(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vj-same-user")
 	vcID := seedVoiceChannel(t, database, "vj-same-vc")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 64)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
-	})
-	hub.HandleMessageForTest(c, raw)
-	drainChanTimeout(send, 100*time.Millisecond)
+	raw := joinVoiceAndDrain(hub, c, send, vcID)
 
 	hub.HandleMessageForTest(c, raw)
 
@@ -346,25 +270,12 @@ func TestHandleVoiceJoin_SwitchChannels(t *testing.T) {
 	user := seedCoverageOwner(t, database, "vj-switch-user")
 	vc1 := seedVoiceChannel(t, database, "vj-switch-vc1")
 	vc2 := seedVoiceChannel(t, database, "vj-switch-vc2")
-	send := make(chan []byte, 128)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 128)
 
-	raw1, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vc1,
-		},
-	})
-	hub.HandleMessageForTest(c, raw1)
-	drainChanTimeout(send, 100*time.Millisecond)
+	joinVoiceAndDrain(hub, c, send, vc1)
 
-	raw2, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vc2,
-		},
+	raw2 := envelope("voice_join", map[string]any{
+		"channel_id": vc2,
 	})
 	hub.HandleMessageForTest(c, raw2)
 
@@ -392,35 +303,16 @@ func TestHandleVoiceJoin_SwitchChannels(t *testing.T) {
 
 func TestHandleVoiceJoin_ChannelFull(t *testing.T) {
 	hub, database := newCoverageHub(t)
-	vcID, err := database.CreateChannel(context.Background(), "full-vc", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	_, err = database.ExecContext(context.Background(), "UPDATE channels SET voice_max_users = 1 WHERE id = ?", vcID)
-	if err != nil {
-		t.Fatalf("UPDATE channels: %v", err)
-	}
+	vcID := mustCreateChannel(t, database, "full-vc", "voice")
+	mustExec(t, database, "UPDATE channels SET voice_max_users = 1 WHERE id = ?", vcID)
 
 	user1 := seedCoverageOwner(t, database, "vj-full-u1")
-	send1 := make(chan []byte, 64)
-	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, user1, 0, 64)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
-	})
-	hub.HandleMessageForTest(c1, raw)
-	drainChanTimeout(send1, 100*time.Millisecond)
+	raw := joinVoiceAndDrain(hub, c1, send1, vcID)
 
 	user2 := seedVoiceMember(t, database, "vj-full-u2")
-	send2 := make(chan []byte, 64)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, 0, 64)
 
 	hub.HandleMessageForTest(c2, raw)
 
@@ -434,33 +326,15 @@ func TestHandleVoiceLeave_ExplicitLeave(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vl-explicit-user")
 	vcID := seedVoiceChannel(t, database, "vl-explicit-vc")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 64)
 
-	joinRaw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
-	})
-	hub.HandleMessageForTest(c, joinRaw)
-	drainChanTimeout(send, 100*time.Millisecond)
+	joinVoiceAndDrain(hub, c, send, vcID)
 
 	leaveRaw, _ := json.Marshal(map[string]any{"type": "voice_leave"})
 	hub.HandleMessageForTest(c, leaveRaw)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
-	foundLeave := false
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_leave" {
-			foundLeave = true
-			break
-		}
-	}
-	if !foundLeave {
+	if !containsFrameType(msgs, "voice_leave") {
 		t.Error("expected voice_leave broadcast after explicit leave")
 	}
 }
@@ -468,10 +342,7 @@ func TestHandleVoiceLeave_ExplicitLeave(t *testing.T) {
 func TestHandleVoiceLeave_NotInVoice(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vl-not-in-voice")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 16)
 
 	// handleVoiceLeave is synchronous — a no-op leave returns with state intact.
 	hub.HandleVoiceLeaveForTest(c)
@@ -489,38 +360,17 @@ func TestHandleVoiceMute_FullFlow(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vm-flow-user")
 	vcID := seedVoiceChannel(t, database, "vm-flow-vc")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 64)
 
-	joinRaw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
-	})
-	hub.HandleMessageForTest(c, joinRaw)
-	drainChanTimeout(send, 100*time.Millisecond)
+	joinVoiceAndDrain(hub, c, send, vcID)
 
-	muteRaw, _ := json.Marshal(map[string]any{
-		"type": "voice_mute",
-		"payload": map[string]any{
-			"muted": true,
-		},
+	muteRaw := envelope("voice_mute", map[string]any{
+		"muted": true,
 	})
 	hub.HandleMessageForTest(c, muteRaw)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
-	found := false
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_state" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !containsFrameType(msgs, "voice_state") {
 		t.Error("expected voice_state broadcast after mute")
 	}
 }
@@ -529,38 +379,17 @@ func TestHandleVoiceDeafen_FullFlow(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vd-flow-user")
 	vcID := seedVoiceChannel(t, database, "vd-flow-vc")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 64)
 
-	joinRaw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
-	})
-	hub.HandleMessageForTest(c, joinRaw)
-	drainChanTimeout(send, 100*time.Millisecond)
+	joinVoiceAndDrain(hub, c, send, vcID)
 
-	deafenRaw, _ := json.Marshal(map[string]any{
-		"type": "voice_deafen",
-		"payload": map[string]any{
-			"deafened": true,
-		},
+	deafenRaw := envelope("voice_deafen", map[string]any{
+		"deafened": true,
 	})
 	hub.HandleMessageForTest(c, deafenRaw)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
-	found := false
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_state" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !containsFrameType(msgs, "voice_state") {
 		t.Error("expected voice_state broadcast after deafen")
 	}
 }
@@ -568,16 +397,10 @@ func TestHandleVoiceDeafen_FullFlow(t *testing.T) {
 func TestHandleVoiceJoin_ChannelNotFound(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vj-notfound-user")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": 99999,
-		},
+	raw := envelope("voice_join", map[string]any{
+		"channel_id": 99999,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -600,23 +423,12 @@ func TestHandleVoiceJoin_PerChannelQualityOverrideIsNotRead(t *testing.T) {
 			hub, database := newCoverageHub(t)
 			user := seedCoverageOwner(t, database, "vj-quality-user")
 
-			vcID, err := database.CreateChannel(context.Background(), "quality-vc", "voice", "", "", 0)
-			if err != nil {
-				t.Fatalf("CreateChannel: %v", err)
-			}
-			if _, err = database.ExecContext(context.Background(), "UPDATE channels SET voice_quality = ? WHERE id = ?", forced, vcID); err != nil {
-				t.Fatalf("UPDATE: %v", err)
-			}
+			vcID := mustCreateChannel(t, database, "quality-vc", "voice")
+			mustExec(t, database, "UPDATE channels SET voice_quality = ? WHERE id = ?", forced, vcID)
 
-			send := make(chan []byte, 64)
-			c := ws.NewTestClientWithUser(hub, user, 0, send)
-			hub.Register(c)
-			waitRegistered(t, hub, c)
+			c, send := connectClient(t, hub, user, 0, 64)
 
-			raw, _ := json.Marshal(map[string]any{
-				"type":    "voice_join",
-				"payload": map[string]any{"channel_id": vcID},
-			})
+			raw := envelope("voice_join", map[string]any{"channel_id": vcID})
 			hub.HandleMessageForTest(c, raw)
 
 			for _, msg := range drainChanTimeout(send, 300*time.Millisecond) {
@@ -639,25 +451,12 @@ func TestHandleVoiceJoin_MultipleParticipants(t *testing.T) {
 	vcID := seedVoiceChannel(t, database, "vj-multi-vc")
 
 	user1 := seedCoverageOwner(t, database, "vj-multi-u1")
-	send1 := make(chan []byte, 64)
-	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, user1, 0, 64)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
-	})
-	hub.HandleMessageForTest(c1, raw)
-	drainChanTimeout(send1, 100*time.Millisecond)
+	raw := joinVoiceAndDrain(hub, c1, send1, vcID)
 
 	user2 := seedCoverageOwner(t, database, "vj-multi-u2")
-	send2 := make(chan []byte, 64)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, 0, 64)
 
 	hub.HandleMessageForTest(c2, raw)
 
@@ -680,19 +479,11 @@ func TestHandleVoiceLeave_BroadcastsToOtherParticipants(t *testing.T) {
 
 	user1 := seedCoverageOwner(t, database, "vl-bcast-u1")
 	user2 := seedCoverageOwner(t, database, "vl-bcast-u2")
-	send1 := make(chan []byte, 64)
-	send2 := make(chan []byte, 64)
-	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c1)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c1, send1 := connectClient(t, hub, user1, 0, 64)
+	c2, send2 := connectClient(t, hub, user2, 0, 64)
 
-	joinRaw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
+	joinRaw := envelope("voice_join", map[string]any{
+		"channel_id": vcID,
 	})
 	hub.HandleMessageForTest(c1, joinRaw)
 	hub.HandleMessageForTest(c2, joinRaw)
@@ -703,15 +494,7 @@ func TestHandleVoiceLeave_BroadcastsToOtherParticipants(t *testing.T) {
 	hub.HandleMessageForTest(c1, leaveRaw)
 
 	msgs := drainChanTimeout(send2, 300*time.Millisecond)
-	found := false
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_leave" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !containsFrameType(msgs, "voice_leave") {
 		t.Error("user2 should receive voice_leave when user1 leaves")
 	}
 }
@@ -720,38 +503,17 @@ func TestHandleVoiceCamera_FullFlow(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vc-flow-user")
 	vcID := seedVoiceChannel(t, database, "vc-flow-vc")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 64)
 
-	joinRaw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
-	})
-	hub.HandleMessageForTest(c, joinRaw)
-	drainChanTimeout(send, 100*time.Millisecond)
+	joinVoiceAndDrain(hub, c, send, vcID)
 
-	camRaw, _ := json.Marshal(map[string]any{
-		"type": "voice_camera",
-		"payload": map[string]any{
-			"enabled": true,
-		},
+	camRaw := envelope("voice_camera", map[string]any{
+		"enabled": true,
 	})
 	hub.HandleMessageForTest(c, camRaw)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
-	found := false
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_state" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !containsFrameType(msgs, "voice_state") {
 		t.Error("expected voice_state after camera toggle")
 	}
 }
@@ -760,38 +522,17 @@ func TestHandleVoiceScreenshare_FullFlow(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vs-flow-user")
 	vcID := seedVoiceChannel(t, database, "vs-flow-vc")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 64)
 
-	joinRaw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
-	})
-	hub.HandleMessageForTest(c, joinRaw)
-	drainChanTimeout(send, 100*time.Millisecond)
+	joinVoiceAndDrain(hub, c, send, vcID)
 
-	ssRaw, _ := json.Marshal(map[string]any{
-		"type": "voice_screenshare",
-		"payload": map[string]any{
-			"enabled": true,
-		},
+	ssRaw := envelope("voice_screenshare", map[string]any{
+		"enabled": true,
 	})
 	hub.HandleMessageForTest(c, ssRaw)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
-	found := false
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_state" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !containsFrameType(msgs, "voice_state") {
 		t.Error("expected voice_state after screenshare toggle")
 	}
 }
@@ -801,16 +542,10 @@ func TestHandleVoiceScreenshare_FullFlow(t *testing.T) {
 func TestHandleVoiceMute_NotInVoice(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vm-not-in-voice")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_mute",
-		"payload": map[string]any{
-			"muted": true,
-		},
+	raw := envelope("voice_mute", map[string]any{
+		"muted": true,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -823,16 +558,10 @@ func TestHandleVoiceMute_NotInVoice(t *testing.T) {
 func TestHandleVoiceDeafen_NotInVoice(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vd-not-in-voice")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_deafen",
-		"payload": map[string]any{
-			"deafened": true,
-		},
+	raw := envelope("voice_deafen", map[string]any{
+		"deafened": true,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -848,25 +577,13 @@ func TestHandleVoiceJoin_InvalidQualityFallsBackToMedium(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vj-badquality-user")
 
-	vcID, err := database.CreateChannel(context.Background(), "badquality-vc", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	_, err = database.ExecContext(context.Background(), "UPDATE channels SET voice_quality = 'garbage' WHERE id = ?", vcID)
-	if err != nil {
-		t.Fatalf("UPDATE: %v", err)
-	}
+	vcID := mustCreateChannel(t, database, "badquality-vc", "voice")
+	mustExec(t, database, "UPDATE channels SET voice_quality = 'garbage' WHERE id = ?", vcID)
 
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 64)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
+	raw := envelope("voice_join", map[string]any{
+		"channel_id": vcID,
 	})
 	hub.HandleMessageForTest(c, raw)
 

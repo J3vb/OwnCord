@@ -26,15 +26,15 @@ vi.mock("../../../src/platform/desktop", async (importOriginal) => {
     },
   };
 });
-vi.mock("@components/EmojiPicker", () => ({
+vi.mock("../../../src/features/messaging/EmojiPicker", () => ({
   createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
-vi.mock("@components/GifPicker", () => ({
+vi.mock("../../../src/features/messaging/GifPicker", () => ({
   createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import { looksLikeFileList } from "@components/message-input/inputAttachments";
+import { createMessageInput, type MessageInputOptions } from "../../helpers/messageInputApi";
+import { looksLikeFileList } from "../../../src/features/messaging/composer/inputAttachments";
 
 function nativeFile(
   name: string,

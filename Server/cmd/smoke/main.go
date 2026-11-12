@@ -9,16 +9,13 @@
 //  5. with -browser-client, boot once more with the browser client enabled and
 //     GET / (an HTML page with a module script) and that script from /assets/.
 //
-// Phase 4 covers what phase 1 cannot: a non-idempotent migration, a lock the
-// drain failed to release, or state only a first boot creates. Phase 5 makes a
-// release asset provably carry the browser client, which is embedded at build
-// time; a build that missed it still boots and drains cleanly.
+// Phase 4 covers what phase 1 cannot: a non-idempotent migration, a lock the drain failed to release, or
+// state only a first boot creates. Phase 5 makes a release asset provably carry the browser client (embedded
+// at build time; a build that missed it still boots and drains cleanly).
 //
-// It is a Go program rather than a shell script because the graceful stop is
-// the point and Windows has no SIGTERM: MSYS `kill -TERM` terminates a native
-// Windows binary without running the drain (exit status 143), so the harness
-// uses the console control event via process-group control. See
-// stop_windows.go and stop_other.go.
+// It is a Go program, not a shell script, because the graceful stop is the point and Windows has no SIGTERM:
+// MSYS `kill -TERM` terminates a native binary without running the drain (exit 143), so the harness uses the
+// console control event (stop_windows.go, stop_other.go).
 //
 // With -upgrade it instead rehearses the upgrade an owner performs (install
 // the new version over a populated install, then roll back), sharing one
@@ -110,7 +107,6 @@ func main() {
 		summary = ""
 	}
 	if err := action(); err != nil {
-		// ::error:: is the GitHub Actions annotation prefix, as in docker-smoke.sh.
 		fmt.Printf("::error::%v\n", err)
 		os.Exit(1)
 	}
@@ -119,8 +115,8 @@ func main() {
 	}
 }
 
-// invocation is the command line as typed, checked as a whole: each of these
-// combinations would otherwise run something the caller did not ask for.
+// invocation is the command line as typed, checked as a whole: each bad combination would run something the
+// caller did not ask for.
 type invocation struct {
 	args       []string
 	upgrade    bool
@@ -132,8 +128,6 @@ type invocation struct {
 	browserClient bool // -browser-client
 }
 
-// validate names the first thing wrong with the invocation, or nil. It returns
-// an error so the exit code stays in main.
 func (in invocation) validate() error {
 	switch {
 	case len(in.args) != 1:
@@ -243,7 +237,6 @@ func run(binArg string, browserClient bool) error {
 	return runBrowserClient(bin, dir)
 }
 
-// server is one launched instance and the log it is writing to.
 type server struct {
 	bin     string
 	dir     string
@@ -288,8 +281,6 @@ func start(bin, dir, logName string, extraEnv ...string) (*server, error) {
 	return s, nil
 }
 
-// waitHealthy polls the binary's own healthcheck until it passes, failing early
-// if the process dies rather than after the whole timeout.
 func (s *server) waitHealthy(phase string) error {
 	deadline := time.Now().Add(bootTimeout)
 	for attempt := 1; time.Now().Before(deadline); attempt++ {
@@ -330,14 +321,11 @@ func (s *server) drain(phase string) error {
 	}
 }
 
-// log is everything the server has printed so far, stdout and stderr.
 func (s *server) log() (string, error) {
 	data, err := os.ReadFile(s.logPath)
 	return string(data), err
 }
 
-// annotate wraps a phase failure with the server's log, so a CI failure carries
-// the reason.
 func (s *server) annotate(phase string, cause error) error {
 	// An adopted server has no cmd; the kill only stops a server still writing
 	// to the log being read.
@@ -351,8 +339,6 @@ func (s *server) annotate(phase string, cause error) error {
 	return fmt.Errorf("%s: %w\n--- server log (%s) ---\n%s", phase, cause, phase, log)
 }
 
-// healthy runs the binary's healthcheck subcommand, which reads config.yaml
-// from the working directory and probes /health without side effects.
 func healthy(bin, dir string) bool {
 	cmd := exec.Command(bin, "healthcheck")
 	cmd.Dir = dir

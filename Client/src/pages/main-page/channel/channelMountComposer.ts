@@ -8,8 +8,9 @@ import {
   createMessageInput,
   type QueuedAttachment,
   type SentAttachment,
-} from "@components/MessageInput";
-import { createTypingIndicator } from "@components/TypingIndicator";
+} from "../../../features/messaging/MessageInput";
+import { onSendAcknowledged } from "../../../features/messaging/sendAcknowledged";
+import { createTypingIndicator } from "../../../features/messaging/TypingIndicator";
 import { getChannelMessages } from "@stores/messages.store";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
@@ -92,8 +93,9 @@ export function mountComposer(st: ChannelState, cc: ChannelApi, ms: MountScope):
       }
     },
     onDraftChange: cc.scheduleDraftSave,
+    onReplyTargetChange: (messageId) => st.messageList?.setReplyTarget(messageId),
     onCreatePoll: () => {
-      import("../../../components/PollComposer").then(
+      import("../../../features/messaging/PollComposer").then(
         ({ openPollComposer }) => {
           if (ms.signal.aborted) return;
           openPollComposer({
@@ -241,45 +243,9 @@ export function mountComposerGating(st: ChannelState, cc: ChannelApi, ms: MountS
 
   // The server accepted a message — the next one is subject to the cooldown.
   st.composerGatingUnsubs.push(
-    st.ws.on("chat_send_ok", (payload, correlationId) => {
-      if (!ms.ownsSession()) return;
-      const sameChannel = ms.sentToMountedChannel(correlationId);
-      const sentDraft =
-        correlationId === undefined ? undefined : st.draftByCorrelation.get(correlationId);
-      const sentTo = sentDraft?.channelId;
-      // An accepted send can never be retried, so its draft is dead weight.
-      // The map is controller-scoped (a failed row outlives a channel
-      // switch, so its draft must too), which means nothing else would ever
-      // drop it — every message sent in the session would be retained.
-      if (correlationId !== undefined && correlationId !== "") {
-        st.draftByCorrelation.delete(correlationId);
-        cc.clearSendTimer(correlationId);
-      }
-      if (payload.client_message_id) {
-        for (const [id, draft] of st.draftByCorrelation) {
-          if (draft.clientMessageId === payload.client_message_id) {
-            st.draftByCorrelation.delete(id);
-            cc.clearSendTimer(id);
-          }
-        }
-      }
-      const ch = channelsStore.getState().channels.get(ms.channelId);
-      if (
-        ch !== undefined &&
-        ch.id === channelsStore.getState().activeChannelId &&
-        sameChannel &&
-        !payload.deduplicated
-      ) {
-        ms.startSlowMode(ch.slowMode);
-      } else if (sentTo !== undefined && !sameChannel && !payload.deduplicated) {
-        // A late ack for a channel the user has left: charge that channel's
-        // cooldown now, without arming this mounted channel's ticker.
-        const seconds = channelsStore.getState().channels.get(sentTo)?.slowMode ?? 0;
-        if (seconds > 0 && !canManageMessages()) {
-          cc.recordSlowModeSend(sentTo, seconds, sentDraft?.sentAt);
-        }
-      }
-    }),
+    st.ws.on("chat_send_ok", (payload, correlationId) =>
+      onSendAcknowledged(st, cc, ms, payload, correlationId),
+    ),
   );
 
   st.composerGatingUnsubs.push(

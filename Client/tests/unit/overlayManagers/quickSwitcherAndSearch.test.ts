@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as mocks from "../../helpers/overlayManagersMocks";
-import { createQuickSwitcher } from "@components/QuickSwitcher";
-import { createSearchOverlay } from "@components/SearchOverlay";
+import { createQuickSwitcher } from "../../../src/features/navigation/QuickSwitcher";
+import { createSearchOverlay } from "../../../src/features/navigation/SearchOverlay";
 import {
   createQuickSwitcherManager,
   createSearchOverlayController,
@@ -17,10 +17,10 @@ import { useMountContainer } from "../../helpers/mountContainer";
 import { guarded, pressBack, settle } from "../../helpers/backNav";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
-vi.mock("@components/QuickSwitcher", () => mocks.quickSwitcherMock());
-vi.mock("@components/InviteManager", () => mocks.inviteManagerMock());
-vi.mock("@components/PinnedMessages", () => mocks.pinnedMessagesMock());
-vi.mock("@components/SearchOverlay", () => mocks.searchOverlayMock());
+vi.mock("../../../src/features/navigation/QuickSwitcher", () => mocks.quickSwitcherMock());
+vi.mock("../../../src/features/invites/InviteManager", () => mocks.inviteManagerMock());
+vi.mock("../../../src/features/messaging/PinnedMessages", () => mocks.pinnedMessagesMock());
+vi.mock("../../../src/features/navigation/SearchOverlay", () => mocks.searchOverlayMock());
 vi.mock("@stores/channels.store", () => mocks.channelsStoreMock());
 vi.mock("@stores/messages.store", () => mocks.messagesStoreMock());
 vi.mock("@stores/auth.store", () => mocks.authStoreMock());

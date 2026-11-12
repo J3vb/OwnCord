@@ -2,7 +2,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -207,10 +206,7 @@ func TestReadyMembers_PresenceUpdateAfterCachedReadShowsLiveStatus(t *testing.T)
 	if got := buildReadyMembers(t, hub, reader, viewer.ID)[busy.ID]["status"]; got != db.StatusOnline {
 		t.Fatalf("busy before presence_update = %v, want online", got)
 	}
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "presence_update",
-		"payload": map[string]any{"status": db.StatusDND},
-	})
+	raw := envelope("presence_update", map[string]any{"status": db.StatusDND})
 	hub.HandleMessageForTest(bc, raw)
 
 	if got := buildReadyMembers(t, hub, reader, viewer.ID)[busy.ID]["status"]; got != db.StatusDND {

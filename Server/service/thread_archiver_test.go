@@ -44,9 +44,7 @@ func TestThreadArchiver_DueNotDueAndBootSweep(t *testing.T) {
 	a := NewThreadArchiver(f.database)
 	n := &threadRecorder{}
 	a.SetNotifier(n)
-	if err := a.Sweep(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Sweep", a.Sweep(ctx))
 	if len(n.got()) != 0 {
 		t.Fatalf("archived %v before the window passed", n.got())
 	}
@@ -54,9 +52,7 @@ func TestThreadArchiver_DueNotDueAndBootSweep(t *testing.T) {
 	if _, err := f.database.ExecContext(ctx, `UPDATE channels SET thread_auto_archive_minutes = 60 WHERE id = ?`, idle.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Sweep(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Sweep", a.Sweep(ctx))
 	if got := n.got(); len(got) != 1 || got[0] != idle.ID {
 		t.Fatalf("notified %v, want [%d]", got, idle.ID)
 	}

@@ -5,10 +5,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 
 import * as mocks from "../helpers/messageInputMocks";
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
-vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
+vi.mock("../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../src/features/messaging/GifPicker", () => mocks.gifPickerMock());
 
-import { createMessageInput, type QueuedAttachment } from "@components/MessageInput";
+import {
+  createMessageInput,
+  type QueuedAttachment,
+} from "../../src/features/messaging/MessageInput";
 import {
   attachmentErrorText,
   clickSend,

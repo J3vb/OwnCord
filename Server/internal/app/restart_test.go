@@ -258,9 +258,7 @@ func TestRestartCoordinator_HandoffJoinsCompanionExactlyOnce(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 			listener, err := net.Listen("tcp4", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "Listen", err)
 			defer listener.Close()
 			addr := listener.Addr().String()
 			var spawns, stops atomic.Int32
@@ -351,9 +349,7 @@ func TestRun_RestartRequest_DrainsCleanly(t *testing.T) {
 	// Grab a free port, release it, and hand it to Run. The tiny window
 	// where something else could take it is absorbed by Run's bind retry.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("probe listen: %v", err)
-	}
+	mustDo(t, "probe listen", err)
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
 

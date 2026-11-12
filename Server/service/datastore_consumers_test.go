@@ -5,7 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -34,7 +33,7 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[accountRecovery]():       11,
 	reflect.TypeFor[BlockService]():          4,
 	reflect.TypeFor[CallLogService]():        13,
-	reflect.TypeFor[ChannelService]():        20,
+	reflect.TypeFor[ChannelService]():        19,
 	reflect.TypeFor[channelOverrides]():      16,
 	reflect.TypeFor[readFocus]():             3,
 	reflect.TypeFor[ConnWrites]():            4,
@@ -46,7 +45,7 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[MessageService]():        20,
 	reflect.TypeFor[messageReads]():          17,
 	reflect.TypeFor[mentionState]():          18,
-	reflect.TypeFor[dmDelivery]():            7,
+	reflect.TypeFor[dmDelivery]():            8,
 	reflect.TypeFor[messagePins]():           10,
 	reflect.TypeFor[messageRemoval]():        12,
 	reflect.TypeFor[ModerationService]():     20,
@@ -61,7 +60,7 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[SettingsService]():       9,
 	reflect.TypeFor[SetupService]():          9,
 	reflect.TypeFor[ThreadService]():         7,
-	reflect.TypeFor[TokenService]():          9,
+	reflect.TypeFor[TokenService]():          10,
 	reflect.TypeFor[UploadService]():         15,
 	reflect.TypeFor[UserService]():           17,
 	reflect.TypeFor[userSessions]():          5,
@@ -202,26 +201,9 @@ func recvName(e ast.Expr) string {
 }
 
 func TestStoreConsumers(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read service dir: %v", err)
-	}
-	sources := map[string]string{}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		b, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		sources[name] = string(b)
-	}
+	sources := serviceSources(t)
 	got, err := findStoreConsumers(sources)
-	if err != nil {
-		t.Fatalf("find consumers: %v", err)
-	}
+	mustDo(t, "find consumers", err)
 	seen := map[string]bool{}
 	for _, c := range got {
 		seen[c] = true
@@ -285,9 +267,7 @@ func TestFindStoreConsumers(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := findStoreConsumers(map[string]string{"s.go": tc.src})
-			if err != nil {
-				t.Fatalf("findStoreConsumers: %v", err)
-			}
+			mustDo(t, "findStoreConsumers", err)
 			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
 				t.Fatalf("consumers = %v, want %v", got, tc.want)
 			}

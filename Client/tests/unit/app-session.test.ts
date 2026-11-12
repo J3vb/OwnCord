@@ -48,7 +48,7 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 vi.mock("@lib/prefs/lastChannel", () => ({ setLastChannelHost: vi.fn() }));
-vi.mock("@components/ConnectedOverlay", () => ({
+vi.mock("../../src/features/connection/ConnectedOverlay", () => ({
   createConnectedOverlay: vi.fn((opts: { onReady: () => void }) => {
     const entry = {
       onReady: opts.onReady,
@@ -77,9 +77,20 @@ vi.mock("@lib/dispatcher", () => ({
     const id = ++dispatcherSeq;
     return () => events.push(`dispatcher-${id}-unsub`);
   }),
+  wireConnectionStatus: vi.fn(() => () => {}),
 }));
 
+vi.mock("../../src/app/sessionDispatcher", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../src/app/sessionDispatcher")>();
+  return {
+    ...real,
+    loadDispatcher: vi.fn(real.loadDispatcher),
+    loadedDispatcher: vi.fn(real.loadedDispatcher),
+  };
+});
+
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
+import { loadDispatcher, loadedDispatcher } from "../../src/app/sessionDispatcher";
 import { createApiClient } from "@lib/api";
 import { createWsClient, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { authStore, clearAuth, setAuth } from "@stores/auth.store";
@@ -89,11 +100,15 @@ import {
   abandonInFlight,
   configureSession,
   installLogoutTeardown,
+  READY_TIMEOUT_MS,
   sessionInFlight,
   sessionTarget,
+  signInPending,
   startSession,
 } from "../../src/app/session";
 import type { PageId } from "../../src/app/context";
+import { connectText } from "../../src/i18n/connect";
+import { readyFrame } from "../helpers/wsSuiteHarness";
 
 const USER = { id: 7, username: "casey", avatar: null, role: "member" };
 const api = createApiClient({ host: "" });
@@ -147,12 +162,40 @@ describe("start and abandon", () => {
     expect(sessionInFlight()).toBe(false);
   });
 
-  it("records the connect target and wires the dispatcher on startSession", () => {
+  it("records the connect target, then wires the dispatcher before it dials", async () => {
+    vi.mocked(loadedDispatcher).mockReturnValueOnce(null);
+    const connect = vi.spyOn(ws, "connect");
     startSession("a.example:8443", "tok-a", "casey");
     expect(sessionTarget()).toEqual({ host: "a.example:8443", token: "tok-a" });
     expect(sessionInFlight()).toBe(true);
     expect(authStore.getState().token).toBe("tok-a");
+    // The dispatcher is its own chunk: nothing dials until it is wired.
+    expect(connect).not.toHaveBeenCalled();
+    await vi.dynamicImportSettled();
     expect(dispatcherSeq).toBe(1);
+    expect(connect).toHaveBeenCalledTimes(1);
+    connect.mockRestore();
+  });
+
+  it("wires and dials in the same task once the dispatcher has loaded", async () => {
+    await loadDispatcher();
+    const connect = vi.spyOn(ws, "connect");
+    startSession("a.example:8443", "tok-a", "casey");
+    expect(dispatcherSeq).toBe(1);
+    expect(connect).toHaveBeenCalledTimes(1);
+    connect.mockRestore();
+  });
+
+  it("an attempt abandoned while the dispatcher loads never wires or dials", async () => {
+    vi.mocked(loadedDispatcher).mockReturnValueOnce(null);
+    const connect = vi.spyOn(ws, "connect");
+    startSession("a.example:8443", "tok-a", "casey");
+    api.endSession();
+    abandonInFlight();
+    await vi.dynamicImportSettled();
+    expect(dispatcherSeq).toBe(0);
+    expect(connect).not.toHaveBeenCalled();
+    connect.mockRestore();
   });
 
   it("abandonInFlight tears the wiring and overlay down and forgets the target", async () => {
@@ -212,13 +255,47 @@ describe("a second startSession while an attempt is in flight", () => {
 
 describe("a same-host, same-token re-entry", () => {
   it("drops the first attempt's listeners and keeps a single overlay", async () => {
+    vi.mocked(loadedDispatcher).mockReturnValueOnce(null).mockReturnValueOnce(null);
+    const connect = vi.spyOn(ws, "connect");
     startSession("a.example:8443", "tok-a", "casey");
     startSession("a.example:8443", "tok-a", "casey");
-    expect(events).toContain("dispatcher-1-unsub");
     await authOk();
+    // The first attempt was superseded while the dispatcher loaded: only the second wires and dials.
+    expect(dispatcherSeq).toBe(1);
+    expect(connect).toHaveBeenCalledTimes(1);
+    connect.mockRestore();
     // Only the second attempt's auth_ok listener is left, so one overlay is built.
     expect(overlays).toHaveLength(1);
     expect(overlays.filter((o) => !o.destroyed)).toHaveLength(1);
+  });
+
+  it("with the dispatcher loaded, the second attempt unwires the first before it wires", async () => {
+    await loadDispatcher();
+    startSession("a.example:8443", "tok-a", "casey");
+    startSession("a.example:8443", "tok-a", "casey");
+    expect(events).toContain("dispatcher-1-unsub");
+    expect(dispatcherSeq).toBe(2);
+    await authOk();
+    expect(overlays.filter((o) => !o.destroyed)).toHaveLength(1);
+  });
+});
+
+describe("the dispatcher chunk fails to load", () => {
+  it("ends the sign-in on the form without dialing or running the offline wait", async () => {
+    vi.mocked(loadedDispatcher).mockReturnValueOnce(null);
+    vi.mocked(loadDispatcher).mockRejectedValueOnce(new Error("chunk fetch failed"));
+    const connect = vi.spyOn(ws, "connect");
+    const onTimeout = vi.fn();
+    startSession("a.example:8443", "tok-a", "casey", undefined, true, false, onTimeout);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connect).not.toHaveBeenCalled();
+    expect(sessionTarget()).toBeNull();
+    expect(uiStore.getState().transientError).toBe(connectText("session.codeLoadFailed"));
+    expect(onTimeout).not.toHaveBeenCalled();
+    // The pre-auth deadline went with the attempt.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    connect.mockRestore();
   });
 });
 
@@ -257,6 +334,117 @@ describe("pre-auth deadline", () => {
     await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 1);
     expect(onTimeout).not.toHaveBeenCalled();
     expect(sessionInFlight()).toBe(true);
+  });
+});
+
+describe("ready deadline", () => {
+  /** Delivers `ready`, the frame the connected overlay waits for. */
+  function ready(): void {
+    emitTauriEvent("ws-message", readyFrame());
+  }
+
+  it("returns to the connect page with a message when ready never arrives", async () => {
+    startSession("a.example:8443", "tok-a", "casey");
+    await authOk();
+    setAuth("tok-a", USER, "Srv", "");
+    await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS - 1);
+    expect(overlays[0]!.destroyed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(overlays[0]!.destroyed).toBe(true);
+    expect(sessionInFlight()).toBe(false);
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    expect(uiStore.getState().transientError).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(0);
+    // A stall is not a logout: the stored sign-in stays for the next try.
+    expect(hoisted.deleteCredential).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("restarts on a reconnect while the overlay waits", async () => {
+    startSession("a.example:8443", "tok-a", "casey");
+    await authOk();
+    await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS - 5_000);
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(0);
+    await authOk();
+    await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS - 1_000);
+    expect(overlays[0]!.destroyed).toBe(false);
+    expect(sessionInFlight()).toBe(true);
+  });
+
+  it("is cleared once ready arrives", async () => {
+    startSession("a.example:8443", "tok-a", "casey");
+    await authOk();
+    ready();
+    expect(overlays[0]!.ready).toBe(true);
+    await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS + 1);
+    expect(sessionInFlight()).toBe(true);
+    expect(overlays[0]!.destroyed).toBe(false);
+  });
+});
+
+describe("a handshake frame the client cannot read", () => {
+  it("ends a sign-in whose auth_ok has the wrong shape and tells the form", async () => {
+    const onTimeout = vi.fn();
+    startSession("a.example:8443", "tok-a", "casey", undefined, true, false, onTimeout);
+    await vi.advanceTimersByTimeAsync(0);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({ type: "auth_ok", payload: { server_name: "S" } }),
+    );
+    // Not "waiting for the server": that would redial into the same fault.
+    expect(onTimeout).not.toHaveBeenCalled();
+    expect(sessionInFlight()).toBe(false);
+    expect(uiStore.getState().transientError).toBe(connectText("session.unreadableReply"));
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 60_000);
+    expect(mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect")).toHaveLength(0);
+  });
+
+  it("ends a session whose ready has the wrong shape, keeping the stored sign-in", async () => {
+    startSession("a.example:8443", "tok-a", "casey");
+    await authOk();
+    setAuth("tok-a", USER, "Srv", "");
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: { channels: 5 } }));
+    expect(overlays[0]!.destroyed).toBe(true);
+    expect(sessionInFlight()).toBe(false);
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    expect(uiStore.getState().transientError).toBe(connectText("session.unreadableReply"));
+    await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS + 1);
+    expect(hoisted.deleteCredential).not.toHaveBeenCalled();
+  });
+});
+
+describe("signInPending", () => {
+  it("holds from the dial until ready", async () => {
+    expect(signInPending()).toBe(false);
+    startSession("a.example:8443", "tok-a", "casey");
+    expect(signInPending()).toBe(true);
+    await authOk();
+    expect(signInPending()).toBe(true);
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "ready",
+        payload: { channels: [], members: [], voice_states: [], roles: [] },
+      }),
+    );
+    expect(signInPending()).toBe(false);
+    expect(sessionInFlight()).toBe(true);
+  });
+
+  it("ends when the first dial is refused, though the target is kept", async () => {
+    startSession("a.example:8443", "tok-a", "casey");
+    await vi.advanceTimersByTimeAsync(0);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({ type: "auth_error", payload: { message: "invalid token" } }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sessionInFlight()).toBe(true);
+    expect(signInPending()).toBe(false);
   });
 });
 
@@ -331,6 +519,16 @@ describe("logout teardown", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(hoisted.deleteCredential).not.toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledWith("connect");
+  });
+
+  it("keeps the credential and auto-login when a later reconnect gets an unreadable ready", async () => {
+    await signIn();
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: { channels: 5 } }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hoisted.deleteCredential).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("owncord:skip-auto-login")).toBeNull();
+    expect(navigate).toHaveBeenCalledWith("connect");
+    expect(uiStore.getState().transientError).toBe(connectText("session.unreadableReply"));
   });
 
   it("leaves the voice channel before the socket closes", async () => {

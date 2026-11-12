@@ -55,9 +55,7 @@ func TestChannelActions_Create_Edit_Delete_PermittedMemberSucceeds(t *testing.T)
 	e := newMemberActionsEnv(t)
 
 	rr := e.do(t, http.MethodPost, channelsBase, "admin", `{"name":"planning","type":"text","category":"Team"}`)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		t.Fatalf("create Content-Type = %q, want JSON", ct)
 	}
@@ -128,9 +126,7 @@ func TestChannelActions_Categories_PermittedMemberRoundTrip(t *testing.T) {
 	e := newMemberActionsEnv(t)
 
 	rr := e.do(t, http.MethodPost, channelsBase+"/categories", "admin", `{"name":"Games"}`)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create category: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	var games struct {
 		ID int64 `json:"id"`
 	}
@@ -138,13 +134,10 @@ func TestChannelActions_Categories_PermittedMemberRoundTrip(t *testing.T) {
 		t.Fatalf("create body has no id: err=%v body=%s", err, rr.Body.String())
 	}
 	rr = e.do(t, http.MethodPost, channelsBase+"/categories", "admin", `{"name":"Voice"}`)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create second category: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var voice struct {
+	requireStatus(t, rr, http.StatusCreated)
+	voice := decodeBody[struct {
 		ID int64 `json:"id"`
-	}
-	_ = json.Unmarshal(rr.Body.Bytes(), &voice)
+	}](t, rr)
 
 	if rr := e.do(t, http.MethodPost, channelsBase+"/categories", "admin", `{"name":"games"}`); rr.Code != http.StatusConflict {
 		t.Fatalf("duplicate: status = %d, want 409; body = %s", rr.Code, rr.Body.String())

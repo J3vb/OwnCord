@@ -54,8 +54,7 @@ func doVoiceUpload(t *testing.T, h *quotaHarness, rawQuery, filename string, con
 	req := httptest.NewRequest(http.MethodPost, target, body)
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+h.token)
-	rr := httptest.NewRecorder()
-	h.router.ServeHTTP(rr, req)
+	rr := serveRequest(h.router, req)
 	return rr
 }
 
@@ -74,17 +73,12 @@ func TestUploadVoice_StoresAndReturnsDurationAndWaveform(t *testing.T) {
 			h := newQuotaHarness(t, nil)
 			wave := voiceWaveform(64)
 			rr := doVoiceUpload(t, h, voiceQuery("4200", wave), "voice."+name, body)
-			if rr.Code != http.StatusCreated {
-				t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-			}
-			var resp struct {
+			requireStatus(t, rr, http.StatusCreated)
+			resp := decodeBody[struct {
 				ID         string `json:"id"`
 				DurationMs int    `json:"duration_ms"`
 				Waveform   string `json:"waveform"`
-			}
-			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-				t.Fatalf("decode: %v", err)
-			}
+			}](t, rr)
 			if resp.DurationMs != 4200 || resp.Waveform != wave {
 				t.Fatalf("response = %d, %q; want 4200, %q", resp.DurationMs, resp.Waveform, wave)
 			}
@@ -131,9 +125,7 @@ func TestUploadVoice_WaveformIsStoredCanonically(t *testing.T) {
 	h := newQuotaHarness(t, nil)
 	// 0xFF 0xFF 0xFF encodes to "____"; the stored string is the re-encoding.
 	rr := doVoiceUpload(t, h, voiceQuery("1000", "____"), "v.ogg", oggOpusBody())
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	var wave string
 	if err := h.database.QueryRowContext(context.Background(), `SELECT waveform FROM attachments`).Scan(&wave); err != nil {
 		t.Fatalf("read waveform: %v", err)
@@ -184,9 +176,7 @@ func TestUploadVoice_BoundaryValuesAreAccepted(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := newQuotaHarness(t, nil)
 			rr := doVoiceUpload(t, h, q, "v.ogg", oggOpusBody())
-			if rr.Code != http.StatusCreated {
-				t.Fatalf("status = %d; body: %s", rr.Code, rr.Body.String())
-			}
+			requireStatus(t, rr, http.StatusCreated)
 		})
 	}
 }
@@ -218,13 +208,8 @@ func TestUploadVoice_NonAudioTypeIsRefusedAndItsFileDeleted(t *testing.T) {
 func TestUploadVoice_PlainUploadIsUnchanged(t *testing.T) {
 	h := newQuotaHarness(t, nil)
 	rr := doVoiceUpload(t, h, "", "v.ogg", oggOpusBody())
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	for _, k := range []string{"duration_ms", "waveform"} {
 		if _, ok := resp[k]; ok {
 			t.Errorf("plain upload response carries %q", k)
@@ -247,11 +232,8 @@ func TestUploadVoice_SameClipTwiceMakesTwoIndependentRows(t *testing.T) {
 	ids := map[string]bool{}
 	for range 2 {
 		rr := doVoiceUpload(t, h, q, "v.ogg", oggOpusBody())
-		if rr.Code != http.StatusCreated {
-			t.Fatalf("status = %d; body: %s", rr.Code, rr.Body.String())
-		}
-		var resp struct{ ID string }
-		_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+		requireStatus(t, rr, http.StatusCreated)
+		resp := decodeBody[struct{ ID string }](t, rr)
 		ids[resp.ID] = true
 	}
 	if len(ids) != 2 || attachmentRows(t, h) != 2 || h.filesOnDisk(t) != 2 {
@@ -261,11 +243,8 @@ func TestUploadVoice_SameClipTwiceMakesTwoIndependentRows(t *testing.T) {
 	for id := range ids {
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/uploads/"+id, nil)
 		req.Header.Set("Authorization", "Bearer "+h.token)
-		rr := httptest.NewRecorder()
-		h.router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusNoContent {
-			t.Fatalf("discard: %d %s", rr.Code, rr.Body.String())
-		}
+		rr := serveRequest(h.router, req)
+		requireStatus(t, rr, http.StatusNoContent)
 		break
 	}
 	if attachmentRows(t, h) != 1 || h.filesOnDisk(t) != 1 {

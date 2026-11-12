@@ -12,23 +12,14 @@ func TestInviteService_ListInviteRedemptions(t *testing.T) {
 	ctx := context.Background()
 	svc := NewInviteService(database)
 
-	creator, err := database.CreateUser(ctx, "svc-redemption-creator", "hash", 2)
-	if err != nil {
-		t.Fatalf("CreateUser creator: %v", err)
-	}
+	creator := mustCreateUser(t, database, "svc-redemption-creator", "hash", 2)
 	inv, err := svc.CreateInvite(ctx, creator, 5, 24)
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	mustDo(t, "CreateInvite", err)
 	redeemer, err := database.CreateUserWithInvite(ctx, "svc-redeemer", "hash", 4, inv.Code, "sess-svc-redeemer", "test", "127.0.0.1")
-	if err != nil {
-		t.Fatalf("CreateUserWithInvite: %v", err)
-	}
+	mustDo(t, "CreateUserWithInvite", err)
 
 	reds, err := svc.ListInviteRedemptions(ctx, inv.Code)
-	if err != nil {
-		t.Fatalf("ListInviteRedemptions: %v", err)
-	}
+	mustDo(t, "ListInviteRedemptions", err)
 	if len(reds) != 1 {
 		t.Fatalf("redemptions = %d, want 1", len(reds))
 	}

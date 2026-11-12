@@ -95,9 +95,7 @@ func TestHandleRestoreBackup_CarriesTheLiveSeqFloor(t *testing.T) {
 	defer restoreHook()
 
 	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	read := func() string {
 		b, err := os.ReadFile(f.dbPath + ".ws-seq-floor")
 		if err != nil {
@@ -124,9 +122,7 @@ func TestHandleRestoreBackup_RefusesWhenTheSeqFloorCannotBeStored(t *testing.T) 
 	defer restoreHook()
 
 	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusInternalServerError)
 	if _, err := os.Stat(f.dbPath + ".restore-pending.json"); err == nil {
 		t.Error("a refused restore left a marker")
 	}
@@ -180,9 +176,7 @@ func TestHandleRestoreBackup_StagesInsteadOfOverwriting(t *testing.T) {
 	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
 	cancel()
 	writers.Wait()
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	var resp map[string]string
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
@@ -247,9 +241,7 @@ func TestHandleRestoreBackup_StageFailureLeavesDatabaseAndNoRestart(t *testing.T
 	defer restoreHook()
 
 	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusInternalServerError)
 	if !strings.Contains(w.Body.String(), "could not stage the backup") {
 		t.Errorf("body = %s", w.Body.String())
 	}

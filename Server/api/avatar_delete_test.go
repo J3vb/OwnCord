@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,9 +30,7 @@ func doDeleteAvatar(router http.Handler, token string) *httptest.ResponseRecorde
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 	return rr
 }
 
@@ -46,11 +43,8 @@ func TestDeleteAvatar_ClearsAndBroadcastsNull(t *testing.T) {
 	peerToken := uploadCreateToken(t, database, "del_peer", 4)
 
 	up := doAvatarUpload(t, router, ownerToken, "me.png", makePNGBytes(t, 32, 32))
-	if up.Code != http.StatusCreated {
-		t.Fatalf("upload status = %d; body = %s", up.Code, up.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(up.Body).Decode(&resp)
+	requireStatus(t, up, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, up)
 	id, _ := resp["id"].(string)
 	if got := doServeFile(t, router, id, peerToken, nil); got.Code != http.StatusOK {
 		t.Fatalf("peer fetch before delete = %d, want 200", got.Code)
@@ -58,13 +52,8 @@ func TestDeleteAvatar_ClearsAndBroadcastsNull(t *testing.T) {
 	spy.got = nil
 
 	rr := doDeleteAvatar(router, ownerToken)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
-	var body map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, rr, http.StatusOK)
+	body := decodeBody[map[string]any](t, rr)
 	if body["username"] != "del_owner" || body["avatar"] != nil {
 		t.Errorf("response = %v, want username del_owner and no avatar key", body)
 	}
@@ -99,9 +88,7 @@ func TestDeleteAvatar_KeepsConcurrentRename(t *testing.T) {
 	}
 
 	rr := doDeleteAvatar(router, token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	after, _ := database.GetUserByID(context.Background(), u.ID)
 	if after.Username != "new_name" {
 		t.Errorf("username = %q, want new_name kept", after.Username)

@@ -209,7 +209,7 @@
   background: var(--bg-hover);
 }
 
-/* Menus as sheets (components/menuSheet.ts): the channel and server menus. A
+/* Menus as sheets (features/menus/menuSheet.ts): the channel and server menus. A
    row can carry a second line, a chevron (it opens a second page) or a check. */
 .menu-sheet-row {
   display: flex;
@@ -279,31 +279,6 @@
 .menu-sheet-footer .form-input {
   min-height: 44px;
   font-size: 16px !important;
-}
-
-/* The status picker as a sheet: the four statuses, then the custom status. */
-.status-sheet-option {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.status-sheet-option .status-picker-option-dot {
-  width: 12px;
-  height: 12px;
-}
-.status-sheet-check {
-  display: flex;
-  min-width: 18px;
-  color: var(--accent-text);
-}
-.status-sheet-custom {
-  padding: 0;
-}
-.status-sheet-custom .status-picker-custom-input {
-  min-height: 48px;
-  padding: 0 16px;
-  border-radius: var(--radius-lg);
-  font-size: 16px;
 }
 
 /* Emoji / GIF / sticker picker: the popup fills the sheet, tabs on top. */
@@ -394,20 +369,11 @@
   border-radius: 10px;
   font-size: var(--font-size-md);
 }
-.upp-sheet-primary .upp-action-btn + .upp-action-btn {
-  background: var(--bg-input);
-  color: var(--text-normal);
-}
 .upp-sheet-secondary .upp-action-btn {
   min-height: 44px;
-  background: transparent;
-  color: var(--text-muted);
-}
-.upp-sheet-secondary [data-testid="upp-block-btn"] {
-  color: var(--text-danger);
 }
 
-/* Tapping a voice channel: who is in there, then Join (components/VoiceJoinSheet.ts). */
+/* Tapping a voice channel: who is in there, then Join (features/channels/VoiceJoinSheet.ts). */
 .join-sheet {
   display: flex;
   flex-direction: column;

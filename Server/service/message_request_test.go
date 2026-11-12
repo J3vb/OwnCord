@@ -45,9 +45,7 @@ func TestMessageRequest_BlockedSenderCreatesNoRequest(t *testing.T) {
 			database, svc := newMessageRequestFixture(t)
 			ctx := context.Background()
 			blocker, blocked := tc.blockerBlocked(database)
-			if err := database.BlockUser(ctx, blocker, blocked); err != nil {
-				t.Fatalf("BlockUser: %v", err)
-			}
+			mustDo(t, "BlockUser", database.BlockUser(ctx, blocker, blocked))
 
 			_, err := svc.Messages.SendMessage(ctx, SendMessageParams{
 				ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
@@ -72,16 +70,11 @@ func TestMessageRequest_BlockedSenderCreatesNoRequest(t *testing.T) {
 func TestMessageRequest_BannedRecipientGetsNoRequest(t *testing.T) {
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
-	if err := database.BanUser(ctx, 2, "test", nil); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(ctx, 2, "test", nil))
 
-	result, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	result := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(result.RequestCreatedFor) != 0 {
 		t.Errorf("RequestCreatedFor = %v, want none", result.RequestCreatedFor)
 	}
@@ -110,12 +103,9 @@ func TestFirstContact_NonActiveRecipientNoRequest(t *testing.T) {
 			database, svc := newMessageRequestFixture(t)
 			setRegistrationStatus(t, database, 2, status)
 
-			result, err := svc.Messages.SendMessage(context.Background(), SendMessageParams{
+			result := mustSendMessage(context.Background(), t, svc.Messages, SendMessageParams{
 				ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
 			})
-			if err != nil {
-				t.Fatalf("SendMessage: %v", err)
-			}
 			if len(result.RequestCreatedFor) != 0 || len(result.OpenedDMFor) != 0 {
 				t.Errorf("RequestCreatedFor = %v, OpenedDMFor = %v, want none", result.RequestCreatedFor, result.OpenedDMFor)
 			}
@@ -139,12 +129,9 @@ func TestMessageRequest_AcceptDoesNotResurrectDeletedContent(t *testing.T) {
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 
-	sendResult, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	sendResult := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "secret",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(sendResult.RequestCreatedFor) != 1 {
 		t.Fatalf("RequestCreatedFor = %v, want exactly one", sendResult.RequestCreatedFor)
 	}
@@ -155,17 +142,13 @@ func TestMessageRequest_AcceptDoesNotResurrectDeletedContent(t *testing.T) {
 	}
 
 	updated, err := svc.MessageRequests.Accept(ctx, 2, reqID)
-	if err != nil {
-		t.Fatalf("Accept: %v", err)
-	}
+	mustDo(t, "Accept", err)
 	if updated.State != msgReqAccepted {
 		t.Fatalf("state = %q, want accepted", updated.State)
 	}
 
 	var deleted int
-	if err := database.QueryRowContext(ctx, `SELECT deleted FROM messages WHERE id = ?`, sendResult.MessageID).Scan(&deleted); err != nil {
-		t.Fatalf("read message: %v", err)
-	}
+	mustDo(t, "read message", database.QueryRowContext(ctx, `SELECT deleted FROM messages WHERE id = ?`, sendResult.MessageID).Scan(&deleted))
 	if deleted == 0 {
 		t.Error("accepting the request un-deleted the message")
 	}
@@ -192,12 +175,9 @@ func TestMessageRequest_PreviewRaceWithDeleteReturnsNilNotStaleContent(t *testin
 	}
 	defer func() { svc.Messages.beforeRequestPreviewLookup = nil }()
 
-	sendResult, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	sendResult := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "racing content",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(sendResult.RequestCreatedFor) != 1 {
 		t.Fatalf("RequestCreatedFor = %v, want exactly one", sendResult.RequestCreatedFor)
 	}
@@ -213,12 +193,9 @@ func TestMessageRequest_ResendAfterIgnoreCreatesNothing(t *testing.T) {
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 
-	first, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	first := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage(1): %v", err)
-	}
 	if len(first.RequestCreatedFor) != 1 {
 		t.Fatalf("first send: RequestCreatedFor = %v, want one", first.RequestCreatedFor)
 	}
@@ -228,12 +205,9 @@ func TestMessageRequest_ResendAfterIgnoreCreatesNothing(t *testing.T) {
 		t.Fatalf("Ignore: %v", err)
 	}
 
-	second, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	second := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi again",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage(2): %v", err)
-	}
 	if len(second.RequestCreatedFor) != 0 {
 		t.Errorf("second send: RequestCreatedFor = %v, want none", second.RequestCreatedFor)
 	}
@@ -255,12 +229,9 @@ func TestMessageRequest_SentFirstMeansTheReplyIsNotARequest(t *testing.T) {
 		t.Fatalf("SendMessage(alice): %v", err)
 	}
 
-	reply, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	reply := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 2, Username: "bob", Content: "who is this",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage(bob): %v", err)
-	}
 	if len(reply.RequestCreatedFor) != 0 {
 		t.Errorf("bob's reply created a request: %v", reply.RequestCreatedFor)
 	}
@@ -305,12 +276,9 @@ func TestMessageRequest_OnlyPendingTransitions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, svc := newMessageRequestFixture(t)
 			ctx := context.Background()
-			sendResult, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+			sendResult := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 				ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
 			})
-			if err != nil {
-				t.Fatalf("SendMessage: %v", err)
-			}
 			id := sendResult.RequestCreatedFor[0].ID
 
 			got, err := action(svc, ctx, 2, id)
@@ -337,12 +305,9 @@ func TestMessageRequest_OnlyRecipientDecides(t *testing.T) {
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
 
-	sendResult, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	sendResult := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	id := sendResult.RequestCreatedFor[0].ID
 
 	for name, action := range dmRequestActions {
@@ -429,9 +394,7 @@ func TestMessageRequest_ConcurrentFirstSendsProduceOneRequest(t *testing.T) {
 func TestMessageRequest_TrustedSendReusesParticipantAndTrustRead(t *testing.T) {
 	database, _ := newDMFixture(t)
 	ctx := context.Background()
-	if err := database.TrustSender(ctx, 2, 1, "accepted"); err != nil {
-		t.Fatalf("TrustSender: %v", err)
-	}
+	mustDo(t, "TrustSender", database.TrustSender(ctx, 2, 1, "accepted"))
 	for _, id := range []int64{1, 2} {
 		if _, err := database.OpenDM(ctx, id, 50); err != nil {
 			t.Fatalf("OpenDM(%d): %v", id, err)
@@ -440,14 +403,15 @@ func TestMessageRequest_TrustedSendReusesParticipantAndTrustRead(t *testing.T) {
 	spy := &dmSendSpyStore{DB: database}
 	svc := New(spy, nil)
 
-	result, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	result := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi bob",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if n := spy.trusted.Load(); n != 0 {
 		t.Errorf("IsTrustedSender calls = %d, want 0 — trust rides on the participant read", n)
+	}
+	// The first send records the sender's own trust; later ones find it on the same read.
+	if n := spy.trustWrites.Load(); n != 1 {
+		t.Errorf("TrustSender writes on the first send = %d, want 1", n)
 	}
 	if n := spy.participantIDs.Load() + spy.isGroup.Load(); n != 0 {
 		t.Errorf("separate GetDMParticipantIDs/IsGroupDM reads = %d, want 0", n)
@@ -462,6 +426,12 @@ func TestMessageRequest_TrustedSendReusesParticipantAndTrustRead(t *testing.T) {
 	if len(result.RequestCreatedFor) != 0 {
 		t.Errorf("RequestCreatedFor = %v, want none for a trusted sender", result.RequestCreatedFor)
 	}
+	mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "and again",
+	})
+	if n := spy.trustWrites.Load(); n != 1 {
+		t.Errorf("TrustSender writes after a second send = %d, want still 1", n)
+	}
 }
 
 // DP-51: an untrusted recipient is still staged as a request and still kept
@@ -471,12 +441,9 @@ func TestMessageRequest_UntrustedSendAudienceFromSameRead(t *testing.T) {
 	spy := &dmSendSpyStore{DB: database}
 	svc := New(spy, nil)
 
-	result, err := svc.Messages.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(result.RequestCreatedFor) != 1 {
 		t.Fatalf("RequestCreatedFor = %v, want one", result.RequestCreatedFor)
 	}

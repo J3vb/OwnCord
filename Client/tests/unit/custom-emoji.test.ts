@@ -32,7 +32,7 @@ import {
   renderMessageContent,
   clearContentParseCache,
 } from "../../src/features/messaging/content/contentParser";
-import { renderReactions } from "../../src/components/message-list/reactions";
+import { renderReactions } from "../../src/features/messaging/message-list/reactions";
 import {
   emojiStore,
   setCustomEmoji,

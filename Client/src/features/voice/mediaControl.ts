@@ -4,25 +4,23 @@
 // facades. The track implementations stay in screenShare.ts, deviceManager.ts,
 // audioElements.ts and audioPipeline.ts; the session state and every
 // collaborator stay owned by LiveKitSession, reached through MediaControlHost.
-import { type Room, Track } from "livekit-client";
+import { Track } from "livekit-client";
 import type { WsClient } from "../../lib/ws";
 import {
   voiceStore,
   setLocalMuted,
   setLocalDeafened,
   setListenOnly,
-  setShareDenied,
-  bumpLocalCameraRev,
 } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
 import type { AudioPipeline } from "../../lib/voice/audioPipeline";
 import type { AudioElements } from "../../lib/voice/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/voice/deviceManager";
+import { publishAllowed, announceFallbackMute } from "./publishGrant";
 import { voiceText } from "../../i18n/voice";
 import { CodecSwitchController } from "./codecSwitch";
-import { CameraDeviceUnusable, CameraSwitchUnavailable } from "./cameraSwitch";
-import { setH264GpuProfiles } from "../../lib/voice/h264Profile";
-import { h264GpuPublish } from "./videoCodec";
+import { VideoCapFollower } from "./videoCapFollow";
+import { switchCameraDevice } from "./cameraDeviceSwitch";
 import { savePref } from "../../lib/prefs/preferences";
 import {
   type VideoTrackDeps,
@@ -36,7 +34,9 @@ import {
   reconcileVideoFlags as doReconcileVideoFlags,
   inPlaceSourceChange,
   getLocalScreenshareStats,
-} from "../../lib/voice/screenShare";
+  getLocalCameraStats,
+} from "./screenShare";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 // Same logger tag as before the extraction, so the media log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -45,7 +45,7 @@ const log = createLogger("livekitSession");
  *  through getters on every use, never captured, so the session stays the
  *  single owner of each one. */
 export interface MediaControlHost {
-  getRoom(): Room | null;
+  getRoom(): VoiceRoom | null;
   getCurrentChannelId(): number | null;
   getWs(): WsClient | null;
   getOnError(): ((message: string) => void) | null;
@@ -54,8 +54,8 @@ export interface MediaControlHost {
   getDeviceManager(): DeviceManager;
   getCameraState(): CameraTrackState;
   getScreenState(): ScreenTrackState;
-  getPendingMicrophoneRoom(): Room | null;
-  setPendingMicrophoneRoom(room: Room | null): void;
+  getPendingMicrophoneRoom(): VoiceRoom | null;
+  setPendingMicrophoneRoom(room: VoiceRoom | null): void;
   configuredAudioOptions(
     channelId: number | null,
   ): { audioPreset: { maxBitrate: number } } | undefined;
@@ -72,14 +72,20 @@ export class MediaControl {
     getCameraState: () => this._cameraState,
     getScreenState: () => this._screenState,
     getDeps: () => this._videoTrackDeps,
+    readCameraSenderSample: () => getLocalCameraStats(this._room),
     readScreenSenderSample: () => getLocalScreenshareStats(this._room),
     onSwitchError: (err) => log.warn("Codec switch failed", err),
+  });
+  private readonly capFollow = new VideoCapFollower({
+    getRoom: () => this._room,
+    getCameraState: () => this._cameraState,
+    getScreenState: () => this._screenState,
   });
   private latestVideoDevice: string | null = null;
 
   // --- Host views, named as the pre-extraction fields so the bodies read the same ---
 
-  private get _room(): Room | null {
+  private get _room(): VoiceRoom | null {
     return this.host.getRoom();
   }
   private get _currentChannelId(): number | null {
@@ -106,10 +112,10 @@ export class MediaControl {
   private get _screenState(): ScreenTrackState {
     return this.host.getScreenState();
   }
-  private get pendingMicrophoneRoom(): Room | null {
+  private get pendingMicrophoneRoom(): VoiceRoom | null {
     return this.host.getPendingMicrophoneRoom();
   }
-  private set pendingMicrophoneRoom(room: Room | null) {
+  private set pendingMicrophoneRoom(room: VoiceRoom | null) {
     this.host.setPendingMicrophoneRoom(room);
   }
   private configuredAudioOptions(
@@ -206,7 +212,7 @@ export class MediaControl {
    *  the call shaped exactly as it was before. On the web path the room's
    *  track creation attaches the mic processor before the publish
    *  (RoomLifecycle.createRoom), so the sender never carries a raw track. */
-  async enableMicrophone(room: Room, enabled: boolean): Promise<void> {
+  async enableMicrophone(room: VoiceRoom, enabled: boolean): Promise<void> {
     const publishOptions = enabled
       ? this.configuredAudioOptions(this._currentChannelId)
       : undefined;
@@ -217,7 +223,7 @@ export class MediaControl {
     await room.localParticipant.setMicrophoneEnabled(enabled, undefined, publishOptions);
   }
 
-  microphonePublishingAllowed(room: Room): boolean {
+  microphonePublishingAllowed(room: VoiceRoom): boolean {
     return publishAllowed(room, Track.Source.Microphone);
   }
 
@@ -281,21 +287,12 @@ export class MediaControl {
         }
         setListenOnly(true);
         setLocalMuted(true);
-        this.announceFallbackMute();
+        announceFallbackMute(this.ws, this._currentChannelId);
         log.warn("Mic re-publish failed — falling back to listen-only/muted", err);
         this.onErrorCallback?.(voiceText("mic.unavailableMuted"));
         return;
       }
     }
-  }
-
-  /** The unmute toggle already sent voice_mute{muted:false}; restate the
-   *  fallback's mute so the server row and every peer's roster match. */
-  private announceFallbackMute(): void {
-    const ws = this.ws;
-    if (ws === null || ws.getState() !== "connected") return;
-    if (this._currentChannelId === null) return;
-    ws.send({ type: "voice_mute", payload: { muted: true } });
   }
 
   async enableCamera(): Promise<void> {
@@ -306,6 +303,7 @@ export class MediaControl {
     await doEnableCamera(this._cameraState, deps);
     // A viewer may have joined while the enable was in flight.
     this.codecSwitch.kick();
+    this.capFollow.kick();
   }
 
   async disableCamera(): Promise<void> {
@@ -315,11 +313,13 @@ export class MediaControl {
   async enableScreenshare(): Promise<void> {
     await doEnableScreenshare(this._screenState, this._videoTrackDeps);
     this.codecSwitch.kick();
+    this.capFollow.kick();
   }
 
-  /** The session ended or is reconnecting: stop the live codec switch. */
+  /** The session ended or is reconnecting: stop the codec switch and cap follower. */
   stopCodecSwitch(): void {
     this.codecSwitch.stop();
+    this.capFollow.stop();
   }
 
   async disableScreenshare(): Promise<void> {
@@ -336,7 +336,7 @@ export class MediaControl {
   /** Stop the camera or share the grant no longer allows (a permission
    *  removed mid-call): the SFU stops carrying it, so the buttons and the
    *  server must not keep saying it is on. */
-  dropDeniedVideo(room: Room): void {
+  dropDeniedVideo(room: VoiceRoom): void {
     if (room !== this._room) return;
     const { localCamera, localScreenshare } = voiceStore.getState();
     if (localCamera && !publishAllowed(room, Track.Source.Camera)) void this.disableCamera();
@@ -348,14 +348,18 @@ export class MediaControl {
    *  browser capture; Linux asks the host to swap its own). */
   async changeScreenshareSource(): Promise<void> {
     const { changeScreenshareSource } = await import("./screenshareChange");
-    return changeScreenshareSource(this._screenState, this._videoTrackDeps);
+    return this.codecSwitch.checkAfterChange("screen", () =>
+      changeScreenshareSource(this._screenState, this._videoTrackDeps),
+    );
   }
 
   /** The live share's quality for this share only (the web path re-sizes the
    *  browser capture; Linux has the host re-size and republish its own). */
   async setScreenshareQuality(quality: StreamQuality): Promise<void> {
     const { setScreenshareQuality } = await import("./screenshareChange");
-    return setScreenshareQuality(this._screenState, this._videoTrackDeps, quality);
+    return this.codecSwitch.checkAfterChange("screen", () =>
+      setScreenshareQuality(this._screenState, this._videoTrackDeps, quality),
+    );
   }
 
   /** The live share's quality, or null while it is not published. */
@@ -377,108 +381,29 @@ export class MediaControl {
     savePref("videoInputDevice", deviceId);
     this.latestVideoDevice = deviceId;
     const run = this.videoSwitch.then(() =>
-      this.latestVideoDevice === deviceId ? this.doSwitchVideoDevice(deviceId) : undefined,
+      this.latestVideoDevice === deviceId
+        ? this.codecSwitch.checkAfterChange("camera", () => this.doSwitchVideoDevice(deviceId))
+        : undefined,
     );
     this.videoSwitch = run.catch(() => {});
     return run;
   }
 
-  private async doSwitchVideoDevice(deviceId: string): Promise<void> {
-    const state = this._cameraState;
-    const track = state.manualCameraTrack;
-    // Camera off, or still starting: the saved choice is what it uses next.
-    // An enable that read the choice just before this pick starts on the old
-    // device; picking again moves it.
-    if (track === null) return;
-    // The device the live camera runs on (the native track knows it).
-    const previous = "device" in track ? track.device : null;
-    // The pick is unusable and the live camera stays: keep using its device.
-    const keepPrevious = (): void => {
-      if (previous === null || this.latestVideoDevice !== deviceId) return;
-      savePref("videoInputDevice", previous);
-      this.latestVideoDevice = previous;
-    };
-    // The restart path: stop, start on the saved device, republish.
-    const restartCameraOn = async (): Promise<boolean> => {
-      const generation = state.generation ?? 0;
-      const failed = (): boolean =>
-        state.manualCameraTrack === null && (state.generation ?? 0) === generation;
-      if (previous === null) {
-        await this.enableCamera();
-      } else {
-        // Hold the failure message: the previous camera may still come back.
-        const held: string[] = [];
-        await this.startCamera({ ...this._videoTrackDeps, onError: (msg) => held.push(msg) });
-        if (failed()) {
-          log.warn("Camera restart on the picked device failed, starting the previous one");
-          const back = this.latestVideoDevice === deviceId;
-          const newer = this.latestVideoDevice;
-          // Start on the previous device. A pick made meanwhile stays the
-          // saved choice and its queued switch moves the camera on from here.
-          savePref("videoInputDevice", previous);
-          await this.enableCamera();
-          if (back) keepPrevious();
-          else if (newer !== null) savePref("videoInputDevice", newer);
-          if (!failed() && back) {
-            this.onErrorCallback?.(voiceText("share.cameraSwitchFailed"));
-          }
-        } else {
-          for (const msg of held) this.onErrorCallback?.(msg);
-        }
-      }
-      // A failed restart already said so, but the server still has the
-      // camera on: tell it the camera is off.
-      if (failed()) {
-        await this.disableCamera();
-        return false;
-      }
-      return true;
-    };
-    try {
-      if ("setDeviceId" in track) {
-        const before = track.mediaStreamTrack;
-        try {
-          if (!(await track.setDeviceId(deviceId))) {
-            log.warn("Camera restarted on another device than the one picked");
-          }
-        } catch (err) {
-          if (err instanceof CameraDeviceUnusable) {
-            log.warn("Picked camera gave no picture, keeping the live one", err);
-            // A newer pick queued meanwhile moves the camera on: no message.
-            if (this.latestVideoDevice !== deviceId) return;
-            keepPrevious();
-            this.onErrorCallback?.(voiceText("share.cameraSwitchFailed"));
-            return;
-          }
-          if (!(err instanceof CameraSwitchUnavailable)) throw err;
-          // The in-place switch could not run and the old camera still
-          // publishes: restart on the new device instead.
-          log.info("In-place camera switch unavailable, restarting", err);
-          if (!(await restartCameraOn())) return;
-          bumpLocalCameraRev();
-          log.info("Camera device switched");
-          return;
-        }
-        // The restart swaps the capture: unplug detection and the H.264
-        // profiles a reconnect would republish with move with it.
-        const now = track.mediaStreamTrack;
-        if (now !== before) setH264GpuProfiles(now, h264GpuPublish(state.published ?? "vp8"));
-        if (now !== before && state.manualCameraTrack === track && state.onCameraEnded) {
-          now.addEventListener("ended", state.onCameraEnded, { once: true });
-        }
-        // The self tile holds the stopped capture: have it drawn again.
-        if (now !== before && state.manualCameraTrack === track) bumpLocalCameraRev();
-      } else {
-        if (!(await restartCameraOn())) return;
-        bumpLocalCameraRev();
-      }
-      log.info("Camera device switched");
-    } catch (err) {
-      if (state.manualCameraTrack !== track) return;
-      log.warn("Camera device switch failed", err);
-      await this.disableCamera();
-      this.onErrorCallback?.(voiceText("share.cameraFailed"));
-    }
+  private doSwitchVideoDevice(deviceId: string): Promise<void> {
+    return switchCameraDevice(
+      {
+        latestDevice: () => this.latestVideoDevice,
+        setLatestDevice: (device) => {
+          this.latestVideoDevice = device;
+        },
+        enableCamera: () => this.enableCamera(),
+        disableCamera: () => this.disableCamera(),
+        startCameraHolding: (onError) => this.startCamera({ ...this._videoTrackDeps, onError }),
+        onError: (message) => this.onErrorCallback?.(message),
+      },
+      this._cameraState,
+      deviceId,
+    );
   }
 
   // --- Delegating methods to DeviceManager ---
@@ -565,19 +490,4 @@ export class MediaControl {
   }
 }
 
-/** Whether the SFU grant lets this room publish `source`; an empty source
- *  list means every source. */
-export function publishAllowed(room: Room, source: Track.Source): boolean {
-  const permissions = room.localParticipant.permissions;
-  return (
-    permissions === undefined ||
-    (permissions.canPublish &&
-      (permissions.canPublishSources.length === 0 ||
-        permissions.canPublishSources.includes(Track.sourceToProto(source))))
-  );
-}
-
-/** Mirror the grant's screen-share permission into the store for the share buttons. */
-export function syncShareGrant(room: Room): void {
-  setShareDenied(!publishAllowed(room, Track.Source.ScreenShare));
-}
+export { publishAllowed, syncShareGrant } from "./publishGrant";

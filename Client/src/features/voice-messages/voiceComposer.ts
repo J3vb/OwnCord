@@ -16,7 +16,7 @@ import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { VoiceUploadMeta } from "@lib/types";
 import { authStore } from "@stores/auth.store";
-import { ATTACHMENT_TTL_MS } from "../messaging/attachmentTtl";
+import { attachmentTtlMs } from "../messaging/attachmentTtl";
 import { voiceMessagesText } from "../../i18n/voiceMessages";
 import {
   createVoiceRecorder,
@@ -330,6 +330,25 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
     );
   }
 
+  /** The stop request was rejected; drop the recording unless the composer moved on. */
+  function onStopRejected(rec: VoiceRecorder): void {
+    if (!alive || recorder !== rec) return;
+    reset(true);
+    options.onError(voiceMessagesText("error.recordingFailed"));
+  }
+
+  /** Take the stopped clip; false when the composer moved on or the clip was too short. */
+  function settleStopped(rec: VoiceRecorder, result: VoiceClip | null): boolean {
+    if (!alive || recorder !== rec || phase !== "stopping") return false;
+    if (result === null) {
+      reset(true);
+      options.onError(voiceMessagesText("error.tooShort"));
+      return false;
+    }
+    holdClip(result);
+    return true;
+  }
+
   async function submit(): Promise<void> {
     if (!alive || bar === null) return;
     if (phase === "recording") {
@@ -341,43 +360,51 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
       try {
         result = await rec.stop();
       } catch {
-        if (!alive || recorder !== rec) return;
-        reset(true);
-        options.onError(voiceMessagesText("error.recordingFailed"));
+        onStopRejected(rec);
         return;
       }
-      if (!alive || recorder !== rec || phase !== "stopping") return;
-      if (result === null) {
-        reset(true);
-        options.onError(voiceMessagesText("error.tooShort"));
-        return;
-      }
-      holdClip(result);
+      if (!settleStopped(rec, result)) return;
     }
     if ((phase !== "ready" && phase !== "failed") || clip === null || file === null) return;
     await upload(clip, file);
   }
 
-  async function upload(held: VoiceClip, heldFile: File): Promise<void> {
-    const refusal = options.gate();
-    if (refusal !== null) {
-      phase = "failed";
-      render();
-      setStatus(refusal);
-      return;
-    }
-    // The server sweeps an unsent upload after about an hour: a retained id
-    // that old is withdrawn and the held clip uploads again.
-    if (uploaded !== null && Date.now() - uploadedAt >= ATTACHMENT_TTL_MS) {
+  /** Show a failed upload with the reason; the held clip stays for a retry. */
+  function failUpload(message: string): void {
+    phase = "failed";
+    render();
+    setStatus(message);
+  }
+
+  /** The server sweeps an unsent upload after its staged lifetime: a retained
+   *  id that old is withdrawn and the held clip uploads again. */
+  function dropStaleUpload(): void {
+    if (uploaded !== null && Date.now() - uploadedAt >= attachmentTtlMs()) {
       withdraw(uploaded.id);
       uploaded = null;
     }
+  }
+
+  function exceedsUploadLimit(heldFile: File): boolean {
     const max = authStore.getState().uploadPolicy?.max_upload_bytes;
-    if (uploaded === null && max !== undefined && max > 0 && heldFile.size > max) {
+    return uploaded === null && max !== undefined && max > 0 && heldFile.size > max;
+  }
+
+  /** The upload that `owner` started still has a composer and clip to serve. */
+  function uploadStillWanted(owner: Disposable, held: VoiceClip): boolean {
+    return uploadOwner === owner && alive && clip === held;
+  }
+
+  async function upload(held: VoiceClip, heldFile: File): Promise<void> {
+    const refusal = options.gate();
+    if (refusal !== null) {
+      failUpload(refusal);
+      return;
+    }
+    dropStaleUpload();
+    if (exceedsUploadLimit(heldFile)) {
       blocked = true;
-      phase = "failed";
-      render();
-      setStatus(voiceMessagesText("error.tooLarge"));
+      failUpload(voiceMessagesText("error.tooLarge"));
       return;
     }
     phase = "uploading";
@@ -391,7 +418,7 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
           { durationMs: held.durationMs, waveform: held.waveform },
           owner.signal,
         );
-        if (uploadOwner !== owner || !alive || clip !== held) {
+        if (!uploadStillWanted(owner, held)) {
           // Discarded while it ran: nothing will use this upload.
           withdraw(result.id);
           return;
@@ -399,10 +426,8 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
         uploaded = result;
         uploadedAt = Date.now();
       } catch {
-        if (uploadOwner !== owner || !alive || clip !== held || owner.signal.aborted) return;
-        phase = "failed";
-        render();
-        setStatus(voiceMessagesText("error.uploadFailed"));
+        if (!uploadStillWanted(owner, held) || owner.signal.aborted) return;
+        failUpload(voiceMessagesText("error.uploadFailed"));
         return;
       } finally {
         if (uploadOwner === owner) uploadOwner = null;
@@ -411,9 +436,7 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
     const final = options.gate();
     if (final !== null) {
       // The composer was gated while the upload ran: keep the uploaded clip.
-      phase = "failed";
-      render();
-      setStatus(final);
+      failUpload(final);
       return;
     }
     const posted = uploaded;

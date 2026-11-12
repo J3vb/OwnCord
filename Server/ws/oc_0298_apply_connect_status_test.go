@@ -30,10 +30,7 @@ func TestApplyConnectStatus_DoesNotStampStatusWhenDBWriteFails(t *testing.T) {
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
-	userID, err := database.CreateUser(ctx, "connect-status-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	userID := mustCreateUser(t, database, "connect-status-user", 1)
 	// Establish a known persisted status distinct from what ConnectStatus
 	// would compute from it, so a wrongly-stamped c.user.Status is
 	// unambiguous. StampConnections is what actually leaves a session at
@@ -45,10 +42,7 @@ func TestApplyConnectStatus_DoesNotStampStatusWhenDBWriteFails(t *testing.T) {
 	if err := database.StampConnections(ctx, nil, []int64{userID}); err != nil {
 		t.Fatalf("StampConnections: %v", err)
 	}
-	pre, err := database.GetUserByID(ctx, userID)
-	if err != nil || pre == nil {
-		t.Fatalf("GetUserByID (precondition): %v", err)
-	}
+	pre := mustGetUser(t, database, userID)
 	if pre.Status != db.StatusOffline {
 		t.Fatalf("precondition: expected status=offline after StampConnections, got %q", pre.Status)
 	}
@@ -73,10 +67,7 @@ func TestApplyConnectStatus_DoesNotStampStatusWhenDBWriteFails(t *testing.T) {
 			c.user.Status, db.StatusOffline)
 	}
 
-	post, err := database.GetUserByID(ctx, userID)
-	if err != nil || post == nil {
-		t.Fatalf("GetUserByID (postcondition): %v", err)
-	}
+	post := mustGetUser(t, database, userID)
 	if post.Status != db.StatusOffline {
 		t.Fatalf("persisted status after failed applyConnectStatus = %q, want unchanged %q", post.Status, db.StatusOffline)
 	}

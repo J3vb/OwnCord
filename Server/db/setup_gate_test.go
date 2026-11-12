@@ -18,9 +18,7 @@ func openTestMarkersExternal(t *testing.T) *db.MarkerStore {
 		key[i] = 11
 	}
 	m, err := db.OpenMarkerStore(filepath.Join(t.TempDir(), "erasure", "markers.sqlite"), key)
-	if err != nil {
-		t.Fatalf("OpenMarkerStore: %v", err)
-	}
+	mustDo(t, "OpenMarkerStore", err)
 	t.Cleanup(func() { _ = m.Close() })
 	return m
 }
@@ -65,9 +63,7 @@ func TestCreateOwnerIfEmpty_SetupStaysClosedOnceAnOwnerExisted(t *testing.T) {
 	}
 
 	// The operator's deliberate re-open, with filesystem access.
-	if err := database.SetSetting(ctx, "setup_completed", "0"); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetSetting", database.SetSetting(ctx, "setup_completed", "0"))
 	if _, err := database.CreateOwnerIfEmpty(ctx, "recovered-owner", "hash", 1); err != nil {
 		t.Fatalf("CreateOwnerIfEmpty after the operator re-opened setup = %v", err)
 	}
@@ -112,16 +108,10 @@ func TestMarkerStore_LocateSequenceFloor(t *testing.T) {
 	}
 	for _, id := range []int64{3, 41, 900} {
 		tok, _, err := m.RecordPendingAccount(ctx, id, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := m.ConfirmAccount(ctx, tok); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "RecordPendingAccount", err)
+		mustDo(t, "ConfirmAccount", m.ConfirmAccount(ctx, tok))
 	}
-	if err := m.RecordMessagesSweep(ctx, 7, "2026-01-01 00:00:00", 0); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RecordMessagesSweep", m.RecordMessagesSweep(ctx, 7, "2026-01-01 00:00:00", 0))
 	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorUsers, probeCeiling)
 	if err != nil || got != 900 || !complete {
 		t.Errorf("users floor = %d, %v, %v; want 900 located completely", got, complete, err)
@@ -138,12 +128,8 @@ func TestMarkerStore_LocateSequenceFloor(t *testing.T) {
 	// as the lower bound it is, and says so, which the caller treats as
 	// fatal rather than persisting it.
 	tok, _, err := m.RecordPendingAccount(ctx, probeCeiling+5, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := m.ConfirmAccount(ctx, tok); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RecordPendingAccount", err)
+	mustDo(t, "ConfirmAccount", m.ConfirmAccount(ctx, tok))
 	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorUsers, probeCeiling)
 	if err != nil || complete || got != 900 {
 		t.Errorf("users floor with an out-of-range marker = %d, %v, %v; want 900 reported incomplete", got, complete, err)
@@ -158,9 +144,7 @@ func TestCreateOwnerIfEmpty_AnUnrecognisedFlagRefuses(t *testing.T) {
 	for _, value := range []string{"", "2", "true", "TRUE", "0 ", "no"} {
 		t.Run("flag="+value, func(t *testing.T) {
 			database := openMigratedMemory(t)
-			if err := database.SetSetting(ctx, db.SetupCompletedKey, value); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "SetSetting", database.SetSetting(ctx, db.SetupCompletedKey, value))
 			if _, err := database.CreateOwnerIfEmpty(ctx, "someone", "hash", 1); !errors.Is(err, db.ErrConflict) {
 				t.Errorf("CreateOwnerIfEmpty with setup_completed = %q = %v, want ErrConflict", value, err)
 			}
@@ -168,9 +152,7 @@ func TestCreateOwnerIfEmpty_AnUnrecognisedFlagRefuses(t *testing.T) {
 	}
 	// The documented re-open value is the one that lets the count decide.
 	database := openMigratedMemory(t)
-	if err := database.SetSetting(ctx, db.SetupCompletedKey, db.SetupOpen); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetSetting", database.SetSetting(ctx, db.SetupCompletedKey, db.SetupOpen))
 	if _, err := database.CreateOwnerIfEmpty(ctx, "recovered", "hash", 1); err != nil {
 		t.Errorf("CreateOwnerIfEmpty with the re-open value = %v", err)
 	}

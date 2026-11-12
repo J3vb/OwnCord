@@ -17,6 +17,17 @@
  */
 
 import { formatDiscordTimestamp, type TimestampStyle } from "./discordTimestamp";
+import {
+  ANGLE_URL_RE,
+  buildMatches,
+  codeSpanEnd,
+  matchDelim,
+  runLength,
+  scanClose,
+  urlEnd,
+} from "./markdownScan";
+
+export { codeSpanEnd };
 
 /** Emphasis-style wrappers, in the flavour Discord uses. */
 export type InlineStyle = "strong" | "em" | "underline" | "strike" | "spoiler";
@@ -40,8 +51,6 @@ export type { TimestampStyle };
 
 /** `<t:1700000000>` or `<t:1700000000:R>`, sticky: matched at `lastIndex`. */
 const TIMESTAMP_RE = /<t:(-?\d{1,13})(?::([tTdDfFR]))?>/y;
-/** `<https://…>`, sticky: matched at `lastIndex`. */
-const ANGLE_URL_RE = /<(https?:\/\/[^\s<>]+)>/iy;
 
 /** Characters a backslash can neutralise. Anything else keeps its backslash. */
 const ESCAPABLE = "\\`*_~|[]()<>#-+.!";
@@ -49,171 +58,8 @@ const ESCAPABLE = "\\`*_~|[]()<>#-+.!";
 /** Nesting cap — a guard against pathological input, not a style choice. */
 const MAX_DEPTH = 6;
 
-/** Bare-URL shape, kept in sync with URL_REGEX in content-parser. */
-const URL_START = /^https?:\/\//i;
-
 /** Shared empty map for `parseInline` calls with nothing to bracket-match. */
 const EMPTY_MATCHES: ReadonlyMap<number, number> = new Map();
-
-interface DelimSpec {
-  readonly marker: string;
-  /** Outermost style first; `***x***` is bold wrapping italic. */
-  readonly styles: readonly InlineStyle[];
-}
-
-/** Longest markers first — `***` must win over `**`, and `**` over `*`. */
-const DELIMS: readonly DelimSpec[] = [
-  { marker: "***", styles: ["strong", "em"] },
-  { marker: "___", styles: ["underline", "em"] },
-  { marker: "**", styles: ["strong"] },
-  { marker: "__", styles: ["underline"] },
-  { marker: "~~", styles: ["strike"] },
-  { marker: "||", styles: ["spoiler"] },
-  { marker: "*", styles: ["em"] },
-  { marker: "_", styles: ["em"] },
-];
-
-function isWordChar(ch: string | undefined): boolean {
-  return ch !== undefined && /[A-Za-z0-9]/.test(ch);
-}
-
-function runLength(src: string, i: number, ch: string): number {
-  let n = 0;
-  while (i + n < src.length && src[i + n] === ch) n++;
-  return n;
-}
-
-/**
- * End index (exclusive) of the code span opening at `i`, or -1 when it never
- * closes. Supports single and double backtick fences.
- */
-export function codeSpanEnd(src: string, i: number): number {
-  const run = Math.min(runLength(src, i, "`"), 2);
-  const fence = "`".repeat(run);
-  const close = src.indexOf(fence, i + run);
-  if (close < 0) return -1;
-  return close + run;
-}
-
-/**
- * End index (exclusive) of a bare URL starting at `i`, or `i` when there is
- * none. Trailing delimiter runs are given back so `**https://a/b**` still
- * closes its bold — a URL swallowing the closer is worse than a URL losing a
- * trailing asterisk it almost certainly never had.
- */
-function urlEnd(src: string, i: number): number {
-  if (!URL_START.test(src.slice(i, i + 8))) return i;
-  let end = i;
-  while (end < src.length && !/[\s<>"'`]/.test(src[end]!)) end++;
-  const min = i + 8;
-  for (;;) {
-    const tail = src.slice(min, end);
-    const run = /([*_~|])\1+$/.exec(tail);
-    if (run !== null) {
-      end -= run[0].length;
-      continue;
-    }
-    if (end > min && (src[end - 1] === "*" || src[end - 1] === "_")) {
-      end--;
-      continue;
-    }
-    break;
-  }
-  return end;
-}
-
-/** The delimiter opening at `i`, or null. */
-function matchDelim(src: string, i: number): DelimSpec | null {
-  for (const d of DELIMS) {
-    if (!src.startsWith(d.marker, i)) continue;
-    // `snake_case_names` must stay literal: an underscore only opens emphasis
-    // on a word boundary.
-    if (d.marker[0] === "_" && isWordChar(src[i - 1])) continue;
-    return d;
-  }
-  return null;
-}
-
-/**
- * Index of the delimiter run that closes `marker`, searching from `from`, or
- * -1. Escapes, code spans and bare URLs are skipped so a closer hiding inside
- * them is not mistaken for the real one.
- */
-function scanClose(src: string, from: number, marker: string): number {
-  const ch = marker[0]!;
-  const len = marker.length;
-  let j = from;
-  while (j < src.length) {
-    const c = src[j]!;
-    if (c === "\\") {
-      j += 2;
-      continue;
-    }
-    if (c === "`") {
-      const end = codeSpanEnd(src, j);
-      if (end > 0) {
-        j = end;
-        continue;
-      }
-    }
-    if (c === "<") {
-      ANGLE_URL_RE.lastIndex = j;
-      const angle = ANGLE_URL_RE.exec(src);
-      if (angle !== null) {
-        j += angle[0].length;
-        continue;
-      }
-    }
-    const u = urlEnd(src, j);
-    if (u > j) {
-      j = u;
-      continue;
-    }
-    if (c === ch) {
-      const run = runLength(src, j, ch);
-      const usable = len > 1 ? run >= len : run === 1;
-      if (usable && (ch !== "_" || !isWordChar(src[j + len]))) return j;
-      j += run;
-      continue;
-    }
-    j++;
-  }
-  return -1;
-}
-
-/**
- * Matches for every `openCh` in `src` to its balanced `closeCh`, computed in
- * one linear pass with a stack (an opener that never closes just never gets
- * an entry). A run's mismatched openers therefore cost O(1) each to look up
- * instead of a fresh O(n) rescan apiece — the same semantics as calling a
- * depth-counting scan from every individual opener (nesting balances the
- * same way, escapes swallow the following character unconditionally, and a
- * bare newline strands whatever is still open across it), just computed once
- * per `parseInline` invocation instead of once per opener.
- */
-function buildMatches(src: string, openCh: string, closeCh: string): ReadonlyMap<number, number> {
-  const matches = new Map<number, number>();
-  const stack: number[] = [];
-  for (let j = 0; j < src.length; j++) {
-    const c = src[j]!;
-    if (c === "\\") {
-      j++;
-      continue;
-    }
-    if (c === "\n") {
-      // Nothing left open can span a newline; abandon it rather than let it
-      // match something on a later line.
-      stack.length = 0;
-      continue;
-    }
-    if (c === openCh) stack.push(j);
-    else if (c === closeCh) {
-      const open = stack.pop();
-      if (open !== undefined) matches.set(open, j);
-    }
-  }
-  return matches;
-}
 
 /** Parse `[text](url)` at `i`. The URL is *not* validated here — that is the
  * renderer's job, which is why the raw source travels with the node. */
@@ -243,6 +89,90 @@ function parseLink(
   };
 }
 
+/** What one step of the scan consumed: text for the buffer, or a node. */
+interface InlineToken {
+  /** Index after the consumed source. */
+  readonly end: number;
+  /** A node to emit (flushing the text buffer first), or null for plain text. */
+  readonly node: InlineNode | null;
+  readonly text: string;
+}
+
+function nodeToken(node: InlineNode, end: number): InlineToken {
+  return { end, node, text: "" };
+}
+
+function textToken(text: string, end: number): InlineToken {
+  return { end, node: null, text };
+}
+
+/** A backslash before an escapable character: that character, literal. */
+function escapeToken(src: string, i: number, c: string): InlineToken | null {
+  if (c !== "\\" || i + 1 >= src.length || !ESCAPABLE.includes(src[i + 1]!)) return null;
+  return textToken(src[i + 1]!, i + 2);
+}
+
+/** A closed code span, in which markdown is dead. */
+function codeToken(src: string, i: number, c: string): InlineToken | null {
+  if (c !== "`") return null;
+  const end = codeSpanEnd(src, i);
+  if (end <= i) return null;
+  const run = Math.min(runLength(src, i, "`"), 2);
+  return nodeToken({ type: "code", value: src.slice(i + run, end - run) }, end);
+}
+
+/** `<t:unix>` or `<https://…>` at `i`. */
+function angleToken(src: string, i: number, c: string): InlineToken | null {
+  if (c !== "<") return null;
+  TIMESTAMP_RE.lastIndex = i;
+  const ts = TIMESTAMP_RE.exec(src);
+  // Past what a Date can hold (±8.64e12 s) the token stays text.
+  if (ts !== null && Math.abs(Number(ts[1])) <= 8.64e12) {
+    const style = (ts[2] ?? "f") as TimestampStyle;
+    return nodeToken({ type: "timestamp", unix: Number(ts[1]), style }, i + ts[0].length);
+  }
+  ANGLE_URL_RE.lastIndex = i;
+  const angle = ANGLE_URL_RE.exec(src);
+  if (angle === null) return null;
+  return nodeToken({ type: "url", url: angle[1]!, raw: angle[0] }, i + angle[0].length);
+}
+
+/** A bare URL is opaque: its underscores and asterisks are address, not
+ *  markup, and it is autolinked later by the renderer. */
+function urlToken(src: string, i: number): InlineToken | null {
+  const u = urlEnd(src, i);
+  return u > i ? textToken(src.slice(i, u), u) : null;
+}
+
+function linkToken(
+  src: string,
+  i: number,
+  c: string,
+  depth: number,
+  bracketMatches: ReadonlyMap<number, number>,
+  parenMatches: ReadonlyMap<number, number>,
+): InlineToken | null {
+  if (depth >= MAX_DEPTH || c !== "[") return null;
+  const link = parseLink(src, i, depth, bracketMatches, parenMatches);
+  return link === null ? null : nodeToken(link.node, link.end);
+}
+
+/** A delimiter pair opening at `i` and closing later, as nested style nodes. */
+function styledToken(src: string, i: number, depth: number): InlineToken | null {
+  if (depth >= MAX_DEPTH) return null;
+  const d = matchDelim(src, i);
+  if (d === null) return null;
+  const innerStart = i + d.marker.length;
+  const close = scanClose(src, innerStart, d.marker);
+  if (close <= innerStart) return null;
+  const children = parseInline(src.slice(innerStart, close), depth + 1);
+  let node: InlineNode = { type: d.styles[d.styles.length - 1]!, children };
+  for (let k = d.styles.length - 2; k >= 0; k--) {
+    node = { type: d.styles[k]!, children: [node] };
+  }
+  return nodeToken(node, close + d.marker.length);
+}
+
 /**
  * Tokenize one run of inline text (no block constructs, no newline meaning).
  */
@@ -265,85 +195,25 @@ export function parseInline(src: string, depth = 0): InlineNode[] {
   let i = 0;
   while (i < src.length) {
     const c = src[i]!;
-
-    if (c === "\\" && i + 1 < src.length && ESCAPABLE.includes(src[i + 1]!)) {
-      buf += src[i + 1]!;
-      i += 2;
+    const token =
+      escapeToken(src, i, c) ??
+      codeToken(src, i, c) ??
+      angleToken(src, i, c) ??
+      urlToken(src, i) ??
+      linkToken(src, i, c, depth, bracketMatches, parenMatches) ??
+      styledToken(src, i, depth);
+    if (token === null) {
+      buf += c;
+      i++;
       continue;
     }
-
-    if (c === "`") {
-      const end = codeSpanEnd(src, i);
-      if (end > i) {
-        const run = Math.min(runLength(src, i, "`"), 2);
-        flush();
-        out.push({ type: "code", value: src.slice(i + run, end - run) });
-        i = end;
-        continue;
-      }
+    if (token.node === null) {
+      buf += token.text;
+    } else {
+      flush();
+      out.push(token.node);
     }
-
-    if (c === "<") {
-      TIMESTAMP_RE.lastIndex = i;
-      const ts = TIMESTAMP_RE.exec(src);
-      // Past what a Date can hold (±8.64e12 s) the token stays text.
-      if (ts !== null && Math.abs(Number(ts[1])) <= 8.64e12) {
-        flush();
-        const style = (ts[2] ?? "f") as TimestampStyle;
-        out.push({ type: "timestamp", unix: Number(ts[1]), style });
-        i += ts[0].length;
-        continue;
-      }
-      ANGLE_URL_RE.lastIndex = i;
-      const angle = ANGLE_URL_RE.exec(src);
-      if (angle !== null) {
-        flush();
-        out.push({ type: "url", url: angle[1]!, raw: angle[0] });
-        i += angle[0].length;
-        continue;
-      }
-    }
-
-    // A bare URL is opaque: its underscores and asterisks are address, not
-    // markup, and it is autolinked later by the renderer.
-    const u = urlEnd(src, i);
-    if (u > i) {
-      buf += src.slice(i, u);
-      i = u;
-      continue;
-    }
-
-    if (depth < MAX_DEPTH && c === "[") {
-      const link = parseLink(src, i, depth, bracketMatches, parenMatches);
-      if (link !== null) {
-        flush();
-        out.push(link.node);
-        i = link.end;
-        continue;
-      }
-    }
-
-    if (depth < MAX_DEPTH) {
-      const d = matchDelim(src, i);
-      if (d !== null) {
-        const innerStart = i + d.marker.length;
-        const close = scanClose(src, innerStart, d.marker);
-        if (close > innerStart) {
-          flush();
-          const children = parseInline(src.slice(innerStart, close), depth + 1);
-          let node: InlineNode = { type: d.styles[d.styles.length - 1]!, children };
-          for (let k = d.styles.length - 2; k >= 0; k--) {
-            node = { type: d.styles[k]!, children: [node] };
-          }
-          out.push(node);
-          i = close + d.marker.length;
-          continue;
-        }
-      }
-    }
-
-    buf += c;
-    i++;
+    i = token.end;
   }
 
   flush();

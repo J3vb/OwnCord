@@ -1,39 +1,24 @@
 package ws_test
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
-
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // drainForErrorEnvelope reads from ch until an error frame arrives and returns
 // its code and envelope id; hasID is false when the frame had no id key.
 func drainForErrorEnvelope(ch <-chan []byte, deadline time.Duration) (code, id string, hasID bool) {
-	timer := time.NewTimer(deadline)
-	defer timer.Stop()
-	for {
-		select {
-		case msg := <-ch:
-			var env map[string]any
-			if err := json.Unmarshal(msg, &env); err != nil {
-				continue
-			}
-			if env["type"] != "error" {
-				continue
-			}
-			if payload, ok := env["payload"].(map[string]any); ok {
-				code, _ = payload["code"].(string)
-			}
-			rawID, present := env["id"]
-			id, _ = rawID.(string)
-			return code, id, present
-		case <-timer.C:
-			return "", "", false
-		}
+	env := waitErrorEnvelope(ch, deadline, func(map[string]any) bool { return true })
+	if env == nil {
+		return "", "", false
 	}
+	if payload, ok := errorPayload(env); ok {
+		code, _ = payload["code"].(string)
+	}
+	rawID, present := env["id"]
+	id, _ = rawID.(string)
+	return code, id, present
 }
 
 func voiceJoinFrame(t *testing.T, reqID string, channelID int64) []byte {
@@ -56,10 +41,7 @@ func TestVoiceJoinRefusal_EchoesRequestID(t *testing.T) {
 	t.Run("not_found_precheck", func(t *testing.T) {
 		hub, database := newCoverageHub(t)
 		user := seedCoverageOwner(t, database, "vjid-nf")
-		send := make(chan []byte, 64)
-		c := ws.NewTestClientWithUser(hub, user, 0, send)
-		hub.Register(c)
-		waitRegistered(t, hub, c)
+		c, send := connectClient(t, hub, user, 0, 64)
 
 		hub.HandleMessageForTest(c, voiceJoinFrame(t, "req-nf", 999999))
 
@@ -71,15 +53,9 @@ func TestVoiceJoinRefusal_EchoesRequestID(t *testing.T) {
 
 	t.Run("join_gate_text_channel", func(t *testing.T) {
 		hub, database := newCoverageHub(t)
-		textID, err := database.CreateChannel(context.Background(), "vjid-text", "text", "", "", 0)
-		if err != nil {
-			t.Fatalf("CreateChannel: %v", err)
-		}
+		textID := mustCreateChannel(t, database, "vjid-text", "text")
 		user := seedCoverageOwner(t, database, "vjid-gate")
-		send := make(chan []byte, 64)
-		c := ws.NewTestClientWithUser(hub, user, 0, send)
-		hub.Register(c)
-		waitRegistered(t, hub, c)
+		c, send := connectClient(t, hub, user, 0, 64)
 
 		hub.HandleMessageForTest(c, voiceJoinFrame(t, "req-gate", textID))
 
@@ -91,27 +67,16 @@ func TestVoiceJoinRefusal_EchoesRequestID(t *testing.T) {
 
 	t.Run("channel_full_persist", func(t *testing.T) {
 		hub, database := newCoverageHub(t)
-		vcID, err := database.CreateChannel(context.Background(), "vjid-full", "voice", "", "", 0)
-		if err != nil {
-			t.Fatalf("CreateChannel: %v", err)
-		}
-		if _, err := database.ExecContext(context.Background(), "UPDATE channels SET voice_max_users = 1 WHERE id = ?", vcID); err != nil {
-			t.Fatalf("UPDATE channels: %v", err)
-		}
+		vcID := mustCreateChannel(t, database, "vjid-full", "voice")
+		mustExec(t, database, "UPDATE channels SET voice_max_users = 1 WHERE id = ?", vcID)
 
 		user1 := seedCoverageOwner(t, database, "vjid-full-u1")
-		send1 := make(chan []byte, 64)
-		c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-		hub.Register(c1)
-		waitRegistered(t, hub, c1)
+		c1, send1 := connectClient(t, hub, user1, 0, 64)
 		hub.HandleMessageForTest(c1, voiceJoinFrame(t, "req-first", vcID))
 		drainChanTimeout(send1, 100*time.Millisecond)
 
 		user2 := seedVoiceMember(t, database, "vjid-full-u2")
-		send2 := make(chan []byte, 64)
-		c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-		hub.Register(c2)
-		waitRegistered(t, hub, c2)
+		c2, send2 := connectClient(t, hub, user2, 0, 64)
 		hub.HandleMessageForTest(c2, voiceJoinFrame(t, "req-full", vcID))
 
 		code, id, _ := drainForErrorEnvelope(send2, 500*time.Millisecond)
@@ -123,10 +88,7 @@ func TestVoiceJoinRefusal_EchoesRequestID(t *testing.T) {
 	t.Run("rate_limited", func(t *testing.T) {
 		hub, database := newCoverageHub(t)
 		user := seedCoverageOwner(t, database, "vjid-rl")
-		send := make(chan []byte, 64)
-		c := ws.NewTestClientWithUser(hub, user, 0, send)
-		hub.Register(c)
-		waitRegistered(t, hub, c)
+		c, send := connectClient(t, hub, user, 0, 64)
 
 		// Each refused attempt still spends a rate-limit token.
 		for range 5 {
@@ -145,10 +107,7 @@ func TestVoiceJoinRefusal_EchoesRequestID(t *testing.T) {
 func TestVoiceJoinRefusal_NoRequestID_StaysIDLess(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vjid-none")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 64)
 
 	hub.HandleMessageForTest(c, voiceJoinFrame(t, "", 999999))
 

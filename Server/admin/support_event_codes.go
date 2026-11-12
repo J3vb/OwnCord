@@ -2,19 +2,14 @@ package admin
 
 // The event-code table for the support bundle's events.json.
 //
-// supportEventCodes maps a fixed Warn/Error log message (the constant string a
-// slog.Warn/Error call passes as its message) to a stable, lower_snake_case
-// event code. The message text itself is never exported: supportEvents emits
-// only the code, so a bundle cannot carry free-form text. Codes are derived
-// from the literal alone — no runtime data — so none can embed a request value.
+// supportEventCodes maps a fixed Warn/Error log message (the constant string passed to slog.Warn/Error) to a
+// stable lower_snake_case code. The message text is never exported: supportEvents emits only the code, so a
+// bundle cannot carry free-form text. Codes derive from the literal alone, so none can embed a request value.
 //
-// The entries were generated from the message literals in this tree. They are
-// hand-maintained from here: TestSupportEventCodes_EveryWarnErrorLiteralIsCoded
-// parses the tree, and when a new Warn/Error message has no code it names the
-// message and file, so an author adds the entry it needs. A message held in a
-// struct field (a maintenance step's failLog, a voice toggle's updateLog) needs
-// an entry for each constant that field is set to. Messages with a variable
-// suffix are covered by supportEventPrefixCodes (support_redaction.go).
+// Entries are hand-maintained: TestSupportEventCodes_EveryWarnErrorLiteralIsCoded parses the tree and names
+// any new Warn/Error message lacking a code. A message held in a struct field (a step's failLog, a toggle's
+// updateLog) needs an entry for each constant it is set to. Variable-suffix messages are covered by
+// supportEventPrefixCodes (support_redaction.go).
 var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positive — log messages and event codes, not credentials
 	"ACME HTTP server error — HTTP-01 challenges and certificate renewal will fail until the next restart": "acme_http_server_error_http_01",
 	"ACME HTTP server shutdown error": "acme_http_server_shutdown_error",
@@ -226,7 +221,9 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"livekit: ensure the keys entry in your livekit.yaml matches voice.livekit_api_key / voice.livekit_api_secret": "livekit_keys_mismatch_hint",
 	"livekit: process exited unexpectedly":                                                                         "livekit_process_exited",
 	"livekit: retrying download":                                                                                   "livekit_retrying_download",
-	"livekit: too many rapid failures, giving up":                                                                  "livekit_restart_exhausted",
+	"livekit: too many rapid failures, retrying every 10 minutes":                                                  "livekit_restart_exhausted",
+	"livekit: restart requested by an admin":                                                                       "livekit_restart_requested",
+	"livekit: trying again after giving up":                                                                        "livekit_slow_retry",
 	"log stream: failed to clear write deadline; stream may be cut by WriteTimeout":                                "log_stream_clear_write_deadline_failed",
 	"login: GetUserByUsername failed":                                                                              "login_getuserbyusername_failed",
 	"maintenance loop did not exit before shutdown timeout":                                                        "maintenance_loop_shutdown_timeout",
@@ -304,10 +301,13 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"restore refused: backup schema is newer than this server":                                                     "restore_refused_backup_schema_is_newer",
 	"restore refused: could not preserve message retry cutoff":                                                     "restore_refused_preserve_retry_cutoff_failed",
 	"restore refused: could not read backup schema version":                                                        "restore_refused_read_schema_version_failed",
+	"storage reconciliation skipped: backup folder could not be read":                                              "storage_reconcile_backup_folder_unreadable",
+	"storage reconciliation skipped while a restore safety copy is fresh":                                          "storage_reconcile_held_for_restore",
 	"retention marker: messages present past the recorded cutoff, removed again":                                   "retention_marker_messages_past_cutoff",
 	"retention markers replayed":                                                                                   "retention_markers_replayed",
 	"retention: journaled replay purge failed again":                                                               "retention_journaled_replay_purge_failed_again",
 	"retention: replay purge failed, journaled for the next tick":                                                  "retention_replay_purge_failed",
+	"retention: recording the finished sweep failed, the start-up replay will run again":                           "retention_swept_record_failed",
 	"retention: resuming unfinished runs":                                                                          "retention_resuming_unfinished_runs",
 	"role deleted":                                                                                                 "role_deleted",
 	"role service: failed to list role members":                                                                    "role_service_list_role_members_failed",
@@ -443,6 +443,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"ws: buildReady ListNSFWAcknowledgedChannelIDs failed, reporting unacknowledged":               "ws_buildready_listnsfwacknowledgedchannelids_failed",
 	"ws: channelNSFWFilter GetChannel failed, denying all recipients":                              "ws_channelnsfwfilter_getchannel_failed",
 	"ws: channelNSFWFilter ListNSFWAcknowledgedUserIDs failed, denying":                            "ws_channelnsfwfilter_listnsfwacknowledgeduserids_failed",
+	"hub: channelReadAudience could not resolve users, marking them for resync":                    "hub_channelreadaudience_unresolved_users_marked",
 	"ws: channelReadAudience GetChannel failed, denying":                                           "ws_channelreadaudience_getchannel_failed_denying",
 	"ws: channelReadAudience GetDMParticipantIDs failed, denying":                                  "ws_channelreadaudience_getdmparticipantids_failed",
 	"ws: client high+normal buffers full, closing connection":                                      "ws_client_high_normal_buffers_full",

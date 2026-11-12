@@ -1,9 +1,8 @@
 /**
  * Discord's `<t:unix:style>` message timestamps, written in the reader's own
- * time zone and clock preference. Pure: the renderer decides the element.
+ * time zone, date order and clock preference. Pure: the renderer decides the element.
  */
 import { TEXT_LOCALE, formatDate } from "../../i18n/format";
-import { getTimeFormat } from "../../lib/text/timeFormat";
 
 /** Discord's timestamp styles; `f` is the default. */
 export type TimestampStyle = "t" | "T" | "d" | "D" | "f" | "F" | "R";
@@ -24,17 +23,9 @@ const STYLE_OPTIONS: Record<Exclude<TimestampStyle, "R">, Intl.DateTimeFormatOpt
   },
 };
 
-const fullFormats: { h12?: Intl.DateTimeFormat; h24?: Intl.DateTimeFormat } = {};
-
-/** Weekday, date and time ("F" style) for a tooltip. The formatter is built
- *  once per clock preference, not once per call: a list draws one per row. */
+/** Weekday, date and time ("F" style) for a tooltip. */
 export function formatFullDateTime(date: Date): string {
-  const key = getTimeFormat() === "12h" ? "h12" : "h24";
-  fullFormats[key] ??= new Intl.DateTimeFormat(TEXT_LOCALE, {
-    ...STYLE_OPTIONS.F,
-    hour12: key === "h12",
-  });
-  return fullFormats[key].format(date);
+  return formatDate(date, STYLE_OPTIONS.F);
 }
 
 /** Largest unit first: the first whose size fits the gap is used. */

@@ -259,9 +259,7 @@ func TestGetRoleForUserWarmCacheNoStoreRead(t *testing.T) {
 	r1.Top.Name = "mutated"
 	r1.IDs[0] = 999
 	r2, err := svc.GetRoleForUser(ctx, 1)
-	if err != nil {
-		t.Fatalf("GetRoleForUser: %v", err)
-	}
+	mustDo(t, "GetRoleForUser", err)
 	if r2.Top.Name != "member" || *r2.Top.Color != "#112233" || r2.IDs[0] != permissions.MemberRoleID {
 		t.Fatalf("cached role was aliased: %+v", r2)
 	}

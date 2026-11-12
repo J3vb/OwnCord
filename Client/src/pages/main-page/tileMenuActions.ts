@@ -4,9 +4,9 @@
  * and member list use.
  */
 
-import { buildVoiceModOptions } from "@components/ChannelSidebar";
+import { buildVoiceModOptions } from "../../features/channels/ChannelSidebar";
 import { Disposable } from "@lib/disposable";
-import type { VideoGridCallbacks } from "@components/VideoGrid";
+import type { VideoGridCallbacks } from "../../features/voice/videoGrid/VideoGrid";
 import { channelsStore } from "@stores/channels.store";
 import { voiceStore } from "@stores/voice.store";
 import type { WsClient } from "@lib/ws";

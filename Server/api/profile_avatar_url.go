@@ -13,21 +13,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// validateAvatarURL checks that avatar is empty or an https:// URL no longer
-// than maxAvatarURLLen, and that a URL on the server's own host is an attachment
-// route.
-// A same-host URL is otherwise an amplification primitive: the client attaches
-// the session bearer token to requests whose host equals the server, so every
-// viewer rendering the user would fetch an arbitrary path on this origin with
-// their credentials. The only legitimate same-host avatar is the attachment
-// route this server writes (service.AvatarFileURL); other hosts are fetched
-// anonymously through the client's external-content broker.
-// selfHosts come from configuration (configuredSelfHosts), NOT the
-// client-supplied Host header: trusting it alone let an attacker name an
-// arbitrary Host and slip a same-origin path past the comparison. The request's
-// Host is still one extra candidate, which only widens what is refused, and it
-// covers a server with no tls.domain reached by DNS name or behind a reverse
-// proxy.
+// validateAvatarURL checks that avatar is empty or an https:// URL within maxAvatarURLLen, and that a URL on
+// the server's own host is an attachment route. A same-host URL is otherwise an amplification primitive: the
+// client attaches the session bearer token to same-host requests, so every viewer would fetch an arbitrary
+// path on this origin with their credentials. Other hosts are fetched anonymously through the
+// external-content broker. selfHosts come from configuration (configuredSelfHosts), NOT the client-supplied
+// Host header, which alone let an attacker name an arbitrary Host; the request Host is an extra candidate
+// that only widens what is refused.
 func validateAvatarURL(avatar string, selfHosts []string, requestHost string) error {
 	if avatar == "" {
 		return nil
@@ -45,11 +37,9 @@ func validateAvatarURL(avatar string, selfHosts []string, requestHost string) er
 	return nil
 }
 
-// configuredSelfHosts derives the host[:port] names this server is reachable
-// on, for the same-host avatar guard: the operator-configured public host
-// (tls.domain, which names this server when TLS terminates here) plus every
-// bound listen address on this host, each with the configured listen port (an
-// explicit default port compares equal to none, see isSelfHost).
+// configuredSelfHosts derives the host[:port] names this server is reachable on: tls.domain plus every bound
+// listen address, each with the listen port (an explicit default port compares equal to none, see
+// isSelfHost).
 func configuredSelfHosts(cfg *config.Config) []string {
 	var names []string
 	port := ""
@@ -78,9 +68,7 @@ func configuredSelfHosts(cfg *config.Config) []string {
 	return hosts
 }
 
-// isSelfHost reports whether parsed names this server: its host:port matches a
-// self host or the request's Host header. Default ports are stripped from both
-// sides.
+// isSelfHost reports whether parsed names this server (host:port matches a self host or the request Host).
 func isSelfHost(parsed *url.URL, selfHosts []string, requestHost string) bool {
 	parsedHost := stripDefaultPort(parsed.Scheme, parsed.Host)
 	for _, candidate := range append(slices.Clip(selfHosts), requestHost) {
@@ -94,10 +82,8 @@ func isSelfHost(parsed *url.URL, selfHosts []string, requestHost string) bool {
 	return false
 }
 
-// isAvatarAttachmentPath reports whether path is this server's avatar file
-// route: /api/v1/files/<uuid>. The uuid check mirrors what the upload handler
-// actually stores, so a path that merely looks similar cannot be used to reach
-// another handler.
+// isAvatarAttachmentPath reports whether path is /api/v1/files/<uuid>; the uuid check mirrors what the
+// upload handler stores, so a similar-looking path cannot reach another handler.
 func isAvatarAttachmentPath(path string) bool {
 	id, ok := strings.CutPrefix(path, "/api/v1/files/")
 	if !ok {

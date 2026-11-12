@@ -1,12 +1,12 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
-import type { Room } from "livekit-client";
 import { voiceStore, setVoiceStatus, onPttPollingLiveChange } from "@stores/voice.store";
 import { installLivekitLogging } from "@lib/voice/livekitDiagnostics";
 import { LiveKitSession } from "../../features/voice/voiceSession";
+import type { VoiceRoom } from "@lib/voice/voiceRoom";
 export { LiveKitSession } from "../../features/voice/voiceSession";
 
 // Re-export StreamQuality so existing consumers don't break
-export type { StreamQuality } from "@lib/voice/screenShare";
+export type { StreamQuality } from "../../features/voice/screenShare";
 
 // --- Push-to-talk liveness (cross-module signal, no instance state) ---
 
@@ -30,10 +30,12 @@ const session = new LiveKitSession();
 
 // Expose debug info on window under __owncord namespace for DevTools console access
 // Usage: JSON.stringify(__owncord.lkDebug(), null, 2)
-const owncordNs = ((window as unknown as Record<string, unknown>).__owncord ??= {}) as Record<
-  string,
-  unknown
->;
+declare global {
+  interface Window {
+    __owncord?: Record<string, unknown>;
+  }
+}
+const owncordNs = (window.__owncord ??= {});
 owncordNs.lkDebug = session.getSessionDebugInfo.bind(session);
 // Status seam for the production-build e2e suite, which cannot import stores:
 // it stands in for room.connect() succeeding (no real LiveKit server there).
@@ -53,6 +55,8 @@ export const handleE2EEAnnounce = session.handleE2EEAnnounce.bind(session);
 export const handleE2EEOffer = session.handleE2EEOffer.bind(session);
 export const rePinPeerIdentity = session.rePinPeerIdentity.bind(session);
 export const peerAnnouncedIdentityKey = session.peerAnnouncedIdentityKey.bind(session);
+export const trustedPeerKeys = session.trustedPeerKeys.bind(session);
+export const forgetPeerKey = session.forgetPeerKey.bind(session);
 export const handleParticipantLeft = session.handleParticipantLeft.bind(session);
 export const leaveVoice = session.leaveVoice.bind(session);
 export const failPendingRejoin = session.failPendingRejoin.bind(session);
@@ -78,6 +82,7 @@ export const getUserVolume = session.getUserVolume.bind(session);
 export const setUserLocalMute = session.setUserLocalMute.bind(session);
 export const getUserLocalMute = session.getUserLocalMute.bind(session);
 export const setInputVolume = session.setInputVolume.bind(session);
+export const setSileroBufferMs = session.setSileroBufferMs;
 export const onNativeInputLevel = session.onNativeInputLevel.bind(session);
 export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
@@ -108,11 +113,13 @@ export const getScreenshareAudioMuted = session.getScreenshareAudioMuted.bind(se
  *  live ("connected") — i.e. there is something for leaveVoice() to tear
  *  down. A Room-existence check alone reads false for the entire
  *  "connecting" state (no Room object exists yet), so a caller deciding
- *  whether to abort an in-flight join must ask this instead. */
+ *  whether to abort an in-flight join must ask this instead. Also true for a
+ *  call the reconnect loop handed to a join that has no answer yet: the
+ *  server may still hold that call, and leaveVoice(true) is what ends it. */
 export function isVoiceSessionActive(): boolean {
   return session.hasActiveSession();
 }
 
-export function getRoomForStats(): Room | null {
+export function getRoomForStats(): VoiceRoom | null {
   return session.getRoom();
 }

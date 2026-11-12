@@ -83,6 +83,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     }));
     vi.doMock("../../../src/platform/desktop", () => ({
       desktop: {
+        gpuAdapter: { available: false },
         nativeVoice: {
           startCameraPreview: (...args: unknown[]) => startCameraPreview(...args) as unknown,
           stopCameraPreview: (...args: unknown[]) => stopCameraPreview(...args) as unknown,
@@ -838,7 +839,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
             audio: audio({
               echoCancellation: false,
               noiseSuppression: false,
-              enhancedNoiseSuppression: true,
+              enhancedNoiseSuppression: false,
             }),
           },
         ],
@@ -851,7 +852,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
               echoCancellation: false,
               noiseSuppression: false,
               autoGainControl: false,
-              enhancedNoiseSuppression: true,
+              enhancedNoiseSuppression: false,
             }),
           },
         ],

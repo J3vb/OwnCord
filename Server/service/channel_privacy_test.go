@@ -13,23 +13,14 @@ func TestChannelPrivacyService(t *testing.T) {
 	svc := NewChannelPrivacyService(database)
 	const memberRole = 4 // seeded is_default role
 
-	pub, err := database.CreateChannel(ctx, "pub", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	pub := mustCreateChannel(t, database, "pub", "text", "", "", 0)
 	locked, _ := database.CreateChannel(ctx, "locked", "voice", "", "", 1)
 	allowed, _ := database.CreateChannel(ctx, "allowed", "text", "", "", 2)
-	if err := database.UpsertChannelOverride(ctx, locked, memberRole, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("override: %v", err)
-	}
-	if err := database.UpsertChannelOverride(ctx, allowed, memberRole, permissions.ReadMessages, 0); err != nil {
-		t.Fatalf("override: %v", err)
-	}
+	mustDo(t, "override", database.UpsertChannelOverride(ctx, locked, memberRole, 0, permissions.ReadMessages))
+	mustDo(t, "override", database.UpsertChannelOverride(ctx, allowed, memberRole, permissions.ReadMessages, 0))
 
 	snap, err := svc.Snapshot(ctx)
-	if err != nil {
-		t.Fatalf("Snapshot: %v", err)
-	}
+	mustDo(t, "Snapshot", err)
 	for id, want := range map[int64]bool{pub: false, locked: true, allowed: false, 9999: false} {
 		if got := snap.private(id); got != want {
 			t.Errorf("snapshot.private(%d) = %v, want %v", id, got, want)
@@ -68,18 +59,12 @@ func TestChannelPrivacyService(t *testing.T) {
 // the thread to its parent instead of judging the thread id on base permissions.
 func TestChannelPrivacySnapshot_PrivateOfThread(t *testing.T) {
 	f := newThreadFixture(t)
-	if err := f.database.UpsertChannelOverride(bg(), thrParent, permissions.MemberRoleID, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("override: %v", err)
-	}
+	mustDo(t, "override", f.database.UpsertChannelOverride(bg(), thrParent, permissions.MemberRoleID, 0, permissions.ReadMessages))
 	starter := f.post(t, thrParent, thrMod, "s")
 	info, _, err := f.threads.Create(bg(), CreateThreadParams{UserID: thrMod, ChannelID: thrParent, MessageID: starter, Name: "t"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	mustDo(t, "Create", err)
 	snap, err := NewChannelPrivacyService(f.database).Snapshot(bg())
-	if err != nil {
-		t.Fatalf("Snapshot: %v", err)
-	}
+	mustDo(t, "Snapshot", err)
 	th, err := f.database.GetChannel(bg(), info.ID)
 	if err != nil || th == nil {
 		t.Fatalf("GetChannel: %v", err)

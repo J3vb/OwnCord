@@ -36,6 +36,7 @@ vi.mock("@lib/logPersistence", () => ({
 vi.mock("@lib/net/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
+  resumeSavedSession: vi.fn().mockResolvedValue(null),
   deleteCredential: vi.fn().mockResolvedValue(undefined),
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
@@ -48,7 +49,7 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
 }));
 vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
-vi.mock("@components/CertMismatchModal", () => ({
+vi.mock("../../src/features/connection/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));

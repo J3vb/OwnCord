@@ -16,7 +16,7 @@ vi.mock("@lib/ui/toast", () => ({
   teardownToast: vi.fn(),
 }));
 
-import { createChannelSidebar } from "../../src/components/ChannelSidebar";
+import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
 import {
   channelsStore,
   removeChannel,

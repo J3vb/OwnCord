@@ -4,7 +4,7 @@ import {
   createMessageInput,
   wrapWithMarker,
   type MessageInputOptions,
-} from "@components/MessageInput";
+} from "../../../src/features/messaging/MessageInput";
 import { canMention, mentionInComposer } from "../../../src/features/messaging/activeComposer";
 import { lastEmojiPickerOptions, lastGifPickerOptions } from "../../helpers/messageInputMocks";
 import {
@@ -16,8 +16,8 @@ import {
 } from "../../helpers/messageInputHarness";
 import { useMountContainer } from "../../helpers/mountContainer";
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
-vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
+vi.mock("../../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../../src/features/messaging/GifPicker", () => mocks.gifPickerMock());
 
 describe("MessageInput", () => {
   let container: HTMLDivElement;

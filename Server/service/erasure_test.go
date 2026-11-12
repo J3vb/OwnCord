@@ -19,24 +19,16 @@ import (
 // attachment and an avatar) and materialises their files in dir, per the
 // drill protocol's "files" rule. Another admin-class account exists so the
 // last-admin guard never fires.
-func seedErasureMember(t *testing.T, database *db.DB, dir string) (int64, []string) {
+func seedErasureMember(ctx context.Context, t *testing.T, database *db.DB, dir string) (int64, []string) {
 	t.Helper()
-	ctx := context.Background()
-	if _, err := database.CreateUser(ctx, "erasure-owner", "hash", 1); err != nil {
-		t.Fatalf("CreateUser(owner): %v", err)
-	}
+	_, err := database.CreateUser(ctx, "erasure-owner", "hash", 1)
+	mustDo(t, "CreateUser", err)
 	uid, err := database.CreateUser(ctx, "erasure-member", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(member): %v", err)
-	}
+	mustDo(t, "CreateUser", err)
 	chID, err := database.CreateChannel(ctx, "erasure-chan", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	mustDo(t, "CreateChannel", err)
 	msgID, err := database.CreateMessage(ctx, chID, uid, "with a file", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	files := []string{"stored-msg-file", "stored-avatar-file"}
 	for i, f := range files {
 		var msg any
@@ -48,9 +40,7 @@ func seedErasureMember(t *testing.T, database *db.DB, dir string) (int64, []stri
 			fmt.Sprintf("att-%d", i), msg, f, uid); err != nil {
 			t.Fatalf("seed attachment: %v", err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, f), []byte("data"), 0o600); err != nil {
-			t.Fatalf("seed file: %v", err)
-		}
+		mustDo(t, "seed file", os.WriteFile(filepath.Join(dir, f), []byte("data"), 0o600))
 	}
 	return uid, files
 }
@@ -58,9 +48,7 @@ func seedErasureMember(t *testing.T, database *db.DB, dir string) (int64, []stri
 func newTestStorage(t *testing.T, dir string) *storage.Storage {
 	t.Helper()
 	st, err := storage.New(dir, 10)
-	if err != nil {
-		t.Fatalf("storage.New: %v", err)
-	}
+	mustDo(t, "storage.New", err)
 	return st
 }
 
@@ -79,13 +67,11 @@ func fileExists(t *testing.T, path string) bool {
 func TestErasureService_EraseRemovesRowsAndFiles(t *testing.T) {
 	database := newTestDB(t)
 	dir := t.TempDir()
-	uid, files := seedErasureMember(t, database, dir)
+	uid, files := seedErasureMember(context.Background(), t, database, dir)
 	svc := NewErasureService(database)
 	svc.SetFiles(newTestStorage(t, dir))
 
-	if err := svc.Erase(context.Background(), uid); err != nil {
-		t.Fatalf("Erase: %v", err)
-	}
+	mustDo(t, "Erase", svc.Erase(context.Background(), uid))
 	for _, f := range files {
 		if fileExists(t, filepath.Join(dir, f)) {
 			t.Errorf("%s still on disk after the erasure", f)
@@ -107,7 +93,7 @@ func TestErasureService_EraseRemovesRowsAndFiles(t *testing.T) {
 func TestErasureService_EraseRemovesThumbnails(t *testing.T) {
 	database := newTestDB(t)
 	dir := t.TempDir()
-	uid, files := seedErasureMember(t, database, dir)
+	uid, files := seedErasureMember(context.Background(), t, database, dir)
 	st := newTestStorage(t, dir)
 	for _, f := range files {
 		if err := st.SaveThumb(f, []byte("thumb")); err != nil {
@@ -117,9 +103,7 @@ func TestErasureService_EraseRemovesThumbnails(t *testing.T) {
 	svc := NewErasureService(database)
 	svc.SetFiles(st)
 
-	if err := svc.Erase(context.Background(), uid); err != nil {
-		t.Fatalf("Erase: %v", err)
-	}
+	mustDo(t, "Erase", svc.Erase(context.Background(), uid))
 	for _, f := range files {
 		if _, err := st.OpenThumb(f); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("thumbnail of %s survived the erasure: %v", f, err)
@@ -137,30 +121,21 @@ func TestErasureService_EraseRemovesThumbnails(t *testing.T) {
 func TestErasureService_PreservesPriorBadgeForQueuedMention(t *testing.T) {
 	_, _, database := newMentionFixture(t)
 	ctx := context.Background()
-	if _, err := database.CreateUser(ctx, "erasure-owner", "hash", 1); err != nil {
-		t.Fatalf("CreateUser(owner): %v", err)
-	}
+	mustCreateUser(t, database, "erasure-owner", "hash", 1)
 	svcs := New(database, nil)
 	svcs.Erasure.SetFiles(newTestStorage(t, t.TempDir()))
 	stop := svcs.Messages.StartMentionWorker(t.Context())
 	defer stop(context.Background())
 
-	m0, err := database.CreateMessage(ctx, 10, 3, "hey @bob earlier", nil)
-	if err != nil {
-		t.Fatalf("seed m0: %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, 10, m0, []int64{2}); err != nil {
-		t.Fatalf("seed increment: %v", err)
-	}
+	m0 := mustCreateMessage(t, database, 10, 3, "hey @bob earlier", nil)
+	mustDo(t, "seed increment", database.IncrementMentionCounts(ctx, 10, m0, []int64{2}))
 
 	sendAs(t, svcs.Messages, 1, "@bob look")
 	if got := mentionCount(t, database, 2); got != 1 {
 		t.Fatalf("setup: bob mention_count = %d before the flush, want 1", got)
 	}
 
-	if err := svcs.Erasure.Erase(ctx, 1); err != nil {
-		t.Fatalf("Erase: %v", err)
-	}
+	mustDo(t, "Erase", svcs.Erasure.Erase(ctx, 1))
 	svcs.Messages.FlushAllPendingMentionCounts(ctx)
 
 	if got := mentionCount(t, database, 2); got != 1 {
@@ -175,22 +150,16 @@ func TestErasureService_PreservesPriorBadgeForQueuedMention(t *testing.T) {
 func TestErasureService_RestartResumesTheFileHalf(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "erasure.sqlite")
 	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	mustDo(t, "db.Open", err)
+	mustDo(t, "db.Migrate", db.Migrate(database))
 	dir := t.TempDir()
-	uid, files := seedErasureMember(t, database, dir)
+	uid, files := seedErasureMember(context.Background(), t, database, dir)
 
 	// The database half commits; the process is gone before any unlink.
 	if _, err := database.EraseAccount(context.Background(), uid, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", database.Close())
 	for _, f := range files {
 		if !fileExists(t, filepath.Join(dir, f)) {
 			t.Fatalf("%s should still be on disk before the restart", f)
@@ -198,13 +167,9 @@ func TestErasureService_RestartResumesTheFileHalf(t *testing.T) {
 	}
 
 	reopened, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("db.Open after restart: %v", err)
-	}
+	mustDo(t, "db.Open after restart", err)
 	t.Cleanup(func() { _ = reopened.Close() })
-	if err := db.Migrate(reopened); err != nil {
-		t.Fatalf("db.Migrate after restart: %v", err)
-	}
+	mustDo(t, "db.Migrate after restart", db.Migrate(reopened))
 	svc := NewErasureService(reopened)
 	svc.SetFiles(newTestStorage(t, dir))
 	done, err := svc.Resume(context.Background())
@@ -239,7 +204,7 @@ func (f *failingRemover) Delete(name string) error {
 func TestErasureService_FailedRemovalIsRetriedAndMissingFilesCount(t *testing.T) {
 	database := newTestDB(t)
 	dir := t.TempDir()
-	uid, files := seedErasureMember(t, database, dir)
+	uid, files := seedErasureMember(context.Background(), t, database, dir)
 	remover := &failingRemover{real: newTestStorage(t, dir)}
 	svc := NewErasureService(database)
 	svc.SetFiles(remover)
@@ -265,17 +230,13 @@ func TestErasureService_FailedRemovalIsRetriedAndMissingFilesCount(t *testing.T)
 	}
 	// One file disappears out of band (the reconciliation pass, an
 	// operator): a missing file counts as removed.
-	if err := os.Remove(filepath.Join(dir, files[0])); err != nil {
-		t.Fatalf("remove out of band: %v", err)
-	}
+	mustDo(t, "remove out of band", os.Remove(filepath.Join(dir, files[0])))
 	remover.allow = true
 	if done, err := svc.Resume(context.Background()); done != 1 || err != nil {
 		t.Fatalf("Resume once removal works = %d, %v; want 1 done", done, err)
 	}
 	job, err := database.GetErasureJob(context.Background(), jobs[0].ID)
-	if err != nil {
-		t.Fatalf("GetErasureJob: %v", err)
-	}
+	mustDo(t, "GetErasureJob", err)
 	if job.State != db.ErasureStateDone || job.FilesRemoved != 2 || job.Attempts != 3 {
 		t.Errorf("job after completion = %+v, want done, 2 removed, 3 attempts", job)
 	}
@@ -287,7 +248,7 @@ func TestErasureService_FailedRemovalIsRetriedAndMissingFilesCount(t *testing.T)
 func TestErasureService_NoStorageLeavesTheJobPending(t *testing.T) {
 	database := newTestDB(t)
 	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
+	uid, _ := seedErasureMember(context.Background(), t, database, dir)
 	svc := NewErasureService(database)
 	if svc.HasFiles() {
 		t.Fatal("HasFiles before SetFiles")
@@ -300,9 +261,7 @@ func TestErasureService_NoStorageLeavesTheJobPending(t *testing.T) {
 		t.Fatalf("unfinished jobs = %v, %v; want one with the no-storage error", jobs, err)
 	}
 	// A job with nothing to remove completes without storage.
-	if _, err := database.CreateUser(context.Background(), "fileless", "hash", 4); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateUser(t, database, "fileless", "hash", 4)
 	fileless, _ := database.GetUserByUsername(context.Background(), "fileless")
 	if err := svc.Erase(context.Background(), fileless.ID); err != nil {
 		t.Errorf("Erase of a fileless account without storage = %v, want nil", err)
@@ -322,10 +281,7 @@ func TestErasureService_ReconcileRemovesOnlyStrandedFiles(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, err := database.CreateUser(ctx, "reconcile-owner", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	uid := mustCreateUser(t, database, "reconcile-owner", "hash", 1)
 	if _, err := database.ExecContext(ctx, `INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id) VALUES ('live', 'l', 'live-file', 'image/png', 1, ?)`, uid); err != nil {
 		t.Fatal(err)
 	}
@@ -335,18 +291,12 @@ func TestErasureService_ReconcileRemovesOnlyStrandedFiles(t *testing.T) {
 	old := time.Now().Add(-2 * time.Hour)
 	for _, name := range []string{"live-file", "emoji-file", "stranded-1", "stranded-2", "fresh-upload"} {
 		p := filepath.Join(dir, name)
-		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "WriteFile", os.WriteFile(p, []byte("x"), 0o600))
 		if name != "fresh-upload" {
-			if err := os.Chtimes(p, old, old); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "Chtimes", os.Chtimes(p, old, old))
 		}
 	}
-	if err := os.Mkdir(filepath.Join(dir, "a-directory"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Mkdir", os.Mkdir(filepath.Join(dir, "a-directory"), 0o700))
 	store := newTestStorage(t, dir)
 	cutoff := time.Now().Add(-time.Hour)
 
@@ -381,17 +331,11 @@ func TestErasureService_ReconcileRemovesOnlyStrandedFiles(t *testing.T) {
 // inventory class zero and zero files for the subject on disk.
 func TestErasureService_LineageChecklistOnAlphaSnapshot(t *testing.T) {
 	path, err := alphasnap.Copy(t.TempDir())
-	if err != nil {
-		t.Fatalf("alphasnap.Copy: %v", err)
-	}
+	mustDo(t, "alphasnap.Copy", err)
 	database, err := db.Open(path)
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
+	mustDo(t, "db.Open", err)
 	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	mustDo(t, "db.Migrate", db.Migrate(database))
 	ctx := context.Background()
 	var uid int64
 	var uname string
@@ -402,19 +346,13 @@ func TestErasureService_LineageChecklistOnAlphaSnapshot(t *testing.T) {
 	}
 	dir := t.TempDir()
 	rows, err := database.QueryContext(ctx, `SELECT stored_as, size FROM attachments WHERE uploader_id = ?`, uid)
-	if err != nil {
-		t.Fatalf("list attachments: %v", err)
-	}
+	mustDo(t, "list attachments", err)
 	seeded := 0
 	for rows.Next() {
 		var name string
 		var size int64
-		if err := rows.Scan(&name, &size); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "Scan", rows.Scan(&name, &size))
+		mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o600))
 		seeded++
 	}
 	_ = rows.Close()
@@ -422,20 +360,14 @@ func TestErasureService_LineageChecklistOnAlphaSnapshot(t *testing.T) {
 		t.Fatalf("subject %d has no attachments; pick a member with everything", uid)
 	}
 	before, err := database.TakeInventory(ctx, uid, uname)
-	if err != nil {
-		t.Fatalf("TakeInventory: %v", err)
-	}
+	mustDo(t, "TakeInventory", err)
 
 	svc := NewErasureService(database)
 	svc.SetFiles(newTestStorage(t, dir))
-	if err := svc.Erase(ctx, uid); err != nil {
-		t.Fatalf("Erase: %v", err)
-	}
+	mustDo(t, "Erase", svc.Erase(ctx, uid))
 
 	after, err := database.TakeInventory(ctx, uid, uname)
-	if err != nil {
-		t.Fatalf("TakeInventory: %v", err)
-	}
+	mustDo(t, "TakeInventory", err)
 	for _, c := range db.SubjectInventory {
 		want := 0
 		if db.InventoryKeptByErasure[c.Key] {
@@ -446,9 +378,7 @@ func TestErasureService_LineageChecklistOnAlphaSnapshot(t *testing.T) {
 		}
 	}
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReadDir", err)
 	t.Logf("lineage — subject %d: %d attachment files seeded, %d left on disk", uid, seeded, len(entries))
 	if len(entries) != 0 {
 		t.Errorf("%d of the subject's files survived on disk", len(entries))
@@ -467,14 +397,10 @@ func TestAuthService_DeleteAccountErasesAndBroadcasts(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, files := seedErasureMember(t, database, dir)
+	uid, files := seedErasureMember(ctx, t, database, dir)
 	hash, err := auth.HashPassword("correct horse battery")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.UpdateUserPassword(ctx, uid, hash); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "HashPassword", err)
+	mustDo(t, "UpdateUserPassword", database.UpdateUserPassword(ctx, uid, hash))
 	user, err := database.GetUserByID(ctx, uid)
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
@@ -489,9 +415,7 @@ func TestAuthService_DeleteAccountErasesAndBroadcasts(t *testing.T) {
 	if err := svc.DeleteAccount(ctx, sessionPrincipal(user), "wrong", "203.0.113.9"); !errors.Is(err, ErrIncorrectPassword) {
 		t.Fatalf("wrong password = %v", err)
 	}
-	if err := svc.DeleteAccount(ctx, sessionPrincipal(user), "correct horse battery", "203.0.113.9"); err != nil {
-		t.Fatalf("DeleteAccount: %v", err)
-	}
+	mustDo(t, "DeleteAccount", svc.DeleteAccount(ctx, sessionPrincipal(user), "correct horse battery", "203.0.113.9"))
 	if u, _ := database.GetUserByID(ctx, uid); u != nil {
 		t.Error("user row survived")
 	}
@@ -517,10 +441,7 @@ func TestAuthService_DeleteAccountLastAdminIsRefused(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	hash, _ := auth.HashPassword("correct horse battery")
-	uid, err := database.CreateUser(ctx, "only-owner", hash, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	uid := mustCreateUser(t, database, "only-owner", hash, 1)
 	user, _ := database.GetUserByID(ctx, uid)
 	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), nil)
 	if err := svc.DeleteAccount(ctx, sessionPrincipal(user), "correct horse battery", ""); !errors.Is(err, ErrLastAdmin) {
@@ -535,16 +456,10 @@ func TestModerationService_EraseUser(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	member, files := seedErasureMember(t, database, dir) // also creates the owner
+	member, files := seedErasureMember(ctx, t, database, dir) // also creates the owner
 	owner, _ := database.GetUserByUsername(ctx, "erasure-owner")
-	adminID, err := database.CreateUser(ctx, "erasure-admin", "hash", 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bystander, err := database.CreateUser(ctx, "erasure-bystander", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	adminID := mustCreateUser(t, database, "erasure-admin", "hash", 2)
+	bystander := mustCreateUser(t, database, "erasure-bystander", "hash", 4)
 	svc := New(database, auth.NewRateLimiter())
 	svc.Erasure.SetFiles(newTestStorage(t, dir))
 	mod := svc.Moderation
@@ -568,9 +483,7 @@ func TestModerationService_EraseUser(t *testing.T) {
 		t.Fatal("a refused erasure removed the account")
 	}
 
-	if err := mod.EraseUser(ctx, owner.ID, member); err != nil {
-		t.Fatalf("owner erasing a member: %v", err)
-	}
+	mustDo(t, "owner erasing a member", mod.EraseUser(ctx, owner.ID, member))
 	if u, _ := database.GetUserByID(ctx, member); u != nil {
 		t.Error("member row survived")
 	}
@@ -613,11 +526,9 @@ func TestErasureService_HubBroadcastsThenPurges(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
+	uid, _ := seedErasureMember(ctx, t, database, dir)
 	hash, _ := auth.HashPassword("correct horse battery")
-	if err := database.UpdateUserPassword(ctx, uid, hash); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpdateUserPassword", database.UpdateUserPassword(ctx, uid, hash))
 	user, _ := database.GetUserByID(ctx, uid)
 	hub := &recordingErasureHub{}
 	shared := NewErasureService(database)
@@ -630,9 +541,7 @@ func TestErasureService_HubBroadcastsThenPurges(t *testing.T) {
 	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), bcast)
 	svc.UseErasure(shared)
 
-	if err := svc.DeleteAccount(ctx, sessionPrincipal(user), "correct horse battery", ""); err != nil {
-		t.Fatalf("DeleteAccount: %v", err)
-	}
+	mustDo(t, "DeleteAccount", svc.DeleteAccount(ctx, sessionPrincipal(user), "correct horse battery", ""))
 	want := fmt.Sprintf("[disconnect:%d ban:%d purge:%d]", uid, uid, uid)
 	if got := fmt.Sprint(hub.calls); got != want {
 		t.Errorf("hub calls = %s, want %s", got, want)
@@ -658,9 +567,7 @@ func newTestMarkers(t *testing.T) *db.MarkerStore {
 		key[i] = 9
 	}
 	m, err := db.OpenMarkerStore(filepath.Join(t.TempDir(), "erasure", "markers.sqlite"), key)
-	if err != nil {
-		t.Fatalf("OpenMarkerStore: %v", err)
-	}
+	mustDo(t, "OpenMarkerStore", err)
 	t.Cleanup(func() { _ = m.Close() })
 	return m
 }
@@ -672,7 +579,7 @@ func TestErasureService_RecordsAndConfirmsTheMarker(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
+	uid, _ := seedErasureMember(ctx, t, database, dir)
 	markers := newTestMarkers(t)
 	svc := NewErasureService(database)
 	svc.SetFiles(newTestStorage(t, dir))
@@ -694,12 +601,8 @@ func TestErasureService_RecordsAndConfirmsTheMarker(t *testing.T) {
 		t.Fatalf("a refused erasure left a marker: %+v", m)
 	}
 
-	if err := database.LogAuditEntry(ctx, db.AuditEntry{ActorID: uid, Action: "user_login", TargetType: "user", TargetID: uid, Detail: "ip"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.Erase(ctx, uid); err != nil {
-		t.Fatalf("Erase: %v", err)
-	}
+	mustDo(t, "LogAuditEntry", database.LogAuditEntry(ctx, db.AuditEntry{ActorID: uid, Action: "user_login", TargetType: "user", TargetID: uid, Detail: "ip"}))
+	mustDo(t, "Erase", svc.Erase(ctx, uid))
 	m, err := markers.Markers(ctx)
 	if err != nil || len(m) != 1 || m[0].SubjectToken != tok || m[0].State != db.MarkerRecorded {
 		t.Fatalf("markers after erasure = %+v, %v; want one recorded marker for the subject", m, err)
@@ -720,54 +623,8 @@ func TestErasureService_RecordsAndConfirmsTheMarker(t *testing.T) {
 // ReplayMarkers is the start-up pass: an account a restore brought back is
 // erased again, files included, and the audit row names the replay by token.
 func TestErasureService_ReplayMarkersErasesAResurrectedAccount(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatal(err)
-	}
 	ctx := context.Background()
-	dir := t.TempDir()
-	uid, files := seedErasureMember(t, database, dir)
-	backup := filepath.Join(t.TempDir(), "older.db")
-	if err := database.BackupToSafe(ctx, backup, filepath.Dir(backup)); err != nil {
-		t.Fatal(err)
-	}
-	markers := newTestMarkers(t)
-	svc := NewErasureService(database)
-	svc.SetFiles(newTestStorage(t, dir))
-	svc.SetMarkers(markers)
-	if err := svc.Erase(ctx, uid); err != nil {
-		t.Fatalf("Erase: %v", err)
-	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
-	// The restore: the older file over the live one, the files back on disk
-	// (uploads are not in a backup, but a subject's files may well be — the
-	// operator restored the upload directory too).
-	data, err := os.ReadFile(backup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(dbPath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range files {
-		if err := os.WriteFile(filepath.Join(dir, f), []byte("back"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	restored, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = restored.Close() })
-	if err := db.Migrate(restored); err != nil {
-		t.Fatal(err)
-	}
+	restored, uid, files, dir, markers := restoreAfterErasure(ctx, t)
 	if u, _ := restored.GetUserByID(ctx, uid); u == nil {
 		t.Fatal("the restore did not resurrect the account")
 	}
@@ -779,9 +636,7 @@ func TestErasureService_ReplayMarkersErasesAResurrectedAccount(t *testing.T) {
 	}
 	fresh.SetMarkers(markers)
 	rep, err := fresh.ReplayMarkers(ctx)
-	if err != nil {
-		t.Fatalf("ReplayMarkers: %v", err)
-	}
+	mustDo(t, "ReplayMarkers", err)
 	if rep.Erased != 1 {
 		t.Fatalf("report = %+v, want 1 erased", rep)
 	}
@@ -806,51 +661,8 @@ func TestErasureService_ReplayMarkersErasesAResurrectedAccount(t *testing.T) {
 // propagate. The database half of the replay must go through, and the job
 // stays listed for Resume to finish once the store comes back (OC-0399).
 func TestErasureService_ReplayMarkersSurvivesFilesUnavailable(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatal(err)
-	}
 	ctx := context.Background()
-	dir := t.TempDir()
-	uid, files := seedErasureMember(t, database, dir)
-	backup := filepath.Join(t.TempDir(), "older.db")
-	if err := database.BackupToSafe(ctx, backup, filepath.Dir(backup)); err != nil {
-		t.Fatal(err)
-	}
-	markers := newTestMarkers(t)
-	svc := NewErasureService(database)
-	svc.SetFiles(newTestStorage(t, dir))
-	svc.SetMarkers(markers)
-	if err := svc.Erase(ctx, uid); err != nil {
-		t.Fatalf("Erase: %v", err)
-	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(backup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(dbPath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range files {
-		if err := os.WriteFile(filepath.Join(dir, f), []byte("back"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	restored, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = restored.Close() })
-	if err := db.Migrate(restored); err != nil {
-		t.Fatal(err)
-	}
+	restored, uid, _, _, markers := restoreAfterErasure(ctx, t)
 
 	// No SetFiles here: the upload store failed to open at start-up, just
 	// as openMarkers leaves it when storage.New errors.
@@ -867,9 +679,7 @@ func TestErasureService_ReplayMarkersSurvivesFilesUnavailable(t *testing.T) {
 		t.Error("the resurrected account survived the replay")
 	}
 	jobs, err := restored.ListUnfinishedErasureJobs(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListUnfinishedErasureJobs", err)
 	if len(jobs) != 1 {
 		t.Fatalf("unfinished erasure jobs = %d, want 1 (the files are still journaled)", len(jobs))
 	}
@@ -893,7 +703,7 @@ func TestErasureService_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, files := seedErasureMember(t, database, dir)
+	uid, files := seedErasureMember(ctx, t, database, dir)
 	hub := &failingHub{}
 	svc := NewErasureService(database)
 	svc.SetFiles(newTestStorage(t, dir))
@@ -934,9 +744,7 @@ func TestErasureService_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
 	}
 	noHub := NewErasureService(database)
 	noHub.SetFiles(newTestStorage(t, dir))
-	if err := noHub.Erase(ctx, other); err != nil {
-		t.Fatalf("Erase without a hub: %v", err)
-	}
+	mustDo(t, "Erase without a hub", noHub.Erase(ctx, other))
 	var n int
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE `+db.EventNamesUserPredicate, other).Scan(&n); err != nil || n != 0 {
 		t.Errorf("events naming the user after a hub-less erasure = %d (%v), want 0", n, err)
@@ -969,19 +777,12 @@ func TestErasureService_ReconcileKeepsAFileNamedAfterTheBatchLookup(t *testing.T
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, err := database.CreateUser(ctx, "reconcile-race", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	uid := mustCreateUser(t, database, "reconcile-race", "hash", 1)
 	old := time.Now().Add(-2 * time.Hour)
 	for _, name := range []string{"forwarded", "stranded"} {
 		p := filepath.Join(dir, name)
-		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(p, old, old); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "WriteFile", os.WriteFile(p, []byte("x"), 0o600))
+		mustDo(t, "Chtimes", os.Chtimes(p, old, old))
 	}
 	store := newTestStorage(t, dir)
 	st := &namingStore{DB: database, onBatch: func() {
@@ -1000,4 +801,38 @@ func TestErasureService_ReconcileKeepsAFileNamedAfterTheBatchLookup(t *testing.T
 	if fileExists(t, filepath.Join(dir, "stranded")) {
 		t.Error("the stranded file was kept")
 	}
+}
+
+// restoreAfterErasure erases a seeded member, then simulates a restore: the
+// pre-erasure database comes back over the live file and the subject's files
+// reappear on disk (the operator restored the upload directory too). It
+// returns the restored database, the subject and its files, the upload
+// directory and the markers that still record the erasure.
+func restoreAfterErasure(ctx context.Context, t *testing.T) (restored *db.DB, uid int64, files []string, dir string, markers *db.MarkerStore) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
+	database, err := db.Open(dbPath)
+	mustDo(t, "Open", err)
+	mustDo(t, "Migrate", db.Migrate(database))
+	dir = t.TempDir()
+	uid, files = seedErasureMember(ctx, t, database, dir)
+	backup := filepath.Join(t.TempDir(), "older.db")
+	mustDo(t, "BackupToSafe", database.BackupToSafe(ctx, backup, filepath.Dir(backup)))
+	markers = newTestMarkers(t)
+	svc := NewErasureService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+	svc.SetMarkers(markers)
+	mustDo(t, "Erase", svc.Erase(ctx, uid))
+	mustDo(t, "Close", database.Close())
+	data, err := os.ReadFile(backup)
+	mustDo(t, "ReadFile", err)
+	mustDo(t, "WriteFile", os.WriteFile(dbPath, data, 0o600))
+	for _, f := range files {
+		mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, f), []byte("back"), 0o600))
+	}
+	restored, err = db.Open(dbPath)
+	mustDo(t, "Open", err)
+	t.Cleanup(func() { _ = restored.Close() })
+	mustDo(t, "Migrate", db.Migrate(restored))
+	return restored, uid, files, dir, markers
 }

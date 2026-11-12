@@ -2,6 +2,8 @@ import type { Page } from "@playwright/test";
 import type { TestServer } from "./server";
 
 type TestEnvelope = { type: string; id?: string; payload?: Record<string, unknown> };
+/** What `save_credential` is called with, kept as the stored sign-in. */
+type SavedCredentialArgs = { username: string; token: string; password?: string | null };
 
 /** The path token the test tunnel hands out, standing in for the native one. */
 export const TUNNEL_TOKEN = "e2e-tunnel";
@@ -26,6 +28,9 @@ export async function installRealTransport(page: Page, server: TestServer) {
   let sendObserver: ((message: TestEnvelope) => void) | undefined;
   let httpFailure: ((request: { path: string; method: string }) => boolean) | undefined;
   let httpHold:
+    | { filter: (request: { path: string; method: string }) => boolean; gate: Promise<void> }
+    | undefined;
+  let responseHold:
     | { filter: (request: { path: string; method: string }) => boolean; gate: Promise<void> }
     | undefined;
   const pendingEvents = new Set<Promise<void>>();
@@ -102,6 +107,8 @@ export async function installRealTransport(page: Page, server: TestServer) {
           });
           const id = ++resource;
           bodies.set(id, Array.from(new Uint8Array(await response.arrayBuffer())));
+          if (responseHold?.filter({ path: forward.pathname, method: request.method }))
+            await responseHold.gate;
           return {
             status: response.status,
             statusText: response.statusText,
@@ -177,8 +184,18 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "save_credential":
           secrets.set(`credential:${args.host}`, args);
           return;
-        case "load_credential":
-          return secrets.get(`credential:${args.host}`) ?? null;
+        case "load_credential": {
+          const stored = secrets.get(`credential:${args.host}`) as SavedCredentialArgs | undefined;
+          return stored
+            ? { username: stored.username, has_password: typeof stored.password === "string" }
+            : null;
+        }
+        case "resume_saved_session": {
+          const stored = secrets.get(`credential:${args.host}`) as SavedCredentialArgs | undefined;
+          return stored
+            ? { outcome: "resumed", username: stored.username, token: stored.token }
+            : null;
+        }
         case "delete_credential":
           secrets.delete(`credential:${args.host}`);
           return;
@@ -197,6 +214,17 @@ export async function installRealTransport(page: Page, server: TestServer) {
           return { minimizeToTray: true, startMinimized: false };
         case "set_window_pref":
         case "show_next_launch":
+          return null;
+        // Graphics card for video: no cards, so the row stays hidden.
+        case "get_gpu_adapters":
+          return {
+            cards: [],
+            saved: "auto",
+            active: null,
+            notFound: false,
+            resetAfterCrash: false,
+          };
+        case "set_gpu_adapter":
           return null;
         case "plugin:path|resolve_directory":
           return "/test-logs";
@@ -243,6 +271,8 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "plugin:notification|is_permission_granted":
         // Auto-idle's OS idle poll: "the OS cannot say", in-window idle only.
         case "system_idle_ms":
+        // The OS region: unknown, dates follow the browser language.
+        case "system_region_locale":
         // The game scan (WP 8.3): no game is running here.
         case "detect_game":
         // The taskbar/tray unread badge (DP-27): nothing to draw here.
@@ -327,6 +357,15 @@ export async function installRealTransport(page: Page, server: TestServer) {
       httpHold = { filter, gate: new Promise<void>((resolve) => (release = resolve)) };
       return () => {
         httpHold = undefined;
+        release();
+      };
+    },
+    /** Let selected HTTP sends reach the server now, but hold their answers back until the returned release runs. */
+    holdHttpResponses(filter: (request: { path: string; method: string }) => boolean) {
+      let release!: () => void;
+      responseHold = { filter, gate: new Promise<void>((resolve) => (release = resolve)) };
+      return () => {
+        responseHold = undefined;
         release();
       };
     },

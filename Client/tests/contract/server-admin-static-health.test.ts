@@ -345,18 +345,18 @@ describe("Server/admin/static — Dashboard health row", () => {
         [...tr.querySelectorAll("td")].map((td) => td.textContent),
       );
 
-    it("lists routes with calls, typical and worst time under the health row and LiveKit card", async () => {
+    it("lists slow routes with calls, typical and worst time below the attention panel", async () => {
       const paths: string[] = [];
       const { host } = await openDashboard(paths, (p) =>
         p === "/system/slow-requests" ? SLOW : p.startsWith("/system/stats") ? STATS : {},
       );
       expect(paths).toContain("/system/slow-requests");
       expect(host.querySelector("#healthRow + section #livekitCard")).toBeTruthy();
-      expect(host.querySelector("#healthRow + section + section #slowRequests")).toBeTruthy();
+      expect(host.querySelector("#attentionPanel ~ section #slowRequests")).toBeTruthy();
+      // A route whose 95th percentile is under the warning line is not listed.
       expect(rows(host)).toEqual([
         ["POST /api/v1/channels/{id}/messages", (1204).toLocaleString(), "2.5 s", "12 s"],
         ["GET /admin/api/<b>x</b>", "3", "500 ms", "730 ms"],
-        ["GET /api/v1/health", "9", "<1 ms", "<1 ms"],
       ]);
       // A route is text, never markup.
       expect(host.querySelector("#slowRequests b")).toBeNull();
@@ -385,6 +385,28 @@ describe("Server/admin/static — Dashboard health row", () => {
       );
     });
 
+    it("says nothing is slow when every route answered fast", async () => {
+      const fast = (route: string, ms: number) => ({
+        method: "GET",
+        route,
+        count: 40,
+        p50_ms: ms,
+        p95_ms: ms * 2,
+        max_ms: 3,
+      });
+      const { host } = await openDashboard([], (p) =>
+        p === "/system/slow-requests"
+          ? { window_seconds: 3600, routes: [fast("/api/v1/health", 1), fast("/api/v1/me", 2)] }
+          : p.startsWith("/system/stats")
+            ? STATS
+            : {},
+      );
+      expect(host.querySelector("#slowRequests table")).toBeNull();
+      expect(host.querySelector("#slowRequests")?.textContent).toBe(
+        "No slow requests in the last hour.",
+      );
+    });
+
     // The card never stops the poll: a failed read keeps its last list and
     // the health row keeps updating.
     it("keeps the last list and the poll when its read fails", async () => {
@@ -409,7 +431,7 @@ describe("Server/admin/static — Dashboard health row", () => {
       await bridge.pollHealth(bridge.health.seq, "tok");
       const doc = dom.window.document;
       expect(doc.querySelector("#healthCpu .health-value")?.textContent).toBe("42%");
-      expect(doc.querySelectorAll("#slowRequests tbody tr")).toHaveLength(3);
+      expect(doc.querySelectorAll("#slowRequests tbody tr")).toHaveLength(2);
       expect(bridge.health.timer).not.toBeNull();
     });
 
@@ -508,6 +530,8 @@ describe("Server/admin/static — Dashboard health row", () => {
       expect(body(host).querySelector("#livekitStatus")?.textContent).toMatch(
         /since \d{1,2}:\d{2}/,
       );
+      expect(body(host).textContent).toContain("prometheus: port: 6789");
+      expect(body(host).textContent).toContain("restart LiveKit");
       expect(text(host, "lkCpu", "health-value")).toBe("–");
       expect(text(host, "lkMemory", "health-value")).toBe("–");
       expect(text(host, "lkUsage", "health-value")).toBe("–");

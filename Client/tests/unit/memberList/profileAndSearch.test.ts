@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../../helpers/mountContainer";
 import "../../helpers/memberListMocks";
-import { createMemberList } from "@components/MemberList";
-import type { MemberListOptions } from "@components/MemberList";
+import { createMemberList } from "../../../src/features/members/MemberList";
+import type { MemberListOptions } from "../../../src/features/members/MemberList";
 import {
   membersStore,
   updatePresence,
@@ -14,8 +14,8 @@ import { authStore } from "@stores/auth.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { type UserStatus } from "../../../src/lib/types";
 import { openUserProfilePopup } from "../../../src/features/profiles/openUserProfilePopup";
-import "@components/UserProfilePopup";
-import "@components/AdminActions";
+import "../../../src/features/profiles/userProfilePopup";
+import "../../../src/features/moderation/AdminActions";
 import {
   resetStore,
   makeMember,

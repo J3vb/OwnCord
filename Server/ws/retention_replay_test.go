@@ -4,11 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
-	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -48,44 +45,22 @@ func setOf(ids ...int64) map[int64]struct{} {
 // the ring, and a frame about a swept message that a producer hands the hub
 // after the purge is dropped instead of sequenced, buffered or persisted.
 func TestRetention_PurgeMessagesFromReplay(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	limiter := auth.NewRateLimiter()
-	svc := service.New(database, limiter)
-	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, Services: svc})
-	persister := ws.NewEventPersister(database, 256, 64, time.Hour)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	persister.Start(ctx)
-	t.Cleanup(func() { persister.Stop(context.Background()) })
-	hub.SetEventPersister(persister)
-	hub.SetEventStore(database)
-	go hub.Run()
-	t.Cleanup(func() { hub.Stop() })
+	hub, database, _, persister, ctx := newReplayPipeline(t)
 
 	author := seedCoverageOwner(t, database, "retention-author")
 	chID := seedTestChannel(t, database, "retention-chan")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, author, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, author, chID, 64)
 
 	// Two control frames first, so the resume point below is a seq the ring
 	// holds behind an older one (the ring serves nothing from its oldest
 	// slot, and 0 is "no resume").
-	control, _ := json.Marshal(map[string]any{"type": "typing", "payload": map[string]any{"channel_id": chID, "user_id": author.ID}})
+	control := envelope("typing", map[string]any{"channel_id": chID, "user_id": author.ID})
 	hub.BroadcastToChannel(chID, control)
 	hub.BroadcastToChannel(chID, control)
 	waitFor(t, waitTimeout, func() bool { return hub.CurrentSeqForTest() >= 2 }, "the control frames to be sequenced")
 	before := hub.CurrentSeqForTest()
 	for _, content := range []string{"sweep me", "sweep me too", "keep me"} {
-		raw, _ := json.Marshal(map[string]any{"type": "chat_send", "payload": map[string]any{"channel_id": chID, "content": content}})
+		raw := envelope("chat_send", map[string]any{"channel_id": chID, "content": content})
 		hub.HandleMessageForTest(c, raw)
 	}
 	rows, err := database.QueryContext(ctx, `SELECT id, content FROM messages WHERE channel_id = ? ORDER BY id`, chID)
@@ -145,9 +120,9 @@ func TestRetention_PurgeMessagesFromReplay(t *testing.T) {
 	// the purge. A harmless frame behind it is sequenced; the edit is not,
 	// nor buffered, nor persisted.
 	seqBefore := hub.CurrentSeqForTest()
-	late, _ := json.Marshal(map[string]any{"type": "chat_edited", "payload": map[string]any{"message_id": swept[0], "channel_id": chID, "content": "late edit", "edited_at": "now"}})
+	late := envelope("chat_edited", map[string]any{"message_id": swept[0], "channel_id": chID, "content": "late edit", "edited_at": "now"})
 	hub.BroadcastToChannel(chID, late)
-	harmless, _ := json.Marshal(map[string]any{"type": "typing", "payload": map[string]any{"channel_id": chID, "user_id": author.ID}})
+	harmless := envelope("typing", map[string]any{"channel_id": chID, "user_id": author.ID})
 	hub.BroadcastToChannel(chID, harmless)
 	waitFor(t, waitTimeout, func() bool { return hub.CurrentSeqForTest() > seqBefore }, "the harmless frame to be sequenced")
 	if hub.CurrentSeqForTest() != seqBefore+1 {
@@ -165,7 +140,7 @@ func TestRetention_PurgeMessagesFromReplay(t *testing.T) {
 	// A frame about the kept message is still sequenced: the tombstone set
 	// holds the swept ids only.
 	seqBefore = hub.CurrentSeqForTest()
-	keptEdit, _ := json.Marshal(map[string]any{"type": "chat_edited", "payload": map[string]any{"message_id": kept, "channel_id": chID, "content": "kept, edited", "edited_at": "now"}})
+	keptEdit := envelope("chat_edited", map[string]any{"message_id": kept, "channel_id": chID, "content": "kept, edited", "edited_at": "now"})
 	hub.BroadcastToChannel(chID, keptEdit)
 	waitFor(t, waitTimeout, func() bool { return hub.CurrentSeqForTest() > seqBefore }, "the kept message's edit to be sequenced")
 	if n := framesAbout(hub, keptSet); n != 2 {

@@ -48,7 +48,7 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   onOpenUrl: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@lib/nav/messageNavigation", () => mainMocks.navMessageNavigationMock());
-vi.mock("@components/CertMismatchModal", () => mainMocks.certMismatchModalMock());
+vi.mock("../../src/features/connection/CertMismatchModal", () => mainMocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mainMocks.netCertReconnectMock());
 const PROFILES = [
   {
@@ -211,17 +211,20 @@ import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { voiceStore } from "@stores/voice.store";
 import { currentUserPermissions } from "@lib/permissions";
 import { cleanupNotificationAudio } from "@lib/media/notificationSound";
+// The app loads this with the dispatcher chunk (mocked here); it registers the audio reset.
+import "@lib/notifications";
 import { leaveVoice } from "@lib/voice/livekitSession";
-import { deleteCredential, loadCredential } from "@lib/net/credentials";
+import { deleteCredential, resumeSavedSession } from "@lib/net/credentials";
 import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { createProfileManager } from "@lib/presence/profiles";
 import { createConnectPage } from "@pages/ConnectPage";
+import { readyFrame } from "../helpers/wsSuiteHarness";
 
 const A = "a.example:8443";
 const B = "b.example:8443";
 
 const storedA = async (host: string) =>
-  host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null;
+  host === A ? ({ outcome: "resumed", username: "alex", token: "stored-token-a" } as const) : null;
 
 // main.ts builds its profile manager once at startup, before the per-test
 // mock clear wipes mock.results.
@@ -241,7 +244,7 @@ beforeEach(() => {
   mockGetHealth.mockReset().mockResolvedValue(HEALTHY);
   mockApiLogout.mockClear();
   vi.mocked(deleteCredential).mockReset().mockResolvedValue(true);
-  vi.mocked(loadCredential).mockReset().mockResolvedValue(null);
+  vi.mocked(resumeSavedSession).mockReset().mockResolvedValue(null);
   sessionStorage.clear();
   clearAuth();
 });
@@ -300,7 +303,7 @@ async function completeHandshake(
       },
     }),
   );
-  emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: ready }));
+  emitTauriEvent("ws-message", readyFrame(ready));
   await vi.advanceTimersByTimeAsync(800);
 }
 
@@ -331,6 +334,16 @@ const dmChannelRow = (channelId: number): DmChannel =>
     unreadCount: 3,
     mentionCount: 1,
   });
+// The row as `ready` ships it for the shape check, plus the store fields the
+// stand-in handler below reads (extra fields pass the check).
+const dmReadyRow = (channelId: number): object => ({
+  ...dmChannelRow(channelId),
+  channel_id: channelId,
+  last_message_id: null,
+  last_message_at: "",
+  last_message: "hi",
+  unread_count: 3,
+});
 const memberOf = (id: number): object => ({
   id,
   username: `user${id}`,
@@ -423,7 +436,7 @@ describe("a server switch leaves nothing of the old server behind", () => {
   });
 
   it("drops a late `ready` from server A: after B's ready only B's roster and DMs remain", async () => {
-    await loginWithPassword(A, 1, { members: [memberOf(11)], dm_channels: [dmChannelRow(9)] });
+    await loginWithPassword(A, 1, { members: [memberOf(11)], dm_channels: [dmReadyRow(9)] });
     expect([...membersStore.getState().members.keys()]).toEqual([11]);
     expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([9]);
 
@@ -434,16 +447,13 @@ describe("a server switch leaves nothing of the old server behind", () => {
     // A's snapshot arrives after the switch, before B signs in.
     emitTauriEvent(
       "ws-message",
-      JSON.stringify({
-        type: "ready",
-        payload: { members: [memberOf(11)], dm_channels: [dmChannelRow(9)] },
-      }),
+      readyFrame({ members: [memberOf(11)], dm_channels: [dmReadyRow(9)] }),
     );
     await vi.advanceTimersByTimeAsync(10);
     expect(membersStore.getState().members.size).toBe(0);
     expect(dmStore.getState().channels.length).toBe(0);
 
-    await loginWithPassword(B, 2, { members: [memberOf(22)], dm_channels: [dmChannelRow(10)] });
+    await loginWithPassword(B, 2, { members: [memberOf(22)], dm_channels: [dmReadyRow(10)] });
     expect([...membersStore.getState().members.keys()]).toEqual([22]);
     expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([10]);
   });
@@ -460,7 +470,7 @@ describe("quick switch keeps each server's saved sign-in", () => {
   });
 
   it("resumes with the stored token when switching back, without a password", async () => {
-    vi.mocked(loadCredential).mockImplementation(storedA);
+    vi.mocked(resumeSavedSession).mockImplementation(storedA);
     await loginWithPassword(A, 1);
     await quickSwitchTo(B);
     // B has no stored credential: the prefilled form waits for a password.
@@ -480,7 +490,7 @@ describe("quick switch keeps each server's saved sign-in", () => {
   });
 
   it("times out a resume to an offline server, returning to the form with an error", async () => {
-    vi.mocked(loadCredential).mockImplementation(storedA);
+    vi.mocked(resumeSavedSession).mockImplementation(storedA);
     await loginWithPassword(A, 1);
 
     await quickSwitchTo(A);
@@ -500,7 +510,7 @@ describe("quick switch keeps each server's saved sign-in", () => {
   });
 
   it("keeps A's sign-in through Add server, so switching back skips the password", async () => {
-    vi.mocked(loadCredential).mockImplementation(storedA);
+    vi.mocked(resumeSavedSession).mockImplementation(storedA);
     await loginWithPassword(A, 1);
 
     // SidebarArea's Add server: end the session with no switch target.
@@ -572,7 +582,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
 
   /** Resume A's stored token while A is down, and let the pre-auth deadline lapse. */
   async function resumeAgainstDownServer(): Promise<void> {
-    vi.mocked(loadCredential).mockImplementation(storedA);
+    vi.mocked(resumeSavedSession).mockImplementation(storedA);
     await loginWithPassword(A, 1);
     mockGetHealth.mockImplementation(async (host: string) => {
       if (host === A) throw new Error("connection refused");
@@ -747,7 +757,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
     manager.getAutoConnectProfile.mockReturnValue({ ...PROFILES[0]!, autoConnect: true });
     try {
       // The logout's credential delete loses the race: the read still finds it.
-      vi.mocked(loadCredential).mockImplementation(storedA);
+      vi.mocked(resumeSavedSession).mockImplementation(storedA);
       await loginWithPassword(A, 1);
       const before = connectsToA();
 
@@ -786,7 +796,7 @@ describe("a stored-token resume refused SERVER_BUSY keeps connecting (P5-S04)", 
   }
 
   async function resumeA(): Promise<number> {
-    vi.mocked(loadCredential).mockImplementation(storedA);
+    vi.mocked(resumeSavedSession).mockImplementation(storedA);
     await loginWithPassword(A, 1);
     await quickSwitchTo(A);
     await vi.advanceTimersByTimeAsync(10);

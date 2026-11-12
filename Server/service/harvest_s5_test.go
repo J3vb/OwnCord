@@ -87,12 +87,7 @@ func TestAffectedUserIDs_LookupFailureReportsNotOK(t *testing.T) {
 // otherwise stuck and reasserted by every ready payload.
 func TestHandleChannelFocus_ClearsMentionBadgeWhenAllMessagesDeleted(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.ReadMessages | permissions.SendMessages,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.ReadMessages|permissions.SendMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
@@ -100,26 +95,16 @@ func TestHandleChannelFocus_ClearsMentionBadgeWhenAllMessagesDeleted(t *testing.
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
 	ctx := context.Background()
-	msgID, err := database.CreateMessage(ctx, 10, 2, "hey @alice", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, 10, msgID, []int64{1}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
-	if err := database.DeleteMessage(ctx, msgID, 2, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, 10, 2, "hey @alice", nil)
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, 10, msgID, []int64{1}))
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, msgID, 2, false))
 
 	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	if _, err := svc.HandleChannelFocus(ctx, 1, 10); err != nil {
 		t.Fatalf("HandleChannelFocus: %v", err)
 	}
 
-	counts, err := database.GetChannelUnreadCounts(ctx, 1)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
+	counts := mustGetChannelUnreadCounts(t, database, 1)
 	if got := counts[10].MentionCount; got != 0 {
 		t.Fatalf("mention_count = %d after focusing a channel whose messages were all deleted, want 0", got)
 	}

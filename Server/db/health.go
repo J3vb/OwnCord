@@ -26,8 +26,8 @@ type HealthStats struct {
 	WriterWaitMs    float64
 }
 
-// HealthStats reads the figures with one query on the reader pool, so a busy
-// writer cannot hold it up; the caller's deadline bounds that query.
+// HealthStats reads the figures with one query on the reader pool so a busy writer
+// cannot hold it up.
 func (d *DB) HealthStats(ctx context.Context) (HealthStats, error) {
 	out := HealthStats{}
 	reader, writer := d.reader.Stats(), d.writer.Stats()

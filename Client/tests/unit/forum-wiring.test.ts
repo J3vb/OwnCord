@@ -15,11 +15,11 @@ import {
 } from "@stores/channels.store";
 import { getThread, resetThreadsStore } from "@stores/threads.store";
 import { resetMessagesStore } from "@stores/messages.store";
-import { createQuickSwitcher } from "@components/QuickSwitcher";
+import { createQuickSwitcher } from "../../src/features/navigation/QuickSwitcher";
 import {
   filterChannelSuggestions,
   createChannelAutocomplete,
-} from "@components/ChannelAutocomplete";
+} from "../../src/features/messaging/composer/ChannelAutocomplete";
 import { buildChatHeader, setChatHeaderChannelType } from "../../src/pages/main-page/ChatHeader";
 import {
   applyReadyCapabilities,

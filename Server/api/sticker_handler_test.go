@@ -16,7 +16,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
 	"github.com/go-chi/chi/v5"
@@ -54,25 +53,8 @@ type stickerHarness struct {
 
 func newStickerHarness(t *testing.T) *stickerHarness {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	exec := func(q string, args ...any) {
-		t.Helper()
-		if _, execErr := database.ExecContext(context.Background(), q, args...); execErr != nil {
-			t.Fatalf("exec %q: %v", q, execErr)
-		}
-	}
-	exec(`UPDATE roles SET permissions = ? WHERE id = ?`, permissions.Administrator, permissions.OwnerRoleID)
-	exec(`UPDATE roles SET permissions = ? WHERE id = ?`,
-		permissions.ManageServer|permissions.ReadMessages|permissions.SendMessages, permissions.AdminRoleID)
-	exec(`UPDATE roles SET permissions = ? WHERE id = ?`,
-		permissions.ReadMessages|permissions.SendMessages|permissions.AddReactions, permissions.MemberRoleID)
+	database := openMigratedDB(t)
+	pinGateRoles(t, database)
 
 	dir := t.TempDir()
 	store, err := storage.New(dir, 10)
@@ -85,27 +67,13 @@ func newStickerHarness(t *testing.T) *stickerHarness {
 	api.MountStickerRoutes(r, svc, store, auth.NewRateLimiter(), h.broadcaster)
 	h.router = r
 
-	h.ownerToken = emojiSeedUser(t, database, "owner", int(permissions.OwnerRoleID))
-	h.adminToken = emojiSeedUser(t, database, "admin", int(permissions.AdminRoleID))
-	h.memberToken = emojiSeedUser(t, database, "member", int(permissions.MemberRoleID))
+	h.ownerToken, h.adminToken, h.memberToken = seedGatePrincipals(t, database)
 	return h
 }
 
 func (h *stickerHarness) do(t *testing.T, method, path, token string, body *bytes.Buffer, contentType string) *httptest.ResponseRecorder {
 	t.Helper()
-	var req *http.Request
-	if body == nil {
-		req = httptest.NewRequest(method, path, nil)
-	} else {
-		req = httptest.NewRequest(method, path, body)
-		req.Header.Set("Content-Type", contentType)
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	rec := httptest.NewRecorder()
-	h.router.ServeHTTP(rec, req)
-	return rec
+	return doBody(h.router, method, path, token, body, contentType)
 }
 
 // upload POSTs a multipart sticker. An empty name or emoji omits the field, a
@@ -215,9 +183,7 @@ func TestStickerUpload_PermissionGate(t *testing.T) {
 		t.Errorf("a refused upload broadcast or stored something")
 	}
 	rec := h.upload(t, h.adminToken, "Wave", "", pngBytes(t, 64, 64))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("MANAGE_SERVER status = %d, want 201 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusCreated)
 	if h.broadcaster.count() != 1 || len(h.broadcaster.calls[0]) != 1 || h.broadcaster.calls[0][0].Name != "Wave" {
 		t.Errorf("broadcast calls = %+v, want the one new sticker", h.broadcaster.calls)
 	}
@@ -380,9 +346,7 @@ func TestStickerUpload_CapIsEnforcedWithoutAnOrphan(t *testing.T) {
 		}
 	}
 	rec := h.upload(t, h.ownerToken, "One More", "", pngBytes(t, 32, 32))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusBadRequest)
 	if h.storedFiles(t) != 0 {
 		t.Errorf("the refused upload left a file behind")
 	}
@@ -417,9 +381,7 @@ func TestStickerPatch_RenamesSetsEmojiAndBroadcasts(t *testing.T) {
 	created := decodeSticker(t, h.upload(t, h.ownerToken, "Wave", "👋", pngBytes(t, 32, 32)))
 
 	rec := h.patch(t, h.adminToken, created.ID, `{"name":"Hello There"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusOK)
 	if got := decodeSticker(t, rec); got.Name != "Hello There" || got.Emoji == nil || *got.Emoji != "👋" || got.URL != created.URL {
 		t.Errorf("rename kept nothing: %+v", got)
 	}
@@ -489,9 +451,7 @@ func TestStickerDelete_RemovesRowFileAndBroadcasts(t *testing.T) {
 	}
 
 	del := h.do(t, http.MethodDelete, fmt.Sprintf("/api/v1/stickers/%d", created.ID), h.adminToken, nil, "")
-	if del.Code != http.StatusNoContent {
-		t.Fatalf("delete status = %d, want 204 (%s)", del.Code, del.Body.String())
-	}
+	requireStatus(t, del, http.StatusNoContent)
 	if row, _ := h.database.GetSticker(context.Background(), created.ID); row != nil {
 		t.Errorf("row still present after delete: %+v", row)
 	}

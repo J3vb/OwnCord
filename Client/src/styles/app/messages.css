@@ -96,6 +96,19 @@
   background: var(--bg-hover);
   color: var(--text-normal);
 }
+/* Data saver: a media item that waits for its own tap. */
+.data-saver-placeholder {
+  display: grid;
+  place-content: center;
+  width: 100%;
+  min-height: 140px;
+  padding: var(--space-4);
+  background: var(--bg-secondary);
+  overflow-wrap: anywhere;
+}
+.data-saver-action {
+  color: var(--accent-text);
+}
 
 .msg-day-divider {
   display: flex;
@@ -484,6 +497,13 @@
 .message.mentioned:hover {
   background: color-mix(in srgb, var(--yellow) 12%, transparent);
 }
+/* The row the open reply bar answers: the mention row's shape in the accent
+   colour, so it reads as "this one" without looking like a ping. */
+.message.reply-target,
+.message.reply-target:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 
 /* #channel links inside message text */
 .channel-mention {
@@ -809,6 +829,10 @@
   overflow: hidden;
   max-width: 420px;
 }
+/* The stand-in before consent is only its Load button: no empty card beside it. */
+.msg-embed-concealed {
+  width: fit-content;
+}
 .msg-embed-youtube {
   width: 420px;
   max-width: 100%;
@@ -953,6 +977,7 @@
   gap: 4px;
   flex-wrap: wrap;
   margin-top: 4px;
+  user-select: none;
 }
 .reaction-chip {
   display: flex;
@@ -2309,6 +2334,7 @@ ul.md-list-nested {
   transition: opacity 0.1s ease;
   box-shadow: var(--shadow-sm);
   z-index: 5;
+  user-select: none;
 }
 /* Only a real pointer hovers: a touch screen's tap leaves a sticky :hover
    behind, and there a message's actions live in the long-press menu. */

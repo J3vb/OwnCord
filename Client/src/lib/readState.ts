@@ -10,13 +10,13 @@
 
 import { channelsStore, clearUnread, setReadPointer } from "@stores/channels.store";
 import { dmStore, clearDmUnread, setDmReadPointer } from "@stores/dm.store";
-import { isWindowDetached } from "@stores/messages.store";
-import { uiStore } from "@stores/ui.store";
-import { dialogOpen } from "./ui/dialogOpen";
 import { readPointerEnabled } from "./net/serverCapabilities";
+import { isChannelAway, isChannelCovered, isWindowAway, setTailInView } from "./readStateAway";
+import { announceMarkUnreadFailure, type MarkUnreadNotice } from "./readStateNotices";
+import { cancelPendingMarkAll, queueMarkRead } from "./readStateBulk";
 
-/** Channels whose mounted list is scrolled away from the live tail. */
-const liveTailOutOfView = new Set<number>();
+export { isChannelAway, isChannelCovered } from "./readStateAway";
+export { onMarkUnreadFailed, setMarkUnreadNotice, type MarkUnreadNotice } from "./readStateNotices";
 
 /**
  * Record whether the mounted list for a channel shows its live tail. The list
@@ -24,13 +24,9 @@ const liveTailOutOfView = new Set<number>();
  * flag describes the position a new arrival lands against.
  */
 export function setLiveTailInView(channelId: number, inView: boolean): void {
-  if (inView) {
-    liveTailOutOfView.delete(channelId);
-  } else {
-    liveTailOutOfView.add(channelId);
-    // The reader scrolled off the tail since Mark Unread: see `unreadHold`.
-    noteAwayUnread(channelId);
-  }
+  setTailInView(channelId, inView);
+  // The reader scrolled off the tail since Mark Unread: see `unreadHold`.
+  if (!inView) noteAwayUnread(channelId);
 }
 
 /**
@@ -40,31 +36,6 @@ export function setLiveTailInView(channelId: number, inView: boolean): void {
  */
 export function noteAwayUnread(channelId: number): void {
   if (unreadHold.has(channelId)) unreadHold.set(channelId, true);
-}
-
-/**
- * Whether the reader is away from a channel: its loaded window is detached from
- * the live tail, the list is scrolled away from the tail, or the app window is
- * not focused. "Active" only means "the reader is watching" when this
- * is false, so a message landing while away counts as unread and a `ready`
- * resync must not mark the channel read. The focus source is
- * `document.hasFocus()`, as in `lib/notifications.ts`.
- */
-export function isChannelAway(channelId: number): boolean {
-  return !document.hasFocus() || isWindowDetached(channelId) || liveTailOutOfView.has(channelId);
-}
-
-/**
- * Whether something full-screen sits over the chat although the channel is
- * still active: the Settings overlay (the list stays mounted and the window
- * stays focused behind it), a content view, or an open modal dialog such as the
- * Quick Switcher. `isChannelAway` cannot see
- * either, and must not change (it decides unread counting), so the paths that
- * mark a channel read for messages "seen live" ask this as well.
- */
-export function isChannelCovered(): boolean {
-  const { settingsOpen, activeView } = uiStore.getState();
-  return settingsOpen || activeView !== null || dialogOpen();
 }
 
 /** Sends one `mark_read` over the socket, up to `messageId` when given. */
@@ -155,54 +126,6 @@ export function unreadChannelIds(opts: UnreadScope = {}): readonly number[] {
   return [...ids];
 }
 
-/**
- * The server's `mark_read` handler has its own 5-per-second-per-user budget,
- * separate from `channel_focus` (Server/ws/handlers_presence.go), and
- * silently drops frames over that budget — no error reaches the client. A
- * burst of `mark_read` sends larger than the budget would still clear every
- * local badge (see `markChannelRead`), so the excess channels' badges would
- * resurrect on the next `ready` once the server re-asserts its own unread
- * counts. Pacing the burst to below the budget keeps every send inside a
- * window the server actually honours.
- */
-const MARK_ALL_READ_BURST_SIZE = 4;
-const MARK_ALL_READ_BURST_INTERVAL_MS = 1100;
-
-/** Channels still waiting for their `mark_read` frame, each with its
- *  unread+mention total at click time. One queue is shared by every caller of
- *  `markChannelsRead`, so overlapping calls merge instead of dropping each
- *  other's unsent tail. A re-registered sender (new connection) empties it. */
-let markQueue: Array<{ readonly id: number; readonly snapshot: number }> = [];
-/** When each frame sent inside the current pacing window went out. */
-let markSentAt: number[] = [];
-let markTimer: ReturnType<typeof setTimeout> | null = null;
-
-function cancelPendingMarkAll(): void {
-  if (markTimer !== null) clearTimeout(markTimer);
-  markTimer = null;
-  markQueue = [];
-  markSentAt = [];
-}
-
-/** Send as many queued channels as the window allows, then re-arm for the rest. */
-function drainMarkQueue(): void {
-  markTimer = null;
-  const now = Date.now();
-  markSentAt = markSentAt.filter((t) => now - t < MARK_ALL_READ_BURST_INTERVAL_MS);
-  while (markQueue.length > 0 && markSentAt.length < MARK_ALL_READ_BURST_SIZE) {
-    const next = markQueue.shift()!;
-    // A message that arrived after the click was never seen: skip its send,
-    // and spend no budget on it.
-    if (unreadTotal(next.id) > next.snapshot) continue;
-    markChannelRead(next.id);
-    markSentAt.push(now);
-  }
-  if (markQueue.length > 0) {
-    const wait = Math.max(0, markSentAt[0]! + MARK_ALL_READ_BURST_INTERVAL_MS - now);
-    markTimer = setTimeout(drainMarkQueue, wait);
-  }
-}
-
 /** Sum of a channel or DM's unread + mention counts, from whichever store
  *  knows it. 0 for a channel this client does not (or no longer) know. */
 function unreadTotal(channelId: number): number {
@@ -218,7 +141,7 @@ function unreadTotal(channelId: number): number {
  * stay silent when there was nothing to do.
  *
  * Sent in bursts of `MARK_ALL_READ_BURST_SIZE` spaced `MARK_ALL_READ_BURST_INTERVAL_MS`
- * apart — see the budget note above. Each channel's local badge is cleared at
+ * apart — see the budget note in readStateBulk.ts. Each channel's local badge is cleared at
  * the moment its own frame actually goes out, not up front, so a channel
  * whose send hasn't fired yet still shows unread rather than lying about it.
  *
@@ -243,18 +166,7 @@ export function markAllRead(opts: UnreadScope = {}): number {
  * overlapping bursts. Returns how many ids were passed.
  */
 export function markChannelsRead(ids: readonly number[]): number {
-  const queued = new Set(markQueue.map((q) => q.id));
-  for (const id of ids) {
-    if (queued.has(id)) continue;
-    // Already read (an earlier burst got there first): nothing to send.
-    const snapshot = unreadTotal(id);
-    if (snapshot === 0) continue;
-    queued.add(id);
-    markQueue.push({ id, snapshot });
-  }
-  if (markTimer !== null) clearTimeout(markTimer);
-  drainMarkQueue();
-  return ids.length;
+  return queueMarkRead(ids, { markOne: markChannelRead, unreadTotal });
 }
 
 /**
@@ -454,8 +366,13 @@ export function noteMessageSeen(channelId: number, messageId: number, live = fal
   raiseHighestSeen(channelId, messageId);
 }
 
+/** Whether recording `messageId` as seen would raise the channel's highest seen id. */
+export function wouldRaiseSeen(channelId: number, messageId: number): boolean {
+  return messageId > (highestSeen.get(channelId) ?? 0);
+}
+
 function raiseHighestSeen(channelId: number, messageId: number): void {
-  if (messageId > (highestSeen.get(channelId) ?? 0)) highestSeen.set(channelId, messageId);
+  if (wouldRaiseSeen(channelId, messageId)) highestSeen.set(channelId, messageId);
 }
 
 /**
@@ -470,7 +387,7 @@ function raiseHighestSeen(channelId: number, messageId: number): void {
  */
 export function noteVisibleMessageSeen(channelId: number, messageId: number): void {
   if (!readPointerEnabled() || messageId <= 0) return;
-  if (!document.hasFocus() || isWindowDetached(channelId)) return;
+  if (isWindowAway(channelId)) return;
   if (unreadHold.has(channelId)) return;
   raiseHighestSeen(channelId, messageId);
 }
@@ -528,7 +445,7 @@ export function isHeldUnread(channelId: number): boolean {
 
 /**
  * Mark Unread, the shared half (the click logic is in
- * components/message-list/markUnread.ts): `send` puts the `mark_unread` frame
+ * features/messaging/message-list/markUnread.ts): `send` puts the `mark_unread` frame
  * on the wire and returns its id; the local pointer moves to `pointer`, what
  * was seen is forgotten, and the channel is held so nothing on screen marks it
  * read straight away. False, and nothing sent, without the capability or for an
@@ -566,31 +483,6 @@ export function acceptReadState(channelId: number, pointer: number): boolean {
   return true;
 }
 
-const markUnreadFailListeners = new Set<(channelId: number) => void>();
-
-/**
- * Be told when a Mark Unread for any channel failed and its pointer was put
- * back (see `failMarkUnread`), so a mounted list can drop the NEW line the
- * mark drew. Returns the unsubscribe. A `read_state` that answers the mark
- * never notifies: the line stays.
- */
-export function onMarkUnreadFailed(listener: (channelId: number) => void): () => void {
-  markUnreadFailListeners.add(listener);
-  return () => {
-    markUnreadFailListeners.delete(listener);
-  };
-}
-
-/** What to tell the user when a Mark Unread did not happen. */
-export type MarkUnreadNotice = "rateLimited" | "notFound" | "failed";
-
-let unreadNotice: ((notice: MarkUnreadNotice) => void) | null = null;
-
-/** Register how a failed Mark Unread is shown (the page's, like the sender). */
-export function setMarkUnreadNotice(next: ((notice: MarkUnreadNotice) => void) | null): void {
-  unreadNotice = next;
-}
-
 /**
  * The Mark Unread whose frame id is `requestId` did not happen (the server
  * refused it, or it never left): put the pointer back, release the hold and
@@ -603,7 +495,6 @@ export function failMarkUnread(requestId: string | undefined, notice: MarkUnread
   pendingMarkUnread.delete(requestId);
   unreadHold.delete(pending.channelId);
   if (pending.previous !== undefined) writeReadPointer(pending.channelId, pending.previous);
-  for (const listener of markUnreadFailListeners) listener(pending.channelId);
-  unreadNotice?.(notice);
+  announceMarkUnreadFailure(pending.channelId, notice);
   return true;
 }

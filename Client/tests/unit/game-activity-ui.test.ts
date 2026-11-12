@@ -7,8 +7,8 @@ const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@lib/logger", () => logMock.loggerMock());
 
-import { createUserProfilePopup } from "@components/UserProfilePopup";
-import { createDmProfileSidebar } from "@components/DmProfileSidebar";
+import { createUserProfilePopup } from "../../src/features/profiles/userProfilePopup";
+import { createDmProfileSidebar } from "../../src/features/direct-messages/DmProfileSidebar";
 import { makeDmConversation, useDmSidebarHost } from "../helpers/dmSidebarHost";
 import { buildGameActivityRows } from "../../src/features/settings/GameActivityRows";
 import { playingForLine, playingLine } from "../../src/features/members/gameActivityLine";
@@ -30,7 +30,7 @@ import {
   withRename,
 } from "@lib/prefs/gameActivityPrefs";
 import { desktop } from "../../src/platform/desktop";
-import { buildDmConversations } from "../../src/pages/main-page/SidebarDmHelpers";
+import { buildDmConversations } from "../../src/features/direct-messages/SidebarDmHelpers";
 import { dmStore } from "../../src/stores/dm.store";
 
 const NOW = Date.UTC(2026, 9, 23, 12, 0, 0);

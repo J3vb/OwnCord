@@ -19,6 +19,26 @@ import (
 	"github.com/coder/websocket"
 )
 
+// expectTextFrames dials srvURL and requires the server to send exactly the
+// wanted text frames, in order.
+func expectTextFrames(t testing.TB, srvURL string, wants ...string) {
+	t.Helper()
+	conn := dialTestConn(t, srvURL)
+	defer func() { _ = conn.CloseNow() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, want := range wants {
+		_, msg, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("read %q: %v", want, err)
+		}
+		if string(msg) != want {
+			t.Fatalf("got %q want %q", msg, want)
+		}
+	}
+}
+
 func dialTestConn(t testing.TB, srvURL string) *websocket.Conn {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -117,20 +137,7 @@ func TestWriteDeadline_LateTimerDoesNotPoisonNextWrite(t *testing.T) {
 		result <- wd.write(conn, []byte("second"))
 	}))
 	defer srv.Close()
-	conn := dialTestConn(t, srv.URL)
-	defer func() { _ = conn.CloseNow() }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for _, want := range []string{"first", "second"} {
-		_, msg, err := conn.Read(ctx)
-		if err != nil {
-			t.Fatalf("read %q: %v", want, err)
-		}
-		if string(msg) != want {
-			t.Fatalf("got %q want %q", msg, want)
-		}
-	}
+	expectTextFrames(t, srv.URL, "first", "second")
 	if err := <-result; err != nil {
 		t.Fatalf("write after late timer: %v", err)
 	}
@@ -171,20 +178,7 @@ func TestWriteDeadline_TimerFiredDuringSuccessfulWriteIsReset(t *testing.T) {
 		result <- wd.write(conn, []byte("second"))
 	}))
 	defer srv.Close()
-	conn := dialTestConn(t, srv.URL)
-	defer func() { _ = conn.CloseNow() }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for _, want := range []string{"first", "second"} {
-		_, msg, err := conn.Read(ctx)
-		if err != nil {
-			t.Fatalf("read %q: %v", want, err)
-		}
-		if string(msg) != want {
-			t.Fatalf("got %q want %q", msg, want)
-		}
-	}
+	expectTextFrames(t, srv.URL, "first", "second")
 	if err := <-result; err != nil {
 		t.Fatalf("write after late cancel: %v", err)
 	}

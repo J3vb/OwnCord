@@ -38,10 +38,7 @@ func TestRefreshUserSnapshot_FailsClosedWhenNewRoleLookupFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := newClient(hub, nil, user, "", 0, ctx)
@@ -51,15 +48,9 @@ func TestRefreshUserSnapshot_FailsClosedWhenNewRoleLookupFails(t *testing.T) {
 	// would otherwise reject this — the point is to exercise
 	// GetRoleByID(missingRoleID) returning (nil, nil), the same shape a
 	// transient lookup failure produces in refreshUserSnapshot.
-	if _, err := database.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
-		t.Fatalf("disable foreign_keys: %v", err)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE users SET role_id = ? WHERE id = ?`, missingRoleID, uid); err != nil {
-		t.Fatalf("reassign role to missing role: %v", err)
-	}
-	if _, err := database.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
-		t.Fatalf("re-enable foreign_keys: %v", err)
-	}
+	mustExec(t, database, "PRAGMA foreign_keys=OFF")
+	mustExec(t, database, `UPDATE users SET role_id = ? WHERE id = ?`, missingRoleID, uid)
+	mustExec(t, database, "PRAGMA foreign_keys=ON")
 
 	if role, roleErr := database.GetRoleByID(ctx, missingRoleID); roleErr != nil || role != nil {
 		t.Fatalf("precondition: GetRoleByID(missingRoleID) = (%v, %v), want (nil, nil)", role, roleErr)

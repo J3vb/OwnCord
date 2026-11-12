@@ -16,8 +16,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// ErrImportRunning is returned by Start while another import is running. One
-// import runs at a time, server-wide.
+// ErrImportRunning is returned by Start while another import is running; one import runs at a time,
+// server-wide.
 var ErrImportRunning = db.ErrImportRunning
 
 // ErrNothingToImport means the export held no message the import takes.
@@ -35,7 +35,7 @@ const (
 	finishTimeout       = 30 * time.Second
 )
 
-// Store is the database surface the import needs. *db.DB satisfies it.
+// Store is the database surface the import needs.
 type Store interface {
 	EnsureImportAccount(ctx context.Context) (int64, error)
 	StartImport(ctx context.Context, p db.StartImportParams) (channelID, jobID int64, err error)
@@ -55,17 +55,15 @@ type Files interface {
 	Delete(name string) error
 }
 
-// Uploads supplies the rules a normal upload follows (file-type policy, per-file
-// cap, free-space floor) but not the per-user quota; *service.UploadService
-// satisfies it.
+// Uploads supplies the rules a normal upload follows (file-type policy, per-file cap, free-space floor) but
+// not the per-user quota.
 type Uploads interface {
 	FileTypePolicy(ctx context.Context) (storage.FileTypePolicy, error)
 	ReserveHeadroom(ctx context.Context, n int64) (*service.StorageReservation, error)
 	MaxUploadBytes() int64
 }
 
-// Announcer is told once when the finished channel becomes visible; no other
-// event is sent for an import.
+// Announcer is told once when the finished channel becomes visible; no other event is sent for an import.
 type Announcer interface {
 	ChannelCreated(ctx context.Context, ch *db.Channel)
 }
@@ -76,40 +74,32 @@ type Config struct {
 	Files     Files
 	Uploads   Uploads
 	Announcer Announcer
-	// Group runs the import in the background so the lifecycle owner can join
-	// it before the database closes. Nil runs it unowned, as in tests.
-	Group *syncutil.Group
-	// ChunkSize is messages per transaction; DefaultChunkSize when zero.
+	// Group runs the import in the background so the lifecycle owner can join it before the database closes; nil
+	// runs it unowned, as in tests.
+	Group     *syncutil.Group
 	ChunkSize int
-	// ChunkBytes and ChunkAge flush a chunk early once its copied files pass
-	// that size or wait that long, so the orphan sweep (which takes unlinked
-	// rows after an hour) cannot reclaim them. Zero takes the defaults.
+	// ChunkBytes and ChunkAge flush a chunk early once its copied files pass that size or wait that long, so the
+	// orphan sweep (which takes unlinked rows after an hour) cannot reclaim them. Zero takes the defaults.
 	ChunkBytes int64
 	ChunkAge   time.Duration
-	// Now is the clock the chunk age is measured on; time.Now when nil.
-	Now func() time.Time
+	Now        func() time.Time
 }
 
-// Defaults for Config.ChunkBytes and Config.ChunkAge.
 const (
 	DefaultChunkBytes = 64 << 20
 	DefaultChunkAge   = 10 * time.Minute
 )
 
-// abandonAttempts is how often a dead import's clean-up is tried.
 const abandonAttempts = 4
 
 // Runner runs imports, one at a time server-wide.
 type Runner struct {
 	cfg Config
 
-	// jobs holds the jobs this runner is running, so a cancel finds one by id.
 	jobsMu syncutil.Mutex
 	jobs   map[int64]*Job
 
-	// afterChunk, when set by a test, runs after each committed chunk.
 	afterChunk func(ctx context.Context, chunk int)
-	// retryDelay is the first wait between clean-up attempts.
 	retryDelay time.Duration
 }
 
@@ -129,11 +119,8 @@ func NewRunner(cfg Config) *Runner {
 
 // Request is one import.
 type Request struct {
-	// Export is opened by the caller, who closes it after Wait returns.
-	Export Export
-	// CategoryID is the category the new channel goes in, 0 for none.
+	Export     Export
 	CategoryID int64
-	// CreatedBy is the admin starting the import.
 	CreatedBy  int64
 	SourceName string
 }
@@ -157,8 +144,8 @@ type Job struct {
 	result Result
 }
 
-// Cancel asks the import to stop. It deletes the channel and ends the job as
-// cancelled; messages already inserted go with the channel.
+// Cancel asks the import to stop: it deletes the channel and ends the job as cancelled; messages already
+// inserted go with the channel.
 func (j *Job) Cancel() { j.cancel() }
 
 // Done is closed when the job has ended.
@@ -173,9 +160,8 @@ func (j *Job) Wait() Result {
 // ErrShuttingDown is returned by Start once the server is draining.
 var ErrShuttingDown = errors.New("the server is shutting down")
 
-// Start creates the hidden channel and its job and runs the import in the
-// background; the job outlives ctx and ends on completion, Cancel or Group
-// stop. It returns ErrImportRunning while another import runs.
+// Start creates the hidden channel and its job and runs the import in the background; the job outlives ctx
+// and ends on completion, Cancel or Group stop. Returns ErrImportRunning while another import runs.
 func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 	header, err := readHeader(ctx, req.Export)
 	if err != nil {
@@ -204,8 +190,7 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 		return nil, err
 	}
 
-	// stopCtx ends when Cancel is called; the group's own context ends the job
-	// at shutdown.
+	// stopCtx ends when Cancel is called; the group's own context ends the job at shutdown.
 	stopCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
 	job := &Job{ID: jobID, ChannelID: channelID, cancel: stop, done: make(chan struct{})}
 	r.track(job, true)
@@ -247,8 +232,8 @@ func readHeader(ctx context.Context, ex Export) (Header, error) {
 	return h, nil
 }
 
-// cleanText sanitizes like any other free text, trims it and cuts it to max
-// runes. An empty result becomes fallback.
+// cleanText sanitizes like any other free text, trims it and cuts it to max runes; an empty result becomes
+// fallback.
 func cleanText(s string, maxRunes int, fallback string) string {
 	s = strings.TrimSpace(service.SanitizeText(s))
 	if r := []rune(s); len(r) > maxRunes {
@@ -260,23 +245,19 @@ func cleanText(s string, maxRunes int, fallback string) string {
 	return s
 }
 
-// runState is one job's working set.
 type runState struct {
-	// stop ends when Cancel is called. Cancel reaches ctx through a callback, so
-	// the steps that must not slip past it (a chunk, the publish) also read this
-	// directly.
+	// stop ends when Cancel is called. Cancel reaches ctx through a callback, so the steps that must not slip
+	// past it (a chunk, the publish) also read this directly.
 	stop                      context.Context
 	account, channelID, jobID int64
-	// discordChannel is the export's channel id: a reply only links when it
-	// points into this channel.
+	// discordChannel is the export's channel id: a reply only links when it points into this channel.
 	discordChannel string
 	ids            map[string]int64
 	chunk          []db.ImportMessage
 	chunks         int
 	lastID         int64
 	prog           db.ImportProgress
-	// chunkBytes is the size of the files copied for the open chunk, and
-	// chunkSince when the first of them landed.
+	// chunkBytes is the size of the files copied for the open chunk, chunkSince when the first landed.
 	chunkBytes int64
 	chunkSince time.Time
 	policy     storage.FileTypePolicy
@@ -292,14 +273,12 @@ func (r *Runner) run(ctx, stop context.Context, ex Export, account, channelID, j
 	status, reason := db.ImportFailed, cleanText(err.Error(), maxErrorRunes, "import failed")
 	switch {
 	case st.stop.Err() != nil:
-		// An administrator asked for this.
 		status, reason = db.ImportCancelled, "cancelled"
 	case errors.Is(err, context.Canceled):
-		// Nobody asked: the server is stopping.
 		reason = ErrServerStopped.Error()
 	}
-	// The channel is removed even when ctx is what ended the job. A server
-	// shutdown (ctx done, no administrator stop) cuts the clean-up retries short.
+	// The channel is removed even when ctx is what ended the job. A server shutdown (ctx done, no administrator
+	// stop) cuts the clean-up retries short.
 	var halt <-chan struct{}
 	if st.stop.Err() == nil {
 		halt = ctx.Done()
@@ -345,8 +324,8 @@ func (r *Runner) execute(ctx context.Context, ex Export, st *runState) error {
 	return nil
 }
 
-// announce sends the one channel-created event. The import is already
-// committed, so a cancelled ctx must not swallow it.
+// announce sends the one channel-created event; the import is already committed, so a cancelled ctx must not
+// swallow it.
 func (r *Runner) announce(ctx context.Context, channelID int64) {
 	if r.cfg.Announcer == nil {
 		return
@@ -360,7 +339,6 @@ func (r *Runner) announce(ctx context.Context, channelID int64) {
 	r.cfg.Announcer.ChannelCreated(tail, ch)
 }
 
-// parseTime reads an export timestamp as a UTC instant.
 func parseTime(s string) (time.Time, bool) {
 	t, err := time.Parse(time.RFC3339Nano, s)
 	return t.UTC(), err == nil
@@ -368,8 +346,6 @@ func parseTime(s string) (time.Time, bool) {
 
 var colorRe = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
 
-// addMessage turns one exported message into a chunk entry, or counts it as
-// skipped.
 func (r *Runner) addMessage(ctx context.Context, ex Export, st *runState, m *Message) error {
 	if !m.Importable() {
 		st.prog.Skipped++
@@ -421,7 +397,6 @@ func (r *Runner) addMessage(ctx context.Context, ex Export, st *runState, m *Mes
 	return nil
 }
 
-// interrupted reports why the import must stop, or nil to go on.
 func (st *runState) interrupted(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("import stopped: %w", err)
@@ -432,7 +407,6 @@ func (st *runState) interrupted(ctx context.Context) error {
 	return nil
 }
 
-// flush writes the pending chunk in one transaction and then reports progress.
 func (r *Runner) flush(ctx context.Context, st *runState) error {
 	if len(st.chunk) == 0 {
 		return nil

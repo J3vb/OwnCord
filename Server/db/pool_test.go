@@ -31,9 +31,7 @@ func openFileDB(t *testing.T) *db.DB {
 		t.Fatalf("Open(%q) error: %v", dbPath, err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 	return database
 }
 
@@ -43,13 +41,8 @@ func seedChannelAndUser(t *testing.T, database *db.DB) (channelID, userID int64)
 	t.Helper()
 	ctx := context.Background()
 	channelID, err := database.AdminCreateChannel(ctx, "pool-test", "text", "", "", 99)
-	if err != nil {
-		t.Fatalf("AdminCreateChannel: %v", err)
-	}
-	userID, err = database.CreateUser(ctx, "pooluser", "x", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
+	userID = mustCreateUser(t, database, "pooluser", "x", 4)
 	return channelID, userID
 }
 
@@ -103,9 +96,7 @@ func TestFilePool_ForeignKeysOnReaderConnections(t *testing.T) {
 
 	// journal_mode must be WAL on the reader connections too.
 	var mode string
-	if err := database.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&mode); err != nil {
-		t.Fatalf("PRAGMA journal_mode: %v", err)
-	}
+	mustDo(t, "PRAGMA journal_mode", database.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&mode))
 	if mode != "wal" {
 		t.Errorf("journal_mode = %q, want %q", mode, "wal")
 	}
@@ -168,15 +159,11 @@ func TestFilePool_ConcurrentReadsAndWrites(t *testing.T) {
 	wg.Wait()
 
 	var msgCount, evtCount int64
-	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages").Scan(&msgCount); err != nil {
-		t.Fatalf("count messages: %v", err)
-	}
+	mustDo(t, "count messages", database.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages").Scan(&msgCount))
 	if msgCount != wantRows {
 		t.Errorf("messages = %d, want %d", msgCount, wantRows)
 	}
-	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM events").Scan(&evtCount); err != nil {
-		t.Fatalf("count events: %v", err)
-	}
+	mustDo(t, "count events", database.QueryRowContext(ctx, "SELECT COUNT(*) FROM events").Scan(&evtCount))
 	if evtCount != wantRows {
 		t.Errorf("events = %d, want %d", evtCount, wantRows)
 	}
@@ -218,14 +205,10 @@ func TestFilePool_ReadDuringOpenWriteTx(t *testing.T) {
 	ctx := context.Background()
 	channelID, userID := seedChannelAndUser(t, database)
 
-	if _, err := database.CreateMessage(ctx, channelID, userID, "before", nil); err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustCreateMessage(t, database, channelID, userID, "before", nil)
 
 	tx, err := database.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx: %v", err)
-	}
+	mustDo(t, "BeginTx", err)
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO messages (channel_id, user_id, content) VALUES (?, ?, 'uncommitted')`,
 		channelID, userID,
@@ -249,9 +232,7 @@ func TestFilePool_ReadDuringOpenWriteTx(t *testing.T) {
 		t.Errorf("read during open tx saw %d messages, want 1 (pre-tx snapshot)", count)
 	}
 
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
+	mustDo(t, "Commit", tx.Commit())
 	if err := database.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM messages WHERE channel_id = ?", channelID,
 	).Scan(&count); err != nil {
@@ -271,10 +252,7 @@ func TestFilePool_ThreadListDuringOpenWriteTx(t *testing.T) {
 	channelID, userID := seedChannelAndUser(t, database)
 
 	for _, name := range []string{"first", "second"} {
-		starter, err := database.CreateMessage(ctx, channelID, userID, "starter "+name, nil)
-		if err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		starter := mustCreateMessage(t, database, channelID, userID, "starter "+name, nil)
 		if _, _, err := database.CreateThread(ctx, db.NewThread{
 			ParentID: channelID, StarterMessageID: starter, OwnerID: userID, Name: name, AutoArchiveMinutes: 1440,
 		}); err != nil {
@@ -283,9 +261,7 @@ func TestFilePool_ThreadListDuringOpenWriteTx(t *testing.T) {
 	}
 
 	tx, err := database.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx: %v", err)
-	}
+	mustDo(t, "BeginTx", err)
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO messages (channel_id, user_id, content) VALUES (?, ?, 'held')`,

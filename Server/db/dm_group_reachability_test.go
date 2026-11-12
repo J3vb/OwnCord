@@ -11,9 +11,7 @@ import (
 
 func turnDMsOff(t *testing.T, database *db.DB, userID int64) {
 	t.Helper()
-	if err := database.SetUserPrivacy(context.Background(), userID, db.UserPrivacy{AllowMemberDMs: false, MessageRequests: true}); err != nil {
-		t.Fatalf("SetUserPrivacy: %v", err)
-	}
+	mustDo(t, "SetUserPrivacy", database.SetUserPrivacy(context.Background(), userID, db.UserPrivacy{AllowMemberDMs: false, MessageRequests: true}))
 }
 
 // The target turns DMs off after the service's check and before the add
@@ -58,9 +56,7 @@ func TestAddGroupDMMembers_UnacceptedRequestRefusedInTx(t *testing.T) {
 	ctx := context.Background()
 	dave := seedUser(t, f.database, "dave")
 	dm, _, err := f.database.GetOrCreateDMChannel(ctx, f.alice, dave)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	if _, err = f.database.ExecContext(ctx,
 		`INSERT INTO message_requests (sender_id, recipient_id, channel_id, state) VALUES (?, ?, ?, 'ignored')`,
 		f.alice, dave, dm.ID); err != nil {
@@ -94,9 +90,7 @@ func TestCreateGroupDMChannel_RefusesUnreachableRecipientInTx(t *testing.T) {
 	}
 	// The creator's own setting never counts against them.
 	turnDMsOff(t, database, alice)
-	if err := database.TrustSender(ctx, carol, alice, "accepted"); err != nil {
-		t.Fatalf("TrustSender: %v", err)
-	}
+	mustDo(t, "TrustSender", database.TrustSender(ctx, carol, alice, "accepted"))
 	if _, err := database.CreateGroupDMChannel(ctx, "Crew", alice, []int64{alice, bob, carol}); err != nil {
 		t.Fatalf("create with a recipient that trusts the creator: %v", err)
 	}

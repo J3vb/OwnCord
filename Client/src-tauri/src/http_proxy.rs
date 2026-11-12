@@ -48,7 +48,8 @@ use tokio::time::Duration;
 use crate::http_pool::{self, BoxError, ConnPool, Fresh};
 use crate::tofu::{self, TofuOutcome};
 
-/// Tauri-managed state: one running tunnel per remote host.
+/// Tauri-managed state: one running tunnel per remote host, keyed by
+/// `tofu::cert_store_key`.
 pub struct HttpProxyState {
     inner: Mutex<HashMap<String, ProxyEntry>>,
     /// Idle upstream connections shared by every tunnel, keyed by exact host.
@@ -109,11 +110,13 @@ impl HttpProxyState {
 }
 
 use crate::proxy_common::{
-    connect_tls_over, content_length, copy_with_deadline, dial_tcp, header_value,
-    random_tunnel_token, read_request_headers, resolve_remote_target, rewrite_headers,
-    run_accept_loop, spawn_watched, strip_tunnel_token, validate_remote_host, CountingStream,
-    TunnelEndpoint, FORBIDDEN_RESPONSE,
+    connect_tls_over, copy_with_deadline, dial_tcp, random_tunnel_token, read_request_headers,
+    resolve_remote_target, run_accept_loop, spawn_watched, strip_tunnel_token,
+    validate_remote_host, AbortOnDrop, CountingStream, TunnelEndpoint, FORBIDDEN_RESPONSE,
 };
+#[cfg(test)]
+use owncord_parse::proxy::MAX_UPLOAD_PROGRESS_ID_LEN;
+use owncord_parse::proxy::{rewrite_request_headers, upload_progress_target};
 
 /// Start (or reuse) a local HTTP→TLS tunnel for `remote_host` and return its
 /// loopback port and path token. The webview sends its REST traffic to
@@ -125,10 +128,14 @@ pub async fn start_http_proxy<R: Runtime>(
     remote_host: String,
 ) -> Result<TunnelEndpoint, String> {
     validate_remote_host(&remote_host)?;
+    // Keyed like the pins and the pool, so two spellings of one server (a
+    // typed profile host and a URL-parsed one) share a tunnel. The first
+    // spelling stays the one the tunnel dials.
+    let key = tofu::cert_store_key(&remote_host);
 
     let mut inner = state.inner.lock().await;
 
-    if let Some(entry) = inner.get(&remote_host) {
+    if let Some(entry) = inner.get(&key) {
         debug!(
             "[http_proxy] reusing tunnel on port {} for {}",
             entry.port, remote_host
@@ -153,7 +160,7 @@ pub async fn start_http_proxy<R: Runtime>(
     let conn_app = app.clone();
     let conn_host = remote_host.clone();
     let conn_token = token.clone();
-    let dead_host = remote_host.clone();
+    let dead_host = key.clone();
     spawn_watched(
         "http_proxy",
         tokio::spawn(run_accept_loop(
@@ -188,7 +195,7 @@ pub async fn start_http_proxy<R: Runtime>(
         port, remote_host
     );
     inner.insert(
-        remote_host,
+        key,
         ProxyEntry {
             port,
             token: token.clone(),
@@ -204,9 +211,10 @@ pub async fn stop_http_proxy(
     state: tauri::State<'_, HttpProxyState>,
     remote_host: String,
 ) -> Result<(), String> {
+    let key = tofu::cert_store_key(&remote_host);
     let mut inner = state.inner.lock().await;
-    state.pool.invalidate(&tofu::cert_store_key(&remote_host));
-    if let Some(entry) = inner.remove(&remote_host) {
+    state.pool.invalidate(&key);
+    if let Some(entry) = inner.remove(&key) {
         let _ = entry.shutdown_tx.send(());
         info!("[http_proxy] tunnel stopped for {}", remote_host);
     }
@@ -221,35 +229,6 @@ pub async fn stop_http_proxy(
 // ---------------------------------------------------------------------------
 // Proxy internals
 // ---------------------------------------------------------------------------
-
-/// Rewrite a request's headers: replace Host with the real remote host and
-/// set exactly one `Connection: {connection}`. The one-shot path passes
-/// `close`, so the upstream connection ends with the response; the pooled
-/// path passes `keep-alive`. Either way the webview sends one request per
-/// loopback connection (its response says `Connection: close`), so every
-/// request is read and rewritten here, never passed through unread.
-/// `raw` must end with the "\r\n\r\n" header terminator.
-fn rewrite_request_headers(raw: &[u8], remote_host: &str, connection: &str) -> String {
-    let mut modified = rewrite_headers(&String::from_utf8_lossy(raw), |line| {
-        let lower = line.to_ascii_lowercase();
-        if lower.starts_with("host:") {
-            Some(format!("Host: {remote_host}"))
-        } else if lower.starts_with("connection:") {
-            Some(format!("Connection: {connection}"))
-        } else {
-            None
-        }
-    });
-    // `read_request_headers` only returns once it has seen the terminator, so
-    // it survives the line split; the `insert_at` below depends on it.
-    debug_assert!(modified.ends_with("\r\n\r\n"));
-    // If the client never sent a Connection header, inject one.
-    if !modified.to_ascii_lowercase().contains("\r\nconnection:") {
-        let insert_at = modified.len() - 2; // before final CRLF
-        modified.insert_str(insert_at, &format!("Connection: {connection}\r\n"));
-    }
-    modified
-}
 
 /// The upstream side of a tunnel: one TLS connection to the real server.
 type TlsConn = tokio_rustls::client::TlsStream<TcpStream>;
@@ -478,31 +457,6 @@ async fn connect_verified<R: Runtime>(
     }
 }
 
-/// The upload an in-flight request belongs to: the webview-generated
-/// correlation id plus the request's declared body length. Both must be
-/// present for the proxy to report progress; every other request takes the
-/// plain copy path with no extra work.
-struct UploadTarget {
-    id: String,
-    total: u64,
-}
-
-/// Bound on the correlation id the webview sends, so a malformed request head
-/// cannot make the proxy hold or re-emit an unbounded value.
-const MAX_UPLOAD_PROGRESS_ID_LEN: usize = 128;
-
-fn upload_progress_target(raw: &[u8]) -> Option<UploadTarget> {
-    let id = header_value(raw, "x-upload-id")?;
-    if id.is_empty() || id.len() > MAX_UPLOAD_PROGRESS_ID_LEN {
-        return None;
-    }
-    let total = content_length(raw)?;
-    if total == 0 {
-        return None;
-    }
-    Some(UploadTarget { id, total })
-}
-
 /// Emit one `upload-progress` event. The payload shape is the webview's
 /// `UploadProgress` (`src/platform/contracts/http.ts`); keep the two in step.
 fn emit_upload_progress<R: Runtime>(app: &AppHandle<R>, id: &str, sent: u64, total: u64) {
@@ -527,11 +481,11 @@ async fn run_data_phase<R: Runtime>(
     tls: &mut tokio_rustls::client::TlsStream<TcpStream>,
 ) -> std::io::Result<(u64, u64)> {
     let Some(target) = upload_progress_target(request_head) else {
-        return copy_with_deadline(local, tls, DATA_PHASE_TIMEOUT).await;
+        return copy_with_deadline(local, tls, DATA_PHASE_IDLE_TIMEOUT).await;
     };
     let counter = Arc::new(AtomicU64::new(0));
     let mut counted = CountingStream::new(&mut *local, Arc::clone(&counter));
-    let ticker = tokio::spawn({
+    let _ticker = AbortOnDrop(tokio::spawn({
         let app = app.clone();
         let counter = Arc::clone(&counter);
         async move {
@@ -545,20 +499,20 @@ async fn run_data_phase<R: Runtime>(
                 );
             }
         }
-    });
-    let result = copy_with_deadline(&mut counted, tls, DATA_PHASE_TIMEOUT).await;
-    ticker.abort();
-    result
+    }));
+    copy_with_deadline(&mut counted, tls, DATA_PHASE_IDLE_TIMEOUT).await
 }
 
-/// Bound for the data-copy phase of a tunneled connection (step 3 above).
-/// The header read, TCP connect, and TLS handshake phases all use a tight
-/// 10s guard, but this phase carries the actual REST body — including
-/// attachment/avatar uploads — so it needs a much more generous bound. 600s
-/// only reclaims a connection that is genuinely stuck (e.g. a remote that
-/// completes the TLS handshake and then neither responds nor closes), not
-/// one that is merely slow.
-pub(crate) const DATA_PHASE_TIMEOUT: Duration = Duration::from_secs(600);
+/// Idle bound for the data-copy phase of a tunneled connection (step 3
+/// above): the connection is reclaimed after this long with no byte moving
+/// either way. The header read, TCP connect, and TLS handshake phases use a
+/// tight 10s guard. This one only reclaims a connection that is genuinely
+/// stuck (a remote that completes the TLS handshake and then neither responds
+/// nor closes). A transfer that is slow but moving is never cut here: the
+/// server ends it at its own transfer lifetime (up to an hour) with a 408 the
+/// webview can explain, and the server abandons a stalled body after 30 s,
+/// well inside this window.
+pub(crate) const DATA_PHASE_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -823,5 +777,75 @@ mod tests {
         }
 
         stop_http_proxy(app.state(), host).await.expect("stop");
+    }
+
+    #[tokio::test]
+    async fn stopping_a_tunnel_closes_its_parked_connection_and_a_restart_serves() {
+        use tokio::io::AsyncReadExt;
+        let app = tauri::test::mock_builder()
+            .manage(HttpProxyState::new())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        let host = "127.0.0.1:9".to_string();
+
+        let first = start_http_proxy(app.handle().clone(), app.state(), host.clone())
+            .await
+            .expect("first start");
+        let mut parked = TcpStream::connect(("127.0.0.1", first.port))
+            .await
+            .expect("connect");
+        let partial = format!("GET /{}/api/v1/health HTTP/1.1\r\nHost: x\r\n", first.token);
+        parked.write_all(partial.as_bytes()).await.expect("write");
+
+        stop_http_proxy(app.state(), host.clone())
+            .await
+            .expect("stop");
+        let mut buf = Vec::new();
+        let closed = tokio::time::timeout(Duration::from_secs(5), parked.read_to_end(&mut buf))
+            .await
+            .expect("parked connection closes after stop");
+        assert!(closed.is_err() || buf.is_empty());
+
+        let second = start_http_proxy(app.handle().clone(), app.state(), host.clone())
+            .await
+            .expect("second start");
+        let mut client = TcpStream::connect(("127.0.0.1", second.port))
+            .await
+            .expect("connect");
+        client
+            .write_all(b"GET /x HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .expect("write");
+        let mut reply = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut reply))
+            .await
+            .expect("reply in time")
+            .expect("read");
+        assert_eq!(reply, FORBIDDEN_RESPONSE);
+
+        stop_http_proxy(app.state(), host).await.expect("stop");
+    }
+
+    #[tokio::test]
+    async fn two_spellings_of_one_host_share_one_tunnel() {
+        let app = tauri::test::mock_builder()
+            .manage(HttpProxyState::new())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+
+        let typed = start_http_proxy(app.handle().clone(), app.state(), "Chat.Example".into())
+            .await
+            .expect("typed start");
+        let parsed = start_http_proxy(app.handle().clone(), app.state(), "chat.example:443".into())
+            .await
+            .expect("parsed start");
+        assert_eq!(typed, parsed, "one server must get one listener");
+
+        // Stopping by either spelling stops the shared tunnel.
+        stop_http_proxy(app.state(), "chat.example".into())
+            .await
+            .expect("stop");
+        let state: tauri::State<'_, HttpProxyState> = app.state();
+        assert!(state.inner.lock().await.is_empty());
     }
 }

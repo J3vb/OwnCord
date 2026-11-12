@@ -1,9 +1,6 @@
-// Package clientip resolves the real client IP for an HTTP request, honouring
-// the operator's trusted_proxies configuration.
-//
-// Every trust boundary (HTTP middleware, the WebSocket handshake) shares this
-// one implementation, so none logs or audits r.RemoteAddr, which is the
-// reverse proxy's address in the recommended reverse-proxy deployment.
+// Package clientip resolves the real client IP per the operator's
+// trusted_proxies. Every trust boundary shares it, so none logs or audits
+// r.RemoteAddr, which is the reverse proxy's address in the recommended deployment.
 package clientip
 
 import (
@@ -13,9 +10,8 @@ import (
 	"strings"
 )
 
-// ParseCIDRList parses CIDR strings into networks, skipping invalid entries —
-// a misconfigured entry must not take the server down. Call it once at
-// construction, never on the request path.
+// ParseCIDRList parses CIDR strings, skipping invalid entries so a misconfigured
+// one cannot take the server down. Call it at construction, not per request.
 func ParseCIDRList(cidrs []string) []*net.IPNet {
 	nets := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {
@@ -28,10 +24,8 @@ func ParseCIDRList(cidrs []string) []*net.IPNet {
 	return nets
 }
 
-// CoversEveryAddress reports whether n spans the whole IPv4 or the whole IPv6
-// address space. A prefix holds every address between its two ends, so holding
-// both ends means holding the whole space. This also catches an IPv4-mapped
-// form such as ::ffff:0.0.0.0/96, which matches every IPv4 client.
+// CoversEveryAddress reports whether n spans the whole IPv4 or IPv6 space,
+// including IPv4-mapped forms like ::ffff:0.0.0.0/96 that match every IPv4 client.
 func CoversEveryAddress(n *net.IPNet) bool {
 	return (n.Contains(net.IPv4zero) && n.Contains(net.IPv4bcast)) ||
 		(n.Contains(net.IPv6zero) && n.Contains(allOnesIPv6))
@@ -42,9 +36,8 @@ var allOnesIPv6 = net.IP{
 	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 }
 
-// FirstCatchAll returns the first entry of cidrs that parses and covers every
-// address (see CoversEveryAddress), so a trusted-proxy list can be refused
-// before it lets any client choose its own address.
+// FirstCatchAll returns the first parseable cidrs entry covering every address,
+// so a trusted-proxy list can be refused before any client chooses its own address.
 func FirstCatchAll(cidrs []string) (entry string, found bool) {
 	for _, c := range cidrs {
 		_, n, err := net.ParseCIDR(c)
@@ -69,22 +62,14 @@ func InNets(ipStr string, nets []*net.IPNet) bool {
 	return false
 }
 
-// Resolve returns the real client IP for r.
-//
-// Security model:
-//   - Always parse the actual connecting address from r.RemoteAddr.
-//   - Only honour X-Real-IP or X-Forwarded-For if the connecting address
-//     matches one of the trustedNets. This prevents clients from forging their
-//     IP to bypass rate limits or pollute the audit trail.
-//   - If trustedNets is empty (the default), RemoteAddr is always used.
-//
-// X-Forwarded-For wins over X-Real-IP when both come from a trusted proxy: the
-// documented nginx and Caddy recipes forward X-Real-IP verbatim from whatever
-// the client sent rather than overwriting it, so it is only a last resort.
+// Resolve returns the real client IP for r. X-Real-IP and X-Forwarded-For are
+// honoured only when r.RemoteAddr matches trustedNets, so clients cannot forge
+// their IP to bypass rate limits or pollute the audit trail; with no trustedNets
+// RemoteAddr is always used. X-Forwarded-For wins over X-Real-IP because the
+// documented nginx and Caddy recipes forward X-Real-IP verbatim from the client.
 func Resolve(r *http.Request, trustedNets []*net.IPNet) string {
 	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		// RemoteAddr without port (e.g. Unix socket or test stub) — use as-is.
 		remoteHost = r.RemoteAddr
 	}
 
@@ -96,14 +81,11 @@ func Resolve(r *http.Request, trustedNets []*net.IPNet) string {
 		return remoteHost
 	}
 
-	// Walk X-Forwarded-For from the RIGHT and skip entries that are themselves
-	// trusted proxies; the first non-trusted, valid address is the real client.
-	// The leftmost entry would trust a client-supplied value: a client can
-	// prepend a spoofed IP (`X-Forwarded-For: <spoofed>, <real>`) that the
-	// proxy appends to, forging per-IP rate-limit and lockout keys. Every
-	// header line is joined first: a proxy that adds its own X-Forwarded-For
-	// line instead of extending the client's (HAProxy's `option forwardfor`)
-	// leaves the client-supplied line first.
+	// Walk X-Forwarded-For from the RIGHT, skipping trusted proxies; the first
+	// non-trusted valid address is the client. The leftmost entry is client-supplied
+	// (`X-Forwarded-For: <spoofed>, <real>`) and would forge rate-limit and lockout
+	// keys. All header lines are joined first: a proxy that adds its own line
+	// (HAProxy's `option forwardfor`) leaves the client's line first.
 	if xff := strings.Join(r.Header.Values("X-Forwarded-For"), ","); xff != "" {
 		parts := strings.Split(xff, ",")
 		leftmostValid := ""
@@ -118,22 +100,18 @@ func Resolve(r *http.Request, trustedNets []*net.IPNet) string {
 			}
 			return candidate
 		}
-		// Every entry fell inside trustedNets (a config that covers client
-		// networks too, e.g. trusted_proxies: 10.0.0.0/8 with LAN clients).
-		// Falling back to RemoteAddr would collapse ALL clients behind the
-		// proxy into one rate-limit/lockout bucket, so one user's failed logins
-		// would lock out everyone. The leftmost valid entry is the
-		// furthest-upstream hop, the best distinct per-client key available.
-		// trusted_proxies must list only proxy hops; startup validation warns
-		// about entries that cannot be proxies.
+		// Every entry is a trusted proxy (trusted_proxies covers client networks too).
+		// RemoteAddr would collapse ALL clients into one rate-limit/lockout bucket so
+		// one user's failed logins lock out everyone; use the leftmost valid entry, the
+		// furthest-upstream hop, as the best distinct key. trusted_proxies must list
+		// only proxy hops; startup validation warns about entries that cannot be proxies.
 		if leftmostValid != "" {
 			return leftmostValid
 		}
 	}
 
-	// Fall back to X-Real-IP only when X-Forwarded-For was absent or wholly
-	// unusable. Still validate the extracted IP: this header is untrustworthy
-	// on its own, since the documented recipes never overwrite it.
+	// X-Real-IP is a last resort, used only when X-Forwarded-For is absent or
+	// unusable, and still validated: the documented recipes never overwrite it.
 	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
 		if net.ParseIP(xri) != nil {
 			return xri
@@ -143,11 +121,9 @@ func Resolve(r *http.Request, trustedNets []*net.IPNet) string {
 	return remoteHost
 }
 
-// RateKey returns the per-IP rate-limit and lockout key for a resolved client
-// IP. An IPv6 address is aggregated to its /64, since a single subscriber is
-// normally handed a whole /64 and could otherwise rotate through addresses for
-// an unlimited budget; IPv4 (including IPv4-mapped IPv6) stays whole. A value
-// that does not parse is returned unchanged.
+// RateKey returns the per-IP rate-limit and lockout key. IPv6 aggregates to its
+// /64, since one subscriber is normally handed a whole /64 and could otherwise
+// rotate addresses for an unlimited budget; IPv4 stays whole; unparseable input is unchanged.
 func RateKey(ip string) string {
 	parsed := net.ParseIP(ip)
 	if parsed == nil {

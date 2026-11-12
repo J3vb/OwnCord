@@ -67,6 +67,7 @@ jobs:
             -L Server/go.mod \
             -L Client/package-lock.json \
             -L Client/src-tauri/Cargo.lock \
+            -L Client/src-tauri/crates/owncord-parse/fuzz/Cargo.lock \
             -L tools/mcp-introspect/package-lock.json \
             -L package-lock.json
 
@@ -94,3 +95,37 @@ jobs:
       # Fatal here: this scan is where a new advisory on dev is reported.
       - name: Check Rust advisories (cargo-deny)
         run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check advisories
+
+  # The full history, not a range: a pull request's secret-scan job only sees
+  # the commits it adds, and the baseline in .gitleaks.toml can change under
+  # old commits. Same pinned binary and digest as ci.yml's secret-scan job.
+  weekly-secret-scan:
+    name: Weekly Secret Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/gitleaks.tar.gz" "$url"
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Report tool version
+        run: gitleaks version
+
+      - name: Scan all history (gitleaks)
+        run: gitleaks git --no-banner --redact --config .gitleaks.toml .
+
+      - name: Scan the working tree (gitleaks)
+        run: gitleaks dir --no-banner --redact --config .gitleaks.toml .

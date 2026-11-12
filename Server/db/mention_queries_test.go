@@ -21,9 +21,7 @@ func seedMentionFixture(t *testing.T, database *db.DB) {
 			t.Fatalf("CreateUser(%s): %v", name, err)
 		}
 	}
-	if _, err := database.CreateChannel(ctx, "general", "text", "", "", 0); err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	mustCreateChannel(t, database, "general", "text", "", "", 0)
 }
 
 func TestCreateMessageWithMentions_StoresRowsAndFlag(t *testing.T) {
@@ -31,18 +29,13 @@ func TestCreateMessageWithMentions_StoresRowsAndFlag(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil)
 	if !msg.MentionsEveryone {
 		t.Error("MentionsEveryone = false, want true")
 	}
 
 	got, err := database.GetMentionsByMessageIDs(ctx, []int64{msg.ID})
-	if err != nil {
-		t.Fatalf("GetMentionsByMessageIDs: %v", err)
-	}
+	mustDo(t, "GetMentionsByMessageIDs", err)
 	if len(got[msg.ID]) != 1 || got[msg.ID][0] != 2 {
 		t.Errorf("mentions = %v, want [2]", got[msg.ID])
 	}
@@ -66,21 +59,13 @@ func TestCreateMessageWithMentions_CapsStoredRows(t *testing.T) {
 
 	ids := make([]int64, 0, storageMentionCap+5)
 	for i := range storageMentionCap + 5 {
-		uid, err := database.CreateUser(ctx, "capped"+string(rune('a'+i)), "hash", 4)
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
+		uid := mustCreateUser(t, database, "capped"+string(rune('a'+i)), "hash", 4)
 		ids = append(ids, uid)
 	}
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "spam", nil, ids, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, 1, 1, "spam", nil, ids, 0, false, nil)
 	got, err := database.GetMentionsByMessageIDs(ctx, []int64{msg.ID})
-	if err != nil {
-		t.Fatalf("GetMentionsByMessageIDs: %v", err)
-	}
+	mustDo(t, "GetMentionsByMessageIDs", err)
 	if len(got[msg.ID]) != storageMentionCap {
 		t.Errorf("stored = %d, want %d", len(got[msg.ID]), storageMentionCap)
 	}
@@ -91,18 +76,13 @@ func TestReplaceMessageMentions(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil)
 	if _, err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{3}, false, nil); err != nil {
 		t.Fatalf("ReplaceMessageMentions: %v", err)
 	}
 
 	got, err := database.GetMentionsByMessageIDs(ctx, []int64{msg.ID})
-	if err != nil {
-		t.Fatalf("GetMentionsByMessageIDs: %v", err)
-	}
+	mustDo(t, "GetMentionsByMessageIDs", err)
 	if len(got[msg.ID]) != 1 || got[msg.ID][0] != 3 {
 		t.Errorf("mentions = %v, want [3]", got[msg.ID])
 	}
@@ -120,17 +100,10 @@ func TestIncrementMentionCounts_AndReadStateClear(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msgID, err := database.CreateMessage(ctx, 1, 1, "hi @bob @carol", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, 1, 1, "hi @bob @carol", nil)
 
-	if err := database.IncrementMentionCounts(ctx, 1, msgID, []int64{2, 3}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, 1, msgID, []int64{2}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, 1, msgID, []int64{2, 3}))
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, 1, msgID, []int64{2}))
 
 	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 2 {
 		t.Errorf("user 2 mention_count = %d, want 2", n)
@@ -140,9 +113,7 @@ func TestIncrementMentionCounts_AndReadStateClear(t *testing.T) {
 	}
 
 	// Marking the channel read clears the badge, and only for that user.
-	if err := database.UpdateReadState(ctx, 2, 1, 99); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
+	mustDo(t, "UpdateReadState", database.UpdateReadState(ctx, 2, 1, 99))
 	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 0 {
 		t.Errorf("after read state, user 2 mention_count = %d, want 0", n)
 	}
@@ -160,32 +131,19 @@ func TestIncrementMentionCounts_AndReadStateClear(t *testing.T) {
 func TestIncrementMentionCounts_BatchesAcrossChunkBoundary(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	if _, err := database.CreateChannel(ctx, "everyone-chan", "text", "", "", 0); err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	mustCreateChannel(t, database, "everyone-chan", "text", "", "", 0)
 
 	const n = 520 // > one 500-row chunk, so the run crosses a chunk boundary.
 	ids := make([]int64, 0, n)
 	for i := range n {
-		uid, err := database.CreateUser(ctx, "batchuser"+strconv.Itoa(i), "hash", 4)
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
+		uid := mustCreateUser(t, database, "batchuser"+strconv.Itoa(i), "hash", 4)
 		ids = append(ids, uid)
 	}
 
-	msg1, err := database.CreateMessage(ctx, 1, ids[0], "first", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(msg1): %v", err)
-	}
-	msg2, err := database.CreateMessage(ctx, 1, ids[0], "second", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(msg2): %v", err)
-	}
+	msg1 := mustCreateMessage(t, database, 1, ids[0], "first", nil)
+	msg2 := mustCreateMessage(t, database, 1, ids[0], "second", nil)
 
-	if err := database.IncrementMentionCounts(ctx, 1, msg1, ids); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, 1, msg1, ids))
 
 	for _, uid := range []int64{ids[0], ids[499], ids[500], ids[n-1]} {
 		if got, err := database.GetMentionCount(ctx, uid, 1); err != nil || got != 1 {
@@ -196,9 +154,7 @@ func TestIncrementMentionCounts_BatchesAcrossChunkBoundary(t *testing.T) {
 	// A second pass bumps every one of them again, chunk boundary included.
 	// msgID is higher than the first pass's so the read-state guard does not
 	// treat this as the same already-seen message.
-	if err := database.IncrementMentionCounts(ctx, 1, msg2, ids); err != nil {
-		t.Fatalf("IncrementMentionCounts (second pass): %v", err)
-	}
+	mustDo(t, "IncrementMentionCounts (second pass)", database.IncrementMentionCounts(ctx, 1, msg2, ids))
 	for _, uid := range []int64{ids[0], ids[499], ids[500], ids[n-1]} {
 		if got, err := database.GetMentionCount(ctx, uid, 1); err != nil || got != 2 {
 			t.Errorf("user %d mention_count after second pass = %d (err=%v), want 2", uid, got, err)
@@ -209,9 +165,7 @@ func TestIncrementMentionCounts_BatchesAcrossChunkBoundary(t *testing.T) {
 func TestIncrementMentionCounts_EmptyIsNoop(t *testing.T) {
 	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
-	if err := database.IncrementMentionCounts(context.Background(), 1, 1, nil); err != nil {
-		t.Fatalf("IncrementMentionCounts(nil): %v", err)
-	}
+	mustDo(t, "IncrementMentionCounts(nil)", database.IncrementMentionCounts(context.Background(), 1, 1, nil))
 }
 
 // TestIncrementMentionCounts_NoOpWhenReaderAlreadyPastMessage locks OC-0066:
@@ -226,20 +180,13 @@ func TestIncrementMentionCounts_NoOpWhenReaderAlreadyPastMessage(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msgID, err := database.CreateMessage(ctx, 1, 1, "hey @bob", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, 1, 1, "hey @bob", nil)
 
 	// The reader (user 2 = bob) marks the channel read before the deferred
 	// badge increment for this same message lands.
-	if err := database.UpdateReadState(ctx, 2, 1, msgID); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
+	mustDo(t, "UpdateReadState", database.UpdateReadState(ctx, 2, 1, msgID))
 
-	if err := database.IncrementMentionCounts(ctx, 1, msgID, []int64{2}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, 1, msgID, []int64{2}))
 
 	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 0 {
 		t.Errorf("mention_count = %d after a read state that already covers the mentioning message, want 0 (phantom badge)", n)
@@ -256,21 +203,11 @@ func TestIncrementMentionCounts_StillAppliesWhenReaderIsBehind(t *testing.T) {
 
 	// Bob's read state is behind: he has read message 1's predecessor, not the
 	// mention itself.
-	older, err := database.CreateMessage(ctx, 1, 1, "hi", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(older): %v", err)
-	}
-	if err := database.UpdateReadState(ctx, 2, 1, older); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
+	older := mustCreateMessage(t, database, 1, 1, "hi", nil)
+	mustDo(t, "UpdateReadState", database.UpdateReadState(ctx, 2, 1, older))
 
-	msgID, err := database.CreateMessage(ctx, 1, 1, "hey @bob", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, 1, msgID, []int64{2}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, 1, 1, "hey @bob", nil)
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, 1, msgID, []int64{2}))
 
 	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 1 {
 		t.Errorf("mention_count = %d for a reader behind the mentioning message, want 1", n)
@@ -291,18 +228,11 @@ func TestDecrementMentionCounts_SkipsNeverCountedBlockedMention(t *testing.T) {
 	ctx := context.Background()
 
 	// Bob (2) blocks Alice (1).
-	if err := database.BlockUser(ctx, 2, 1); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", database.BlockUser(ctx, 2, 1))
 
 	// Carol's earlier message gives Bob a genuine, unrelated mention badge.
-	earlierMsg, err := database.CreateMessage(ctx, 1, 3, "hey @bob standup?", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(earlier): %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, 1, earlierMsg, []int64{2}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	earlierMsg := mustCreateMessage(t, database, 1, 3, "hey @bob standup?", nil)
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, 1, earlierMsg, []int64{2}))
 	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 1 {
 		t.Fatalf("precondition: bob mention_count = %d, want 1", n)
 	}
@@ -311,17 +241,12 @@ func TestDecrementMentionCounts_SkipsNeverCountedBlockedMention(t *testing.T) {
 	// records the row (fan-out, not storage, excludes blockers), but the
 	// service layer never calls IncrementMentionCounts for Bob because he
 	// blocked Alice -- so no increment ever landed for this message.
-	blockedMsg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
+	blockedMsg := mustCreateMessageWithMentions(t, database, 1, 1, "hi @bob", nil, []int64{2}, 0, false, nil)
 
 	// Alice deletes her message. DecrementMentionCounts must not touch Bob's
 	// mention_count: that message never contributed to it.
 	lowered, err := database.DecrementMentionCounts(ctx, 1, []int64{blockedMsg.ID})
-	if err != nil {
-		t.Fatalf("DecrementMentionCounts: %v", err)
-	}
+	mustDo(t, "DecrementMentionCounts", err)
 	if len(lowered) != 0 {
 		t.Errorf("lowered readers = %v, want none (Bob's bump was never counted)", lowered)
 	}
@@ -336,9 +261,7 @@ func TestGetUserIDsByUsernames_CaseInsensitive(t *testing.T) {
 	seedMentionFixture(t, database)
 
 	got, err := database.GetUserIDsByUsernames(context.Background(), []string{"BOB", "carol", "ghost"})
-	if err != nil {
-		t.Fatalf("GetUserIDsByUsernames: %v", err)
-	}
+	mustDo(t, "GetUserIDsByUsernames", err)
 	if got["bob"] != 2 {
 		t.Errorf("bob = %d, want 2", got["bob"])
 	}
@@ -363,15 +286,10 @@ func TestGetUserIDsByUsernames_NonASCIIUppercase(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	uid, err := database.CreateUser(ctx, "Émile", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "Émile", "hash", 4)
 
 	got, err := database.GetUserIDsByUsernames(ctx, []string{"Émile"})
-	if err != nil {
-		t.Fatalf("GetUserIDsByUsernames: %v", err)
-	}
+	mustDo(t, "GetUserIDsByUsernames", err)
 	if got["Émile"] != uid {
 		t.Errorf(`result["Émile"] = %d, want %d (map key must match the query spelling for a non-ASCII-uppercase username)`, got["Émile"], uid)
 	}
@@ -389,14 +307,10 @@ func TestGetUserIDsByUsernames_LapsedTempBan_StillResolves(t *testing.T) {
 	ctx := context.Background()
 
 	past := time.Now().Add(-1 * time.Hour)
-	if err := database.BanUser(ctx, 2, "temp ban", &past); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(ctx, 2, "temp ban", &past))
 
 	got, err := database.GetUserIDsByUsernames(ctx, []string{"bob"})
-	if err != nil {
-		t.Fatalf("GetUserIDsByUsernames: %v", err)
-	}
+	mustDo(t, "GetUserIDsByUsernames", err)
 	if got["bob"] != 2 {
 		t.Errorf("bob = %d, want 2 (a lapsed temp ban must not hide the user from mention resolution)", got["bob"])
 	}
@@ -410,14 +324,10 @@ func TestGetUserIDsByUsernames_ActiveTempBan_Excluded(t *testing.T) {
 	ctx := context.Background()
 
 	future := time.Now().Add(1 * time.Hour)
-	if err := database.BanUser(ctx, 2, "temp ban", &future); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(ctx, 2, "temp ban", &future))
 
 	got, err := database.GetUserIDsByUsernames(ctx, []string{"bob"})
-	if err != nil {
-		t.Fatalf("GetUserIDsByUsernames: %v", err)
-	}
+	mustDo(t, "GetUserIDsByUsernames", err)
 	if _, ok := got["bob"]; ok {
 		t.Error("actively temp-banned user must not resolve as a mention target")
 	}
@@ -451,9 +361,7 @@ func TestGetUserIDsByUsernames_ActiveTempBan_SQLiteTimeFormat_Excluded(t *testin
 	}
 
 	got, err := database.GetUserIDsByUsernames(ctx, []string{"bob"})
-	if err != nil {
-		t.Fatalf("GetUserIDsByUsernames: %v", err)
-	}
+	mustDo(t, "GetUserIDsByUsernames", err)
 	if _, ok := got["bob"]; ok {
 		t.Error("temp ban stored in SQLite's space-separated time format must still exclude the user")
 	}
@@ -466,14 +374,10 @@ func TestGetUserIDsByUsernames_PermanentBan_Excluded(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if err := database.BanUser(ctx, 2, "permanent ban", nil); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(ctx, 2, "permanent ban", nil))
 
 	got, err := database.GetUserIDsByUsernames(ctx, []string{"bob"})
-	if err != nil {
-		t.Fatalf("GetUserIDsByUsernames: %v", err)
-	}
+	mustDo(t, "GetUserIDsByUsernames", err)
 	if _, ok := got["bob"]; ok {
 		t.Error("permanently banned user must not resolve as a mention target")
 	}
@@ -487,14 +391,10 @@ func TestListMentionTargetsByRoles_LapsedTempBan_Included(t *testing.T) {
 	ctx := context.Background()
 
 	past := time.Now().Add(-1 * time.Hour)
-	if err := database.BanUser(ctx, 2, "temp ban", &past); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(ctx, 2, "temp ban", &past))
 
 	targets, err := database.ListMentionTargetsByRoles(ctx, []int64{4})
-	if err != nil {
-		t.Fatalf("ListMentionTargetsByRoles: %v", err)
-	}
+	mustDo(t, "ListMentionTargetsByRoles", err)
 	found := false
 	for _, tgt := range targets {
 		if tgt.UserID == 2 {
@@ -511,14 +411,10 @@ func TestListMentionTargetsByRoles(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if err := database.UpdateUserStatus(ctx, 2, "online"); err != nil {
-		t.Fatalf("UpdateUserStatus: %v", err)
-	}
+	mustDo(t, "UpdateUserStatus", database.UpdateUserStatus(ctx, 2, "online"))
 
 	targets, err := database.ListMentionTargetsByRoles(ctx, []int64{4})
-	if err != nil {
-		t.Fatalf("ListMentionTargetsByRoles: %v", err)
-	}
+	mustDo(t, "ListMentionTargetsByRoles", err)
 	if len(targets) != 3 {
 		t.Fatalf("targets = %d, want 3", len(targets))
 	}
@@ -539,13 +435,9 @@ func TestListBlockersOf(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if err := database.BlockUser(ctx, 2, 1); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", database.BlockUser(ctx, 2, 1))
 	blockers, err := database.ListBlockersOf(ctx, 1)
-	if err != nil {
-		t.Fatalf("ListBlockersOf: %v", err)
-	}
+	mustDo(t, "ListBlockersOf", err)
 	if len(blockers) != 1 || blockers[0] != 2 {
 		t.Errorf("blockers = %v, want [2]", blockers)
 	}
@@ -556,13 +448,9 @@ func TestGetChannelOverrides(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if err := database.UpsertChannelOverride(ctx, 1, 4, 0, 2); err != nil {
-		t.Fatalf("UpsertChannelOverride: %v", err)
-	}
+	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(ctx, 1, 4, 0, 2))
 	got, err := database.GetChannelOverrides(ctx, 1)
-	if err != nil {
-		t.Fatalf("GetChannelOverrides: %v", err)
-	}
+	mustDo(t, "GetChannelOverrides", err)
 	if o, ok := got[4]; !ok || o.Deny != 2 {
 		t.Errorf("override for role 4 = %+v, want deny=2", o)
 	}
@@ -575,13 +463,9 @@ func TestMessagesForAPI_CarryMentions(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil); err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
+	mustCreateMessageWithMentions(t, database, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil)
 	msgs, err := database.GetMessagesForAPI(ctx, 1, 0, 10, 1)
-	if err != nil {
-		t.Fatalf("GetMessagesForAPI: %v", err)
-	}
+	mustDo(t, "GetMessagesForAPI", err)
 	if len(msgs) != 1 {
 		t.Fatalf("messages = %d, want 1", len(msgs))
 	}
@@ -598,13 +482,9 @@ func TestSearchMessages_CarryMentions(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "deployment notes", nil, []int64{2}, 0, false, nil); err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
+	mustCreateMessageWithMentions(t, database, 1, 1, "deployment notes", nil, []int64{2}, 0, false, nil)
 	results, err := database.SearchMessages(ctx, "deployment", nil, db.SearchPage{Limit: 10})
-	if err != nil {
-		t.Fatalf("SearchMessages: %v", err)
-	}
+	mustDo(t, "SearchMessages", err)
 	if len(results) != 1 {
 		t.Fatalf("results = %d, want 1", len(results))
 	}
@@ -626,19 +506,11 @@ func TestIncrementMentionCountsBatch_AppliesEveryEntry(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	m1, err := database.CreateMessage(ctx, 1, 1, "first @bob", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(m1): %v", err)
-	}
-	m2, err := database.CreateMessage(ctx, 1, 1, "second @bob", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(m2): %v", err)
-	}
+	m1 := mustCreateMessage(t, database, 1, 1, "first @bob", nil)
+	m2 := mustCreateMessage(t, database, 1, 1, "second @bob", nil)
 
 	// Bob (2) has read up to m1; Carol (3) has read nothing.
-	if err := database.UpdateReadState(ctx, 2, 1, m1); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
+	mustDo(t, "UpdateReadState", database.UpdateReadState(ctx, 2, 1, m1))
 
 	if _, err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
 		{MsgID: m1, UserIDs: []int64{2, 3}},
@@ -667,13 +539,8 @@ func TestIncrementMentionCountsBatch_SkipsRemovedMessages(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	deleted, err := database.CreateMessage(ctx, 1, 1, "deleted @bob", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(deleted): %v", err)
-	}
-	if err := database.DeleteMessage(ctx, deleted, 1, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	deleted := mustCreateMessage(t, database, 1, 1, "deleted @bob", nil)
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, deleted, 1, false))
 	if _, err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
 		{MsgID: deleted, UserIDs: []int64{2}},
 	}); err != nil {
@@ -714,18 +581,10 @@ func TestIncrementMentionCountsBatch_ReturnsOnlyBumpedReaders(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	m1, err := database.CreateMessage(ctx, 1, 1, "first @bob", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(m1): %v", err)
-	}
-	m2, err := database.CreateMessage(ctx, 1, 1, "second @bob", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(m2): %v", err)
-	}
+	m1 := mustCreateMessage(t, database, 1, 1, "first @bob", nil)
+	m2 := mustCreateMessage(t, database, 1, 1, "second @bob", nil)
 	// Bob has already read m1, so m1's bump is skipped for him.
-	if err := database.UpdateReadState(ctx, 2, 1, m1); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
+	mustDo(t, "UpdateReadState", database.UpdateReadState(ctx, 2, 1, m1))
 
 	got, err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
 		{MsgID: m1, UserIDs: []int64{2, 3}},
@@ -748,13 +607,8 @@ func TestIncrementMentionCountsBatch_ReturnsOnlyBumpedReaders(t *testing.T) {
 	}
 
 	// A removed message contributes nothing to the returned set.
-	deleted, err := database.CreateMessage(ctx, 1, 1, "deleted @bob", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage(deleted): %v", err)
-	}
-	if err := database.DeleteMessage(ctx, deleted, 1, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	deleted := mustCreateMessage(t, database, 1, 1, "deleted @bob", nil)
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, deleted, 1, false))
 	got, err = database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
 		{MsgID: deleted, UserIDs: []int64{2}},
 	})
@@ -778,14 +632,10 @@ func replyPingRows(t *testing.T, database *db.DB, msgID int64) map[int64]int64 {
 	out := map[int64]int64{}
 	for rows.Next() {
 		var uid, flag int64
-		if err := rows.Scan(&uid, &flag); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
+		mustDo(t, "scan", rows.Scan(&uid, &flag))
 		out[uid] = flag
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows: %v", err)
-	}
+	mustDo(t, "rows", rows.Err())
 	return out
 }
 
@@ -802,10 +652,7 @@ func TestCreateMessageWithMentions_ReplyPingRow(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			database := openMigratedMemory(t)
 			seedMentionFixture(t, database)
-			msg, err := database.CreateMessageWithMentions(context.Background(), 1, 1, "re", nil, tc.content, 2, false, nil)
-			if err != nil {
-				t.Fatalf("CreateMessageWithMentions: %v", err)
-			}
+			msg := mustCreateMessageWithMentions(t, database, 1, 1, "re", nil, tc.content, 2, false, nil)
 			got := replyPingRows(t, database, msg.ID)
 			if len(got) != len(tc.want) {
 				t.Fatalf("rows = %v, want %v", got, tc.want)
@@ -824,18 +671,12 @@ func TestCreateMessageWithMentions_ReplyPingIsExtraToTheCap(t *testing.T) {
 	seedMentionFixture(t, database)
 	ids := make([]int64, 0, storageMentionCap+5)
 	for i := range storageMentionCap + 5 {
-		uid, err := database.CreateUser(context.Background(), "capuser"+strconv.Itoa(i), "hash", 4)
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
+		uid := mustCreateUser(t, database, "capuser"+strconv.Itoa(i), "hash", 4)
 		ids = append(ids, uid)
 	}
 	// The target is the last content id, which the content cap would drop.
 	target := ids[len(ids)-1]
-	msg, err := database.CreateMessageWithMentions(context.Background(), 1, 1, "re", nil, ids, target, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, 1, 1, "re", nil, ids, target, false, nil)
 	got := replyPingRows(t, database, msg.ID)
 	if len(got) != storageMentionCap+1 {
 		t.Errorf("rows = %d, want %d", len(got), storageMentionCap+1)
@@ -849,16 +690,11 @@ func TestReplaceMessageMentions_KeepsReplyPingRow(t *testing.T) {
 	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "re @carol", nil, []int64{3}, 2, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, 1, 1, "re @carol", nil, []int64{3}, 2, false, nil)
 
 	// The edit drops carol and names the reply target in content.
 	kept, err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{2}, false, nil)
-	if err != nil {
-		t.Fatalf("ReplaceMessageMentions: %v", err)
-	}
+	mustDo(t, "ReplaceMessageMentions", err)
 	if kept != 2 {
 		t.Errorf("returned reply ping user = %d, want 2", kept)
 	}
@@ -875,10 +711,7 @@ func TestReplaceMessageMentions_KeepsReplyPingRow(t *testing.T) {
 	}
 
 	// A message that never pinged returns 0.
-	plain, err := database.CreateMessageWithMentions(ctx, 1, 1, "x", nil, []int64{3}, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
+	plain := mustCreateMessageWithMentions(t, database, 1, 1, "x", nil, []int64{3}, 0, false, nil)
 	if kept, err = database.ReplaceMessageMentions(ctx, plain.ID, []int64{2}, false, nil); err != nil || kept != 0 {
 		t.Errorf("plain replace = (%d, %v), want (0, nil)", kept, err)
 	}
@@ -889,18 +722,10 @@ func TestRoleMentionRows_RoundTripAndReplace(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi", nil, nil, 0, false, []int64{1, 2, 2})
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
-	other, err := database.CreateMessageWithMentions(ctx, 1, 1, "plain", nil, nil, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions plain: %v", err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, 1, 1, "hi", nil, nil, 0, false, []int64{1, 2, 2})
+	other := mustCreateMessageWithMentions(t, database, 1, 1, "plain", nil, nil, 0, false, nil)
 	got, err := database.GetRoleMentionsByMessageIDs(ctx, []int64{msg.ID, other.ID})
-	if err != nil {
-		t.Fatalf("GetRoleMentionsByMessageIDs: %v", err)
-	}
+	mustDo(t, "GetRoleMentionsByMessageIDs", err)
 	if len(got[msg.ID]) != 2 || got[msg.ID][0] != 1 || got[msg.ID][1] != 2 || len(got[other.ID]) != 0 {
 		t.Errorf("role mentions = %v, want {msg:[1 2]}", got)
 	}
@@ -927,9 +752,7 @@ func TestUserAndRoleHolderLookups(t *testing.T) {
 		t.Fatalf("ban bob: %v", err)
 	}
 	ids, err := database.GetReachableUserIDs(ctx, []int64{1, 2, 3, 99})
-	if err != nil {
-		t.Fatalf("GetReachableUserIDs: %v", err)
-	}
+	mustDo(t, "GetReachableUserIDs", err)
 	if len(ids) != 2 || ids[0] != 1 || ids[1] != 3 {
 		t.Errorf("reachable = %v, want [1 3] (banned and unknown dropped)", ids)
 	}
@@ -937,10 +760,7 @@ func TestUserAndRoleHolderLookups(t *testing.T) {
 		t.Errorf("empty = %v, %v", none, err)
 	}
 
-	role, err := database.CreateRole(ctx, "devs", nil, 0, 5, false, true)
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	role := mustCreateRole(t, database, "devs", nil, 0, 5, false, true)
 	for _, uid := range []int64{3, 1} {
 		if _, err := database.ExecContext(ctx, `INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, uid, role.ID); err != nil {
 			t.Fatalf("grant: %v", err)
@@ -948,9 +768,7 @@ func TestUserAndRoleHolderLookups(t *testing.T) {
 	}
 	// Roles 4 (everyone) and the new one overlap on users 1 and 3: each once.
 	holders, err := database.ListUserIDsByRoles(ctx, []int64{4, role.ID})
-	if err != nil {
-		t.Fatalf("ListUserIDsByRoles: %v", err)
-	}
+	mustDo(t, "ListUserIDsByRoles", err)
 	if len(holders) != 3 || holders[0] != 1 || holders[1] != 2 || holders[2] != 3 {
 		t.Errorf("holders = %v, want [1 2 3] once each", holders)
 	}

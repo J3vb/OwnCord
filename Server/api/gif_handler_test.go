@@ -72,14 +72,7 @@ func (l *lastRequest) get(key string) string {
 // gifGET issues an authenticated GET against the GIF router.
 func gifGET(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, path, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, http.MethodGet, path, token, nil)
 }
 
 const gifUpstreamBody = `{"results":[
@@ -118,9 +111,7 @@ func TestGIFSearchProxiesUpstream(t *testing.T) {
 	router := buildGIFRouter(database, "server-side-key")
 
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats&limit=5", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	if up.path != "/search" {
 		t.Errorf("upstream path = %q, want /search", up.path)
@@ -151,9 +142,7 @@ func TestGIFTrendingProxiesUpstream(t *testing.T) {
 	router := buildGIFRouter(database, "server-side-key")
 
 	rr := gifGET(t, router, "/api/v1/gif/trending", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if up.path != "/featured" {
 		t.Errorf("upstream path = %q, want /featured", up.path)
 	}
@@ -199,7 +188,6 @@ func TestGIFPosForwardedUpstream(t *testing.T) {
 func TestGIFNextPassedThrough(t *testing.T) {
 	database := newAuthTestDB(t)
 	token := profileCreateToken(t, database, "gifuser", 4)
-	router := buildGIFRouter(database, "server-side-key")
 
 	for _, tt := range []struct{ name, body, want string }{
 		{"present", `{"results":[],"next":"CAoQ-9_.x:y="}`, "CAoQ-9_.x:y="},
@@ -213,17 +201,14 @@ func TestGIFNextPassedThrough(t *testing.T) {
 		{"escaped chars", `{"results":[],"next":"a+b/c%3D~"}`, "a+b/c%3D~"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			// A fresh router per case: trending answers are cached per handler.
+			router := buildGIFRouter(database, "server-side-key")
 			stubKlipy(t, tt.body, http.StatusOK)
 			rr := gifGET(t, router, "/api/v1/gif/trending", token)
-			if rr.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
-			}
-			var env struct {
+			requireStatus(t, rr, http.StatusOK)
+			env := decodeBody[struct {
 				Next *string `json:"next"`
-			}
-			if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
-				t.Fatalf("decode: %v", err)
-			}
+			}](t, rr)
 			if env.Next == nil || *env.Next != tt.want {
 				t.Errorf("next = %v, want %q", env.Next, tt.want)
 			}
@@ -235,7 +220,6 @@ func TestGIFNextPassedThrough(t *testing.T) {
 func TestGIFBadNextDropped(t *testing.T) {
 	database := newAuthTestDB(t)
 	token := profileCreateToken(t, database, "gifuser", 4)
-	router := buildGIFRouter(database, "server-side-key")
 
 	for name, next := range map[string]string{
 		"space":    "a b",
@@ -249,17 +233,14 @@ func TestGIFBadNextDropped(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
+			// A fresh router per case: trending answers are cached per handler.
+			router := buildGIFRouter(database, "server-side-key")
 			stubKlipy(t, string(body), http.StatusOK)
 			rr := gifGET(t, router, "/api/v1/gif/trending", token)
-			if rr.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
-			}
-			var env struct {
+			requireStatus(t, rr, http.StatusOK)
+			env := decodeBody[struct {
 				Next string `json:"next"`
-			}
-			if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
-				t.Fatalf("decode: %v", err)
-			}
+			}](t, rr)
 			if env.Next != "" {
 				t.Errorf("next = %q, want it dropped", env.Next)
 			}
@@ -275,9 +256,7 @@ func TestGIFResponseNeverLeaksAPIKey(t *testing.T) {
 	router := buildGIFRouter(database, "server-side-key")
 
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if strings.Contains(rr.Body.String(), "server-side-key") {
 		t.Fatalf("response leaked the API key: %s", rr.Body.String())
 	}
@@ -301,9 +280,7 @@ func TestGIFResultURLsAreHTTPSWithoutCredentials(t *testing.T) {
 	router := buildGIFRouter(database, "server-side-key")
 
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	results := decodeGIFResults(t, rr)
 	if len(results) != 1 {
@@ -366,9 +343,7 @@ func TestGIFRejectsInvalidToken(t *testing.T) {
 	router := buildGIFRouter(database, "server-side-key")
 
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", "not-a-real-token")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // Auth is checked before the disabled check, so an anonymous caller cannot
@@ -378,9 +353,7 @@ func TestGIFAuthCheckedBeforeDisabledCheck(t *testing.T) {
 	router := buildGIFRouter(database, "")
 
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401 (not 503)", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── Input validation ────────────────────────────────────────────────────────
@@ -411,9 +384,7 @@ func TestGIFSearchValidatesInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rr := gifGET(t, router, tt.path, token)
-			if rr.Code != http.StatusBadRequest {
-				t.Errorf("status = %d, want 400 (body=%s)", rr.Code, rr.Body.String())
-			}
+			expectStatus(t, rr, http.StatusBadRequest)
 		})
 	}
 }
@@ -427,9 +398,7 @@ func TestGIFUpstreamErrorBecomesBadGateway(t *testing.T) {
 	router := buildGIFRouter(database, "server-side-key")
 
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
-	if rr.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusBadGateway)
 	if strings.Contains(rr.Body.String(), "quota exceeded") {
 		t.Errorf("upstream error body was passed through to the client: %s", rr.Body.String())
 	}
@@ -445,9 +414,7 @@ func TestGIFMalformedUpstreamBecomesBadGateway(t *testing.T) {
 	router := buildGIFRouter(database, "server-side-key")
 
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
-	if rr.Code != http.StatusBadGateway {
-		t.Errorf("status = %d, want 502", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadGateway)
 }
 
 // ─── Rate limiting ───────────────────────────────────────────────────────────
@@ -466,9 +433,7 @@ func TestGIFRateLimited(t *testing.T) {
 		}
 	}
 	rr := gifGET(t, router, "/api/v1/gif/trending", token)
-	if rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("request 31: status = %d, want 429", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusTooManyRequests)
 	if code := decodeGIFError(t, rr); code != "RATE_LIMITED" {
 		t.Errorf("error code = %q, want RATE_LIMITED", code)
 	}
@@ -537,9 +502,7 @@ func TestGIFOversizedUpstreamBecomesBadGateway(t *testing.T) {
 	router := buildGIFRouter(database, "server-side-key")
 
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
-	if rr.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusBadGateway)
 	if got := decodeGIFError(t, rr); got != "BAD_GATEWAY" {
 		t.Errorf("error = %q, want BAD_GATEWAY", got)
 	}
@@ -561,9 +524,7 @@ func TestGIFWrongContentTypeBecomesBadGateway(t *testing.T) {
 	router := buildGIFRouter(database, "server-side-key")
 
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
-	if rr.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 (body=%s)", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadGateway)
 }
 
 // A redirect is not followed at all: the upstream host is a constant, so a
@@ -583,9 +544,7 @@ func TestGIFUpstreamRedirectIsRefused(t *testing.T) {
 	router := buildGIFRouter(database, "server-side-key")
 
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
-	if rr.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusBadGateway)
 	if got := hits.Load(); got != 1 {
 		t.Fatalf("upstream saw %d requests, want exactly 1 — the redirect must not be followed", got)
 	}
@@ -609,9 +568,7 @@ func TestGIFProductionPolicyRefusesLoopback(t *testing.T) {
 	router := buildGIFRouter(database, "server-side-key")
 
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
-	if rr.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusBadGateway)
 }
 
 // An upstream host that does not resolve — the server has no network route to
@@ -639,9 +596,7 @@ func TestGIFOfflineUpstreamIsBadGatewayWithoutLeak(t *testing.T) {
 	rr := gifGET(t, router, "/api/v1/gif/search?q=cats", token)
 	elapsed := time.Since(start)
 
-	if rr.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 (body=%s)", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadGateway)
 	body := rr.Body.String()
 	if strings.Contains(body, "api.klipy.com") {
 		t.Errorf("response leaked the upstream host: %s", body)

@@ -20,7 +20,7 @@
 // track, takes the canvas down and releases the GL context. The frame server
 // also closes every socket when the native session ends.
 import { createLogger } from "../../../lib/logger";
-import { registerVideoSurface } from "../../../lib/voice/videoSurface";
+import { registerVideoSurface, SURFACE_RESIZE_EVENT } from "../../../lib/voice/videoSurface";
 import { nativeCounters } from "./counters";
 
 const log = createLogger("nativeVideo");
@@ -192,6 +192,7 @@ export class NativeVideoRenderer {
     if (this.canvas.width !== frame.width || this.canvas.height !== frame.height) {
       this.canvas.width = frame.width;
       this.canvas.height = frame.height;
+      this.canvas.dispatchEvent(new Event(SURFACE_RESIZE_EVENT, { bubbles: true }));
     }
     const cw = Math.ceil(frame.width / 2);
     const ch = Math.ceil(frame.height / 2);

@@ -18,8 +18,9 @@ import type { DmChannel } from "../../stores/dm.store";
 import { clearChannelVoiceUsers } from "../../stores/voice.store";
 import { blocksStore, setBlockedByMe, clearBlockedByThem } from "../../stores/blocks.store";
 import type { DmChannelPayload } from "../../lib/types";
-import type { DispatchApi, Payload } from "../connection/dispatchContext";
-import { log } from "../connection/dispatchContext";
+import type { DispatchApi, Payload, WsRoute } from "../connection/dispatchContext";
+import { log, route } from "../connection/dispatchContext";
+import { ServerMessageType as S } from "@lib/protocolTypes";
 
 /** Map one DM participant from the wire shape to the store's. */
 function mapDmUser(u: DmChannelPayload["recipient"]): DmChannel["recipient"] {
@@ -107,12 +108,20 @@ export function applyReadyDms(payload: Payload<"ready">): void {
   });
 }
 
-/** The block slice of `ready`: forget "blocked by them" and re-fetch our own blocks. */
-export function applyReadyBlocks(api: DispatchApi | undefined): void {
+/**
+ * The block slice of `ready`: forget "blocked by them" and re-fetch our own
+ * blocks. A resumed `auth_ok` (`on: "resume"`) only re-fetches, since a block or
+ * unblock made on another device is not replayed; what a refused send taught
+ * about the other side still holds across a short reconnect.
+ */
+export function applyReadyBlocks(
+  api: DispatchApi | undefined,
+  on: "ready" | "resume" = "ready",
+): void {
   // Refresh DM block state (channels-members-dms.md §3.2). "Being blocked"
-  // is only known from a refused send, so it's stale after a reconnect —
+  // is only known from a refused send, so it's stale after a full reconnect:
   // clear it and re-fetch our own outgoing blocks authoritatively.
-  clearBlockedByThem();
+  if (on === "ready") clearBlockedByThem();
   if (api !== undefined) {
     // Snapshot the revision blocksStore was at right before
     // issuing this fetch. If the user blocks/unblocks someone (via
@@ -198,3 +207,8 @@ function mostRecentDm(channels: readonly DmChannel[]): DmChannel | undefined {
   }
   return best;
 }
+
+export const wsRoutes: readonly WsRoute[] = [
+  route(S.DM_CHANNEL_OPEN, () => handleDmChannelOpen),
+  route(S.DM_CHANNEL_CLOSE, () => handleDmChannelClose),
+];

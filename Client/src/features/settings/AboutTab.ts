@@ -121,7 +121,7 @@ function buildUpdateCard(signal: AbortSignal, installed: Promise<string | null>)
     "click",
     () => {
       if (offer === null) return;
-      void downloadAndInstallUpdate(offer.serverUrl).catch((err: unknown) => {
+      void downloadAndInstallUpdate(offer.serverUrl, offer.version).catch((err: unknown) => {
         log.error("Update install failed", { error: String(err) });
       });
     },

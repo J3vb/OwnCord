@@ -39,16 +39,12 @@ func (h *recordingRetentionHub) all() []int64 {
 func messageIDs(t *testing.T, database *db.DB, chID int64) []int64 {
 	t.Helper()
 	rows, err := database.QueryContext(context.Background(), `SELECT id FROM messages WHERE channel_id = ? ORDER BY id`, chID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryContext", err)
 	defer rows.Close()
 	var ids []int64
 	for rows.Next() {
 		var id int64
-		if err := rows.Scan(&id); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "Scan", rows.Scan(&id))
 		ids = append(ids, id)
 	}
 	return ids
@@ -60,9 +56,7 @@ func persistChatFrames(t *testing.T, database *db.DB, chID int64, ids []int64) {
 	t.Helper()
 	for _, id := range ids {
 		raw, _ := json.Marshal(map[string]any{"seq": id * 10, "type": "chat_message", "payload": map[string]any{"id": id, "channel_id": chID, "content": "persisted"}})
-		if err := database.PersistEvent(context.Background(), id*10, "chat_message", chID, raw); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "PersistEvent", database.PersistEvent(context.Background(), id*10, "chat_message", chID, raw))
 	}
 }
 
@@ -71,9 +65,7 @@ func persistedAbout(t *testing.T, database *db.DB, ids []int64) int {
 	t.Helper()
 	encoded, _ := json.Marshal(ids)
 	var n int
-	if err := database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE `+db.EventNamesMessagePredicate, string(encoded)).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE `+db.EventNamesMessagePredicate, string(encoded)).Scan(&n))
 	return n
 }
 
@@ -84,10 +76,7 @@ func TestRetention_SweepPurgesTheReplayTiers(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, err := database.CreateUser(ctx, "retention-purge-owner", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	uid := mustCreateUser(t, database, "retention-purge-owner", "hash", 1)
 	chID, _ := seedRetentionChannel(t, database, "purge-hub", uid, dir, 3)
 	ids := messageIDs(t, database, chID)
 	if len(ids) != 4 {
@@ -143,10 +132,7 @@ func TestRetention_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, err := database.CreateUser(ctx, "retention-journal-owner", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	uid := mustCreateUser(t, database, "retention-journal-owner", "hash", 1)
 	chID, _ := seedRetentionChannel(t, database, "purge-journal", uid, dir, 2)
 	ids := messageIDs(t, database, chID)
 	old := append([]int64(nil), ids[:2]...)
@@ -192,15 +178,9 @@ func TestRetention_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
 	// The crash, by hand: ids journaled, the purge never ran, the process
 	// died — the next tick purges them.
 	runID, err := database.StartRetentionRun(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.RecordRetentionRunPurge(ctx, runID, []int64{999}); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.FinishRetentionRun(ctx, runID, 0, ""); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "StartRetentionRun", err)
+	mustDo(t, "RecordRetentionRunPurge", database.RecordRetentionRunPurge(ctx, runID, []int64{999}))
+	mustDo(t, "FinishRetentionRun", database.FinishRetentionRun(ctx, runID, 0, ""))
 	if _, err := svc.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -219,15 +199,9 @@ func TestRetention_ReplayMarkersResumesPendingRunBeforeServing(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	runID, err := database.StartRetentionRun(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.RecordRetentionRunPurge(ctx, runID, []int64{991}); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.FinishRetentionRun(ctx, runID, 0, ""); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "StartRetentionRun", err)
+	mustDo(t, "RecordRetentionRunPurge", database.RecordRetentionRunPurge(ctx, runID, []int64{991}))
+	mustDo(t, "FinishRetentionRun", database.FinishRetentionRun(ctx, runID, 0, ""))
 
 	hub := &recordingRetentionHub{}
 	svc := NewRetentionService(database)
@@ -251,10 +225,7 @@ func TestRetention_ReplayMarkersPurgesPersistedEvents(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, err := database.CreateUser(ctx, "retention-replay-owner", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	uid := mustCreateUser(t, database, "retention-replay-owner", "hash", 1)
 	chID, _ := seedRetentionChannel(t, database, "purge-replay", uid, dir, 2)
 	ids := messageIDs(t, database, chID)
 	old, fresh := ids[:2], ids[2]
@@ -265,12 +236,8 @@ func TestRetention_ReplayMarkersPurgesPersistedEvents(t *testing.T) {
 	svc.SetMarkers(markers)
 	svc.SetClock(func() time.Time { return retentionNow })
 	seq, err := database.SequenceValue(ctx, db.SequenceFloorChannels)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := markers.RecordMessagesSweep(ctx, chID, retentionNow.Add(-7*24*time.Hour).Format("2006-01-02 15:04:05"), seq); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SequenceValue", err)
+	mustDo(t, "RecordMessagesSweep", markers.RecordMessagesSweep(ctx, chID, retentionNow.Add(-7*24*time.Hour).Format("2006-01-02 15:04:05"), seq))
 	n, err := svc.ReplayMarkers(ctx)
 	if err != nil || n != 2 {
 		t.Fatalf("ReplayMarkers = %d, %v; want 2 messages re-swept", n, err)

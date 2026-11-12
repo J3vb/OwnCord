@@ -286,22 +286,42 @@ func TestRestoreCLI_RefusesNewerSchema(t *testing.T) {
 }
 
 // TestRestoreCLI_RefusesWithoutSafetyCopy: a readable live database is only
-// overwritten once its safety copy exists. A backup dir BackupToSafe rejects
-// must refuse, not continue without the copy.
+// overwritten once its safety copy exists. A safety copy BackupToSafe refuses
+// (here: the volume cannot keep the configured space free) must refuse the
+// restore, not continue without the copy.
 func TestRestoreCLI_RefusesWithoutSafetyCopy(t *testing.T) {
 	cfgPath, dbPath, _ := restoreCLIFixture(t)
 	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
-	badDir := filepath.Join(filepath.Dir(cfgPath), "back+ups")
-	body := "database:\n  path: " + filepath.ToSlash(dbPath) + "\nbackup:\n  dir: " + filepath.ToSlash(badDir) + "\n"
+	backupDir := filepath.Join(filepath.Dir(cfgPath), "backups")
+	body := "server:\n  min_free_disk_mb: 1099511627776\ndatabase:\n  path: " + filepath.ToSlash(dbPath) +
+		"\nbackup:\n  dir: " + filepath.ToSlash(backupDir) + "\n"
 	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code == 0 {
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	code := runRestoreCLI(cfgPath, []string{"--force", backup})
+	os.Stderr = oldStderr
+	_ = w.Close()
+	var said bytes.Buffer
+	_, _ = said.ReadFrom(r)
+
+	if code == 0 {
 		t.Fatal("restore without a safety copy exited 0, want a refusal")
+	}
+	if !strings.Contains(said.String(), "pre-restore safety copy") || !strings.Contains(said.String(), db.ErrBackupNoSpace.Error()) {
+		t.Fatalf("the refusal did not come from the safety copy: %s", said.String())
 	}
 	if !userExists(t, dbPath, "existing-owner") || userExists(t, dbPath, "restored-user") {
 		t.Fatal("the live database was overwritten with no safety copy taken")
+	}
+	if left, _ := filepath.Glob(filepath.Join(backupDir, "*")); len(left) != 0 {
+		t.Fatalf("the refused restore left files in the backup dir: %v", left)
 	}
 }
 

@@ -22,11 +22,12 @@ export const {
   getLocalCameraStream,
   getLocalScreenshareStream,
   getLocalScreenshareStats,
+  getLocalCameraStats,
   stopManualCameraTrack,
   stopManualScreenTracks,
   rollbackPendingVideo,
   reconcileVideoFlags,
-} = await import("@lib/voice/screenShare");
+} = await import("../../src/features/voice/screenShare");
 
 export type VideoTrackDeps = Parameters<typeof enableCamera>[1];
 

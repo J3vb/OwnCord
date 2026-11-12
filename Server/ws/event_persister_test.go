@@ -35,14 +35,7 @@ func captureLogs(t *testing.T, fn func()) string {
 // depends on (D3 removed the store abstraction).
 func openPersisterTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := newTeardownTestDB(t)
 	return database
 }
 
@@ -280,5 +273,34 @@ func TestEventPersisterStopSweepsStrandedQueue(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("expected 0 rows persisted for a stranded event Stop must drop, got %d", len(rows))
+	}
+}
+
+// Cancelling the owner context with events still accepted writes them: the final
+// flush runs on a detached context, so the store does not reject the statement.
+func TestEventPersister_OwnerCancelFlushesQueuedEvents(t *testing.T) {
+	mem := openPersisterTestDB(t)
+	p := NewEventPersister(mem, 1024, 1024, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	p.Start(ctx)
+	for i := range 5 {
+		p.Enqueue(int64(i+1), "broadcast", 0, []byte(`{"type":"x"}`))
+	}
+	cancel()
+	select {
+	case <-p.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the persister did not exit after its owner context was cancelled")
+	}
+	rows, err := mem.GetEventsSince(context.Background(), 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 5 {
+		t.Fatalf("rows in the store = %d, want 5", len(rows))
+	}
+	persisted, dropped, _, errs := p.Stats()
+	if persisted != 5 || dropped != 0 || errs != 0 {
+		t.Fatalf("persisted=%d dropped=%d errors=%d, want 5/0/0", persisted, dropped, errs)
 	}
 }

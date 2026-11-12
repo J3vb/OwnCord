@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -20,9 +19,7 @@ func nsfwWatermarkOrderDo(t *testing.T, r http.Handler, method, path, token stri
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
+	rr := serveLocal(r, req)
 	return rr
 }
 
@@ -58,14 +55,7 @@ func (b *orderRecordingNSFWBroadcaster) SendToUser(int64, []byte) bool {
 // but "bump" itself comes from the broadcaster's real MarkVisibilityChanged
 // method, not from the hook.
 func TestNSFW_WatermarkBumpsBeforeTheNotifySend(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	ctx := context.Background()
 
 	userID, err := database.CreateUser(ctx, "order-user", "hash", 4)

@@ -3,6 +3,8 @@ package db_test
 import (
 	"context"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // ─── GetOrCreateDMChannel ───────────────────────────────────────────────────
@@ -13,9 +15,7 @@ func TestGetOrCreateDMChannel_CreatesNew(t *testing.T) {
 	user2 := seedUser(t, database, "bob")
 
 	ch, created, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	if !created {
 		t.Error("expected created=true for new DM channel")
 	}
@@ -36,17 +36,13 @@ func TestGetOrCreateDMChannel_Idempotent(t *testing.T) {
 	user2 := seedUser(t, database, "bob")
 
 	ch1, created1, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("first GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "first GetOrCreateDMChannel", err)
 	if !created1 {
 		t.Error("expected created=true on first call")
 	}
 
 	ch2, created2, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("second GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "second GetOrCreateDMChannel", err)
 	if created2 {
 		t.Error("expected created=false on second call")
 	}
@@ -61,15 +57,11 @@ func TestGetOrCreateDMChannel_IdempotentReversedOrder(t *testing.T) {
 	user2 := seedUser(t, database, "bob")
 
 	ch1, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel(u1,u2): %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel(u1,u2)", err)
 
 	// Reversed argument order should find the same channel.
 	ch2, created, err := database.GetOrCreateDMChannel(context.Background(), user2, user1)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel(u2,u1): %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel(u2,u1)", err)
 	if created {
 		t.Error("expected created=false when called with reversed user order")
 	}
@@ -90,18 +82,12 @@ func TestGetUserDMChannelIDs(t *testing.T) {
 	user3 := seedUser(t, database, "carol")
 
 	ch12, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel(u1,u2): %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel(u1,u2)", err)
 	ch13, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user3)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel(u1,u3): %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel(u1,u3)", err)
 
 	ids, err := database.GetUserDMChannelIDs(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannelIDs: %v", err)
-	}
+	mustDo(t, "GetUserDMChannelIDs", err)
 	got := make(map[int64]bool, len(ids))
 	for _, id := range ids {
 		got[id] = true
@@ -112,21 +98,15 @@ func TestGetUserDMChannelIDs(t *testing.T) {
 
 	// user2 only participates in one DM.
 	ids2, err := database.GetUserDMChannelIDs(context.Background(), user2)
-	if err != nil {
-		t.Fatalf("GetUserDMChannelIDs(user2): %v", err)
-	}
+	mustDo(t, "GetUserDMChannelIDs(user2)", err)
 	if len(ids2) != 1 || ids2[0] != ch12.ID {
 		t.Errorf("user2 IDs = %v, want [%d]", ids2, ch12.ID)
 	}
 
 	// Closing a DM removes it from the caller's set only.
-	if err := database.CloseDM(context.Background(), user1, ch12.ID); err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
+	mustDo(t, "CloseDM", database.CloseDM(context.Background(), user1, ch12.ID))
 	ids, err = database.GetUserDMChannelIDs(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannelIDs after close: %v", err)
-	}
+	mustDo(t, "GetUserDMChannelIDs after close", err)
 	if len(ids) != 1 || ids[0] != ch13.ID {
 		t.Errorf("user1 IDs after close = %v, want [%d]", ids, ch13.ID)
 	}
@@ -137,34 +117,20 @@ func TestGetUserDMChannelIDs(t *testing.T) {
 }
 
 func TestGetOrCreateDMChannel_ReopensForCaller(t *testing.T) {
-	database := openMigratedMemory(t)
-	user1 := seedUser(t, database, "alice")
-	user2 := seedUser(t, database, "bob")
-
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	database, user1, user2, ch := newDMPair(t)
 
 	// Close the DM for user1.
-	if err := database.CloseDM(context.Background(), user1, ch.ID); err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
+	mustDo(t, "CloseDM", database.CloseDM(context.Background(), user1, ch.ID))
 
 	// Verify user1 no longer sees it.
-	dms, err := database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 0 {
 		t.Errorf("expected 0 open DMs after close, got %d", len(dms))
 	}
 
 	// Call GetOrCreateDMChannel again — should re-open for user1.
 	ch2, created, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel after close: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel after close", err)
 	if created {
 		t.Error("expected created=false (reuse existing channel)")
 	}
@@ -173,10 +139,7 @@ func TestGetOrCreateDMChannel_ReopensForCaller(t *testing.T) {
 	}
 
 	// User1 should now see the DM again.
-	dms, err = database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels after reopen: %v", err)
-	}
+	dms = mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 1 {
 		t.Errorf("expected 1 open DM after reopen, got %d", len(dms))
 	}
@@ -188,10 +151,7 @@ func TestGetUserDMChannels_EmptyList(t *testing.T) {
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")
 
-	dms, err := database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 0 {
 		t.Errorf("expected 0 DMs, got %d", len(dms))
 	}
@@ -204,18 +164,11 @@ func TestGetUserDMChannels_ReturnsOpenDMs(t *testing.T) {
 	user3 := seedUser(t, database, "charlie")
 
 	_, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel(u1,u2): %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel(u1,u2)", err)
 	_, _, err = database.GetOrCreateDMChannel(context.Background(), user1, user3)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel(u1,u3): %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel(u1,u3)", err)
 
-	dms, err := database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 2 {
 		t.Fatalf("expected 2 DMs, got %d", len(dms))
 	}
@@ -234,70 +187,34 @@ func TestGetUserDMChannels_ReturnsOpenDMs(t *testing.T) {
 }
 
 func TestGetUserDMChannels_ExcludesClosedDMs(t *testing.T) {
-	database := openMigratedMemory(t)
-	user1 := seedUser(t, database, "alice")
-	user2 := seedUser(t, database, "bob")
+	database, user1, user2, ch := newDMPair(t)
 
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "CloseDM", database.CloseDM(context.Background(), user1, ch.ID))
 
-	if err := database.CloseDM(context.Background(), user1, ch.ID); err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
-
-	dms, err := database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 0 {
 		t.Errorf("expected 0 DMs after close, got %d", len(dms))
 	}
 
 	// User2 should still see the DM (only user1 closed it).
-	dms2, err := database.GetUserDMChannels(context.Background(), user2)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels(user2): %v", err)
-	}
+	dms2 := mustGetUserDMChannels(t, database, user2)
 	if len(dms2) != 1 {
 		t.Errorf("expected 1 DM for user2, got %d", len(dms2))
 	}
 }
 
 func TestGetUserDMChannels_UnreadCount(t *testing.T) {
-	database := openMigratedMemory(t)
-	user1 := seedUser(t, database, "alice")
-	user2 := seedUser(t, database, "bob")
-
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	database, user1, user2, ch := newDMPair(t)
 
 	// Send 3 messages from user2 in the DM channel.
-	msg1, err := database.CreateMessage(context.Background(), ch.ID, user2, "hello", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage 1: %v", err)
-	}
-	_, err = database.CreateMessage(context.Background(), ch.ID, user2, "how are you", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage 2: %v", err)
-	}
-	_, err = database.CreateMessage(context.Background(), ch.ID, user2, "anyone there?", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage 3: %v", err)
-	}
+	msg1 := mustCreateMessage(t, database, ch.ID, user2, "hello", nil)
+	_ = mustCreateMessage(t, database, ch.ID, user2, "how are you", nil)
+	_ = mustCreateMessage(t, database, ch.ID, user2, "anyone there?", nil)
 
 	// Mark user1 as having read only the first message.
-	if err := database.UpdateReadState(context.Background(), user1, ch.ID, msg1); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
+	mustDo(t, "UpdateReadState", database.UpdateReadState(context.Background(), user1, ch.ID, msg1))
 
-	dms, err := database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 1 {
 		t.Fatalf("expected 1 DM, got %d", len(dms))
 	}
@@ -315,19 +232,12 @@ func TestGetUserDMChannels_UnreadCountCapsAt100(t *testing.T) {
 	user2 := seedUser(t, database, "capbob")
 
 	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	for range 150 {
-		if _, err := database.CreateMessage(context.Background(), ch.ID, user2, "msg", nil); err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		mustCreateMessage(t, database, ch.ID, user2, "msg", nil)
 	}
 
-	dms, err := database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 1 {
 		t.Fatalf("expected 1 DM, got %d", len(dms))
 	}
@@ -342,14 +252,9 @@ func TestGetUserDMChannels_NoMessages(t *testing.T) {
 	user2 := seedUser(t, database, "bob")
 
 	_, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 
-	dms, err := database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 1 {
 		t.Fatalf("expected 1 DM, got %d", len(dms))
 	}
@@ -362,28 +267,12 @@ func TestGetUserDMChannels_NoMessages(t *testing.T) {
 }
 
 func TestGetUserDMChannels_LastMessagePreview(t *testing.T) {
-	database := openMigratedMemory(t)
-	user1 := seedUser(t, database, "alice")
-	user2 := seedUser(t, database, "bob")
+	database, user1, user2, ch := newDMPair(t)
 
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	_ = mustCreateMessage(t, database, ch.ID, user2, "first message", nil)
+	lastMsgID := mustCreateMessage(t, database, ch.ID, user2, "latest message", nil)
 
-	_, err = database.CreateMessage(context.Background(), ch.ID, user2, "first message", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage 1: %v", err)
-	}
-	lastMsgID, err := database.CreateMessage(context.Background(), ch.ID, user2, "latest message", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage 2: %v", err)
-	}
-
-	dms, err := database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 1 {
 		t.Fatalf("expected 1 DM, got %d", len(dms))
 	}
@@ -401,27 +290,16 @@ func TestGetUserDMChannels_LastMessagePreview(t *testing.T) {
 // ─── IsDMParticipant ────────────────────────────────────────────────────────
 
 func TestIsDMParticipant_ValidParticipant(t *testing.T) {
-	database := openMigratedMemory(t)
-	user1 := seedUser(t, database, "alice")
-	user2 := seedUser(t, database, "bob")
-
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	database, user1, user2, ch := newDMPair(t)
 
 	ok, err := database.IsDMParticipant(context.Background(), user1, ch.ID)
-	if err != nil {
-		t.Fatalf("IsDMParticipant(user1): %v", err)
-	}
+	mustDo(t, "IsDMParticipant(user1)", err)
 	if !ok {
 		t.Error("expected true for user1")
 	}
 
 	ok, err = database.IsDMParticipant(context.Background(), user2, ch.ID)
-	if err != nil {
-		t.Fatalf("IsDMParticipant(user2): %v", err)
-	}
+	mustDo(t, "IsDMParticipant(user2)", err)
 	if !ok {
 		t.Error("expected true for user2")
 	}
@@ -434,14 +312,10 @@ func TestIsDMParticipant_NonParticipant(t *testing.T) {
 	user3 := seedUser(t, database, "charlie")
 
 	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 
 	ok, err := database.IsDMParticipant(context.Background(), user3, ch.ID)
-	if err != nil {
-		t.Fatalf("IsDMParticipant(user3): %v", err)
-	}
+	mustDo(t, "IsDMParticipant(user3)", err)
 	if ok {
 		t.Error("expected false for non-participant user3")
 	}
@@ -452,9 +326,7 @@ func TestIsDMParticipant_NonExistentChannel(t *testing.T) {
 	user1 := seedUser(t, database, "alice")
 
 	ok, err := database.IsDMParticipant(context.Background(), user1, 99999)
-	if err != nil {
-		t.Fatalf("IsDMParticipant: %v", err)
-	}
+	mustDo(t, "IsDMParticipant", err)
 	if ok {
 		t.Error("expected false for non-existent channel")
 	}
@@ -463,14 +335,7 @@ func TestIsDMParticipant_NonExistentChannel(t *testing.T) {
 // ─── OpenDM / CloseDM ──────────────────────────────────────────────────────
 
 func TestOpenDM_Idempotent(t *testing.T) {
-	database := openMigratedMemory(t)
-	user1 := seedUser(t, database, "alice")
-	user2 := seedUser(t, database, "bob")
-
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	database, user1, _, ch := newDMPair(t)
 
 	// Already open from creation — opening again should not error, and must
 	// report false: the row already existed, so this call is a no-op.
@@ -481,47 +346,25 @@ func TestOpenDM_Idempotent(t *testing.T) {
 	}
 
 	// Should still have exactly 1 DM.
-	dms, err := database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 1 {
 		t.Errorf("expected 1 DM after idempotent open, got %d", len(dms))
 	}
 }
 
 func TestCloseDM_RemovesFromOpenList(t *testing.T) {
-	database := openMigratedMemory(t)
-	user1 := seedUser(t, database, "alice")
-	user2 := seedUser(t, database, "bob")
+	database, user1, _, ch := newDMPair(t)
 
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "CloseDM", database.CloseDM(context.Background(), user1, ch.ID))
 
-	if err := database.CloseDM(context.Background(), user1, ch.ID); err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
-
-	dms, err := database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 0 {
 		t.Errorf("expected 0 DMs after close, got %d", len(dms))
 	}
 }
 
 func TestCloseDM_Idempotent(t *testing.T) {
-	database := openMigratedMemory(t)
-	user1 := seedUser(t, database, "alice")
-	user2 := seedUser(t, database, "bob")
-
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	database, user1, _, ch := newDMPair(t)
 
 	// Close twice — should not error.
 	if err := database.CloseDM(context.Background(), user1, ch.ID); err != nil {
@@ -533,18 +376,9 @@ func TestCloseDM_Idempotent(t *testing.T) {
 }
 
 func TestOpenDM_AfterClose(t *testing.T) {
-	database := openMigratedMemory(t)
-	user1 := seedUser(t, database, "alice")
-	user2 := seedUser(t, database, "bob")
+	database, user1, _, ch := newDMPair(t)
 
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
-
-	if err := database.CloseDM(context.Background(), user1, ch.ID); err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
+	mustDo(t, "CloseDM", database.CloseDM(context.Background(), user1, ch.ID))
 
 	if opened, err := database.OpenDM(context.Background(), user1, ch.ID); err != nil {
 		t.Fatalf("OpenDM after close: %v", err)
@@ -552,10 +386,7 @@ func TestOpenDM_AfterClose(t *testing.T) {
 		t.Error("OpenDM after close reported opened=false — a genuine reopen must report true")
 	}
 
-	dms, err := database.GetUserDMChannels(context.Background(), user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	if len(dms) != 1 {
 		t.Errorf("expected 1 DM after reopen, got %d", len(dms))
 	}
@@ -564,19 +395,10 @@ func TestOpenDM_AfterClose(t *testing.T) {
 // ─── GetDMParticipantIDs ────────────────────────────────────────────────────
 
 func TestGetDMParticipantIDs_ReturnsBoth(t *testing.T) {
-	database := openMigratedMemory(t)
-	user1 := seedUser(t, database, "alice")
-	user2 := seedUser(t, database, "bob")
-
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	database, user1, user2, ch := newDMPair(t)
 
 	ids, err := database.GetDMParticipantIDs(context.Background(), ch.ID)
-	if err != nil {
-		t.Fatalf("GetDMParticipantIDs: %v", err)
-	}
+	mustDo(t, "GetDMParticipantIDs", err)
 	if len(ids) != 2 {
 		t.Fatalf("expected 2 participant IDs, got %d", len(ids))
 	}
@@ -594,9 +416,7 @@ func TestGetDMParticipantIDs_NonExistentChannel(t *testing.T) {
 	database := openMigratedMemory(t)
 
 	ids, err := database.GetDMParticipantIDs(context.Background(), 99999)
-	if err != nil {
-		t.Fatalf("GetDMParticipantIDs: %v", err)
-	}
+	mustDo(t, "GetDMParticipantIDs", err)
 	if len(ids) != 0 {
 		t.Errorf("expected 0 IDs for non-existent channel, got %d", len(ids))
 	}
@@ -605,20 +425,11 @@ func TestGetDMParticipantIDs_NonExistentChannel(t *testing.T) {
 // ─── GetDMRecipient ─────────────────────────────────────────────────────────
 
 func TestGetDMRecipient_ReturnsOtherUser(t *testing.T) {
-	database := openMigratedMemory(t)
-	user1 := seedUser(t, database, "alice")
-	user2 := seedUser(t, database, "bob")
-
-	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	database, user1, user2, ch := newDMPair(t)
 
 	// From user1's perspective, recipient should be user2.
 	recipient, err := database.GetDMRecipient(context.Background(), ch.ID, user1)
-	if err != nil {
-		t.Fatalf("GetDMRecipient(user1): %v", err)
-	}
+	mustDo(t, "GetDMRecipient(user1)", err)
 	if recipient == nil {
 		t.Fatal("expected recipient, got nil")
 	}
@@ -631,9 +442,7 @@ func TestGetDMRecipient_ReturnsOtherUser(t *testing.T) {
 
 	// From user2's perspective, recipient should be user1.
 	recipient2, err := database.GetDMRecipient(context.Background(), ch.ID, user2)
-	if err != nil {
-		t.Fatalf("GetDMRecipient(user2): %v", err)
-	}
+	mustDo(t, "GetDMRecipient(user2)", err)
 	if recipient2 == nil {
 		t.Fatal("expected recipient, got nil")
 	}
@@ -650,9 +459,7 @@ func TestGetDMRecipient_NonExistentChannel(t *testing.T) {
 	user1 := seedUser(t, database, "alice")
 
 	recipient, err := database.GetDMRecipient(context.Background(), 99999, user1)
-	if err != nil {
-		t.Fatalf("GetDMRecipient: %v", err)
-	}
+	mustDo(t, "GetDMRecipient", err)
 	if recipient != nil {
 		t.Errorf("expected nil for non-existent channel, got user ID %d", recipient.ID)
 	}
@@ -668,31 +475,15 @@ func TestGetUserDMChannels_LastReadMessageID(t *testing.T) {
 	user3 := seedUser(t, database, "charlie")
 
 	readDM, _, err := database.GetOrCreateDMChannel(ctx, user1, user2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel(u1,u2): %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel(u1,u2)", err)
 	unreadDM, _, err := database.GetOrCreateDMChannel(ctx, user1, user3)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel(u1,u3): %v", err)
-	}
-	msg1, err := database.CreateMessage(ctx, readDM.ID, user2, "hello", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if _, err := database.CreateMessage(ctx, readDM.ID, user2, "again", nil); err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if _, err := database.CreateMessage(ctx, unreadDM.ID, user3, "hi", nil); err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if err := database.UpdateReadState(ctx, user1, readDM.ID, msg1); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel(u1,u3)", err)
+	msg1 := mustCreateMessage(t, database, readDM.ID, user2, "hello", nil)
+	mustCreateMessage(t, database, readDM.ID, user2, "again", nil)
+	mustCreateMessage(t, database, unreadDM.ID, user3, "hi", nil)
+	mustDo(t, "UpdateReadState", database.UpdateReadState(ctx, user1, readDM.ID, msg1))
 
-	dms, err := database.GetUserDMChannels(ctx, user1)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, user1)
 	got := make(map[int64]*int64, len(dms))
 	for i := range dms {
 		got[dms[i].ChannelID] = dms[i].LastReadMessageID
@@ -705,11 +496,20 @@ func TestGetUserDMChannels_LastReadMessageID(t *testing.T) {
 	}
 
 	// The other participant has no row for the DM: their own pointer is 0.
-	theirs, err := database.GetUserDMChannels(ctx, user2)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels(u2): %v", err)
-	}
+	theirs := mustGetUserDMChannels(t, database, user2)
 	if len(theirs) != 1 || theirs[0].LastReadMessageID == nil || *theirs[0].LastReadMessageID != 0 {
 		t.Errorf("other participant pointer = %+v, want a pointer to 0", theirs)
 	}
+}
+
+// newDMPair seeds users alice and bob and opens the one-to-one DM between
+// them, returning the database, both user ids and the channel.
+func newDMPair(t *testing.T) (database *db.DB, user1, user2 int64, ch *db.Channel) {
+	t.Helper()
+	database = openMigratedMemory(t)
+	user1 = seedUser(t, database, "alice")
+	user2 = seedUser(t, database, "bob")
+	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
+	mustDo(t, "GetOrCreateDMChannel", err)
+	return database, user1, user2, ch
 }

@@ -1,13 +1,11 @@
 package ws
 
-// voice_afk.go: the AFK sweep and the AFK move.
-//
-// A member idle (presence status idle, livePresence.idleSince) in a server voice
-// channel for the AFK timeout is moved to the AFK channel: a server-side eviction
-// plus a client-driven re-join, announced by voice_moved with reason "afk". The
-// re-join runs the ordinary join gate, so the sweep runs the same pre-flight first
-// and leaves a member where they are when that join would be refused. There is no
-// automatic return: the member's own join is user_initiated.
+// voice_afk.go: the AFK sweep and the AFK move. A member idle (livePresence.idleSince) in a
+// server voice channel for the AFK timeout is moved to the AFK channel: a server-side
+// eviction plus a client-driven re-join, announced by voice_moved with reason "afk". The
+// re-join runs the ordinary join gate, so the sweep runs the same pre-flight and leaves a
+// member in place when that join would be refused. No automatic return: the member's own
+// join is user_initiated.
 
 import (
 	"context"
@@ -21,33 +19,29 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// afkMovesPerSweep bounds how many members one sweep moves, spreading a large
-// idle crowd's LiveKit and broadcast work over several ticks.
+// afkMovesPerSweep bounds how many members one sweep moves, spreading LiveKit and broadcast work over several
+// ticks.
 const afkMovesPerSweep = 25
 
-// afkSweepSnapshotHook, when non-nil, runs after the sweep snapshotted its
-// candidates and before it acts on them. Test-only: holds the window in which a
-// member returns or switches channel.
+// afkSweepSnapshotHook runs after the sweep snapshotted its candidates and before it acts. Test-only.
 var afkSweepSnapshotHook func()
 
-// afkAfterEvictHook, when non-nil, runs between a member's eviction and the
-// voice_moved send. Test-only: holds the window in which the connection drops.
+// afkAfterEvictHook runs between a member's eviction and the voice_moved send. Test-only.
 var afkAfterEvictHook func()
 
-// isIdleStatus reports whether a presence status is "idle". It lives here, not
-// in client.go, so client.go keeps using db for its type only.
+// isIdleStatus lives here, not in client.go, so client.go keeps using db for its type only.
 func isIdleStatus(status string) bool { return status == db.StatusIdle }
 
-// afkCandidate is one idle voice member the sweep may move: the connection and
-// channel it saw, and the idle stamp it judged by.
+// afkCandidate is one idle voice member the sweep may move: the connection and channel it saw, and the idle
+// stamp it judged by.
 type afkCandidate struct {
 	c         *Client
 	fromCh    int64
 	idleSince time.Time
 }
 
-// sweepAFK moves members idle past the AFK timeout to the AFK channel, from the
-// 60 s voice ticker (startSweep); it holds nothing between members.
+// sweepAFK moves members idle past the AFK timeout to the AFK channel, from the 60 s voice ticker; it holds
+// nothing between members.
 func (h *Hub) sweepAFK(ctx context.Context) {
 	afk, err := h.readers.Dispatch.GetAFKChannel(ctx)
 	if err != nil {
@@ -87,28 +81,25 @@ func (h *Hub) sweepAFK(ctx context.Context) {
 	}
 }
 
-// afkQuota tracks the AFK channel's room across one sweep: the stored count is
-// read once before the first move and each eviction is reserved on top of it, so
-// members who re-join meanwhile are never counted twice.
+// afkQuota tracks the AFK channel's room across one sweep: the count is read once and each
+// eviction reserved on top, so members who re-join meanwhile are never counted twice.
 type afkQuota struct {
 	count    int
 	haveRead bool
 	reserved int
 }
 
-// afkStillTarget reports whether the configured AFK channel is still afkID and a
-// live voice channel, so an administrator unsetting, replacing or archiving it
-// mid-sweep stops further evictions.
+// afkStillTarget reports whether the AFK channel is still afkID and a live voice channel,
+// so unsetting, replacing or archiving it mid-sweep stops further evictions.
 func (h *Hub) afkStillTarget(ctx context.Context, afkID int64) bool {
 	cur, err := h.readers.Dispatch.GetAFKChannel(ctx)
 	return err == nil && cur != nil && cur.ID == afkID && !cur.Archived && cur.Type == "voice"
 }
 
-// afkTimeout reads the AFK timeout; a missing or unusable stored value is the
-// default. A read failure skips the sweep (false), so an unreadable setting never
-// moves anyone on a guess.
+// afkTimeout reads the AFK timeout; a missing or unusable value is the default. A read
+// failure skips the sweep, so an unreadable setting never moves anyone on a guess.
 func (h *Hub) afkTimeout(ctx context.Context) (time.Duration, bool) {
-	stored, err := h.settings.reader.Setting(ctx, service.AFKTimeoutKey)
+	stored, err := h.settings.cache.Reader().Setting(ctx, service.AFKTimeoutKey)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		slog.Warn("voice afk: sweep read failed", "what", "timeout setting", "err", err)
 		return 0, false
@@ -116,10 +107,9 @@ func (h *Hub) afkTimeout(ctx context.Context) (time.Duration, bool) {
 	return time.Duration(service.AFKTimeoutSeconds(stored)) * time.Second, true
 }
 
-// afkCandidates snapshots, under Hub.mu (R) alone, the clients in a voice channel
-// other than afkID idle since cutoff or earlier, longest idle first. It reads two
-// leaf fields only (the atomic presence pointer and voiceSlot.voiceMu): no I/O
-// under the lock.
+// afkCandidates snapshots, under Hub.mu (R) alone, clients in a voice channel other than
+// afkID idle since cutoff, longest idle first. It reads two leaf fields only (atomic
+// presence pointer, voiceSlot.voiceMu): no I/O under the lock.
 func (h *Hub) afkCandidates(afkID int64, cutoff time.Time) []afkCandidate {
 	h.mu.RLock()
 	var out []afkCandidate
@@ -128,8 +118,8 @@ func (h *Hub) afkCandidates(afkID int64, cutoff time.Time) []afkCandidate {
 		if ch == 0 || ch == afkID {
 			continue
 		}
-		// AFK is judged on the connection that holds the call: its idleness says the
-		// person left the call, and another device's activity must not move (or keep) it.
+		// AFK is judged on the connection holding the call: another device's activity must not move (or keep)
+		// it.
 		p := c.presence.Load()
 		if p == nil || p.status != db.StatusIdle || p.idleSince.IsZero() || p.idleSince.After(cutoff) {
 			continue
@@ -141,11 +131,10 @@ func (h *Hub) afkCandidates(afkID int64, cutoff time.Time) []afkCandidate {
 	return out
 }
 
-// afkMoveAllowed is the pre-flight: the source must be a server voice channel (a
-// DM or group call is never moved) and the member must be able to join the AFK
-// channel with room in it, the checks handleVoiceModMoveV2 makes, so a member is
-// not dropped for a re-join that would bounce. quota carries the room left across
-// the sweep. A refusal leaves the member where they are.
+// afkMoveAllowed is the pre-flight: the source must be a server voice channel (never a DM
+// or group call) and the member must be able to join the AFK channel with room in it (the
+// handleVoiceModMoveV2 checks), so nobody is dropped for a re-join that would bounce.
+// quota carries the room left across the sweep.
 func (h *Hub) afkMoveAllowed(ctx context.Context, afk *db.Channel, cand afkCandidate, quota *afkQuota) bool {
 	userID := cand.c.userID
 	src, err := h.readers.Dispatch.GetChannel(ctx, cand.fromCh)
@@ -165,8 +154,8 @@ func (h *Hub) afkMoveAllowed(ctx context.Context, afk *db.Channel, cand afkCandi
 	if capacity <= 0 {
 		return true
 	}
-	// A member moved earlier in this sweep joins the AFK channel only once its client
-	// answers voice_moved, so each move is reserved on top of a single count read.
+	// A member moved earlier joins the AFK channel only once its client answers voice_moved, so
+	// each move is reserved on top of a single count read.
 	if !quota.haveRead {
 		count, err := h.voice.CountInChannel(ctx, afk.ID)
 		if err != nil {
@@ -182,29 +171,21 @@ func (h *Hub) afkMoveAllowed(ctx context.Context, afk *db.Channel, cand afkCandi
 	return true
 }
 
-// EvictForAFKMove evicts c from fromCh because it has been idle since idleSince,
-// then tells it to re-join the AFK channel afkID. It reports whether c was
-// evicted: true also when the voice_moved send was refused, since the eviction's
-// cost is already paid and counts toward the sweep's limit.
-//
-// Under c's membership lock (Hub.begin, voiceMember, rank 1) it requires that c is
-// still the registered connection (a parked or replaced one is never touched,
-// unlike the moderator path's leaveParkedVoice), that its presence is still idle
-// with the same idleSince, and that it is still in fromCh (clearIfChannel); it
-// reads the moderator flags from the voice_states row in the same hold and stashes
-// them, so a prior moderator mute survives the move. After the lock is released it
-// blocks the automatic return to fromCh and sends voice_moved; a failed send (the
-// client is reconnecting) clears the stash and leaves the member out of voice.
-//
-// Lock order: voiceMember, then only the leaves the moderator move already takes
-// (Hub.mu (R) in clientsOf, PubSub.mu, voiceSlot.voiceMu) and the DB read, plus a
-// TRY-lock of voiceHub.mod, which follows voiceMember in the documented order. It is
-// never waited for: a blocking take under voiceMember would sit behind a LiveKit
-// RPC (user_locks.go). Held across the flag read and the row delete, it stops a
-// moderator mute committing between the two and being lost; when moderation is in
-// flight the candidate is skipped and the next tick retries. No audit row: the move
-// is the server's, not a moderator's.
-// moderator's.
+// EvictForAFKMove evicts c from fromCh because it has been idle since idleSince, then tells
+// it to re-join afkID. Reports whether c was evicted: true also when the voice_moved send
+// was refused, since the cost is paid and counts toward the sweep's limit. Under c's
+// membership lock (Hub.begin, voiceMember, rank 1) it requires c to be still the registered
+// connection (a parked or replaced one is never touched), still idle with the same
+// idleSince, and still in fromCh (clearIfChannel); it reads the moderator flags from the
+// row in the same hold and stashes them so a prior moderator mute survives. After unlock it
+// blocks the automatic return and sends voice_moved; a failed send (client reconnecting)
+// clears the stash and leaves the member out of voice. Lock order: voiceMember, then only
+// the leaves the moderator move takes (Hub.mu (R), PubSub.mu, voiceSlot.voiceMu) and the DB
+// read, plus a TRY-lock of voiceHub.mod, which follows voiceMember. Never waited for: a
+// blocking take under voiceMember would sit behind a LiveKit RPC (voicestate/userlocks.go).
+// Held across the flag read and row delete it stops a moderator mute committing between the
+// two; when moderation is in flight the candidate is skipped and the next tick retries. No
+// audit row: the move is the server's.
 func (h *Hub) EvictForAFKMove(ctx context.Context, c *Client, fromCh int64, idleSince time.Time, afkID int64) bool {
 	if !h.afkEvict(ctx, c, fromCh, idleSince) {
 		return false
@@ -213,9 +194,8 @@ func (h *Hub) EvictForAFKMove(ctx context.Context, c *Client, fromCh int64, idle
 	if afkAfterEvictHook != nil {
 		afkAfterEvictHook()
 	}
-	// The member's re-join of a password-protected AFK channel must not ask
-	// for the password: the grant is stored now that the member is evicted,
-	// and a failure leaves them out of voice like a failed send.
+	// A move never asks for the AFK channel's password: the grant is stored now, and a failure leaves the
+	// member out of voice like a failed send.
 	gErr := grantPasswordForMove(ctx, h.readers.Dispatch, afkID, c.userID)
 	if gErr != nil {
 		slog.Warn("voice afk: granting the AFK channel password failed, member removed from voice instead of moved", "user_id", c.userID, "err", gErr)
@@ -230,7 +210,6 @@ func (h *Hub) EvictForAFKMove(ctx context.Context, c *Client, fromCh int64, idle
 	return true
 }
 
-// afkEvict is the membership-locked half of EvictForAFKMove.
 func (h *Hub) afkEvict(ctx context.Context, c *Client, fromCh int64, idleSince time.Time) bool {
 	txn := h.begin(c.userID)
 	defer txn.end()
@@ -240,7 +219,7 @@ func (h *Hub) afkEvict(ctx context.Context, c *Client, fromCh int64, idleSince t
 	if p := c.presence.Load(); p == nil || p.status != db.StatusIdle || !p.idleSince.Equal(idleSince) {
 		return false
 	}
-	unlockMod, ok := h.voiceHub.mod.tryLock(c.userID)
+	unlockMod, ok := h.voiceHub.mod.TryLock(c.userID)
 	if !ok {
 		return false
 	}

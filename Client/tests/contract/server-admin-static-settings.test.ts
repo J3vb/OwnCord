@@ -247,7 +247,7 @@ describe("Server/admin/static — Settings page", () => {
       "General",
       "Access & registration",
       "Security",
-      "Voice: AFK",
+      "Voice",
       "Member activity (games and music)",
       "Welcome messages",
       "Upload file types",
@@ -1139,5 +1139,17 @@ describe("Server/admin/static — Updates page when apply is blocked", () => {
   it("keeps the container note when an older server sends no apply_blocked", async () => {
     const doc = await renderBlocked(undefined);
     expect(doc.querySelector(".card-note")?.textContent).toContain("container deployments");
+  });
+
+  // A source build is told so, not offered the release: the server refuses
+  // the apply too (409 DEVELOPMENT_BUILD).
+  it("says a development build is not updated and offers no Update now button", async () => {
+    const doc = await renderBlocked("development_build");
+    expect(doc.querySelector(".status-line-title")?.textContent).toBe("Development build");
+    expect(doc.querySelector(".status-line-sub")?.textContent).toBe(
+      "Running v1.0.0. Updates are not applied automatically. The latest release is v1.1.0.",
+    );
+    expect(doc.querySelector(".card-note")?.textContent).toContain("built from source");
+    expect(doc.querySelector('[data-action="applyUpdate"]')).toBeNull();
   });
 });
