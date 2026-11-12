@@ -94,6 +94,7 @@ func newRestorePaths(dbPath string) (restorePaths, error) {
 	if err != nil {
 		return restorePaths{}, err
 	}
+	p = restoreBase(p)
 	return restorePaths{
 		db:        p,
 		staged:    p + restoreStagedSuffix,
@@ -102,6 +103,24 @@ func newRestorePaths(dbPath string) (restorePaths, error) {
 		result:    p + restoreResultSuffix,
 		rollback:  p + restoreRollbackSuffix,
 	}, nil
+}
+
+// restoreBase is the file every restore file sits beside. A symlinked database path resolves to its
+// target, so the swap replaces the real file (SQLite keeps the WAL there too) and the link survives.
+// A restore that an older binary staged or half applied beside the link itself is still finished there.
+func restoreBase(p string) string {
+	real, err := filepath.EvalSymlinks(p)
+	if err != nil || real == p {
+		return p
+	}
+	if !restoreFilesExist(real) && restoreFilesExist(p) {
+		return p
+	}
+	return real
+}
+
+func restoreFilesExist(base string) bool {
+	return fileExists(base+restoreMarkerSuffix) || fileExists(base+restoreStagedSuffix) || fileExists(base+restoreRollbackSuffix)
 }
 
 var sqliteSidecars = [...]string{"", "-wal", "-shm"}
