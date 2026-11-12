@@ -144,7 +144,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	// enabled, while h.db is set whenever a database exists, so a gated purge
 	// would skip rows a previous boot persisted (an erasure regression). The two
 	// calls stay direct and pinned here.
-	"ws/hub_events.go":                 {Disposition: "boundary", Note: "replay purge: tombstones and ring drop under seqMu, persisted-row delete after it under the purge lock (2A-7); the delete is never gated on the persistence seam being wired", Calls: calls{"DeleteEventsForMessages": 1, "DeleteEventsForUser": 1}},
+	"ws/hub_events.go":                 {Disposition: "boundary", Note: "replay purge: tombstones and ring drop under seqMu, persisted-row delete after it under the purge lock (2A-7); the delete is never gated on the persistence seam being wired", Calls: calls{"DeleteEventsForMessages": 1, "DeleteEventsForUser": 1, "DeleteOrphanMessageEvents": 1, "MissingMessageIDs": 1}},
 	"ws/hub_options.go":                {Disposition: "boundary", Note: "construction validates and stores the handle, and gives it to the permission checker; no calls of its own", Hands: calls{"permissions.NewChecker": 1}},
 	"ws/hub_broadcast.go":              {Disposition: "adapter", Note: "member payloads read through the MemberPayloadReader seam; db types + pure BroadcastStatus"},
 	"ws/hub_presence.go":               {Disposition: "adapter", Note: "presence coalescer; pure BroadcastStatus helper and the MemberSummary shape"},
