@@ -1,5 +1,5 @@
 {
-  "nextId": 593,
+  "nextId": 595,
   "findings": [
     {
       "id": "OC-0001",
@@ -12938,7 +12938,7 @@
       "line": 84,
       "severity": "high",
       "why": "BackupToSafe checked every character of the destination's absolute path against letters, digits and a few signs. A server installed under a folder with an accented letter, brackets, a plus sign, an at sign or an apostrophe could not write a scheduled or manual backup, a pre-restore safety copy or an archive snapshot, and the backup taken before a pending migration failed too, so the server refused to start after such an update.",
-      "repro": "Call BackupToSafe with a destination under a directory named \"Jörg (x86)\": it returned a forbidden character error before the fix.",
+      "repro": "Call BackupToSafe with a destination under a directory named \"J\u00f6rg (x86)\": it returned a forbidden character error before the fix.",
       "evidence": "Server/db/backup_test.go TestBackupToSafe_AcceptsAnyNameTheFilesystemAllows",
       "suggestedFix": "Bind the destination as a value in VACUUM INTO and drop the character list; keep the safe-root check and the null byte refusal.",
       "fix": {
@@ -13685,6 +13685,52 @@
       "hunt": "fable-review-2026-11-11",
       "finder": "claude",
       "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0593",
+      "title": "The Linux crash report searched only the current boot for the kernel's crash line",
+      "file": "Client/src-tauri/src/system_crash_report.rs",
+      "line": 136,
+      "severity": "low",
+      "why": "log_kernel asked journalctl with -k, which implies -b (current boot only). A run that died silently is reported at the next app start, often after a reboot, so the time window pointed into an earlier boot that was never searched and the support bundle said no crash line was found.",
+      "repro": "On Linux, let the client die from a native segfault or the OOM killer, reboot, start OwnCord: the log says the kernel log has no crash line near the pid, although the persistent journal holds one.",
+      "evidence": "Vault issue #149; journalctl(1): -k/--dmesg implies -b.",
+      "suggestedFix": "Match _TRANSPORT=kernel instead of -k and keep --since/--until, so every kept boot is searched within the window.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/system_crash_report.rs (kernel_query_searches_earlier_boots_in_the_window)",
+        "revertProof": "fail (args contain -k)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-01",
+      "hunt": "nightly-bughunt",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-11-12"
+    },
+    {
+      "id": "OC-0594",
+      "title": "The screen-share zoom overview swallowed every key, so Escape and F could not leave theatre or toggle full screen",
+      "file": "Client/src/lib/ui/videoZoomNavigator.ts",
+      "line": 171,
+      "severity": "low",
+      "why": "The overview root stopped propagation of every keydown, while the map only handles the arrow keys. With focus on the map (after any drag) or its Reset button, Escape and F never reached the tile, theatre or pop-out handlers above it.",
+      "repro": "Zoom into a screen share with Ctrl+wheel, drag the overview, press F (or Escape in the theatre fallback or pop-out window full screen): nothing happens.",
+      "evidence": "Vault issue #152; videoZoomNavigator.ts blanket stopPropagation loop included keydown.",
+      "suggestedFix": "Stop propagation only for the arrow keys the map handles and drop keydown from the blanket loop.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/lib/ui/videoZoomNavigator.test.ts (keeps arrow keys in the map and lets Escape and F reach the tile)",
+        "revertProof": "fail (no key reaches the tile)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-09",
+      "hunt": "nightly-bughunt",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-11-12"
     }
   ]
 }

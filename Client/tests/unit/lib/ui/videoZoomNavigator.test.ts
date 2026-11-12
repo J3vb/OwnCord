@@ -98,6 +98,20 @@ describe("video zoom navigator lifecycle and interaction", () => {
     expect(view.y).toBeLessThan(0);
   });
 
+  it("keeps arrow keys in the map and lets Escape and F reach the tile", () => {
+    const { host, view } = mount();
+    view.setScale(2);
+    const seen: string[] = [];
+    host.addEventListener("keydown", (e) => seen.push(e.key));
+    const map = host.querySelector<HTMLButtonElement>(".video-zoom-nav__map")!;
+    const reset = host.querySelector<HTMLButtonElement>(".video-zoom-nav__reset")!;
+    map.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    map.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    map.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+    reset.dispatchEvent(new KeyboardEvent("keydown", { key: "F", bubbles: true }));
+    expect(seen).toEqual(["Escape", "f", "F"]);
+  });
+
   it("keeps cameras free of the overview", () => {
     const { host, view } = mount("camera");
     view.setScale(4);
