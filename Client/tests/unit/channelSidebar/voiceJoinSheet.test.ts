@@ -253,6 +253,17 @@ describe("ChannelSidebar join sheet", () => {
         expect(onWatchStream).toHaveBeenCalledWith(30);
       });
 
+      it("joins without a watch when the stream ended while the sheet was open", async () => {
+        await tapParticipant();
+        addVoiceUser(VOICE, 30, "alice", { camera: false });
+        onVoiceJoin.mockImplementation((id) =>
+          voiceStore.setState((prev) => ({ ...prev, currentChannelId: id })),
+        );
+        joinBtn().click();
+        expect(onVoiceJoin).toHaveBeenCalledExactlyOnceWith(VOICE);
+        expect(onWatchStream).not.toHaveBeenCalled();
+      });
+
       it("does nothing while a timeout is on", async () => {
         setActiveTimeout(new Date(Date.now() + 3_600_000).toISOString());
         await tapParticipant();

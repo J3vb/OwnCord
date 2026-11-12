@@ -158,6 +158,18 @@
       "reason": "Keyed by image-cache blob: URLs; clearAttachmentCaches clears it with them under the attachments:caches session reset"
     },
     {
+      "file": "lib/ui/animatedStill.ts",
+      "binding": "followers",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by bound <img> elements; an entry goes with its image, and a removed image is dropped on the next motion-setting change"
+    },
+    {
+      "file": "lib/ui/animatedStill.ts",
+      "binding": "registry",
+      "category": "dom-owned",
+      "reason": "Weak references to bound <img> elements; dead or detached ones are pruned on the next motion-setting change and the observer disconnects when none are left"
+    },
+    {
       "file": "features/messaging/emojiStill.ts",
       "binding": "stills",
       "category": "pure-cache",

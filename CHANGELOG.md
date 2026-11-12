@@ -115,6 +115,11 @@ release changes the database, and anything an operator must do first.)
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
 - **Channels:** a channel permission change on a busy server now always applies to every connected member.
 - **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
+- **Sign-in:** after a password change in Settings, a remembered password was still the old one, so the next one-click sign-in was refused. It now holds the new password.
+- **Voice:** on a phone, tapping someone in a voice channel who had their camera or screen on joined the call at once. It now asks first, like a tap on the channel.
+- **Moderation:** closing the ban dialog after a failed ban said the member was banned. It now says the ban could not be confirmed.
+- **Desktop UI:** animated avatars and banners kept old rows in memory after every channel switch. They no longer do.
+- **Direct messages:** the People view redrew every row on each presence change or new message on busy servers. It now updates only the rows that changed.
 
 ### Messages & files
 

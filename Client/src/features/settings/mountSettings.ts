@@ -43,10 +43,11 @@ export interface SettingsMountDeps {
  * one-click sign-in. Nothing is stored for a host that holds no password.
  */
 async function refreshRememberedPassword(host: string, newPassword: string): Promise<void> {
+  const token = authStore.getState().token;
+  if (token === null) return;
   try {
     const stored = await loadCredential(host);
-    const token = authStore.getState().token;
-    if (stored === null || !stored.hasPassword || token === null) return;
+    if (stored === null || !stored.hasPassword || authStore.getState().token !== token) return;
     const saved = await saveCredential(host, stored.username, token, newPassword);
     if (!saved) log.warn("The remembered password could not be updated after a password change");
   } catch (err) {

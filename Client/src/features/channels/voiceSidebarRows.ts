@@ -201,8 +201,10 @@ export function createVoiceRows(
       onVoiceJoin(channelId);
       if (refused) return;
     }
-    const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
     const voice = voiceStore.getState();
+    const live = voice.voiceUsers.get(channelId)?.get(user.userId);
+    if (live === undefined || (!live.camera && !live.screenshare)) return;
+    const tileId = live.screenshare ? live.userId + SCREENSHARE_TILE_ID_OFFSET : live.userId;
     if (voice.switchingTo === channelId) watchAfterSwitch(channelId, tileId);
     else if (voice.currentChannelId === channelId) onWatchStream?.(tileId);
   }
