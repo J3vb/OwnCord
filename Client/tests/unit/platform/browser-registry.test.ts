@@ -164,6 +164,10 @@ describe("browser platform registry", () => {
       vi.unstubAllGlobals();
     }
     expect(await b.systemIdle.idleMs()).toBeNull();
+    // Nothing follows the idle time either: the page's poll is all there is.
+    const ask = vi.fn();
+    expect(b.systemIdle.follow(new AbortController().signal, 600_000, ask)).toBeUndefined();
+    expect(ask).not.toHaveBeenCalled();
     expect(await b.systemRegion.localeTag()).toBeNull();
     // The web build scans nothing: no game, and the setting stays hidden.
     expect(b.gameDetector.available).toBe(false);
@@ -172,7 +176,9 @@ describe("browser platform registry", () => {
     expect(b.mediaDetector.available).toBe(false);
     expect(await b.mediaDetector.detect({ hidden: [] })).toEqual({ state: "none" });
     expect(() => b.trayStatus.onStatusChange(() => undefined)()).not.toThrow();
-    expect(b.callService.update({ active: true, camera: true })).toBeUndefined();
+    expect(
+      b.callService.update({ active: true, camera: true, videoOnScreen: true }),
+    ).toBeUndefined();
     // No call audio to follow in a tab: nothing is ever reported.
     const onAudioState = vi.fn();
     expect(b.mobileAudio.watch(new AbortController().signal, onAudioState)).toBeUndefined();

@@ -291,6 +291,7 @@ const nativeFiles: NativeFiles = {
 
 const systemIdle: SystemIdle = {
   idleMs: async () => null,
+  follow: () => {},
 };
 
 // navigator.language is all a page can know.

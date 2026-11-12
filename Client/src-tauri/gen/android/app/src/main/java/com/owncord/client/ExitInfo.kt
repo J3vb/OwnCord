@@ -164,8 +164,14 @@ object ExitInfo {
 
   fun callServiceStopped(): String = "[call] call service stopped"
 
+  fun screenKeptOn(on: Boolean): String =
+    if (on) "[call] screen stays on: a camera or a stream shows" else "[call] screen may sleep again"
+
   fun appVisibility(visible: Boolean): String =
     if (visible) "[app] back in front" else "[app] moved to the background"
+
+  fun awayLook(awayMs: Long): String =
+    "[idle] out of view for ${awayMs / 60_000} min: the app checks its status"
 
   // A line in the log plugin's format (UTC):
   // `[YYYY-MM-DD][HH:MM:SS][target][LEVEL] message`.

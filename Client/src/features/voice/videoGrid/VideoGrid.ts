@@ -235,6 +235,7 @@ export function createVideoGrid(): VideoGridComponent {
     lastInfo: new Map<number, StreamInfo>(),
     infoModule: null,
     miniRequest: 0,
+    onScreen: false,
   };
   const api = {} as GridApi;
   Object.assign(
@@ -367,6 +368,7 @@ export function createVideoGrid(): VideoGridComponent {
       syncVideoSurface(entry.video);
     }
     st.cells.clear();
+    api.syncOnScreen();
     api.forgetTileSizes();
     st.focusedTileId = null;
     st.people = [];

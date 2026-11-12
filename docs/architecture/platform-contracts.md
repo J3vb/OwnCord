@@ -102,9 +102,9 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 29    |
-| Distinct `invoke` command names called from `Client/src/`  | 117   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 120   |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 30    |
+| Distinct `invoke` command names called from `Client/src/`  | 118   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 121   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
@@ -127,6 +127,16 @@ reach the plugin in the order they were made. The plugin outlives a reload of
 the webview: the webview says that no call runs when it starts, and a call
 always starts from no picked route. The `MobileAudio` platform contract
 reports nothing outside Android.
+It also includes the Android-only `system_idle_follow` registration
+(`idle_android.rs`), and Android registers that file's `system_idle_ms` in
+place of `idle.rs`'s: the Android app's idle time is how long it has been out
+of view, 0 while it shows. Its `owncord-idle` plugin delivers `look` events
+through an owned plugin listener, when the app comes back into view and each
+time it has been out of view for the delay `system_idle_follow` gave it, by an
+alarm that wakes a sleeping phone. That alarm is not exact: Android may hold it
+back, longest while the phone is in Doze. The webview reads the idle time at each
+`look`, and once when it starts to listen, so nothing that happened before is
+lost. The delay goes out one command at a time, like the call audio commands.
 The handler count also covers the existing 115 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]`, and the forty-four `native_voice_*` commands
@@ -134,11 +144,12 @@ and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
 files dragged in or copied from the file manager) behind
 `#[cfg(target_os = "linux")]` (`read_staged_file` also on Android, where it
 reads the files another app shared), so a default build (no `devtools`)
-registers 103 on Linux and 58 elsewhere, plus fourteen Android-only ones:
+registers 103 on Linux and 58 elsewhere, plus fifteen Android-only ones:
 `set_call_service`, `save_file`, `share_file`, `share_text`, `read_staged_file`,
 `take_shared` (`share_in.rs`, the share another app sent to OwnCord), the
-five notification commands in `android_notifications.rs` and the three call
-audio commands in `mobile_audio.rs`. The one environment-detection helper is
+five notification commands in `android_notifications.rs`, the three call
+audio commands in `mobile_audio.rs` and `system_idle_follow` in
+`idle_android.rs`. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -268,6 +279,7 @@ stop_app_audio
 stop_http_proxy
 stop_livekit_proxy
 store_identity_pin
+system_idle_follow
 system_idle_ms
 system_region_locale
 take_notification_tap
@@ -305,9 +317,15 @@ caller since WP 6.7b: `src/platform/desktop/appAudio.ts`, behind the `AppAudio`
 contract, a twenty-seventh importer. They still belong in the registration
 inventory. `set_call_service` (Android only, `src-tauri/src/call_service.rs`)
 starts, updates and stops the foreground service that keeps a call's mic and
-camera running while the app is in the background; its caller is
-`src/platform/desktop/callService.ts`, behind the `CallService` contract, and
-the web build does nothing. `save_file`, `share_file` and `share_text` (Android
+camera running while the app is in the background, and keeps the screen on
+while the call has a camera or a stream on screen (a window flag, set and
+cleared with the same call); its caller is
+`src/platform/desktop/callServiceHost.ts`, loaded lazily behind the
+`CallService` contract (`callService.ts`), which sends one state at a time so
+they reach the plugin in the order they were made, and the web build does
+nothing. The plugin outlives a reload of the page,
+so the page sends its state as it starts, "no call" included
+(`features/voice/backgroundCall.ts`). `save_file`, `share_file` and `share_text` (Android
 only, `src-tauri/src/files.rs`) take a file's bytes as the raw command body and
 save it to the phone's Pictures or Downloads, or open the system share sheet;
 their caller is `src/platform/desktop/androidFiles.ts`, loaded lazily behind the
@@ -329,6 +347,15 @@ read the audio state: the routes there are, the one in use, the user's pick
 and whether a phone call holds the audio. Their caller is
 `src/platform/desktop/mobileAudioHost.ts`, loaded lazily behind the
 `MobileAudio` contract (`mobileAudio.ts`), and the web build reports nothing.
+`system_idle_follow` (Android only, `src-tauri/src/idle_android.rs`) gives the
+idle plugin the delay after which the app counts as idle, 0 to end it; its
+caller is `src/platform/desktop/systemIdleHost.ts`, a thirtieth importer,
+loaded lazily behind the `SystemIdle` contract's `follow` (`systemIdle.ts`),
+and the web build follows nothing. The three host modules only the Android app
+has (`callServiceHost.ts`, `mobileAudioHost.ts`, `systemIdleHost.ts`) load
+through one door, `src/platform/desktop/androidHost.ts`: one load carries every
+call, so they reach the host side in the order they were made, and nothing
+loads outside the Android app.
 
 There is no `window.__TAURI__` access, and the only environment branching is
 the SDK `isTauri` guard in `lib/pendingMessages.ts` (imported, not global), which is
@@ -366,7 +393,7 @@ native surface itself lives only in `platform/desktop/`.
 | Deep links        | `lib/nav/deepLink.ts`                                                                                 | `plugin-deep-link`                                                                                                                                    | URL routing                                                 |
 | App metadata      | `settings/AboutTab.ts`                                                                                | `api/app`                                                                                                                                             | build-time constant                                         |
 | Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                                                  | `api/core` (`open_devtools`)                                                                                                                          | unsupported — the browser has its own devtools already      |
-| System idle       | `pages/MainPage.ts` (for `lib/presence/autoIdle.ts`)                                                  | `api/core` (`system_idle_ms`)                                                                                                                         | unsupported — answers `null`; in-page activity decides      |
+| System idle       | `pages/MainPage.ts` (for `lib/presence/autoIdle.ts`)                                                  | `api/core` (`system_idle_ms`; on Android also `system_idle_follow` and the `owncord-idle` plugin's `look` event)                                      | unsupported — answers `null`; in-page activity decides      |
 | System region     | `main.ts` (for `lib/text/timeFormat.ts`)                                                              | `api/core` (`system_region_locale`)                                                                                                                   | unsupported — answers `null`; dates use the page language   |
 | Game activity     | `pages/MainPage.ts` (for `lib/presence/gameActivity.ts`), `settings/GameActivityRows.ts`              | `api/core` (`detect_game`, `list_running_programs`)                                                                                                   | unsupported — answers `null`; the setting is hidden         |
 
@@ -448,7 +475,7 @@ consumer of the registry, not an exception. `Client/eslint.config.js` carries
 the seam as a rule: `src/platform/desktop/**` is the only path under `src/`
 allowed a static `@tauri-apps` import.
 
-Three shapes recur in B7-5's moves, worth knowing before adding a member:
+Four shapes recur in B7-5's moves and since, worth knowing before adding a member:
 
 - **The registry is in the startup chunk.** `desktop` is statically reachable
   from the entry, so a native module that was a lazy `import()` before its
@@ -458,6 +485,10 @@ Three shapes recur in B7-5's moves, worth knowing before adding a member:
   through the voice store, whose import graph reaches back into the registry.
   `desktop/pushToTalk.ts` is a facade over `desktop/pushToTalkService.ts`,
   loaded on first use, so the static graph gains no import cycle.
+- **A member only the Android app has a host for is a facade too.** Its host
+  side (`desktop/*Host.ts`) loads on first use through `desktop/androidHost.ts`,
+  so the other builds' startup chunk carries one small door and no Android
+  code.
 - **Where a `lib/` export keeps callers, it stays as a thin delegate**
   (`lib/net/updater.ts`, `lib/net/httpProxy.ts`, `LiveKitUrlResolver`), and its legacy
   suite binding stays with it. Where the export went internal (deep links,

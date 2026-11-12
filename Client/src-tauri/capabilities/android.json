@@ -1,12 +1,14 @@
 {
   "identifier": "android",
-  "description": "Android network-cost and call-audio event subscriptions for the main window.",
+  "description": "Android network-cost, call-audio and idle event subscriptions for the main window.",
   "windows": ["main"],
   "platforms": ["android"],
   "permissions": [
     "owncord-metered-network:allow-register-listener",
     "owncord-metered-network:allow-remove-listener",
     "owncord-mobile-audio:allow-register-listener",
-    "owncord-mobile-audio:allow-remove-listener"
+    "owncord-mobile-audio:allow-remove-listener",
+    "owncord-idle:allow-register-listener",
+    "owncord-idle:allow-remove-listener"
   ]
 }

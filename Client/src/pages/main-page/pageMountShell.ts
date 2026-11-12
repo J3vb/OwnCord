@@ -171,6 +171,7 @@ export function mountConnectionBanner(st: PageState, pg: PageApi, ms: MountScope
   st.autoIdle = startAutoIdle({
     onStatusChange: (status) => pg.applyPresence(status),
     systemIdleMs: () => desktop.systemIdle.idleMs(),
+    followSystemIdle: (signal, delay, ask) => desktop.systemIdle.follow(signal, delay, ask),
   });
 
   startDetectedActivities(st);

@@ -13,12 +13,15 @@
 //!   answer in milliseconds, on X11 and Wayland alike where they exist. Last,
 //!   the Wayland `ext-idle-notify-v1` protocol (`idle_wayland.rs`), which
 //!   covers KDE Plasma on Wayland and wlroots desktops.
+//! - Android: the app's own answer, how long it has been out of view
+//!   (`idle_android.rs`).
 //! - Anything else: `None`.
 
 /// Milliseconds since the last keyboard or mouse input on the system, or
 /// `None` when the OS cannot say. Read-only, argument-free, and cheap enough
 /// for the frontend's 30 s poll; `async` so a slow D-Bus peer blocks a worker
 /// thread rather than the IPC main thread.
+#[cfg(not(target_os = "android"))]
 #[tauri::command(async)]
 pub fn system_idle_ms() -> Option<u64> {
     platform_idle_ms()
@@ -121,7 +124,7 @@ fn wayland_idle_ms() -> Option<u64> {
     monitor.as_ref().map(IdleMonitor::idle_ms)
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "android")))]
 fn platform_idle_ms() -> Option<u64> {
     None
 }

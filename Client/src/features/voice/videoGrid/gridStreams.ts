@@ -271,6 +271,7 @@ export function createGridStreams(st: GridState, api: GridApi) {
       st.callbacks.onStreamRemoved?.();
     }, ENDED_COVER_MS);
     api.syncStatsPolling();
+    api.syncOnScreen();
   }
 
   /** Close the tile's windows, listeners and picture before it leaves. */
@@ -321,6 +322,7 @@ export function createGridStreams(st: GridState, api: GridApi) {
     if (wasFocused) api.syncTileNav();
     api.relayout();
     api.syncStatsPolling();
+    api.syncOnScreen();
     api.restoreFocusedControl(savedFocus);
     // Focus was inside the tile that left: the grid takes it, not <body>.
     const active = api.doc().activeElement;

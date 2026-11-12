@@ -66,6 +66,7 @@ export const shards = {
     "src/features/voice/mediaEncryption.ts",
     "src/features/voice/sileroWorker.ts",
     "src/features/voice/videoCapFollow.ts",
+    "src/features/voice/videoOnScreen.ts",
     "src/lib/net/sessionScope.ts",
     "src/lib/voice/vadDetector.ts",
   ],

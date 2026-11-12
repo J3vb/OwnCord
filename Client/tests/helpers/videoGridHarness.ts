@@ -4,7 +4,7 @@ import {
   type VideoGridComponent,
   type TileConfig,
 } from "../../src/features/voice/videoGrid/VideoGrid";
-import "./resizeObserverStub";
+import { stubCapturingResizeObserver } from "./resizeObserverStub";
 import { mockGetScreenshareAudioMuted, mockGetScreenshareAudioVolume } from "./videoGridMocks";
 
 /** Minimal MediaStream stub for testing. */
@@ -134,6 +134,42 @@ export function useVideoGridHarness(
     adopt(grid: VideoGridComponent): VideoGridComponent {
       current = grid;
       return grid;
+    },
+  };
+}
+
+/** How long tile sizes settle before the grid acts on them (`VIEW_RESIZE_MS`). */
+const SIZES_SETTLE_MS = 150;
+
+export interface TileSizes {
+  /** Rendered tile sizes by data-user-id; an absent tile renders 0 × 0. */
+  readonly sizes: Map<string, { width: number; height: number }>;
+  /** Every ResizeObserver callback the grid registered. */
+  readonly observers: Array<() => void>;
+  /** Resize tiles and let the sizes settle. */
+  resize(entries: Record<number, [number, number]>): void;
+}
+
+/** Gives the grid's tiles a rendered size (jsdom lays nothing out) for the
+ *  current test, which runs on fake timers and restores the mocks after. A
+ *  closed grid is every tile at 0 × 0. Install it before the grid mounts. */
+export function stubTileSizes(): TileSizes {
+  const sizes: TileSizes["sizes"] = new Map();
+  const observers: Array<() => void> = [];
+  stubCapturingResizeObserver(observers);
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const size = sizes.get(this.dataset["userId"] ?? "") ?? { width: 0, height: 0 };
+    return { ...size, top: 0, left: 0, right: size.width, bottom: size.height } as DOMRect;
+  });
+  return {
+    sizes,
+    observers,
+    resize(entries) {
+      for (const [id, [width, height]] of Object.entries(entries)) sizes.set(id, { width, height });
+      for (const fire of observers) fire();
+      vi.advanceTimersByTime(SIZES_SETTLE_MS);
     },
   };
 }

@@ -157,23 +157,24 @@ describe("system idle", () => {
     expect(invokeMock).toHaveBeenCalledWith("system_idle_ms");
   });
 
-  it("answers 'unknown' on Android without asking the host, so the in-app timer rules", async () => {
+  it("asks the host on Android too, which answers with the app's time out of view", async () => {
     hostAndroidApp();
-    await expect(systemIdle.idleMs()).resolves.toBeNull();
-    expect(invokeMock).not.toHaveBeenCalled();
+    invokeMock.mockResolvedValue(0);
+    await expect(systemIdle.idleMs()).resolves.toBe(0);
+    expect(invokeMock).toHaveBeenCalledWith("system_idle_ms");
   });
 
-  it("an unknown answer leaves auto-idle on its own activity timer", async () => {
+  it("auto-idle polls that answer on Android", async () => {
     vi.useFakeTimers();
     try {
       hostAndroidApp();
-      const onStatusChange = vi.fn();
+      invokeMock.mockResolvedValue(0);
       const idle = startAutoIdle({
-        onStatusChange,
+        onStatusChange: vi.fn(),
         systemIdleMs: () => systemIdle.idleMs(),
       });
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(invokeMock).not.toHaveBeenCalled();
+      expect(invokeMock.mock.calls).toEqual([["system_idle_ms"], ["system_idle_ms"]]);
       idle.destroy();
     } finally {
       vi.useRealTimers();

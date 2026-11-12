@@ -2,31 +2,57 @@
 // host's call service when a call starts, when the camera goes on or off, and
 // when the call ends. The service starts at "joining", while the user's tap
 // still has the app in front, which Android requires for a mic service.
+//
+// The same state keeps the screen on while the call has a picture on screen
+// (a camera or a stream, as the video grid reports it), so watching with
+// hands off the phone does not dim and lock it.
+//
+// The host side outlives a reload of the page, so the page says where it
+// stands as it starts, "no call" included: a service or a lit screen left
+// from before the reload ends there.
 
 import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { desktop } from "../../platform/desktop";
 import type { CallServiceState } from "../../platform/contracts/callService";
+import { isVideoOnScreen, onVideoOnScreenChange } from "./videoOnScreen";
 
-function callState(state: VoiceState): CallServiceState {
-  const active = state.currentChannelId !== null || state.voiceStatus !== "idle";
-  return { active, camera: active && state.localCamera };
+const NO_CALL: CallServiceState = { active: false, camera: false, videoOnScreen: false };
+
+function inCall(state: VoiceState): boolean {
+  return state.currentChannelId !== null || state.voiceStatus !== "idle";
 }
 
-/** Follow the voice store until `signal` aborts, then stop the service if a
- *  call still had it running. */
+/** A camera and a picture count only inside a call. */
+function callState(voice: VoiceState, videoOnScreen: boolean): CallServiceState {
+  if (!inCall(voice)) return NO_CALL;
+  return { active: true, camera: voice.localCamera, videoOnScreen };
+}
+
+function same(a: CallServiceState, b: CallServiceState): boolean {
+  return a.active === b.active && a.camera === b.camera && a.videoOnScreen === b.videoOnScreen;
+}
+
+/** Follow the voice store and the video grid until `signal` aborts, then stop
+ *  the service (and let the screen sleep) if a call still had it running. */
 export function startBackgroundCall(signal: AbortSignal): void {
   if (signal.aborted) return;
-  let sent = callState(voiceStore.getState());
-  if (sent.active) desktop.callService.update(sent);
-  const stop = voiceStore.subscribeSelector(callState, (next) => {
+  let sent: CallServiceState | null = null;
+  const send = (next: CallServiceState): void => {
+    if (sent !== null && same(next, sent)) return;
     sent = next;
     desktop.callService.update(next);
-  });
+  };
+  const sync = (): void => send(callState(voiceStore.getState(), isVideoOnScreen()));
+  sync();
+  const stops = [
+    voiceStore.subscribeSelector((voice) => callState(voice, false), sync),
+    onVideoOnScreenChange(sync),
+  ];
   signal.addEventListener(
     "abort",
     () => {
-      stop();
-      if (sent.active) desktop.callService.update({ active: false, camera: false });
+      for (const stop of stops) stop();
+      send(NO_CALL);
     },
     { once: true },
   );
