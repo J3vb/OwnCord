@@ -152,6 +152,29 @@ fn a_closed_ptt_gate_sends_silence_and_an_open_one_the_processed_audio() {
     );
 }
 
+/// A mute or leave holds the microphone silent the moment it is asked for,
+/// whatever the push-to-talk gate says, until the hold is lifted.
+#[test]
+fn a_held_capture_sends_silence_even_with_the_ptt_gate_open() {
+    let input = noise(FRAME * 20, 0.1, 3);
+    let capture = Capture::default();
+    let controls = capture.controls();
+    let mut p = Processor::new(Apm::new(&opts(false, false)), true)
+        .gated_by(capture.feed.gated.clone())
+        .held_by(capture.feed.held.clone());
+    controls.set_ptt_gated(false);
+    controls.set_held(true);
+    assert!(
+        run(&mut p, &input).iter().all(|&s| s == 0),
+        "a held capture sends only zeros"
+    );
+    controls.set_held(false);
+    assert!(
+        energy(&run(&mut p, &input)) > 1.0e5,
+        "a released hold passes audio again"
+    );
+}
+
 /// Each 10 ms frame's output: whether it is all zeros.
 fn silent_frames(p: &mut Processor, input: &[f32]) -> Vec<bool> {
     run(p, input)
@@ -499,13 +522,13 @@ fn the_ptt_gate_is_shared_with_the_watchers_feed() {
 fn a_failed_move_leaves_the_record_on_the_running_device() {
     // After a restart the stream fell back to the default mic; the
     // pinned one is listed again but does not open yet.
-    let stream = Mutex::new(Some("default-stream"));
+    let stream = Mutex::new(StreamSlot::with(Some("default-stream")));
     let resolved = Mutex::new(Some(("default".to_string(), "default")));
     let moved = move_stream(&stream, &resolved, ("bt".to_string(), "bt"), |_| {
         Err("busy".to_string())
     });
     assert_eq!(moved, Err("busy".to_string()));
-    assert_eq!(*lock(&stream), Some("default-stream"));
+    assert_eq!(lock(&stream).get(), Some(&"default-stream"));
     let current = lock(&resolved).as_ref().map(|(id, _)| id.clone());
     assert!(
         pinned_listed("bt", current.as_deref(), ["default", "bt"].iter()),
@@ -516,7 +539,7 @@ fn a_failed_move_leaves_the_record_on_the_running_device() {
         Ok(if *d == "bt" { "bt-stream" } else { "wrong" })
     })
     .unwrap();
-    assert_eq!(*lock(&stream), Some("bt-stream"));
+    assert_eq!(lock(&stream).get(), Some(&"bt-stream"));
     assert_eq!(
         lock(&resolved).as_ref().map(|(id, _)| id.as_str()),
         Some("bt")
@@ -524,14 +547,48 @@ fn a_failed_move_leaves_the_record_on_the_running_device() {
 }
 
 #[test]
+fn a_restart_while_the_watcher_reopens_keeps_the_new_stream() {
+    // A republish stops the stream and starts one on the new track's sink
+    // while the watcher is reopening the old one: the watcher's stream was
+    // bound to the old sink and must not replace the new one.
+    let stream = Mutex::new(StreamSlot::with(Some("old-stream")));
+    let resolved = Mutex::new(Some(("default".to_string(), "default")));
+    let moved = move_stream(&stream, &resolved, ("usb".to_string(), "usb"), |_| {
+        let mut slot = lock(&stream);
+        let _ = slot.take();
+        slot.set("new-track-stream");
+        Ok("reopened-for-old-track")
+    });
+    assert!(moved.is_err(), "the watcher retries on its next tick");
+    assert_eq!(lock(&stream).get(), Some(&"new-track-stream"));
+    assert_eq!(
+        lock(&resolved).as_ref().map(|(id, _)| id.as_str()),
+        Some("default"),
+        "the record stays with the running stream"
+    );
+}
+
+#[test]
+fn a_device_switch_while_the_watcher_reopens_keeps_the_switched_stream() {
+    let stream = Mutex::new(StreamSlot::with(Some("old-stream")));
+    let resolved = Mutex::new(Some(("default".to_string(), "default")));
+    let moved = move_stream(&stream, &resolved, ("usb".to_string(), "usb"), |_| {
+        lock(&stream).set("switched-stream");
+        Ok("reopened")
+    });
+    assert!(moved.is_err());
+    assert_eq!(lock(&stream).get(), Some(&"switched-stream"));
+}
+
+#[test]
 fn a_muted_move_only_records_where_the_next_unmute_opens() {
-    let stream: Mutex<Option<&str>> = Mutex::new(None);
+    let stream: Mutex<StreamSlot<&str>> = Mutex::new(StreamSlot::default());
     let resolved = Mutex::new(Some(("default".to_string(), "default")));
     move_stream(&stream, &resolved, ("usb".to_string(), "usb"), |_| {
         panic!("muted: the mic must not open")
     })
     .unwrap();
-    assert_eq!(*lock(&stream), None);
+    assert_eq!(lock(&stream).get(), None);
     assert_eq!(
         lock(&resolved).as_ref().map(|(id, _)| id.as_str()),
         Some("usb")

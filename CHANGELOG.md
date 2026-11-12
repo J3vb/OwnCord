@@ -115,6 +115,8 @@ release changes the database, and anything an operator must do first.)
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
 - **Channels:** a channel permission change on a busy server now always applies to every connected member.
 - **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
+- **Linux:** while the camera or a screen share was being published on a slow connection, mute, push-to-talk release, deafen, volume changes and Leave waited for it (up to 10 seconds or more). They now act at once.
+- **Linux:** after a microphone device change landed during an unmute, you could show as unmuted while others heard nothing.
 
 ### Messages & files
 

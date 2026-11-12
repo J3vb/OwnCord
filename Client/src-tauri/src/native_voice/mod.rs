@@ -28,6 +28,7 @@ mod hotplug;
 mod keys;
 pub mod mic_test;
 pub mod playout;
+mod quick;
 pub mod screen;
 pub mod session;
 pub mod share_audio;
@@ -43,6 +44,7 @@ use mic_test::{
     level_event, MicTest, MicTestEnvelope, MicTestEvent, MicTestOptions, MicTestUpdate,
     MIC_TEST_EVENT, MIC_TEST_IN_CALL,
 };
+use quick::{closing_error, unless_closing, QuickSlot};
 use serde::Serialize;
 use session::{
     release_blocking, AudioOptions, CameraOptions, Event, NativeSession, QualityError, Resources,
@@ -206,6 +208,9 @@ pub struct NativeVoiceState {
     /// that wait. Microphone, device and leave commands never take a gate.
     camera_gate: Mutex<()>,
     screen_gate: Mutex<()>,
+    /// The live session's push-to-talk, gain, volume and mute-hold controls
+    /// and its close signal, reachable without `inner` (`quick.rs`).
+    quick: QuickSlot,
 }
 
 impl NativeVoiceState {
@@ -313,17 +318,27 @@ pub async fn native_voice_connect<R: Runtime>(
     token: String,
     audio: AudioOptions,
 ) -> Result<Connected, String> {
+    // A publish of the old session may hold the lock on the SFU: end it.
+    state.quick.begin_close(None);
     let (id, key, superseded, test) = {
         let mut inner = state.inner.lock().await;
-        let key = inner
-            .key
-            .clone()
-            .ok_or("no E2EE room key installed before connect")?;
+        let Some(key) = inner.key.clone() else {
+            // Told to close above: finish it rather than leave it held silent.
+            let stale = inner.session.take();
+            state.quick.remove(None);
+            drop(inner);
+            if let Some((old, s)) = stale {
+                log::info!("[native_voice] closing session {old}: connect without a room key");
+                s.close().await;
+            }
+            return Err("no E2EE room key installed before connect".to_string());
+        };
         // Take the old session out under the lock but close it after
         // releasing it: close() awaits the SFU, and holding the state lock
         // across that serialised a fast leave→join behind the old teardown
         // (voice #20).
         let superseded = inner.session.take();
+        state.quick.remove(None);
         inner.next_id += 1;
         (inner.next_id, key, superseded, inner.take_mic_test())
     };
@@ -350,6 +365,8 @@ pub async fn native_voice_connect<R: Runtime>(
     match rotated {
         Err(e) => {
             log::info!("[native_voice] {e}");
+            // close() awaits the SFU: not under the lock.
+            drop(inner);
             session.close().await;
             return Err(e);
         }
@@ -368,7 +385,9 @@ pub async fn native_voice_connect<R: Runtime>(
     }
     log::info!("[native_voice] session {id} connected as {identity}");
     let frames = session.frames_url().to_string();
+    let (capture_controls, playout_controls) = session.quick_controls();
     inner.session = Some((id, session));
+    state.quick.install(id, capture_controls, playout_controls);
     // A test start that finished between the two locks.
     let late = inner.take_mic_test();
     drop(inner);
@@ -562,12 +581,16 @@ pub async fn native_voice_disconnect(
     state: tauri::State<'_, NativeVoiceState>,
     session: u64,
 ) -> Result<Resources, String> {
+    // Quiet the microphone now and end a publish that holds the lock on the
+    // SFU, so the leave does not wait behind it.
+    state.quick.begin_close(Some(session));
     let closing = {
         let mut inner = state.inner.lock().await;
         if matches!(&inner.session, Some((id, _)) if *id == session) {
             // Take it out under the lock, close it after releasing: close()
             // awaits the SFU, and holding the lock across it blocked every
             // other command (voice #20).
+            state.quick.remove(Some(session));
             inner.session.take()
         } else {
             None
@@ -587,28 +610,39 @@ pub async fn native_voice_set_microphone(
     enabled: bool,
     bitrate: Option<u64>,
 ) -> Result<(), String> {
+    // A mute goes quiet at once, ahead of a publish holding the lock.
+    let request = state.quick.mic_request(session, enabled);
+    let closing = state.quick.closing(session);
     // Decide under the lock, open or close the stream without it, then commit
     // under the lock again if this call is still the latest on a live session.
-    let step = state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .begin_microphone(enabled, bitrate)
-        .await;
+    let step = unless_closing(
+        closing.clone(),
+        async {
+            let mut inner = state.inner.lock().await;
+            let s = inner.current(session)?;
+            if enabled {
+                state.quick.release_hold(session, request);
+            }
+            Ok(s.begin_microphone(enabled, bitrate).await)
+        },
+        || closing_error(session),
+    )
+    .await?;
     let ran = tokio::task::spawn_blocking(move || step.run())
         .await
         .map_err(|e| e.to_string())??;
     let Some(commit) = ran else {
         return Ok(());
     };
-    let (result, cleanup) = state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .finish_microphone(commit)
-        .await;
+    let (result, cleanup) = unless_closing(
+        closing,
+        async {
+            let mut inner = state.inner.lock().await;
+            Ok(inner.current(session)?.finish_microphone(commit).await)
+        },
+        || closing_error(session),
+    )
+    .await?;
     if let Some(stop) = cleanup {
         let stopped = tokio::task::spawn_blocking(move || stop.run())
             .await
@@ -627,12 +661,7 @@ pub async fn native_voice_set_ptt_gated(
     session: u64,
     gated: bool,
 ) -> Result<(), String> {
-    state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .set_ptt_gated(gated);
+    state.quick.get(session)?.capture.set_ptt_gated(gated);
     Ok(())
 }
 
@@ -649,7 +678,7 @@ pub async fn native_voice_set_voice_gate(
     retune: Option<bool>,
     speech: Option<bool>,
 ) -> Result<(), String> {
-    state.inner.lock().await.current(session)?.set_voice_gate(
+    state.quick.get(session)?.capture.set_voice_gate(
         threshold,
         retune.unwrap_or(false),
         speech.unwrap_or(false),
@@ -666,10 +695,9 @@ pub async fn native_voice_set_input_gain(
     percent: f32,
 ) -> Result<(), String> {
     state
-        .inner
-        .lock()
-        .await
-        .current(session)?
+        .quick
+        .get(session)?
+        .capture
         .set_input_gain(percent / 100.0);
     Ok(())
 }
@@ -861,13 +889,18 @@ pub async fn native_voice_publish_camera(
     capture: u64,
     options: CameraOptions,
 ) -> Result<String, String> {
-    state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .publish_camera(capture, options)
-        .await
+    unless_closing(
+        state.quick.closing(session),
+        async {
+            let mut inner = state.inner.lock().await;
+            inner
+                .current(session)?
+                .publish_camera(capture, options)
+                .await
+        },
+        || closing_error(session),
+    )
+    .await
 }
 
 /// Unpublish the screen share of running capture `capture`, keeping the
@@ -1195,14 +1228,19 @@ pub async fn native_voice_set_screen_quality(
     options: screen::CaptureOptions,
     publish: ScreenOptions,
 ) -> Result<ScreenQualitySet, QualityError> {
-    let (sid, width, height) = state
-        .inner
-        .lock()
-        .await
-        .current(session)
-        .map_err(QualityError::Refused)?
-        .set_screen_quality(capture, options, publish)
-        .await?;
+    let (sid, width, height) = unless_closing(
+        state.quick.closing(session),
+        async {
+            let mut inner = state.inner.lock().await;
+            inner
+                .current(session)
+                .map_err(QualityError::Refused)?
+                .set_screen_quality(capture, options, publish)
+                .await
+        },
+        || QualityError::Refused(closing_error(session)),
+    )
+    .await?;
     Ok(ScreenQualitySet { sid, width, height })
 }
 
@@ -1235,13 +1273,18 @@ pub async fn native_voice_publish_screen(
     capture: u64,
     options: ScreenOptions,
 ) -> Result<String, String> {
-    state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .publish_screen(capture, options)
-        .await
+    unless_closing(
+        state.quick.closing(session),
+        async {
+            let mut inner = state.inner.lock().await;
+            inner
+                .current(session)?
+                .publish_screen(capture, options)
+                .await
+        },
+        || closing_error(session),
+    )
+    .await
 }
 
 /// Publish the other applications' sound as capture `capture`'s audio; the
@@ -1257,7 +1300,7 @@ pub async fn native_voice_publish_screen_audio(
         .lock()
         .await
         .current(session)?
-        .publish_screen_audio(capture)
+        .publish_screen_audio_until(capture, state.quick.closing(session))
         .await;
     retired.release().await;
     published
@@ -1309,6 +1352,9 @@ pub async fn native_voice_set_subscribed(
     sid: String,
     subscribed: bool,
 ) -> Result<(), String> {
+    // Heard at once, ahead of a publish holding the lock; the latest call wins.
+    let playout = state.quick.get(session)?.playout;
+    playout.mixer().set_muted(&sid, !subscribed);
     state
         .inner
         .lock()
@@ -1349,12 +1395,11 @@ pub async fn native_voice_set_volume(
     identity: String,
     volume: f32,
 ) -> Result<(), String> {
-    state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .set_volume(&identity, volume);
+    state.quick.get(session)?.playout.mixer().set_gain(
+        &identity,
+        playout::Volume::Microphone,
+        volume,
+    );
     Ok(())
 }
 
@@ -1367,12 +1412,11 @@ pub async fn native_voice_set_screenshare_volume(
     identity: String,
     volume: f32,
 ) -> Result<(), String> {
-    state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .set_screenshare_volume(&identity, volume);
+    state.quick.get(session)?.playout.mixer().set_gain(
+        &identity,
+        playout::Volume::ScreenShare,
+        volume,
+    );
     Ok(())
 }
 

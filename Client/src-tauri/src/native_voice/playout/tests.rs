@@ -780,3 +780,19 @@ fn a_one_shot_plays_its_samples_on_the_front_pair_then_silence_and_flags_done() 
     assert!(write_once(&samples, &mut at, &mut out, 1));
     assert_eq!(out, [0.0; 5]);
 }
+
+#[test]
+fn a_muted_track_plays_nothing_until_unmuted_and_others_play_on() {
+    let tone = sine(8000.0, PRIME);
+    let m = Mixer::default();
+    m.set_muted("TR_a", true);
+    m.add("TR_a", "user-1", Some(Volume::Microphone), 1);
+    m.add("TR_b", "user-2", Some(Volume::Microphone), 1);
+    m.push("TR_a", &tone);
+    assert_eq!(rms(&mixed(&m, PRIME)), 0.0, "muted before it arrived");
+    m.push("TR_b", &tone);
+    assert!(rms(&mixed(&m, PRIME)) > 0.1, "another user still plays");
+    m.set_muted("TR_a", false);
+    m.push("TR_a", &tone);
+    assert!(rms(&mixed(&m, PRIME)) > 0.1, "unmuted plays again");
+}
