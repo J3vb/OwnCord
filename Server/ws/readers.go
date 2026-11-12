@@ -16,6 +16,8 @@ import (
 type VisibilityReader interface {
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
 	ListChannels(ctx context.Context) ([]db.Channel, error)
+	// ListAllChannels keeps the DM rows ListChannels leaves out.
+	ListAllChannels(ctx context.Context) ([]db.Channel, error)
 	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
 	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)

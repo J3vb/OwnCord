@@ -339,6 +339,13 @@ func (r *listFailingReader) ListChannels(ctx context.Context) ([]db.Channel, err
 	return r.VisibilityReader.ListChannels(ctx)
 }
 
+func (r *listFailingReader) ListAllChannels(ctx context.Context) ([]db.Channel, error) {
+	if r.failures.Add(-1) >= 0 {
+		return nil, errors.New("channel list down")
+	}
+	return r.VisibilityReader.ListAllChannels(ctx)
+}
+
 // A failed channel list puts the round back and retries; the users are closed
 // only after roleRefreshListAttempts consecutive failures.
 func TestRoleRefresh_ListFailureRetriesThenCloses(t *testing.T) {

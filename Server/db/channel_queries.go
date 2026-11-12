@@ -69,11 +69,29 @@ func channelFromFields(f channelFields) Channel {
 	}
 }
 
-// ListChannels returns all channels ordered by position.
+// ListChannels returns the guild channels ordered by position. 1:1 and group DM
+// rows are left out; ListAllChannels keeps them.
 func (d *DB) ListChannels(ctx context.Context) ([]Channel, error) {
 	rows, err := d.q.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ListChannels: %w", err)
+	}
+	channels := make([]Channel, 0, len(rows))
+	for i := range rows {
+		channels = append(channels, channelFromFields(channelFields(rows[i])))
+	}
+	if err := d.attachForumTags(ctx, channels); err != nil {
+		return nil, err
+	}
+	return channels, nil
+}
+
+// ListAllChannels is ListChannels with the DM rows kept, for a caller that must tell a
+// DM id from an unknown one.
+func (d *DB) ListAllChannels(ctx context.Context) ([]Channel, error) {
+	rows, err := d.q.ListAllChannels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ListAllChannels: %w", err)
 	}
 	channels := make([]Channel, 0, len(rows))
 	for i := range rows {

@@ -1,7 +1,39 @@
 -- name: ListChannels :many
 -- import_pending = 0 keeps a channel a Discord import is still building out of
 -- every client-facing read (here, GetChannel and GetAFKChannel): nobody can see
--- or address it until the import finishes.
+-- or address it until the import finishes. Guild channels only: DM rows share the
+-- table and are read through the DM queries.
+SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
+       COALESCE(c.category_id, 0) AS category_id,
+       COALESCE(cc.position, 0) AS category_position,
+       COALESCE(c.topic, '') AS topic,
+       c.position,
+       CAST(CASE WHEN p.id IS NULL THEN c.slow_mode ELSE p.slow_mode END AS INTEGER) AS slow_mode,
+       CAST(CASE WHEN p.id IS NULL THEN c.archived ELSE p.archived END AS INTEGER) AS archived,
+       c.created_at,
+       COALESCE(c.voice_max_users, 0) AS voice_max_users,
+       c.voice_quality,
+       c.mixing_threshold,
+       COALESCE(c.voice_max_video, 0) AS voice_max_video,
+       CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       c.afk,
+       COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
+       c.thread_archived,
+       c.thread_locked,
+       c.forum_require_tag,
+       c.forum_default_auto_archive_minutes,
+       CAST(c.password_hash IS NOT NULL AS INTEGER) AS join_locked
+FROM channels c
+LEFT JOIN channels p ON p.id = c.parent_channel_id
+LEFT JOIN channel_categories cc ON cc.id = c.category_id
+WHERE c.parent_channel_id IS NULL AND c.import_pending = 0 AND c.type != 'dm'
+ORDER BY c.position ASC, c.id ASC;
+
+-- name: ListAllChannels :many
+-- import_pending = 0 keeps a channel a Discord import is still building out of
+-- every client-facing read: nobody can see or address it until the import finishes.
+-- Unlike ListChannels this keeps 1:1 and group DM rows, for the few callers that
+-- must tell a DM id from an unknown one.
 SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,

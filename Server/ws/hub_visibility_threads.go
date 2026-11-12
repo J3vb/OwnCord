@@ -17,9 +17,9 @@ import (
 // visible). A thread in allowed takes its parent's label and consent (acknowledgements are keyed by
 // the parent).
 func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityReader, user *db.User, allowed map[int64]bool) (map[int64]bool, error) {
-	channels, err := database.ListChannels(ctx)
+	channels, err := database.ListAllChannels(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("computeReadableChannels ListChannels: %w", err)
+		return nil, fmt.Errorf("computeReadableChannels ListAllChannels: %w", err)
 	}
 	readable := make(map[int64]bool, len(allowed))
 	for id := range allowed {

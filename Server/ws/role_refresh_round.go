@@ -186,7 +186,7 @@ func (h *Hub) refreshUsersWith(ctx context.Context, ids []int64, done func(int64
 func (h *Hub) listRoleChannels(ctx context.Context) (*roleChannels, bool) {
 	ctx, cancel := context.WithTimeout(ctx, roleRefreshListBudget)
 	defer cancel()
-	channels, err := h.readers.Visibility.ListChannels(ctx)
+	channels, err := h.readers.Visibility.ListAllChannels(ctx)
 	if err != nil {
 		slog.Warn("hub: RefreshAllChannelVisibility could not list channels", "err", err)
 		return nil, false
