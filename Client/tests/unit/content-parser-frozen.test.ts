@@ -47,11 +47,6 @@ import {
   buildCustomEmojiNode,
   isEmojiOnlyMessage,
 } from "../../src/features/messaging/content/customEmoji";
-import {
-  UNICODE_EMOJI_REGEX,
-  buildEmojiImage,
-  showsAsImage,
-} from "../../src/features/messaging/content/emojiImage";
 import { formatDiscordTimestamp, type TimestampStyle } from "@lib/text/discordTimestamp";
 import { messagingText } from "../../src/i18n/messaging";
 import { desktop } from "../../src/platform/desktop";
@@ -674,14 +669,6 @@ function renderMentionSegment(text: string, info?: MentionInfo): DocumentFragmen
     text,
     EMOJI_TOKEN_REGEX,
     (m) => (m[1] === undefined ? null : buildCustomEmojiNode(m[1])),
-    matches,
-  );
-  // Unicode emoji as Twemoji images, on the same prose-only path (added
-  // deliberately with the switch away from the emoji font).
-  collectTokens(
-    text,
-    UNICODE_EMOJI_REGEX,
-    (m) => (showsAsImage(m[0]) ? buildEmojiImage(m[0]) : null),
     matches,
   );
   return fragmentFromTokens(text, matches);

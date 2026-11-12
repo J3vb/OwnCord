@@ -52,7 +52,7 @@
   font-size: 32px;
   line-height: 1.15;
 }
-.compact-mode .message .msg-text-jumbo :is(.custom-emoji, .emoji-img) {
+.compact-mode .message .msg-text-jumbo .custom-emoji {
   width: 32px;
   height: 32px;
   min-width: 32px;

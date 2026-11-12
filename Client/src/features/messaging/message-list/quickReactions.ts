@@ -5,7 +5,7 @@
  */
 
 import { getRecentEmoji } from "../emojiRecent";
-import { buildEmojiNode } from "../content/emojiImage";
+import { buildCustomEmojiNode } from "../content/customEmoji";
 
 /** How many quick-reaction emoji the message menu and the hover bar each show. */
 export const QUICK_REACTIONS = 3;
@@ -41,7 +41,8 @@ export function quickReactionEmojiForPass(n: number): string[] {
   return passCache;
 }
 
-/** The image (or text) for a quick reaction, and its accessible name. */
+/** The glyph (or custom-emoji image) for a quick reaction, and its accessible name. */
 export function emojiNode(emoji: string): { node: Node; name: string } {
-  return { node: buildEmojiNode(emoji), name: emoji };
+  const node = buildCustomEmojiNode(emoji);
+  return { node: node ?? document.createTextNode(emoji), name: emoji };
 }

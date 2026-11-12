@@ -333,7 +333,7 @@ describe("reaction pills", () => {
     expect(chip?.textContent).toContain(":deleted_one:");
   });
 
-  it("shows a unicode reaction as its Twemoji image, with the emoji as alt text", () => {
+  it("leaves a unicode reaction as text", () => {
     const el = renderReactions(
       makeReactionMessage("🔥"),
       reactionOptions(),
@@ -341,20 +341,7 @@ describe("reaction pills", () => {
     );
     const chip = el.querySelector(".reaction-chip");
     expect(chip?.querySelector("img.custom-emoji")).toBeNull();
-    const img = chip?.querySelector<HTMLImageElement>("img.emoji-img");
-    expect(img?.alt).toBe("🔥");
-    expect(img?.getAttribute("src")).toMatch(/\/1f525\.svg$/);
-  });
-
-  it("leaves a text-style symbol reaction as text", () => {
-    const el = renderReactions(
-      makeReactionMessage("©"),
-      reactionOptions(),
-      new AbortController().signal,
-    );
-    const chip = el.querySelector(".reaction-chip");
-    expect(chip?.querySelector("img")).toBeNull();
-    expect(chip?.textContent).toContain("©");
+    expect(chip?.textContent).toContain("🔥");
   });
 
   it("still toggles the reaction when it renders as an image", () => {

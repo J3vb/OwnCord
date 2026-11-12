@@ -53,7 +53,6 @@
     "test:e2e:media-cost": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.media-cost.ts"
   },
   "devDependencies": {
-    "@discordapp/twemoji": "17.0.3",
     "@eslint/js": "^10.0.1",
     "@jitsi/rnnoise-wasm": "^0.2.1",
     "@playwright/test": "^1",

@@ -55,7 +55,7 @@ describe("lazy emoji data", () => {
 
     const popup = container.querySelector(".emoji-autocomplete");
     expect(popup).not.toBeNull();
-    expect(popup!.querySelector<HTMLImageElement>(".ea-preview img.emoji-img")?.alt).toBe("👍");
+    expect(popup!.querySelector(".ea-preview")?.textContent).toBe("👍");
 
     picker.destroy();
     picker.element.remove();

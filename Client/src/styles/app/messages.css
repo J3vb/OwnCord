@@ -407,7 +407,7 @@
    Sized in a way that keeps the line height of ordinary text: 22px matches the
    cap height of the 16px message font closely enough that a line with emoji
    does not jump taller than the one above it. */
-:is(.custom-emoji, .emoji-img) {
+.custom-emoji {
   width: 22px;
   height: 22px;
   object-fit: contain;
@@ -425,7 +425,7 @@
   font-size: 48px;
   line-height: 1.15;
 }
-.message .msg-text-jumbo :is(.custom-emoji, .emoji-img) {
+.message .msg-text-jumbo .custom-emoji {
   width: 48px;
   height: 48px;
   min-width: 48px;
@@ -435,7 +435,7 @@
 
 /* In a reaction pill the emoji sits next to the count, so it follows the
    pill's own 14px scale rather than the message body's. */
-.reaction-chip :is(.custom-emoji, .emoji-img) {
+.reaction-chip .custom-emoji {
   width: 18px;
   height: 18px;
   min-width: 18px;
@@ -652,7 +652,7 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.msg-poll-emoji :is(.custom-emoji, .emoji-img) {
+.msg-poll-emoji .custom-emoji {
   width: 18px;
   height: 18px;
   vertical-align: middle;
@@ -2370,13 +2370,6 @@ ul.md-list-nested {
 .msg-actions-bar .msg-quick-react {
   font-size: var(--font-size-md);
   line-height: 1;
-}
-.msg-actions-bar .msg-quick-react .emoji-img {
-  width: 18px;
-  height: 18px;
-  min-width: 18px;
-  vertical-align: middle;
-  margin: 0;
 }
 /* Pin, Delete and (own message) Reply show only while Shift is held
    (MessageList toggles .shift-held on its root). They also carry

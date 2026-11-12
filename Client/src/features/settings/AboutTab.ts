@@ -149,9 +149,6 @@ function buildUpdateCard(signal: AbortSignal, installed: Promise<string | null>)
   return card;
 }
 
-/** The licence of the Twemoji graphics (features/messaging/content/emojiImage.ts). */
-const EMOJI_LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/";
-
 export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active about-tab" });
 
@@ -170,8 +167,6 @@ export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
       platformText(t("about.desktop"), t("about.android")),
     ),
     externalLink(REPO_URL, t("about.github"), "about-repo-link"),
-    createElement("div", { class: "setting-desc" }, t("about.emojiCredit")),
-    externalLink(EMOJI_LICENSE_URL, t("about.emojiLicense"), "about-repo-link"),
   );
   section.appendChild(header);
 

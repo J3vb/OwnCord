@@ -41,7 +41,7 @@ import {
   timeLeft,
   winningAnswers,
 } from "../pollModel";
-import { buildEmojiNode } from "../content/emojiImage";
+import { buildCustomEmojiNode } from "../content/customEmoji";
 import { connectionLockReason } from "./messageActions";
 import { channelCanReact, reactionLockReason } from "./reactions";
 import { WsErrorCode } from "@lib/protocolTypes";
@@ -112,9 +112,9 @@ function errorText(code: string): string {
   }
 }
 
-/** An answer's emoji: a custom `:shortcode:` or unicode emoji as its image, anything else as text. */
+/** An answer's emoji: a custom `:shortcode:` as its image, anything else as text. */
 function emojiNode(emoji: string): Node {
-  return buildEmojiNode(emoji);
+  return buildCustomEmojiNode(emoji) ?? document.createTextNode(emoji);
 }
 
 function timeLeftText(poll: PollView, now: number): string {

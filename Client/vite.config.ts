@@ -1,7 +1,6 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vite";
 import { dirname, resolve } from "path";
-import { twemojiFileName } from "./scripts/twemoji-names.mjs";
 
 const CHANGELOG_ID = "virtual:owncord-changelog";
 // Walk up rather than "../": Stryker runs the suite from a copy of Client/
@@ -36,62 +35,13 @@ export function changelogModule(): Plugin {
   };
 }
 
-const TWEMOJI_PACKAGE = resolve(import.meta.dirname, "node_modules/@discordapp/twemoji");
-
-/** Where the Twemoji SVGs are served: versioned, because assets are cached as immutable. */
-export function twemojiDir(): string {
-  const { version } = JSON.parse(readFileSync(resolve(TWEMOJI_PACKAGE, "package.json"), "utf8"));
-  return `assets/twemoji/${version}/`;
-}
-
-/**
- * The Twemoji SVGs that messages, reactions and the `:` popup show, copied into
- * the build under their FE0F-free names (scripts/twemoji-names.mjs), and served
- * from node_modules by the dev server. The picker grid uses the image sheets in
- * src/assets/emoji-sheets instead.
- */
-export function twemojiAssets(): Plugin {
-  const svgDir = resolve(TWEMOJI_PACKAGE, "dist/svg");
-  const files = (): Map<string, string> => {
-    const out = new Map<string, string>();
-    for (const f of readdirSync(svgDir)) {
-      if (f.endsWith(".svg")) out.set(`${twemojiFileName(f.slice(0, -4))}.svg`, f);
-    }
-    return out;
-  };
-  return {
-    name: "owncord-twemoji",
-    configureServer(server) {
-      const prefix = `/${twemojiDir()}`;
-      const byName = files();
-      server.middlewares.use((req, res, next) => {
-        const url = req.url ?? "";
-        const file = url.startsWith(prefix) ? byName.get(url.slice(prefix.length)) : undefined;
-        if (file === undefined) return next();
-        res.setHeader("Content-Type", "image/svg+xml");
-        res.end(readFileSync(resolve(svgDir, file)));
-      });
-    },
-    generateBundle() {
-      const dir = twemojiDir();
-      for (const [name, file] of files()) {
-        this.emitFile({
-          type: "asset",
-          fileName: dir + name,
-          source: readFileSync(resolve(svgDir, file)),
-        });
-      }
-    },
-  };
-}
-
 /**
  * Target-neutral config. Settings that exist only because the Tauri desktop
  * shell is the consumer live in `vite.config.desktop.ts`; nothing here may
  * assume a target. Plain `vite build` on this file is the non-desktop build.
  */
 export default defineConfig({
-  plugins: [changelogModule(), twemojiAssets()],
+  plugins: [changelogModule()],
   // The desktop build, `vite dev` and the e2e prod build are all not-web;
   // `vite.config.web.ts` overrides this. Always defined, so no build can ship
   // an unresolved identifier.

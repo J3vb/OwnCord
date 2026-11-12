@@ -70,22 +70,6 @@ and only when it changes something a contributor or fork holder must do
 - **Phone app:** on a small phone the buttons at the end of a direct message's header were off screen, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
 - **GIFs:** GIFs in the GIF picker showed up slowly in the desktop app. Thumbnails from the same site now share open connections, and six load at a time instead of four.
 
-### Messages & files
-
-- **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
-- **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
-- **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.
-- **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.
-
-### Voice
-
-- **A reconnect after a live update the app could not read took you out of your call**, and everyone saw you leave. The reconnect now keeps the call. Update the app as well as the server: an older app still drops the call.
-
-### Phone app
-
-- **On a small phone the buttons at the end of a direct message's header were off screen**, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
-- **In a call, the round controls were stacked in two short rows.** They now sit in one row.
-
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

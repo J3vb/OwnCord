@@ -106,7 +106,7 @@ describe("message hover bar", () => {
     const opts = render(makeMessage());
     const first = btn("msg-quick-react-1-0");
     expect(first.getAttribute("aria-label")).toBe(`React with ${UP}`);
-    expect(first.querySelector<HTMLImageElement>("img.emoji-img")?.alt).toBe(UP);
+    expect(first.textContent).toBe(UP);
     first.click();
     expect(opts.onReactionClick).toHaveBeenCalledWith(1, UP);
   });

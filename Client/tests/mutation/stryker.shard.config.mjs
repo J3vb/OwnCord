@@ -348,10 +348,6 @@ export const shards = {
   ],
   "lib-rest-4": [
     "src/features/developer-mode/developerTools.ts",
-    "src/features/messaging/content/emojiImage.ts",
-    "src/features/messaging/emojiPickerCells.ts",
-    "src/features/messaging/emojiSheets.ts",
-    "src/features/messaging/emojiSheetsData.ts",
     "src/features/messaging/pickerImages.ts",
     "src/features/messaging/pickerLazyGrids.ts",
     "src/features/share/shareIn.ts",

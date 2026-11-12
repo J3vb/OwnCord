@@ -19,7 +19,6 @@ import {
   type MentionInfo,
 } from "@lib/text/mentions";
 import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode } from "./customEmoji";
-import { UNICODE_EMOJI_REGEX, buildEmojiImage, showsAsImage } from "./emojiImage";
 import { messagingText } from "../../../i18n/messaging";
 import { INVITE_LINK_REGEX, MESSAGE_LINK_REGEX } from "./contentRegex";
 import { buildChannelNode, buildInviteLinkNode, buildMessageLinkNode } from "./contentLinkChips";
@@ -247,13 +246,6 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
     text,
     EMOJI_TOKEN_REGEX,
     (m) => (m[1] === undefined ? null : buildCustomEmojiNode(m[1])),
-    matches,
-  );
-  // Unicode emoji as Twemoji images, on the same prose-only path.
-  collectTokens(
-    text,
-    UNICODE_EMOJI_REGEX,
-    (m) => (showsAsImage(m[0]) ? buildEmojiImage(m[0]) : null),
     matches,
   );
   return fragmentFromTokens(text, matches);

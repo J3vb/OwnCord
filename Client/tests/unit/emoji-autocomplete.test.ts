@@ -207,11 +207,11 @@ describe("createEmojiAutocomplete", () => {
     ac.destroy();
   });
 
-  it("shows the emoji's Twemoji image as the preview for unicode rows", () => {
+  it("shows the character itself as the preview for unicode rows", () => {
     const { ac } = mount();
     ac.setQuery("flame");
     const row = [...ac.element.querySelectorAll(".ma-item")].find(
-      (r) => r.querySelector<HTMLImageElement>(".ea-preview img.emoji-img")?.alt === "🔥",
+      (r) => r.querySelector(".ea-preview")?.textContent === "🔥",
     );
     expect(row).toBeDefined();
     ac.destroy();

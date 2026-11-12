@@ -318,7 +318,6 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("updates.label"),
     s("updates.desc"),
     platformText(whatsNewText("about.desktop"), whatsNewText("about.android")),
-    whatsNewText("about.emojiCredit"),
     whatsNewText("about.history"),
   ],
 };
