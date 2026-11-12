@@ -189,6 +189,7 @@ const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?
 
 // replayMessageFrameTypes are the frame types whose payload.id or payload.message_id
 // names a message (wire values; the events table's event_type column holds the same).
+// chat_bulk_deleted is left out: it carries only ids, never content.
 const replayMessageFrameTypes = `('chat_message', 'chat_edited', 'chat_deleted', 'reaction_update', 'poll_update')`
 
 // EventNamesOwnMessagePredicate is the SQL deciding whether a persisted replay
