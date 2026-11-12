@@ -11,7 +11,15 @@ import type { Message, MessagesState } from "./messageModel";
 import { isUnreconciledEcho } from "./echoReconcile";
 import { sameValue } from "./sameValue";
 import { mergeMessagePoll } from "../../lib/pollState";
-import { endLoadJournal, startLoadJournal } from "./loadJournal";
+import {
+  endLoadJournal,
+  firstPageReplayStart,
+  holdLoadJournal,
+  releaseLoadJournal,
+  startLoadJournal,
+} from "./loadJournal";
+
+export { holdLoadJournal as reduceHoldLoadJournal, releaseLoadJournal as reduceReleaseLoadJournal };
 import { replayLoadJournal } from "./loadJournalReplay";
 
 /** setChannelLoading's reducer. */
@@ -204,7 +212,12 @@ export function reduceSetMessages(
   // the watermark) is still newer than either bound and survives either way.
   const carryFloor = Math.max(maxSnapshotId, prev.loadWatermark?.get(channelId) ?? 0);
   const carried = carryRows(previous, trimmed, carryFloor);
-  const snapshot = replayLoadJournal(prev, channelId, reuseUnchangedRows(previous, trimmed));
+  const snapshot = replayLoadJournal(
+    prev,
+    channelId,
+    reuseUnchangedRows(previous, trimmed),
+    firstPageReplayStart(prev, channelId),
+  );
   const older = olderThanPage(prev, channelId, previous, trimmed, hasMore, splice);
   const { merged, mergeTrimmed, keepHead } = capMerged(
     [...older, ...snapshot, ...carried],
@@ -290,7 +303,12 @@ export function reduceSetAroundMessages(
 ): MessagesState {
   const { converted, trimmed: fetched } = aroundRows(prev, channelId, messages);
   const previous = prev.messagesByChannel.get(channelId) ?? [];
-  const trimmed = replayLoadJournal(prev, channelId, fetched);
+  const trimmed = replayLoadJournal(
+    prev,
+    channelId,
+    fetched,
+    firstPageReplayStart(prev, channelId),
+  );
   // Reattaches iff the window reaches the live tail with nothing stranded —
   // the exact negation of the detached condition below. Only then does the
   // window claim to BE "now", so only then may a live "sent" row newer than
@@ -393,7 +411,11 @@ export function reduceAppendNewerMessages(
   const carried = existing.filter((m) => m.status !== "sent");
   const newestId = sent.reduce((max, m) => Math.max(max, m.id), 0);
   // An `after` page is oldest-first (render order) already.
-  const fresh = messages.filter((m) => m.id > newestId).map(messageResponseToMessage);
+  const fresh = replayLoadJournal(
+    prev,
+    channelId,
+    messages.filter((m) => m.id > newestId).map(messageResponseToMessage),
+  );
   let kept = [...sent, ...fresh];
   const overflow = kept.length - MAX_MESSAGES_PER_CHANNEL;
   const wasTrimmed = overflow > 0;
@@ -433,7 +455,11 @@ export function reduceMergeTailMessages(
   if (prev.detachedChannels.has(channelId)) return prev;
   const existing = prev.messagesByChannel.get(channelId) ?? [];
   const known = new Set(existing.filter((m) => m.status === "sent").map((m) => m.id));
-  const fresh = messages.filter((m) => !known.has(m.id)).map(messageResponseToMessage);
+  const fresh = replayLoadJournal(
+    prev,
+    channelId,
+    messages.filter((m) => !known.has(m.id)).map(messageResponseToMessage),
+  );
   if (fresh.length === 0) return prev;
   const sent = [...existing.filter((m) => m.status === "sent"), ...fresh].toSorted(
     (a, b) => a.id - b.id,
@@ -454,7 +480,11 @@ export function reducePrependMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): MessagesState {
-  const converted = messages.map(messageResponseToMessage).toReversed();
+  const converted = replayLoadJournal(
+    prev,
+    channelId,
+    messages.map(messageResponseToMessage).toReversed(),
+  );
   const existing = prev.messagesByChannel.get(channelId) ?? [];
   let combined = [...converted, ...existing];
   // Keep the OLDEST rows (start of array) when the cap is exceeded: the

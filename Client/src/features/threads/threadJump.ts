@@ -8,8 +8,10 @@ import {
   getChannelMessages,
   hasMessageLoaded,
   isChannelLoaded,
+  isWindowDetached,
   setAroundMessages,
 } from "@stores/messages.store";
+import { recoverAfterReattach, withLoadJournal } from "../messaging/historyFetch";
 import { messagingText } from "../../i18n/messaging";
 import type { MessageListComponent } from "../messaging/MessageList";
 
@@ -19,7 +21,7 @@ const log = createLogger("thread-jump");
 const AROUND_WINDOW = 50;
 
 export interface ThreadJumpOptions {
-  readonly api: Pick<ApiClient, "getMessagesAround">;
+  readonly api: Pick<ApiClient, "getMessagesAround" | "getMessages">;
   readonly threadId: number;
   /** Aborts when the panel closes or moves to another thread. */
   readonly signal: AbortSignal;
@@ -61,17 +63,24 @@ export function createThreadJump(opts: ThreadJumpOptions): (messageId: number) =
     // re-render the list at the tail and lose the target.
     if (isChannelLoaded(threadId) && getList()?.scrollToMessage(messageId) === true) return;
 
-    let resp: Awaited<ReturnType<ApiClient["getMessagesAround"]>>;
     try {
-      resp = await api.getMessagesAround(threadId, messageId, { limit: AROUND_WINDOW });
+      // Held so an edit, delete or pin that arrives while the window is in
+      // flight is replayed onto it instead of undone.
+      const installed = await withLoadJournal(threadId, async () => {
+        const resp = await api.getMessagesAround(threadId, messageId, { limit: AROUND_WINDOW });
+        // The panel closed or a newer jump started while the fetch was in flight:
+        // installing now would write a window into a thread nobody is looking at.
+        if (signal.aborted || gen !== jumpGen) return false;
+        const wasDetached = isWindowDetached(threadId);
+        setAroundMessages(threadId, resp.messages, resp.has_more_before, resp.has_more_after);
+        recoverAfterReattach(api, threadId, wasDetached, signal);
+        return true;
+      });
+      if (!installed) return;
     } catch (err) {
       if (!signal.aborted && gen === jumpGen) fetchFailed(err, messageId);
       return;
     }
-    // The panel closed or a newer jump started while the fetch was in flight:
-    // installing now would write a window into a thread nobody is looking at.
-    if (signal.aborted || gen !== jumpGen) return;
-    setAroundMessages(threadId, resp.messages, resp.has_more_before, resp.has_more_after);
     if (!hasMessageLoaded(threadId, messageId)) {
       showToast(messagingText("jump.failed"), "error");
       return;

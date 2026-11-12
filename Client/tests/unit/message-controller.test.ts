@@ -45,6 +45,8 @@ vi.mock("@stores/messages.store", () => ({
   setChannelLoadError: mockSetChannelLoadError,
   setOlderLoadFailed: mockSetOlderLoadFailed,
   isWindowDetached: mockIsWindowDetached,
+  holdLoadJournal: vi.fn(),
+  releaseLoadJournal: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------

@@ -49,6 +49,8 @@ import {
   reducePrependMessages,
   reduceAppendNewerMessages,
   reduceMergeTailMessages,
+  reduceHoldLoadJournal,
+  reduceReleaseLoadJournal,
 } from "../features/messaging/historyWindows";
 import {
   reduceEditMessage,
@@ -141,6 +143,18 @@ export function removeOptimistic(correlationId: string): void {
  */
 export function setChannelLoading(channelId: number): void {
   messagesStore.setState((prev) => reduceSetChannelLoading(prev, channelId));
+}
+
+/** An older, newer, tail or around page fetch for the channel starts: edits,
+ *  deletes and pins that arrive meanwhile are replayed onto the page when it
+ *  lands. Pair with releaseLoadJournal when the fetch ends, however it ends. */
+export function holdLoadJournal(channelId: number): void {
+  messagesStore.setState((prev) => reduceHoldLoadJournal(prev, channelId));
+}
+
+/** The fetch that called holdLoadJournal landed, failed or went stale. */
+export function releaseLoadJournal(channelId: number): void {
+  messagesStore.setState((prev) => reduceReleaseLoadJournal(prev, channelId));
 }
 
 /** Mark a channel's first-page history fetch as failed (the region offers Retry).

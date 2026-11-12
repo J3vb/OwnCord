@@ -54,8 +54,9 @@ export function replayLoadJournal(
   prev: MessagesState,
   channelId: number,
   rows: readonly Message[],
+  from = 0,
 ): readonly Message[] {
-  const journal = prev.loadJournal?.get(channelId);
+  const journal = prev.loadJournal?.get(channelId)?.slice(from);
   if (journal === undefined || journal.length === 0) return rows;
   let state: MessagesState = {
     ...prev,

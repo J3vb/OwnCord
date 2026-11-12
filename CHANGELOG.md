@@ -128,6 +128,8 @@ release changes the database, and anything an operator must do first.)
 - **In a thread or forum post, clicking a reply quote did nothing.** It now jumps to the replied-to message, loading it if needed.
 - **Pin, edit and delete in a thread or forum post skipped the channel's safety checks**: a quick double click could pin and unpin at once, and an edit or delete lost to a bad connection vanished silently. They now behave like in a channel: one pin request at a time, and a failed edit puts your text back.
 - **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.
+- **An edit, delete or pin that arrived while older history or a jump was loading was undone when it finished.** It now stays applied.
+- **A message posted at the moment you jumped back to the present could be missing until you reopened the channel.** It is now fetched right after the jump lands.
 
 ### Voice
 

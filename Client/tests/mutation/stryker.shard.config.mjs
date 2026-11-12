@@ -542,6 +542,7 @@ export const shards = {
   ],
   "stores-1": [
     "src/features/channels/categoryActions.ts",
+    "src/features/messaging/historyFetch.ts",
     "src/features/messaging/loadJournal.ts",
     "src/features/messaging/loadJournalReplay.ts",
     "src/features/messaging/readingAnchor.ts",

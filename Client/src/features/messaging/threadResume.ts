@@ -1,9 +1,11 @@
 // Re-focusing the open thread after a reconnect. The thread panel's
 // host registers this with the dispatcher's hook (stores/threadsLoader) while
 // it is mounted, so none of it weighs on startup.
+import { recoverAfterReattach } from "./historyFetch";
 import { removeThread, setFocusedThread, threadsStore } from "@stores/threads.store";
 import {
   getChannelMessages,
+  isWindowDetached,
   setChannelLoadError,
   setChannelLoading,
   setMessages,
@@ -44,10 +46,13 @@ export function resumeThreadFocus(
     attempt === resumeGeneration && threadsStore.getState().focusedThreadId === threadId;
   // Marks the fetch so a change that lands while it is in flight is kept when
   // the page is installed.
+  const wasDetached = isWindowDetached(threadId);
   setChannelLoading(threadId);
   getMessages(threadId, { limit: 50 }).then(
     (resp) => {
-      if (current()) setMessages(threadId, resp.messages, resp.has_more, true);
+      if (!current()) return;
+      setMessages(threadId, resp.messages, resp.has_more, true);
+      recoverAfterReattach({ getMessages }, threadId, wasDetached, new AbortController().signal);
     },
     (err: unknown) => {
       if (!current()) return;
