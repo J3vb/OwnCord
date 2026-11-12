@@ -355,6 +355,43 @@ describe("drag activation threshold", () => {
     expect(el?.classList.contains("dragging")).toBe(false);
   });
 
+  describe("a drag whose release never arrived", () => {
+    /** The drag is on, then the page loses the pointer; a later click must not drop. */
+    function startedDrag(): Rig {
+      const rig = ownerRig();
+      beginDrag(rig.items.get(1), 0);
+      expect(rig.items.get(1)?.classList.contains("dragging")).toBe(true);
+      return rig;
+    }
+
+    function expectCancelled(rig: Rig): void {
+      expect(rig.items.get(1)?.classList.contains("dragging")).toBe(false);
+      expect(document.body.classList.contains("channel-reordering")).toBe(false);
+      document.dispatchEvent(mouse("mouseup", 0, yInRow(2, "bottom")));
+      expect(rig.onReorder).not.toHaveBeenCalled();
+    }
+
+    it("is cancelled by a mouse move with no button down", () => {
+      const rig = startedDrag();
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { clientY: yInRow(2, "top"), buttons: 0, bubbles: true }),
+      );
+      expectCancelled(rig);
+    });
+
+    it("is cancelled when the window loses focus", () => {
+      const rig = startedDrag();
+      window.dispatchEvent(new Event("blur"));
+      expectCancelled(rig);
+    });
+
+    it("is cancelled by Escape", () => {
+      const rig = startedDrag();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expectCancelled(rig);
+    });
+  });
+
   it("a stale pending-drag latch left by an off-row release does not resume on a later buttonless hover", () => {
     // Press near row 1, drift under the 5px threshold, and release over row 2:
     // no drag ran, and because mousedown/mouseup targeted different elements,
