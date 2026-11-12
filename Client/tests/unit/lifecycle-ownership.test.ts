@@ -20,6 +20,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+import { isInstrumented } from "../helpers/instrumented";
 
 const clientRoot = path.resolve(__dirname, "../..");
 const srcDir = path.join(clientRoot, "src");
@@ -340,13 +341,17 @@ let cancelRafCount = 0;
 const observerFiles = new Set<string>();
 const nativeListen: string[] = [];
 
+// The nightly test-depth run rewrites the files it exercises; their sites say
+// nothing about the originals, so the scan skips them and their entries.
+const skipped = new Set<string>();
+
 for (const rel of sourceFiles) {
-  const sf = ts.createSourceFile(
-    rel,
-    readFileSync(path.join(srcDir, rel), "utf8"),
-    ts.ScriptTarget.Latest,
-    true,
-  );
+  const text = readFileSync(path.join(srcDir, rel), "utf8");
+  if (isInstrumented(text)) {
+    skipped.add(rel);
+    continue;
+  }
+  const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
   const line = (node: ts.Node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
 
   const visit = (node: ts.Node): void => {
@@ -423,7 +428,10 @@ for (const rel of sourceFiles) {
  */
 function compare(label: string, found: readonly Site[], allowed: readonly string[]): void {
   const remaining = new Map<string, number>();
-  for (const key of allowed) remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  for (const key of allowed) {
+    if (skipped.has(key.split("|")[0] ?? "")) continue;
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
 
   const unowned: string[] = [];
   for (const [key, where] of found) {
