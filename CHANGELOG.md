@@ -114,6 +114,8 @@ release changes the database, and anything an operator must do first.)
 - **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
 - **Channels:** a channel permission change on a busy server now always applies to every connected member.
+- **Voice:** if the server could not read who is in voice while you connect, the connect now retries instead of showing voice channels as empty.
+- **Group DMs:** a group DM created just as your connection dropped is no longer reported as failed.
 - **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
 - **Admin:** the `chatserver token` commands applied pending database updates themselves, skipping the safety copy an upgrade takes. They now stop and ask you to start the server once first.
 - **Linux:** on a desktop without a keyring service (no gnome-keyring or KWallet), the app now creates your voice identity key and saves unsent messages for recovery, instead of showing "Could not save this pending message" on every send.
