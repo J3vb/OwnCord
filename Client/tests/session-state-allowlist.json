@@ -399,6 +399,12 @@
     },
     {
       "file": "platform/desktop/androidNotifications.ts",
+      "binding": "alertGap",
+      "category": "transient",
+      "reason": "The timer that runs for a little over a second after the Android app's last alert, so a ring is not sent inside Android's one alert a second; it ends by itself, and Android counts an app's alerts, whichever server they are for"
+    },
+    {
+      "file": "platform/desktop/androidNotifications.ts",
       "binding": "shown",
       "category": "transient",
       "reason": "The Android notifications still in the shade, by id; each leaves on tap, on read (clearMessages) or at logout, when the main page's clearing stops"

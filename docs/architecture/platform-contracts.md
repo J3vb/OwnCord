@@ -102,9 +102,9 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 30    |
-| Distinct `invoke` command names called from `Client/src/`  | 118   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 121   |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 31    |
+| Distinct `invoke` command names called from `Client/src/`  | 120   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 123   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
@@ -137,6 +137,14 @@ alarm that wakes a sleeping phone. That alarm is not exact: Android may hold it
 back, longest while the phone is in Doze. The webview reads the idle time at each
 `look`, and once when it starts to listen, so nothing that happened before is
 lost. The delay goes out one command at a time, like the call audio commands.
+It also includes the two Android-only registrations for a ringing call's
+notification (`call_service.rs`: `show_call_ring` and `clear_call_ring`),
+beside that file's `set_call_service`. The `owncord-call-service` plugin shows
+the call notifications and only reports their buttons: a press arrives as an
+`action` event through an owned plugin listener, to the newest listener only,
+and the webview acts on it through the same code as its own buttons. The two
+ring commands go out one at a time, so a ring never comes down before it went
+up.
 The handler count also covers the existing 115 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]`, and the forty-four `native_voice_*` commands
@@ -144,12 +152,13 @@ and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
 files dragged in or copied from the file manager) behind
 `#[cfg(target_os = "linux")]` (`read_staged_file` also on Android, where it
 reads the files another app shared), so a default build (no `devtools`)
-registers 103 on Linux and 58 elsewhere, plus fifteen Android-only ones:
-`set_call_service`, `save_file`, `share_file`, `share_text`, `read_staged_file`,
-`take_shared` (`share_in.rs`, the share another app sent to OwnCord), the
-five notification commands in `android_notifications.rs`, the three call
-audio commands in `mobile_audio.rs` and `system_idle_follow` in
-`idle_android.rs`. The one environment-detection helper is
+registers 103 on Linux and 58 elsewhere, plus seventeen Android-only ones:
+the three call service commands in `call_service.rs` (`set_call_service`,
+`show_call_ring`, `clear_call_ring`), `save_file`, `share_file`, `share_text`,
+`read_staged_file`, `take_shared` (`share_in.rs`, the share another app sent
+to OwnCord), the five notification commands in `android_notifications.rs`,
+the three call audio commands in `mobile_audio.rs` and `system_idle_follow`
+in `idle_android.rs`. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -177,6 +186,7 @@ android_notify
 app_audio_available
 check_client_update
 clear_call_notification
+clear_call_ring
 clipboard_files
 delete_credential
 delete_identity_key
@@ -271,6 +281,7 @@ set_unread_badge
 set_window_pref
 share_file
 share_text
+show_call_ring
 show_next_launch
 start_app_audio
 start_http_proxy
@@ -325,7 +336,26 @@ cleared with the same call); its caller is
 they reach the plugin in the order they were made, and the web build does
 nothing. The plugin outlives a reload of the page,
 so the page sends its state as it starts, "no call" included
-(`features/voice/backgroundCall.ts`). `save_file`, `share_file` and `share_text` (Android
+(`features/voice/backgroundCall.ts`). The same state says how the microphone
+stands (open, muted by the member, muted by a moderator), with the words the
+service's notification shows for it and its Mute or Unmute and Leave buttons
+(`i18n/callNotification.ts`); a moderator's mute gets no button. The
+notification's buttons come back through the contract's `onAction`
+(`addPluginListener` on the `owncord-call-service` plugin's `action` event,
+which makes `callServiceHost.ts` a thirty-first importer), and
+`features/direct-messages/callNotificationActions.ts` acts on them through the
+page's own controls: a mute or an unmute only if the microphone is not there
+already, a leave through the one teardown every Leave uses. `show_call_ring`
+and `clear_call_ring` (Android only, the same file) show and take down the
+notification of a ringing direct message call, with Accept and Decline, on a
+channel that rings with the phone's ringtone (or a silent one while the ring
+sound is off in the app); their caller is the same host module, for the
+Android `Notifier`'s `showCall` and `clearCall`. Android takes that
+notification down by itself a few seconds after a ring's 30, so it never
+outlasts a page that is gone, and showing it again starts the time over.
+Accept and a tap open the app and count only for the ring last shown; the
+app then answers the ring if it still rings and opens its conversation if it
+does not. `save_file`, `share_file` and `share_text` (Android
 only, `src-tauri/src/files.rs`) take a file's bytes as the raw command body and
 save it to the phone's Pictures or Downloads, or open the system share sheet;
 their caller is `src/platform/desktop/androidFiles.ts`, loaded lazily behind the
@@ -336,7 +366,19 @@ The five Android notification commands
 `android_notification_permission` and `take_notification_tap`, the last one
 handing over the id of the notification the user tapped, which
 tauri-plugin-notification's tap event leaves out) have one caller,
-`src/platform/desktop/androidNotifications.ts`, the Android `Notifier`.
+`src/platform/desktop/androidNotifications.ts`, the Android `Notifier`. They
+show messages and missed calls on one channel; a call that rings is the call
+service's notification above. Android mutes an app's alert that comes less
+than a second after its last one, which would leave a ring without a sound, so
+the notifier sends a ring that makes a sound only when the app's last alert is
+over a second old and Android has answered for the ring before it, and sends a
+notification asked for meanwhile after that ring (one that is withdrawn while
+it waits is never shown). That notifier says
+`ringsCalls`: while the app
+is out of sight the phone rings for a call and the app's own chime stays
+quiet, and with the app in front, or when Android will not show the
+notification, the app rings as it does on a desktop
+(`features/direct-messages/callAlerts.ts`).
 `take_shared` (Android only, `src-tauri/src/share_in.rs`) hands over a share
 from another app once, its files staged for `read_staged_file`; its caller is
 `src/platform/desktop/androidShareIn.ts`, loaded lazily behind the

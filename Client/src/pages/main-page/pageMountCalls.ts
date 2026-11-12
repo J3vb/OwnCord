@@ -59,6 +59,7 @@ export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
       st.ws.send({ type: "call_decline", payload: { channel_id: channelId } });
     },
     onRingStart: (ring) => void callAlerts().then((m) => m.alertIncomingCall(ring)),
+    onRedial: (ring) => void callAlerts().then((m) => m.alertRedial(ring)),
     onMissed: (ring) => void callAlerts().then((m) => m.alertMissedCall(ring)),
     onRingEnd: (ring, reason) =>
       void callAlerts().then((m) => {
@@ -87,8 +88,9 @@ export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
   // Loaded on demand like the sidebar drawer: the panel is only drawn in a
   // DM with a call, so its code stays out of the eager MainPage chunk
   // (bundle budget). Until it lands, the banner answers every ring.
-  void callAlerts().then(({ createDmCallPanel }) => {
+  void callAlerts().then(({ createDmCallPanel, followCallActions }) => {
     if (st.tornDown) return;
+    st.unsubscribers.push(followCallActions(st, pg, ms.voiceKeybindActions));
     const panel = createDmCallPanel({
       onMuteToggle: () => ms.voiceKeybindActions.onMuteToggle(),
       onDeafenToggle: () => ms.voiceKeybindActions.onDeafenToggle(),

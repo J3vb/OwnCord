@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"reflect"
 	"slices"
@@ -71,6 +72,12 @@ func envOverrides() (map[string]any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
+		// A blank list variable is usually a compose `${VAR:-}` left unset. Clearing an allowlist that way
+		// would either lock everyone out or switch a perimeter off, so it keeps the file or default value.
+		if list, isList := v.([]string); isList && len(list) == 0 {
+			slog.Warn("config: ignoring empty list environment variable (set the list in config.yaml to clear it)", "name", name)
+			continue
+		}
 		section, leaf, _ := strings.Cut(key, ".")
 		m, _ := out[section].(map[string]any)
 		if m == nil {
@@ -113,7 +120,9 @@ func coerceEnv(value string, kind reflect.Kind) (any, error) {
 		parts := strings.Split(value, ",")
 		out := make([]string, 0, len(parts))
 		for _, p := range parts {
-			out = append(out, strings.TrimSpace(p))
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
 		}
 		return out, nil
 	default:

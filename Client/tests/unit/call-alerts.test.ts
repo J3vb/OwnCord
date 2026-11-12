@@ -5,16 +5,29 @@
  * them. The banner itself is the main page's (the mainPage/ tests).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../helpers/deferred";
 import { makeDm } from "../helpers/dmHarness";
 import type { RingState } from "../../src/lib/voice/callRing";
 
-const { testPrefs, showCall, clearCall, requestAttention, showToast } = vi.hoisted(() => ({
-  testPrefs: new Map<string, unknown>(),
-  showCall: vi.fn(),
-  clearCall: vi.fn(),
-  requestAttention: vi.fn(),
-  showToast: vi.fn(),
-}));
+const { testPrefs, showCall, clearCall, requestAttention, showToast, notifier } = vi.hoisted(() => {
+  const showCall = vi.fn();
+  const clearCall = vi.fn();
+  const requestAttention = vi.fn();
+  /** A desktop's notifier; the Android app's also says `ringsCalls`. */
+  const notifier: Record<string, unknown> & { ringsCalls?: boolean } = {
+    showCall,
+    clearCall,
+    requestAttention,
+  };
+  return {
+    testPrefs: new Map<string, unknown>(),
+    showCall,
+    clearCall,
+    requestAttention,
+    showToast: vi.fn(),
+    notifier,
+  };
+});
 
 vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/lib/prefs/preferences")>()),
@@ -22,13 +35,17 @@ vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
 }));
-vi.mock("../../src/platform/desktop", () => ({
-  desktop: { notifier: { showCall, clearCall, requestAttention } },
-}));
+vi.mock("../../src/platform/desktop", () => ({ desktop: { notifier } }));
 vi.mock("../../src/lib/ui/toast", () => ({ showToast }));
 
-const { alertIncomingCall, alertMissedCall, alertSupersededCall, clearIncomingCall } =
-  await import("../../src/features/direct-messages/callAlerts");
+const {
+  alertIncomingCall,
+  alertMissedCall,
+  alertRedial,
+  alertSupersededCall,
+  clearIncomingCall,
+  isHostRing,
+} = await import("../../src/features/direct-messages/callAlerts");
 const { startRingChime, stopRingChime, playNotificationSound, startRingback, stopRingback } =
   await import("../../src/lib/media/notificationSound");
 const { setChannelMutesHost } = await import("../../src/lib/prefs/channelMutes");
@@ -427,5 +444,231 @@ describe("the ringback", () => {
       stopRingChime();
       vi.useRealTimers();
     }
+  });
+});
+
+// The Android app's notification of a ringing call rings by itself, with the
+// phone's ringtone. Every ring has one voice: the host's while the app is out
+// of sight, the chime's while it is in front or the host will not show it.
+describe("on a host whose call notification rings by itself", () => {
+  const other: RingState = { channelId: 51, fromUserId: 11, fromUsername: "Mira" };
+  const HOST_RING = ["Otto is calling you", "Voice call", { host: "a.example", channelId: 50 }];
+
+  /** The page's order: the chime is asked for at once, the alert follows. */
+  function ringStarts(which = ring): void {
+    startRingChime();
+    alertIncomingCall(which);
+  }
+  function ringEnds(which = ring): void {
+    stopRingChime();
+    clearIncomingCall(which);
+  }
+  /** The app is the one on screen, with the user's eye. */
+  function appInFront(): void {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  }
+  /** Let every answer the host has given so far land. */
+  const hostAnswered = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  beforeEach(() => {
+    notifier.ringsCalls = true;
+  });
+  afterEach(() => {
+    ringEnds(ring);
+    ringEnds(other);
+    delete notifier.ringsCalls;
+  });
+
+  it("lets the host ring while the app is out of sight, and keeps the chime quiet", async () => {
+    ringStarts();
+    expect(showCall.mock.calls).toEqual([[...HOST_RING, true, false]]);
+    await hostAnswered();
+    expect(frequencies).toEqual([]);
+  });
+
+  it.each(["callSounds", "soundRing"])(
+    "asks for a ring without a sound while %s is off, and stays quiet itself",
+    async (pref) => {
+      testPrefs.set(pref, false);
+      ringStarts();
+      expect(showCall.mock.calls).toEqual([[...HOST_RING, true, true]]);
+      await hostAnswered();
+      expect(frequencies).toEqual([]);
+    },
+  );
+
+  it("rings by itself with the app in front, once it is known the host does not", () => {
+    appInFront();
+    startRingChime();
+    // Nobody has said yet whether the host rings: no blip before it would.
+    expect(frequencies).toEqual([]);
+    alertIncomingCall(ring);
+    expect(showCall).not.toHaveBeenCalled();
+    expect(frequencies.length).toBeGreaterThan(0);
+  });
+
+  it("counts an app that has focus but is not on screen as out of sight", () => {
+    appInFront();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    ringStarts();
+    expect(showCall).toHaveBeenCalledOnce();
+    expect(frequencies).toEqual([]);
+  });
+
+  it("under do not disturb rings nowhere", async () => {
+    testPrefs.set("userStatus", "dnd");
+    ringStarts();
+    await hostAnswered();
+    expect(showCall).not.toHaveBeenCalled();
+    expect(frequencies).toEqual([]);
+  });
+
+  it("with notifications off in the app, rings by itself", () => {
+    testPrefs.set("desktopNotifications", false);
+    ringStarts();
+    expect(showCall).not.toHaveBeenCalled();
+    expect(frequencies.length).toBeGreaterThan(0);
+  });
+
+  it("rings by itself after all when the host will not show the ring", async () => {
+    showCall.mockRejectedValue(new Error("call ring: notifications are off"));
+    ringStarts();
+    expect(frequencies).toEqual([]);
+    await hostAnswered();
+    expect(frequencies.length).toBeGreaterThan(0);
+  });
+
+  it("ignores a refusal that comes back after its ring ended", async () => {
+    const late = createDeferred();
+    showCall.mockReturnValueOnce(late.promise);
+    ringStarts();
+    ringEnds();
+    ringStarts(other);
+    late.reject(new Error("call ring: notifications are off"));
+    await hostAnswered();
+    // The newer ring is the host's, and stays so.
+    expect(showCall).toHaveBeenCalledTimes(2);
+    expect(frequencies).toEqual([]);
+  });
+
+  it("shows a ring that is rung again on the host again, so its time starts over", () => {
+    ringStarts();
+    alertRedial(ring);
+    expect(showCall.mock.calls).toEqual([
+      [...HOST_RING, true, false],
+      [...HOST_RING, true, false],
+    ]);
+  });
+
+  it("leaves a ring it rings by itself alone when that is rung again", async () => {
+    appInFront();
+    ringStarts();
+    alertRedial(ring);
+    expect(showCall).not.toHaveBeenCalled();
+
+    // The same for a ring the host refused: the chime has it.
+    ringEnds();
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    showCall.mockRejectedValue(new Error("call ring: notifications are off"));
+    ringStarts();
+    await hostAnswered();
+    alertRedial(ring);
+    expect(showCall).toHaveBeenCalledOnce();
+  });
+
+  it("takes the ring down when it ends, and waits for the word again at the next", () => {
+    appInFront();
+    ringStarts();
+    ringEnds();
+    expect(clearCall.mock.calls).toEqual([[50]]);
+    frequencies.length = 0;
+
+    startRingChime();
+    expect(frequencies).toEqual([]);
+  });
+
+  it("does not keep a refusal that came after its ring's sound stopped for the next ring", async () => {
+    const late = createDeferred();
+    showCall.mockReturnValueOnce(late.promise);
+    ringStarts();
+    // The page's order at a ring's end: the sound stops at once, the
+    // notification is withdrawn a moment later. The refusal lands in between.
+    stopRingChime();
+    late.reject(new Error("call ring: notifications are off"));
+    await hostAnswered();
+    clearIncomingCall(ring);
+
+    startRingChime();
+    expect(frequencies).toEqual([]);
+  });
+
+  it("makes a ring that takes another's place wait for its own word", () => {
+    appInFront();
+    ringStarts();
+    expect(frequencies.length).toBeGreaterThan(0);
+    // The newer ring asks for its sound before the older one is withdrawn.
+    stopRingChime();
+    frequencies.length = 0;
+    startRingChime();
+    expect(frequencies).toEqual([]);
+    clearIncomingCall(ring);
+    expect(frequencies).toEqual([]);
+  });
+
+  it("holds the outgoing ringback back while the host rings, and gives it back after", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      ringStarts();
+      frequencies.length = 0;
+      vi.advanceTimersByTime(6_000);
+      expect(frequencies).toEqual([]);
+
+      ringEnds();
+      expect(frequencies).toContain(440);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets the outgoing ringback go on under a ring the host shows without a sound", () => {
+    vi.useFakeTimers();
+    try {
+      testPrefs.set("soundRing", false);
+      startRingback();
+      ringStarts();
+      frequencies.length = 0;
+      vi.advanceTimersByTime(3_000);
+      expect(frequencies).toContain(440);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe("whose notification a press is about", () => {
+    const pressed: RingState = { channelId: 77, fromUserId: 12, fromUsername: "Ines" };
+    afterEach(() => ringEnds(pressed));
+
+    it("is this page's for the ring it put there, after that ring ended too", () => {
+      expect(isHostRing(77)).toBe(false);
+      ringStarts(pressed);
+      expect(isHostRing(77)).toBe(true);
+      expect(isHostRing(50)).toBe(false);
+      ringEnds(pressed);
+      // A press on it can still be on its way.
+      expect(isHostRing(77)).toBe(true);
+    });
+
+    it("is not this page's once another server is signed in", () => {
+      ringStarts(pressed);
+      setChannelMutesHost("b.example");
+      expect(isHostRing(77)).toBe(false);
+    });
+
+    it("is not this page's for a ring it rang by itself", () => {
+      appInFront();
+      ringStarts(other);
+      expect(isHostRing(51)).toBe(false);
+    });
   });
 });

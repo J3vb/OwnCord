@@ -14,7 +14,11 @@ const host = vi.hoisted(() => ({
 }));
 
 vi.mock("../../src/platform/desktop", () => ({
-  desktop: { nativeVoice: { playSound: host.playSound, stopSound: host.stopSound } },
+  desktop: {
+    nativeVoice: { playSound: host.playSound, stopSound: host.stopSound },
+    // A desktop's notification of a ringing call makes no sound of its own.
+    notifier: {},
+  },
 }));
 vi.mock("../../src/features/voice/native/platform", () => ({
   isLinuxDesktop: () => host.linux,

@@ -167,6 +167,12 @@ object ExitInfo {
   fun screenKeptOn(on: Boolean): String =
     if (on) "[call] screen stays on: a camera or a stream shows" else "[call] screen may sleep again"
 
+  // `kind` is one of the fixed button names (CallEvent), never a caller's name.
+  fun callButton(kind: String): String = "[call] notification button: ${token(kind)}"
+
+  fun callRingShown(quiet: Boolean): String =
+    if (quiet) "[call] incoming call shown, silent" else "[call] incoming call shown, ringing"
+
   fun appVisibility(visible: Boolean): String =
     if (visible) "[app] back in front" else "[app] moved to the background"
 

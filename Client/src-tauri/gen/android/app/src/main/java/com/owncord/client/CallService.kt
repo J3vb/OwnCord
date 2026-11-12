@@ -20,6 +20,10 @@ import android.util.Log
 // unless a foreground service with a visible notification says the app is in
 // use. The camera type is added only while the camera is on, and only when
 // its permission is granted: Android refuses the whole start otherwise.
+//
+// Its notification has the call's buttons: Mute or Unmute, and Leave. They
+// reach the webview through CallActionReceiver, and the notification is
+// written again when the webview says the microphone's state changed.
 class CallService : Service() {
   private var wakeLock: PowerManager.WakeLock? = null
 
@@ -38,11 +42,13 @@ class CallService : Service() {
       stopSelf()
       return START_NOT_STICKY
     }
+    live = this
     holdWakeLock()
     return START_NOT_STICKY
   }
 
   override fun onDestroy() {
+    if (live === this) live = null
     NativeLog.info(ExitInfo.callServiceStopped())
     wakeLock?.let { if (it.isHeld) it.release() }
     wakeLock = null
@@ -92,14 +98,35 @@ class CallService : Service() {
     val tap = PendingIntent.getActivity(
       this, 0, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
-    return Notification.Builder(this, CHANNEL_ID)
+    val shown = face
+    val builder = Notification.Builder(this, CHANNEL_ID)
       .setContentTitle("OwnCord")
-      .setContentText("In a call")
+      .setContentText(shown.text.ifEmpty { "In a call" })
       .setSmallIcon(R.drawable.ic_call_notification)
       .setContentIntent(tap)
       .setOngoing(true)
+      .setOnlyAlertOnce(true)
       .setCategory(Notification.CATEGORY_CALL)
-      .build()
+    val micAction = shown.micAction()
+    if (micAction != null) {
+      builder.addAction(
+        CallActionReceiver.button(this, shown.micLabel.orEmpty(), CallActionReceiver.press(this, micAction))
+      )
+    }
+    if (shown.leaveLabel.isNotEmpty()) {
+      builder.addAction(
+        CallActionReceiver.button(this, shown.leaveLabel, CallActionReceiver.press(this, CallActions.LEAVE))
+      )
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      // With buttons to press it shows at once, not after Android's wait.
+      builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+    }
+    return builder.build()
+  }
+
+  private fun renotify() {
+    getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
   }
 
   // Screen off: the CPU may sleep between audio buffers on some phones, which
@@ -118,6 +145,19 @@ class CallService : Service() {
     private const val CHANNEL_ID = "calls"
     private const val NOTIFICATION_ID = 4101
     const val EXTRA_CAMERA = "camera"
+
+    // What the notification says and offers, as the webview last gave it. A
+    // service that starts reads it as it starts.
+    var face: CallFace = CallFace.PLAIN
+
+    // The service while it is in the foreground: only then is there a
+    // notification to write again.
+    private var live: CallService? = null
+
+    // The words or the buttons changed while the service runs.
+    fun refresh() {
+      live?.renotify()
+    }
 
     fun start(context: Context, camera: Boolean) {
       val intent = Intent(context, CallService::class.java).putExtra(EXTRA_CAMERA, camera)

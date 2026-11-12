@@ -94,15 +94,18 @@ export interface DmCallPanelComponent extends MountableComponent {
 }
 
 // The OS call notification, urgent attention request and missed-call
-// notice. Re-exported here so they ride in this panel's lazy chunk (the page
-// imports the panel at mount) instead of a second dynamic chunk in MainPage,
-// which would push its bundle budget over.
+// notice, and what the Android call notifications' buttons do. Re-exported
+// here so they ride in this panel's lazy chunk (the page imports the panel at
+// mount) instead of a second dynamic chunk in MainPage, which would push its
+// bundle budget over.
 export {
   alertIncomingCall,
   alertMissedCall,
+  alertRedial,
   alertSupersededCall,
   clearIncomingCall,
 } from "./callAlerts";
+export { followCallActions } from "./callNotificationActions";
 
 /** Outgoing and connected are the call view; the rest never collapse. */
 const isCallView = (kind: DmCallView["kind"]): boolean =>
