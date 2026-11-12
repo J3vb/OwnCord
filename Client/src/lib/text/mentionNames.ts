@@ -24,6 +24,8 @@ export function registerRoleMentionName(next: NameOf): void {
 }
 
 const ID_TOKEN = /<@(&?)(\d{1,15})>/g;
+/** A token cut short at the end of a server-truncated preview. */
+const CUT_TOKEN = /<@&?\d*$/;
 
 /** `text` with each token the client can name shown as `@name`; the rest stay raw. */
 export function idMentionsToNames(text: string): string {
@@ -33,4 +35,9 @@ export function idMentionsToNames(text: string): string {
     const name = role === "" ? userName(id) : roleName(id);
     return name === undefined ? raw : `@${name}`;
   });
+}
+
+/** Like idMentionsToNames, for a preview the server cut to length: a token cut in half is dropped. */
+export function previewMentionsToNames(text: string): string {
+  return idMentionsToNames(text).replace(CUT_TOKEN, "");
 }

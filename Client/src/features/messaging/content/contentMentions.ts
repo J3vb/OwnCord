@@ -18,7 +18,7 @@ import {
   resolveMentionUserId,
   type MentionInfo,
 } from "@lib/text/mentions";
-import { registerRoleMentionName, registerUserMentionName } from "@lib/text/mentionNames";
+import "../mentionNameLookups";
 import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode } from "./customEmoji";
 import { UNICODE_EMOJI_REGEX, buildEmojiImage, showsAsImage } from "./emojiImage";
 import { messagingText } from "../../../i18n/messaging";
@@ -31,15 +31,6 @@ export function stripMentionControl(chip: HTMLElement): void {
   chip.removeAttribute("tabindex");
   chip.removeAttribute("data-user-id");
 }
-
-// Plain-text views (notifications, reply previews, the DM list, search) name a
-// `<@id>` / `<@&id>` token the way the pills below do. Registered here, with
-// the signed-in chunk, so the startup chunk does not carry it.
-registerUserMentionName((id) => {
-  const member = membersStore.getState().members.get(id);
-  return member === undefined ? undefined : memberDisplayName(member);
-});
-registerRoleMentionName((id) => channelsStore.getState().roles.find((r) => r.id === id)?.name);
 
 /** One recognised token in a prose segment, with the span it renders to. */
 interface TokenMatch {

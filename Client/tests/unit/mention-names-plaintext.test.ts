@@ -3,12 +3,12 @@
 // the raw token.
 import { beforeEach, describe, expect, it } from "vitest";
 import { markdownToPlainText } from "../../src/lib/text/markdown";
-import { idMentionsToNames } from "../../src/lib/text/mentionNames";
+import { idMentionsToNames, previewMentionsToNames } from "../../src/lib/text/mentionNames";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { resetChannelsState } from "../helpers/storeSeeds";
-// Registers the name lookups, as loading the signed-in page does.
-import "../../src/features/messaging/content/contentMentions";
+// Registers the name lookups, as the chat notifier and the pill renderer do.
+import "../../src/features/messaging/mentionNameLookups";
 
 function seed(): void {
   membersStore.setState((p) => ({
@@ -39,6 +39,14 @@ describe("idMentionsToNames", () => {
 
   it("leaves a token it cannot name as it is", () => {
     expect(idMentionsToNames("<@99> <@&42>")).toBe("<@99> <@&42>");
+  });
+
+  it("drops a token the server's preview cut in half", () => {
+    expect(previewMentionsToNames("hi <@7> and <@&5> then <@1")).toBe(
+      "hi @Alice A. and @Night Owls then ",
+    );
+    expect(previewMentionsToNames("ends with <@&")).toBe("ends with ");
+    expect(previewMentionsToNames("ends with <@&5>")).toBe("ends with @Night Owls");
   });
 
   it("leaves text without tokens untouched", () => {
