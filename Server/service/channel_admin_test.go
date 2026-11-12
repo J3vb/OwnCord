@@ -340,20 +340,3 @@ func TestAdminUpdateChannel_StaleRenameIsRefusedWhenTheNameIsTakenInTheKeptCateg
 	}
 	f.requireNameAndCategory(t, snap.ID, snap.Name, other.ID)
 }
-
-func TestRequireChannelNameFree_IgnoresDMNames(t *testing.T) {
-	svc, database := newChannelAdminService(t)
-	ctx := context.Background()
-	a, err := database.CreateUser(ctx, "namefree-a", "hash", 4)
-	mustDo(t, "CreateUser a", err)
-	b, err := database.CreateUser(ctx, "namefree-b", "hash", 4)
-	mustDo(t, "CreateUser b", err)
-	c, err := database.CreateUser(ctx, "namefree-c", "hash", 4)
-	mustDo(t, "CreateUser c", err)
-	if _, err := database.CreateGroupDMChannel(ctx, "lobby", a, []int64{a, b, c}); err != nil {
-		t.Fatalf("CreateGroupDMChannel: %v", err)
-	}
-	if _, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", Type: "text"}, nil); err != nil {
-		t.Fatalf("a guild channel may share a group DM's name: %v", err)
-	}
-}

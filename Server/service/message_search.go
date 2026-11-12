@@ -133,16 +133,30 @@ func (s *messageReads) searchScope(ctx context.Context, userID int64, channelID 
 		inScope[id] = true
 	}
 	narrowed := make([]int64, 0, len(inNames))
+	matches := func(chName string) bool {
+		return slices.ContainsFunc(inNames, func(name string) bool {
+			return strings.EqualFold(strings.TrimSpace(chName), name)
+		})
+	}
+	guild := make(map[int64]bool, len(channels))
 	for i := range channels {
 		ch := &channels[i]
-		if !inScope[ch.ID] {
+		guild[ch.ID] = true
+		if inScope[ch.ID] && matches(ch.Name) {
+			narrowed = append(narrowed, ch.ID)
+		}
+	}
+	// ListChannels carries guild channels only; a group DM in scope is matched by its own name.
+	for _, id := range scope {
+		if guild[id] {
 			continue
 		}
-		for _, name := range inNames {
-			if strings.EqualFold(strings.TrimSpace(ch.Name), name) {
-				narrowed = append(narrowed, ch.ID)
-				break
-			}
+		ch, err := s.st.GetChannel(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("%w: failed to read channel: %w", ErrInternal, err)
+		}
+		if ch != nil && matches(ch.Name) {
+			narrowed = append(narrowed, id)
 		}
 	}
 	return narrowed, nil
