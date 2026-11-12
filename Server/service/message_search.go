@@ -120,7 +120,10 @@ func (s *messageReads) searchScope(ctx context.Context, userID int64, channelID 
 		}
 		scope = ids
 	}
-	if len(scope) == 0 || len(inNames) == 0 {
+	if len(scope) == 0 {
+		return scope, nil
+	}
+	if len(inNames) == 0 {
 		return scope, nil
 	}
 

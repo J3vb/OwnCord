@@ -120,6 +120,7 @@ release changes the database, and anything an operator must do first.)
 
 ### Messages & files
 
+- **Search never found text written in a thread or a forum post.** Search now covers the threads and forum posts of every channel you can read (a forum post follows its forum's permissions and NSFW acknowledgement), and picking such a result opens it in the thread panel. Search hits gain a `thread_parent_id` field; an older desktop client lists these hits but cannot open them.
 - **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
 - **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
 - **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.

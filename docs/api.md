@@ -1679,7 +1679,7 @@ Unpin a message from a channel.
 
 ### GET /api/v1/search
 
-Full-text search across messages in channels the user can read. Uses SQLite FTS5 for matching.
+Full-text search across messages in channels the user can read, including the threads and forum posts under them (read through their parent). Uses SQLite FTS5 for matching.
 
 **Auth:** Required
 **Rate limit:** 30 requests/minute
@@ -1689,7 +1689,7 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
 | Param        | Type   | Default        | Range                   | Description                                                                                                                                                                                                     |
 | ------------ | ------ | -------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `q`          | string | (required)     | non-empty               | Search words and filters (see [Filters](#filters)). Punctuation separates words; the last word, if three or more characters, also matches as a prefix (`deplo` finds `deploy`; `de` finds only `de`)            |
-| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel                                                                                                                                                                             |
+| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel; a forum or text channel also covers its threads and forum posts, and a thread id searches just that thread                                                                 |
 | `limit`      | int    | 50             | 1-100                   | Maximum results to return                                                                                                                                                                                       |
 | `sort`       | string | `relevance`    | `relevance` \| `recent` | `relevance` is best match first among the newest 2,000 matching messages in scope (older matches appear only with `recent`); `recent` is newest first. A query with filters and no words is always newest first |
 | `before`     | int64  | (none)         | > 0                     | With `sort=recent` only: return messages with an id below this one. Pass the previous page's `next_before`                                                                                                      |
@@ -1703,16 +1703,16 @@ text. Keys are case-insensitive and only count at the start of a token, so
 double-quoted to hold spaces (`from:"ann lee"`); an unterminated quote runs to
 the end of `q`.
 
-| Filter          | Value                                                     | Matches                                                                  |
-| --------------- | --------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `from:name`     | username, optional leading `@`                            | Messages by that user (case-insensitive)                                 |
-| `in:name`       | channel name, optional leading `#`                        | Messages in every readable channel with that name (names are not unique) |
-| `before:date`   | `YYYY-MM-DD`                                              | Sent before 00:00 of that day in `tz`                                    |
-| `after:date`    | `YYYY-MM-DD`                                              | Sent from 00:00 of the day after, in `tz`                                |
-| `during:date`   | `YYYY-MM-DD`                                              | Sent during that day in `tz`                                             |
-| `has:kind`      | `link`, `file`, `image`, `video`, `sound` (alias `audio`) | Messages with a link, or with an attachment of that kind                 |
-| `mentions:name` | username, optional leading `@`                            | Messages whose text mentions that user (case-insensitive)                |
-| `pinned:bool`   | `true` or `false`                                         | Messages that are (or are not) pinned                                    |
+| Filter          | Value                                                     | Matches                                                                                                                                           |
+| --------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `from:name`     | username, optional leading `@`                            | Messages by that user (case-insensitive)                                                                                                          |
+| `in:name`       | channel name, optional leading `#`                        | Messages in every readable channel with that name, and in its threads and forum posts (names are not unique; thread and post titles do not match) |
+| `before:date`   | `YYYY-MM-DD`                                              | Sent before 00:00 of that day in `tz`                                                                                                             |
+| `after:date`    | `YYYY-MM-DD`                                              | Sent from 00:00 of the day after, in `tz`                                                                                                         |
+| `during:date`   | `YYYY-MM-DD`                                              | Sent during that day in `tz`                                                                                                                      |
+| `has:kind`      | `link`, `file`, `image`, `video`, `sound` (alias `audio`) | Messages with a link, or with an attachment of that kind                                                                                          |
+| `mentions:name` | username, optional leading `@`                            | Messages whose text mentions that user (case-insensitive)                                                                                         |
+| `pinned:bool`   | `true` or `false`                                         | Messages that are (or are not) pinned                                                                                                             |
 
 - Repeated `from:` or `in:` values match any of them; repeated `has:` or
   `mentions:` values must all match; different filters must all match. Several date filters intersect, and an empty range returns no results.
@@ -1760,6 +1760,8 @@ the end of `q`.
   "next_before": 1042
 }
 ```
+
+A hit in a thread or forum post carries `thread_parent_id`, the id of its parent channel; the field is absent otherwise.
 
 `next_before` is the `before` value for the next `sort=recent` page, or `null`
 when there are no more results. It is always `null` for `sort=relevance` when `q` has words.

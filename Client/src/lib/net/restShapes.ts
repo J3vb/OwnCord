@@ -136,7 +136,7 @@ export const SHAPES: readonly Shape[] = [
   [2,["attachment","uploaded_at","channel_id","message_id","state","removable"],[78,0,59,59,0,2]],
   [0,114],
   [2,["items"],[115],["next_cursor"],[0]],
-  [2,["message_id","channel_id","channel_name","user","content","timestamp"],[1,1,0,73,0,0],["imported_author"],[75]],
+  [2,["message_id","channel_id","channel_name","user","content","timestamp"],[1,1,0,73,0,0],["thread_parent_id","imported_author"],[1,75]],
   [0,117],
   [2,["results"],[118],["next_before"],[59]],
   [2,["url"],[0]],

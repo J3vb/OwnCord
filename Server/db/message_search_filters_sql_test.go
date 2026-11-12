@@ -7,7 +7,7 @@ import (
 )
 
 // With no imported channel in scope the date bounds render exactly the plain id
-// range plus the timestamp test, so a native search keeps its index plans.
+// range plus the timestamp test (the scope's threads ride in one JSON parameter), so a native search keeps its index plans.
 func TestSearchFilters_NoImportedChannelKeepsThePlainIdRange(t *testing.T) {
 	ctx := context.Background()
 	database := openMigratedMemoryInternal(t)
@@ -20,12 +20,12 @@ func TestSearchFilters_NoImportedChannelKeepsThePlainIdRange(t *testing.T) {
 		if err != nil {
 			t.Fatalf("searchFilters: %v", err)
 		}
-		want := " AND m.channel_id IN (?,?) AND " + tc.col + " >= ? AND m.timestamp >= ? AND " + tc.col + " < ? AND m.timestamp < ?"
+		want := " AND (m.channel_id IN (?,?) OR " + threadsOfScope + ") AND " + tc.col + " >= ? AND m.timestamp >= ? AND " + tc.col + " < ? AND m.timestamp < ?"
 		if strings.TrimSpace(got) != strings.TrimSpace(want) {
 			t.Errorf("ranked=%v filter =\n%s\nwant\n%s", tc.ranked, got, want)
 		}
-		if len(args) != 6 {
-			t.Errorf("ranked=%v args = %v, want 6", tc.ranked, args)
+		if len(args) != 7 {
+			t.Errorf("ranked=%v args = %v, want 7 (two ids, the scope JSON, four date terms)", tc.ranked, args)
 		}
 	}
 }

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -70,7 +71,7 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 		args []any
 	)
 	sb.WriteString(`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content,
-		        m.timestamp, m.mentions_everyone
+		        m.timestamp, m.mentions_everyone, COALESCE(c.parent_channel_id, 0)
 		 FROM `)
 	idCol := "m.id"
 	switch {
@@ -149,8 +150,13 @@ func (d *DB) searchFilters(ctx context.Context, q SearchQuery, ranked bool) (str
 		return "", nil, err
 	}
 	native, importedInScope := splitImportedScope(q.ChannelIDs, imported)
-	sb.WriteString(" AND m.channel_id IN (" + placeholders(len(q.ChannelIDs)) + ")")
+	scopeJSON, err := scopeIDsJSON(q.ChannelIDs)
+	if err != nil {
+		return "", nil, err
+	}
+	sb.WriteString(" AND (m.channel_id IN (" + placeholders(len(q.ChannelIDs)) + ") OR " + threadsOfScope + ")")
 	args = appendIDs(args, q.ChannelIDs)
+	args = append(args, scopeJSON)
 	if len(q.AuthorIDs) > 0 {
 		sb.WriteString(" AND m.user_id IN (" + placeholders(len(q.AuthorIDs)) + ")")
 		args = appendIDs(args, q.AuthorIDs)
@@ -160,7 +166,7 @@ func (d *DB) searchFilters(ctx context.Context, q SearchQuery, ranked bool) (str
 		if err != nil {
 			return "", nil, err
 		}
-		bound, boundArgs := idBound(idCol+" >=", lo, native, importedInScope)
+		bound, boundArgs := idBoundWithThreads(idCol+" >=", lo, native, importedInScope, scopeJSON)
 		sb.WriteString(bound + " AND m.timestamp >= ?")
 		args = append(args, boundArgs...)
 		args = append(args, q.AfterTS)
@@ -170,7 +176,7 @@ func (d *DB) searchFilters(ctx context.Context, q SearchQuery, ranked bool) (str
 		if err != nil {
 			return "", nil, err
 		}
-		bound, boundArgs := idBound(idCol+" <", hi, native, importedInScope)
+		bound, boundArgs := idBoundWithThreads(idCol+" <", hi, native, importedInScope, scopeJSON)
 		sb.WriteString(bound + " AND m.timestamp < ?")
 		args = append(args, boundArgs...)
 		args = append(args, q.BeforeTS)
@@ -247,18 +253,50 @@ func splitImportedScope(scope, imported []int64) (native, importedInScope []int6
 // idBound renders one side of a date bound as an id range; imported channels
 // skip it (judged by timestamp alone) so native channels keep their range scan.
 func idBound(cmp string, bound int64, native, importedInScope []int64) (string, []any) {
+	return idBoundWithThreads(cmp, bound, native, importedInScope, "")
+}
+
+// threadsOfScope matches a message in a thread or forum post whose parent is in the scope. The scope
+// rides in as one JSON array parameter, so the bound-parameter count does not grow with the thread count.
+const threadsOfScope = `m.channel_id IN (SELECT t.id FROM channels t WHERE t.type = 'thread' AND t.import_pending = 0
+		 AND t.parent_channel_id IN (SELECT value FROM json_each(?)))`
+
+func scopeIDsJSON(ids []int64) (string, error) {
+	b, err := json.Marshal(ids)
+	if err != nil {
+		return "", fmt.Errorf("scope ids: %w", err)
+	}
+	return string(b), nil
+}
+
+// idBoundWithThreads is idBound for a search scope: with scopeJSON set, the native side also matches the
+// threads under the scope. A thread is created after its parent, so its ids follow time like a native channel's.
+func idBoundWithThreads(cmp string, bound int64, native, importedInScope []int64, scopeJSON string) (string, []any) {
 	if len(importedInScope) == 0 {
 		return " AND " + cmp + " ?", []any{bound}
 	}
 	imp := appendIDs(nil, importedInScope)
 	imports := "m.channel_id IN (" + placeholders(len(importedInScope)) + ")"
-	if len(native) == 0 {
+	if len(native) == 0 && scopeJSON == "" {
 		return " AND " + imports, imp
 	}
-	args := appendIDs(nil, native)
+	var args []any
+	var nativeMatch string
+	switch {
+	case len(native) == 0:
+		nativeMatch = threadsOfScope
+	case scopeJSON == "":
+		nativeMatch = "m.channel_id IN (" + placeholders(len(native)) + ")"
+	default:
+		nativeMatch = "(m.channel_id IN (" + placeholders(len(native)) + ") OR " + threadsOfScope + ")"
+	}
+	args = appendIDs(args, native)
+	if scopeJSON != "" {
+		args = append(args, scopeJSON)
+	}
 	args = append(args, bound)
 	args = append(args, imp...)
-	return " AND ((m.channel_id IN (" + placeholders(len(native)) + ") AND " + cmp + " ?) OR " + imports + ")", args
+	return " AND ((" + nativeMatch + " AND " + cmp + " ?) OR " + imports + ")", args
 }
 
 // firstIDAtOrAfter returns an id b such that every message with id < b has a
