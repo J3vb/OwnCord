@@ -137,7 +137,9 @@ describe("an open poll before voting", () => {
 
   it("shows the answer's emoji and text", () => {
     const el = draw(pollMessage(pollView({}, [0, 0])), { onPollVote: vi.fn() });
-    expect(text(q(el, "poll-choice-1")!.closest("label")!)).toBe("🍕Pizza");
+    const label = q(el, "poll-choice-1")!.closest("label")!;
+    expect(text(label)).toBe("Pizza");
+    expect(label.querySelector<HTMLImageElement>("img.emoji-img")?.alt).toBe("🍕");
   });
 
   it("Show results reveals counts without a vote, and Back to voting returns", () => {

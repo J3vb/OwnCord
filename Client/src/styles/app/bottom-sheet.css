@@ -90,7 +90,7 @@
   font-size: 22px;
   line-height: 1;
 }
-.msg-sheet-quick-btn .custom-emoji {
+.msg-sheet-quick-btn :is(.custom-emoji, .emoji-img) {
   width: 26px;
   height: 26px;
   margin: 0;
