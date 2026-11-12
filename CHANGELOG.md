@@ -132,6 +132,10 @@ release changes the database, and anything an operator must do first.)
 - **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.
 - **An edit, delete or pin that arrived while older history or a jump was loading was undone when it finished.** It now stays applied.
 - **A message posted at the moment you jumped back to the present could be missing until you reopened the channel.** It is now fetched right after the jump lands.
+- **A message the server refused showed its real reason for only 20 seconds**, then changed to "Delivery not confirmed". It now keeps the reason.
+- **A too-long message sent as a text file was lost when its upload failed after you switched channel.** The text now comes back in the composer.
+- **A voice message that hit the 5-minute limit and failed to stop froze the recording bar.** The bar now closes and shows "Recording failed".
+- **Link previews are limited to five per message**; further links stay plain links.
 
 ### Voice
 
