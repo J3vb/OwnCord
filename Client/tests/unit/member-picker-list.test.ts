@@ -2,8 +2,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMemberPickerModal } from "../../src/features/direct-messages/MemberPickerModal";
 import * as avatar from "../../src/features/profiles/avatar";
-import { membersStore, type Member } from "../../src/stores/members.store";
-import { memberRow, useMemberPickerHarness } from "../helpers/memberPickerHarness";
+import { type Member } from "../../src/stores/members.store";
+import {
+  memberRow,
+  setPickerMembers,
+  useMemberPickerHarness,
+} from "../helpers/memberPickerHarness";
 
 let container: HTMLDivElement;
 const { opened } = useMemberPickerHarness((c) => {
@@ -11,10 +15,7 @@ const { opened } = useMemberPickerHarness((c) => {
 });
 
 function open(members: Member[]): void {
-  membersStore.setState(() => ({
-    members: new Map(members.map((m) => [m.id, m])),
-    typingUsers: new Map(),
-  }));
+  setPickerMembers(members);
   const picker = createMemberPickerModal({ onSelect: vi.fn(), onClose: vi.fn() });
   picker.mount(container);
   opened.push(picker);

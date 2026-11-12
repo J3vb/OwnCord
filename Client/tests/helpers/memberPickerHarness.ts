@@ -1,5 +1,6 @@
 import { beforeEach } from "vitest";
 import { authStore } from "../../src/stores/auth.store";
+import { membersStore, type Member } from "../../src/stores/members.store";
 import { useMountContainer } from "./mountContainer";
 
 /** A member row as membersStore holds it. */
@@ -12,6 +13,14 @@ export function memberRow(id: number, username: string) {
     status: "online" as const,
     displayName: null,
   };
+}
+
+/** Puts exactly `members` in the members store, with nobody typing. */
+export function setPickerMembers(members: readonly Member[]): void {
+  membersStore.setState(() => ({
+    members: new Map(members.map((m) => [m.id, m])),
+    typingUsers: new Map(),
+  }));
 }
 
 /**

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { createMemberPickerModal } from "../../src/features/direct-messages/MemberPickerModal";
-import { membersStore } from "../../src/stores/members.store";
+import { setPickerMembers } from "../helpers/memberPickerHarness";
 import type { Member } from "../../src/stores/members.store";
 import { signInAs } from "../helpers/storeSeeds";
 
@@ -16,10 +16,7 @@ function member(overrides: Partial<Member> & { id: number; username: string }): 
 }
 
 function setup(members: Member[]): void {
-  membersStore.setState(() => ({
-    members: new Map(members.map((m) => [m.id, m])),
-    typingUsers: new Map(),
-  }));
+  setPickerMembers(members);
   signInAs(
     { id: 1, username: "Me", avatar: null, role: "member" },
     { token: "t", serverName: "S" },

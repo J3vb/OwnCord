@@ -54,6 +54,14 @@ function openMove(
   contextMenuAt4(el);
 }
 
+/** Move Down on the first of `rows`; returns the reorder callback. */
+function moveFirstDown(rows: readonly Channel[]) {
+  const onReorder = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
+  openMove(rows, rows[0]!, onReorder);
+  (document.querySelector('[data-testid="ctx-move-down"]') as HTMLElement).click();
+  return onReorder;
+}
+
 describe("channel context menu - Move Up / Move Down", () => {
   it("emits entries that carry each channel's previous position", () => {
     const rows = [channel(1, 0), channel(2, 3), channel(3, 6)];
@@ -70,21 +78,13 @@ describe("channel context menu - Move Up / Move Down", () => {
   });
 
   it("records the pre-nudge position when tied positions are nudged apart", () => {
-    const rows = [channel(1, 0), channel(2, 0)];
-    const onReorder = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
-    openMove(rows, rows[0]!, onReorder);
-
-    (document.querySelector('[data-testid="ctx-move-down"]') as HTMLElement).click();
+    const onReorder = moveFirstDown([channel(1, 0), channel(2, 0)]);
 
     expect(onReorder).toHaveBeenCalledWith([{ channelId: 1, newPosition: 1, previousPosition: 0 }]);
   });
 
   it("moves one place among three rows that share a position", () => {
-    const rows = [channel(1, 0), channel(2, 0), channel(3, 0)];
-    const onReorder = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
-    openMove(rows, rows[0]!, onReorder);
-
-    (document.querySelector('[data-testid="ctx-move-down"]') as HTMLElement).click();
+    moveFirstDown([channel(1, 0), channel(2, 0), channel(3, 0)]);
 
     const positions = (id: number): number | undefined =>
       channelsStore.getState().channels.get(id)?.position;
