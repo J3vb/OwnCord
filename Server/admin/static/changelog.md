@@ -1,3 +1,24 @@
+## v2.9.1
+
+**OwnCord 2.9.1** is a fix-only update to 2.9. It keeps you in your voice call after a reconnect, brings back thread replies that failed to send, and tightens a few voice and channel permission edge cases. Nothing new is added and the database does not change. It is still a **beta and a hobby project**: don't use it for anything sensitive. **Update the server and the desktop app together**: the reconnect fix needs both.
+
+### Fixed
+
+- **Voice:** a reconnect after a live update the app could not read took you out of your call, and everyone saw you leave. The reconnect now keeps the call.
+- **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
+- **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
+- **Channels:** a channel permission change on a busy server now always applies to every connected member.
+- **Threads:** a thread reply that failed to send was lost when you restarted the desktop app. It now comes back after a restart with Retry, like a channel message.
+- **Threads:** a thread reply whose delivery was never confirmed kept spinning. After 20 seconds it now shows as failed with Retry.
+
+### Known issues
+
+- **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.
+- **Linux: this release was not checked by hand on X11, GNOME Wayland and KDE Plasma Wayland.** It works, but it is less tested than Windows.
+- **Scrolling far back in a long channel while it reloads can make the list jump** to another spot. Scroll back to where you were; nothing is lost.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
+- **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
+
 ## v2.9.0
 
 **OwnCord 2.9** (the tenth public beta) is mostly about speed. The app starts sooner, scrolling through chat and long member lists is smoother, a screen share leaves your graphics card more room while you game, and Enhanced Noise Suppression gets the Silero VAD speech-detection model. Calls get a smarter layout: tiles take the shape of their picture, people without video move to a strip, and you can pin and resize tiles. On top of that come many voice fixes for switching channels and reconnecting, and fixes for threads, unread hints and multi-device sync.
