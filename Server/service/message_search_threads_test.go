@@ -99,7 +99,6 @@ func TestSearchMessages_ThreadOfUnreadableParentHidden(t *testing.T) {
 		t.Fatalf("channels = %v, want neither the thread nor the post", got)
 	}
 	for _, id := range []int64{threadID, postID} {
-		id := id
 		if _, _, err := f.msgs.SearchMessages(bg(), thrOther, SearchRequest{Query: "needle", ChannelID: &id}); !errors.Is(err, ErrForbidden) {
 			t.Errorf("thread-scoped search of %d: err = %v, want ErrForbidden", id, err)
 		}
