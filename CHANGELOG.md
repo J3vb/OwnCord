@@ -110,6 +110,7 @@ release changes the database, and anything an operator must do first.)
 
 - **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
 - **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
+- **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.
 
 ### Voice
 

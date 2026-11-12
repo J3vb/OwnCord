@@ -53,6 +53,10 @@ const USER_AGENT: &str = "facebookexternalhit/1.1";
 const MAX_REDIRECTS: usize = 3;
 /// Concurrent broker fetches across the whole process.
 const MAX_CONCURRENT: usize = 6;
+/// HTTP clients kept for reuse, one per host and vetted address set, so a run
+/// of fetches from one host (a page of GIFs) shares its open connections
+/// instead of a fresh TCP and TLS handshake each.
+const MAX_CLIENTS: usize = 16;
 
 /// Every limit a fetch is bounded by. Production uses `Limits::PRODUCTION`;
 /// tests shrink them to hit the boundaries without megabytes of fixtures.
@@ -598,12 +602,56 @@ struct Fetched {
     url: Url,
 }
 
+/// A client answers only for the host and addresses in its key, so a pooled
+/// connection is always to an address in the hop's current vetted answer: a
+/// changed DNS answer gets a new client, never an old connection.
+type ClientKey = (String, Vec<SocketAddr>);
+
+struct Clients {
+    order: VecDeque<ClientKey>,
+    by_key: HashMap<ClientKey, reqwest::Client>,
+}
+
+impl Clients {
+    fn new() -> Self {
+        Self {
+            order: VecDeque::new(),
+            by_key: HashMap::new(),
+        }
+    }
+
+    fn get_or_insert(
+        &mut self,
+        key: ClientKey,
+        build: impl FnOnce() -> Option<reqwest::Client>,
+    ) -> Option<reqwest::Client> {
+        if let Some(client) = self.by_key.get(&key) {
+            return Some(client.clone());
+        }
+        let client = build()?;
+        self.by_key.insert(key.clone(), client.clone());
+        self.order.push_back(key);
+        while self.order.len() > MAX_CLIENTS {
+            if let Some(oldest) = self.order.pop_front() {
+                self.by_key.remove(&oldest);
+            }
+        }
+        Some(client)
+    }
+
+    fn clear(&mut self) {
+        self.order.clear();
+        self.by_key.clear();
+    }
+}
+
 pub struct ExternalContentState {
     policy: Policy,
     limits: Limits,
     gate: Semaphore,
     in_flight: ByteBudget,
     inner: Mutex<Partitioned>,
+    clients: Mutex<Clients>,
 }
 
 impl ExternalContentState {
@@ -622,6 +670,7 @@ impl ExternalContentState {
                 cache: ByteCache::new(limits.cache_bytes),
                 handles: Handles::new(),
             }),
+            clients: Mutex::new(Clients::new()),
         }
     }
 
@@ -635,6 +684,9 @@ impl ExternalContentState {
             inner.cache.clear();
             inner.handles.clear();
             inner.partition = partition.to_string();
+            // Open connections belong to the partition too: a new server or a
+            // cleared cache starts with none.
+            crate::sync::lock(&self.clients).clear();
         }
         inner
     }
@@ -730,6 +782,36 @@ impl ExternalContentState {
         .map_err(|_| Failure::Unavailable)?
     }
 
+    /// The client for one hop: shared with earlier hops to the same host
+    /// while its vetted addresses are unchanged, built otherwise.
+    fn client_for(
+        &self,
+        url: &Url,
+        mut addrs: Vec<SocketAddr>,
+    ) -> Result<reqwest::Client, Failure> {
+        addrs.sort();
+        addrs.dedup();
+        let host = url.host_str().unwrap_or("").to_string();
+        let build = || {
+            let mut builder = reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .no_proxy()
+                .user_agent(USER_AGENT)
+                .https_only(!self.policy.allow_http);
+            if let Some(Host::Domain(name)) = url.host() {
+                builder = builder.dns_resolver(Arc::new(VettedResolver {
+                    host: name.to_string(),
+                    addrs: addrs.clone(),
+                    classify: self.policy.classify,
+                }));
+            }
+            builder.build().ok()
+        };
+        crate::sync::lock(&self.clients)
+            .get_or_insert((host, addrs.clone()), build)
+            .ok_or(Failure::Unavailable)
+    }
+
     async fn follow(
         &self,
         raw: &str,
@@ -742,22 +824,7 @@ impl ExternalContentState {
         let mut hops = 0;
         loop {
             let addrs = vet_addrs(&self.policy, &url).await?;
-            let mut builder = reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .no_proxy()
-                .user_agent(USER_AGENT)
-                .timeout(deadline.saturating_sub(started.elapsed()))
-                .https_only(!self.policy.allow_http);
-            if let Some(Host::Domain(name)) = url.host() {
-                builder = builder.dns_resolver(Arc::new(VettedResolver {
-                    host: name.to_string(),
-                    addrs,
-                    classify: self.policy.classify,
-                }));
-            }
-            // ponytail: a client per hop re-reads the root store each time;
-            // cache one per policy if preview latency ever shows it.
-            let client = builder.build().map_err(|_| Failure::Unavailable)?;
+            let client = self.client_for(&url, addrs)?;
             let accept = match want {
                 Want::Page => "text/html, application/json;q=0.9",
                 Want::Image => "image/*",
@@ -765,6 +832,7 @@ impl ExternalContentState {
             let mut resp = client
                 .get(url.clone())
                 .header(reqwest::header::ACCEPT, accept)
+                .timeout(deadline.saturating_sub(started.elapsed()))
                 .send()
                 .await
                 .map_err(|_| Failure::Unavailable)?;
