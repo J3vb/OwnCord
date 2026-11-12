@@ -3,36 +3,26 @@
 
 import sheet0 from "../../assets/emoji-sheets/smileys.webp";
 import sheet1 from "../../assets/emoji-sheets/people.webp";
-import sheet2 from "../../assets/emoji-sheets/people-1.webp";
-import sheet3 from "../../assets/emoji-sheets/people-2.webp";
-import sheet4 from "../../assets/emoji-sheets/people-3.webp";
-import sheet5 from "../../assets/emoji-sheets/people-4.webp";
-import sheet6 from "../../assets/emoji-sheets/people-5.webp";
-import sheet7 from "../../assets/emoji-sheets/nature.webp";
-import sheet8 from "../../assets/emoji-sheets/food.webp";
-import sheet9 from "../../assets/emoji-sheets/travel.webp";
-import sheet10 from "../../assets/emoji-sheets/activities.webp";
-import sheet11 from "../../assets/emoji-sheets/objects.webp";
-import sheet12 from "../../assets/emoji-sheets/symbols.webp";
-import sheet13 from "../../assets/emoji-sheets/flags.webp";
+import sheet2 from "../../assets/emoji-sheets/nature.webp";
+import sheet3 from "../../assets/emoji-sheets/food.webp";
+import sheet4 from "../../assets/emoji-sheets/travel.webp";
+import sheet5 from "../../assets/emoji-sheets/activities.webp";
+import sheet6 from "../../assets/emoji-sheets/objects.webp";
+import sheet7 from "../../assets/emoji-sheets/symbols.webp";
+import sheet8 from "../../assets/emoji-sheets/flags.webp";
 
 /** Hash of the emoji catalog the sheets were drawn from (see emojiSheets.test.ts). */
 export const SHEETS_CATALOG_HASH = "0c4a7feba36c6460";
 
-/** Each sheet's URL by name: a group key, or `<group>-<tone>` for a skin tone. */
+/** Each group's sheet URL, by group key. */
 export const EMOJI_SHEETS: Readonly<Record<string, string>> = {
   smileys: sheet0,
   people: sheet1,
-  "people-1": sheet2,
-  "people-2": sheet3,
-  "people-3": sheet4,
-  "people-4": sheet5,
-  "people-5": sheet6,
-  nature: sheet7,
-  food: sheet8,
-  travel: sheet9,
-  activities: sheet10,
-  objects: sheet11,
-  symbols: sheet12,
-  flags: sheet13,
+  nature: sheet2,
+  food: sheet3,
+  travel: sheet4,
+  activities: sheet5,
+  objects: sheet6,
+  symbols: sheet7,
+  flags: sheet8,
 };

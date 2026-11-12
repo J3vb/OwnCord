@@ -1,7 +1,7 @@
 /**
  * The emoji picker's image sheets (scripts/gen-emoji-sheets.mjs): one picture
- * per catalog group, and per skin tone for a group with toneable emoji, its
- * emoji in catalog order eight to a row. A grid shows its whole category from
+ * per catalog group, its emoji in catalog order eight to a row; a skin tone's
+ * sheet is drawn in the app (toneSheets.ts). A grid shows its whole category from
  * one decoded image instead of hundreds of font glyphs; a cell finds its spot
  * from the emoji's index in the group.
  */
@@ -11,9 +11,9 @@ import { EMOJI_SHEETS } from "./emojiSheetsData";
 /** Emoji per sheet row: the picker's own column count. */
 export const SHEET_COLUMNS = 8;
 
-/** The sheet for `group` in skin `tone` (0 = none), or null when there is none. */
-export function sheetUrl(group: string, tone: number): string | null {
-  return EMOJI_SHEETS[tone === 0 ? group : `${group}-${tone}`] ?? EMOJI_SHEETS[group] ?? null;
+/** The shipped sheet for `group`, without skin tones, or null when there is none. */
+export function sheetUrl(group: string): string | null {
+  return EMOJI_SHEETS[group] ?? null;
 }
 
 /** Point a category grid at its sheet; `count` is the group's full size. */

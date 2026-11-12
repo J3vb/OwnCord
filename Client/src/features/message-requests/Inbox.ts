@@ -20,6 +20,7 @@ import type { DmRequestDecision } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
 import type { ModalInstance } from "@lib/ui/modalFactory";
 import { parseTimestamp } from "@lib/text/formatting";
+import { idMentionsToNames } from "@lib/text/mentionNames";
 import { uiStore } from "@stores/ui.store";
 import { formatDate } from "../../i18n/format";
 import { messageRequestsText as t } from "../../i18n/messageRequests";
@@ -82,7 +83,7 @@ function renderShown(r: MessageRequest): { head: HTMLElement; text: HTMLElement 
   const text =
     r.preview === null
       ? createElement("p", { class: "requests-preview requests-preview-empty" }, t("noText"))
-      : createElement("p", { class: "requests-preview" }, r.preview.content);
+      : createElement("p", { class: "requests-preview" }, idMentionsToNames(r.preview.content));
   return { head, text };
 }
 
