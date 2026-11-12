@@ -12,6 +12,7 @@ import {
 } from "@stores/messages.store";
 import { ApiClientError, type ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
+import { RestErrorCode } from "@lib/protocolTypes";
 import { showToast } from "@lib/ui/toast";
 import type { WsClient } from "@lib/ws";
 import { connectText } from "../../i18n/connect";
@@ -30,7 +31,7 @@ let resumeGeneration = 0;
  * `thread_focus` is not carried across a connection: after every authenticated
  * (re)connect, if a panel is open, say so again and refetch its history, because
  * the thread's frames were not delivered while the socket was down. A thread
- * that is gone (404) or no longer readable (403) closes the panel.
+ * that is gone (404 NOT_FOUND) or no longer readable (403) closes the panel.
  */
 export function resumeThreadFocus(
   ws: Pick<WsClient, "send">,
@@ -58,7 +59,13 @@ export function resumeThreadFocus(
       if (!current()) return;
       // Ends the fetch's journal on every failure, including a gone thread.
       setChannelLoadError(threadId);
-      if (err instanceof ApiClientError && err.status === 404) {
+      // Only the server's own NOT_FOUND means the thread is gone; any other
+      // 404 (a proxy, a stray route) is a transient fault and keeps it.
+      if (
+        err instanceof ApiClientError &&
+        err.status === 404 &&
+        err.code === RestErrorCode.NOT_FOUND
+      ) {
         removeThread(threadId);
         return;
       }

@@ -133,9 +133,9 @@ func (s *MessageService) CreatePoll(ctx context.Context, p PollCreateParams) (*S
 	if err != nil {
 		return nil, err
 	}
-	ch, err := s.st.GetChannel(ctx, p.ChannelID)
-	if err != nil || ch == nil {
-		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, s.st, p.ChannelID)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.checkSendPermission(ctx, p.UserID, ch); err != nil {
 		return nil, err
