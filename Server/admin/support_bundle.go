@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,6 +24,10 @@ const (
 	supportTTL          = 5 * time.Minute
 	supportMaxSnapshots = 16
 	supportMaxBytes     = 256 << 10
+	// The database reads get their own shares of the preview's 3 s budget so a slow or unreadable
+	// database leaves time to build the items that need none.
+	supportSnapshotBudget = 1500 * time.Millisecond
+	supportNamesBudget    = 500 * time.Millisecond
 )
 
 type supportItem struct {
@@ -68,10 +73,12 @@ type supportBundles struct {
 	config    *config.Config
 	logs      *RingBuffer
 	hub       HubBroadcaster
+
+	snapshotBudget, namesBudget time.Duration
 }
 
 func newSupportBundles(svc *service.DiagnosticsService, version string, cfg *config.Config, logs *RingBuffer, hub HubBroadcaster) *supportBundles {
-	return &supportBundles{snapshots: make(map[string]*supportSnapshot), downloads: make(chan struct{}, 2), now: time.Now, service: svc, version: version, config: cfg, logs: logs, hub: hub}
+	return &supportBundles{snapshots: make(map[string]*supportSnapshot), downloads: make(chan struct{}, 2), now: time.Now, service: svc, version: version, config: cfg, logs: logs, hub: hub, snapshotBudget: supportSnapshotBudget, namesBudget: supportNamesBudget}
 }
 
 func (s *supportBundles) reserve() bool {
@@ -208,15 +215,31 @@ func (s *supportBundles) download(w http.ResponseWriter, r *http.Request) {
 func supportHash(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
 
 func (s *supportBundles) collect(ctx context.Context) (supportSnapshot, error) {
-	database, err := s.service.Snapshot(ctx)
-	if err != nil {
-		return supportSnapshot{}, err
+	// Each database read degrades on its own: the items that need no database are still produced.
+	var database any = map[string]string{"error": "unavailable"}
+	databaseClasses := []int{}
+	snapCtx, snapCancel := context.WithTimeout(ctx, s.snapshotBudget)
+	snap, snapErr := s.service.Snapshot(snapCtx)
+	snapCancel()
+	if snapErr == nil {
+		database, databaseClasses = snap, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
 	}
-	names, err := s.service.KnownNames(ctx)
-	if err != nil {
-		return supportSnapshot{}, err
+	namesCtx, namesCancel := context.WithTimeout(ctx, s.namesBudget)
+	names, namesErr := s.service.KnownNames(namesCtx)
+	namesCancel()
+	if snapErr != nil || namesErr != nil {
+		slog.Warn("support bundle collected without some database data", "database_unavailable", snapErr != nil, "names_unavailable", namesErr != nil)
+	}
+	events := supportEvents(s.logs, supportKnownValues(s.config, names)...)
+	if namesErr != nil {
+		// Without the registered names the free text cannot be redacted safely: keep only the fixed event codes.
+		for i := range events {
+			events[i].Detail = nil
+		}
 	}
 	created := s.now().UTC()
+	health := supportHealth(s.hub, created)
+	health.DatabaseReadable = snapErr == nil
 	data := []struct {
 		name    string
 		classes []int
@@ -224,9 +247,9 @@ func (s *supportBundles) collect(ctx context.Context) (supportSnapshot, error) {
 	}{
 		{"build.json", []int{}, supportBuild(s.version)},
 		{"configuration.json", []int{}, supportConfig(s.config)},
-		{"database.json", []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}, database},
-		{"health.json", []int{}, supportHealth(s.hub, created)},
-		{"events.json", []int{22}, supportEvents(s.logs, supportKnownValues(s.config, names)...)},
+		{"database.json", databaseClasses, database},
+		{"health.json", []int{}, health},
+		{"events.json", []int{22}, events},
 	}
 	var buffer bytes.Buffer
 	zw := zip.NewWriter(&buffer)
