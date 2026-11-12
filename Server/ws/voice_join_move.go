@@ -57,9 +57,8 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 	return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, true, held
 }
 
-// heldMove is the membership a same-channel call move ended without a voice_leave, and
-// whether its row is still in place for the join's insert to replace. flagsFromRow: the
-// moderator flags came off that row, which the upsert keeps, so they need no restore.
+// heldMove is the membership a same-channel move ended without a voice_leave; flagsFromRow
+// means the upsert keeps the row's moderator flags, so they need no restore.
 type heldMove struct {
 	chID         int64
 	joinToken    string

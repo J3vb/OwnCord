@@ -64,8 +64,7 @@ func (h *Hub) finishVoiceLeave(ctx context.Context, txn *voiceTxn, c *Client, ol
 
 // finishVoiceLeaveAnnounce is finishVoiceLeave with the broadcast optional. announce=false
 // is the same-channel call move: the user stays in the room, so no voice_leave that a
-// client would apply to the new join, and the row stays for the join's upsert to replace,
-// so the slot is never free for another user's join; the caller holds the member lock.
+// client would apply to the new join, and the row stays for the join's upsert (member lock held).
 func (h *Hub) finishVoiceLeaveAnnounce(ctx context.Context, txn *voiceTxn, c *Client, oldChID int64, oldJoinToken, reason string, announce bool) {
 	username := ""
 	if c.user != nil {

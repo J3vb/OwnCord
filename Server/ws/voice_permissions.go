@@ -79,16 +79,14 @@ func (h *Hub) currentVoiceGrants(ctx context.Context, userID, channelID int64, j
 	return grants, live, err
 }
 
-// sessionVoiceGrants is currentVoiceGrants for a session about to start: live is also false
-// when permissions.CanStayInVoice refuses. Moderation and reconcile keep currentVoiceGrants,
-// so they still reach a member the sweep has yet to remove.
+// sessionVoiceGrants also needs permissions.CanStayInVoice. Moderation and reconcile keep
+// currentVoiceGrants, so they still reach a member the sweep has yet to remove.
 func (h *Hub) sessionVoiceGrants(ctx context.Context, userID, channelID int64, joinToken string) (voicePublishGrants, bool, error) {
 	grants, live, mayStay, err := h.voiceGrantsAndStay(ctx, userID, channelID, joinToken)
 	return grants, live && mayStay, err
 }
 
-// voiceGrantsAndStay reads the join, the channel and its live subject once. A missing
-// channel is not live.
+// voiceGrantsAndStay reads the join, channel and live subject once; no channel is not live.
 func (h *Hub) voiceGrantsAndStay(ctx context.Context, userID, channelID int64, joinToken string) (grants voicePublishGrants, live, mayStay bool, err error) {
 	state, err := h.voice.State(ctx, userID)
 	if err != nil {

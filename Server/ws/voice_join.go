@@ -59,8 +59,7 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 
 	restore := modFlagStash{muted: wasServerMuted, deafened: wasServerDeafened, mutedBy: wasServerMutedBy}
 	if held.rowKept && held.flagsFromRow {
-		// The upsert keeps the row's flags as they are now, including a moderator's change
-		// since they were read; restoring the earlier read would undo it.
+		// The upsert keeps the row's current flags; restoring the earlier read would undo a change.
 		restore = modFlagStash{}
 	}
 	state, ok := h.voiceJoinPersistWithModFlags(fctx, ctx, txn, c, capacity, channelID, reqID, restore)
