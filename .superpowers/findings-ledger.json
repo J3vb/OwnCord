@@ -13787,6 +13787,52 @@
       "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
     },
     {
+      "id": "OC-0598",
+      "title": "Moving a call to another device in the same voice channel now replaces the member's row in one write, so the channel stays at its limit",
+      "file": "Server/ws/voice_join_move.go",
+      "line": 25,
+      "severity": "low",
+      "why": "A same-channel call move ended the old membership row before inserting the new one with the capacity check skipped, so another user's join in between could land and the channel ended one over its limit.",
+      "repro": "Fill a capped voice channel, move one member's call to their second device while another user joins.",
+      "evidence": "Release review of 2.9.0 (2026-11-11).",
+      "suggestedFix": "Keep the member's row across a same-channel move and let the join's upsert replace it while the member lock is held.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/voice_join_move_failure_test.go (TestMultiDevice_SameChannelMoveKeepsChannelAtLimit; the kept row is removed when the move fails)",
+        "revertProof": "fail (the racing join takes the slot)"
+      },
+      "lens": "concurrency",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "release-review-2.9.0",
+      "finder": "claude",
+      "fixedDate": "2026-11-12"
+    },
+    {
+      "id": "OC-0599",
+      "title": "The voice session gate applies the same stay-in-voice rule as the token refresh and the sweep",
+      "file": "Server/ws/voice_permissions.go",
+      "line": 72,
+      "severity": "low",
+      "why": "The gate that admits and confirms a proxied voice session checked the membership row and the publish rights, while the token refresh and the sweep apply the full stay-in-voice rule; the two now agree.",
+      "repro": "Change a member's voice permissions while their call is connecting.",
+      "evidence": "Release review of 2.9.0 (2026-11-11).",
+      "suggestedFix": "Run permissions.CanStayInVoice over the live channel subject in currentVoiceGrants.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/voice_session_admit_test.go (TestVoiceSession_RequiresTheRightToStay, TestAdmitVoiceSession_ChannelReadFailure)",
+        "revertProof": "fail (6 of 8 subtests)"
+      },
+      "lens": "authorization",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "release-review-2.9.0",
+      "finder": "claude",
+      "fixedDate": "2026-11-12"
+    },
+    {
       "id": "OC-0600",
       "title": "A channel visibility refresh that runs out of time now settles every client it did not reach",
       "file": "Server/ws/hub_visibility_refresh.go",

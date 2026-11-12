@@ -71,9 +71,10 @@ type voicePublishGrants struct {
 }
 
 // currentVoiceGrants is the one rule for what a join may publish right now, for a live participant
-// and for a session about to start. live is false when the row is gone or names another join.
-// Reconciliation is the uncached backstop for role/override changes, so the permission read skips
-// the cache.
+// and for a session about to start. live is false when the row is gone or names another join, or
+// when the member may no longer stay in the channel (permissions.CanStayInVoice, as the token
+// refresh and the sweep apply it). Reconciliation is the uncached backstop for role/override
+// changes, so the permission read skips the cache.
 func (h *Hub) currentVoiceGrants(ctx context.Context, userID, channelID int64, joinToken string) (voicePublishGrants, bool, error) {
 	state, err := h.voice.State(ctx, userID)
 	if err != nil {
@@ -82,17 +83,23 @@ func (h *Hub) currentVoiceGrants(ctx context.Context, userID, channelID int64, j
 	if state == nil || state.ChannelID != channelID || state.JoinedAt != joinToken || joinToken == "" {
 		return voicePublishGrants{}, false, nil
 	}
-	sub, err := subjectFor(ctx, h.readers.Dispatch, h.permChecker, nil, userID, channelID)
-	if err != nil {
-		return voicePublishGrants{}, false, fmt.Errorf("resolving voice permissions: %w", err)
-	}
-	// The AFK channel is listen-only: reconciliation must not re-grant what
-	// the join and the token refresh withheld.
 	ch, err := h.readers.Dispatch.GetChannel(ctx, channelID)
 	if err != nil {
 		return voicePublishGrants{}, false, fmt.Errorf("reading voice channel: %w", err)
 	}
-	if ch != nil && ch.AFK {
+	if ch == nil {
+		return voicePublishGrants{}, false, nil
+	}
+	sub, err := channelSubject(ctx, h.readers.Dispatch, h.permChecker, nil, userID, ch, true)
+	if err != nil {
+		return voicePublishGrants{}, false, fmt.Errorf("resolving voice permissions: %w", err)
+	}
+	if permissions.CanStayInVoice(sub) != nil {
+		return voicePublishGrants{}, false, nil
+	}
+	// The AFK channel is listen-only: reconciliation must not re-grant what
+	// the join and the token refresh withheld.
+	if ch.AFK {
 		return voicePublishGrants{}, true, nil
 	}
 	return voicePublishGrants{

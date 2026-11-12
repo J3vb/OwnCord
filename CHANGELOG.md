@@ -100,6 +100,11 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Fixed
+
+- **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
+- **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

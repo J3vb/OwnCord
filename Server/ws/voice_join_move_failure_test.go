@@ -7,27 +7,41 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// stateFailsAfterLeaveVoice fails the first State read that follows a
-// LeaveIfMatch: the read a move uses to confirm the old row is gone.
-type stateFailsAfterLeaveVoice struct {
+// stateFailsAfterSlotCleared fails the first State read made once the old
+// device's call slot is cleared: the read a move uses to confirm the old row is
+// gone (or is the one it kept).
+type stateFailsAfterSlotCleared struct {
 	VoiceStore
-	left   atomic.Bool
+	old    *Client
 	failed atomic.Bool
 }
 
-func (s *stateFailsAfterLeaveVoice) LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error) {
-	deleted, err := s.VoiceStore.LeaveIfMatch(ctx, userID, channelID, joinedAt)
-	s.left.Store(true)
-	return deleted, err
-}
-
-func (s *stateFailsAfterLeaveVoice) State(ctx context.Context, userID int64) (*db.VoiceState, error) {
-	if s.left.Load() && s.failed.CompareAndSwap(false, true) {
+func (s *stateFailsAfterSlotCleared) State(ctx context.Context, userID int64) (*db.VoiceState, error) {
+	if s.old.voice.channel() == 0 && s.failed.CompareAndSwap(false, true) {
 		return nil, errors.New("state read failed")
 	}
 	return s.VoiceStore.State(ctx, userID)
+}
+
+// joinRacesMove runs another user's capacity-checked join just before the
+// mover's own insert: the moment the slot would be free if the move had
+// removed the row first.
+type joinRacesMove struct {
+	VoiceStore
+	mover, racer, chID int64
+	capacity           int
+	raced              atomic.Bool
+	racerErr           error
+}
+
+func (s *joinRacesMove) Join(ctx context.Context, userID, channelID int64, maxUsers int) error {
+	if userID == s.mover && s.raced.CompareAndSwap(false, true) {
+		s.racerErr = s.VoiceStore.Join(ctx, s.racer, s.chID, s.capacity)
+	}
+	return s.VoiceStore.Join(ctx, userID, channelID, maxUsers)
 }
 
 // voiceLeaves counts the voice_leave frames for (ch, uid) the device has seen.
@@ -125,7 +139,7 @@ func TestMultiDevice_SameChannelMoveFailingLaterStepAnnouncesLeave(t *testing.T)
 // announce the leave it held back: no device holds the call any more.
 func TestMultiDevice_SameChannelMoveUnverifiedLeaveIsAnnounced(t *testing.T) {
 	f, obs, a, b := newSameChannelMove(t)
-	store := &stateFailsAfterLeaveVoice{VoiceStore: f.hub.voice}
+	store := &stateFailsAfterSlotCleared{VoiceStore: f.hub.voice, old: a.c}
 	f.hub.voice = store
 
 	takeOverSameChannel(t, f, obs, a, b)
@@ -141,6 +155,9 @@ func TestMultiDevice_SameChannelMoveUnverifiedLeaveIsAnnounced(t *testing.T) {
 	}
 	if b.c.voice.channel() != 0 || a.c.voice.channel() != 0 {
 		t.Fatal("a device still holds a call after the aborted move")
+	}
+	if row := f.row(f.uid); row != nil {
+		t.Fatalf("the aborted move left the kept row: %+v", row)
 	}
 }
 
@@ -184,5 +201,45 @@ func TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsModeratorMute(t *tes
 	}
 	if !row.ServerMuted {
 		t.Fatal("the moved call came back unmuted")
+	}
+}
+
+// Another user's join that lands while a same-channel call move is in flight
+// finds the channel full: the move never frees the slot it takes over, so the
+// channel stays at its limit and the mover keeps the call.
+func TestMultiDevice_SameChannelMoveKeepsChannelAtLimit(t *testing.T) {
+	f, obs, a, b := newSameChannelMove(t)
+	ctx := context.Background()
+	const limit = 2 // the mover and the observer
+	if err := f.db.SetChannelVoiceMaxUsers(ctx, f.voiceA, limit); err != nil {
+		t.Fatalf("SetChannelVoiceMaxUsers: %v", err)
+	}
+	racer := seedHarvestVoiceUser(t, f.db, "md-racer")
+	store := &joinRacesMove{VoiceStore: f.hub.voice, mover: f.uid, racer: racer, chID: f.voiceA, capacity: limit}
+	f.hub.voice = store
+
+	takeOverSameChannel(t, f, obs, a, b)
+
+	if !store.raced.Load() {
+		t.Fatal("the racing join never ran: the test does not exercise the move")
+	}
+	if !errors.Is(store.racerErr, service.ErrVoiceChannelFull) {
+		t.Fatalf("racing join: err = %v, want %v", store.racerErr, service.ErrVoiceChannelFull)
+	}
+	if row := f.row(racer); row != nil {
+		t.Fatalf("the racing join took a slot: %+v", row)
+	}
+	if b.sawErrorCode(ErrCodeChannelFull) || b.c.voice.channel() != f.voiceA {
+		t.Fatalf("the mover lost the call; B got %s", b.types())
+	}
+	states, err := f.db.GetChannelVoiceStates(ctx, f.voiceA)
+	if err != nil {
+		t.Fatalf("GetChannelVoiceStates: %v", err)
+	}
+	if len(states) != limit {
+		t.Fatalf("channel holds %d members, want its limit %d", len(states), limit)
+	}
+	if obs.sawVoiceLeave(f.voiceA, f.uid) {
+		t.Fatal("a successful same-channel move announced a voice_leave")
 	}
 }

@@ -404,3 +404,73 @@ func TestAdmitVoiceSession_VoiceNotConfigured(t *testing.T) {
 		t.Fatalf("err = %v, want a failure that is neither refusal", err)
 	}
 }
+
+// A member who may no longer stay in the channel is not admitted, and one who
+// lost that right while connecting is removed by Confirm: the gate applies the
+// same rule as the token refresh and the sweep, read past the permission cache.
+func TestVoiceSession_RequiresTheRightToStay(t *testing.T) {
+	revoke := map[string]func(f *admitFixture){
+		"connect permission removed": func(f *admitFixture) {
+			if _, err := f.db.ExecContext(context.Background(), `UPDATE roles SET permissions = ? WHERE id = ?`,
+				permissions.ReadMessages|permissions.SpeakVoice|permissions.UseVideo, harvestVoiceRoleID); err != nil {
+				f.t.Fatalf("revoke: %v", err)
+			}
+		},
+		"channel hidden": func(f *admitFixture) {
+			if _, err := f.db.ExecContext(context.Background(), `UPDATE roles SET permissions = ? WHERE id = ?`,
+				permissions.ConnectVoice|permissions.SpeakVoice|permissions.UseVideo, harvestVoiceRoleID); err != nil {
+				f.t.Fatalf("hide: %v", err)
+			}
+		},
+		"channel archived": func(f *admitFixture) {
+			if _, err := f.db.ExecContext(context.Background(), `UPDATE channels SET archived = 1 WHERE id = ?`, f.chID); err != nil {
+				f.t.Fatalf("archive: %v", err)
+			}
+		},
+		"channel deleted": func(f *admitFixture) {
+			if _, err := f.db.ExecContext(context.Background(), `DELETE FROM channels WHERE id = ?`, f.chID); err != nil {
+				f.t.Fatalf("delete: %v", err)
+			}
+		},
+	}
+	for name, apply := range revoke {
+		t.Run(name+" before admission", func(t *testing.T) {
+			f := newAdmitFixture(t)
+			presented := f.widest()
+			apply(f)
+			if _, err := f.hub.AdmitVoiceSession(context.Background(), presented); !errors.Is(err, ErrVoiceSessionRefused) {
+				t.Fatalf("AdmitVoiceSession: err = %v, want %v", err, ErrVoiceSessionRefused)
+			}
+		})
+		t.Run(name+" while connecting", func(t *testing.T) {
+			f := newAdmitFixture(t)
+			f.beforeSession()
+			ticket := f.admit()
+			apply(f)
+			f.sessionStarts()
+			if err := ticket.Confirm(context.Background()); !errors.Is(err, ErrVoiceSessionRefused) {
+				t.Fatalf("Confirm: err = %v, want %v", err, ErrVoiceSessionRefused)
+			}
+			if f.sfu.has(RoomName(f.chID), f.identity) {
+				t.Fatal("the session of a member who may not stay is still at the media server")
+			}
+		})
+	}
+}
+
+// A channel read that fails is neither an admission nor a refusal: the
+// caller answers "try again" and nothing is issued.
+func TestAdmitVoiceSession_ChannelReadFailure(t *testing.T) {
+	f := newAdmitFixture(t)
+	presented := f.widest()
+	if _, err := f.db.ExecContext(context.Background(), `ALTER TABLE channels RENAME TO channels_gone`); err != nil {
+		t.Fatalf("break channel reads: %v", err)
+	}
+	ticket, err := f.hub.AdmitVoiceSession(context.Background(), presented)
+	if err == nil || errors.Is(err, ErrVoiceSessionRefused) || errors.Is(err, ErrVoiceCredentialInvalid) {
+		t.Fatalf("err = %v, want a failure that is neither refusal", err)
+	}
+	if ticket.Token != "" {
+		t.Fatal("a failed channel read still issued a credential")
+	}
+}
