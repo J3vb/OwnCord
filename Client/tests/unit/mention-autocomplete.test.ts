@@ -136,8 +136,33 @@ describe("filterMentionSuggestions", () => {
   });
 
   it("caps the list", () => {
-    seedMembers(Array.from({ length: 40 }, (_, i) => `user${String(i).padStart(2, "0")}`));
+    seedMembers(
+      Array.from(
+        { length: MAX_MENTION_SUGGESTIONS + 30 },
+        (_, i) => `user${String(i).padStart(2, "0")}`,
+      ),
+    );
     expect(filterMentionSuggestions("user").length).toBe(MAX_MENTION_SUGGESTIONS);
+  });
+
+  it("lists every member of a 30-member server on a bare @, offline non-chatters included", () => {
+    seedMembers(Array.from({ length: 30 }, (_, i) => `user${String(i).padStart(2, "0")}`));
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map(
+        [...prev.members].map(([id, m]) => [id, { ...m, status: id > 12 ? "offline" : "online" }]),
+      ),
+    }));
+    // Twelve recent chatters (ids 1..12) sort first and used to fill the list.
+    setMessages(
+      1,
+      Array.from({ length: 12 }, (_, i) => historyRow(i + 1, i + 1)),
+      false,
+    );
+    const tokens = filterMentionSuggestions("", 1).map((s) => s.token);
+    expect(tokens).toHaveLength(30);
+    expect(tokens.slice(0, 12).every((t) => Number(t.slice(4)) < 12)).toBe(true);
+    expect(tokens).toContain("user29");
   });
 
   it("omits @everyone/@here without MENTION_EVERYONE", () => {
