@@ -34,6 +34,23 @@ service name `com.owncord.client`. It tries the OS credential store first.
 If a write fails or cannot be read back, it uses the encrypted fallback
 described below.
 
+A read answers "nothing stored" only when neither store holds the secret. A
+read error from the OS store is passed on, so a locked keychain is never taken
+for a first sign-in, with one exception: on Linux, when there is no session
+bus, or nobody owns the Secret Service's name and no provider could be started
+for it (checked on the bus, after a one-second wait the first time in a run,
+for a provider still starting from autostart), the OS store can hold nothing.
+Then an empty fallback means "nothing stored" and the first write creates the
+fallback copy. A provider whose start fails is an error, as before.
+
+A fallback entry that cannot be decrypted or decoded is an error, never
+"nothing stored", so an identity key is never replaced because its copy could
+not be read. That happens when `credential_fallback.key` was lost or the
+Windows entry came from another user or machine. To start over for one
+server, quit the app and remove that account's entry from
+`credential_fallback.json`; the app then creates a new identity key, which
+peers see as a changed key.
+
 | Secret                          | Account name                      | Contents                                             |
 | ------------------------------- | --------------------------------- | ---------------------------------------------------- |
 | Login credential                | `{host}`                          | JSON `{"username","token","password"}`               |

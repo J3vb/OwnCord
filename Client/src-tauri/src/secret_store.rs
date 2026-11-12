@@ -95,7 +95,7 @@ pub fn set(app: &AppHandle, account: &str, secret: &str) -> Result<Backend, Stri
         account,
         secret,
         keyring_set,
-        keyring_get,
+        |acct| keyring_get(acct).map_err(|f| f.message),
         keyring_delete,
         |acct, sec| set_fallback(app, acct, sec),
         // Best-effort here: the keyring copy just proved it round-trips, so
@@ -198,28 +198,47 @@ pub fn get(app: &AppHandle, account: &str) -> Result<Option<String>, String> {
     get_with(account, keyring_get, |acct| get_fallback(app, acct))
 }
 
+/// A failed OS credential store read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReadFailure {
+    message: String,
+    /// The machine has no OS credential store at all (Linux: nobody provides
+    /// the Secret Service on the session bus), so it cannot hold anything and
+    /// the fallback file is the only store. A locked or failing store is not
+    /// this.
+    no_store: bool,
+}
+
 /// Core decision logic for [`get`], with the keyring and fallback lookups
 /// injected so the branching is testable without a live OS credential store.
 fn get_with(
     account: &str,
-    keyring_get: impl Fn(&str) -> Result<Option<String>, String>,
-    get_fallback: impl Fn(&str) -> Option<String>,
+    keyring_get: impl Fn(&str) -> Result<Option<String>, ReadFailure>,
+    get_fallback: impl Fn(&str) -> Result<Option<String>, String>,
 ) -> Result<Option<String>, String> {
     match keyring_get(account) {
         Ok(Some(secret)) => Ok(Some(secret)),
-        Ok(None) => Ok(get_fallback(account)),
-        Err(e) => {
-            log::warn!("{SERVICE}: credential store read failed for '{account}': {e}");
+        Ok(None) => get_fallback(account),
+        Err(failure) => {
+            let e = failure.message;
+            if failure.no_store {
+                log::debug!("{SERVICE}: no OS credential store for '{account}': {e}");
+            } else {
+                log::warn!("{SERVICE}: credential store read failed for '{account}': {e}");
+            }
             // A read error must not collapse to "nothing stored": on a
             // healthy machine set() clears the fallback on every successful
             // write, so an empty fallback here is indistinguishable from
-            // "never stored". Prefer a fallback copy if one exists; only
-            // report "nothing" when both stores genuinely have nothing, and
-            // otherwise propagate the error so the caller can tell a broken
-            // store apart from first login.
+            // "never stored". Prefer a fallback copy if one exists; report
+            // "nothing" only when both stores genuinely have nothing — the
+            // fallback is empty and there is no OS store that could hold a
+            // copy — and otherwise propagate the error so the caller can tell
+            // a broken store apart from first login.
             match get_fallback(account) {
-                Some(secret) => Ok(Some(secret)),
-                None => Err(e),
+                Ok(Some(secret)) => Ok(Some(secret)),
+                Ok(None) if failure.no_store => Ok(None),
+                Ok(None) => Err(e),
+                Err(fallback) => Err(format!("{e}; fallback: {fallback}")),
             }
         }
     }
@@ -283,7 +302,11 @@ fn compiled_backend_persistence() -> (bool, &'static str) {
 /// keeps changing" into a one-line answer.
 pub fn log_compiled_backend() {
     let (persistent, description) = compiled_backend_persistence();
-    if persistent {
+    if cfg!(target_os = "android") {
+        // No OS keyring backend is compiled for Android: every secret lives
+        // in the encrypted fallback file, which persists.
+        log::info!("credential store: encrypted fallback file (no OS keyring on Android)");
+    } else if persistent {
         log::info!("credential store: OS keyring, {description}");
     } else {
         log::error!(
@@ -309,12 +332,97 @@ fn keyring_set(account: &str, secret: &str) -> Result<(), String> {
         .map_err(|e| format!("{e}"))
 }
 
-fn keyring_get(account: &str) -> Result<Option<String>, String> {
-    match entry(account)?.get_password() {
+fn keyring_get(account: &str) -> Result<Option<String>, ReadFailure> {
+    let entry = entry(account).map_err(|message| ReadFailure {
+        message,
+        no_store: false,
+    })?;
+    match entry.get_password() {
         Ok(secret) => Ok(Some(secret)),
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("{e}")),
+        Err(e) => Err(ReadFailure {
+            message: format!("{e}"),
+            no_store: no_os_store(&e),
+        }),
     }
+}
+
+/// Whether `err` says the machine has no OS credential store: on Linux, no
+/// session bus at all, or a session bus where nobody provides the Secret
+/// Service and nothing can be started to (no gnome-keyring, KWallet or
+/// KeePassXC). A locked collection, a dismissed prompt or a provider whose
+/// start failed is a different error and stays a failure.
+#[cfg(target_os = "linux")]
+fn no_os_store(err: &keyring::Error) -> bool {
+    let keyring::Error::PlatformFailure(inner) = err else {
+        return false;
+    };
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(inner.as_ref());
+    while let Some(e) = source {
+        if let Some(bus) = e.downcast_ref::<dbus::Error>() {
+            return bus
+                .name()
+                .is_some_and(|name| names_missing_store(name, confirm_no_provider));
+        }
+        source = e.source();
+    }
+    false
+}
+
+#[cfg(not(target_os = "linux"))]
+fn no_os_store(_err: &keyring::Error) -> bool {
+    false
+}
+
+/// Whether D-Bus error `name` means no OS store. The bus-connect errors (no
+/// session bus) do; "no such service" does only once `confirm` finds the
+/// Secret Service neither running nor startable, since a provider launched
+/// from session autostart registers its name a moment after login. Every
+/// other name (a failed start, a provider that left the bus) is a failure.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn names_missing_store(name: &str, confirm: impl FnOnce() -> bool) -> bool {
+    match name {
+        "org.freedesktop.DBus.Error.NoServer"
+        | "org.freedesktop.DBus.Error.FileNotFound"
+        | "org.freedesktop.DBus.Error.NotSupported" => true,
+        "org.freedesktop.DBus.Error.ServiceUnknown" => confirm(),
+        _ => false,
+    }
+}
+
+/// The Secret Service's bus name.
+#[cfg(target_os = "linux")]
+const SECRETS_NAME: &str = "org.freedesktop.secrets";
+
+/// Ask the session bus whether anybody owns, or could be started to own, the
+/// Secret Service's name. No answer is given before a second after the first
+/// ask of the run, for a provider that is still starting from session
+/// autostart: every read that arrives in that second waits for its end.
+#[cfg(target_os = "linux")]
+fn confirm_no_provider() -> bool {
+    static NOT_BEFORE: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let not_before =
+        *NOT_BEFORE.get_or_init(|| std::time::Instant::now() + std::time::Duration::from_secs(1));
+    std::thread::sleep(not_before.saturating_duration_since(std::time::Instant::now()));
+    secret_service_absent()
+}
+
+#[cfg(target_os = "linux")]
+fn secret_service_absent() -> bool {
+    let timeout = std::time::Duration::from_millis(500);
+    let Ok(bus) = dbus::blocking::Connection::new_session() else {
+        // The bus just answered, so this is a passing failure, not "no bus"
+        // (the bus-connect errors never reach this check).
+        return false;
+    };
+    let proxy = bus.with_proxy("org.freedesktop.DBus", "/org/freedesktop/DBus", timeout);
+    let owned: Result<(bool,), dbus::Error> =
+        proxy.method_call("org.freedesktop.DBus", "NameHasOwner", (SECRETS_NAME,));
+    let activatable: Result<(Vec<String>,), dbus::Error> =
+        proxy.method_call("org.freedesktop.DBus", "ListActivatableNames", ());
+    // Any doubt (a failed query) reads as "a store may exist".
+    matches!(owned, Ok((false,)))
+        && activatable.is_ok_and(|(names,)| !names.iter().any(|n| n == SECRETS_NAME))
 }
 
 fn keyring_delete(account: &str) -> Result<(), String> {
@@ -403,26 +511,46 @@ fn set_fallback(app: &AppHandle, account: &str, secret: &str) -> Result<(), Stri
     Ok(())
 }
 
-fn get_fallback(app: &AppHandle, account: &str) -> Option<String> {
+/// The fallback copy of `account`: `Ok(None)` only when the store opened and
+/// holds no entry for it. An entry that cannot be read back is an error, never
+/// "nothing stored": the identity key loader mints a new key on `None`.
+fn get_fallback(app: &AppHandle, account: &str) -> Result<Option<String>, String> {
+    let store = crate::json_store::open(app, CREDENTIAL_FALLBACK_STORE)
+        .map_err(|e| format!("failed to open credential fallback store: {e}"))?;
+    let read = read_fallback_entry(account, store.get(account), |blob| {
+        unprotect_secret(app, account, blob)
+    });
+    if let Err(e) = &read {
+        log::warn!("{e}");
+    }
+    read
+}
+
+/// Decode a fallback store value; `open` unseals the decoded blob.
+fn read_fallback_entry(
+    account: &str,
+    value: Option<Value>,
+    open: impl FnOnce(&[u8]) -> Result<Vec<u8>, String>,
+) -> Result<Option<String>, String> {
     use base64::Engine as _;
 
-    let store = crate::json_store::open(app, CREDENTIAL_FALLBACK_STORE)
-        .map_err(|e| log::warn!("failed to open credential fallback store: {e}"))
-        .ok()?;
-    let encoded = match store.get(account) {
+    let encoded = match value {
+        None => return Ok(None),
         Some(Value::String(s)) => s,
-        _ => return None,
+        Some(_) => {
+            return Err(format!(
+                "credential fallback entry for '{account}' is not a string"
+            ))
+        }
     };
     let blob = base64::engine::general_purpose::STANDARD
         .decode(encoded)
-        .map_err(|e| log::warn!("credential fallback entry for '{account}' is not base64: {e}"))
-        .ok()?;
-    let plaintext = unprotect_secret(app, account, &blob)
-        .map_err(|e| log::warn!("credential fallback entry for '{account}' did not open: {e}"))
-        .ok()?;
+        .map_err(|e| format!("credential fallback entry for '{account}' is not base64: {e}"))?;
+    let plaintext = open(&blob)
+        .map_err(|e| format!("credential fallback entry for '{account}' did not open: {e}"))?;
     String::from_utf8(plaintext)
-        .map_err(|_| log::warn!("credential fallback entry for '{account}' is not valid UTF-8"))
-        .ok()
+        .map(Some)
+        .map_err(|_| format!("credential fallback entry for '{account}' is not valid UTF-8"))
 }
 
 /// Drop any fallback copy of `account`, flushing the removal to disk.
@@ -512,12 +640,26 @@ mod tests {
 
     // -- get_with: finding "a keyring read error must not read as 'not stored'" --
 
+    fn failed(message: &str) -> ReadFailure {
+        ReadFailure {
+            message: message.to_string(),
+            no_store: false,
+        }
+    }
+
+    fn no_store() -> ReadFailure {
+        ReadFailure {
+            message: "no Secret Service provider".to_string(),
+            no_store: true,
+        }
+    }
+
     #[test]
     fn get_with_falls_back_when_the_keyring_errors_but_the_fallback_has_a_copy() {
         let result = get_with(
             "identity:chat.example",
-            |_| Err("keychain locked".to_string()),
-            |_| Some("fallback-secret".to_string()),
+            |_| Err(failed("keychain locked")),
+            |_| Ok(Some("fallback-secret".to_string())),
         );
         assert_eq!(result, Ok(Some("fallback-secret".to_string())));
     }
@@ -531,10 +673,52 @@ mod tests {
         // signal, invalidating every peer's TOFU pin.
         let result = get_with(
             "identity:chat.example",
-            |_| Err("keychain locked".to_string()),
-            |_| None,
+            |_| Err(failed("keychain locked")),
+            |_| Ok(None),
         );
         assert_eq!(result, Err("keychain locked".to_string()));
+    }
+
+    #[test]
+    fn get_with_reports_nothing_stored_when_there_is_no_os_store_and_no_fallback_copy() {
+        // A Linux desktop with no Secret Service provider: the keyring can
+        // hold nothing, so an empty fallback is a true "never stored", and
+        // the first write (identity key, pending messages) can create the
+        // fallback copy every later read finds.
+        let result = get_with("identity:chat.example", |_| Err(no_store()), |_| Ok(None));
+        assert_eq!(result, Ok(None));
+    }
+
+    #[test]
+    fn get_with_reads_the_fallback_copy_when_there_is_no_os_store() {
+        let result = get_with(
+            "identity:chat.example",
+            |_| Err(no_store()),
+            |_| Ok(Some("fallback-secret".to_string())),
+        );
+        assert_eq!(result, Ok(Some("fallback-secret".to_string())));
+    }
+
+    #[test]
+    fn get_with_reports_an_unreadable_fallback_entry_as_an_error() {
+        // The keyring has nothing (always so on Android): a fallback copy
+        // that cannot be read is not "nothing stored", or the identity key
+        // loader would mint and publish a new key over the old one.
+        let result = get_with(
+            "identity:chat.example",
+            |_| Ok(None),
+            |_| Err("did not open".to_string()),
+        );
+        assert_eq!(result, Err("did not open".to_string()));
+        let result = get_with(
+            "identity:chat.example",
+            |_| Err(no_store()),
+            |_| Err("did not open".to_string()),
+        );
+        assert_eq!(
+            result,
+            Err("no Secret Service provider; fallback: did not open".to_string())
+        );
     }
 
     #[test]
@@ -542,15 +726,96 @@ mod tests {
         let result = get_with(
             "acct",
             |_| Ok(Some("live".to_string())),
-            |_| Some("stale".to_string()),
+            |_| Ok(Some("stale".to_string())),
         );
         assert_eq!(result, Ok(Some("live".to_string())));
     }
 
     #[test]
     fn get_with_uses_the_fallback_when_the_keyring_has_nothing_stored() {
-        let result = get_with("acct", |_| Ok(None), |_| Some("fallback".to_string()));
+        let result = get_with("acct", |_| Ok(None), |_| Ok(Some("fallback".to_string())));
         assert_eq!(result, Ok(Some("fallback".to_string())));
+    }
+
+    #[test]
+    fn read_fallback_entry_separates_no_entry_from_an_unreadable_one() {
+        use base64::Engine as _;
+        let encode = |b: &[u8]| Value::String(base64::engine::general_purpose::STANDARD.encode(b));
+        let open = |b: &[u8]| Ok(b.to_vec());
+        assert_eq!(read_fallback_entry("a", None, open), Ok(None));
+        assert_eq!(
+            read_fallback_entry("a", Some(encode(b"secret")), open),
+            Ok(Some("secret".to_string()))
+        );
+        assert!(read_fallback_entry("a", Some(Value::String("%%".into())), open).is_err());
+        assert!(read_fallback_entry("a", Some(Value::Bool(true)), open).is_err());
+        assert!(read_fallback_entry("a", Some(encode(&[0xff, 0xfe])), open).is_err());
+        assert!(read_fallback_entry("a", Some(encode(b"x")), |_| Err("bad key".into())).is_err());
+    }
+
+    #[test]
+    fn only_a_missing_bus_or_a_confirmed_missing_provider_counts_as_no_os_store() {
+        for name in [
+            "org.freedesktop.DBus.Error.NoServer",
+            "org.freedesktop.DBus.Error.FileNotFound",
+            "org.freedesktop.DBus.Error.NotSupported",
+        ] {
+            assert!(
+                names_missing_store(name, || panic!("no bus needs no check")),
+                "{name}"
+            );
+        }
+        assert!(names_missing_store(
+            "org.freedesktop.DBus.Error.ServiceUnknown",
+            || true
+        ));
+        assert!(
+            !names_missing_store("org.freedesktop.DBus.Error.ServiceUnknown", || false),
+            "a provider that is running or startable by now is a store"
+        );
+        for name in [
+            "org.freedesktop.DBus.Error.NameHasNoOwner",
+            "org.freedesktop.DBus.Error.Spawn.ChildExited",
+            "org.freedesktop.DBus.Error.Spawn.ExecFailed",
+            "org.freedesktop.DBus.Error.NoReply",
+            "org.freedesktop.DBus.Error.Timeout",
+            "org.freedesktop.DBus.Error.AccessDenied",
+            "org.freedesktop.Secret.Error.IsLocked",
+        ] {
+            assert!(!names_missing_store(name, || true), "{name}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_wrapped_bus_error_is_found_in_the_source_chain() {
+        // keyring wraps dbus-secret-service's error, whose source is the bus
+        // error; the chain is walked to find it.
+        #[derive(Debug)]
+        struct Wrapper(dbus::Error);
+        impl std::fmt::Display for Wrapper {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "DBus error: {}", self.0)
+            }
+        }
+        impl std::error::Error for Wrapper {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+        let wrap = |name: &str| {
+            keyring::Error::PlatformFailure(Box::new(Wrapper(dbus::Error::new_custom(
+                name, "test",
+            ))))
+        };
+        assert!(no_os_store(&wrap("org.freedesktop.DBus.Error.NoServer")));
+        assert!(!no_os_store(&wrap("org.freedesktop.DBus.Error.NoReply")));
+        assert!(!no_os_store(&keyring::Error::NoStorageAccess(Box::new(
+            Wrapper(dbus::Error::new_custom(
+                "org.freedesktop.DBus.Error.ServiceUnknown",
+                "test"
+            ))
+        ))));
     }
 
     // -- set_with: finding "a failed keyring write must not leave a stale entry" --

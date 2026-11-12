@@ -12,6 +12,7 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { idMentionsToNames } from "@lib/text/mentionNames";
 import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { showToast } from "@lib/ui/toast";
 import { channelsStore } from "@stores/channels.store";
@@ -291,7 +292,7 @@ export function openForwardPicker(opts: ForwardPickerOptions): void {
     closeBtn,
   );
 
-  const preview = source.content.trim().slice(0, PREVIEW_CHARS);
+  const preview = idMentionsToNames(source.content).trim().slice(0, PREVIEW_CHARS);
   const body = createElement("div", { class: "modal-body" });
   appendChildren(
     body,

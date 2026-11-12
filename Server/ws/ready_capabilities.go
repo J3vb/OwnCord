@@ -14,6 +14,7 @@ type readyCapabilitiesPayload struct {
 	DMPrivacy                 bool  `json:"dm_privacy"`
 	Forums                    bool  `json:"forums"`             // forum_post_create and a forum's posts
 	GameActivity              bool  `json:"game_activity"`      // activity_update, presence.activity and ready.activities; false while an admin has it off
+	IDMentions                bool  `json:"id_mentions"`        // <@id> and <@&id> tokens in content resolve to a user or a role
 	ListeningActivity         bool  `json:"listening_activity"` // listening_update, presence.listening and ready.listening; follows the same switch as game_activity
 	ManageNicknames           bool  `json:"manage_nicknames"`   // PUT /api/v1/moderation/users/{id}/nickname
 	MessageDeduplication      bool  `json:"message_deduplication"`
@@ -36,6 +37,7 @@ func readyCapabilities(retryFloorMS int64, threads, forums, gameActivity bool) r
 		DMPrivacy:                 true,
 		Forums:                    forums,
 		GameActivity:              gameActivity,
+		IDMentions:                true,
 		ListeningActivity:         gameActivity,
 		ManageNicknames:           true,
 		MessageDeduplication:      true,

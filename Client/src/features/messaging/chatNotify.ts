@@ -7,6 +7,7 @@ import { notifyIncomingMessage } from "../../lib/notifications";
 import { mentionsCurrentUser } from "../../lib/text/mentions";
 import { loadedThreadsStore } from "../../stores/threadsLoader";
 import { noteAwayUnread } from "@lib/readState";
+import "./mentionNameLookups";
 import type { Payload, ReconnectClock } from "../connection/dispatchContext";
 
 /**
