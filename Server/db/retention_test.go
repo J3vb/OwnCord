@@ -217,6 +217,9 @@ func TestSweepRetention_RemovesOnlyPastWindowUnpinned(t *testing.T) {
 	if n, err := database.CountRetentionCandidates(ctx, ch, cutoff); err != nil || n != 2 {
 		t.Fatalf("candidates = %d, %v; want 2 (the two past the window; pinned and at-boundary stay)", n, err)
 	}
+	if has, err := database.HasRetentionCandidates(ctx, ch, cutoff); err != nil || !has {
+		t.Fatalf("HasRetentionCandidates before the sweep = %v, %v; want true", has, err)
+	}
 
 	// Bounded: one per call, then the rest.
 	ids, files, err := database.SweepRetention(ctx, ch, cutoff, 1)
@@ -229,6 +232,9 @@ func TestSweepRetention_RemovesOnlyPastWindowUnpinned(t *testing.T) {
 	}
 	if ids, _, err := database.SweepRetention(ctx, ch, cutoff, 100); err != nil || len(ids) != 0 {
 		t.Fatalf("third sweep = %v, %v; want none", ids, err)
+	}
+	if has, err := database.HasRetentionCandidates(ctx, ch, cutoff); err != nil || has {
+		t.Fatalf("HasRetentionCandidates after the sweep = %v, %v; want false", has, err)
 	}
 
 	left := map[int64]bool{}
