@@ -481,3 +481,17 @@ func TestNoteIfThread_IgnoresOrdinaryChannelsAndBareHubs(t *testing.T) {
 		t.Errorf("a stopped feed accepted a change: %d timers", n)
 	}
 }
+
+func TestHandleThreadUpdate_NoopAnnouncesNothing(t *testing.T) {
+	e := newThreadHandlerEnv(t)
+	ctx := context.Background()
+	cur, err := e.svc.Threads.Get(ctx, e.thread)
+	if err != nil || cur == nil {
+		t.Fatalf("get: %v", err)
+	}
+	owner := ClientInfo{UserID: e.owner, ReqID: "n1"}
+	res := handleThreadUpdateV2(ctx, ThreadUpdateCmd{userID: e.owner, ThreadID: e.thread, Name: &cur.Name}, owner, e.deps)
+	if res.Error != nil || len(res.Reply) == 0 || len(res.Events) != 0 {
+		t.Fatalf("no-op = %+v, want an ack and no events", res)
+	}
+}

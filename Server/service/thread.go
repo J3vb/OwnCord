@@ -24,6 +24,9 @@ const (
 
 	threadCreateLimit  = 5
 	threadCreateWindow = 10 * time.Minute
+	// threadUpdateLimit per threadUpdateWindow is one user's thread_update budget, shared by all their sockets.
+	threadUpdateLimit  = 5
+	threadUpdateWindow = time.Second
 	// ThreadListMaxLimit and ThreadListDefaultLimit bound one page of the thread list.
 	ThreadListMaxLimit     = 100
 	ThreadListDefaultLimit = 50
@@ -266,40 +269,53 @@ func (s *ThreadService) threadActor(ctx context.Context, ts ThreadStore, userID,
 // Update renames, archives, unarchives, locks or retimes a thread. The owner may rename, archive, unarchive
 // and change the period; a moderator may also lock. A locked thread belongs to moderators alone.
 func (s *ThreadService) Update(ctx context.Context, p UpdateThreadParams) (*db.ThreadInfo, error) {
+	out, _, err := s.UpdateChanged(ctx, p)
+	return out, err
+}
+
+// UpdateChanged is Update plus whether the thread actually changed: a patch that sets every field to its
+// current value writes nothing and reports false, so the caller announces nothing.
+func (s *ThreadService) UpdateChanged(ctx context.Context, p UpdateThreadParams) (out *db.ThreadInfo, changed bool, err error) {
 	ts, err := s.store()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if p.Name == nil && p.Archived == nil && p.Locked == nil && p.AutoArchiveMinutes == nil && p.TagIDs == nil {
-		return nil, fmt.Errorf("%w: nothing to update", ErrBadRequest)
+		return nil, false, fmt.Errorf("%w: nothing to update", ErrBadRequest)
 	}
 	patch, err := cleanThreadPatch(p)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if s.limiter != nil && !s.limiter.Allow(auth.Key("thread_update", p.UserID), threadUpdateLimit, threadUpdateWindow) {
+		return nil, false, ErrRateLimited
 	}
 	cur, isOwner, isMod, err := s.threadActor(ctx, ts, p.UserID, p.ThreadID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	switch {
 	case !isOwner && !isMod:
-		return nil, fmt.Errorf("%w: only the thread's creator or a moderator can change it", ErrForbidden)
+		return nil, false, fmt.Errorf("%w: only the thread's creator or a moderator can change it", ErrForbidden)
 	case p.Locked != nil && !isMod:
-		return nil, fmt.Errorf("%w: only a moderator can lock a thread", ErrForbidden)
+		return nil, false, fmt.Errorf("%w: only a moderator can lock a thread", ErrForbidden)
 	case cur.Locked && !isMod:
-		return nil, denial(permissions.ErrThreadLocked)
+		return nil, false, denial(permissions.ErrThreadLocked)
 	}
 	if patch.TagIDs, err = s.postTagsPatch(ctx, cur, p.TagIDs); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	out, err := ts.UpdateThread(ctx, p.ThreadID, patch, isMod)
+	if threadPatchIsNoop(cur, patch) {
+		return cur, false, nil
+	}
+	out, err = ts.UpdateThread(ctx, p.ThreadID, patch, isMod)
 	if err != nil {
-		return nil, mapThreadErr(err)
+		return nil, false, mapThreadErr(err)
 	}
 	if patch.AutoArchiveMinutes != nil && s.archiveWake != nil {
 		s.archiveWake()
 	}
-	return out, nil
+	return out, true, nil
 }
 
 func (s *ThreadService) postTags(ctx context.Context, cur *db.ThreadInfo, ids []int64) ([]int64, error) {

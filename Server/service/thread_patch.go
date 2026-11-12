@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -38,4 +39,26 @@ func (s *ThreadService) postTagsPatch(ctx context.Context, cur *db.ThreadInfo, i
 		return nil, err
 	}
 	return &ids, nil
+}
+
+// threadPatchIsNoop reports whether applying patch to cur would change nothing. Tags compare as sets.
+func threadPatchIsNoop(cur *db.ThreadInfo, patch db.ThreadPatch) bool {
+	switch {
+	case patch.Name != nil && *patch.Name != cur.Name,
+		patch.Archived != nil && *patch.Archived != cur.Archived,
+		patch.Locked != nil && *patch.Locked != cur.Locked,
+		patch.AutoArchiveMinutes != nil && *patch.AutoArchiveMinutes != cur.AutoArchiveMinutes:
+		return false
+	}
+	if patch.TagIDs == nil {
+		return true
+	}
+	if cur.Post == nil {
+		return false
+	}
+	have := slices.Clone(cur.Post.TagIDs)
+	want := slices.Clone(*patch.TagIDs)
+	slices.Sort(have)
+	slices.Sort(want)
+	return slices.Equal(slices.Compact(have), slices.Compact(want))
 }
