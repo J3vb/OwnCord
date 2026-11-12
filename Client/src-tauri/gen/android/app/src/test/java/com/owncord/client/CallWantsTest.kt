@@ -72,4 +72,40 @@ class CallWantsTest {
     assertEquals(CallWants.Service.START, next.service)
     assertTrue(next.screenOn)
   }
+
+  private val open = CallFace(CallFace.LIVE, "In a call", "Mute", "Leave")
+  private val muted = CallFace(CallFace.MUTED, "In a call, muted", "Unmute", "Leave")
+
+  @Test
+  fun aMuteWritesTheNotificationAgainAndLeavesARunningServiceAlone() {
+    wants.take(active = true, camera = false, videoOnScreen = false, running = false, face = open)
+    val mute = wants.take(active = true, camera = false, videoOnScreen = false, running = true, face = muted)
+    assertEquals(CallWants.Service.KEEP, mute.service)
+    assertTrue(mute.renotify)
+    assertEquals(muted, wants.face)
+
+    // The same words again are nothing new.
+    val same = wants.take(active = true, camera = false, videoOnScreen = true, running = true, face = muted)
+    assertFalse(same.renotify)
+  }
+
+  @Test
+  fun aServiceThatStartsReadsItsWordsAsItStarts() {
+    val join = wants.take(active = true, camera = false, videoOnScreen = false, running = false, face = open)
+    assertEquals(CallWants.Service.START, join.service)
+    assertFalse(join.renotify)
+
+    // Muted in the same breath as the camera went on: the start carries both.
+    val both = wants.take(active = true, camera = true, videoOnScreen = false, running = true, face = muted)
+    assertEquals(CallWants.Service.START, both.service)
+    assertFalse(both.renotify)
+  }
+
+  @Test
+  fun aCallThatEndsWritesNothing() {
+    wants.take(active = true, camera = false, videoOnScreen = false, running = false, face = open)
+    val leave = wants.take(active = false, camera = false, videoOnScreen = false, running = true, face = CallFace.PLAIN)
+    assertEquals(CallWants.Service.STOP, leave.service)
+    assertFalse(leave.renotify)
+  }
 }

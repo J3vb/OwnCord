@@ -132,8 +132,10 @@ export function messagesCallAlertsMock() {
   return {
     alertIncomingCall: vi.fn(),
     alertMissedCall: vi.fn(),
+    alertRedial: vi.fn(),
     alertSupersededCall: vi.fn(),
     clearIncomingCall: vi.fn(),
+    isHostRing: vi.fn(() => false),
   };
 }
 

@@ -423,6 +423,7 @@ export const shards = {
   "lib-rest-9": [
     "src/features/channels/channelRow.view.ts",
     "src/features/direct-messages/callAlerts.ts",
+    "src/features/direct-messages/callNotificationActions.ts",
     "src/features/forums/NewPostDialog.ts",
     "src/features/messaging/forwardRequests.ts",
     "src/features/messaging/importedAuthor.ts",

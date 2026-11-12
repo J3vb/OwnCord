@@ -6,18 +6,61 @@
  *
  * Clicking either notification opens the DM through the same target path a
  * message notification uses, so a call from another server is dropped there.
+ *
+ * The Android app's notification of a ringing call rings by itself, with the
+ * phone's ringtone, and has Accept and Decline (`Notifier.ringsCalls`). There
+ * this module says for every ring who sounds it: the host, when it was asked
+ * to show the ring, or the app's own chime, when it was not or would not.
  */
 import { loadPref } from "../../lib/prefs/preferences";
 import { loadUserStatus } from "../../lib/presence/userStatus";
 import { getChannelMutesHost } from "../../lib/prefs/channelMutes";
+import { ringSoundOn, setHostRinging } from "../../lib/media/notificationSound";
 import { showToast } from "../../lib/ui/toast";
 import { createLogger } from "../../lib/logger";
 import type { RingState } from "../../lib/voice/callRing";
 import { desktop } from "../../platform/desktop";
+import type { NotificationTarget } from "../../platform/contracts/notifications";
 import { dmCallText } from "../../i18n/dmCall";
 import { dmStore, dmDisplayName } from "../../stores/dm.store";
 
 const log = createLogger("call-alerts");
+
+/** The ring the host was asked to show and ring for. Its identity is the
+ *  attempt: an answer that comes back for an earlier one changes nothing. */
+let hostRing: { readonly channelId: number } | null = null;
+
+/** What the host was last asked to ring for. It stays after that ring ended,
+ *  because a press on its notification can still be on its way, and it names
+ *  the server that rang, so the press counts on no other. */
+let lastHostRing: NotificationTarget | null = null;
+
+/** DND and the notification toggle each promise no OS popup. */
+function popupsOn(): boolean {
+  return loadUserStatus() !== "dnd" && loadPref<boolean>("desktopNotifications", true);
+}
+
+/** The app is on screen and has the user's eye, so its own ring is in view.
+ *  A phone that sleeps or shows another app reports at least one of the two. */
+function inFront(): boolean {
+  return document.hasFocus() && document.visibilityState === "visible";
+}
+
+/** The server the client is signed into now, as a notification target names it. */
+const signedInHost = (): string => getChannelMutesHost() ?? "";
+
+function showCall(
+  title: string,
+  ring: RingState,
+  ringing: boolean,
+  quiet?: boolean,
+): Promise<void> {
+  const target = { host: signedInHost(), channelId: ring.channelId };
+  const body = dmCallText("voiceCall");
+  return quiet === undefined
+    ? desktop.notifier.showCall(title, body, target, ringing)
+    : desktop.notifier.showCall(title, body, target, ringing, quiet);
+}
 
 /**
  * The OS popup for `ring`. DND promises no desktop notifications,
@@ -25,17 +68,35 @@ const log = createLogger("call-alerts");
  * case gets one; the banner or the in-app notice still does.
  */
 function popup(title: string, ring: RingState, ringing: boolean): void {
-  if (loadUserStatus() === "dnd" || !loadPref<boolean>("desktopNotifications", true)) return;
-  if (document.hasFocus()) return;
-  desktop.notifier
-    .showCall(
-      title,
-      dmCallText("voiceCall"),
-      { host: getChannelMutesHost() ?? "", channelId: ring.channelId },
-      ringing,
-    )
-    .catch((err: unknown) => log.debug("Call notification not available", err));
+  if (!popupsOn() || document.hasFocus()) return;
+  showCall(title, ring, ringing).catch((err: unknown) =>
+    log.debug("Call notification not available", err),
+  );
 }
+
+/**
+ * Ask a host that rings by itself to show `ring`, or to show it again so its
+ * time starts over. Until it refuses, the host sounds this ring and the app's
+ * chime stays quiet; with the ring sound off in the app the host shows it
+ * without a sound.
+ */
+function ringOnHost(title: string, ring: RingState): void {
+  const mine = { channelId: ring.channelId };
+  hostRing = mine;
+  lastHostRing = { host: signedInHost(), channelId: ring.channelId };
+  setHostRinging(true);
+  showCall(title, ring, true, !ringSoundOn()).catch((err: unknown) => {
+    log.debug("Call notification not available", err);
+    // A refusal that comes back after this ring ended, or after it was shown
+    // again, is not this ring's any more.
+    if (hostRing !== mine) return;
+    hostRing = null;
+    setHostRinging(false);
+  });
+}
+
+const ringTitle = (ring: RingState): string =>
+  dmCallText("notifyIncoming", { name: ring.fromUsername });
 
 /**
  * A new ring: one OS notification and one attention request. The acceptance
@@ -44,7 +105,9 @@ function popup(title: string, ring: RingState, ringing: boolean): void {
  * the ringtone.
  */
 export function alertIncomingCall(ring: RingState): void {
-  popup(dmCallText("notifyIncoming", { name: ring.fromUsername }), ring, true);
+  if (desktop.notifier.ringsCalls !== true) popup(ringTitle(ring), ring, true);
+  else if (popupsOn() && !inFront()) ringOnHost(ringTitle(ring), ring);
+  else setHostRinging(false);
   // Flashes until the window is focused. A ringing call is urgent, so unlike a
   // message's flash it stays under DND: in the tray it is the only signal left.
   if (document.hasFocus() || !loadPref<boolean>("flashTaskbar", true)) return;
@@ -75,9 +138,30 @@ export function alertSupersededCall(ring: RingState): void {
   );
 }
 
+/**
+ * The ring on screen was rung again, so its 30s started over. A notification
+ * the host takes down by itself after a set time is shown again, or it would
+ * go while the call still rings.
+ */
+export function alertRedial(ring: RingState): void {
+  if (hostRing?.channelId === ring.channelId) ringOnHost(ringTitle(ring), ring);
+}
+
+/**
+ * Whether the host's ring notification for `channelId` is this page's: the
+ * ring it last asked the host to show, for the server now signed in. True
+ * after that ring ended too. A press on any other one (a ring an earlier
+ * session left on screen) is not this page's to act on.
+ */
+export function isHostRing(channelId: number): boolean {
+  return lastHostRing?.channelId === channelId && lastHostRing.host === signedInHost();
+}
+
 /** The ring ended, however it ended: withdraw its notification, which would
  *  otherwise sit in the notification centre offering a call that is over. */
 export function clearIncomingCall(ring: RingState): void {
+  if (hostRing?.channelId === ring.channelId) hostRing = null;
+  if (desktop.notifier.ringsCalls === true) setHostRinging(null);
   desktop.notifier
     .clearCall(ring.channelId)
     .catch((err: unknown) => log.debug("Call notification not withdrawn", err));

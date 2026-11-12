@@ -1,44 +1,46 @@
 // The Android app's notifier. The desktop host's own command
 // (`notify_message`) is not built for Android; `src-tauri/src/android_notifications.rs`
-// shows notifications through tauri-plugin-notification's mobile side, on two
-// channels Android lists under the app's settings, and a tap opens what the
+// shows notifications through tauri-plugin-notification's mobile side, on a
+// channel Android lists under the app's settings, and a tap opens what the
 // notification was for.
 //
 // The plugin reports that a notification was tapped but not which one, so
 // `NotificationTapPlugin.kt` keeps the tapped notification's id and
 // `take_notification_tap` hands it over; the target is looked up here.
 //
+// A call that rings is not one of these: it is the call service's own
+// notification (`./callServiceHost.ts`, `CallRing.kt`), with Accept and
+// Decline, which rings with the phone's ringtone. Its buttons and its tap
+// come back through `callService.onAction`.
+//
 // A phone has no taskbar to flash and draws its own launcher badge from the
 // notifications, so those members do nothing.
 import { createLogger } from "@lib/logger";
 import { connectText } from "../../i18n/connect";
+import { clearRing, showRing } from "./callServiceHost";
 import { invokeOrThrow, tryInvoke } from "./nativeInvoke";
 import type { Notifier, NotificationTarget } from "../contracts/notifications";
 
 const log = createLogger("notifications");
 
-/** Messages and mentions: a banner over the app and a sound (Android's "high"). */
-const MESSAGES_CHANNEL = "messages";
-/** A DM call ringing while the app is open but not in front. */
-const INCOMING_CALLS_CHANNEL = "incoming-calls";
-
 // The id of the call service's own "in a call" notification (CallService.kt);
 // a message must never replace it.
 const CALL_SERVICE_NOTIFICATION_ID = 4101;
 
-interface Shown {
-  readonly target: NotificationTarget | null;
-  readonly kind: "message" | "call" | "ring";
-}
+/** How long Android keeps a ringing call's notification up when nothing takes
+ *  it down: a little longer than a ring lasts (`RING_TIMEOUT_MS`), so it never
+ *  outlasts a page that is gone. Showing it again starts the time over. */
+const RING_NOTIFICATION_MS = 35_000;
 
 // Notifications asked for and not yet confirmed by the host, by id: a
 // withdrawal waits for them, so its removal never reaches Android before the
 // notification it removes.
 const showing = new Map<number, Promise<unknown>>();
 
-// Notifications this process showed and Android may still display, by id.
-// Lost when the process dies; a tap on an older one then just opens the app.
-const shown = new Map<number, Shown>();
+// What a tap opens for each notification this process showed and Android may
+// still display, by id (null: just the app). Lost when the process dies; a
+// tap on an older one then just opens the app.
+const shown = new Map<number, NotificationTarget | null>();
 
 let nextId = 1_000_000 + Math.floor(Math.random() * 1_000_000_000);
 
@@ -50,15 +52,13 @@ function takeId(): number {
 
 let channelsReady: Promise<void> | null = null;
 
-/** Create the two channels once per process; a failure is retried at the
- *  next notification. */
+/** Create the channel once per process; a failure is retried at the next
+ *  notification. */
 function ensureChannels(): Promise<void> {
   channelsReady ??= invokeOrThrow<void>("android_notification_channels", {
     names: {
       messages: connectText("notifications.androidChannel.messages"),
       messagesDescription: connectText("notifications.androidChannel.messagesDesc"),
-      calls: connectText("notifications.androidChannel.calls"),
-      callsDescription: connectText("notifications.androidChannel.callsDesc"),
     },
   }).catch((err: unknown) => {
     channelsReady = null;
@@ -73,20 +73,18 @@ function groupOf(target: NotificationTarget | null): string | undefined {
 }
 
 async function present(
-  channelId: string,
   title: string,
   body: string,
-  entry: Shown,
+  target: NotificationTarget | null,
 ): Promise<void> {
   await ensureChannels();
   const id = takeId();
-  shown.set(id, entry);
+  shown.set(id, target);
   const shownNow = invokeOrThrow("android_notify", {
     id,
-    channel: channelId,
     title,
     body,
-    group: groupOf(entry.target) ?? null,
+    group: groupOf(target) ?? null,
   });
   showing.set(id, shownNow);
   try {
@@ -99,14 +97,14 @@ async function present(
   }
 }
 
-/** Remove the notifications `matches` picks from the shade. */
-async function withdraw(matches: (entry: Shown) => boolean): Promise<void> {
-  const ids: number[] = [];
-  for (const [id, entry] of shown) {
-    if (matches(entry)) ids.push(id);
-  }
-  if (ids.length === 0) return;
-  const removed = ids.map((id) => [id, shown.get(id)!] as const);
+/** Remove the notifications shown for `channelId` from the shade, or every
+ *  one when no id is given. */
+async function withdraw(channelId?: number): Promise<void> {
+  const removed = [...shown].filter(
+    ([, target]) => channelId === undefined || target?.channelId === channelId,
+  );
+  if (removed.length === 0) return;
+  const ids = removed.map(([id]) => id);
   for (const id of ids) shown.delete(id);
   const pending = ids.flatMap((id) => {
     const notify = showing.get(id);
@@ -117,7 +115,7 @@ async function withdraw(matches: (entry: Shown) => boolean): Promise<void> {
     await invokeOrThrow("android_clear_notifications", { ids });
   } catch (err) {
     // Still on screen: keep them, so a later read or tap still finds them.
-    for (const [id, entry] of removed) shown.set(id, entry);
+    for (const [id, target] of removed) shown.set(id, target);
     throw err;
   }
 }
@@ -130,15 +128,16 @@ async function tappedTarget(): Promise<NotificationTarget | null> {
     return null;
   }
   if (result.value === null) return null;
-  const entry = shown.get(result.value);
+  const target = shown.get(result.value) ?? null;
   shown.delete(result.value);
-  return entry?.target ?? null;
+  return target;
 }
 
 export const androidNotifier: Notifier = {
   // The plugin's mobile side asks Android, so a block in the system settings
   // shows as one.
   readsOsPermission: true,
+  ringsCalls: true,
   async permissionGranted(): Promise<boolean> {
     const state = await invokeOrThrow<string>("android_notification_permission", { ask: false });
     return state === "granted";
@@ -148,29 +147,28 @@ export const androidNotifier: Notifier = {
     return state === "granted";
   },
   async show(title: string, body: string): Promise<void> {
-    await present(MESSAGES_CHANNEL, title, body, { target: null, kind: "message" });
+    await present(title, body, null);
   },
   async showMessage(title: string, body: string, target: NotificationTarget): Promise<void> {
-    await present(MESSAGES_CHANNEL, title, body, { target, kind: "message" });
+    await present(title, body, target);
   },
-  async showCall(title: string, body: string, target, ringing = false): Promise<void> {
-    const callTarget: NotificationTarget = { host: target.host, channelId: target.channelId };
+  async showCall(title: string, body: string, target, ringing = false, quiet = false) {
     if (ringing) {
-      // One ring per channel: a newer ring replaces one still showing.
-      await withdraw((e) => e.kind === "ring" && e.target?.channelId === target.channelId);
-      await present(INCOMING_CALLS_CHANNEL, title, body, { target: callTarget, kind: "ring" });
-    } else {
-      await present(MESSAGES_CHANNEL, title, body, { target: callTarget, kind: "call" });
+      // One ring at a time, and the same one again starts its time over.
+      await showRing({
+        channelId: target.channelId,
+        title,
+        text: body,
+        quiet,
+        timeoutMs: RING_NOTIFICATION_MS,
+      });
+      return;
     }
+    // A call that was missed: a tap opens its conversation, at no message.
+    await present(title, body, { host: target.host, channelId: target.channelId });
   },
-  async clearCall(channelId: number): Promise<void> {
-    await withdraw((e) => e.kind === "ring" && e.target?.channelId === channelId);
-  },
-  async clearMessages(channelId?: number): Promise<void> {
-    await withdraw(
-      (e) => e.kind !== "ring" && (channelId === undefined || e.target?.channelId === channelId),
-    );
-  },
+  clearCall: (channelId: number): Promise<void> => clearRing(channelId),
+  clearMessages: (channelId?: number): Promise<void> => withdraw(channelId),
   onMessageActivated(handler: (target: NotificationTarget) => void): () => void {
     let active = true;
     let stop: (() => void) | null = null;

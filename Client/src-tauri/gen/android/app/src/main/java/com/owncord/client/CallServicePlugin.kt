@@ -2,22 +2,30 @@ package com.owncord.client
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import android.view.WindowManager
+import android.webkit.WebView
 import androidx.appcompat.app.AppCompatActivity
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
+import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import java.util.UUID
 
 @InvokeArg
 class SetCallArgs {
   var active: Boolean = false
   var camera: Boolean = false
   var videoOnScreen: Boolean = false
+  var mic: String = CallFace.LIVE
+  var text: String = ""
+  var micLabel: String? = null
+  var leaveLabel: String = ""
 }
 
 // What the webview last asked for, and what a new ask changes. Apart from the
@@ -25,27 +33,41 @@ class SetCallArgs {
 class CallWants {
   enum class Service { KEEP, START, STOP }
 
-  class Step(val service: Service, val screenOn: Boolean)
+  class Step(val service: Service, val screenOn: Boolean, val renotify: Boolean)
 
   var active = false
     private set
   var camera = false
+    private set
+  var face = CallFace.PLAIN
     private set
 
   // The service is started (again) for what it has to know: a call, its
   // camera, or a start that did not take. A picture coming on screen or
   // leaving it changes the screen only, and a running service is left alone:
   // a restart goes through Android's foreground-service rules once more.
-  fun take(active: Boolean, camera: Boolean, videoOnScreen: Boolean, running: Boolean): Step {
+  //
+  // New words or buttons for the notification (the microphone was muted) are
+  // not a reason to start it again either: a service left running writes its
+  // notification again, and one that starts reads them as it starts.
+  fun take(
+    active: Boolean,
+    camera: Boolean,
+    videoOnScreen: Boolean,
+    running: Boolean,
+    face: CallFace = this.face,
+  ): Step {
     val changed = active != this.active || camera != this.camera
+    val newFace = face != this.face
     this.active = active
     this.camera = camera
+    this.face = face
     val service = when {
       active && (changed || !running) -> Service.START
       !active && changed -> Service.STOP
       else -> Service.KEEP
     }
-    return Step(service, active && videoOnScreen)
+    return Step(service, active && videoOnScreen, active && newFace && service == Service.KEEP)
   }
 }
 
@@ -59,10 +81,16 @@ class CallWants {
 // from the permission dialog (onResume), still in front.
 //
 // It also keeps the screen on while the call shows a camera or a stream.
+//
+// And it is where the call notifications' buttons come in: the service's own
+// (Mute, Unmute, Leave) and the incoming call's (CallRing: Accept, Decline, a
+// tap on it). Each reaches the webview as an `action` event, and the webview
+// acts on it: this side only shows and takes down, and holds no call.
 @TauriPlugin
 class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
   private var askedForCallPermissions = false
   private val wants = CallWants()
+  private val buttons = CallButtons { UUID.randomUUID().toString() }
   private var started = false
   private var startedWithCamera = false
   private var screenKeptOn = false
@@ -72,11 +100,77 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
   // take in place, and this plugin stays.
   private var shownIn: Activity = activity
 
+  override fun load(webView: WebView) {
+    super.load(webView)
+    CallActionReceiver.sink = { intent -> pressed(intent, throughActivity = false) }
+  }
+
+  // Accept, and a tap on the ring, open the app and arrive here.
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    pressed(intent, throughActivity = true)
+  }
+
+  private fun pressed(intent: Intent, throughActivity: Boolean) {
+    val channelId =
+      if (intent.hasExtra(CallActions.EXTRA_CHANNEL)) intent.getLongExtra(CallActions.EXTRA_CHANNEL, 0)
+      else null
+    val token = intent.getStringExtra(CallActions.EXTRA_TOKEN)
+    val event = buttons.read(intent.action, channelId, token, throughActivity) ?: return
+    // Declined: it stops ringing at once, whatever the webview is doing. An
+    // accepted ring stays up until the webview has joined or said why not.
+    if (event.kind == CallEvent.DECLINE && event.channelId != null && buttons.ringDown(event.channelId)) {
+      CallRing.cancel(activity.applicationContext)
+    }
+    NativeLog.info(ExitInfo.callButton(event.kind))
+    val payload = JSObject()
+    payload.put("kind", event.kind)
+    if (event.channelId != null) payload.put("channelId", event.channelId)
+    trigger("action", payload)
+  }
+
+  @Command
+  fun showRing(invoke: Invoke) {
+    val args = invoke.parseArgs(ShowRingArgs::class.java)
+    val context = activity.applicationContext
+    val refusal = try {
+      val channel = CallRing.channel(context, args)
+      if (CallRing.shows(context, channel)) {
+        CallRing.post(context, args, channel, buttons.ringUp(args.channelId))
+        null
+      } else {
+        "notifications are off"
+      }
+    } catch (e: Exception) {
+      e.toString()
+    }
+    if (refusal == null) {
+      NativeLog.info(ExitInfo.callRingShown(args.quiet))
+      invoke.resolve()
+      return
+    }
+    // Refused: the webview rings by itself then, as it does with the app in
+    // front, so nothing of this ring may stay up here (it was shown before
+    // and could not be shown again).
+    if (buttons.ringDown(args.channelId)) CallRing.cancel(context)
+    invoke.reject("call ring: $refusal")
+  }
+
+  @Command
+  fun clearRing(invoke: Invoke) {
+    val args = invoke.parseArgs(ClearRingArgs::class.java)
+    if (buttons.ringDown(args.channelId)) CallRing.cancel(activity.applicationContext)
+    invoke.resolve()
+  }
+
   @Command
   fun setCall(invoke: Invoke) {
     val args = invoke.parseArgs(SetCallArgs::class.java)
-    val step = wants.take(args.active, args.camera, args.videoOnScreen, started)
+    val face = CallFace(args.mic, args.text, args.micLabel, args.leaveLabel)
+    val step = wants.take(args.active, args.camera, args.videoOnScreen, started, face)
     keepScreenOn(step.screenOn)
+    CallService.face = face
+    if (step.renotify) CallService.refresh()
     try {
       when (step.service) {
         CallWants.Service.START -> startIfAllowed(force = true)

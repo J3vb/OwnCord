@@ -59,19 +59,42 @@ let ringInterval: ReturnType<typeof setInterval> | null = null;
 /** The chime burst currently sounding, so stopping the chime cuts the
  *  in-flight notes instead of leaving them under the ringback. */
 let ringtoneBurst: Playing | null = null;
+/** A ring is in flight and wants its sound. */
+let chimeWanted = false;
+/** On a host that rings for a call by itself (`Notifier.ringsCalls`: the
+ *  Android app, with the phone's ringtone), whether it does for the ring in
+ *  flight. Null until whoever asks the host has said (`setHostRinging`); the
+ *  chime waits for that word, so the two never sound together and a ring the
+ *  host did not take still rings here. */
+let hostRings: boolean | null = null;
 
-/** Start the repeating incoming-call chime. Idempotent. */
-export function startRingChime(): void {
-  if (ringInterval !== null) return;
+/** Whether a ringing call makes a sound right now. */
+export function ringSoundOn(): boolean {
   // DND silences a call chime for the same reason it silences a message one:
   // the settings panel promises no notification sounds, and a ringing phone is
   // the loudest possible violation of that. The banner still appears.
   // D2(b): the call sound has its own toggle, so muting message sounds does
   // not silence a ringing phone; the ring has its own switch too.
+  return (
+    loadUserStatus() !== "dnd" && loadPref<boolean>("callSounds", true) && soundSwitchOn("ring")
+  );
+}
+
+/** The ring in flight sounds here, not on the host. */
+function chimeIsOurs(): boolean {
+  return desktop.notifier.ringsCalls === true ? hostRings === false : true;
+}
+
+/** Start the repeating incoming-call chime. Idempotent. */
+export function startRingChime(): void {
+  chimeWanted = true;
+  if (chimeIsOurs()) soundRingChime();
+}
+
+function soundRingChime(): void {
+  if (ringInterval !== null) return;
   // A ring that will not sound pre-empts nothing: the outgoing ringback goes on.
-  if (loadUserStatus() === "dnd") return;
-  if (!loadPref<boolean>("callSounds", true)) return;
-  if (!soundSwitchOn("ring")) return;
+  if (!ringSoundOn()) return;
   // A client is either calling or being called; an incoming ring pre-empts the
   // outgoing ringback. The outgoing call keeps wanting its
   // ringback, so it resumes when this chime ends.
@@ -81,19 +104,38 @@ export function startRingChime(): void {
   // phone rings stops the chime (and lets a pre-empted ringback resume).
   ringInterval = setInterval(() => {
     if (soundSwitchOn("ring")) playRingtone();
-    else stopRingChime();
+    else silenceRingChime();
   }, 2000);
 }
 
 /** Stop the repeating incoming-call chime. Idempotent. */
 export function stopRingChime(): void {
+  chimeWanted = false;
+  hostRings = null;
+  silenceRingChime();
+}
+
+/** Cut the chime's sound; the ring in flight, if any, keeps wanting one. */
+function silenceRingChime(): void {
   stopRingtoneBurst();
   if (ringInterval !== null) {
     clearInterval(ringInterval);
     ringInterval = null;
   }
-  // The incoming ring ended: an outgoing ring that was pre-empted resumes.
+  // An outgoing ring this chime pre-empted resumes, unless the host now rings
+  // in its place.
   syncRingback();
+}
+
+/**
+ * The word of whoever asked the host about the ring in flight: the host rings
+ * for it (true), it does not and the chime rings here after all (false), or
+ * that ring is over (null).
+ */
+export function setHostRinging(rings: boolean | null): void {
+  hostRings = rings;
+  if (chimeWanted && chimeIsOurs()) soundRingChime();
+  else silenceRingChime();
 }
 
 /** Cut the chime burst that is sounding right now, if any. */
@@ -145,11 +187,16 @@ function unwatchRingbackInputs(): void {
   ringbackWatch = null;
 }
 
+/** An incoming ring is sounding, here or on the host. */
+function incomingRingSounds(): boolean {
+  return ringInterval !== null || (chimeWanted && hostRings === true && ringSoundOn());
+}
+
 /** (Re)evaluate whether the ringback should be sounding right now. */
 function syncRingback(): void {
   const shouldPlay =
     ringbackWanted &&
-    ringInterval === null &&
+    !incomingRingSounds() &&
     loadUserStatus() !== "dnd" &&
     loadPref<boolean>("callSounds", true) &&
     soundSwitchOn("ringback");

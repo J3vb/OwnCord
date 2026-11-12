@@ -213,6 +213,23 @@ and a call with no video leave the screen to the phone's own timeout, and the
 screen may sleep again as soon as the last picture goes or the call ends. The
 power button turns the screen off as always.
 
+**Call notification buttons in the Android app**
+(`features/voice/backgroundCall.ts`,
+`features/direct-messages/callNotificationActions.ts`, the `callService`
+platform member): the "In a call" notification that keeps a call running in the
+background says how the microphone stands and has two buttons. **Mute** becomes
+**Unmute** while the member is muted, and the notification then reads "In a
+call, muted"; under a moderator's mute it says so and has no microphone button,
+since that mute is not the member's to lift. **Leave** ends the call. The
+notification follows a mute made anywhere (the app, a hotkey, a moderator) as
+the voice store changes. The host only shows the buttons and reports a press;
+the app acts on it through the same code as its own buttons. Mute and Unmute
+name the state they promise, so a press that crosses a change made in the app
+never flips the microphone back. Leave is the one teardown every Leave uses,
+whatever the call is doing (joining, reconnecting). Once no call is left, a
+press that was still on its way does nothing: no second teardown, and no mute
+carried into the next call.
+
 **The voice channel's chat beside the grid** (guild calls): opening the call
 view selects the voice channel you are in (`pages/main-page/callChat.ts`), so
 its chat mounts as for any channel, and the grid sits left of it with the chat
@@ -573,6 +590,35 @@ call):
 | Decline                    | `call_decline` sent → the ringer's panel says "declined" in a 1:1, and in a group that callee drops off the ringing list. Another callee's ring stops when its own ringer declines (`call_declined`) or when a `voice_leave` for that channel leaves the room empty, whoever left; the ringer leaving while others stay in does not stop it. A caller who is not looking at that DM (another channel, settings or another view) gets one toast instead: "<name> declined"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Timeout / caller leaves    | Timeout: the callee's ring clears with a "Missed call from _X_" toast (plus an OS notification when the window is not focused; the ringer hanging up before the timeout is reported the same way, but an accept, decline or newer call is not a miss), and the caller's panel says "didn't answer", draws only the caller's own tile, and stays in the call with Ring again / Leave call; a caller who is not looking at the DM gets a "No answer" toast. Caller leaves: the call simply ends, the caller's outgoing ring clears, and the callees' rings clear once the room is empty, with the same "Missed call" notice. In a 1:1, when the other person hangs up and you are left alone, the connected panel's status reads "<name> left the call" with Ring again                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
+**An incoming call in the Android app** (`features/direct-messages/callAlerts.ts`,
+the `Notifier`'s `ringsCalls`, `CallRing.kt`): a ring that arrives while the
+app is out of sight (another app in front, or the screen off) is shown by the
+phone, as an incoming-call notification with Accept and Decline over whatever
+is on screen and on the lock screen. It rings with the phone's own ringtone, so
+the phone's ring volume, silent mode and Do Not Disturb apply, and the app's
+chime stays quiet for that ring. With the app in front the ring is the app's
+own, as on a desktop, and the phone shows nothing. Each ring has one voice: if
+Android will not show the notification (notifications are off for the app or
+for that channel), the app rings by itself after all. With the ring sound off
+in the app (the Incoming Call Sound toggle or the ring's own switch) the
+notification goes on a second channel that makes no sound. Under OwnCord's own
+Do Not Disturb there is no notification and no ring, as on a desktop. All of it
+needs a page that runs: Android freezes a background app that has no call after
+a while (how long differs per phone and Android version), and a frozen app
+hears no ring until it is opened again.
+
+Accept opens the app, after the unlock on a locked phone, and answers the ring.
+Decline declines without opening the app. A tap on the notification opens the
+conversation with the ring still to answer. The notification goes when the ring
+ends, however it ends, and Android takes it down by itself a few seconds after
+a ring's 30 if the app is gone. A press that lands after the ring ended (Accept
+as the caller hangs up) opens the conversation and joins nothing; a press on a
+ring this page did not put there, or one from another server, does nothing. A
+ring rung again is shown again, so its time starts over. A missed call leaves
+an ordinary notification whose tap opens the conversation. A ring that started
+with the app in front is not handed to the phone when the member leaves the app
+while it rings.
+
 Call is on the DM chat header and in another member's profile popup. The
 popup's Call opens the 1:1 DM with that member (creating it if needed) and then
 starts the call there through the same `startCall` (`onCallUser` in
@@ -643,5 +689,6 @@ and the E2EE verification badge), `src/features/voice/videoGrid/VideoGrid.ts`,
 `src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,
 `src-tauri/src/mobile_audio.rs` and `MobileAudioPlugin.kt` (the Android app's call audio),
 `src-tauri/src/call_service.rs` and `CallServicePlugin.kt` (the Android app's call service and screen-on),
+`CallButtons.kt`, `CallActionReceiver.kt` and `CallRing.kt` (its call notifications' buttons and the incoming call's notification),
 `src/lib/net/e2eeCrypto.ts`, `src/lib/net/identity.ts`; and the structural map in
 [../voice-e2ee.md](../voice-e2ee.md).

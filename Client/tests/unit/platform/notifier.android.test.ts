@@ -1,18 +1,31 @@
 // Android binding for the Notifier suite: `platform/desktop`'s Android
 // notifier, over the host's `android_*` notification commands and the tap
-// command of NotificationTapPlugin.kt. A phone has no window to flash and
-// draws its own launcher badge, so those suite tests are skipped and pinned
-// as no-ops below.
+// command of NotificationTapPlugin.kt. A call that rings is the call
+// service's own notification (`show_call_ring`, `clear_call_ring`). A phone
+// has no window to flash and draws its own launcher badge, so those suite
+// tests are skipped and pinned as no-ops below.
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { RING_TIMEOUT_MS } from "../../../src/lib/voice/callRing";
 import type { Notifier, NotificationTarget } from "../../../src/platform/contracts/notifications";
 import { describeNotifierSuite } from "./notifier.suite";
 
 interface NotifyArgs {
   id: number;
-  channel: string;
   title: string;
   body: string;
   group: string | null;
+}
+/** The ringing call's notification, as `show_call_ring` takes it. */
+interface RingArgs {
+  channelId: number;
+  title: string;
+  text: string;
+  acceptLabel: string;
+  declineLabel: string;
+  channelName: string;
+  channelDescription: string;
+  quiet: boolean;
+  timeoutMs: number;
 }
 type ActionHandler = (event: { actionId: string }) => void;
 
@@ -27,6 +40,8 @@ const native = vi.hoisted(() => ({
   requests: 0,
   failClear: false,
   notifyGate: Promise.resolve() as Promise<void>,
+  refuseRing: false,
+  ringGate: Promise.resolve() as Promise<void>,
 }));
 
 const invoke = vi.hoisted(() =>
@@ -43,6 +58,10 @@ const invoke = vi.hoisted(() =>
         return undefined;
       case "android_clear_notifications":
         if (native.failClear) throw new Error("clear refused");
+        return undefined;
+      case "show_call_ring":
+        await native.ringGate;
+        if (native.refuseRing) throw new Error("call ring: notifications are off");
         return undefined;
       case "take_notification_tap": {
         const id = native.tapped;
@@ -79,6 +98,10 @@ const notified = (): NotifyArgs[] =>
   calls("android_notify").map((args) => args as unknown as NotifyArgs);
 const removed = (): number[] =>
   calls("android_clear_notifications").flatMap((args) => (args as { ids: number[] }).ids);
+const rung = (): RingArgs[] =>
+  calls("show_call_ring").map((args) => (args as { ring: RingArgs }).ring);
+const ringsTakenDown = (): number[] =>
+  calls("clear_call_ring").map((args) => (args as { channelId: number }).channelId);
 const flush = async (): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -105,6 +128,8 @@ async function freshNotifier(): Promise<Notifier> {
     requests: 0,
     failClear: false,
     notifyGate: Promise.resolve(),
+    refuseRing: false,
+    ringGate: Promise.resolve(),
   });
   native.actionHandlers.clear();
   const mod = await import("../../../src/platform/desktop/androidNotifications");
@@ -124,7 +149,8 @@ describeNotifierSuite(
         await notifier.showMessage(title, body, target);
       },
       async showCall(title, body, target, ringing) {
-        targets.push({ host: target.host, channelId: target.channelId });
+        // A ring is the call service's notification, not one of these.
+        if (ringing !== true) targets.push({ host: target.host, channelId: target.channelId });
         await notifier.showCall(title, body, target, ringing);
       },
     };
@@ -159,14 +185,8 @@ describeNotifierSuite(
         attentionRequests: () => 0,
         urgentAttentionRequests: () => 0,
         badgeCounts: () => [],
-        ringsShown: () =>
-          withTarget()
-            .filter((n) => n.channel === "incoming-calls")
-            .map((n) => n.target.channelId),
-        callsCleared: () => {
-          const byId = new Map(withTarget().map((n) => [n.id, n.target.channelId]));
-          return removed().map((id) => byId.get(id)!);
-        },
+        ringsShown: () => rung().map((ring) => ring.channelId),
+        callsCleared: ringsTakenDown,
       },
     };
   },
@@ -177,6 +197,8 @@ describe("Android notifier", () => {
   let notifier: Notifier;
   const dm: NotificationTarget = { host: "h", channelId: 7, messageId: 42 };
   const other: NotificationTarget = { host: "h", channelId: 9, messageId: 1 };
+  /** A call in `dm`'s conversation: its target names no message. */
+  const call = { host: "h", channelId: 7 };
 
   beforeEach(async () => {
     notifier = await freshNotifier();
@@ -194,7 +216,7 @@ describe("Android notifier", () => {
     expect(native.requests).toBe(1);
   });
 
-  test("creates its two channels once, before the first notification", async () => {
+  test("creates its channel once, before the first notification", async () => {
     await notifier.showMessage("a", "b", dm);
     await notifier.showMessage("c", "d", other);
     expect(calls("android_notification_channels")).toEqual([
@@ -202,8 +224,6 @@ describe("Android notifier", () => {
         names: {
           messages: "Messages",
           messagesDescription: "Direct messages, mentions and channel messages",
-          calls: "Incoming calls",
-          callsDescription: "A direct message call ringing",
         },
       },
     ]);
@@ -213,10 +233,10 @@ describe("Android notifier", () => {
     );
   });
 
-  test("shows a message on the Messages channel, grouped by server", async () => {
+  test("shows a message grouped by server", async () => {
     await notifier.showMessage("Bob", "hi", dm);
     expect(notified()).toEqual([
-      { id: expect.any(Number), channel: "messages", title: "Bob", body: "hi", group: "owncord:h" },
+      { id: expect.any(Number), title: "Bob", body: "hi", group: "owncord:h" },
     ]);
   });
 
@@ -237,31 +257,118 @@ describe("Android notifier", () => {
     expect(ids).not.toContain(4101);
   });
 
-  test("withdraws a channel's messages and nothing else", async () => {
+  test("withdraws a channel's messages and missed calls, and never a ring", async () => {
     await notifier.showMessage("a", "b", dm);
     await notifier.showMessage("c", "d", other);
-    await notifier.showCall("Bob is calling", "Voice call", { host: "h", channelId: 7 }, true);
-    const [first, second, ring] = notified();
+    await notifier.showCall("Missed call from Bob", "Voice call", call);
+    await notifier.showCall("Bob is calling", "Voice call", call, true);
+    const [first, second, missed] = notified();
     await notifier.clearMessages(7);
-    expect(removed()).toEqual([first!.id]);
+    expect(removed()).toEqual([first!.id, missed!.id]);
     await notifier.clearMessages();
-    expect(removed()).toEqual([first!.id, second!.id]);
-    await notifier.clearCall(7);
-    expect(removed()).toEqual([first!.id, second!.id, ring!.id]);
+    expect(removed()).toEqual([first!.id, missed!.id, second!.id]);
+    expect(ringsTakenDown()).toEqual([]);
   });
 
-  test("makes no native call when it has nothing to withdraw", async () => {
+  test("makes no native call when it has no message to withdraw", async () => {
     await notifier.clearMessages(7);
     await notifier.clearMessages();
-    await notifier.clearCall(7);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  test("says that its ringing call rings by itself", () => {
+    expect(notifier.ringsCalls).toBe(true);
+  });
+
+  test("shows a ringing call through the call service, in the app's words", async () => {
+    await notifier.showCall("Bob is calling", "Voice call", call, true);
+    expect(rung()).toEqual([
+      {
+        channelId: 7,
+        title: "Bob is calling",
+        text: "Voice call",
+        acceptLabel: "Accept",
+        declineLabel: "Decline",
+        channelName: "Incoming calls",
+        channelDescription: "A direct message call ringing",
+        quiet: false,
+        timeoutMs: 35_000,
+      },
+    ]);
+    // Not one of the message notifications: no id, no channel of theirs.
+    expect(notified()).toEqual([]);
+    expect(calls("android_notification_channels")).toEqual([]);
+  });
+
+  test("shows a ring without a sound on a channel of its own", async () => {
+    await notifier.showCall("Bob is calling", "Voice call", call, true, true);
+    expect(rung()).toEqual([
+      expect.objectContaining({
+        channelName: "Incoming calls, silent",
+        channelDescription: "Used while the ring sound is off in the app's settings",
+        quiet: true,
+      }),
+    ]);
+  });
+
+  test("keeps a ring up a little longer than a ring lasts", async () => {
+    await notifier.showCall("Bob is calling", "Voice call", call, true);
+    const { timeoutMs } = rung()[0]!;
+    expect(timeoutMs).toBeGreaterThan(RING_TIMEOUT_MS);
+    expect(timeoutMs - RING_TIMEOUT_MS).toBeLessThanOrEqual(10_000);
+  });
+
+  test("shows the same ring again in place, so its time starts over", async () => {
+    await notifier.showCall("Bob is calling", "Voice call", call, true);
+    await notifier.showCall("Bob is calling", "Voice call", call, true);
+    expect(rung().map((ring) => ring.channelId)).toEqual([7, 7]);
+    expect(ringsTakenDown()).toEqual([]);
+  });
+
+  test("takes a ring down by its conversation, the host knowing which one is up", async () => {
+    await notifier.clearCall(9);
+    expect(ringsTakenDown()).toEqual([9]);
     expect(calls("android_clear_notifications")).toEqual([]);
   });
 
-  test("replaces a channel's ring still showing with the newer one", async () => {
-    const target = { host: "h", channelId: 7 };
-    await notifier.showCall("Bob is calling", "Voice call", target, true);
-    await notifier.showCall("Bob is calling", "Voice call", target, true);
-    expect(removed()).toEqual([notified()[0]!.id]);
+  test("rejects a ring Android will not show, and still takes it down after", async () => {
+    native.refuseRing = true;
+    await expect(notifier.showCall("Bob is calling", "Voice call", call, true)).rejects.toThrow(
+      "call ring: notifications are off",
+    );
+    await notifier.clearCall(7);
+    expect(ringsTakenDown()).toEqual([7]);
+  });
+
+  test("takes a ring down only once Android has answered for showing it", async () => {
+    let answer = (): void => {};
+    native.ringGate = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const up = notifier.showCall("Bob is calling", "Voice call", call, true);
+    const down = notifier.clearCall(7);
+    await flush();
+    expect(ringsTakenDown()).toEqual([]);
+    answer();
+    await Promise.all([up, down]);
+    const order = invoke.mock.calls.map(([command]) => command);
+    expect(order).toEqual(["show_call_ring", "clear_call_ring"]);
+  });
+
+  test("leaves a missed call as a notification whose tap opens the conversation", async () => {
+    const handler = vi.fn();
+    notifier.onMessageActivated(handler);
+    await notifier.showCall("Missed call from Bob", "Voice call", call);
+    expect(notified()).toEqual([
+      {
+        id: expect.any(Number),
+        title: "Missed call from Bob",
+        body: "Voice call",
+        group: "owncord:h",
+      },
+    ]);
+    await tap(notified()[0]!.id);
+    expect(handler.mock.calls).toEqual([[call]]);
   });
 
   test("does not track a notification Android refused", async () => {

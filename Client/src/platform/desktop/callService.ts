@@ -9,4 +9,5 @@ const withHost = androidHost("callService", () => import("./callServiceHost"));
 
 export const callService: CallService = {
   update: (state) => withHost((host) => host.update(state)),
+  onAction: (signal, handler) => withHost((host) => host.onAction(signal, handler)),
 };

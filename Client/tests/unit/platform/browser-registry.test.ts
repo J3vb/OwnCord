@@ -177,8 +177,12 @@ describe("browser platform registry", () => {
     expect(await b.mediaDetector.detect({ hidden: [] })).toEqual({ state: "none" });
     expect(() => b.trayStatus.onStatusChange(() => undefined)()).not.toThrow();
     expect(
-      b.callService.update({ active: true, camera: true, videoOnScreen: true }),
+      b.callService.update({ active: true, camera: true, videoOnScreen: true, mic: "live" }),
     ).toBeUndefined();
+    // No call notification in a tab, so no button of one is ever pressed.
+    const onCallAction = vi.fn();
+    expect(b.callService.onAction(new AbortController().signal, onCallAction)).toBeUndefined();
+    expect(onCallAction).not.toHaveBeenCalled();
     // No call audio to follow in a tab: nothing is ever reported.
     const onAudioState = vi.fn();
     expect(b.mobileAudio.watch(new AbortController().signal, onAudioState)).toBeUndefined();
