@@ -14,9 +14,10 @@ import type { GridState, GridApi } from "./gridState";
 
 /** A camera or a stream is drawn: yours or someone else's, in its tile
  *  (not behind Watch stream, not in a closed grid), in the mini-player or
- *  in a pop-out window. */
+ *  in a pop-out window. A stream held while its owner publishes it again
+ *  (a codec switch) is still being watched. */
 function drawsPicture(entry: CellEntry): boolean {
-  if (entry.video.srcObject == null) return false;
+  if (entry.video.srcObject == null && entry.holding === undefined) return false;
   if (entry.popout !== undefined || entry.mini !== undefined) return true;
   return (
     !entry.el.classList.contains("video-cell--stopped") &&

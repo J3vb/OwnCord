@@ -146,6 +146,25 @@ describe("VideoGrid: a picture on screen", () => {
     expect(isVideoOnScreen()).toBe(false);
   });
 
+  it("holds while a watched stream is published again, and lets go if it does not come back", () => {
+    grid.setCallbacks({ isStreamLive: () => true });
+    addOtto();
+    resize({ [OTTO]: SHOWN });
+
+    // A codec switch: no longer received, while its owner still has it on.
+    // The tile waits with no picture, and is measured again meanwhile.
+    addOtto(null);
+    resize({ [OTTO]: SHOWN });
+    expect(isVideoOnScreen()).toBe(true);
+    addOtto();
+    expect(reports.sent).toEqual([true]);
+
+    // The same, and this time nothing comes back within the grace.
+    addOtto(null);
+    vi.advanceTimersByTime(2500);
+    expect(reports.sent).toEqual([true, false]);
+  });
+
   it("lets go when the call's streams are cleared, and when the grid is destroyed", () => {
     addOtto();
     resize({ [OTTO]: SHOWN });

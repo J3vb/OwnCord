@@ -33,8 +33,11 @@ class AwayClock {
     return nextLook(now)
   }
 
-  fun show() {
+  // The app is back in view. Answers whether it had been out of view.
+  fun show(): Boolean {
+    val wasAway = hiddenAt != null
     hiddenAt = null
+    return wasAway
   }
 
   // The page follows a delay; 0 when it stops.
@@ -85,21 +88,31 @@ class IdlePlugin(private val activity: Activity) : Plugin(activity) {
     arm(clock.hide(now()))
   }
 
-  override fun onRestart(activity: AppCompatActivity) {
-    clock.show()
+  // Back in view. Android restarts an activity it had stopped, but one it
+  // built anew (a system setting changed that the app does not take in
+  // place) only resumes, so either counts.
+  override fun onRestart(activity: AppCompatActivity) = shown()
+
+  override fun onResume(activity: AppCompatActivity) = shown()
+
+  // An activity that goes to be built anew leaves this plugin in place, and
+  // its alarm with it.
+  override fun onDestroy(activity: AppCompatActivity) {
+    if (!activity.isChangingConfigurations) arm(null)
+  }
+
+  private fun shown() {
+    if (!clock.show()) return
     arm(null)
     trigger("look", JSObject())
   }
 
-  override fun onDestroy(activity: AppCompatActivity) {
-    arm(null)
-  }
-
   private fun now(): Long = SystemClock.elapsedRealtime()
 
-  // One alarm at most. It is not exact: Android may deliver it late, by up
-  // to three quarters of the wait, which costs no permission and little
-  // battery. A cancelled alarm can still arrive, and is then not `armed`.
+  // One alarm at most. It is not exact, which costs no permission and little
+  // battery: Android may deliver it late, by up to three quarters of the
+  // wait, and holds it back longer while the phone is in deep sleep (Doze).
+  // A cancelled alarm can still arrive, and is then not `armed`.
   private fun arm(at: Long?) {
     armed?.let { alarms.cancel(it) }
     armed = null

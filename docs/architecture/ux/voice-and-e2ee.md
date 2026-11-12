@@ -206,11 +206,12 @@ phone call hold above), and a ringing phone does not.
 call has a live picture on screen, the app keeps the phone from dimming and
 locking. A picture is a camera or a stream, yours or someone else's, drawn in a
 tile of the call view or in the mini-player; the video grid reports it
-(`syncOnScreen` in `features/voice/videoGrid/gridWatch.ts`). A stream still
-behind **Watch stream**, a call view that is closed with no mini-player, and a
-call with no video leave the screen to the phone's own timeout, and the screen
-may sleep again as soon as the last picture goes or the call ends. The power
-button turns the screen off as always.
+(`syncOnScreen` in `features/voice/videoGrid/gridWatch.ts`). A stream that
+waits for its owner to publish it again (a codec switch) still counts. A stream
+still behind **Watch stream**, a call view that is closed with no mini-player,
+and a call with no video leave the screen to the phone's own timeout, and the
+screen may sleep again as soon as the last picture goes or the call ends. The
+power button turns the screen off as always.
 
 **The voice channel's chat beside the grid** (guild calls): opening the call
 view selects the voice channel you are in (`pages/main-page/callChat.ts`), so

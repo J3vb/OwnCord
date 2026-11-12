@@ -133,7 +133,8 @@ place of `idle.rs`'s: the Android app's idle time is how long it has been out
 of view, 0 while it shows. Its `owncord-idle` plugin delivers `look` events
 through an owned plugin listener, when the app comes back into view and each
 time it has been out of view for the delay `system_idle_follow` gave it, by an
-alarm that wakes a sleeping phone. The webview reads the idle time at each
+alarm that wakes a sleeping phone. That alarm is not exact: Android may hold it
+back, longest while the phone is in Doze. The webview reads the idle time at each
 `look`, and once when it starts to listen, so nothing that happened before is
 lost. The delay goes out one command at a time, like the call audio commands.
 The handler count also covers the existing 115 distinct registrations

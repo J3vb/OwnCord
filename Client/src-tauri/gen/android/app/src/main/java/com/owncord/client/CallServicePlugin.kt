@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import android.view.WindowManager
+import androidx.appcompat.app.AppCompatActivity
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -66,6 +67,11 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
   private var startedWithCamera = false
   private var screenKeptOn = false
 
+  // The activity on screen, whose window holds the screen flag. Android
+  // builds a new one when a system setting changes that the app does not
+  // take in place, and this plugin stays.
+  private var shownIn: Activity = activity
+
   @Command
   fun setCall(invoke: Invoke) {
     val args = invoke.parseArgs(SetCallArgs::class.java)
@@ -96,10 +102,23 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
     if (on == screenKeptOn) return
     screenKeptOn = on
     NativeLog.info(ExitInfo.screenKeptOn(on))
-    activity.runOnUiThread {
+    applyScreenFlag()
+  }
+
+  private fun applyScreenFlag() {
+    val on = screenKeptOn
+    val window = shownIn.window
+    shownIn.runOnUiThread {
       val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-      if (on) activity.window.addFlags(flag) else activity.window.clearFlags(flag)
+      if (on) window.addFlags(flag) else window.clearFlags(flag)
     }
+  }
+
+  // A new activity starts with a window that holds no flag.
+  override fun onResume(activity: AppCompatActivity) {
+    if (activity === shownIn) return
+    shownIn = activity
+    if (screenKeptOn) applyScreenFlag()
   }
 
   override fun onResume() {

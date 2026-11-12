@@ -1,7 +1,9 @@
 package com.owncord.client
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AwayClockTest {
@@ -30,6 +32,16 @@ class AwayClockTest {
     clock.show()
     assertEquals(0L, clock.awayMs(700_000L))
     assertNull(clock.nextLook(700_000L))
+  }
+
+  // Coming back is reported by more than one of the activity's events.
+  @Test
+  fun comingBackSaysOnceThatTheAppHadBeenAway() {
+    val clock = AwayClock()
+    assertFalse(clock.show())
+    clock.hide(1_000L)
+    assertTrue(clock.show())
+    assertFalse(clock.show())
   }
 
   @Test
