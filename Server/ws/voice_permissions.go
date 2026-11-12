@@ -75,31 +75,48 @@ type voicePublishGrants struct {
 // Reconciliation is the uncached backstop for role/override changes, so the permission read skips
 // the cache.
 func (h *Hub) currentVoiceGrants(ctx context.Context, userID, channelID int64, joinToken string) (voicePublishGrants, bool, error) {
+	grants, live, _, err := h.voiceGrantsAndStay(ctx, userID, channelID, joinToken)
+	return grants, live, err
+}
+
+// sessionVoiceGrants also needs permissions.CanStayInVoice. Moderation and reconcile keep
+// currentVoiceGrants, so they still reach a member the sweep has yet to remove.
+func (h *Hub) sessionVoiceGrants(ctx context.Context, userID, channelID int64, joinToken string) (voicePublishGrants, bool, error) {
+	grants, live, mayStay, err := h.voiceGrantsAndStay(ctx, userID, channelID, joinToken)
+	return grants, live && mayStay, err
+}
+
+// voiceGrantsAndStay reads the join, channel and live subject once; no channel is not live.
+func (h *Hub) voiceGrantsAndStay(ctx context.Context, userID, channelID int64, joinToken string) (grants voicePublishGrants, live, mayStay bool, err error) {
 	state, err := h.voice.State(ctx, userID)
 	if err != nil {
-		return voicePublishGrants{}, false, fmt.Errorf("reading voice state: %w", err)
+		return voicePublishGrants{}, false, false, fmt.Errorf("reading voice state: %w", err)
 	}
 	if state == nil || state.ChannelID != channelID || state.JoinedAt != joinToken || joinToken == "" {
-		return voicePublishGrants{}, false, nil
+		return voicePublishGrants{}, false, false, nil
 	}
-	sub, err := subjectFor(ctx, h.readers.Dispatch, h.permChecker, nil, userID, channelID)
-	if err != nil {
-		return voicePublishGrants{}, false, fmt.Errorf("resolving voice permissions: %w", err)
-	}
-	// The AFK channel is listen-only: reconciliation must not re-grant what
-	// the join and the token refresh withheld.
 	ch, err := h.readers.Dispatch.GetChannel(ctx, channelID)
 	if err != nil {
-		return voicePublishGrants{}, false, fmt.Errorf("reading voice channel: %w", err)
+		return voicePublishGrants{}, false, false, fmt.Errorf("reading voice channel: %w", err)
 	}
-	if ch != nil && ch.AFK {
-		return voicePublishGrants{}, true, nil
+	if ch == nil {
+		return voicePublishGrants{}, false, false, nil
+	}
+	sub, err := channelSubject(ctx, h.readers.Dispatch, h.permChecker, nil, userID, ch, true)
+	if err != nil {
+		return voicePublishGrants{}, false, false, fmt.Errorf("resolving voice permissions: %w", err)
+	}
+	mayStay = permissions.CanStayInVoice(sub) == nil
+	// The AFK channel is listen-only: reconciliation must not re-grant what
+	// the join and the token refresh withheld.
+	if ch.AFK {
+		return voicePublishGrants{}, true, mayStay, nil
 	}
 	return voicePublishGrants{
 		microphone:  voiceMicrophoneAllowed(sub.Has(permissions.SpeakVoice), state),
 		camera:      sub.Has(permissions.UseVideo),
 		screenshare: sub.Has(permissions.ShareScreen),
-	}, true, nil
+	}, true, mayStay, nil
 }
 
 // updateVoiceParticipantPermissions requires the per-user moderation lock.

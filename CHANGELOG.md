@@ -100,6 +100,12 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Fixed
+
+- **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
+- **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
+- **Channels:** a channel permission change on a busy server now always applies to every connected member.
+
 ### Messages & files
 
 - **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
