@@ -111,6 +111,10 @@ release changes the database, and anything an operator must do first.)
 - **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
 - **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
 
+### Voice
+
+- **A reconnect after a live update the app could not read took you out of your call**, and everyone saw you leave. The reconnect now keeps the call. Update the app as well as the server: an older app still drops the call.
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

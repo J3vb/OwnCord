@@ -50,7 +50,10 @@
     "test:e2e:web": "node tests/e2e/scripts/build-server.mjs --web && playwright test --config tests/e2e/config/playwright.config.web.ts",
     "test:e2e:fullstack": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.fullstack.ts",
     "test:e2e:soak": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.soak.ts",
-    "test:e2e:media-cost": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.media-cost.ts"
+    "test:e2e:media-cost": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.media-cost.ts",
+    "test:e2e:stream-perf": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.perf.ts stream-performance",
+    "test:e2e:chat-perf": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.perf.ts non-media-performance",
+    "perf:analyze": "node scripts/analyze-perf.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
