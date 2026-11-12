@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
@@ -69,8 +70,8 @@ func channelFromFields(f channelFields) Channel {
 	}
 }
 
-// ListChannels returns the guild channels ordered by position. 1:1 and group DM
-// rows are left out; ListAllChannels keeps them.
+// ListChannels returns the guild channels ordered by position; 1:1 and group DM rows
+// are left out.
 func (d *DB) ListChannels(ctx context.Context) ([]Channel, error) {
 	rows, err := d.q.ListChannels(ctx)
 	if err != nil {
@@ -86,21 +87,21 @@ func (d *DB) ListChannels(ctx context.Context) ([]Channel, error) {
 	return channels, nil
 }
 
-// ListAllChannels is ListChannels with the DM rows kept, for a caller that must tell a
-// DM id from an unknown one.
-func (d *DB) ListAllChannels(ctx context.Context) ([]Channel, error) {
-	rows, err := d.q.ListAllChannels(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ListAllChannels: %w", err)
+// ListDMChannelIDsAmong returns those of ids that are 1:1 or group DM channels.
+func (d *DB) ListDMChannelIDsAmong(ctx context.Context, ids []int64) ([]int64, error) {
+	if len(ids) == 0 {
+		return nil, nil
 	}
-	channels := make([]Channel, 0, len(rows))
-	for i := range rows {
-		channels = append(channels, channelFromFields(channelFields(rows[i])))
+	var out []int64
+	// Chunked to stay under SQLite's bound-variable limit.
+	for chunk := range slices.Chunk(ids, 5000) {
+		got, err := d.q.ListDMChannelIDsAmong(ctx, chunk)
+		if err != nil {
+			return nil, fmt.Errorf("ListDMChannelIDsAmong: %w", err)
+		}
+		out = append(out, got...)
 	}
-	if err := d.attachForumTags(ctx, channels); err != nil {
-		return nil, err
-	}
-	return channels, nil
+	return out, nil
 }
 
 // GetChannel returns the channel with the given id, or nil if not found.

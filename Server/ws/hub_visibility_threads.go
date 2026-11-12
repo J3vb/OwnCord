@@ -17,9 +17,9 @@ import (
 // visible). A thread in allowed takes its parent's label and consent (acknowledgements are keyed by
 // the parent).
 func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityReader, user *db.User, allowed map[int64]bool) (map[int64]bool, error) {
-	channels, err := database.ListAllChannels(ctx)
+	channels, err := database.ListChannels(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("computeReadableChannels ListAllChannels: %w", err)
+		return nil, fmt.Errorf("computeReadableChannels ListChannels: %w", err)
 	}
 	readable := make(map[int64]bool, len(allowed))
 	for id := range allowed {
@@ -35,7 +35,15 @@ func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityRe
 		}
 		return acked[id], nil
 	}
-	known := make(map[int64]struct{}, len(channels))
+	// A DM is never labelled, so it only needs to count as known and skip the per-id lookup below.
+	dmIDs, err := database.GetUserDMChannelIDs(ctx, user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("computeReadableChannels GetUserDMChannelIDs: %w", err)
+	}
+	known := make(map[int64]struct{}, len(channels)+len(dmIDs))
+	for _, id := range dmIDs {
+		known[id] = struct{}{}
+	}
 	for i := range channels {
 		ch := &channels[i]
 		known[ch.ID] = struct{}{}

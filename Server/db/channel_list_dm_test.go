@@ -24,15 +24,13 @@ func TestListChannels_LeavesDMRowsOut(t *testing.T) {
 		t.Fatalf("ListChannels = %+v, want only the guild channel %d", got, guild)
 	}
 
-	all, err := database.ListAllChannels(ctx)
-	mustDo(t, "ListAllChannels", err)
+	dms, err := database.ListDMChannelIDsAmong(ctx, []int64{guild, oneToOne.ID, group.ID, 9999})
+	mustDo(t, "ListDMChannelIDsAmong", err)
 	seen := map[int64]bool{}
-	for i := range all {
-		seen[all[i].ID] = true
+	for _, id := range dms {
+		seen[id] = true
 	}
-	for _, id := range []int64{guild, oneToOne.ID, group.ID} {
-		if !seen[id] {
-			t.Errorf("ListAllChannels missing channel %d", id)
-		}
+	if len(seen) != 2 || !seen[oneToOne.ID] || !seen[group.ID] {
+		t.Errorf("ListDMChannelIDsAmong = %v, want the 1:1 %d and the group %d only", dms, oneToOne.ID, group.ID)
 	}
 }

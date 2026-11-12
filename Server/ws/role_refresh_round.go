@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -55,7 +56,7 @@ func (h *Hub) runRoleRound(ctx context.Context, b roleBatch) time.Duration {
 		}
 		h.beginVisibilityRefresh()
 		if h.db != nil && len(ids) > 0 {
-			rc, ok := h.listRoleChannels(ctx)
+			rc, ok := h.listRoleChannels(ctx, ids)
 			switch {
 			case ok:
 				s.listFailures = 0
@@ -113,7 +114,7 @@ func (h *Hub) refreshVisibilityUsers(ctx context.Context, ids []int64, done func
 	if h.db == nil || len(ids) == 0 {
 		return
 	}
-	rc, ok := h.listRoleChannels(ctx)
+	rc, ok := h.listRoleChannels(ctx, ids)
 	if !ok {
 		h.closeUsers(ids, done)
 		return
@@ -183,10 +184,10 @@ func (h *Hub) refreshUsersWith(ctx context.Context, ids []int64, done func(int64
 	}
 }
 
-func (h *Hub) listRoleChannels(ctx context.Context) (*roleChannels, bool) {
+func (h *Hub) listRoleChannels(ctx context.Context, userIDs []int64) (*roleChannels, bool) {
 	ctx, cancel := context.WithTimeout(ctx, roleRefreshListBudget)
 	defer cancel()
-	channels, err := h.readers.Visibility.ListAllChannels(ctx)
+	channels, err := h.readers.Visibility.ListChannels(ctx)
 	if err != nil {
 		slog.Warn("hub: RefreshAllChannelVisibility could not list channels", "err", err)
 		return nil, false
@@ -199,16 +200,38 @@ func (h *Hub) listRoleChannels(ctx context.Context) (*roleChannels, bool) {
 			continue
 		}
 		rc.known[channels[i].ID] = struct{}{}
-		if channels[i].Type == "dm" {
-			rc.dms[channels[i].ID] = struct{}{}
-			continue
-		}
 		rc.servers = append(rc.servers, roleChannel{
 			ch:      &channels[i],
 			private: h.channelIsPrivate(ctx, channels[i].ID, channels[i].Type),
 		})
 	}
+	// Only the DMs these users hold a topic on matter, so one narrow read stands in for every DM row.
+	held := h.heldChannelIDs(userIDs)
+	if len(held) > 0 {
+		dmIDs, err := h.readers.Visibility.ListDMChannelIDsAmong(ctx, held)
+		if err != nil {
+			slog.Warn("hub: RefreshAllChannelVisibility could not list DM channels", "err", err)
+			return nil, false
+		}
+		for _, id := range dmIDs {
+			rc.known[id] = struct{}{}
+			rc.dms[id] = struct{}{}
+		}
+	}
 	return rc, true
+}
+
+// heldChannelIDs is the distinct channel ids the users hold a topic on.
+func (h *Hub) heldChannelIDs(userIDs []int64) []int64 {
+	seen := make(map[int64]struct{})
+	for _, uid := range userIDs {
+		for _, topic := range h.topicsOfUser(uid) {
+			if id := channelTopicID(topic); id != 0 {
+				seen[id] = struct{}{}
+			}
+		}
+	}
+	return slices.Collect(maps.Keys(seen))
 }
 
 // prepareUserVisibility is a user's first-pass step: resolve verdicts and release held

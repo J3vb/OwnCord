@@ -8,6 +8,7 @@ package dbgen
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const adminUpdateChannel = `-- name: AdminUpdateChannel :exec
@@ -464,111 +465,6 @@ func (q *Queries) GetUserChannelPermissions(ctx context.Context, userID int64) (
 	return items, nil
 }
 
-const listAllChannels = `-- name: ListAllChannels :many
-SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
-       COALESCE(c.category_id, 0) AS category_id,
-       COALESCE(cc.position, 0) AS category_position,
-       COALESCE(c.topic, '') AS topic,
-       c.position,
-       CAST(CASE WHEN p.id IS NULL THEN c.slow_mode ELSE p.slow_mode END AS INTEGER) AS slow_mode,
-       CAST(CASE WHEN p.id IS NULL THEN c.archived ELSE p.archived END AS INTEGER) AS archived,
-       c.created_at,
-       COALESCE(c.voice_max_users, 0) AS voice_max_users,
-       c.voice_quality,
-       c.mixing_threshold,
-       COALESCE(c.voice_max_video, 0) AS voice_max_video,
-       CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
-       c.afk,
-       COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
-       c.thread_archived,
-       c.thread_locked,
-       c.forum_require_tag,
-       c.forum_default_auto_archive_minutes,
-       CAST(c.password_hash IS NOT NULL AS INTEGER) AS join_locked
-FROM channels c
-LEFT JOIN channels p ON p.id = c.parent_channel_id
-LEFT JOIN channel_categories cc ON cc.id = c.category_id
-WHERE c.parent_channel_id IS NULL AND c.import_pending = 0
-ORDER BY c.position ASC, c.id ASC
-`
-
-type ListAllChannelsRow struct {
-	ID                             int64   `json:"id"`
-	Name                           string  `json:"name"`
-	Type                           string  `json:"type"`
-	Category                       string  `json:"category"`
-	CategoryID                     int64   `json:"categoryId"`
-	CategoryPosition               int64   `json:"categoryPosition"`
-	Topic                          string  `json:"topic"`
-	Position                       int64   `json:"position"`
-	SlowMode                       int64   `json:"slowMode"`
-	Archived                       int64   `json:"archived"`
-	CreatedAt                      string  `json:"createdAt"`
-	VoiceMaxUsers                  int64   `json:"voiceMaxUsers"`
-	VoiceQuality                   *string `json:"voiceQuality"`
-	MixingThreshold                *int64  `json:"mixingThreshold"`
-	VoiceMaxVideo                  int64   `json:"voiceMaxVideo"`
-	Nsfw                           int64   `json:"nsfw"`
-	Afk                            int64   `json:"afk"`
-	ParentChannelID                int64   `json:"parentChannelId"`
-	ThreadArchived                 int64   `json:"threadArchived"`
-	ThreadLocked                   int64   `json:"threadLocked"`
-	ForumRequireTag                int64   `json:"forumRequireTag"`
-	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
-	JoinLocked                     int64   `json:"joinLocked"`
-}
-
-// import_pending = 0 keeps a channel a Discord import is still building out of
-// every client-facing read: nobody can see or address it until the import finishes.
-// Unlike ListChannels this keeps 1:1 and group DM rows, for the few callers that
-// must tell a DM id from an unknown one.
-func (q *Queries) ListAllChannels(ctx context.Context) ([]ListAllChannelsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAllChannels)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListAllChannelsRow{}
-	for rows.Next() {
-		var i ListAllChannelsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Type,
-			&i.Category,
-			&i.CategoryID,
-			&i.CategoryPosition,
-			&i.Topic,
-			&i.Position,
-			&i.SlowMode,
-			&i.Archived,
-			&i.CreatedAt,
-			&i.VoiceMaxUsers,
-			&i.VoiceQuality,
-			&i.MixingThreshold,
-			&i.VoiceMaxVideo,
-			&i.Nsfw,
-			&i.Afk,
-			&i.ParentChannelID,
-			&i.ThreadArchived,
-			&i.ThreadLocked,
-			&i.ForumRequireTag,
-			&i.ForumDefaultAutoArchiveMinutes,
-			&i.JoinLocked,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listChannels = `-- name: ListChannels :many
 SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
@@ -664,6 +560,43 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDMChannelIDsAmong = `-- name: ListDMChannelIDsAmong :many
+SELECT id FROM channels WHERE type = 'dm' AND id IN (/*SLICE:ids*/?)
+`
+
+func (q *Queries) ListDMChannelIDsAmong(ctx context.Context, ids []int64) ([]int64, error) {
+	query := listDMChannelIDsAmong
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
