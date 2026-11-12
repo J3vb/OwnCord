@@ -113,7 +113,9 @@ func coerceEnv(value string, kind reflect.Kind) (any, error) {
 		parts := strings.Split(value, ",")
 		out := make([]string, 0, len(parts))
 		for _, p := range parts {
-			out = append(out, strings.TrimSpace(p))
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
 		}
 		return out, nil
 	default:
