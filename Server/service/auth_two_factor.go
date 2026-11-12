@@ -311,6 +311,11 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		return nil, ErrTOTPChallengeInvalid
 	}
 
+	return s.finishTOTPVerify(ctx, user, challenge, partialToken, claimed, code, recoveryRemaining)
+}
+
+// finishTOTPVerify starts the session once the second factor is spent, and audits it.
+func (s *AuthService) finishTOTPVerify(ctx context.Context, user *db.User, challenge auth.PartialAuthChallenge, partialToken string, claimed auth.PartialAuthChallenge, code string, recoveryRemaining *int) (*AuthResult, error) {
 	// The code is spent by now: starting the session must not die with the request deadline.
 	tailCtx, cancel := postCommitContext(ctx)
 	defer cancel()
