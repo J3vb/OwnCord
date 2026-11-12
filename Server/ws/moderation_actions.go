@@ -143,9 +143,6 @@ func (h *Hub) RefreshUserChannels(userID int64) {
 	privacy := h.privacySnapshot(ctx)
 	for i := range channels {
 		ch := &channels[i]
-		if ch.Type == "dm" {
-			continue
-		}
 		sub, err := h.subjectFor(ctx, userID, ch.ID)
 		if err != nil {
 			continue

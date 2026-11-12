@@ -100,6 +100,9 @@ struct MixerState {
     queues: HashMap<String, Queue>,
     /// Per identity, indexed by `Volume`.
     gains: [HashMap<String, f32>; 2],
+    /// Track sids that play nothing (deafen), set before the unsubscribe
+    /// that follows reaches the room.
+    muted: std::collections::HashSet<String>,
 }
 
 /// 48 kHz queues, one per remote audio track, mixed on demand.
@@ -111,6 +114,17 @@ impl Mixer {
     /// set before the track arrives still applies.
     pub fn set_gain(&self, identity: &str, volume: Volume, gain: f32) {
         lock(&self.0).gains[volume as usize].insert(identity.to_string(), gain.max(0.0));
+    }
+
+    /// Play nothing of track `sid` (`true`) or play it again. Kept for the
+    /// session, so a track that arrives while muted stays silent.
+    pub fn set_muted(&self, sid: &str, muted: bool) {
+        let mut state = lock(&self.0);
+        if muted {
+            state.muted.insert(sid.to_string());
+        } else {
+            state.muted.remove(sid);
+        }
     }
 
     pub(super) fn add(&self, sid: &str, identity: &str, volume: Option<Volume>, channels: usize) {
@@ -162,8 +176,17 @@ impl Mixer {
         let channels = channels.max(1);
         let frames = out.len() / channels;
         let mut state = lock(&self.0);
-        let MixerState { queues, gains } = &mut *state;
-        for q in queues.values_mut() {
+        let MixerState {
+            queues,
+            gains,
+            muted,
+        } = &mut *state;
+        for (sid, q) in queues.iter_mut() {
+            if muted.contains(sid) {
+                q.samples.clear();
+                q.primed = false;
+                continue;
+            }
             if !q.primed {
                 if q.frames() < PRIME {
                     continue;

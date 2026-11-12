@@ -1,7 +1,8 @@
 -- name: ListChannels :many
 -- import_pending = 0 keeps a channel a Discord import is still building out of
 -- every client-facing read (here, GetChannel and GetAFKChannel): nobody can see
--- or address it until the import finishes.
+-- or address it until the import finishes. Guild channels only: DM rows share the
+-- table and are read through the DM queries.
 SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,
@@ -25,8 +26,14 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id
-WHERE c.parent_channel_id IS NULL AND c.import_pending = 0
+WHERE c.parent_channel_id IS NULL AND c.import_pending = 0 AND c.type != 'dm'
 ORDER BY c.position ASC, c.id ASC;
+
+-- name: ListDMChannelIDsAmong :many
+SELECT id FROM channels WHERE type = 'dm' AND id IN (sqlc.slice('ids'));
+
+-- name: ListDMChannelNamesAmong :many
+SELECT id, name FROM channels WHERE type = 'dm' AND id IN (sqlc.slice('ids'));
 
 -- name: GetChannel :one
 SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,

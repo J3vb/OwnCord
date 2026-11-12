@@ -123,6 +123,8 @@ release changes the database, and anything an operator must do first.)
 - **Moderation:** closing the ban dialog after a failed ban said the member was banned. It now says the ban could not be confirmed.
 - **Desktop UI:** animated avatars and banners kept old rows in memory after every channel switch. They no longer do.
 - **Direct messages:** the People view redrew every row on each presence change or new message on busy servers. It now updates only the rows that changed.
+- **Linux:** while the camera or a screen share was being published on a slow connection, mute, push-to-talk release, deafen, volume changes and Leave waited for it (up to 10 seconds or more). They now act at once.
+- **Linux:** after a microphone device change landed during an unmute, you could show as unmuted while others heard nothing.
 - **Admin:** the `chatserver token` commands applied pending database updates themselves, skipping the safety copy an upgrade takes. They now stop and ask you to start the server once first.
 - **Linux:** on a desktop without a keyring service (no gnome-keyring or KWallet), the app now creates your voice identity key and saves unsent messages for recovery, instead of showing "Could not save this pending message" on every send.
 - **Threads:** thread edits (rename, archive, lock, tags) are now limited to 5 a second per user, and an edit that changes nothing is no longer announced.
