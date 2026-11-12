@@ -19,14 +19,14 @@ function dials(): number {
   return mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect").length;
 }
 
-function authFrames(): Array<{ last_seq: number }> {
+function authFrames(): Array<{ last_seq: number; full_state?: boolean }> {
   return mockInvoke.mock.calls
     .filter((c) => c[0] === "ws_send")
     .map(
       (c) =>
         JSON.parse((c[1] as { message: string }).message) as {
           type: string;
-          payload: { last_seq: number };
+          payload: { last_seq: number; full_state?: boolean };
         },
     )
     .filter((m) => m.type === "auth")
@@ -85,6 +85,35 @@ describe("cseq gap detection", () => {
     // It is a resume: the auth frame carries the last seq this socket saw.
     emitTauriEvent("ws-state", "open");
     expect(authFrames().at(-1)?.last_seq).toBe(15);
+  });
+
+  // A frame that fails its shape check was already counted into last_seq, so
+  // the redial asks for the full state. It must keep its real last_seq: 0
+  // reads as a reload, and the server ends a reloaded session's voice call.
+  it("asks for the full state after an unreadable frame, keeping last_seq", async () => {
+    await connectAndAuth();
+    mockInvoke.mockClear();
+
+    emitTauriEvent("ws-message", frame(10, 1));
+    emitTauriEvent(
+      "ws-message",
+      `{"cseq":2,"seq":11,"type":"typing","payload":{"channel_id":"x","user_id":2,"username":"u"}}`,
+    );
+    expectConsole("warn", /\[ws\] Invalid WS frame, dropping/);
+
+    await vi.advanceTimersByTimeAsync(1_010);
+    expect(dials()).toBe(1);
+    emitTauriEvent("ws-state", "open");
+    expect(authFrames().at(-1)).toMatchObject({ last_seq: 11, full_state: true });
+
+    // auth_ok settles the debt: the next resume is an ordinary one.
+    emitAuthOk();
+    emitTauriEvent("ws-message", frame(12, 1));
+    emitTauriEvent("ws-message", frame(14, 3));
+    await vi.advanceTimersByTimeAsync(5_010);
+    emitTauriEvent("ws-state", "open");
+    expect(authFrames().at(-1)?.last_seq).toBe(14);
+    expect(authFrames().at(-1)?.full_state).toBeUndefined();
   });
 
   it("waits a random 1-5 s before resuming", async () => {

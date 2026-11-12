@@ -1,5 +1,5 @@
 {
-  "nextId": 601,
+  "nextId": 602,
   "findings": [
     {
       "id": "OC-0001",
@@ -13785,6 +13785,29 @@
       "lens": "client-state",
       "finder": "claude",
       "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
+    },
+    {
+      "id": "OC-0601",
+      "title": "A redial after an unreadable live update sent last_seq 0, so the server ended the user's own voice call",
+      "file": "Client/src/lib/net/ws/authFrame.ts",
+      "line": 88,
+      "severity": "medium",
+      "why": "After a sequenced frame failed the client's shape check, the redial asked for the full state by sending last_seq 0. The server reads last_seq 0 as a reload of the session: it ends that session's parked call, deletes the voice_states row and broadcasts voice_leave, so a user in a healthy call dropped out of it.",
+      "repro": "Join a voice channel, then have the server send one sequenced frame the client's generated shape table rejects (client/server version skew). The gap resume redials with last_seq 0 and the user leaves voice on every roster.",
+      "evidence": "Vault issue #153. wsInbound.ts sets fullStateOwed on a resync verdict; authFrame.ts turned it into last_seq 0; serve_fresh_connect.go freshConnectSettleVoice and freshConnectCleanStaleVoice keep the call only when lastSeq > 0.",
+      "suggestedFix": "Keep the real last_seq and add an auth field full_state that sends the resume to the existing full-ready fallback, which keeps the session's voice membership.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/full_state_resume_test.go (full_state resume gets a full ready and keeps the voice row and session); Client/tests/unit/ws-cseq-gap.test.ts (an unreadable frame redials with its last_seq and full_state)",
+        "revertProof": "fail (server replays from the buffer; client sends last_seq 0)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-12",
+      "hunt": "nightly-bughunt",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-11-12"
     },
     {
       "id": "OC-0600",

@@ -79,14 +79,20 @@ export function buildAuthFrame(
   epoch: typeof PROTOCOL_EPOCH;
   active_channel_id?: number;
   wake?: true;
+  full_state?: true;
   features: readonly string[];
 } {
   // active_channel_id only matters on a resume (last_seq > 0); on a
   // fresh connect the ready payload re-establishes everything anyway.
   // Omitted when unknown so the frame stays byte-identical to before
   // for callers that never register a provider.
-  const lastSeq = s.fullStateOwed ? 0 : s.lastSeq;
+  const lastSeq = s.lastSeq;
   const activeChannelId = lastSeq > 0 ? (activeChannelProvider?.() ?? null) : null;
+  // After an unreadable frame the dial asks for the full state with
+  // `full_state` and keeps its real last_seq: last_seq 0 would read as a
+  // reload, and the server ends a reloaded session's voice call. A server
+  // that predates the flag ignores it and replays, which skips only the
+  // frame this client could not read anyway.
   // A wake dial carries `wake: true`. The server refuses it
   // (ANOTHER_DEVICE_ACTIVE) when another device holds the session, and
   // accepts it otherwise — so a lone device wakes silently while a woken
@@ -98,6 +104,7 @@ export function buildAuthFrame(
     epoch: PROTOCOL_EPOCH,
     ...(activeChannelId !== null ? { active_channel_id: activeChannelId } : {}),
     ...(s.pendingWake ? { wake: true as const } : {}),
+    ...(s.fullStateOwed ? { full_state: true as const } : {}),
     features: clientFeatures(),
   };
 }
