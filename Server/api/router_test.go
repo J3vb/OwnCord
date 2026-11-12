@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/api"
@@ -336,37 +337,41 @@ func TestAPIV1ServerInfoMissingRegistrationMode(t *testing.T) {
 	}
 }
 
+// The router and its background work start outside the bubble; only the requests run inside it, so
+// the cache TTL runs on the bubble's fake clock and the expiry wait costs no wall time.
 func TestAPIV1ServerInfoCachesSettings(t *testing.T) {
 	store := &serverInfoStore{}
 	router := setupServerInfoStore(t, store)
-	first := serverInfoBody(t, router)
-	if err := store.SetSetting(t.Context(), "registration_mode", "open"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetSetting(t.Context(), db.RetentionDaysKey, "30"); err != nil {
-		t.Fatal(err)
-	}
-	second := serverInfoBody(t, router)
-	if second["registration_mode"] != first["registration_mode"] {
-		t.Fatal("response changed within the five-second cache TTL")
-	}
-	assertServerInfoRetention(t, second, 0)
-	if got := store.registrationReads.Load(); got != 1 {
-		t.Errorf("registration reads = %d, want 1 for two requests", got)
-	}
-	if got := store.retentionReads.Load(); got != 1 {
-		t.Errorf("retention reads = %d, want 1 for two requests", got)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		first := serverInfoBody(t, router)
+		if err := store.SetSetting(t.Context(), "registration_mode", "open"); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetSetting(t.Context(), db.RetentionDaysKey, "30"); err != nil {
+			t.Fatal(err)
+		}
+		second := serverInfoBody(t, router)
+		if second["registration_mode"] != first["registration_mode"] {
+			t.Fatal("response changed within the five-second cache TTL")
+		}
+		assertServerInfoRetention(t, second, 0)
+		if got := store.registrationReads.Load(); got != 1 {
+			t.Errorf("registration reads = %d, want 1 for two requests", got)
+		}
+		if got := store.retentionReads.Load(); got != 1 {
+			t.Errorf("retention reads = %d, want 1 for two requests", got)
+		}
 
-	time.Sleep(5 * time.Second)
-	third := serverInfoBody(t, router)
-	if third["registration_mode"] != "open" {
-		t.Errorf("registration_mode = %v after expiry, want open", third["registration_mode"])
-	}
-	assertServerInfoRetention(t, third, 30)
-	if store.registrationReads.Load() != 2 || store.retentionReads.Load() != 2 {
-		t.Fatal("expired cache must refresh both settings exactly once")
-	}
+		time.Sleep(5 * time.Second)
+		third := serverInfoBody(t, router)
+		if third["registration_mode"] != "open" {
+			t.Errorf("registration_mode = %v after expiry, want open", third["registration_mode"])
+		}
+		assertServerInfoRetention(t, third, 30)
+		if store.registrationReads.Load() != 2 || store.retentionReads.Load() != 2 {
+			t.Fatal("expired cache must refresh both settings exactly once")
+		}
+	})
 }
 
 func TestAPIV1ServerInfoConcurrentRequestsShareCache(t *testing.T) {
