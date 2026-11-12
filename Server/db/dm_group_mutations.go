@@ -14,8 +14,8 @@ import (
 // caller's context.
 const groupDMReadBackTimeout = 5 * time.Second
 
-// GroupDMPostCommitHook runs right after a group create commits. Test-only.
-var GroupDMPostCommitHook func()
+// groupDMPostCommitHookForTest runs right after a group create commits.
+var groupDMPostCommitHookForTest func()
 
 // CreateGroupDMChannel creates a group DM with the given participants (creator
 // included) and opens it for all; ownerID must be one of them. It always creates, in
@@ -67,7 +67,7 @@ func (d *DB) CreateGroupDMChannel(ctx context.Context, name string, ownerID int6
 		return nil, fmt.Errorf("CreateGroupDMChannel commit: %w", err)
 	}
 
-	if hook := GroupDMPostCommitHook; hook != nil {
+	if hook := groupDMPostCommitHookForTest; hook != nil {
 		hook()
 	}
 

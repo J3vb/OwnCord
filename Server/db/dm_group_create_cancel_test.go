@@ -12,8 +12,8 @@ func TestCreateGroupDMChannel_CancelAfterCommitReturnsChannel(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	db.GroupDMPostCommitHook = cancel
-	t.Cleanup(func() { db.GroupDMPostCommitHook = nil })
+	db.SetGroupDMPostCommitHookForTest(cancel)
+	t.Cleanup(func() { db.SetGroupDMPostCommitHookForTest(nil) })
 
 	ch, err := database.CreateGroupDMChannel(ctx, "Crew", 1, []int64{1, 2, 3})
 	if err != nil || ch == nil {
