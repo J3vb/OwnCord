@@ -66,6 +66,8 @@ You start the server, give your friends an invite code, and that is it.
 | Voice and video | Stable       |
 | Admin panel     | Stable       |
 | Browser client  | Stable       |
+| Windows app     | Stable       |
+| Linux app       | Stable       |
 | Android app     | Experimental |
 
 Security is reviewed in regular passes. Each review is a dated audit, listed in
