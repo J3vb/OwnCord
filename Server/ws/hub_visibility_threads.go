@@ -35,7 +35,15 @@ func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityRe
 		}
 		return acked[id], nil
 	}
-	known := make(map[int64]struct{}, len(channels))
+	// A DM is never labelled, so it only needs to count as known and skip the per-id lookup below.
+	dmIDs, err := database.GetUserDMChannelIDs(ctx, user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("computeReadableChannels GetUserDMChannelIDs: %w", err)
+	}
+	known := make(map[int64]struct{}, len(channels)+len(dmIDs))
+	for _, id := range dmIDs {
+		known[id] = struct{}{}
+	}
 	for i := range channels {
 		ch := &channels[i]
 		known[ch.ID] = struct{}{}

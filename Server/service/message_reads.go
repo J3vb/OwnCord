@@ -24,6 +24,8 @@ type messageReadStore interface {
 	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
 	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
+	// ListDMChannelNamesAmong names the DM channels among ids in one read.
+	ListDMChannelNamesAmong(ctx context.Context, ids []int64) (map[int64]string, error)
 }
 
 // messageReads is MessageService's read side: history, pins, search, reaction
