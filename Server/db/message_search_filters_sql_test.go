@@ -40,3 +40,14 @@ func TestSplitImportedScope(t *testing.T) {
 		t.Errorf("no imports: native=%v imported=%v", native, imp)
 	}
 }
+
+func TestScopeIDsJSON(t *testing.T) {
+	for _, tc := range []struct {
+		ids  []int64
+		want string
+	}{{nil, "[]"}, {[]int64{7}, "[7]"}, {[]int64{1, -2, 30}, "[1,-2,30]"}} {
+		if got := scopeIDsJSON(tc.ids); got != tc.want {
+			t.Errorf("scopeIDsJSON(%v) = %q, want %q", tc.ids, got, tc.want)
+		}
+	}
+}

@@ -3,9 +3,9 @@ package db
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -150,10 +150,7 @@ func (d *DB) searchFilters(ctx context.Context, q SearchQuery, ranked bool) (str
 		return "", nil, err
 	}
 	native, importedInScope := splitImportedScope(q.ChannelIDs, imported)
-	scopeJSON, err := scopeIDsJSON(q.ChannelIDs)
-	if err != nil {
-		return "", nil, err
-	}
+	scopeJSON := scopeIDsJSON(q.ChannelIDs)
 	sb.WriteString(" AND (m.channel_id IN (" + placeholders(len(q.ChannelIDs)) + ") OR " + threadsOfScope + ")")
 	args = appendIDs(args, q.ChannelIDs)
 	args = append(args, scopeJSON)
@@ -261,12 +258,16 @@ func idBound(cmp string, bound int64, native, importedInScope []int64) (string, 
 const threadsOfScope = `m.channel_id IN (SELECT t.id FROM channels t WHERE t.type = 'thread' AND t.import_pending = 0
 		 AND t.parent_channel_id IN (SELECT value FROM json_each(?)))`
 
-func scopeIDsJSON(ids []int64) (string, error) {
-	b, err := json.Marshal(ids)
-	if err != nil {
-		return "", fmt.Errorf("scope ids: %w", err)
+// scopeIDsJSON renders the ids as a JSON array of numbers for json_each.
+func scopeIDsJSON(ids []int64) string {
+	b := []byte{'['}
+	for i, id := range ids {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		b = strconv.AppendInt(b, id, 10)
 	}
-	return string(b), nil
+	return string(append(b, ']'))
 }
 
 // idBoundWithThreads is idBound for a search scope: with scopeJSON set, the native side also matches the
