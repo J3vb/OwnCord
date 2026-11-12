@@ -25,9 +25,11 @@ var erasureDrainSteps = []drainStep{
 	// delete, so no reader sees old counts at a newer version.
 	pollVotesStep(),
 	{label: "attachments uploaded", run: drainUploadedAttachments},
+	// Events go before messages: an edit frame names its message, not its author, so
+	// the predicate asks the messages table whose it is while the rows still exist.
+	windowStep("events", "events", "seq", EventNamesUserPredicate+" OR "+EventNamesOwnMessagePredicate),
 	{label: "messages", run: drainMessages},
 	windowStep("reactions", "reactions", "id", `user_id = ?1`),
-	windowStep("events", "events", "seq", EventNamesUserPredicate),
 }
 
 func limitStep(label, query string) drainStep {

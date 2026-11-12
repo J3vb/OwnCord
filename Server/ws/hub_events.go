@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -140,19 +141,69 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
+	dropped, rows, err := h.purgeMessageIDs(ctx, &h.tombstones.unfinishedMessages, ids, ids)
+	if err != nil {
+		return err
+	}
+	slog.Info("hub: replay purged for swept messages", "messages", len(ids), "buffered", dropped, "persisted", rows)
+	return nil
+}
+
+// purgeMessageIDs tombstones ids and takes every frame about them out of the ring and the
+// table; key is what the unfinished marker records.
+func (h *Hub) purgeMessageIDs(ctx context.Context, unfinished *map[int64]struct{}, key, ids []int64) (int, int64, error) {
 	h.activity.forget(nil, ids)
 	set := make(map[int64]struct{}, len(ids))
 	for _, id := range ids {
 		set[id] = struct{}{}
 	}
-	dropped, rows, err := h.purgeReplay(ctx, &h.tombstones.unfinishedMessages, ids,
+	return h.purgeReplay(ctx, unfinished, key,
 		func(seq uint64) { h.tombstones.add(&h.tombstones.messages, seq, ids...) },
 		func(data []byte) bool { return eventNamesMessage(data, set) },
 		func(ctx context.Context) (int64, error) { return h.db.DeleteEventsForMessages(ctx, ids) })
+}
+
+// PurgeErasedMessagesFromReplay takes the frames about messages an erasure deleted out of the
+// replay pipeline. An edit frame names its message, not its author, so the ring is asked
+// which of its messages no longer exist (one pass) and the persisted tier is swept for rows
+// written since the job's lock whose message is gone (bounded by created_at). Nothing is
+// kept in memory between the drain and this call, so it also runs after a restart.
+// Idempotent; retried from the erasure journal.
+func (h *Hub) PurgeErasedMessagesFromReplay(ctx context.Context, jobID int64) error {
+	var orphans, swept []int64
+	if h.db != nil {
+		var err error
+		if orphans, err = h.db.MissingMessageIDs(ctx, h.replayBuf.MessageIDs()); err != nil {
+			return fmt.Errorf("purge replay: %w", err)
+		}
+	}
+	set := make(map[int64]struct{}, len(orphans))
+	for _, id := range orphans {
+		set[id] = struct{}{}
+	}
+	h.activity.forget(nil, orphans)
+	dropped, rows, err := h.purgeReplay(ctx, &h.tombstones.unfinishedErasures, []int64{jobID},
+		func(seq uint64) {
+			if len(orphans) > 0 {
+				h.tombstones.add(&h.tombstones.messages, seq, orphans...)
+			}
+		},
+		func(data []byte) bool { return eventNamesMessage(data, set) },
+		func(ctx context.Context) (int64, error) {
+			var err error
+			swept, err = h.db.DeleteOrphanMessageEvents(ctx, jobID)
+			return int64(len(swept)), err
+		})
 	if err != nil {
 		return err
 	}
-	slog.Info("hub: replay purged for swept messages", "messages", len(ids), "buffered", dropped, "persisted", rows)
+	// A frame the ring read missed but the sweep found: its ring copy goes too, under the same job key.
+	if extra := slices.DeleteFunc(slices.Clone(swept), func(id int64) bool { _, ok := set[id]; return ok }); len(extra) > 0 {
+		if _, _, err := h.purgeMessageIDs(ctx, &h.tombstones.unfinishedErasures, []int64{jobID}, extra); err != nil {
+			return err
+		}
+	}
+	slog.Info("hub: replay purged for erased messages", "buffered", dropped, "persisted", rows)
 	return nil
 }
 
