@@ -118,6 +118,18 @@ func (f *admitFixture) claimsOf(token string) *auth.ClaimGrants {
 	return claims
 }
 
+// confirmRefusedAndRemoved runs Confirm, expects a refusal, and checks the
+// session is gone from the media server.
+func (f *admitFixture) confirmRefusedAndRemoved(ticket VoiceSessionTicket) {
+	f.t.Helper()
+	if err := ticket.Confirm(context.Background()); !errors.Is(err, ErrVoiceSessionRefused) {
+		f.t.Fatalf("Confirm: err = %v, want %v", err, ErrVoiceSessionRefused)
+	}
+	if f.sfu.has(RoomName(f.chID), f.identity) {
+		f.t.Fatal("a refused session is still at the media server")
+	}
+}
+
 func publishRights(claims *auth.ClaimGrants) voicePublishGrants {
 	return voicePublishGrants{
 		microphone:  claims.Video.GetCanPublishSource(lkproto.TrackSource_MICROPHONE),
@@ -331,12 +343,7 @@ func TestConfirmVoiceSession_RemovesSessionOfAJoinThatEnded(t *testing.T) {
 	f.evict(f.alice)
 	f.sessionStarts()
 
-	if err := ticket.Confirm(context.Background()); !errors.Is(err, ErrVoiceSessionRefused) {
-		t.Fatalf("Confirm: err = %v, want %v", err, ErrVoiceSessionRefused)
-	}
-	if f.sfu.has(RoomName(f.chID), f.identity) {
-		t.Fatal("the session of a join that ended is still at the media server")
-	}
+	f.confirmRefusedAndRemoved(ticket)
 	if _, watched := f.hub.livekit.removed.snapshot(true)[f.chID][f.identity]; !watched {
 		t.Fatal("the removed identity is not on the removed watch")
 	}
@@ -448,12 +455,7 @@ func TestVoiceSession_RequiresTheRightToStay(t *testing.T) {
 			ticket := f.admit()
 			apply(f)
 			f.sessionStarts()
-			if err := ticket.Confirm(context.Background()); !errors.Is(err, ErrVoiceSessionRefused) {
-				t.Fatalf("Confirm: err = %v, want %v", err, ErrVoiceSessionRefused)
-			}
-			if f.sfu.has(RoomName(f.chID), f.identity) {
-				t.Fatal("the session of a member who may not stay is still at the media server")
-			}
+			f.confirmRefusedAndRemoved(ticket)
 		})
 	}
 }

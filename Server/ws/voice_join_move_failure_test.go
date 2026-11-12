@@ -10,18 +10,21 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// stateFailsAfterSlotCleared fails the first State read made once the old
-// device's call slot is cleared: the read a move uses to confirm the old row is
-// gone (or is the one it kept).
-type stateFailsAfterSlotCleared struct {
+// onStateAfterSlotCleared runs fn once, at the first State read made after the
+// old device's call slot is cleared: the move's check of the old row, between
+// its leave step and its insert. A non-nil error from fn fails that read.
+type onStateAfterSlotCleared struct {
 	VoiceStore
-	old    *Client
-	failed atomic.Bool
+	old *Client
+	fn  func() error
+	ran atomic.Bool
 }
 
-func (s *stateFailsAfterSlotCleared) State(ctx context.Context, userID int64) (*db.VoiceState, error) {
-	if s.old.voice.channel() == 0 && s.failed.CompareAndSwap(false, true) {
-		return nil, errors.New("state read failed")
+func (s *onStateAfterSlotCleared) State(ctx context.Context, userID int64) (*db.VoiceState, error) {
+	if s.old.voice.channel() == 0 && s.ran.CompareAndSwap(false, true) {
+		if err := s.fn(); err != nil {
+			return nil, err
+		}
 	}
 	return s.VoiceStore.State(ctx, userID)
 }
@@ -69,6 +72,17 @@ func newSameChannelMove(t *testing.T) (f *mdFix, obs, a, b *mdDev) {
 	b = f.dev("session-b", f.text)
 	f.join(a, f.voiceA)
 	f.join(obs, f.voiceA)
+	return f, obs, a, b
+}
+
+// newMutedSameChannelMove is newSameChannelMove with the account's call
+// server-muted by a moderator.
+func newMutedSameChannelMove(t *testing.T) (f *mdFix, obs, a, b *mdDev) {
+	t.Helper()
+	f, obs, a, b = newSameChannelMove(t)
+	if ok, err := f.hub.voice.SetServerMute(context.Background(), f.uid, f.voiceA, true); err != nil || !ok {
+		t.Fatalf("SetServerMute = %v, %v", ok, err)
+	}
 	return f, obs, a, b
 }
 
@@ -139,12 +153,14 @@ func TestMultiDevice_SameChannelMoveFailingLaterStepAnnouncesLeave(t *testing.T)
 // announce the leave it held back: no device holds the call any more.
 func TestMultiDevice_SameChannelMoveUnverifiedLeaveIsAnnounced(t *testing.T) {
 	f, obs, a, b := newSameChannelMove(t)
-	store := &stateFailsAfterSlotCleared{VoiceStore: f.hub.voice, old: a.c}
+	store := &onStateAfterSlotCleared{VoiceStore: f.hub.voice, old: a.c, fn: func() error {
+		return errors.New("state read failed")
+	}}
 	f.hub.voice = store
 
 	takeOverSameChannel(t, f, obs, a, b)
 
-	if !store.failed.Load() {
+	if !store.ran.Load() {
 		t.Fatal("the state read never failed: the test does not exercise the abort")
 	}
 	if !b.sawErrorCode(ErrCodeInternal) {
@@ -184,11 +200,8 @@ func TestMultiDevice_SameChannelMoveRolledBackAtRosterReadAnnouncesOnce(t *testi
 // A moderator mute follows a same-channel move into a channel over its cap: the
 // slot is kept and the new row is still muted.
 func TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsModeratorMute(t *testing.T) {
-	f, obs, a, b := newSameChannelMove(t)
+	f, obs, a, b := newMutedSameChannelMove(t)
 	ctx := context.Background()
-	if ok, err := f.hub.voice.SetServerMute(ctx, f.uid, f.voiceA, true); err != nil || !ok {
-		t.Fatalf("SetServerMute = %v, %v", ok, err)
-	}
 	if err := f.db.SetChannelVoiceMaxUsers(ctx, f.voiceA, 1); err != nil {
 		t.Fatalf("SetChannelVoiceMaxUsers: %v", err)
 	}
@@ -244,33 +257,15 @@ func TestMultiDevice_SameChannelMoveKeepsChannelAtLimit(t *testing.T) {
 	}
 }
 
-// onStateAfterSlotCleared runs fn once, at the first State read made after the
-// old device's call slot is cleared: between the move's leave step and its insert.
-type onStateAfterSlotCleared struct {
-	VoiceStore
-	old *Client
-	fn  func()
-	ran atomic.Bool
-}
-
-func (s *onStateAfterSlotCleared) State(ctx context.Context, userID int64) (*db.VoiceState, error) {
-	if s.old.voice.channel() == 0 && s.ran.CompareAndSwap(false, true) {
-		s.fn()
-	}
-	return s.VoiceStore.State(ctx, userID)
-}
-
 // A moderator's unmute that lands while a same-channel move is in flight is
 // kept: the move does not re-apply the mute it read before.
 func TestMultiDevice_SameChannelMoveKeepsAnUnmuteThatLandsMidMove(t *testing.T) {
-	f, obs, a, b := newSameChannelMove(t)
+	f, obs, a, b := newMutedSameChannelMove(t)
 	ctx := context.Background()
-	if ok, err := f.hub.voice.SetServerMute(ctx, f.uid, f.voiceA, true); err != nil || !ok {
-		t.Fatalf("SetServerMute = %v, %v", ok, err)
-	}
 	var unmuted bool
-	store := &onStateAfterSlotCleared{VoiceStore: f.hub.voice, old: a.c, fn: func() {
+	store := &onStateAfterSlotCleared{VoiceStore: f.hub.voice, old: a.c, fn: func() error {
 		unmuted, _, _ = f.hub.SetServerMuteLocked(ctx, f.uid, f.voiceA, false)
+		return nil
 	}}
 	f.hub.voice = store
 
