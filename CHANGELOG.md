@@ -134,6 +134,9 @@ release changes the database, and anything an operator must do first.)
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
 - **Admin:** restoring a backup from the admin panel on a symlinked database path replaced the link with a plain file. The link is now kept and the restore goes to the linked file.
 - **Accounts:** erasing an account now also removes the erased user's messages from stored reconnect history, including later edits and reactions on them.
+- **Admin:** a blank `OWNCORD_*` list variable (such as `OWNCORD_SERVER_ADMIN_ALLOWED_CIDRS=`) locked everyone out of the admin panel. It is now ignored with a start-up warning and the list keeps its configured value.
+- **Admin:** a backup folder set to the database's own folder counted the live database as a backup, so scheduled backups stopped. That folder is now refused, and the live database is never listed, deleted or restored as a backup.
+- **Admin:** first-run setup opened over a bare IPv6 address showed a broken link after a port or TLS change.
 
 ### Messages & files
 

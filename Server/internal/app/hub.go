@@ -197,7 +197,7 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 			return settings.Setting(ctx, "backup_schedule")
 		},
 		LastBackup: func() (time.Time, error) {
-			return admin.NewestBackup(admin.ResolveBackupDir(cfg.Backup.Dir))
+			return admin.NewestBackup(admin.ResolveBackupDir(cfg.Backup.Dir), cfg.Database.Path)
 		},
 		Certificate: admin.ServedCertificate,
 		VoiceHealth: func(ctx context.Context) service.VoiceHealth {
