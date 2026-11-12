@@ -54,7 +54,7 @@ func MountDMRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaste
 	r.Route("/api/v1/dms", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Post("/", handleCreateDM(svc, broadcaster))
-		r.Post("/group", handleCreateGroupDM(svc, broadcaster))
+		r.Post("/group", handleCreateGroupDM(svc, broadcaster, limiter))
 		r.Get("/", handleListDMs(svc))
 		r.Patch("/{channelId}", handleRenameGroupDM(svc, broadcaster, limiter))
 		r.Delete("/{channelId}", handleCloseDM(svc, broadcaster))
@@ -255,10 +255,13 @@ func broadcastDMOpen(ctx context.Context, svc *service.Services, broadcaster DMB
 	}
 }
 
-func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
+func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
+			return
+		}
+		if !allowGroupCreate(w, limiter, user.ID) {
 			return
 		}
 

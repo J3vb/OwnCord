@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -17,6 +18,14 @@ import (
 
 // dmGroupRateLimitPerMinute bounds, per user, the group mutations that publish to other members.
 const dmGroupRateLimitPerMinute = 20
+
+// Group creation has its own budget, apart from the mutation one: a short burst limit and a daily ceiling.
+const (
+	dmGroupCreatePerMinute = 5
+	dmGroupCreatePerDay    = 50
+	dmGroupCreateMinuteKey = "dm_group_create_min"
+	dmGroupCreateDayKey    = "dm_group_create_day"
+)
 
 const dmGroupMaxBody = 1 << 14
 
@@ -69,6 +78,33 @@ func allowGroupMutation(w http.ResponseWriter, limiter *auth.RateLimiter, userID
 	}
 	writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many group changes, please slow down")
 	return false
+}
+
+// allowGroupCreate applies both creation limits and writes the 429 itself; a nil limiter allows. A call the
+// daily ceiling refuses gives its minute slot back.
+func allowGroupCreate(w http.ResponseWriter, limiter *auth.RateLimiter, userID int64) bool {
+	if limiter == nil {
+		return true
+	}
+	minuteKey := auth.Key(dmGroupCreateMinuteKey, userID)
+	refund, ok := limiter.Reserve(minuteKey, dmGroupCreatePerMinute, time.Minute)
+	if !ok {
+		writeGroupCreateLimited(w, limiter.RetryAfter(minuteKey, dmGroupCreatePerMinute, time.Minute))
+		return false
+	}
+	dayKey := auth.Key(dmGroupCreateDayKey, userID)
+	if !limiter.Allow(dayKey, dmGroupCreatePerDay, 24*time.Hour) {
+		refund()
+		writeGroupCreateLimited(w, limiter.RetryAfter(dayKey, dmGroupCreatePerDay, 24*time.Hour))
+		return false
+	}
+	return true
+}
+
+func writeGroupCreateLimited(w http.ResponseWriter, retryAfter time.Duration) {
+	secs := int((retryAfter + time.Second - 1) / time.Second)
+	w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
+	writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many new groups, please try again later")
 }
 
 func decodeGroupBody(w http.ResponseWriter, r *http.Request, v any) bool {
