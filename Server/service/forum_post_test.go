@@ -352,6 +352,8 @@ func TestThreadUpdate_PostTags(t *testing.T) {
 		if ids == nil {
 			ids = []int64{}
 		}
+		// The rate limit is not under test here: each call gets a fresh budget.
+		f.threads.limiter = auth.NewRateLimiter()
 		return f.threads.Update(bg(), UpdateThreadParams{UserID: user, ThreadID: id, TagIDs: &ids})
 	}
 	out, err := set(thrOwner, f.tags[2].ID, f.tags[1].ID)

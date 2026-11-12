@@ -28,6 +28,9 @@ type StorageLister interface {
 type ErasureHub interface {
 	BroadcastMemberBan(userID int64)
 	PurgeUserFromReplay(ctx context.Context, userID int64) error
+	// PurgeErasedMessagesFromReplay drops the frames about the messages the erasure deleted:
+	// an edit frame names its message, not its author.
+	PurgeErasedMessagesFromReplay(ctx context.Context, jobID int64) error
 	// DisconnectRevokedUser drops the live socket right after the lock stage revoked
 	// sessions, so a half-erased account is not left connected during the drain.
 	DisconnectRevokedUser(userID int64)
@@ -54,6 +57,7 @@ type ErasureStore interface {
 	CompleteErasureJob(ctx context.Context, id int64, filesRemoved int) error
 	MarkErasureJobReplayPurged(ctx context.Context, id int64) error
 	DeleteEventsForUser(ctx context.Context, userID int64) (int64, error)
+	DeleteOrphanMessageEvents(ctx context.Context, jobID int64) ([]int64, error)
 	ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error)
 }
 
@@ -299,7 +303,7 @@ func (s *ErasureService) runJob(ctx context.Context, job *db.ErasureJob) error {
 	defer s.mu.Unlock()
 
 	if !job.ReplayPurged {
-		if err := s.purgeReplay(ctx, job.UserID); err != nil {
+		if err := s.purgeReplay(ctx, job.UserID, job.ID); err != nil {
 			slog.Warn("erasure: replay purge failed", "erasure_job", job.ID, "user_id", job.UserID, "err", err)
 			if recErr := s.st.RecordErasureJobAttempt(ctx, job.ID, job.FilesRemoved, err.Error()); recErr != nil {
 				return recErr
@@ -347,11 +351,17 @@ func (s *ErasureService) runJob(ctx context.Context, job *db.ErasureJob) error {
 // purgeReplay takes the erased user's frames out of the replay pipeline: through the hub
 // when installed (ring buffer, persister barrier, events rows, producer tombstone), else
 // the persisted rows alone (start-up replay, tests), since nothing is buffered yet.
-func (s *ErasureService) purgeReplay(ctx context.Context, userID int64) error {
+func (s *ErasureService) purgeReplay(ctx context.Context, userID, jobID int64) error {
 	if s.hub != nil {
-		return s.hub.PurgeUserFromReplay(ctx, userID)
+		if err := s.hub.PurgeUserFromReplay(ctx, userID); err != nil {
+			return err
+		}
+		return s.hub.PurgeErasedMessagesFromReplay(ctx, jobID)
 	}
-	_, err := s.st.DeleteEventsForUser(ctx, userID)
+	if _, err := s.st.DeleteEventsForUser(ctx, userID); err != nil {
+		return err
+	}
+	_, err := s.st.DeleteOrphanMessageEvents(ctx, jobID)
 	return err
 }
 

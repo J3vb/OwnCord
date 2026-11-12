@@ -279,9 +279,8 @@ func (h *Hub) bumpVisibilityWatermark() {
 	}
 }
 
-// MarkVisibilityChanged is the exported watermark bump for REST handlers (via a dmVisibilityMarker
-// assertion), giving an unsequenced targeted DM event the same full-resync guarantee as the WS
-// emitter.
+// MarkVisibilityChanged is the watermark bump for unsequenced targeted DM events, used by the REST
+// handlers (via a dmVisibilityMarker assertion) and the WS emitter alike, so both give a full resync.
 // It takes h.seqMu, which reconnectRegister holds across its watermark re-check and registerNow,
 // rather than the lock-free bump (REST callers raced reconnectRegister): a call either completes
 // before that section or blocks until the socket is registered, so what the caller sends next

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -171,7 +172,8 @@ var erasureStatements = []struct {
 // `{"seq":...,"type":...,"payload":{...}}` (ws.wrapWithSeq), so every lookup
 // goes through $.payload: user_id on state frames, user.id on message frames,
 // mentions, call.participants, group_event.target_user_id, from_user_id,
-// presence_batch updates[].user_id and member_update_batch members[].user_id.
+// presence_batch updates[].user_id, member_update_batch members[].user_id and
+// thread.owner_id on thread frames.
 // ws.eventNamesUser is the same rule over the ring buffer's bytes; the two
 // must stay in step.
 const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?1
@@ -181,8 +183,90 @@ const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE json_each.value = ?1)
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.call.participants') WHERE json_each.value = ?1)
 	 OR json_extract(payload, '$.payload.group_event.target_user_id') = ?1
+	 OR json_extract(payload, '$.payload.thread.owner_id') = ?1
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.updates') WHERE json_extract(json_each.value, '$.user_id') = ?1)
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.members') WHERE json_extract(json_each.value, '$.user_id') = ?1))`
+
+// replayMessageFrameTypes are the frame types whose payload.id or payload.message_id
+// names a message (wire values; the events table's event_type column holds the same).
+// chat_bulk_deleted is left out: it carries only ids, never content.
+const replayMessageFrameTypes = `('chat_message', 'chat_edited', 'chat_deleted', 'reaction_update', 'poll_update')`
+
+// EventNamesOwnMessagePredicate is the SQL deciding whether a persisted replay
+// event is a message frame about a message the user (?1) authored. Edit frames
+// carry no author, so only the messages table can say whose they are; the drain
+// runs this before it deletes the messages. It matches payload.id and
+// payload.message_id only: ws.messageIn also reads ids[] and the replied-to
+// message, which the ring purge needs and this one does not.
+const EventNamesOwnMessagePredicate = `(event_type IN ` + replayMessageFrameTypes + `
+	 AND (EXISTS (SELECT 1 FROM messages WHERE messages.id = json_extract(payload, '$.payload.id') AND messages.user_id = ?1)
+	   OR EXISTS (SELECT 1 FROM messages WHERE messages.id = json_extract(payload, '$.payload.message_id') AND messages.user_id = ?1)))`
+
+// DeleteOrphanMessageEvents removes the message frames written since the erasure job's
+// lock whose message no longer exists and returns the message ids they named. A frame
+// whose message is gone is always safe to drop. It catches what reached the table after
+// the drain passed, and runs again from the replay purge after a restart. A frame
+// sequenced after the persister flush and missing from the first ring read can survive
+// in the ring; after the finish stage no producer can make one.
+func (d *DB) DeleteOrphanMessageEvents(ctx context.Context, jobID int64) ([]int64, error) {
+	rows, err := d.writer.QueryContext(ctx, `DELETE FROM events
+	 WHERE created_at >= (SELECT created_at FROM erasure_jobs WHERE id = ?1)
+	   AND event_type IN `+replayMessageFrameTypes+`
+	   AND ((json_extract(payload, '$.payload.id') IS NOT NULL
+	         AND NOT EXISTS (SELECT 1 FROM messages WHERE messages.id = json_extract(payload, '$.payload.id')))
+	     OR (json_extract(payload, '$.payload.message_id') IS NOT NULL
+	         AND NOT EXISTS (SELECT 1 FROM messages WHERE messages.id = json_extract(payload, '$.payload.message_id'))))
+	 RETURNING COALESCE(json_extract(payload, '$.payload.message_id'), json_extract(payload, '$.payload.id'))`, jobID) //nolint:gosec // G202: constant list
+	if err != nil {
+		return nil, fmt.Errorf("DeleteOrphanMessageEvents: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	var ids []int64
+	for rows.Next() {
+		var id sql.NullInt64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("DeleteOrphanMessageEvents scan: %w", err)
+		}
+		if id.Valid {
+			ids = append(ids, id.Int64)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("DeleteOrphanMessageEvents rows: %w", err)
+	}
+	return ids, nil
+}
+
+// MissingMessageIDs returns the ids among ids that name no messages row.
+func (d *DB) MissingMessageIDs(ctx context.Context, ids []int64) ([]int64, error) {
+	var missing []int64
+	for chunk := range slices.Chunk(ids, 500) {
+		in, args := placeholdersFor(chunk)
+		rows, err := d.reader.QueryContext(ctx, `SELECT id FROM messages WHERE id IN (`+in+`)`, args...) //nolint:gosec // G202: placeholders only
+		if err != nil {
+			return nil, fmt.Errorf("MissingMessageIDs: %w", err)
+		}
+		present := make(map[int64]struct{}, len(chunk))
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close() //nolint:errcheck
+				return nil, fmt.Errorf("MissingMessageIDs scan: %w", err)
+			}
+			present[id] = struct{}{}
+		}
+		rows.Close() //nolint:errcheck
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("MissingMessageIDs rows: %w", err)
+		}
+		for _, id := range chunk {
+			if _, ok := present[id]; !ok {
+				missing = append(missing, id)
+			}
+		}
+	}
+	return missing, nil
+}
 
 // DeleteEventsForUser removes every persisted replay event naming userID and returns
 // rows deleted. It runs again after the member_ban broadcast and persister flush so

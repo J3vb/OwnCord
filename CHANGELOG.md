@@ -113,14 +113,19 @@ release changes the database, and anything an operator must do first.)
 
 - **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
+- **Voice:** with LiveKit webhooks on, a voice reconnect no longer drops the member from the call.
 - **Channels:** a channel permission change on a busy server now always applies to every connected member.
+- **Voice:** if the server could not read who is in voice while you connect, the connect now retries instead of showing voice channels as empty.
+- **Group DMs:** a group DM created just as your connection dropped is no longer reported as failed.
 - **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
 - **Linux:** while the camera or a screen share was being published on a slow connection, mute, push-to-talk release, deafen, volume changes and Leave waited for it (up to 10 seconds or more). They now act at once.
 - **Linux:** after a microphone device change landed during an unmute, you could show as unmuted while others heard nothing.
 - **Linux:** when the window's page process ends unexpectedly, the app now leaves your call and reloads the window instead of staying blank.
 - **Admin:** the `chatserver token` commands applied pending database updates themselves, skipping the safety copy an upgrade takes. They now stop and ask you to start the server once first.
 - **Linux:** on a desktop without a keyring service (no gnome-keyring or KWallet), the app now creates your voice identity key and saves unsent messages for recovery, instead of showing "Could not save this pending message" on every send.
+- **Threads:** thread edits (rename, archive, lock, tags) are now limited to 5 a second per user, and an edit that changes nothing is no longer announced.
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
+- **Accounts:** erasing an account now also removes the erased user's messages from stored reconnect history, including later edits and reactions on them.
 
 ### Messages & files
 
