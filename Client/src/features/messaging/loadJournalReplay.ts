@@ -2,7 +2,7 @@
 // loadJournal.ts) to the rows that page brought in.
 import type { ChatEditedPayload } from "../../lib/types";
 import type { Message, MessagesState } from "./messageModel";
-import type { JournalEntry } from "./loadJournal";
+import { firstPageReplayStart, type JournalEntry } from "./loadJournal";
 import {
   reduceBulkDeleteMessages,
   reduceDeleteMessage,
@@ -64,4 +64,14 @@ export function replayLoadJournal(
   };
   for (const entry of journal) state = applyEntry(state, channelId, entry);
   return state.messagesByChannel.get(channelId) ?? rows;
+}
+
+/** replayLoadJournal for a first or around page, which replays only what its
+ *  own fetch journaled. */
+export function replayFirstPage(
+  prev: MessagesState,
+  channelId: number,
+  rows: readonly Message[],
+): readonly Message[] {
+  return replayLoadJournal(prev, channelId, rows, firstPageReplayStart(prev, channelId));
 }

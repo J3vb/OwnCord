@@ -1,7 +1,6 @@
 /**
- * Messages store — holds chat messages per channel, pending send tracking,
- * and load state for infinite scroll.
- * Immutable state updates only.
+ * Messages store — chat messages per channel, pending send tracking and load
+ * state for infinite scroll. Immutable state updates only.
  *
  * The facade: the store instance, every mutator and selector, and the model
  * types. The reducer bodies are pure functions in features/messaging/; import
@@ -67,11 +66,7 @@ import {
 import { reducePollUpdate, reducePollVoteOk } from "@lib/pollState";
 
 export type { Message, PendingReaction, MessagesState } from "../features/messaging/messageModel";
-/**
- * Part of this facade's surface since before the model moved out; no importer
- * names it today.
- * @public
- */
+/** Facade surface since before the model moved out; no importer names it today. @public */
 export type { MessageStatus } from "../features/messaging/messageModel";
 
 // -----------------------------------------------------------------------------
@@ -145,17 +140,11 @@ export function setChannelLoading(channelId: number): void {
   messagesStore.setState((prev) => reduceSetChannelLoading(prev, channelId));
 }
 
-/** An older, newer, tail or around page fetch for the channel starts: edits,
- *  deletes and pins that arrive meanwhile are replayed onto the page when it
- *  lands. Pair with releaseLoadJournal when the fetch ends, however it ends. */
-export function holdLoadJournal(channelId: number): void {
+/** A page fetch holds the journal until it settles; changes meanwhile replay onto its page. */
+export const holdLoadJournal = (channelId: number): void =>
   messagesStore.setState((prev) => reduceHoldLoadJournal(prev, channelId));
-}
-
-/** The fetch that called holdLoadJournal landed, failed or went stale. */
-export function releaseLoadJournal(channelId: number): void {
+export const releaseLoadJournal = (channelId: number): void =>
   messagesStore.setState((prev) => reduceReleaseLoadJournal(prev, channelId));
-}
 
 /** Mark a channel's first-page history fetch as failed (the region offers Retry).
  *  A window with rows is detached, since they may end short of the live tail. */
