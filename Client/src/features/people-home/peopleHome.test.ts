@@ -19,6 +19,14 @@ import { renderActiveStrip } from "./activeStrip";
 
 const ME = 1;
 
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 function member(
   id: number,
   username: string,
@@ -69,11 +77,13 @@ function inVoice(...userIds: number[]): ReadonlyMap<number, VoiceUser> {
   );
 }
 
+/** Delivers the stores' pending notifications, then the view's one redraw for the frame. */
 function flush(): void {
   membersStore.flush();
   voiceStore.flush();
   channelsStore.flush();
   blocksStore.flush();
+  vi.advanceTimersToNextFrame();
 }
 
 function setRoster(...list: Member[]): void {
@@ -263,6 +273,72 @@ describe("the view", () => {
     root.querySelector<HTMLElement>("[data-testid='people-active-2']")?.focus();
     setRoster(member(ME, "me", "online"), member(2, "amy", "idle"), member(3, "bob", "online"));
     expect(document.activeElement?.getAttribute("data-testid")).toBe("people-active-2");
+  });
+
+  it("keeps a row's element across a presence update and patches what changed", () => {
+    const before = root.querySelector<HTMLElement>("[data-testid='people-row-2']")!;
+    setRoster(member(ME, "me", "online"), member(2, "amy", "idle"), member(3, "bob", "offline"));
+    const after = root.querySelector<HTMLElement>("[data-testid='people-row-2']")!;
+    expect(after).toBe(before);
+    expect(after.querySelector(".mi-custom-status")?.textContent).toBe("Idle");
+  });
+
+  it("keeps rows by identity while others join, leave and reorder", () => {
+    setRoster(
+      member(ME, "me", "online"),
+      member(2, "amy", "online"),
+      member(4, "ada", "online"),
+      member(5, "zoe", "online"),
+    );
+    const amy = root.querySelector("[data-testid='people-row-2']");
+    const zoe = root.querySelector("[data-testid='people-row-5']");
+    expect(rowIds()).toEqual(["people-row-4", "people-row-2", "people-row-5"]);
+    setRoster(
+      member(ME, "me", "online"),
+      member(2, "amy", "online", { displayName: "Zzz" }),
+      member(5, "zoe", "online"),
+    );
+    expect(rowIds()).toEqual(["people-row-5", "people-row-2"]);
+    expect(root.querySelector("[data-testid='people-row-2']")).toBe(amy);
+    expect(root.querySelector("[data-testid='people-row-5']")).toBe(zoe);
+  });
+
+  it("draws a burst of changes once, on the next frame", () => {
+    const draws = vi.spyOn(membersStore, "getState");
+    for (let i = 10; i < 20; i++) {
+      membersStore.setState((prev) => ({
+        ...prev,
+        members: new Map(prev.members).set(i, member(i, `user${i}`, "online")),
+      }));
+      membersStore.flush();
+    }
+    expect(rowIds()).toEqual(["people-row-2"]);
+    draws.mockClear();
+    vi.advanceTimersToNextFrame();
+    expect(draws).toHaveBeenCalledTimes(1);
+    expect(rowIds()).toHaveLength(11);
+    draws.mockRestore();
+  });
+
+  it("ignores a channel update that changes no name", () => {
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[10, voiceChannel(10, "Lounge", "voice")]]),
+    }));
+    flush();
+    const before = rowIds();
+    const row = root.querySelector("[data-testid='people-row-2']");
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[10, { ...voiceChannel(10, "Lounge", "voice"), unreadCount: 3 }]]),
+    }));
+    channelsStore.flush();
+    const spy = vi.spyOn(membersStore, "getState");
+    vi.advanceTimersToNextFrame();
+    expect(spy).not.toHaveBeenCalled();
+    expect(rowIds()).toEqual(before);
+    expect(root.querySelector("[data-testid='people-row-2']")).toBe(row);
+    spy.mockRestore();
   });
 
   it("moves focus to the search when the focused person leaves the tab", () => {

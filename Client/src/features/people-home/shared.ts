@@ -38,18 +38,45 @@ export function personAvatar(person: PersonModel): HTMLElement {
   return avatar;
 }
 
-/** Redraw on a roster, presence, block, channel or voice-seat change, until `signal` aborts. */
+/** The names of the server's channels, which Active now shows beside a voice seat. */
+function channelNames(channels: ReadonlyMap<number, { name: string; type: string }>): string {
+  let out = "";
+  for (const [id, channel] of channels) if (channel.type !== "dm") out += `${id}:${channel.name};`;
+  return out;
+}
+
+/**
+ * Redraw on a roster, presence, block, channel-name or voice-seat change,
+ * until `signal` aborts. A burst of changes redraws once, on the next frame.
+ */
 export function watchPeople(render: () => void, signal: AbortSignal): void {
+  let frame = 0;
+  const schedule = (): void => {
+    if (frame !== 0 || signal.aborted) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      if (!signal.aborted) render();
+    });
+  };
   const unsubs = [
-    membersStore.subscribeSelector((s) => s.members, render),
-    blocksStore.subscribeSelector((s) => s.blockedByMe, render),
-    channelsStore.subscribeSelector((s) => s.channels, render),
+    membersStore.subscribeSelector((s) => s.members, schedule),
+    blocksStore.subscribeSelector((s) => s.blockedByMe, schedule),
+    // Names only: unread counts and read pointers replace the channels Map on every message.
+    channelsStore.subscribeSelector((s) => channelNames(s.channels), schedule),
     // Who sits in which channel only: a speaking tick replaces voiceUsers too.
     voiceStore.subscribeSelector(
       (s) =>
         [...s.voiceUsers].map(([id, users]) => `${id}:${[...users.keys()].join(",")}`).join(";"),
-      render,
+      schedule,
     ),
   ];
-  signal.addEventListener("abort", () => unsubs.forEach((u) => u()), { once: true });
+  signal.addEventListener(
+    "abort",
+    () => {
+      unsubs.forEach((u) => u());
+      if (frame !== 0) cancelAnimationFrame(frame);
+      frame = 0;
+    },
+    { once: true },
+  );
 }
