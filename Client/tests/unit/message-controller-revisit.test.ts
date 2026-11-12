@@ -340,6 +340,19 @@ describe("revisit keeps and revalidates older loaded history", () => {
     expect(getMessages).toHaveBeenCalledTimes(2);
   });
 
+  it("drops a cached row deleted while away when it keeps the older page", async () => {
+    server = rows(1, 250).filter((m) => m.id !== 151);
+    cacheWindow(151, 250);
+
+    await olderPageDuringRefetch();
+
+    // The refetch reached past the cached head and no longer holds 151, so
+    // the kept window must not either.
+    expect(ids()).not.toContain(151);
+    expect(ids()).toEqual([...rows(101, 250)].map((m) => m.id).filter((id) => id !== 151));
+    expect(getMessages).toHaveBeenCalledTimes(2);
+  });
+
   it("drops that older page when the refetch does not reach the cached head", async () => {
     server = rows(1, 300);
     cacheWindow(151, 300);
