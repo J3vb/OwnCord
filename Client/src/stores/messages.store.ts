@@ -1,7 +1,6 @@
 /**
- * Messages store — holds chat messages per channel, pending send tracking,
- * and load state for infinite scroll.
- * Immutable state updates only.
+ * Messages store — chat messages per channel, pending send tracking and load
+ * state for infinite scroll. Immutable state updates only.
  *
  * The facade: the store instance, every mutator and selector, and the model
  * types. The reducer bodies are pure functions in features/messaging/; import
@@ -49,6 +48,8 @@ import {
   reducePrependMessages,
   reduceAppendNewerMessages,
   reduceMergeTailMessages,
+  reduceHoldLoadJournal,
+  reduceReleaseLoadJournal,
 } from "../features/messaging/historyWindows";
 import {
   reduceEditMessage,
@@ -65,11 +66,7 @@ import {
 import { reducePollUpdate, reducePollVoteOk } from "@lib/pollState";
 
 export type { Message, PendingReaction, MessagesState } from "../features/messaging/messageModel";
-/**
- * Part of this facade's surface since before the model moved out; no importer
- * names it today.
- * @public
- */
+/** Facade surface since before the model moved out; no importer names it today. @public */
 export type { MessageStatus } from "../features/messaging/messageModel";
 
 // -----------------------------------------------------------------------------
@@ -142,6 +139,12 @@ export function removeOptimistic(correlationId: string): void {
 export function setChannelLoading(channelId: number): void {
   messagesStore.setState((prev) => reduceSetChannelLoading(prev, channelId));
 }
+
+/** A page fetch holds the journal until it settles; changes meanwhile replay onto its page. */
+export const holdLoadJournal = (channelId: number): void =>
+  messagesStore.setState((prev) => reduceHoldLoadJournal(prev, channelId));
+export const releaseLoadJournal = (channelId: number): void =>
+  messagesStore.setState((prev) => reduceReleaseLoadJournal(prev, channelId));
 
 /** Mark a channel's first-page history fetch as failed (the region offers Retry).
  *  A window with rows is detached, since they may end short of the live tail. */

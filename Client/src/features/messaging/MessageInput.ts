@@ -169,6 +169,9 @@ export interface DraftUpload {
   /** Set while this upload refreshes a stale chip: the chip's old id and
    *  age, so a failed refresh keeps the chip even after a channel switch. */
   refreshing: { readonly id: string; readonly uploadedAt: number } | null;
+  /** A too-long draft being sent as a file: put back in the composer that
+   *  follows this upload if it fails. */
+  draftText?: string;
 }
 
 export type MessageInputComponent = MountableComponent & {

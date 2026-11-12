@@ -184,15 +184,20 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
 
   let closed = false;
   let inFlight = false;
-  /** Set once the ban is in and only the purge is unfinished: what Retry resends. */
+  /** What Retry resends: a purge left unfinished, or a request that may not have arrived. */
   let pending: BanRequest | null = null;
+  /** Set once the server has answered the ban. */
+  let banConfirmed = false;
   let deletedSoFar = 0;
   /** Aborted on close, so the retry-window timer never outlives the dialog. */
   const lifetime = new Disposable();
   let cancelExpiry: (() => void) | null = null;
 
-  /** The unfinished-purge report for a dialog that closed before Retry. */
-  const stoppedText = (): string => t("banDialog.purgeStopped", { name, count: deletedSoFar });
+  /** The report for a dialog that closed before Retry. */
+  const stoppedText = (): string =>
+    banConfirmed
+      ? t("banDialog.purgeStopped", { name, count: deletedSoFar })
+      : t("banDialog.unconfirmed", { name });
 
   const modal = createModal({
     content,
@@ -284,6 +289,7 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
       confirm.focus();
       return;
     }
+    banConfirmed = true;
     options.onBanned?.();
 
     if (request.deleteMessageSeconds > 0) {

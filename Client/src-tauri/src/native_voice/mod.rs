@@ -27,6 +27,7 @@ mod codecs;
 mod hotplug;
 mod keys;
 pub mod mic_test;
+pub mod page_gone;
 pub mod playout;
 mod quick;
 pub mod screen;

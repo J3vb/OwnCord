@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
@@ -6,8 +7,9 @@ import shared from "./vite.config.ts";
 /**
  * Web (browser) overlay (WP 6.13b). Builds the same app for a plain browser:
  * the desktop platform registry is swapped for the inert browser one, and
- * `public/` lands under `assets/`, because the server portal serves only `/`
- * and `/assets/*`. Output goes to `dist-web/`; the desktop build is untouched.
+ * `public/` lands under `assets/public-<content hash>/`, because the server
+ * portal serves only `/` and `/assets/*`, and serves the latter as immutable.
+ * Output goes to `dist-web/`; the desktop build is untouched.
  */
 
 const root = import.meta.dirname;
@@ -45,17 +47,41 @@ export function browserPlatform(): Plugin {
   };
 }
 
-/** Emit every file in `public/` as `assets/<name>`. Used with `publicDir: false`. */
-export function publicUnderAssets(): Plugin {
+function publicFileNames(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .sort();
+}
+
+/**
+ * The folder under `assets/` that holds this build's `public/` files, named by
+ * a hash of every file's name and bytes. The portal serves `/assets/*` as
+ * immutable and the files keep their plain names (the speech worker loads its
+ * module and model by relative URL), so the folder is what moves when any of
+ * them changes: a browser then fetches the whole set fresh, never a mix.
+ */
+export function publicAssetsDir(dir: string = PUBLIC_DIR): string {
+  const hash = createHash("sha256");
+  for (const name of publicFileNames(dir)) {
+    hash
+      .update(name)
+      .update("\0")
+      .update(readFileSync(resolve(dir, name)))
+      .update("\0");
+  }
+  return `public-${hash.digest("hex").slice(0, 12)}`;
+}
+
+/** Emit every file in `public/` as `assets/<publicDir>/<name>`. Used with `publicDir: false`. */
+export function publicUnderAssets(publicDir: string): Plugin {
   return {
     name: "owncord-public-under-assets",
     generateBundle() {
-      for (const entry of readdirSync(PUBLIC_DIR, { withFileTypes: true })) {
-        if (!entry.isFile()) continue;
-        const name = entry.name;
+      for (const name of publicFileNames(PUBLIC_DIR)) {
         this.emitFile({
           type: "asset",
-          fileName: `assets/${name}`,
+          fileName: `assets/${publicDir}/${name}`,
           source: readFileSync(resolve(PUBLIC_DIR, name)),
         });
       }
@@ -63,13 +89,16 @@ export function publicUnderAssets(): Plugin {
   };
 }
 
+const PUBLIC_ASSETS_DIR = publicAssetsDir();
+
 export default mergeConfig(
   shared,
   defineConfig({
-    plugins: [browserPlatform(), publicUnderAssets()],
+    plugins: [browserPlatform(), publicUnderAssets(PUBLIC_ASSETS_DIR)],
     define: {
       __OWNCORD_WEB__: true,
       "import.meta.env.OWNCORD_APP_VERSION": JSON.stringify(APP_VERSION),
+      "import.meta.env.OWNCORD_PUBLIC_BASE": JSON.stringify(`/assets/${PUBLIC_ASSETS_DIR}/`),
     },
     publicDir: false,
     build: { outDir: "dist-web" },

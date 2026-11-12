@@ -8,6 +8,9 @@ interface ImportMetaEnv {
   /** The app version, defined only in the web build (`vite.config.web.ts`):
    *  a page has no native host to ask. */
   readonly OWNCORD_APP_VERSION?: string;
+  /** Where the web build serves the `public/` files, `/assets/public-<hash>/`,
+   *  defined only in the web build (`vite.config.web.ts`). */
+  readonly OWNCORD_PUBLIC_BASE?: string;
 }
 
 declare module "virtual:owncord-changelog" {

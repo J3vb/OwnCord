@@ -97,9 +97,9 @@ func (s *messageReads) ReadableChannelIDs(ctx context.Context, userID int64) ([]
 // (channel permissions; DM membership and block), so gates outside the send flow (the
 // plugin broadcast path) share the policy.
 func (s *MessageService) CanPost(ctx context.Context, userID, channelID int64) error {
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, s.st, channelID)
+	if err != nil {
+		return err
 	}
 	return s.checkSendPermission(ctx, userID, ch)
 }
@@ -207,29 +207,33 @@ func requireNotTimedOut(ctx context.Context, perms *PermissionService, userID in
 	return nil
 }
 
-// readSubject resolves what CanReadContent needs for userID in ch. Unlike channelSubject,
-// a DM lookup failure folds into "not a participant" so an outsider learns nothing about a
-// DM's existence even on a transient failure.
+// readSubject resolves what CanReadContent needs for userID in ch. A permission or DM
+// membership lookup failure (a deadline included) is a wrapped ErrInternal, never a zero
+// subject: a real non-member of a DM still reads as ErrNotFound, so existence is not
+// disclosed, but a transient fault must not be answered as a denial.
 // Archived is deliberately NOT propagated into Channel: docs/protocol.md documents
 // "History stays readable" for an archived channel, and this read gate must not withdraw
 // that guarantee (CanViewChannel refuses archived outright). Only the WRITE gate
 // (requireChannelWritable) and visibility/audience predicates see the flag.
 // The NSFW acknowledgement is resolved live (never cached), only for a labelled channel.
-func readSubject(ctx context.Context, st subjectStore, perms *PermissionService, userID int64, ch *db.Channel) permissions.Subject {
+func readSubject(ctx context.Context, st subjectStore, perms *PermissionService, userID int64, ch *db.Channel) (permissions.Subject, error) {
 	sub, err := perms.Subject(ctx, userID, ch.ID)
 	if err != nil {
-		sub = permissions.Subject{}
+		return permissions.Subject{}, fmt.Errorf("%w: failed to resolve permissions: %w", ErrInternal, err)
 	}
 	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, NSFW: ch.NSFW, AuthorityID: ch.Thread.ParentID}
 	switch {
 	case ch.Type == "dm":
 		ok, dmErr := st.IsDMParticipant(ctx, userID, ch.ID)
-		sub.DMParticipant = dmErr == nil && ok
+		if dmErr != nil {
+			return permissions.Subject{}, fmt.Errorf("%w: failed to check DM participation: %w", ErrInternal, dmErr)
+		}
+		sub.DMParticipant = ok
 	case ch.NSFW:
 		ok, ackErr := st.HasNSFWAcknowledgement(ctx, userID, ch.ID)
 		sub.NSFWAcknowledged = ackErr == nil && ok
 	}
-	return sub
+	return sub, nil
 }
 
 // readContentDenial maps a CanReadContent verdict onto service errors. ErrNotDMParticipant

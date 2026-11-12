@@ -111,6 +111,7 @@ release changes the database, and anything an operator must do first.)
 
 ### Fixed
 
+- **Accounts:** an account recovery, sign-up, two-factor sign-in or report that already went through no longer asks you to try again just because the request ran long.
 - **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
 - **Voice:** with LiveKit webhooks on, a voice reconnect no longer drops the member from the call.
@@ -118,24 +119,46 @@ release changes the database, and anything an operator must do first.)
 - **Voice:** if the server could not read who is in voice while you connect, the connect now retries instead of showing voice channels as empty.
 - **Group DMs:** a group DM created just as your connection dropped is no longer reported as failed.
 - **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
+- **Sign-in:** after a password change in Settings, a remembered password was still the old one, so the next one-click sign-in was refused. It now holds the new password.
+- **Voice:** on a phone, tapping someone in a voice channel who had their camera or screen on joined the call at once. It now asks first, like a tap on the channel.
+- **Moderation:** closing the ban dialog after a failed ban said the member was banned. It now says the ban could not be confirmed.
+- **Desktop UI:** animated avatars and banners kept old rows in memory after every channel switch. They no longer do.
+- **Direct messages:** the People view redrew every row on each presence change or new message on busy servers. It now updates only the rows that changed.
 - **Linux:** while the camera or a screen share was being published on a slow connection, mute, push-to-talk release, deafen, volume changes and Leave waited for it (up to 10 seconds or more). They now act at once.
 - **Linux:** after a microphone device change landed during an unmute, you could show as unmuted while others heard nothing.
+- **Linux:** when the window's page process ends unexpectedly, the app now leaves your call and reloads the window instead of staying blank.
 - **Admin:** the `chatserver token` commands applied pending database updates themselves, skipping the safety copy an upgrade takes. They now stop and ask you to start the server once first.
 - **Linux:** on a desktop without a keyring service (no gnome-keyring or KWallet), the app now creates your voice identity key and saves unsent messages for recovery, instead of showing "Could not save this pending message" on every send.
 - **Threads:** thread edits (rename, archive, lock, tags) are now limited to 5 a second per user, and an edit that changes nothing is no longer announced.
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
 - **Retention:** the 15-minute clean-up no longer rewrites its records or holds the database for writing on channels and threads that have nothing old enough to remove.
 - **Channels:** opening the media gallery of a channel with few or no pictures no longer reads every attachment on the server, so it opens quickly on a large server.
+- **Admin:** restoring a backup from the admin panel on a symlinked database path replaced the link with a plain file. The link is now kept and the restore goes to the linked file.
 - **Accounts:** erasing an account now also removes the erased user's messages from stored reconnect history, including later edits and reactions on them.
+- **Admin:** a blank `OWNCORD_*` list variable (such as `OWNCORD_SERVER_ADMIN_ALLOWED_CIDRS=`) locked everyone out of the admin panel. It is now ignored with a start-up warning and the list keeps its configured value.
+- **Admin:** a backup folder set to the database's own folder counted the live database as a backup, so scheduled backups stopped. That folder is now refused, and the live database is never listed, deleted or restored as a backup.
+- **Admin:** first-run setup opened over a bare IPv6 address showed a broken link after a port or TLS change.
 
 ### Messages & files
 
+- **Search never found text written in a thread or a forum post.** Search now covers the threads and forum posts of every channel you can read (a forum post follows its forum's permissions and NSFW acknowledgement), and picking such a result opens it in the thread panel. Search hits gain a `thread_parent_id` field; an older desktop client lists these hits but cannot open them.
+- **An open thread could close and disappear after a reconnect when the server was slow to answer.** It now stays and can be reloaded.
 - **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
 - **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
 - **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.
+- **Large outside images and GIF pages were cut off on a slow connection** in the browser client. They now load in full as long as the connection keeps moving.
+- **The text on a message with a picture or file could not be removed.** Clearing it offered to delete the whole message. It now removes just the text and keeps the files.
 - **Typing just @ listed only 10 people**, so members who were offline or had not posted lately were missing until you typed part of their name. The list now holds up to 50 people and scrolls.
 - **A voice message, video or YouTube player stopped and went back to the start when anyone reacted to or pinned that message**, and a spoiler you had opened was covered again. A reaction or pin now only redraws the reactions and pin button; playback and opened spoilers stay.
+- **In a thread or forum post, clicking a reply quote did nothing.** It now jumps to the replied-to message, loading it if needed.
+- **Pin, edit and delete in a thread or forum post skipped the channel's safety checks**: a quick double click could pin and unpin at once, and an edit or delete lost to a bad connection vanished silently. They now behave like in a channel: one pin request at a time, and a failed edit puts your text back.
 - **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.
+- **An edit, delete or pin that arrived while older history or a jump was loading was undone when it finished.** It now stays applied.
+- **A message posted at the moment you jumped back to the present could be missing until you reopened the channel.** It is now fetched right after the jump lands.
+- **A message the server refused showed its real reason for only 20 seconds**, then changed to "Delivery not confirmed". It now keeps the reason.
+- **A too-long message sent as a text file was lost when its upload failed after you switched channel.** The text now comes back in the composer.
+- **A voice message that hit the 5-minute limit and failed to stop froze the recording bar.** The bar now closes and shows "Recording failed".
+- **Link previews are limited to five per message**; further links stay plain links.
 
 ### Voice
 

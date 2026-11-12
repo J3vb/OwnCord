@@ -210,7 +210,10 @@ function sendNow(st: ChannelState, cc: ChannelApi, ms: MountScope, plan: SendPla
     cc.clearSendTimer(cid);
     if (
       (ms.session === undefined || ms.session.isCurrent()) &&
-      st.getCurrentUserId() === ms.owner.userId
+      st.getCurrentUserId() === ms.owner.userId &&
+      getChannelMessages(ms.channelId).some(
+        (m) => m.correlationId === cid && m.status === "pending",
+      )
     ) {
       markSendFailed(cid, "UNCONFIRMED");
     }
