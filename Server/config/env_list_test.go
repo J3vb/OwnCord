@@ -3,11 +3,12 @@ package config_test
 import (
 	"bytes"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 )
 
-func TestEnvEmptyListOverridesDefault(t *testing.T) {
+func TestEnvEmptyListKeepsDefault(t *testing.T) {
 	for _, value := range []string{"", "  ", " , ,"} {
 		t.Run(value, func(t *testing.T) {
 			t.Setenv("OWNCORD_SERVER_ADMIN_ALLOWED_CIDRS", value)
@@ -18,11 +19,14 @@ func TestEnvEmptyListOverridesDefault(t *testing.T) {
 			t.Cleanup(func() { slog.SetDefault(prev) })
 
 			cfg := loadBody(t, "")
-			if len(cfg.Server.AdminAllowedCIDRs) != 0 {
-				t.Fatalf("admin_allowed_cidrs = %#v, want empty", cfg.Server.AdminAllowedCIDRs)
+			if len(cfg.Server.AdminAllowedCIDRs) == 0 || slices.Contains(cfg.Server.AdminAllowedCIDRs, "") {
+				t.Fatalf("admin_allowed_cidrs = %#v, want the default list", cfg.Server.AdminAllowedCIDRs)
 			}
-			if !strings.Contains(buf.String(), "perimeter is disabled") {
-				t.Errorf("missing perimeter-disabled warning, log: %s", buf.String())
+			if !strings.Contains(buf.String(), "ignoring empty list environment variable") {
+				t.Errorf("missing empty-list warning, log: %s", buf.String())
+			}
+			if strings.Contains(buf.String(), "perimeter is disabled") {
+				t.Errorf("perimeter reported disabled, log: %s", buf.String())
 			}
 		})
 	}

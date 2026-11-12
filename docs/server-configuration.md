@@ -644,8 +644,11 @@ table below is only a sample.
 - A list key takes a comma-separated list. For example,
   `OWNCORD_SERVER_TRUSTED_PROXIES=10.0.0.2/32,10.0.0.3/32` is two entries.
   Spaces around each entry are trimmed.
-  An empty value (or one with only commas and spaces) means an empty list, and
-  it replaces the default list.
+  Blank entries are dropped. A value that is empty (or only commas and spaces)
+  is ignored with a start-up warning, and the list keeps its `config.yaml` or
+  default value: a blank variable can neither lock you out of the admin panel
+  nor switch its address allowlist off. To clear a list, set it to `[]` in
+  `config.yaml`.
 - Every other key takes one value of its own type.
 - A value of the wrong type stops the server at start-up, naming the variable.
   It is never silently changed or ignored.

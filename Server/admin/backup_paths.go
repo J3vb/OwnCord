@@ -49,11 +49,8 @@ var liveDatabaseSuffixes = []string{"", "-wal", "-shm", "-journal"}
 // identity first, so a symlink or a differently spelled path still matches, and falls back to the cleaned
 // absolute path when either side cannot be stat'ed.
 func isLiveDatabaseFile(path, dbFile string) bool {
-	if path == "" {
+	if path == "" || dbFile == "" {
 		return false
-	}
-	if dbFile == "" {
-		dbFile = defaultDatabaseFile()
 	}
 	candidate, candErr := os.Stat(path)
 	for _, suffix := range liveDatabaseSuffixes {

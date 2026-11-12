@@ -10,7 +10,8 @@ import "maps"
 
 func init() {
 	maps.Copy(supportEventCodes, map[string]string{
-		"config: ignoring non-editable key in overrides file (typo, or a protected key)": "config_overrides_non_editable_key",
-		"config: ignoring invalid value in overrides file (wrong type or out of range)":  "config_overrides_invalid_value",
+		"config: ignoring non-editable key in overrides file (typo, or a protected key)":             "config_overrides_non_editable_key",
+		"config: ignoring invalid value in overrides file (wrong type or out of range)":              "config_overrides_invalid_value",
+		"config: ignoring empty list environment variable (set the list in config.yaml to clear it)": "config_env_empty_list_ignored",
 	})
 }
