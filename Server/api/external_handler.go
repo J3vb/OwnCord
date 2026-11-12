@@ -98,6 +98,11 @@ func handleExternalImage(broker *externalcontent.Broker) http.HandlerFunc {
 			writeExternalRefusal(w, externalcontent.FailureOf(err))
 			return
 		}
+		// A slow reader of a large image outlasts the global write timeout, so push it out on each chunk.
+		deadlines := newTransferDeadline(w, r, int64(len(body)))
+		defer deadlines.release()
+		deadlines.touch()
+		w = progressWriter{ResponseWriter: w, d: deadlines}
 		h := w.Header()
 		h.Set("Content-Type", media)
 		h.Set("Content-Length", strconv.Itoa(len(body)))
