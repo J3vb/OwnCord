@@ -1,5 +1,5 @@
 {
-  "nextId": 598,
+  "nextId": 601,
   "findings": [
     {
       "id": "OC-0001",
@@ -13785,6 +13785,29 @@
       "lens": "client-state",
       "finder": "claude",
       "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
+    },
+    {
+      "id": "OC-0600",
+      "title": "A channel visibility refresh that runs out of time now settles every client it did not reach",
+      "file": "Server/ws/hub_visibility_refresh.go",
+      "line": 125,
+      "severity": "high",
+      "why": "When the walk after a channel override change ran past its budget, the clients it had not reached yet were only marked to resync and kept their place on the channel until they did.",
+      "repro": "See the test: a permission read that stalls past the budget, then check the unreached clients' channel topic and focus.",
+      "evidence": "Vault issue #150; Server/ws/hub_visibility_watermark_test.go (TestRefreshChannelVisibility_StalledReaderTimesOutAndMarksClients, TestMarkVisibilityWalkTimedOut_SettlesTheLiveClientOnly)",
+      "suggestedFix": "Take each unreached live client off the channel (topic, focus, held thread under it) before marking it to resync; the full ready gives the channel back to those who may still see it.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/hub_visibility_watermark_test.go",
+        "revertProof": "fail (unreached clients keep the channel topic and focus)"
+      },
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-05",
+      "hunt": "nightly-bughunt",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-11-12"
     }
   ]
 }
