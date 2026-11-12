@@ -102,6 +102,7 @@ export function report(scenarios, compare) {
     const counts = Object.entries(s.statuses)
       .map(([k, v]) => `${k} ${v}`)
       .join(", ");
+    json.push({ scenario: key, statuses: s.statuses, eligible: ok, reasons: [...s.reasons] });
     out.push(`## ${key}`, "", `Trials: ${counts}. Eligible: ${ok ? "yes" : "no"}.`);
     if (s.reasons.size) out.push(`Not ok because: ${[...s.reasons].join("; ")}.`);
     if (s.metrics.size)

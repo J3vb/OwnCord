@@ -125,6 +125,12 @@ async function steady(
       run.trial({ scenario, trial: attempt, status: "ok", metrics, info });
       return;
     }
+    run.trial({
+      scenario,
+      trial: WINDOW_ATTEMPTS,
+      status: "failed",
+      reason: `counters reset in all ${WINDOW_ATTEMPTS} windows`,
+    });
   } finally {
     await Promise.all(cdps.map((c) => c.detach()));
   }
@@ -166,12 +172,18 @@ async function watchTrial(
   const { done } = await armWatchTiming(bob, width);
   await click();
   const t = await done;
-  const complete = t.decodedMs !== null && t.presentedMs !== null;
+  // A trial that never reaches full size is a failure, not a fast trial with
+  // missing numbers: otherwise a regression in full-size delivery would vanish.
+  const complete = t.decodedAtSizeMs !== null && t.presentedAtSizeMs !== null;
   run.trial({
     scenario: "watch-start",
     trial,
     status: complete ? "ok" : "failed",
-    reason: complete ? undefined : "no decoded and presented frame within 20 s",
+    reason: complete
+      ? undefined
+      : t.presentedMs === null
+        ? "no decoded and presented frame within 20 s"
+        : "no full-size frame within 20 s",
     metrics: {
       decodedMs: t.decodedMs,
       decodedAtSizeMs: t.decodedAtSizeMs,

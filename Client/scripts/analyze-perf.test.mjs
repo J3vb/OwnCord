@@ -65,5 +65,13 @@ test("the compare table appears only for metrics both arms measured", () => {
   const { text, json } = report(scenarios, ["base", "cand"]);
   assert.match(text, /cand vs base/);
   assert.equal(json.filter((j) => j.compare).length, 1);
+  assert.equal(json.filter((j) => j.statuses).length, 1);
   assert.doesNotMatch(report(scenarios, ["base", "other"]).text, /other vs base/);
+});
+
+test("a scenario with no ok trials still appears in the JSON, with why", () => {
+  const { json } = report(group([trial("r1", "base", 0, "unverified", "no GPU")]));
+  assert.deepEqual(json, [
+    { scenario: "chat / send", statuses: { unverified: 1 }, eligible: false, reasons: ["no GPU"] },
+  ]);
 });
