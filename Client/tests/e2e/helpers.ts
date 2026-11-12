@@ -1043,8 +1043,12 @@ export function buildTauriMockScript(opts: {
         if (cmd === "list_running_programs") return [];
         // The taskbar/tray unread badge (DP-27); calls stay in __invokeLog.
         if (cmd === "set_unread_badge") return null;
-        // The Android call service; calls stay in __invokeLog.
-        if (cmd === "set_call_service") return null;
+        // The Android call service, its notifications' buttons (none is
+        // pressed here) and the ringing call's notification; calls stay in
+        // __invokeLog.
+        if (["set_call_service", "show_call_ring", "clear_call_ring",
+             "plugin:owncord-call-service|register_listener",
+             "plugin:owncord-call-service|remove_listener"].includes(cmd)) return null;
         if (cmd === "is_metered") return { metered: false };
         if (["plugin:owncord-metered-network|register_listener",
              "plugin:owncord-metered-network|remove_listener"].includes(cmd)) return null;

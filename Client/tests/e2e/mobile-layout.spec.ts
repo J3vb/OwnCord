@@ -126,14 +126,22 @@ function callAudioCommands(page: Page): Promise<string[]> {
   );
 }
 
-/** The call states the page has sent its host's call service, in order. */
-function callServiceStates(page: Page): Promise<unknown[]> {
-  return page.evaluate(() =>
-    (window as unknown as { __invokeLog: Array<{ cmd: string; args?: unknown }> }).__invokeLog
-      .filter((e) => e.cmd === "set_call_service")
-      .map((e) => e.args),
+/** What the page has sent its host's call service, in order: the call states
+ *  (`states`), or what its notification was told to say with each (`faces`). */
+function callServiceCalls(page: Page, part: "states" | "faces"): Promise<unknown[]> {
+  return page.evaluate(
+    (wanted) =>
+      (window as unknown as { __invokeLog: Array<{ cmd: string; args?: unknown }> }).__invokeLog
+        .filter((e) => e.cmd === "set_call_service")
+        .map((e) => {
+          const { face, ...state } = e.args as Record<string, unknown>;
+          return wanted === "faces" ? face : state;
+        }),
+    part,
   );
 }
+
+const callServiceStates = (page: Page): Promise<unknown[]> => callServiceCalls(page, "states");
 
 /** How far apart the visible round controls of a call's control row sit
  *  vertically: under a pixel when they share one row. */
@@ -1072,6 +1080,17 @@ for (const profile of PROFILES) {
 
       await bar.locator("[data-testid='pcb-mute']").tap();
       await expect(bar.locator("[data-testid='pcb-mute']")).toHaveAttribute("aria-pressed", "true");
+
+      // The Android app's "in a call" notification follows the mute: its
+      // words, and the button that lifts it. A phone browser has none.
+      const faces = (): Promise<unknown[]> => callServiceCalls(page, "faces");
+      if (profile.name !== "Pixel 7") {
+        expect(await faces()).toEqual([]);
+        return;
+      }
+      const live = { mic: "live", text: "In a call", micLabel: "Mute", leaveLabel: "Leave" };
+      const muted = { ...live, mic: "muted", text: "In a call, muted", micLabel: "Unmute" };
+      await expect.poll(faces).toEqual([live, live, muted]);
     });
 
     test("the call bar shows on a phone turned sideways", async ({ page }) => {

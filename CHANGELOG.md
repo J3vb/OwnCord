@@ -107,6 +107,8 @@ release changes the database, and anything an operator must do first.)
 - Calls have a sound route button, in the call view and in a DM call: pick Speaker, Earpiece, or a wired or Bluetooth headset. A headset you connect is used by itself, and the call goes back to the speaker when it disconnects. Needs Android 12 or newer.
 - A phone call now pauses your OwnCord call: your mic closes and the call goes silent, and both come back by themselves when the phone call ends. Your own mute and deafen stay as you left them.
 - The screen stays on while a call shows a camera or a stream, and may sleep again once no picture is on screen.
+- The "In a call" notification has Mute and Leave buttons, so you can mute, unmute or hang up without opening the app. It also says when you are muted.
+- A direct message call that comes in while the app is not on screen rings like a phone call: a notification with Accept and Decline and your phone's ringtone, on the lock screen too. Accept joins the call (after you unlock, on a locked phone). A call you missed leaves a notification that opens the conversation. The app has to be running for this: a phone that has stopped the app in the background does not ring yet. On a phone with Android's notification cooldown switched on, a call that comes right after a message can ring more quietly.
 - Your status goes Idle once the app has been out of view for ten minutes (in the background, or the screen off) and back to Online as soon as you open it. A phone that sleeps can take several minutes longer, and a phone that stops the app in the background shows you as offline instead.
 
 ### Fixed
