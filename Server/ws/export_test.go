@@ -447,12 +447,18 @@ func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64,
 // (e.g. already-cancelled, as it would be after the webhook sender hangs up)
 // instead of always running with context.Background().
 func (h *Hub) HandleWebhookParticipantLeftWithContextForTest(ctx context.Context, userID int64, channelID int64, joinToken string) {
+	h.HandleWebhookParticipantLeftWithSIDForTest(ctx, userID, channelID, joinToken, "")
+}
+
+// HandleWebhookParticipantLeftWithSIDForTest is the left webhook carrying the departing session's id.
+func (h *Hub) HandleWebhookParticipantLeftWithSIDForTest(ctx context.Context, userID int64, channelID int64, joinToken, sid string) {
 	identity := fmt.Sprintf("user-%d:%s", userID, joinToken)
 	roomName := fmt.Sprintf("channel-%d", channelID)
 	event := &livekit.WebhookEvent{
 		Event: "participant_left",
 		Participant: &livekit.ParticipantInfo{
 			Identity: identity,
+			Sid:      sid,
 		},
 		Room: &livekit.Room{
 			Name: roomName,

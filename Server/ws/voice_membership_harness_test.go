@@ -60,6 +60,7 @@ import (
 type fakeSFU struct {
 	mu           sync.Mutex
 	participants map[string]map[string]struct{}      // room -> identity set
+	sids         map[string]string                   // room+"|"+identity -> session id, empty when unset
 	unhandled    []string                            // RPC methods the fake does not implement
 	listFails    bool                                // when set, ListParticipants answers an error
 	onList       func()                              // when set, runs once at the next ListParticipants, before it answers
@@ -122,7 +123,7 @@ func (f *fakeSFU) setListFailure(v bool) {
 }
 
 func newFakeSFU() *fakeSFU {
-	return &fakeSFU{participants: map[string]map[string]struct{}{}}
+	return &fakeSFU{participants: map[string]map[string]struct{}{}, sids: map[string]string{}}
 }
 
 func (f *fakeSFU) add(room, identity string) {
@@ -132,6 +133,14 @@ func (f *fakeSFU) add(room, identity string) {
 		f.participants[room] = map[string]struct{}{}
 	}
 	f.participants[room][identity] = struct{}{}
+}
+
+// addWithSID lists identity in room under session id sid.
+func (f *fakeSFU) addWithSID(room, identity, sid string) {
+	f.add(room, identity)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sids[room+"|"+identity] = sid
 }
 
 func (f *fakeSFU) remove(room, identity string) {
@@ -214,7 +223,10 @@ func (f *fakeSFU) handle(w http.ResponseWriter, r *http.Request) {
 		ids := f.identities(req.GetRoom())
 		ps := make([]*lkproto.ParticipantInfo, 0, len(ids))
 		for _, id := range ids {
-			ps = append(ps, &lkproto.ParticipantInfo{Identity: id})
+			f.mu.Lock()
+			sid := f.sids[req.GetRoom()+"|"+id]
+			f.mu.Unlock()
+			ps = append(ps, &lkproto.ParticipantInfo{Identity: id, Sid: sid})
 		}
 		marshal(&lkproto.ListParticipantsResponse{Participants: ps})
 	case "RemoveParticipant":
