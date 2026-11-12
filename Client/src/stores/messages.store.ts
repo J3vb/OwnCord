@@ -175,7 +175,11 @@ export function setChannelLoadError(channelId: number): void {
  *  only the rows that changed: the dropped head, the new tail and, for a
  *  revisit that opened with unread messages, the NEW divider.
  *
- *  `splice` is a full-ready resync's refetch (P2-T4): when the page reaches
+ *  `splice` is a full-ready resync's refetch (P2-T4), or a tail refetch
+ *  (MessageController.loadMessages) that an older page landed above while it
+ *  was in flight; the controller passes it only when its fetched range reaches
+ *  the cached head, so nothing is missing between that page and the window.
+ *  When the page reaches
  *  back to the newest row loaded at setChannelLoading, the loaded rows older
  *  than the page stay above it instead of being dropped. They may still show
  *  an edit, delete or reaction missed while offline until the next visit

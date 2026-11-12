@@ -164,6 +164,7 @@ describe("createLazyVideoGrid", () => {
     ];
     for (const trigger of triggers) {
       vi.resetModules();
+      vi.doMock("../../src/features/voice/videoGrid/VideoGrid", gatedFactory);
       h.loads.value = 0;
       const fresh = (await import("../../src/pages/main-page/lazyVideoGrid")).createLazyVideoGrid();
       trigger(fresh);

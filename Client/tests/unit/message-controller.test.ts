@@ -100,7 +100,7 @@ describe("createMessageController", () => {
       await ctrl.loadMessages(42, signal);
 
       expect(api.getMessages).toHaveBeenCalledWith(42, { limit: 50 }, signal);
-      expect(mockSetMessages).toHaveBeenCalledWith(42, [{ id: 1, content: "hi" }], false);
+      expect(mockSetMessages).toHaveBeenCalledWith(42, [{ id: 1, content: "hi" }], false, false);
     });
 
     it("marks the channel loading before the fetch resolves", async () => {

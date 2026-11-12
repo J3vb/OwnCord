@@ -12,6 +12,7 @@ vi.mock("@lib/logger", () => loggerMock());
 
 import { createMessageController } from "../../src/pages/main-page/MessageController";
 import type { MessageControllerOptions } from "../../src/pages/main-page/MessageController";
+import { createDeferred } from "../helpers/deferred";
 import { createMessageList } from "../../src/features/messaging/MessageList";
 import { makeListOptions } from "../helpers/messageListHarness";
 import {
@@ -91,6 +92,34 @@ function openWithUnread(unread: number): void {
 
 const ids = (): number[] => getChannelMessages(CH).map((m) => m.id);
 const limitAsked = (): number | undefined => getMessages.mock.calls.at(-1)?.[1]?.limit;
+
+/**
+ * Open the cached channel and, while its tail refetch is held, load the
+ * older page above the cached head; then let the refetch land. A request
+ * `failing` picks rejects.
+ */
+async function olderPageDuringRefetch(failing?: (before?: number) => boolean): Promise<void> {
+  const real = getMessages.getMockImplementation()!;
+  const gate = createDeferred();
+  getMessages.mockImplementation(async (channelId, opts) => {
+    if (opts?.before === undefined) await gate.promise;
+    if (failing?.(opts?.before)) throw new Error("offline");
+    return real(channelId, opts);
+  });
+  try {
+    openWithUnread(0);
+    const head = ids()[0]!;
+    const ctrl = controller();
+    const signal = new AbortController().signal;
+    const refetch = ctrl.loadMessages(CH, signal);
+    await ctrl.loadOlderMessages(CH, signal);
+    expect(ids()[0]).toBe(head - 50);
+    gate.resolve();
+    await refetch;
+  } finally {
+    getMessages.mockImplementation(real);
+  }
+}
 
 describe("revisit keeps and revalidates older loaded history", () => {
   beforeEach(() => {
@@ -297,6 +326,43 @@ describe("revisit keeps and revalidates older loaded history", () => {
     expect(limitAsked()).toBe(100);
     expect(ids()).toHaveLength(50);
     expect(ids()[0]).toBe(151);
+  });
+
+  it("keeps an older page the reader scrolled to while the refetch was in flight", async () => {
+    cacheWindow(151, 200);
+
+    await olderPageDuringRefetch();
+
+    // The page read after the refetch began is as fresh as it: it stays above
+    // the reader instead of being dropped and asked for again.
+    expect(ids()).toEqual([...rows(101, 200)].map((m) => m.id));
+    expect(hasMoreMessages(CH)).toBe(true);
+    expect(getMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops a cached row deleted while away when it keeps the older page", async () => {
+    server = rows(1, 250).filter((m) => m.id !== 151);
+    cacheWindow(151, 250);
+
+    await olderPageDuringRefetch();
+
+    // The refetch reached past the cached head and no longer holds 151, so
+    // the kept window must not either.
+    expect(ids()).not.toContain(151);
+    expect(ids()).toEqual([...rows(101, 250)].map((m) => m.id).filter((id) => id !== 151));
+    expect(getMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops that older page when the refetch does not reach the cached head", async () => {
+    server = rows(1, 300);
+    cacheWindow(151, 300);
+
+    await olderPageDuringRefetch((before) => before === 201);
+
+    // 151..200 were not revalidated, so nothing below the fetched range may
+    // stay: a kept older page would sit across a gap.
+    expect(ids()).toEqual([...rows(201, 300)].map((m) => m.id));
+    expect(hasMoreMessages(CH)).toBe(true);
   });
 
   describe("with the list mounted", () => {

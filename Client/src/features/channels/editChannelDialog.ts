@@ -49,11 +49,9 @@ import { createChannelPasswordSection } from "./editChannelPassword";
 export {
   MAX_SLOW_MODE_SECONDS,
   MAX_VOICE_LIMIT,
-  clampSlowMode,
   clampVoiceLimit,
   formatSlowMode,
 } from "./editChannelLimits";
-export { MAX_CHANNEL_PASSWORD_LENGTH } from "./editChannelPassword";
 export type { EditChannelData } from "./editChannelFields";
 
 export interface EditChannelModalOptions {

@@ -36,9 +36,7 @@ import type { UserProfilePopupComponent, UserProfilePopupOptions } from "./userP
 
 export type {
   UserProfileData,
-  ProfileRoleState,
   ProfileRoleControl,
-  ProfileRoleChip,
   ProfileRolesState,
   ProfileRolesControl,
   UserProfilePopupOptions,
