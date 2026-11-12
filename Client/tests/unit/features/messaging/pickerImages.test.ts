@@ -75,7 +75,7 @@ describe("picker image loading", () => {
 
   it("starts visible images before nearby previews and bounds simultaneous downloads", async () => {
     const images = createPickerImages(root, scope.signal);
-    const tasks = Array.from({ length: 8 }, () => createDeferred<string | null>());
+    const tasks = Array.from({ length: 12 }, () => createDeferred<string | null>());
     const cells = tasks.map(() => image());
     const started: number[] = [];
     tasks.forEach((task, i) =>
@@ -84,19 +84,19 @@ describe("picker image loading", () => {
         return task.promise;
       }),
     );
-    report(cells.map((img, i) => entry(img, i < 4 ? 500 : 10)));
-    expect(started).toEqual([4, 5, 6, 7]);
-    tasks[4]!.resolve("blob:visible");
+    report(cells.map((img, i) => entry(img, i < 6 ? 500 : 10)));
+    expect(started).toEqual([6, 7, 8, 9, 10, 11]);
+    tasks[6]!.resolve("blob:visible");
     await flush();
-    expect(cells[4]!.getAttribute("src")).toBe("blob:visible");
-    expect(started).toEqual([4, 5, 6, 7, 0]);
-    expect(unobserve).toHaveBeenCalledWith(cells[4]);
+    expect(cells[6]!.getAttribute("src")).toBe("blob:visible");
+    expect(started).toEqual([6, 7, 8, 9, 10, 11, 0]);
+    expect(unobserve).toHaveBeenCalledWith(cells[6]);
   });
 
   it("leaves previews scrolled away from out of the queue", async () => {
     const images = createPickerImages(root, scope.signal);
     const held = createDeferred<string | null>();
-    const busy = Array.from({ length: 4 }, () => image());
+    const busy = Array.from({ length: 6 }, () => image());
     busy.forEach((img) => images.observe(img, () => held.promise));
     report(busy.map((img) => entry(img, 10)));
     const old = image();

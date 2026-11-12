@@ -68,6 +68,16 @@ and only when it changes something a contributor or fork holder must do
 - **Threads:** a thread reply that failed to send was lost when you restarted the desktop app. It now comes back after a restart with Retry, like a channel message.
 - **Threads:** a thread reply whose delivery was never confirmed kept spinning. After 20 seconds it now shows as failed with Retry.
 
+### Messages & files
+
+- **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
+- **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
+- **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.
+
+### Voice
+
+- **A reconnect after a live update the app could not read took you out of your call**, and everyone saw you leave. The reconnect now keeps the call. Update the app as well as the server: an older app still drops the call.
+
 ### Phone app
 
 - **On a small phone the buttons at the end of a direct message's header were off screen**, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.

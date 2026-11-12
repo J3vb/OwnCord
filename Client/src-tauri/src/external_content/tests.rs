@@ -403,7 +403,7 @@ async fn the_deadline_bounds_a_response_that_never_comes() {
 async fn fetch_deadline_includes_the_wait_for_a_permit() {
     let b = broker();
     let _held = b.gate.acquire_many(MAX_CONCURRENT as u32).await.unwrap();
-    let fetch = b.fetch("http://127.0.0.1:1/", Want::Image);
+    let fetch = b.fetch("p", "http://127.0.0.1:1/", Want::Image);
     tokio::pin!(fetch);
     // Past the image deadline with every permit held, the call must give up.
     let got = tokio::time::timeout(
@@ -644,4 +644,133 @@ fn og_decodes_entities_and_reads_image_dimensions() {
     );
     assert_eq!(t.title.as_deref(), Some("A & B"));
     assert_eq!((t.image_width, t.image_height), (Some(1200), Some(630)));
+}
+
+// --- Connection reuse ----------------------------------------------------------
+
+/// A keep-alive server that answers every request on a connection with the
+/// GIF and counts the connections it accepted.
+async fn serve_keep_alive() -> (String, Arc<AtomicUsize>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let count = accepted.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            count.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 4096];
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: image/gif\r\nContent-Length: {}\r\n\r\n",
+                    GIF.len()
+                );
+                let resp = [head.as_bytes(), GIF].concat();
+                while sock.read(&mut buf).await.unwrap_or(0) > 0 {
+                    if sock.write_all(&resp).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    (base, accepted)
+}
+
+#[tokio::test]
+async fn fetches_from_one_host_share_a_connection() {
+    let (base, accepted) = serve_keep_alive().await;
+    let b = broker();
+    for i in 0..3 {
+        let got = b.image("p", None, Some(&format!("{base}/{i}.gif"))).await;
+        assert_eq!(got.unwrap().as_slice(), GIF);
+    }
+    assert_eq!(accepted.load(Ordering::SeqCst), 1, "one connection, reused");
+}
+
+#[tokio::test]
+async fn a_new_partition_starts_with_no_open_connections() {
+    let (base, accepted) = serve_keep_alive().await;
+    let b = broker();
+    b.image("a", None, Some(&format!("{base}/1.gif")))
+        .await
+        .unwrap();
+    b.image("b", None, Some(&format!("{base}/2.gif")))
+        .await
+        .unwrap();
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        2,
+        "the new partition dials again"
+    );
+}
+
+#[test]
+fn a_changed_address_set_gets_its_own_client() {
+    let b = broker();
+    drop(b.enter("p"));
+    let url = Url::parse("https://cdn.example.com/x.gif").unwrap();
+    let a: SocketAddr = "93.184.216.34:443".parse().unwrap();
+    let c: SocketAddr = "93.184.216.35:443".parse().unwrap();
+    b.client_for("p", &url, vec![a]).unwrap();
+    b.client_for("p", &url, vec![a]).unwrap();
+    assert_eq!(crate::sync::lock(&b.clients).by_key.len(), 1);
+    b.client_for("p", &url, vec![c, a]).unwrap();
+    b.client_for("p", &url, vec![a, c]).unwrap();
+    assert_eq!(
+        crate::sync::lock(&b.clients).by_key.len(),
+        2,
+        "a new answer is a new client; the order of the answer is not"
+    );
+}
+
+#[test]
+fn the_client_cache_is_bounded_oldest_first() {
+    let b = broker();
+    drop(b.enter("p"));
+    let addr: SocketAddr = "93.184.216.34:443".parse().unwrap();
+    for i in 0..=MAX_CLIENTS {
+        let url = Url::parse(&format!("https://h{i}.example.com/")).unwrap();
+        b.client_for("p", &url, vec![addr]).unwrap();
+    }
+    let clients = crate::sync::lock(&b.clients);
+    assert_eq!(clients.by_key.len(), MAX_CLIENTS);
+    assert!(!clients
+        .by_key
+        .contains_key(&("h0.example.com".to_string(), 443, vec![addr])));
+}
+
+#[test]
+fn a_fetch_for_an_old_partition_leaves_no_client_behind() {
+    let b = broker();
+    drop(b.enter("new"));
+    let url = Url::parse("https://cdn.example.com/x.gif").unwrap();
+    let addr: SocketAddr = "93.184.216.34:443".parse().unwrap();
+    b.client_for("old", &url, vec![addr]).unwrap();
+    assert!(
+        crate::sync::lock(&b.clients).by_key.is_empty(),
+        "a late hop of the old partition must not seed the new one"
+    );
+}
+
+#[test]
+fn a_used_client_moves_to_the_back_of_the_eviction_order() {
+    let b = broker();
+    drop(b.enter("p"));
+    let addr: SocketAddr = "93.184.216.34:443".parse().unwrap();
+    let url = |i: usize| Url::parse(&format!("https://h{i}.example.com/")).unwrap();
+    for i in 0..MAX_CLIENTS {
+        b.client_for("p", &url(i), vec![addr]).unwrap();
+    }
+    b.client_for("p", &url(0), vec![addr]).unwrap();
+    b.client_for("p", &url(MAX_CLIENTS), vec![addr]).unwrap();
+    let clients = crate::sync::lock(&b.clients);
+    assert!(clients
+        .by_key
+        .contains_key(&("h0.example.com".to_string(), 443, vec![addr])));
+    assert!(!clients
+        .by_key
+        .contains_key(&("h1.example.com".to_string(), 443, vec![addr])));
 }
