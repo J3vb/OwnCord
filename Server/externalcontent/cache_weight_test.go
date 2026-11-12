@@ -66,14 +66,12 @@ func TestResultCache_ConcurrentSameKeyKeepsBytesExact(t *testing.T) {
 	c := newResultCache(1<<20, time.Minute)
 	var wg sync.WaitGroup
 	for i := range 16 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range 500 {
 				c.put(imageEntry("image:same", "image/png", make([]byte, 1+(i+j)%7)))
 				c.get("image:same")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	e, ok := c.get("image:same")
