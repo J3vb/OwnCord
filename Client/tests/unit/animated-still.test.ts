@@ -206,6 +206,29 @@ describe("bindAnimatedImage", () => {
     expect(img.src).toBe("blob:anim");
   });
 
+  it("forgets an image bound before it was mounted once it is removed", async () => {
+    const lone = document.createElement("img");
+    bindAnimatedImage(lone, "blob:anim", STILL, "always");
+    document.body.appendChild(lone);
+    document.documentElement.classList.add("reduced-motion");
+    await Promise.resolve();
+    expect(lone.src).toBe(STILL);
+    lone.remove();
+    document.documentElement.classList.remove("reduced-motion");
+    await Promise.resolve();
+    expect(lone.src).toBe(STILL);
+  });
+
+  it("watches the page root with one observer however many images are bound", () => {
+    const observe = vi.spyOn(MutationObserver.prototype, "observe");
+    for (let i = 0; i < 5; i++) {
+      bindAnimatedImage(document.createElement("img"), `blob:a${i}`, STILL, "always");
+    }
+    expect(
+      observe.mock.calls.filter(([n]) => n === document.documentElement).length,
+    ).toBeLessThanOrEqual(1);
+  });
+
   it("follows a source reloaded after eviction, so the next hover plays it", () => {
     bindAnimatedImage(img, "blob:old", STILL, { hover: row });
     row.dispatchEvent(new Event("pointerenter"));
