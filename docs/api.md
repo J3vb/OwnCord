@@ -2166,14 +2166,20 @@ The same DM summary shape `GET /api/v1/dms` returns, from the creator's seat.
 Every participant — the creator included — also receives a `dm_channel_open`.
 The creator is the group's owner (`owner_id`).
 
+Limited to 5 attempts per user per minute and 50 per day; an attempt refused for
+another reason (a bad recipient, a block) still counts. This budget is separate from the 20 group changes a minute
+that rename, add, remove and owner transfer share. A refusal carries
+`Retry-After` in seconds.
+
 #### Errors
 
-| Status | Code          | Reason                                                                |
-| ------ | ------------- | --------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Fewer than 2 or more than 8 recipients, or a name over 100 characters |
-| 403    | `FORBIDDEN`   | A recipient cannot be added to a group by the caller (any cause)      |
-| 403    | `TIMED_OUT`   | The caller is timed out                                               |
-| 404    | `NOT_FOUND`   | A recipient does not exist                                            |
+| Status | Code           | Reason                                                                |
+| ------ | -------------- | --------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | Fewer than 2 or more than 8 recipients, or a name over 100 characters |
+| 403    | `FORBIDDEN`    | A recipient cannot be added to a group by the caller (any cause)      |
+| 403    | `TIMED_OUT`    | The caller is timed out                                               |
+| 404    | `NOT_FOUND`    | A recipient does not exist                                            |
+| 429    | `RATE_LIMITED` | More than 5 attempts in a minute or 50 in a day                       |
 
 ---
 
