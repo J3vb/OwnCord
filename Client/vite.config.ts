@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vite";
 import { dirname, resolve } from "path";
-import { twemojiFileName } from "./scripts/twemoji-names.mjs";
+import { twemojiFileName, twemojiPacks } from "./scripts/twemoji-names.mjs";
 
 const CHANGELOG_ID = "virtual:owncord-changelog";
 // Walk up rather than "../": Stryker runs the suite from a copy of Client/
@@ -45,41 +45,45 @@ export function twemojiDir(): string {
 }
 
 /**
- * The Twemoji SVGs that messages, reactions and the `:` popup show, copied into
- * the build under their FE0F-free names (scripts/twemoji-names.mjs), and served
- * from node_modules by the dev server. The picker grid uses the image sheets in
- * src/assets/emoji-sheets instead.
+ * The Twemoji SVGs that messages, reactions and the `:` popup show, packed into
+ * a few JSON files of neighbouring names (scripts/twemoji-names.mjs) plus an
+ * index of each pack's first name, and served from `twemojiDir()`. A few large
+ * files instead of 4,009 small ones: the desktop build compresses every bundled
+ * file on its own, and small SVGs compress badly alone.
  */
 export function twemojiAssets(): Plugin {
   const svgDir = resolve(TWEMOJI_PACKAGE, "dist/svg");
   const files = (): Map<string, string> => {
-    const out = new Map<string, string>();
+    const svgs = new Map<string, string>();
     for (const f of readdirSync(svgDir)) {
-      if (f.endsWith(".svg")) out.set(`${twemojiFileName(f.slice(0, -4))}.svg`, f);
+      if (f.endsWith(".svg")) {
+        svgs.set(twemojiFileName(f.slice(0, -4)), readFileSync(resolve(svgDir, f), "utf8"));
+      }
     }
+    const { starts, packs } = twemojiPacks(svgs);
+    const out = new Map<string, string>([["index.json", JSON.stringify(starts)]]);
+    packs.forEach((pack, i) => out.set(`pack-${i}.json`, JSON.stringify(pack)));
     return out;
   };
   return {
     name: "owncord-twemoji",
     configureServer(server) {
       const prefix = `/${twemojiDir()}`;
-      const byName = files();
+      let byName: Map<string, string> | undefined;
       server.middlewares.use((req, res, next) => {
         const url = req.url ?? "";
-        const file = url.startsWith(prefix) ? byName.get(url.slice(prefix.length)) : undefined;
-        if (file === undefined) return next();
-        res.setHeader("Content-Type", "image/svg+xml");
-        res.end(readFileSync(resolve(svgDir, file)));
+        if (!url.startsWith(prefix)) return next();
+        byName ??= files();
+        const body = byName.get(url.slice(prefix.length));
+        if (body === undefined) return next();
+        res.setHeader("Content-Type", "application/json");
+        res.end(body);
       });
     },
     generateBundle() {
       const dir = twemojiDir();
-      for (const [name, file] of files()) {
-        this.emitFile({
-          type: "asset",
-          fileName: dir + name,
-          source: readFileSync(resolve(svgDir, file)),
-        });
+      for (const [name, source] of files()) {
+        this.emitFile({ type: "asset", fileName: dir + name, source });
       }
     },
   };

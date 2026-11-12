@@ -1,10 +1,11 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   TWEMOJI_BASE,
   buildEmojiImage,
   buildEmojiNode,
+  packIndex,
   showsAsImage,
   twemojiName,
 } from "../../../../src/features/messaging/content/emojiImage";
@@ -13,7 +14,12 @@ import {
   clearContentParseCache,
 } from "../../../../src/features/messaging/content/contentParser";
 import { isEmojiOnlyMessage } from "../../../../src/features/messaging/content/customEmoji";
-import { twemojiFileName } from "../../../../scripts/twemoji-names.mjs";
+import {
+  TWEMOJI_PACK_COUNT,
+  twemojiFileName,
+  twemojiPacks,
+} from "../../../../scripts/twemoji-names.mjs";
+import { stubTwemoji } from "../../../helpers/twemojiStub";
 
 function render(text: string): HTMLElement {
   clearContentParseCache();
@@ -59,25 +65,61 @@ describe("showsAsImage", () => {
 });
 
 describe("buildEmojiImage", () => {
-  it("is an image of the emoji with the emoji itself as alt text", () => {
+  it("is an image of the emoji with the emoji itself as alt text, filled from its pack", async () => {
+    const restore = stubTwemoji({ "1f525": "<svg/>" });
     const img = buildEmojiImage("🔥");
     expect(img.alt).toBe("🔥");
-    expect(img.getAttribute("src")).toBe(`${TWEMOJI_BASE}1f525.svg`);
     expect(img.draggable).toBe(false);
+    expect(img.hasAttribute("src")).toBe(false);
+    await vi.waitFor(() => expect(img.getAttribute("src")).toMatch(/^blob:twemoji-/));
+    const again = buildEmojiImage("🔥");
+    expect(again.getAttribute("src")).toBe(img.getAttribute("src"));
+    restore();
   });
 
-  it("turns back into its text when the image is missing", () => {
+  it("turns back into its text when there is no image for it", async () => {
+    const restore = stubTwemoji({});
     const host = document.createElement("span");
-    const img = buildEmojiImage("🫨");
+    host.appendChild(buildEmojiImage("🫨"));
+    await vi.waitFor(() => expect(host.querySelector("img")).toBeNull());
+    expect(host.textContent).toBe("🫨");
+    restore();
+  });
+
+  it("turns back into its text when the image fails to load", () => {
+    const host = document.createElement("span");
+    const img = buildEmojiImage("🫠");
     host.appendChild(img);
     img.dispatchEvent(new Event("error"));
-    expect(host.querySelector("img")).toBeNull();
-    expect(host.textContent).toBe("🫨");
+    expect(host.textContent).toBe("🫠");
   });
 
   it("buildEmojiNode keeps plain text for a text-style symbol", () => {
     expect(buildEmojiNode("©").nodeType).toBe(Node.TEXT_NODE);
     expect((buildEmojiNode("🍕") as HTMLImageElement).alt).toBe("🍕");
+  });
+});
+
+describe("Twemoji packs", () => {
+  it("finds the pack whose first name sorts at or before the emoji", () => {
+    const firsts = ["", "1f3", "1f6", "2"];
+    expect(packIndex(firsts, "1f1e7-1f1ea")).toBe(0);
+    expect(packIndex(firsts, "1f3")).toBe(1);
+    expect(packIndex(firsts, "1f525")).toBe(1);
+    expect(packIndex(firsts, "1f600")).toBe(2);
+    expect(packIndex(firsts, "2764")).toBe(3);
+  });
+
+  it("puts every shipped image in the pack the client looks in", () => {
+    const dir = resolve(process.cwd(), "node_modules/@discordapp/twemoji/dist/svg");
+    const svgs = new Map<string, string>();
+    for (const f of readdirSync(dir))
+      if (f.endsWith(".svg")) svgs.set(twemojiFileName(f.slice(0, -4)), f);
+    const { starts, packs } = twemojiPacks(svgs);
+    expect(packs).toHaveLength(TWEMOJI_PACK_COUNT);
+    for (const name of svgs.keys()) {
+      expect(packs[packIndex(starts, name)]?.[name], name).toBe(svgs.get(name));
+    }
   });
 });
 
