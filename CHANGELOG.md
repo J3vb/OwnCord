@@ -113,15 +113,21 @@ release changes the database, and anything an operator must do first.)
 
 - **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
 - **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
+- **Voice:** with LiveKit webhooks on, a voice reconnect no longer drops the member from the call.
 - **Channels:** a channel permission change on a busy server now always applies to every connected member.
+- **Voice:** if the server could not read who is in voice while you connect, the connect now retries instead of showing voice channels as empty.
+- **Group DMs:** a group DM created just as your connection dropped is no longer reported as failed.
 - **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
 - **Sign-in:** after a password change in Settings, a remembered password was still the old one, so the next one-click sign-in was refused. It now holds the new password.
 - **Voice:** on a phone, tapping someone in a voice channel who had their camera or screen on joined the call at once. It now asks first, like a tap on the channel.
 - **Moderation:** closing the ban dialog after a failed ban said the member was banned. It now says the ban could not be confirmed.
 - **Desktop UI:** animated avatars and banners kept old rows in memory after every channel switch. They no longer do.
 - **Direct messages:** the People view redrew every row on each presence change or new message on busy servers. It now updates only the rows that changed.
+- **Admin:** the `chatserver token` commands applied pending database updates themselves, skipping the safety copy an upgrade takes. They now stop and ask you to start the server once first.
 - **Linux:** on a desktop without a keyring service (no gnome-keyring or KWallet), the app now creates your voice identity key and saves unsent messages for recovery, instead of showing "Could not save this pending message" on every send.
+- **Threads:** thread edits (rename, archive, lock, tags) are now limited to 5 a second per user, and an edit that changes nothing is no longer announced.
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
+- **Accounts:** erasing an account now also removes the erased user's messages from stored reconnect history, including later edits and reactions on them.
 
 ### Messages & files
 
@@ -129,6 +135,7 @@ release changes the database, and anything an operator must do first.)
 - **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
 - **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.
 - **Typing just @ listed only 10 people**, so members who were offline or had not posted lately were missing until you typed part of their name. The list now holds up to 50 people and scrolls.
+- **A voice message, video or YouTube player stopped and went back to the start when anyone reacted to or pinned that message**, and a spoiler you had opened was covered again. A reaction or pin now only redraws the reactions and pin button; playback and opened spoilers stay.
 - **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.
 
 ### Voice

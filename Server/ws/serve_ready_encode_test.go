@@ -3,7 +3,10 @@ package ws_test
 import (
 	"bytes"
 	"context"
+	"regexp"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -78,6 +81,8 @@ func TestWriteReady_MatchesLegacyEncoderByteForByte(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: ready: %v", v.name, err)
 		}
+		// Each build reads the clock, so the two may differ by a millisecond; compare the rest.
+		got, want = withServerTime(t, got), withServerTime(t, want)
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s viewer: streamed ready differs from the legacy encoder\n got: %s\nwant: %s", v.name, got, want)
 		}
@@ -87,4 +92,24 @@ func TestWriteReady_MatchesLegacyEncoderByteForByte(t *testing.T) {
 			t.Errorf("%s viewer: ready carries %d mobile flags", v.name, n)
 		}
 	}
+}
+
+var serverTimeField = regexp.MustCompile(`"server_time_ms":([0-9]+)`)
+
+// withServerTime checks that frame carries exactly one server_time_ms within a minute of now and
+// returns frame with that value zeroed.
+func withServerTime(t *testing.T, frame []byte) []byte {
+	t.Helper()
+	m := serverTimeField.FindAllSubmatch(frame, -1)
+	if len(m) != 1 {
+		t.Fatalf("ready carries %d server_time_ms fields, want 1", len(m))
+	}
+	ms, err := strconv.ParseInt(string(m[0][1]), 10, 64)
+	if err != nil {
+		t.Fatalf("server_time_ms: %v", err)
+	}
+	if d := time.Since(time.UnixMilli(ms)); d < -time.Minute || d > time.Minute {
+		t.Errorf("server_time_ms is %v away from now", d)
+	}
+	return serverTimeField.ReplaceAll(frame, []byte(`"server_time_ms":0`))
 }

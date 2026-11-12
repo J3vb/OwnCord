@@ -7,6 +7,7 @@ import { getChannelMessages, type Message } from "@stores/messages.store";
 import { buildVirtualItems, keyOf, visibleMessages, type VirtualItem } from "./virtualItems";
 import { blockedUsers, focusSurvivingRow } from "./listShared";
 import { carryActionsBar } from "./messageActionBar";
+import { differsOnlyInLiveFields, refreshLiveParts } from "./rowRefresh";
 import type { ListState, ListApi } from "./listState";
 
 /** What a patch decided from diffing the store's rows against the rendered ones. */
@@ -52,24 +53,28 @@ function stayingRowOrder(
 }
 
 /**
- * A row stays when nothing it draws changed: its message, its grouping and the
- * parent a reply quotes. A divider with the same key is the same.
+ * What a patch does with a row: keep it when nothing it draws changed (its
+ * message, its grouping and the parent a reply quotes), refresh its reactions
+ * and pin state in place when only those changed, else rebuild it. A divider
+ * with the same key is the same.
  */
-function rowStays(
+type RowFate = "keep" | "refresh" | "rebuild";
+
+function rowFate(
   now: VirtualItem,
   was: VirtualItem | undefined,
   quoteChanged: (id: number | null) => boolean,
-): boolean {
+): RowFate {
   if (now.kind === "blocked-run") {
-    return was?.kind === "blocked-run" && was.count === now.count && was.expanded === now.expanded;
+    const same =
+      was?.kind === "blocked-run" && was.count === now.count && was.expanded === now.expanded;
+    return same ? "keep" : "rebuild";
   }
-  if (now.kind !== "message") return true;
-  return (
-    was?.kind === "message" &&
-    was.message === now.message &&
-    was.isGrouped === now.isGrouped &&
-    !quoteChanged(now.message.replyTo)
-  );
+  if (now.kind !== "message") return "keep";
+  if (was?.kind !== "message" || was.isGrouped !== now.isGrouped) return "rebuild";
+  if (quoteChanged(now.message.replyTo)) return "rebuild";
+  if (was.message === now.message) return "keep";
+  return differsOnlyInLiveFields(was.message, now.message) ? "refresh" : "rebuild";
 }
 
 /**
@@ -244,7 +249,19 @@ export function createListPatch(
       const el = shownByKey.get(plan.nextKeys[j]!);
       const was =
         el === undefined ? undefined : plan.prevItems[plan.prevIndex.get(plan.nextKeys[j]!)!];
-      if (el !== undefined && rowStays(now, was, quoteChanged)) {
+      const fate = el === undefined ? "rebuild" : rowFate(now, was, quoteChanged);
+      const owner = el === undefined ? undefined : st.rowOwners.get(el);
+      if (
+        el !== undefined &&
+        fate === "refresh" &&
+        was?.kind === "message" &&
+        now.kind === "message" &&
+        owner !== undefined
+      ) {
+        refreshLiveParts(el, was.message, now.message, st.renderOptions, owner.signal);
+        rows.push(el);
+        reused.add(el);
+      } else if (el !== undefined && fate === "keep") {
         rows.push(el);
         reused.add(el);
       } else {
@@ -335,7 +352,8 @@ export function createListPatch(
   /**
    * Fast path for a store update that changes a few rows: diff the new
    * items against the rendered ones by key and touch only what changed — a
-   * reaction, edit, delete or send confirmation re-renders its own row, plus a
+   * edit, delete or send confirmation re-renders its own row (a reaction or pin
+   * change only redraws that row's reactions and pin button in place), plus a
    * neighbour whose grouping changed and any loaded reply whose quoted
    * parent arrived, left or changed text, author or deletion. Rows dropped from the head, rows appended at the tail (a
    * revisit's refetched page, R1) and the NEW divider landing (R2) are

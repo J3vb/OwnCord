@@ -6,6 +6,7 @@
  */
 
 import { WsErrorCode } from "@lib/protocolTypes";
+import { serverNow } from "@lib/net/serverClock";
 import {
   acknowledgePendingMessage,
   newClientMessageId,
@@ -348,7 +349,7 @@ export function createThreadSender(options: {
   function retryRefusal(clientMessageId: string | undefined): string | null {
     if (clientMessageId === undefined) return null;
     const owner = { host: api.getConfig?.().host ?? "", userId: currentUserId() };
-    if (pendingMessageExpired(clientMessageId, Date.now(), pendingMessageRetryFloor(owner))) {
+    if (pendingMessageExpired(clientMessageId, serverNow(), pendingMessageRetryFloor(owner))) {
       return messagingText("toast.retryExpired");
     }
     if (!supportsMessageDeduplication(owner)) return messagingText("toast.retryUnsupported");
