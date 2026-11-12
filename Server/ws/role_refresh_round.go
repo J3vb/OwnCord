@@ -210,7 +210,7 @@ func (h *Hub) listRoleChannels(ctx context.Context, userIDs []int64) (*roleChann
 	if len(held) > 0 {
 		dmIDs, err := h.readers.Visibility.ListDMChannelIDsAmong(ctx, held)
 		if err != nil {
-			slog.Warn("hub: listRoleChannels could not list DM channels", "err", err)
+			slog.Warn("hub: role refresh could not list DM channels, retrying", "err", err)
 			return nil, false
 		}
 		for _, id := range dmIDs {
