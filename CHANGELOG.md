@@ -126,6 +126,7 @@ release changes the database, and anything an operator must do first.)
 - **Linux:** on a desktop without a keyring service (no gnome-keyring or KWallet), the app now creates your voice identity key and saves unsent messages for recovery, instead of showing "Could not save this pending message" on every send.
 - **Threads:** thread edits (rename, archive, lock, tags) are now limited to 5 a second per user, and an edit that changes nothing is no longer announced.
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
+- **Admin:** restoring a backup from the admin panel on a symlinked database path replaced the link with a plain file. The link is now kept and the restore goes to the linked file.
 - **Accounts:** erasing an account now also removes the erased user's messages from stored reconnect history, including later edits and reactions on them.
 
 ### Messages & files
