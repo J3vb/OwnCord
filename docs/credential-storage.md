@@ -1,13 +1,13 @@
 # Credential storage
 
-Where the desktop app keeps your saved sign-in, your voice key and unsent
-messages.
+Where the app keeps your saved sign-in, your voice key and unsent messages.
 
 ## For users
 
 - **Your saved sign-ins and voice key** are kept in the system keychain:
-  Windows Credential Manager, or the keyring on Linux. If there is no working
-  keychain, the app uses an encrypted file instead.
+  Windows Credential Manager, the keyring on Linux, or the Android Keystore on
+  a phone. If there is no working keychain, the app uses an encrypted file
+  instead.
 - **Your password never reaches the app's web page.** Only the Rust side of
   the app reads it, to sign you in.
 - **Unsent messages** are kept the same way, per server and per account, so
@@ -368,6 +368,27 @@ fallback:
   the default;
 - is cleared automatically as soon as the OS credential store works again, so a
   repaired machine returns to the real store with no migration step.
+
+## Android
+
+Android has no `keyring` backend, so the crate is not built there and
+`secret_store` puts the Android Keystore first (`android_secrets.rs`, calling
+`SecretsPlugin.kt`). One AES-256 key lives in the Keystore under the alias
+`owncord-secrets` (hardware-backed where the phone has it, no user
+authentication). Each value is sealed with AES-GCM under it, with the same
+associated data as the fallback file (`com.owncord.client`, a `\u0001`, the
+account name), and saved in the app-private preferences file
+`owncord_secrets`. The same write check applies: a value that does not read
+back goes to the encrypted fallback file, and the Keystore wins again once it
+round-trips. A stored value whose key is gone is an error, never "nothing
+stored". The log line reads `credential store: Android Keystore`.
+
+The first store call of each run moves what `credential_fallback.json` still
+holds into the Keystore: an entry leaves the file only after its Keystore copy
+reads back byte for byte, and an entry the Keystore already holds is dropped
+from the file (reads prefer the Keystore copy). Whatever fails stays in the
+file and is tried again next run. Once the file is empty, and no copy of an
+unreadable file was saved aside, `credential_fallback.key` is deleted.
 
 None of this weakens the fail-closed E2EE posture: a peer whose announce
 signature does not verify is still rejected. The fallback only affects whether
