@@ -18,6 +18,7 @@ import {
 import { uiStore } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
 import { watchGroupDmExits } from "../../features/direct-messages/groupExitWatch";
+import { mountPendingRequestNotice } from "../../features/direct-messages/pendingRequestNotice";
 import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import {
@@ -45,6 +46,13 @@ import { log, callAlerts, personName, getCurrentUserId, tileLabel } from "./page
 import type { PageState, PageApi, MountScope } from "./pageState";
 
 export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
+  const header = ms.chatAreaResult.chatHeaderRefs;
+  st.unsubscribers.push(
+    mountPendingRequestNotice({
+      inputSlot: ms.chatAreaResult.slots.inputSlot,
+      callButtons: [header.callBtn, header.videoCallBtn],
+    }),
+  );
   // --- DM calls ---
   // The banner is mounted on the page root rather than inside the chat area
   // so a ring stays visible while the user is looking at another channel —

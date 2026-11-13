@@ -21,6 +21,7 @@ import type { DmChannelPayload } from "../../lib/types";
 import type { DispatchApi, Payload, WsRoute } from "../connection/dispatchContext";
 import { log, route } from "../connection/dispatchContext";
 import { ServerMessageType as S } from "@lib/protocolTypes";
+import { clearRequestPending } from "./pendingRequests";
 
 /** Map one DM participant from the wire shape to the store's. */
 function mapDmUser(u: DmChannelPayload["recipient"]): DmChannel["recipient"] {
@@ -166,6 +167,7 @@ export function handleDmChannelOpen(payload: Payload<"dm_channel_open">): void {
 
 export function handleDmChannelClose(payload: Payload<"dm_channel_close">): void {
   log.info("DM channel closed", { channelId: payload.channel_id });
+  clearRequestPending(payload.channel_id);
   // A group closed on this side means the local user left or was removed; a
   // closed 1:1 is still a participant, so only a group drops its call roster.
   const closing = dmStore.getState().channels.find((c) => c.channelId === payload.channel_id);

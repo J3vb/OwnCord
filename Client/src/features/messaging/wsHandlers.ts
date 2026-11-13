@@ -38,6 +38,7 @@ import {
   notifyLiveMessage,
 } from "./chatNotify";
 import { hasDmPreviewRefetch, reviseDmPreviewAfterDelete } from "./dmPreview";
+import { clearRequestPending } from "../direct-messages/pendingRequests";
 
 export { activateReadyPendingMessages, applyReadyMessageResync } from "./readyResync";
 export { handleMessagingError } from "./sendErrors";
@@ -81,6 +82,9 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
 
   noteChannelUnread(payload, activeId, isOwnMessage, isMention, isAway);
   if (isDm) noteDmMessage(payload, activeId, isOwnMessage, isMention, isAway);
+  // A message from the other person hints that they accepted: it clears the
+  // waiting notice, and a refused call brings it back.
+  if (isDm && !isOwnMessage) clearRequestPending(payload.channel_id);
   if (!isReplayFrame) notifyLiveMessage(clock, payload);
 }
 
