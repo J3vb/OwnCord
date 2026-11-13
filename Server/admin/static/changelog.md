@@ -17,6 +17,7 @@
 - **Messages:** a very long message or code block could make the app hang for a moment while it was shown. It now shows without the wait.
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
 - **Link previews:** the outside-content cache now keeps closer to its memory limit.
+- **Voice:** a soft voice was heard, but the speaking ring the others see stayed dark, mostly with Automatic Gain Control off. The ring now lights for soft speech too. The server update brings it; with Docker, or if you manage `livekit.yaml` yourself, set `audio.active_level` to 60 in that file and restart LiveKit.
 
 ### Changed
 
