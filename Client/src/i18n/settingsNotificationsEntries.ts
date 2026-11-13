@@ -54,6 +54,10 @@ export const settingsNotificationsEntries = {
   "notifications.volume.desc":
     "How loud OwnCord's own sounds are. 100% is the normal level, 0% is silent.",
   "notifications.volume.value": "{percent}%",
+  "notifications.soundStyle.label": "Sound style",
+  "notifications.soundStyle.desc": "Classic brings back the plain tones OwnCord had before.",
+  "notifications.soundStyle.modern": "Modern",
+  "notifications.soundStyle.classic": "Classic",
   "notifications.sound.message.label": "Message sound",
   "notifications.sound.message.desc": "The chime for a new message",
   "notifications.sound.mention.label": "Mention sound",

@@ -1,7 +1,7 @@
 //! App sounds on the chosen output (Linux).
 //!
-//! The webview sends a tone spec (`notificationSound.ts`'s table, the one
-//! source of truth); `render` synthesizes it and each play opens its own
+//! The webview sends a tone spec (`soundTables.ts`, the one source of
+//! truth); `render` synthesizes it and each play opens its own
 //! short-lived output stream on the device chosen in settings, in or out of a
 //! call. Overlapping sounds are separate streams the sound server mixes, so
 //! nothing here manages a shared mixer. `AppSounds` holds the live streams
@@ -24,7 +24,7 @@ use super::session::{resolve_device, DeviceInfo};
 use crate::sync::lock;
 
 /// The most notes one sound may have.
-const MAX_NOTES: usize = 16;
+const MAX_NOTES: usize = 32;
 /// The most frequency steps one note may have.
 const MAX_STEPS: usize = 8;
 /// The longest sound, in seconds. Bounds the allocation from IPC input.
@@ -46,6 +46,18 @@ pub struct ToneNote {
     pub end_gain: f32,
     /// `(offset from the note's start in seconds, hertz)`.
     pub freqs: Vec<(f32, f32)>,
+    /// Seconds the gain takes to rise linearly from 0 to `gain`; the fade to
+    /// `end_gain` then runs from there to `duration`.
+    #[serde(default)]
+    pub attack: f32,
+    /// Seconds after `duration` over which the gain falls linearly from
+    /// `end_gain` to 0.
+    #[serde(default)]
+    pub release: f32,
+    /// Slide exponentially from each frequency point to the next instead of
+    /// stepping; after the last point the frequency holds.
+    #[serde(default)]
+    pub glide: bool,
 }
 
 fn samples_of(seconds: f32) -> usize {
@@ -53,9 +65,16 @@ fn samples_of(seconds: f32) -> usize {
 }
 
 fn valid(note: &ToneNote) -> bool {
-    let finite = [note.at, note.duration, note.gain, note.end_gain]
-        .iter()
-        .all(|v| v.is_finite())
+    let finite = [
+        note.at,
+        note.duration,
+        note.gain,
+        note.end_gain,
+        note.attack,
+        note.release,
+    ]
+    .iter()
+    .all(|v| v.is_finite())
         && note
             .freqs
             .iter()
@@ -67,6 +86,9 @@ fn valid(note: &ToneNote) -> bool {
         && note.gain > 0.0
         && (0.0..=1.0).contains(&note.end_gain)
         && note.end_gain > 0.0
+        && note.attack >= 0.0
+        && note.attack < note.duration
+        && note.release >= 0.0
         && !note.freqs.is_empty()
         && note.freqs.len() <= MAX_STEPS
         && note.freqs.windows(2).all(|w| w[0].0 <= w[1].0)
@@ -76,14 +98,42 @@ fn valid(note: &ToneNote) -> bool {
             .all(|&(o, hz)| o >= 0.0 && hz > 0.0 && hz < SAMPLE_RATE as f32 / 2.0)
 }
 
-/// The note's fade at `t` seconds into it: `gain * (end/gain)^(t/duration)`.
+/// The note's gain at `t` seconds into it: a linear rise over `attack`, then
+/// `gain * (end/gain)^((t - attack)/(duration - attack))` up to `duration`,
+/// then a linear fall from `end_gain` to 0 over `release`.
 fn envelope(note: &ToneNote, t: f32) -> f32 {
-    note.gain * (note.end_gain / note.gain).powf(t / note.duration)
+    if t < note.attack {
+        return note.gain * t / note.attack;
+    }
+    if t <= note.duration || note.release <= 0.0 {
+        let fade = (t - note.attack) / (note.duration - note.attack);
+        return note.gain * (note.end_gain / note.gain).powf(fade);
+    }
+    (note.end_gain * (1.0 - (t - note.duration) / note.release)).max(0.0)
+}
+
+/// The note's frequency at sample `i`: the last point at or before it, or,
+/// with `glide`, on the way from that point to the next,
+/// `f0 * (f1/f0)^((t - o0)/(o1 - o0))`.
+fn frequency(steps: &[(usize, f32, f64)], glide: bool, i: usize) -> f64 {
+    let Some(k) = steps.iter().rposition(|(from, _, _)| *from <= i) else {
+        return steps[0].2;
+    };
+    let (_, o0, f0) = steps[k];
+    match steps.get(k + 1) {
+        Some(&(_, o1, f1)) if glide && o1 > o0 => {
+            let t = i as f32 / SAMPLE_RATE as f32;
+            let x = f64::from(((t - o0) / (o1 - o0)).clamp(0.0, 1.0));
+            f0 * (f1 / f0).powf(x)
+        }
+        _ => f0,
+    }
 }
 
 /// Render `notes` to mono 48 kHz at `master` (the app-sounds volume). Each
-/// note is a sine on a phase accumulator, so a frequency step is
-/// phase-continuous, cut at `at + duration`; the notes are summed and clamped.
+/// note is a sine on a phase accumulator, so a frequency step or glide is
+/// phase-continuous, cut at `at + duration + release`; the notes are summed
+/// and clamped.
 pub fn render(notes: &[ToneNote], master: f32) -> Result<Vec<f32>, String> {
     if notes.is_empty() || notes.len() > MAX_NOTES {
         return Err(format!("a sound has 1 to {MAX_NOTES} notes"));
@@ -94,25 +144,24 @@ pub fn render(notes: &[ToneNote], master: f32) -> Result<Vec<f32>, String> {
     if !notes.iter().all(valid) {
         return Err("a note has a non-finite or out-of-range value".into());
     }
-    let end = notes.iter().map(|n| n.at + n.duration).fold(0.0, f32::max);
+    let end = notes
+        .iter()
+        .map(|n| n.at + n.duration + n.release)
+        .fold(0.0, f32::max);
     if end > MAX_SECONDS {
         return Err(format!("a sound is at most {MAX_SECONDS} s long"));
     }
     let mut out = vec![0.0f32; samples_of(end) + 1];
     for note in notes {
         let start = samples_of(note.at);
-        let steps: Vec<(usize, f64)> = note
+        let steps: Vec<(usize, f32, f64)> = note
             .freqs
             .iter()
-            .map(|&(offset, hz)| (samples_of(offset), f64::from(hz)))
+            .map(|&(offset, hz)| (samples_of(offset), offset, f64::from(hz)))
             .collect();
         let mut phase = 0.0f64;
-        for i in 0..samples_of(note.duration) {
-            let hz = steps
-                .iter()
-                .rev()
-                .find(|(from, _)| *from <= i)
-                .map_or(steps[0].1, |&(_, hz)| hz);
+        for i in 0..samples_of(note.duration + note.release) {
+            let hz = frequency(&steps, note.glide, i);
             let t = i as f32 / SAMPLE_RATE as f32;
             if let Some(o) = out.get_mut(start + i) {
                 *o += (phase.sin() as f32) * envelope(note, t) * master;
@@ -278,6 +327,18 @@ mod tests {
             gain,
             end_gain,
             freqs: freqs.to_vec(),
+            attack: 0.0,
+            release: 0.0,
+            glide: false,
+        }
+    }
+
+    fn shaped(base: ToneNote, attack: f32, release: f32, glide: bool) -> ToneNote {
+        ToneNote {
+            attack,
+            release,
+            glide,
+            ..base
         }
     }
 
@@ -386,6 +447,161 @@ mod tests {
         assert!(render(std::slice::from_ref(&ok), -1.0).is_err());
         assert!(render(std::slice::from_ref(&ok), 1.5).is_err());
         assert!(render(&[ok], f32::MAX).is_err());
+    }
+
+    /// The renderer as it was before attack, release and glide existed.
+    fn render_without_shaping(notes: &[ToneNote]) -> Vec<f32> {
+        let end = notes.iter().map(|n| n.at + n.duration).fold(0.0, f32::max);
+        let mut out = vec![0.0f32; samples_of(end) + 1];
+        for note in notes {
+            let start = samples_of(note.at);
+            let steps: Vec<(usize, f64)> = note
+                .freqs
+                .iter()
+                .map(|&(offset, hz)| (samples_of(offset), f64::from(hz)))
+                .collect();
+            let mut phase = 0.0f64;
+            for i in 0..samples_of(note.duration) {
+                let hz = steps
+                    .iter()
+                    .rev()
+                    .find(|(from, _)| *from <= i)
+                    .map_or(steps[0].1, |&(_, hz)| hz);
+                let t = i as f32 / SAMPLE_RATE as f32;
+                let env = note.gain * (note.end_gain / note.gain).powf(t / note.duration);
+                if let Some(o) = out.get_mut(start + i) {
+                    *o += (phase.sin() as f32) * env;
+                }
+                phase = (phase + TAU * hz / f64::from(SAMPLE_RATE)) % TAU;
+            }
+        }
+        out.iter_mut().for_each(|s| *s = s.clamp(-1.0, 1.0));
+        out
+    }
+
+    #[test]
+    fn a_note_without_shaping_renders_exactly_as_before() {
+        let json = r#"[
+            {"at":0,"duration":0.2,"gain":0.3,"endGain":0.01,"freqs":[[0,800],[0.1,600]]},
+            {"at":0.18,"duration":0.16,"gain":0.25,"endGain":0.01,"freqs":[[0,880]]}
+        ]"#;
+        let notes: Vec<ToneNote> = serde_json::from_str(json).unwrap();
+        assert!(notes
+            .iter()
+            .all(|n| n.attack == 0.0 && n.release == 0.0 && !n.glide));
+        let out = render(&notes, 1.0).unwrap();
+        let before = render_without_shaping(&notes);
+        assert_eq!(out.len(), before.len());
+        assert!(out
+            .iter()
+            .zip(&before)
+            .all(|(a, b)| a.to_bits() == b.to_bits()));
+    }
+
+    #[test]
+    fn the_shaping_fields_arrive_in_camel_case_json() {
+        let json = r#"{"at":0,"duration":0.16,"gain":0.42,"endGain":0.00042,
+            "attack":0.004,"release":0.008,"glide":true,"freqs":[[0,420],[0.07,860]]}"#;
+        let n: ToneNote = serde_json::from_str(json).unwrap();
+        assert_eq!((n.attack, n.release, n.glide), (0.004, 0.008, true));
+        assert!(render(&[n], 1.0).is_ok());
+    }
+
+    #[test]
+    fn the_attack_rises_linearly_to_the_gain() {
+        let n = shaped(note(0.0, 0.2, 0.4, 0.01, &[(0.0, 440.0)]), 0.01, 0.0, false);
+        assert_eq!(envelope(&n, 0.0), 0.0);
+        assert!((envelope(&n, 0.005) - 0.2).abs() < 1e-6, "half way up");
+        assert!(
+            (envelope(&n, 0.01) - 0.4).abs() < 1e-6,
+            "the gain at the attack's end"
+        );
+        // The fade then runs from the attack's end to the duration.
+        let mid = (0.4f32 * 0.01).sqrt();
+        assert!((envelope(&n, 0.105) - mid).abs() < 1e-5);
+        assert!((envelope(&n, 0.2) - 0.01).abs() < 1e-5);
+        // Rendered, the first millisecond stays well under the gain.
+        let out = render(&[n], 1.0).unwrap();
+        assert!(
+            peak(&out[..48]) < 0.05,
+            "a soft start: {}",
+            peak(&out[..48])
+        );
+        assert!(peak(&out[480..960]) > 0.3);
+    }
+
+    #[test]
+    fn the_release_falls_linearly_to_silence_after_the_duration() {
+        let n = shaped(note(0.0, 0.1, 0.5, 0.2, &[(0.0, 440.0)]), 0.0, 0.05, false);
+        assert!((envelope(&n, 0.1) - 0.2).abs() < 1e-6);
+        assert!((envelope(&n, 0.125) - 0.1).abs() < 1e-6, "half way down");
+        assert!(envelope(&n, 0.15).abs() < 1e-6);
+        let out = render(std::slice::from_ref(&n), 1.0).unwrap();
+        assert!(
+            (out.len() as i64 - 7200).abs() <= 1,
+            "0.15 s with the release"
+        );
+        // Without a release the same note stops at its duration.
+        let cut = render(&[shaped(n, 0.0, 0.0, false)], 1.0).unwrap();
+        assert!((cut.len() as i64 - 4800).abs() <= 1);
+        assert!(
+            peak(&out[4800..5000]) > 0.15,
+            "still sounding after the duration"
+        );
+        assert!(peak(&out[out.len() - 48..]) < 0.01, "silent at the end");
+    }
+
+    #[test]
+    fn a_glide_passes_the_geometric_midpoint() {
+        let steps = [(0usize, 0.0f32, 400.0f64), (4800, 0.1, 1600.0)];
+        let mid = frequency(&steps, true, 2400);
+        assert!((mid - 800.0).abs() < 1e-3, "sqrt(400 * 1600): {mid}");
+        assert!((frequency(&steps, true, 0) - 400.0).abs() < 1e-9);
+        assert!((frequency(&steps, true, 4800) - 1600.0).abs() < 1e-9);
+        assert!(
+            (frequency(&steps, true, 9000) - 1600.0).abs() < 1e-9,
+            "holds"
+        );
+        // Without glide it steps.
+        assert!((frequency(&steps, false, 4799) - 400.0).abs() < 1e-9);
+        assert!((frequency(&steps, false, 4800) - 1600.0).abs() < 1e-9);
+        // Rendered, a glide stays phase-continuous: no sample jumps further
+        // than the highest frequency allows.
+        let n = shaped(
+            note(0.0, 0.2, 1.0, 1.0, &[(0.0, 400.0), (0.1, 1600.0)]),
+            0.0,
+            0.0,
+            true,
+        );
+        let out = render(&[n], 1.0).unwrap();
+        let max_step = (TAU * 1600.0 / 48_000.0) as f32 + 1e-3;
+        assert!(out.windows(2).all(|w| (w[1] - w[0]).abs() <= max_step));
+    }
+
+    #[test]
+    fn the_shaping_fields_are_validated() {
+        let base = note(0.0, 0.1, 0.2, 0.01, &[(0.0, 440.0)]);
+        let with = |attack, release| shaped(base.clone(), attack, release, false);
+        assert!(render(&[with(0.05, 0.05)], 1.0).is_ok());
+        for bad in [
+            with(-0.01, 0.0),
+            with(0.1, 0.0),
+            with(0.2, 0.0),
+            with(0.0, -0.01),
+            with(f32::NAN, 0.0),
+            with(0.0, f32::NAN),
+            with(f32::INFINITY, 0.0),
+            with(0.0, f32::INFINITY),
+        ] {
+            assert!(render(&[bad], 1.0).is_err());
+        }
+        // The release counts towards the longest sound.
+        let long = note(0.0, 1.9, 0.2, 0.01, &[(0.0, 440.0)]);
+        assert!(render(&[shaped(long.clone(), 0.0, 0.1, false)], 1.0).is_ok());
+        assert!(render(&[shaped(long, 0.0, 0.2, false)], 1.0).is_err());
+        // A ringtone of 28 partials fits.
+        assert!(render(&vec![with(0.003, 0.008); 28], 1.0).is_ok());
+        assert_eq!(MAX_NOTES, 32);
     }
 
     #[test]

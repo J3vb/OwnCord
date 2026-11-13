@@ -129,6 +129,10 @@ release changes the database, and anything an operator must do first.)
 
 - On Home, People and Message requests are now proper rows with an icon. Message requests shows how many requests are waiting, and the Home icon counts them too, so a new request is hard to miss.
 
+**Notifications**
+
+- New app sounds: a short bubble pop for a message, its own two-note chime for a mention, a marimba phrase for an incoming call, and softer voice and call sounds. Settings > Notifications has a new "Sound style" choice under the volume slider; Classic brings back the plain tones OwnCord had before.
+
 **Desktop UI**
 
 - Right-click menus and the phone action sheets now show an icon in front of every action (message, channel, server and member menus), so an action is quicker to find. Destructive actions keep their red colour.

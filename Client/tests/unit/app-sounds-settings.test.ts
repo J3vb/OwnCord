@@ -91,6 +91,56 @@ describe("App sounds volume slider", () => {
   });
 });
 
+describe("Sound style", () => {
+  const choice = (tab: HTMLElement, style: string): HTMLButtonElement =>
+    tab.querySelector<HTMLButtonElement>(`[data-testid='sound-style-${style}']`)!;
+  const select = (tab: HTMLElement): HTMLSelectElement =>
+    tab.querySelector<HTMLSelectElement>("[data-testid='sound-style-select']")!;
+
+  it("sits right under the volume slider and starts on Modern", () => {
+    const tab = build();
+    const rows = [...tab.querySelectorAll<HTMLElement>(".setting-row")];
+    const volume = rows.findIndex((r) => r.contains(slider(tab)));
+    expect(rows[volume + 1]!.contains(choice(tab, "modern"))).toBe(true);
+    expect(rows[volume + 1]!.textContent).toContain("Sound style");
+    expect(rows[volume + 1]!.textContent).toContain(
+      "Classic brings back the plain tones OwnCord had before.",
+    );
+    expect(choice(tab, "modern").getAttribute("aria-checked")).toBe("true");
+    expect(choice(tab, "modern").textContent).toBe("Modern");
+    expect(choice(tab, "classic").textContent).toBe("Classic");
+    expect(select(tab).value).toBe("modern");
+  });
+
+  it("saves the pick and plays the message sound once in it", () => {
+    const tab = build();
+    playNotificationSound.mockImplementation(() => {
+      // The sample plays after the save, so it sounds in the new style.
+      expect(stored("soundStyle")).toBe(JSON.stringify("classic"));
+    });
+    choice(tab, "classic").click();
+    playNotificationSound.mockImplementation(() => undefined);
+
+    expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(playNotificationSound).toHaveBeenCalledWith();
+    expect(choice(tab, "classic").getAttribute("aria-checked")).toBe("true");
+    expect(choice(build(), "classic").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("saves from the narrow-window select as well", () => {
+    const tab = build();
+    select(tab).value = "classic";
+    select(tab).dispatchEvent(new Event("change"));
+    expect(stored("soundStyle")).toBe(JSON.stringify("classic"));
+    expect(playNotificationSound).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Modern for a stored value it does not know", () => {
+    localStorage.setItem("owncord:settings:soundStyle", JSON.stringify("retro"));
+    expect(choice(build(), "modern").getAttribute("aria-checked")).toBe("true");
+  });
+});
+
 describe("per-sound switches", () => {
   const SOUND_SWITCHES: ReadonlyArray<readonly [string, string]> = [
     ["Message sound", "soundMessage"],

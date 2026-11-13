@@ -42,3 +42,15 @@ export function loadAppSoundsGain(): number {
   if (!Number.isFinite(percent)) return 1;
   return Math.min(100, Math.max(0, percent)) / 100;
 }
+
+/** The sound style pref: "modern" (the default) or "classic", the plain tones
+ *  OwnCord played before. */
+export const SOUND_STYLE_KEY = "soundStyle";
+
+/** Which set of sounds plays. */
+export type SoundStyle = "modern" | "classic";
+
+/** The saved sound style; anything but "classic" reads as "modern". */
+export function loadSoundStyle(): SoundStyle {
+  return loadPref<string>(SOUND_STYLE_KEY, "modern") === "classic" ? "classic" : "modern";
+}

@@ -8,8 +8,11 @@ import { isAndroidApp } from "../voice/native/platform";
 import { playNotificationSound } from "@lib/media/notificationSound";
 import {
   APP_SOUNDS_VOLUME_KEY,
+  SOUND_STYLE_KEY,
   SOUND_SWITCH_KEYS,
   loadAppSoundsGain,
+  loadSoundStyle,
+  type SoundStyle,
   type SoundSwitch,
 } from "@lib/prefs/soundPrefs";
 import { setStatusIcon, statusIcon, type StatusKind } from "./status";
@@ -195,6 +198,26 @@ function buildSoundsVolumeRow(signal: AbortSignal): HTMLDivElement {
   return row;
 }
 
+/** The "Sound style" row: Modern or Classic. Picking one plays the message
+ *  sound once in it, as letting go of the volume slider does. */
+function buildSoundStyleRow(signal: AbortSignal): HTMLDivElement {
+  return buildChoiceRow<SoundStyle>({
+    signal,
+    label: t("notifications.soundStyle.label"),
+    desc: t("notifications.soundStyle.desc"),
+    testId: "sound-style",
+    options: [
+      ["modern", t("notifications.soundStyle.modern")],
+      ["classic", t("notifications.soundStyle.classic")],
+    ],
+    current: loadSoundStyle,
+    save: (style) => {
+      savePref(SOUND_STYLE_KEY, style);
+      playNotificationSound();
+    },
+  }).row;
+}
+
 /** The Android app's push row, under the permission row; it loads on demand. */
 function appendPushRow(after: HTMLElement, signal: AbortSignal): void {
   if (!isAndroidApp()) return;
@@ -264,6 +287,7 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const [desktopRow] = appendToggleRows(section, shownToggles, signal) as [HTMLDivElement];
 
   section.appendChild(buildSoundsVolumeRow(signal));
+  section.appendChild(buildSoundStyleRow(signal));
 
   // Each group switch keeps its pref key; its own sounds follow it, nested.
   appendSoundGroup(
