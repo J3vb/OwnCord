@@ -22,6 +22,14 @@ func (h *Hub) cachedUploadPolicy(ctx context.Context) UploadPolicy {
 	return h.settings.cache.UploadPolicy(ctx)
 }
 
+// ExpireSettingsCache marks the cached server_name, motd and upload lists stale, so the next auth_ok
+// or ready re-reads them instead of serving values up to hubsettings.TTL old. Call it after a write
+// to those settings commits: Expire waits out a refresh in flight, so a refresh that read the old
+// values before the commit cannot stamp them fresh after it.
+func (h *Hub) ExpireSettingsCache() {
+	h.settings.cache.Expire()
+}
+
 const uploadPolicyReadTimeout = 5 * time.Second
 
 // BroadcastUploadPolicy re-reads the upload file-type lists into the settings cache and sends them
