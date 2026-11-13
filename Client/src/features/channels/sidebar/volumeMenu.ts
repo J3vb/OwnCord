@@ -5,8 +5,8 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { createMenuItem, openMenuShell } from "@lib/ui/contextMenu";
-import { createIcon } from "@lib/icons";
+import { createMenuItem, openMenuShell, setMenuItemLabel } from "@lib/ui/contextMenu";
+import { createIcon, type IconName } from "@lib/icons";
 import {
   setUserVolume,
   getUserVolume,
@@ -117,7 +117,7 @@ function buildVolumeMenu(
   slider.addEventListener("input", () => {
     const val = Number(slider.value);
     setText(valLabel, `${val}%`);
-    setText(volLabel, t("volume.user", { percent: val }));
+    setMenuItemLabel(volLabel, t("volume.user", { percent: val }));
     setUserVolume(userId, val);
     // Raising the level unmutes, as the tile slider does.
     if (val > 0 && getUserLocalMute(userId)) setUserLocalMute(userId, false);
@@ -130,9 +130,9 @@ function buildVolumeMenu(
   const showFullVolume = (): void => {
     slider.value = "100";
     setText(valLabel, "100%");
-    setText(volLabel, t("volume.resetFull"));
+    setMenuItemLabel(volLabel, t("volume.resetFull"));
   };
-  const resetBtn = createMenuItem(t("volume.reset"), "context-menu-item");
+  const resetBtn = createMenuItem(t("volume.reset"), "context-menu-item", { icon: "volume-2" });
   resetBtn.addEventListener("click", () => {
     setUserVolume(userId, 100);
     showFullVolume();
@@ -140,10 +140,10 @@ function buildVolumeMenu(
   });
   menu.appendChild(resetBtn);
 
-  const mute = createLocalMuteItem(userId, showFullVolume);
+  const mute = createLocalMuteItem(userId, showFullVolume, "volume-x");
   menu.appendChild(mute.item);
 
-  if (mod !== undefined) appendVoiceModeration(menu, mod, closeMenu);
+  if (mod !== undefined) appendVoiceModeration(menu, mod, closeMenu, true);
 }
 
 /**
@@ -151,14 +151,19 @@ function buildVolumeMenu(
  * their level, so unchecking it brings that level back. A level of 0 reads as
  * muted too, and unchecking it restores 100% (then `onRestoreFull` runs, so
  * the caller can redraw its slider). The menu stays open. `sync` redraws the
- * check after the caller changes the level.
+ * check after the caller changes the level. `icon` leads the row.
  */
 export function createLocalMuteItem(
   userId: number,
   onRestoreFull: () => void,
+  icon?: IconName,
 ): { readonly item: HTMLElement; readonly sync: () => void } {
   const isSilenced = (): boolean => getUserLocalMute(userId) || getUserVolume(userId) === 0;
-  const item = createMenuItem(t("volume.mute"), "context-menu-item");
+  const item = createMenuItem(
+    t("volume.mute"),
+    "context-menu-item",
+    icon === undefined ? {} : { icon },
+  );
   item.setAttribute("role", "menuitemcheckbox");
   item.setAttribute("data-action", "local-mute");
   item.style.display = "flex";
@@ -191,14 +196,16 @@ export function createLocalMuteItem(
 }
 
 /** The moderation section, or why it is unavailable (a string, shown as
- *  disabled text). Shared with the video tile menu. */
+ *  disabled text). Shared with the video tile menu; `icons` leads its rows
+ *  with icons. */
 export function appendVoiceModeration(
   menu: HTMLElement,
   mod: VoiceModMenuOptions | string,
   close: () => void,
+  icons = false,
 ): void {
   if (typeof mod !== "string") {
-    appendModerationSection(menu, mod, close);
+    appendModerationSection(menu, mod, close, icons);
     return;
   }
   menu.appendChild(createElement("div", { class: "context-menu-sep" }));
@@ -222,16 +229,24 @@ function appendModerationSection(
   menu: HTMLElement,
   mod: VoiceModMenuOptions,
   close: () => void,
+  icons: boolean,
 ): void {
   menu.appendChild(createElement("div", { class: "context-menu-sep" }));
   const disabled = mod.disabledReason !== undefined;
+  const iconOpt = (icon: IconName): { icon?: IconName } => (icons ? { icon } : {});
 
   /** One moderation row; inert and greyed while `disabled`. */
-  const modItem = (label: string, action: string, run: () => void, danger = false): HTMLElement => {
+  const modItem = (
+    label: string,
+    action: string,
+    icon: IconName,
+    run: () => void,
+    danger = false,
+  ): HTMLElement => {
     const cls = ["context-menu-item", danger ? "danger" : "", disabled ? "disabled" : ""]
       .filter((c) => c !== "")
       .join(" ");
-    const item = createMenuItem(label, cls);
+    const item = createMenuItem(label, cls, iconOpt(icon));
     item.setAttribute("data-action", action);
     if (disabled) {
       (item as HTMLButtonElement).disabled = true;
@@ -266,6 +281,7 @@ function appendModerationSection(
       modItem(
         mod.serverMuted === true ? t("volume.serverUnmute") : t("volume.serverMute"),
         "server-mute",
+        mod.serverMuted === true ? "mic" : "mic-off",
         () => onServerMute(mod.serverMuted !== true),
       ),
     );
@@ -275,6 +291,7 @@ function appendModerationSection(
       modItem(
         mod.serverDeafened === true ? t("volume.serverUndeafen") : t("volume.serverDeafen"),
         "server-deafen",
+        mod.serverDeafened === true ? "headphones" : "headphones-off",
         () => onServerDeafen(mod.serverDeafened !== true),
       ),
     );
@@ -288,7 +305,7 @@ function appendModerationSection(
       disabled
         ? "context-menu-item context-menu-item--submenu disabled"
         : "context-menu-item context-menu-item--submenu",
-      { submenu: true },
+      { submenu: true, ...iconOpt("arrow-right") },
     );
     moveWrap.setAttribute("data-action", "move-to");
     if (disabled) {
@@ -319,6 +336,8 @@ function appendModerationSection(
   }
 
   if (onDisconnect !== undefined) {
-    menu.appendChild(modItem(t("volume.disconnect"), "voice-disconnect", onDisconnect, true));
+    menu.appendChild(
+      modItem(t("volume.disconnect"), "voice-disconnect", "phone-off", onDisconnect, true),
+    );
   }
 }

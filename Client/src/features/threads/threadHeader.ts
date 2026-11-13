@@ -131,27 +131,32 @@ export function createThreadHeader(options: {
       label: threadsText("follow.follow"),
       checked: isFollowed(threadId),
       testId: "thread-sheet-follow",
+      icon: "bell",
       onClick: () => followBtn.click(),
     });
     row(renameBtn, {
       label: threadsText("action.rename"),
       testId: "thread-sheet-rename",
+      icon: "pencil",
       onClick: () => startRename(),
     });
     row(archiveBtn, {
       label: archiveBtn.getAttribute("aria-label") ?? "",
       testId: "thread-sheet-archive",
+      icon: "archive",
       onClick: () => archiveBtn.click(),
     });
     row(lockBtn, {
       label: lockBtn.getAttribute("aria-label") ?? "",
       testId: "thread-sheet-lock",
+      icon: "lock",
       onClick: () => lockBtn.click(),
     });
     row(deleteBtn, {
       label: threadsText("action.delete"),
       danger: true,
       testId: "thread-sheet-delete",
+      icon: "trash-2",
       onClick: () => confirmDelete(),
     });
     return items;

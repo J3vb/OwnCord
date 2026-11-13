@@ -123,6 +123,7 @@ function menuItems(target: ImageMenuTarget): ContextMenuItem[] {
     {
       label: imageMenuText("copy"),
       testId: "image-menu-copy",
+      icon: "copy",
       onClick: () => copyImage(target),
     },
   ];
@@ -132,11 +133,13 @@ function menuItems(target: ImageMenuTarget): ContextMenuItem[] {
       {
         label: imageMenuText("copyLink"),
         testId: "image-menu-copy-link",
+        icon: "link",
         onClick: () => copyLink(link),
       },
       {
         label: imageMenuText("openLink"),
         testId: "image-menu-open-link",
+        icon: "external-link",
         onClick: () => openLink(link),
       },
     );
@@ -144,6 +147,7 @@ function menuItems(target: ImageMenuTarget): ContextMenuItem[] {
   items.push({
     label: imageMenuText("save"),
     testId: "image-menu-save",
+    icon: "download",
     onClick: () => void target.save(),
   });
   const { share } = target;
@@ -151,6 +155,7 @@ function menuItems(target: ImageMenuTarget): ContextMenuItem[] {
     items.push({
       label: imageMenuText("share"),
       testId: "image-menu-share",
+      icon: "share",
       onClick: () => void share(),
     });
   }
