@@ -392,16 +392,19 @@ test.describe("keyboard journey at large text and reduced motion", () => {
     // Reflow at the 940x500 minimum window and 20px Large Font.
     const overflow = await fixture.evaluate((el) => {
       const modal = el.querySelector<HTMLElement>(".modal")!;
+      // The body is the dialog's scroll box, so sideways overflow shows there.
+      const body = el.querySelector<HTMLElement>(".modal-body")!;
       const clipped = [...el.querySelectorAll<HTMLElement>("button, input, label, a, .toggle")]
         .filter((c) => c.scrollWidth > c.clientWidth + 1)
         .map((c) => c.outerHTML.slice(0, 60));
       return {
         pageScroll: document.documentElement.scrollWidth - innerWidth,
         modalScroll: modal.scrollWidth - modal.clientWidth,
+        bodyScroll: body.scrollWidth - body.clientWidth,
         clipped,
       };
     });
-    expect(overflow).toEqual({ pageScroll: 0, modalScroll: 0, clipped: [] });
+    expect(overflow).toEqual({ pageScroll: 0, modalScroll: 0, bodyScroll: 0, clipped: [] });
 
     await testInfo.attach("journey-940x500-20px-large-font.png", {
       body: await page.screenshot(),

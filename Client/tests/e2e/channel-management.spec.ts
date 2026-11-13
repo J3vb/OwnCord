@@ -154,9 +154,12 @@ test.describe("Create Channel modal", () => {
 
     const modal = page.locator("[data-testid='create-channel-modal']");
     await expect(modal).toBeVisible({ timeout: 5_000 });
-    await expect(modal.locator("#create-channel-title")).toHaveText("Create Channel");
+    await expect(modal.locator("#create-channel-title")).toHaveText("Create channel");
     await expect(page.locator("[data-testid='channel-category-select']")).toHaveValue("id:1");
-    await expect(page.locator("[data-testid='channel-type-select']")).toHaveValue("text");
+    await expect(page.locator("[data-testid='channel-type-select']")).toHaveAttribute(
+      "data-value",
+      "text",
+    );
   });
 
   test("creating a channel POSTs name/type/category and closes the modal", async ({ page }) => {
@@ -165,7 +168,7 @@ test.describe("Create Channel modal", () => {
     await expect(page.locator("[data-testid='create-channel-modal']")).toBeVisible();
 
     await page.locator("[data-testid='channel-name-input']").fill("new-lounge");
-    await page.locator("[data-testid='channel-type-select']").selectOption("voice");
+    await page.locator("[data-testid='channel-type-select-voice']").click();
     await page.locator("[data-testid='channel-create-submit']").click();
 
     const call = await waitForCapturedCall(
@@ -210,7 +213,7 @@ test.describe("Create Channel modal", () => {
     await expect(error).toHaveText("Missing MANAGE_CHANNELS");
     await expect(page.locator("[data-testid='channel-create-submit']")).toBeEnabled();
     await expect(page.locator("[data-testid='channel-create-submit']")).toHaveText(
-      "Create Channel",
+      "Create channel",
     );
   });
 
@@ -229,7 +232,10 @@ test.describe("Create Channel modal", () => {
 
     await expect(page.locator("[data-testid='create-channel-modal']")).toBeVisible();
     await expect(page.locator("[data-testid='channel-category-select']")).toHaveValue("");
-    await expect(page.locator("[data-testid='channel-type-select']")).toHaveValue("voice");
+    await expect(page.locator("[data-testid='channel-type-select']")).toHaveAttribute(
+      "data-value",
+      "voice",
+    );
   });
 });
 

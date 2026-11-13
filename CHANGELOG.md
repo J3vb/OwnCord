@@ -133,6 +133,7 @@ release changes the database, and anything an operator must do first.)
 
 - Right-click menus and the phone action sheets now show an icon in front of every action (message, channel, server and member menus), so an action is quicker to find. Destructive actions keep their red colour.
 - The invite dialog is tidier: the link to share and its Copy button come first, a new link is made with two labelled choices, and the other links sit in a short list. A link with no uses left says "Used up", and a link you just made shows your name, not "unknown".
+- The Create channel dialog starts with the channel type, shown as cards that each say what the type is for. On a small screen the buttons of a tall dialog stay in view.
 
 ### Fixed
 
