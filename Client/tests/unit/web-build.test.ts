@@ -32,7 +32,7 @@ const PUBLIC_FILES = [
   "silero-vad-worker.js",
 ];
 // Loaded by the speech worker by relative URL, so they must sit beside it.
-const WORKER_SIBLINGS = ["silero-vad.js", "silero-v5.1.2.bin"];
+const WORKER_SIBLINGS = ["silero-vad.js", "silero-v5.1.2.bin", "silero-v6.2.0-slim.bin"];
 const PUBLIC_DIR = publicAssetsDir();
 
 let outDir = "";

@@ -2,7 +2,8 @@ import { createLogger } from "../../lib/logger";
 import { publicAssetUrl } from "../../lib/media/publicAssets";
 
 const log = createLogger("sileroWorker");
-const INIT_TIMEOUT_MS = 4000;
+// Covers loading and setting up both model files.
+const INIT_TIMEOUT_MS = 6000;
 
 export interface SileroInput {
   readonly source: AudioNode;
