@@ -143,6 +143,8 @@ interface AlertPlan {
   readonly showPopup: boolean;
   readonly flash: boolean;
   readonly chime: boolean;
+  /** The chime is a mention's, not a plain message's. */
+  readonly mentioned: boolean;
 }
 
 /**
@@ -158,7 +160,7 @@ function planAlert(focusedElsewhere: boolean, mentioned: boolean): AlertPlan {
     loadPref<boolean>("desktopNotifications", true);
   const flash = !dnd && !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
   const chime = !dnd && chimeEnabled(mentioned);
-  return { showPopup, flash, chime };
+  return { showPopup, flash, chime, mentioned };
 }
 
 /** Whether the plan leaves nothing to do. */
@@ -170,7 +172,7 @@ function isSilent(plan: AlertPlan): boolean {
 function deliverAlert(plan: AlertPlan, makePopup: () => Promise<boolean>): void {
   const popup = plan.showPopup ? makePopup() : null;
   if (plan.flash) flashTaskbar();
-  if (plan.chime) chimeUnlessOsSounds(popup);
+  if (plan.chime) chimeUnlessOsSounds(popup, plan.mentioned);
 }
 
 /**
@@ -428,13 +430,13 @@ export function notifyChannelActivity(
  * "Messages" channel makes a sound of its own, and two would play. A popup
  * Android refused (notifications blocked) still gets the chime.
  */
-function chimeUnlessOsSounds(popup: Promise<boolean> | null): void {
+function chimeUnlessOsSounds(popup: Promise<boolean> | null, mentioned: boolean): void {
   if (popup === null || !isAndroidHost()) {
-    playNotificationSound();
+    playNotificationSound(mentioned);
     return;
   }
   void popup.then((shown) => {
-    if (!shown) playNotificationSound();
+    if (!shown) playNotificationSound(mentioned);
   });
 }
 

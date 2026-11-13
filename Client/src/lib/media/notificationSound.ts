@@ -4,11 +4,12 @@
  * pulling the whole message-notification pipeline (the level gate, the
  * markdown body, the dispatcher) into its chunk.
  *
- * Every sound is a row of one tone-spec table (`TONES`), drawn by one of two
- * renderers. `playWeb` is the Web Audio one: all sounds share one
- * `AudioContext`, whose output follows the saved `audioOutputDevice` through
- * `setSinkId` where the host supports it (Chromium and WebView2 do). WebKitGTK,
- * the Linux webview, lacks `setSinkId`, so on the Linux desktop `playSpec`
+ * Every sound is a tone spec from `soundTables.ts`, in the style the user
+ * picked, drawn by one of two renderers. `playWeb` is the Web Audio one: all
+ * sounds share one `AudioContext`, whose output follows the saved
+ * `audioOutputDevice` through `setSinkId` where the host supports it (Chromium
+ * and WebView2 do). WebKitGTK, the Linux webview, lacks `setSinkId`, so on the
+ * Linux desktop `playSpec`
  * sends the spec to the native host instead (`native_voice_play_sound`), which
  * synthesizes it and plays it on the saved output device, in or out of a call;
  * any host failure falls back to `playWeb`. Every gate (deafen,
@@ -16,7 +17,7 @@
  */
 
 import { loadPref, onPrefChange } from "../prefs/preferences";
-import { loadAppSoundsGain, soundSwitchOn } from "../prefs/soundPrefs";
+import { loadAppSoundsGain, loadSoundStyle, soundSwitchOn } from "../prefs/soundPrefs";
 import { USER_STATUS_PREF_KEY, loadUserStatus } from "../presence/userStatus";
 import { isVoiceDeafened } from "../voice/voiceDeafened";
 import { createLogger } from "../logger";
@@ -24,6 +25,9 @@ import { Disposable } from "../disposable";
 import { desktop } from "../../platform/desktop";
 import type { NativeToneNote } from "../../platform/contracts/nativeVoice";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
+import { REPEAT_MS, soundSpec, type ToneSpec, type VoiceSound } from "./soundTables";
+
+export type { VoiceSound } from "./soundTables";
 
 const log = createLogger("notifications");
 
@@ -53,8 +57,8 @@ export function cleanupNotificationAudio(): void {
 }
 
 // The ring chime repeats until the call is answered, declined or times out —
-// unlike a message chime, which fires once. It is its own rising pattern, not
-// the message blip, so a call is told apart from a message by ear.
+// unlike a message chime, which fires once. It is its own pattern, not the
+// message sound, so a call is told apart from a message by ear.
 let ringInterval: ReturnType<typeof setInterval> | null = null;
 /** The chime burst currently sounding, so stopping the chime cuts the
  *  in-flight notes instead of leaving them under the ringback. */
@@ -101,11 +105,12 @@ function soundRingChime(): void {
   silenceRingback();
   playRingtone();
   // The ring switch is re-read before each burst, so turning it off while the
-  // phone rings stops the chime (and lets a pre-empted ringback resume).
+  // phone rings stops the chime (and lets a pre-empted ringback resume). The
+  // period is the style's when the ring starts; each burst reads its notes.
   ringInterval = setInterval(() => {
     if (soundSwitchOn("ring")) playRingtone();
     else silenceRingChime();
-  }, 2000);
+  }, REPEAT_MS[loadSoundStyle()].ring);
 }
 
 /** Stop the repeating incoming-call chime. Idempotent. */
@@ -206,7 +211,7 @@ function syncRingback(): void {
   }
   if (ringbackInterval !== null) return;
   playRingback();
-  ringbackInterval = setInterval(() => playRingback(), 3000);
+  ringbackInterval = setInterval(() => playRingback(), REPEAT_MS[loadSoundStyle()].ringback);
 }
 
 /** Start the repeating outgoing-call ringback. Idempotent. */
@@ -278,42 +283,33 @@ interface Playing {
   stop(): void;
 }
 
-/** A sound as data: the one table both renderers draw from, so the
- *  Web Audio and native notes cannot drift. */
-type ToneSpec = readonly NativeToneNote[];
+/** Step (or, with `glide`, slide) the oscillator through the note's points. */
+function scheduleFreqs(freq: AudioParam, n: NativeToneNote, start: number): void {
+  n.freqs.forEach(([offset, hz], i) => {
+    if (i > 0 && n.glide === true) freq.exponentialRampToValueAtTime(hz, start + offset);
+    else freq.setValueAtTime(hz, start + offset);
+  });
+}
 
-const note = (at: number, duration: number, gain: number, hz: number): NativeToneNote => ({
-  at,
-  duration,
-  gain,
-  endGain: 0.01,
-  freqs: [[0, hz]],
-});
+/** Shape the note's gain: the attack, the fade to `endGain`, the release.
+ *  Returns when the note falls silent. */
+function scheduleGain(gain: AudioParam, n: NativeToneNote, start: number): number {
+  const attack = n.attack ?? 0;
+  const release = n.release ?? 0;
+  if (attack > 0) {
+    gain.setValueAtTime(0, start);
+    gain.linearRampToValueAtTime(n.gain, start + attack);
+  } else {
+    gain.setValueAtTime(n.gain, start);
+  }
+  gain.exponentialRampToValueAtTime(n.endGain, start + n.duration);
+  if (release <= 0) return start + n.duration;
+  gain.linearRampToValueAtTime(0, start + n.duration + release);
+  return start + n.duration + release;
+}
 
-/** The message chime: one tone that falls from 800 Hz to 600 Hz. */
-const NOTIFICATION_TONE: ToneSpec = [
-  {
-    at: 0,
-    duration: 0.2,
-    gain: 0.3,
-    endGain: 0.01,
-    freqs: [
-      [0, 800],
-      [0.1, 600],
-    ],
-  },
-];
-
-/** One burst of the ringtone: two rising notes, where a message falls. */
-const RINGTONE_TONE: ToneSpec = [note(0, 0.16, 0.25, 660), note(0.18, 0.16, 0.25, 880)];
-
-/** One burst of the ringback: a single soft, low tone, slower than the
- *  incoming ringtone and quieter, so the caller and the callee hear different
- *  things. */
-const RINGBACK_TONE: ToneSpec = [note(0, 0.5, 0.12, 440)];
-
-/** Render `spec` through Web Audio on the shared context, node for node as the
- *  sounds always were. A host without Web Audio logs `what` and plays nothing. */
+/** Render `spec` through Web Audio on the shared context: one oscillator and
+ *  one gain node per note. A host without Web Audio logs `what` and plays nothing. */
 function playWeb(spec: ToneSpec, what: string): Playing {
   const oscs: OscillatorNode[] = [];
   try {
@@ -325,11 +321,10 @@ function playWeb(spec: ToneSpec, what: string): Playing {
       osc.connect(gain);
       gain.connect(out);
       const start = ctx.currentTime + n.at;
-      for (const [offset, hz] of n.freqs) osc.frequency.setValueAtTime(hz, start + offset);
-      gain.gain.setValueAtTime(n.gain, start);
-      gain.gain.exponentialRampToValueAtTime(n.endGain, start + n.duration);
+      scheduleFreqs(osc.frequency, n, start);
+      const end = scheduleGain(gain.gain, n, start);
       osc.start(start);
-      osc.stop(start + n.duration);
+      osc.stop(end);
       oscs.push(osc);
     }
   } catch (err) {
@@ -382,10 +377,10 @@ function playSpec(spec: ToneSpec, what: string): Playing {
   return isLinuxDesktop() ? playNative(spec, what) : playWeb(spec, what);
 }
 
-/** One burst of the ringtone. */
+/** One burst of the ringtone, in the style saved now. */
 function playRingtone(): void {
   // i18n-exempt: log text, never displayed
-  ringtoneBurst = playSpec(RINGTONE_TONE, "Ringtone");
+  ringtoneBurst = playSpec(soundSpec(loadSoundStyle(), "ring"), "Ringtone");
 }
 
 /** One burst of the ringback. Silent while deafened: the interval keeps
@@ -393,89 +388,19 @@ function playRingtone(): void {
 function playRingback(): void {
   if (deafened()) return;
   // i18n-exempt: log text, never displayed
-  ringbackBurst = playSpec(RINGBACK_TONE, "Ringback");
+  ringbackBurst = playSpec(soundSpec(loadSoundStyle(), "ringback"), "Ringback");
 }
 
-/** Play a brief notification chime. Silent while deafened. */
-export function playNotificationSound(): void {
+/** Play a brief notification chime, a mention's or a plain message's.
+ *  Silent while deafened. */
+export function playNotificationSound(mentioned = false): void {
   if (deafened()) return;
   // i18n-exempt: log text, never displayed
-  playSpec(NOTIFICATION_TONE, "Notification sound");
-}
-
-/** The short voice UI sounds: join/leave, a moderator's move,
- *  mute/unmute, deafen/undeafen, a stream starting and ending. */
-export type VoiceSound =
-  | "join"
-  | "leave"
-  | "moved"
-  | "mute"
-  | "unmute"
-  | "deafen"
-  | "undeafen"
-  | "streamStart"
-  | "streamEnd"
-  | "viewerJoin"
-  | "viewerLeave";
-
-// A note (or pair) per edge, all under a fifth of a second. Distinct enough to
-// tell apart by ear without being a message or a call.
-const VOICE_SOUND_NOTES: Readonly<Record<VoiceSound, readonly (readonly [number, number])[]>> = {
-  join: [
-    [523, 0],
-    [784, 0.09],
-  ],
-  leave: [
-    [784, 0],
-    [523, 0.09],
-  ],
-  // Two quick equal notes: you landed somewhere you did not pick.
-  moved: [
-    [659, 0],
-    [659, 0.09],
-  ],
-  mute: [[392, 0]],
-  unmute: [[587, 0]],
-  deafen: [[330, 0]],
-  undeafen: [[494, 0]],
-  // Three notes, so a stream is told apart from a join or a leave.
-  streamStart: [
-    [440, 0],
-    [587, 0.08],
-    [880, 0.16],
-  ],
-  streamEnd: [
-    [880, 0],
-    [587, 0.08],
-    [440, 0.16],
-  ],
-  // The streamer's cue that someone started or stopped watching: two soft
-  // notes, the pair reversed for leaving (voiceTone plays them quieter).
-  viewerJoin: [
-    [659, 0],
-    [880, 0.07],
-  ],
-  viewerLeave: [
-    [880, 0],
-    [659, 0.07],
-  ],
-};
-
-/** Per-sound gain; the viewer cues sit well under the others (0.2). */
-const VOICE_SOUND_GAIN: Readonly<Partial<Record<VoiceSound, number>>> = {
-  viewerJoin: 0.1,
-  viewerLeave: 0.1,
-};
-
-/** Each voice sound as a tone spec: a short note per `[hz, at]` pair. */
-function voiceTone(kind: VoiceSound): ToneSpec {
-  return VOICE_SOUND_NOTES[kind].map(([hz, at]) =>
-    note(at, 0.12, VOICE_SOUND_GAIN[kind] ?? 0.2, hz),
-  );
+  playSpec(soundSpec(loadSoundStyle(), mentioned ? "mention" : "message"), "Notification sound");
 }
 
 /** Play one voice UI sound. */
 export function playVoiceSound(kind: VoiceSound): void {
   // i18n-exempt: log text, never displayed
-  playSpec(voiceTone(kind), "Voice sound");
+  playSpec(soundSpec(loadSoundStyle(), kind), "Voice sound");
 }

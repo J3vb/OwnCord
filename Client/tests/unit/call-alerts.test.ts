@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../helpers/deferred";
 import { makeDm } from "../helpers/dmHarness";
 import type { RingState } from "../../src/lib/voice/callRing";
+import { soundSpec } from "../../src/lib/media/soundTables";
+import { paramSpy } from "../helpers/audioContextMock";
 
 const { testPrefs, showCall, clearCall, requestAttention, showToast, notifier } = vi.hoisted(() => {
   const showCall = vi.fn();
@@ -51,6 +53,12 @@ const { startRingChime, stopRingChime, playNotificationSound, startRingback, sto
 const { setChannelMutesHost } = await import("../../src/lib/prefs/channelMutes");
 const { dmStore } = await import("../../src/stores/dm.store");
 
+/** Every frequency the ring chime plays, and the ringback's own pitch (the
+ *  default style's; the two share none). */
+const RING_HZ = new Set(soundSpec("modern", "ring").map((n) => n.freqs[0]![1]));
+const RINGBACK_HZ = 440;
+const isRing = (hz: number): boolean => RING_HZ.has(hz);
+
 /** Every frequency the app's audio graph was asked to play, in order. */
 const frequencies: number[] = [];
 /** Every oscillator created, so a test can check that a burst in flight was
@@ -71,6 +79,7 @@ class MockAudioContext {
           hz = value;
           frequencies.push(value);
         },
+        exponentialRampToValueAtTime: vi.fn(),
       },
       start: vi.fn(),
       stop: vi.fn(),
@@ -84,7 +93,7 @@ class MockAudioContext {
   createGain() {
     return {
       connect: vi.fn(),
-      gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
+      gain: paramSpy(),
     };
   }
   close() {
@@ -237,12 +246,19 @@ describe("the ringtone", () => {
     for (const hz of chime) expect(frequencies).not.toContain(hz);
   });
 
-  it("repeats until stopped", () => {
+  it.each([
+    ["modern", 2_800],
+    ["classic", 2_000],
+  ] as const)("repeats until stopped, every %s period", (style, period) => {
     vi.useFakeTimers();
     try {
+      testPrefs.set("soundStyle", style);
       startRingChime();
       const first = frequencies.length;
-      vi.advanceTimersByTime(2_000);
+      expect(first).toBe(soundSpec(style, "ring").length);
+      vi.advanceTimersByTime(period - 1);
+      expect(frequencies.length).toBe(first);
+      vi.advanceTimersByTime(1);
       expect(frequencies.length).toBe(first * 2);
       stopRingChime();
       vi.advanceTimersByTime(10_000);
@@ -292,12 +308,16 @@ describe("the ringback", () => {
     expect(frequencies).toEqual([]);
   });
 
-  it("repeats until stopped", () => {
+  it.each(["modern", "classic"] as const)("repeats every 3 s until stopped (%s)", (style) => {
     vi.useFakeTimers();
     try {
+      testPrefs.set("soundStyle", style);
       startRingback();
       const first = frequencies.length;
-      vi.advanceTimersByTime(3_000);
+      expect(first).toBe(soundSpec(style, "ringback").length);
+      vi.advanceTimersByTime(2_999);
+      expect(frequencies.length).toBe(first);
+      vi.advanceTimersByTime(1);
       expect(frequencies.length).toBe(first * 2);
       stopRingback();
       vi.advanceTimersByTime(10_000);
@@ -315,13 +335,13 @@ describe("the ringback", () => {
       startRingback();
       startRingChime();
       vi.advanceTimersByTime(10_000);
-      const ringtoneFreqs = frequencies.filter((hz) => hz === 660 || hz === 880);
-      const ringbackFreqs = frequencies.filter((hz) => hz === 440);
+      const ringtoneFreqs = frequencies.filter(isRing);
+      const ringbackFreqs = frequencies.filter((hz) => hz === RINGBACK_HZ);
       expect(ringbackFreqs.length).toBeGreaterThan(0);
       expect(ringtoneFreqs.length).toBeGreaterThan(0);
       // The ringback stopped when the chime started: its 3s interval is gone.
-      const atRingtoneStart = frequencies.indexOf(660);
-      expect(frequencies.slice(atRingtoneStart)).not.toContain(440);
+      const atRingtoneStart = frequencies.findIndex(isRing);
+      expect(frequencies.slice(atRingtoneStart)).not.toContain(RINGBACK_HZ);
     } finally {
       stopRingback();
       stopRingChime();
@@ -334,7 +354,7 @@ describe("the ringback", () => {
   // sounding for its full envelope unless it is stopped.
   it("cuts the ringback burst in flight when an incoming chime pre-empts it", () => {
     startRingback();
-    const burst = oscillators.find((o) => o.hz === 440);
+    const burst = oscillators.find((o) => o.hz === RINGBACK_HZ);
     expect(burst).toBeDefined();
     burst!.stop.mockClear();
 
@@ -345,8 +365,9 @@ describe("the ringback", () => {
 
   it("cuts the chime burst in flight when the incoming ring ends", () => {
     startRingChime();
-    const burst = oscillators.filter((o) => o.hz === 660 || o.hz === 880);
-    expect(burst.length).toBeGreaterThan(0);
+    const burst = oscillators.filter((o) => isRing(o.hz));
+    // Every partial of every note of the phrase, the later ones not yet started.
+    expect(burst).toHaveLength(soundSpec("modern", "ring").length);
     for (const o of burst) o.stop.mockClear();
 
     stopRingChime();
@@ -368,10 +389,10 @@ describe("the ringback", () => {
       startRingChime();
       frequencies.length = 0;
       vi.advanceTimersByTime(4_000);
-      expect(frequencies).not.toContain(440);
+      expect(frequencies).not.toContain(RINGBACK_HZ);
 
       stopRingChime();
-      expect(frequencies).toContain(440);
+      expect(frequencies).toContain(RINGBACK_HZ);
     } finally {
       stopRingback();
       stopRingChime();
@@ -390,10 +411,10 @@ describe("the ringback", () => {
 
       saved("userStatus", "dnd");
       vi.advanceTimersByTime(6_000);
-      expect(frequencies).not.toContain(440);
+      expect(frequencies).not.toContain(RINGBACK_HZ);
 
       saved("userStatus", "online");
-      expect(frequencies).toContain(440);
+      expect(frequencies).toContain(RINGBACK_HZ);
     } finally {
       stopRingback();
       vi.useRealTimers();
@@ -410,10 +431,10 @@ describe("the ringback", () => {
 
       saved("callSounds", false);
       vi.advanceTimersByTime(6_000);
-      expect(frequencies).not.toContain(440);
+      expect(frequencies).not.toContain(RINGBACK_HZ);
 
       saved("callSounds", true);
-      expect(frequencies).toContain(440);
+      expect(frequencies).toContain(RINGBACK_HZ);
     } finally {
       stopRingback();
       vi.useRealTimers();
@@ -432,7 +453,7 @@ describe("the ringback", () => {
 
       stopRingChime();
       vi.advanceTimersByTime(4_000);
-      expect(frequencies).not.toContain(440);
+      expect(frequencies).not.toContain(RINGBACK_HZ);
     } finally {
       stopRingback();
       stopRingChime();
@@ -621,7 +642,7 @@ describe("on a host whose call notification rings by itself", () => {
       expect(frequencies).toEqual([]);
 
       ringEnds();
-      expect(frequencies).toContain(440);
+      expect(frequencies).toContain(RINGBACK_HZ);
     } finally {
       vi.useRealTimers();
     }
@@ -635,7 +656,7 @@ describe("on a host whose call notification rings by itself", () => {
       ringStarts();
       frequencies.length = 0;
       vi.advanceTimersByTime(3_000);
-      expect(frequencies).toContain(440);
+      expect(frequencies).toContain(RINGBACK_HZ);
     } finally {
       vi.useRealTimers();
     }

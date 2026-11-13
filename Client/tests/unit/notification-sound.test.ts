@@ -20,40 +20,18 @@ import {
   voiceStore,
 } from "@stores/voice.store";
 import { expectConsole } from "../helpers/console";
+import { soundSpec } from "@lib/media/soundTables";
+import { RecordingAudioContext } from "../helpers/audioContextMock";
 
-class RecordingAudioContext {
-  static instances: RecordingAudioContext[] = [];
-  readonly currentTime = 0;
-  readonly destination = {};
+const MESSAGE_NOTES = soundSpec("modern", "message").length;
+
+/** A recording context with the `setSinkId` Chromium and WebView2 have. */
+class SinkAudioContext extends RecordingAudioContext {
   readonly setSinkId = vi.fn((id: string) => sinkState.impl(id));
-  readonly oscillators: Array<{ hz: number[] }> = [];
-  readonly close = vi.fn(async () => {});
-
-  constructor() {
-    RecordingAudioContext.instances.push(this);
-  }
-
-  createOscillator() {
-    const osc = {
-      hz: [] as number[],
-      connect: vi.fn(),
-      start: vi.fn(),
-      stop: vi.fn(),
-      frequency: {
-        setValueAtTime: (hz: number) => osc.hz.push(hz),
-      },
-    };
-    this.oscillators.push(osc);
-    return osc;
-  }
-
-  createGain() {
-    return {
-      connect: vi.fn(),
-      gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
-    };
-  }
 }
+
+/** The context the n-th `new AudioContext()` built. */
+const context = (n = 0): SinkAudioContext => RecordingAudioContext.instances[n] as SinkAudioContext;
 
 const { testPrefs, sinkState } = vi.hoisted(() => ({
   testPrefs: new Map<string, unknown>(),
@@ -71,7 +49,7 @@ beforeEach(() => {
   testPrefs.clear();
   sinkState.impl = async () => {};
   RecordingAudioContext.instances = [];
-  vi.stubGlobal("AudioContext", RecordingAudioContext);
+  vi.stubGlobal("AudioContext", SinkAudioContext);
   leaveVoiceChannel();
   voiceStore.flush();
   setLocalDeafened(false);
@@ -109,14 +87,14 @@ describe("playNotificationSound and deafen", () => {
     playNotificationSound();
 
     expect(RecordingAudioContext.instances).toHaveLength(1);
-    expect(RecordingAudioContext.instances[0]!.oscillators).toHaveLength(1);
+    expect(RecordingAudioContext.instances[0]!.oscillators).toHaveLength(MESSAGE_NOTES);
   });
 
   it("plays normally once undeafened", () => {
     playNotificationSound();
 
     expect(RecordingAudioContext.instances).toHaveLength(1);
-    expect(RecordingAudioContext.instances[0]!.oscillators).toHaveLength(1);
+    expect(RecordingAudioContext.instances[0]!.oscillators).toHaveLength(MESSAGE_NOTES);
   });
 });
 
@@ -139,20 +117,20 @@ describe("the shared AudioContext sink", () => {
 
     playNotificationSound();
 
-    const ctx = RecordingAudioContext.instances[0]!;
+    const ctx = context();
     expect(ctx.setSinkId).toHaveBeenCalledWith("speakers-a");
   });
 
   it("stays on the default when no output device is saved", () => {
     playNotificationSound();
 
-    expect(RecordingAudioContext.instances[0]!.setSinkId).not.toHaveBeenCalled();
+    expect(context().setSinkId).not.toHaveBeenCalled();
   });
 
   it("follows a device change", () => {
     testPrefs.set("audioOutputDevice", "speakers-a");
     playNotificationSound();
-    const ctx = RecordingAudioContext.instances[0]!;
+    const ctx = context();
 
     testPrefs.set("audioOutputDevice", "headphones-b");
     playNotificationSound();
@@ -165,7 +143,7 @@ describe("the shared AudioContext sink", () => {
     playNotificationSound();
     playNotificationSound();
 
-    expect(RecordingAudioContext.instances[0]!.setSinkId).toHaveBeenCalledTimes(1);
+    expect(context().setSinkId).toHaveBeenCalledTimes(1);
   });
 
   it("retries setSinkId on the next play after a failed apply", async () => {
@@ -181,6 +159,6 @@ describe("the shared AudioContext sink", () => {
     sinkState.impl = async () => {};
     playNotificationSound();
 
-    expect(RecordingAudioContext.instances[0]!.setSinkId).toHaveBeenCalledTimes(2);
+    expect(context().setSinkId).toHaveBeenCalledTimes(2);
   });
 });

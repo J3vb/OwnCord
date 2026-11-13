@@ -5,7 +5,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/notificationsMocks";
-import { mockOscillator, testPrefs } from "../../helpers/notificationsMocks";
+import {
+  MENTION_NOTES,
+  MESSAGE_NOTES,
+  mockOscillator,
+  testPrefs,
+} from "../../helpers/notificationsMocks";
 import { makePayload, useNotificationsHarness } from "../../helpers/notificationsHarness";
 import { expectConsole } from "../../helpers/console";
 import type { NotificationTarget } from "../../../src/platform/contracts/notifications";
@@ -110,7 +115,15 @@ describe("the sound on the phone", () => {
     notifyIncomingMessage(messageIn(2));
     await settle();
     expect(notifier.showMessage).not.toHaveBeenCalled();
-    expect(mockOscillator.start).toHaveBeenCalledTimes(1);
+    expect(mockOscillator.start).toHaveBeenCalledTimes(MESSAGE_NOTES);
+  });
+
+  it("plays the mention's chime, not the message's, when Android blocks a mention", async () => {
+    notifier.permissionGranted.mockResolvedValue(false);
+    notifyIncomingMessage({ ...messageIn(2), content: "hi @everyone", mentions_everyone: true });
+    await settle();
+    expect(notifier.showMessage).not.toHaveBeenCalled();
+    expect(mockOscillator.start).toHaveBeenCalledTimes(MENTION_NOTES);
   });
 
   it("plays the chime when the notification fails", async () => {
@@ -118,7 +131,7 @@ describe("the sound on the phone", () => {
     notifyIncomingMessage(messageIn(2));
     await settle();
     expectConsole("warn", /Notification not shown/);
-    expect(mockOscillator.start).toHaveBeenCalledTimes(1);
+    expect(mockOscillator.start).toHaveBeenCalledTimes(MESSAGE_NOTES);
   });
 
   it("plays the chime when notifications are off in OwnCord", async () => {
@@ -126,7 +139,7 @@ describe("the sound on the phone", () => {
     notifyIncomingMessage(messageIn(2));
     await settle();
     expect(notifier.showMessage).not.toHaveBeenCalled();
-    expect(mockOscillator.start).toHaveBeenCalledTimes(1);
+    expect(mockOscillator.start).toHaveBeenCalledTimes(MESSAGE_NOTES);
   });
 });
 
@@ -146,6 +159,6 @@ describe("the desktop with the window in front", () => {
     notifyIncomingMessage(messageIn(2));
     await settle();
     expect(notifier.showMessage).not.toHaveBeenCalled();
-    expect(mockOscillator.start).toHaveBeenCalledTimes(1);
+    expect(mockOscillator.start).toHaveBeenCalledTimes(MESSAGE_NOTES);
   });
 });

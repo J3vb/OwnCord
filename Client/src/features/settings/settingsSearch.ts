@@ -217,6 +217,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("notifications.voiceSounds.desc"),
     s("notifications.volume.label"),
     s("notifications.volume.desc"),
+    s("notifications.soundStyle.label"),
+    s("notifications.soundStyle.desc"),
     s("notifications.sound.message.label"),
     s("notifications.sound.message.desc"),
     s("notifications.sound.mention.label"),

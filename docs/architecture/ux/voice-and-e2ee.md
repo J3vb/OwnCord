@@ -679,13 +679,35 @@ not dispatcher handlers (see [README §4](README.md)).
 
 ## 10. App sounds (DP-40)
 
-The message chime, the DM ringtone, the caller's ringback and the voice UI
-sounds share one `AudioContext` (`lib/media/notificationSound.ts`), whose output
-follows the `audioOutputDevice` chosen in Settings › Voice & Audio through
-`setSinkId`.
-Where the webview cannot route an `AudioContext` (WebKitGTK, the Linux webview),
-those sounds fall back to the system default — see
-[known limitations](../../known-limitations.md#desktop-app).
+The message and mention sounds, the DM ringtone, the caller's ringback and the
+voice UI sounds are synthesized, with no audio files. Each is a short list of
+sine notes (a tone spec) in `lib/media/soundTables.ts`. A note has a start
+time, a length, a starting and an ending loudness and one or more pitches; it
+can also fade in (`attack`), fade out after its length (`release`), and slide
+smoothly from one pitch to the next instead of jumping (`glide`). The Modern
+sounds build each musical note from a few such notes stacked as overtones,
+which gives the mallet, glass and soft tones their colour.
+
+`lib/media/notificationSound.ts` decides when a sound plays and draws the spec
+in one of two ways. Everywhere but the Linux desktop it uses one shared
+`AudioContext`, whose output follows the `audioOutputDevice` chosen in Settings
+› Voice & Audio through `setSinkId`. WebKitGTK, the Linux webview, cannot
+route an `AudioContext`, so on the Linux desktop the spec goes to the native
+host (`native_voice_play_sound`, `src-tauri/src/native_voice/app_sound.rs`),
+which renders the same notes and plays them on the chosen output; if the host
+cannot, the sound plays through Web Audio on the default output. The host takes
+at most 32 notes and 2 seconds per sound, and a unit test checks every sound of
+both styles against those limits.
+
+**Sound style** (Settings › Notifications, under the volume slider): Modern,
+the default, or Classic, the plain single tones OwnCord played before. In
+Modern a mention has its own two-note glass chime and a plain message a short
+bubble pop; in Classic both play the old falling chime. The style also sets
+how often the ringtone repeats (every 2.8 s in Modern, 2 s in Classic; the
+ringback every 3 s in both). A ring keeps the period it started with, and each
+burst plays in the style saved at that moment, so a change made while a call
+rings takes effect on the next burst. Answering or declining cuts the burst
+that is sounding, every note of it.
 
 `features/voice/uiSounds.ts` plays a short **voice UI sound** on your join,
 leave and move; on another member joining or leaving the channel you are in;

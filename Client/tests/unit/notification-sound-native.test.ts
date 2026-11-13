@@ -38,11 +38,15 @@ import {
 import { savePref } from "@lib/prefs/preferences";
 import { setVoiceDeafened, setVoiceInSession } from "@lib/voice/voiceDeafened";
 import type { NativeToneNote } from "../../src/platform/contracts/nativeVoice";
+import { soundSpec } from "@lib/media/soundTables";
+
+/** How an AudioParam reached a value: set, linear ramp, exponential ramp. */
+type Move = "set" | "lin" | "exp";
 
 /** One Web Audio note as the oscillator and gain nodes saw it. */
 interface WebNote {
-  freqs: Array<[number, number]>;
-  gain: Array<[number, number]>;
+  freqs: Array<[number, number, Move]>;
+  gain: Array<[number, number, Move]>;
   start: number;
   stop: number;
 }
@@ -67,7 +71,10 @@ class RecordingAudioContext {
       stop: (t?: number) => {
         if (t !== undefined) note.stop = t;
       },
-      frequency: { setValueAtTime: (hz: number, t: number) => note.freqs.push([t, hz]) },
+      frequency: {
+        setValueAtTime: (hz: number, t: number) => note.freqs.push([t, hz, "set"]),
+        exponentialRampToValueAtTime: (hz: number, t: number) => note.freqs.push([t, hz, "exp"]),
+      },
     };
   }
 
@@ -77,8 +84,9 @@ class RecordingAudioContext {
       connect: vi.fn(),
       gain: {
         value: 1,
-        setValueAtTime: (v: number, t: number) => note()?.gain.push([t, v]),
-        exponentialRampToValueAtTime: (v: number, t: number) => note()?.gain.push([t, v]),
+        setValueAtTime: (v: number, t: number) => note()?.gain.push([t, v, "set"]),
+        linearRampToValueAtTime: (v: number, t: number) => note()?.gain.push([t, v, "lin"]),
+        exponentialRampToValueAtTime: (v: number, t: number) => note()?.gain.push([t, v, "exp"]),
       },
     };
   }
@@ -89,16 +97,30 @@ function webNotes(): WebNote[] {
   return RecordingAudioContext.instances.flatMap((c) => c.notes);
 }
 
-/** A native note in the shape the Web Audio nodes record. */
+/** A native note in the shape the Web Audio nodes record, following the
+ *  engine's mapping of attack, release and glide. */
 function asWeb(n: NativeToneNote): WebNote {
+  const attack = n.attack ?? 0;
+  const release = n.release ?? 0;
+  const end = n.at + n.duration;
+  const gain: WebNote["gain"] =
+    attack > 0
+      ? [
+          [n.at, 0, "set"],
+          [n.at + attack, n.gain, "lin"],
+        ]
+      : [[n.at, n.gain, "set"]];
+  gain.push([end, n.endGain, "exp"]);
+  if (release > 0) gain.push([end + release, 0, "lin"]);
   return {
-    freqs: n.freqs.map(([offset, hz]) => [n.at + offset, hz]),
-    gain: [
-      [n.at, n.gain],
-      [n.at + n.duration, n.endGain],
-    ],
+    freqs: n.freqs.map(([offset, hz], i) => [
+      n.at + offset,
+      hz,
+      i > 0 && n.glide === true ? "exp" : "set",
+    ]),
+    gain,
     start: n.at,
-    stop: n.at + n.duration,
+    stop: release > 0 ? end + release : end,
   };
 }
 
@@ -152,7 +174,7 @@ describe("app sounds on the native host (Linux)", () => {
       string,
       number,
     ];
-    expect(notes).toEqual([{ at: 0, duration: 0.12, gain: 0.2, endGain: 0.01, freqs: [[0, 392]] }]);
+    expect(notes).toEqual(soundSpec("modern", "mute"));
     expect(device).toBe("guid-headset");
     expect(gain).toBeCloseTo(0.4);
     // Played natively: Web Audio never started.
@@ -160,50 +182,60 @@ describe("app sounds on the native host (Linux)", () => {
     expect(host.stopSound).not.toHaveBeenCalled();
   });
 
-  it("the spec sent natively matches the Web Audio notes for every sound", async () => {
-    const played: Array<[string, () => void]> = [
-      ["message chime", () => playNotificationSound()],
-      ...VOICE_SOUNDS.map((k): [string, () => void] => [k, () => playVoiceSound(k)]),
-    ];
-    for (const [label, play] of played) {
+  it.each(["modern", "classic"] as const)(
+    "the spec sent natively matches the Web Audio notes for every %s sound",
+    async (style) => {
+      savePref("soundStyle", style);
+      const played: Array<[string, () => void]> = [
+        ["message chime", () => playNotificationSound()],
+        ["mention chime", () => playNotificationSound(true)],
+        ...VOICE_SOUNDS.map((k): [string, () => void] => [k, () => playVoiceSound(k)]),
+      ];
+      for (const [label, play] of played) {
+        host.linux = false;
+        cleanupNotificationAudio();
+        RecordingAudioContext.instances = [];
+        play();
+        const web = webNotes();
+        host.linux = true;
+        host.playSound.mockClear();
+        play();
+        await settle();
+        const sent = host.playSound.mock.calls[0]?.[0] as NativeToneNote[];
+        expect(sent.map(asWeb), label).toEqual(web);
+      }
+      // The ring chime and the ringback come from the same table, so a native
+      // ring plays the notes Web Audio would.
       host.linux = false;
       cleanupNotificationAudio();
       RecordingAudioContext.instances = [];
-      play();
-      const web = webNotes();
+      startRingChime();
+      const ringWeb = webNotes();
+      stopRingChime();
       host.linux = true;
       host.playSound.mockClear();
-      play();
+      startRingChime();
       await settle();
-      const sent = host.playSound.mock.calls[0]?.[0] as NativeToneNote[];
-      expect(sent.map(asWeb), label).toEqual(web);
-    }
-    // The ring chime is two notes per burst and the ringback one: both come
-    // from the same table, so a native ring plays the notes Web Audio would.
-    host.linux = false;
-    cleanupNotificationAudio();
-    RecordingAudioContext.instances = [];
-    startRingChime();
-    const ringWeb = webNotes();
-    stopRingChime();
-    host.linux = true;
-    host.playSound.mockClear();
-    startRingChime();
-    await settle();
-    const ringSent = host.playSound.mock.calls[0]?.[0] as NativeToneNote[];
-    expect(ringSent.map(asWeb)).toEqual(ringWeb);
-    expect(ringSent).toHaveLength(2);
-  });
+      const ringSent = host.playSound.mock.calls[0]?.[0] as NativeToneNote[];
+      expect(ringSent.map(asWeb)).toEqual(ringWeb);
+      expect(ringSent).toEqual(soundSpec(style, "ring"));
+      expect(ringSent).toHaveLength(style === "modern" ? 28 : 2);
+    },
+  );
 
   it("a native failure falls back to Web Audio", async () => {
     host.playSound.mockResolvedValue(null);
     playNotificationSound();
     await settle();
     expect(host.playSound).toHaveBeenCalledTimes(1);
-    expect(webNotes()).toHaveLength(1);
-    expect(webNotes()[0]?.freqs).toEqual([
-      [0, 800],
-      [0.1, 600],
+    expect(webNotes()).toEqual(soundSpec("modern", "message").map(asWeb));
+    savePref("soundStyle", "classic");
+    playNotificationSound();
+    await settle();
+    expect(webNotes()).toHaveLength(3);
+    expect(webNotes()[2]?.freqs).toEqual([
+      [0, 800, "set"],
+      [0.1, 600, "set"],
     ]);
   });
 

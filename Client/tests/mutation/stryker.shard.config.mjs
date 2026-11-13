@@ -180,6 +180,7 @@ export const shards = {
     "src/features/members/memberListOptions.ts",
     "src/features/members/memberRowMenu.ts",
     "src/lib/media/notificationSound.ts",
+    "src/lib/media/soundTables.ts",
     "src/lib/ui/statusIndicator.ts",
     "src/lib/ui/virtualRange.ts",
     "src/lib/voice/deviceManager.ts",

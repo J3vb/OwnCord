@@ -160,13 +160,22 @@ export interface NativeVoiceDevices {
  *  steps at the given offsets, fading exponentially from `gain` to `endGain`
  *  over `duration`. Times are seconds, `freqs` entries are `[offset from the
  *  note's start, hertz]`. The host synthesizes it; the same table drives the
- *  Web Audio renderer, so the two cannot drift. */
+ *  Web Audio renderer, so the two cannot drift.
+ *
+ *  Optional shaping, each off when left out: `attack` raises the gain
+ *  linearly from 0 to `gain` over its first seconds (the fade then runs from
+ *  there to `duration`), `release` fades linearly from `endGain` to 0 over
+ *  that many seconds after `duration`, and `glide` slides the frequency
+ *  exponentially from each `freqs` point to the next instead of stepping. */
 export interface NativeToneNote {
   at: number;
   duration: number;
   gain: number;
   endGain: number;
   freqs: ReadonlyArray<readonly [number, number]>;
+  attack?: number;
+  release?: number;
+  glide?: boolean;
 }
 
 export interface NativeVoiceConnected {

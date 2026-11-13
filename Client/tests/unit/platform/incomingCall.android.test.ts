@@ -100,11 +100,19 @@ vi.stubGlobal(
       connect() {},
       start() {},
       stop() {},
-      frequency: { setValueAtTime: (hz: number) => void chimeNotes.push(hz) },
+      frequency: {
+        setValueAtTime: (hz: number) => void chimeNotes.push(hz),
+        exponentialRampToValueAtTime() {},
+      },
     });
     createGain = () => ({
       connect() {},
-      gain: { value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} },
+      gain: {
+        value: 1,
+        setValueAtTime() {},
+        linearRampToValueAtTime() {},
+        exponentialRampToValueAtTime() {},
+      },
     });
     close = () => Promise.resolve();
   },
