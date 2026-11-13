@@ -120,6 +120,7 @@ export function wireExpressionPopup(st: InputState, api: InputApi, buttons: Popu
             const after = st.textarea.value.slice(end);
             st.textarea.value = before + emoji + after;
             st.textarea.selectionStart = st.textarea.selectionEnd = start + emoji.length;
+            st.onTextChange?.();
             // Shift-pick keeps focus in the picker so the next pick lands at
             // the caret just advanced.
             if (!keepOpen) st.textarea.focus();

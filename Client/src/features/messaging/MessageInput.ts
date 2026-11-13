@@ -29,6 +29,7 @@ import {
   createComposerButtons,
   createComposerTextarea,
   registerControls,
+  trackTypingButtons,
   wirePlusMenu,
   wireVoiceMic,
 } from "./composer/inputWidgets";
@@ -265,6 +266,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     attachHasActions: () => false,
     closeAttachMenu: null,
     togglePickerOf: null,
+    onTextChange: null,
+    typingButtonsHidden: false,
     mentionPopup: null,
     pickedMentions: [],
     pendingPick: null,
@@ -332,6 +335,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     refreshButtons();
     onPrefChange(COMPOSER_BUTTON_PREF_KEYS, refreshButtons, st.signal);
     onPhoneLayoutChange(refreshButtons, st.signal);
+    st.onTextChange = trackTypingButtons(st, refreshButtons);
     // The open menu belongs to the old layout; the next "+" opens the new one.
     onPhoneLayoutChange(() => st.closeAttachMenu?.(), st.signal);
     const slowNote = createElement("div", {
@@ -410,6 +414,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     st.openPicker = null;
     st.closeAttachMenu = null;
     st.togglePickerOf = null;
+    st.onTextChange = null;
   }
 
   return {

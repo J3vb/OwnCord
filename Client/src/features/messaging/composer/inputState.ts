@@ -54,6 +54,10 @@ export interface InputState {
   closeAttachMenu: (() => void) | null;
   /** Set by mount(); backs togglePicker(). */
   togglePickerOf: ((kind: "emoji" | "gif" | "sticker") => void) | null;
+  /** Set by mount(): runs after every change to the text, typed or not. */
+  onTextChange: (() => void) | null;
+  /** Whether applyButtonPrefs last hid Emoji and GIF for text on a phone. */
+  typingButtonsHidden: boolean;
   mentionPopup: MentionAutocompleteComponent | null;
   /** Users and roles picked from the popup for this draft, by the
    *  text now in the textarea. Send turns the spans still intact into id
