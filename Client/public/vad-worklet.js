@@ -183,9 +183,10 @@ class VadProcessor extends AudioWorkletProcessor {
       const frame = this._sileroFrame++;
       if (this._sileroPending < SILERO_MAX_PENDING) {
         const audio = this._sileroAudio;
-        this._sileroPort.postMessage({ frame, samples: audio, peak: this._sileroPeak }, [
-          audio.buffer,
-        ]);
+        this._sileroPort.postMessage(
+          { frame, samples: audio, peak: this._sileroPeak, threshold: this._threshold },
+          [audio.buffer],
+        );
         this._sileroAudio = new Float32Array(SILERO_CAPTURE_SAMPLES);
         this._sileroPending++;
       }
