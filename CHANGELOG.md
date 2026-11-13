@@ -57,7 +57,7 @@ and only when it changes something a contributor or fork holder must do
 
 ## v2.9.1
 
-**OwnCord 2.9.1** is a fix update to 2.9. It keeps you in your voice call after a reconnect, brings back thread replies that failed to send, loads GIFs in the picker faster, fits direct message headers on small phones, and tightens a few voice and channel permission edge cases. Emoji are now drawn as images, so they look the same everywhere and the emoji picker scrolls smoothly. The database does not change. It is still a **beta and a hobby project**: don't use it for anything sensitive. **Update the server and the desktop app together**: the reconnect fix needs both.
+**OwnCord 2.9.1** is a fix update to 2.9. It keeps you in your voice call after a reconnect, brings back thread replies that failed to send, loads GIFs in the picker faster, fits direct message headers on small phones, lets soft speech through the noise gate and lights the speaking ring for it, and tightens a few voice and channel permission edge cases. Emoji are now drawn as images, so they look the same everywhere and the emoji picker scrolls smoothly. The database does not change. It is still a **beta and a hobby project**: don't use it for anything sensitive. **Update the server and the desktop app together**: the reconnect fix needs both.
 
 ### Fixed
 
@@ -75,31 +75,11 @@ and only when it changes something a contributor or fork holder must do
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
 - **Link previews:** the outside-content cache now keeps closer to its memory limit.
 - **Voice:** a soft voice was heard, but the speaking ring the others see stayed dark, mostly with Automatic Gain Control off. The ring now lights for soft speech too. The server update brings it; with Docker, or if you manage `livekit.yaml` yourself, set `audio.active_level` to 60 in that file and restart LiveKit.
+- **Voice:** with Enhanced Noise Suppression on, a soft "hmm" or "yes" after a pause or after typing was often cut off. Short soft words now get through much more often, while keys, clicks and thumps stay out. A cough or a sneeze gets through a little more often than before.
 
 ### Changed
 
 - **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.
-- **An edit, delete or pin that arrived while older history or a jump was loading was undone when it finished.** It now stays applied.
-- **A message posted at the moment you jumped back to the present could be missing until you reopened the channel.** It is now fetched right after the jump lands.
-- **A message the server refused showed its real reason for only 20 seconds**, then changed to "Delivery not confirmed". It now keeps the reason.
-- **A too-long message sent as a text file was lost when its upload failed after you switched channel.** The text now comes back in the composer.
-- **A voice message that hit the 5-minute limit and failed to stop froze the recording bar.** The bar now closes and shows "Recording failed".
-- **Link previews are limited to five per message**; further links stay plain links.
-
-### Voice
-
-- **A reconnect after a live update the app could not read took you out of your call**, and everyone saw you leave. The reconnect now keeps the call. Update the app as well as the server: an older app still drops the call.
-- **A soft voice was heard, but the speaking ring the others see stayed dark**, mostly with Automatic Gain Control off. The ring now lights for soft speech too. The server update brings it; with Docker, or if you manage `livekit.yaml` yourself, set `audio.active_level` to 60 in that file and restart LiveKit.
-- **With Enhanced Noise Suppression on, a soft "hmm" or "yes" after a pause or after typing was often cut off.** Short soft words now get through much more often, while keys, clicks and thumps stay out. A cough or a sneeze gets through a little more often than before.
-
-### Phone app
-
-- **On a small phone the buttons at the end of a direct message's header were off screen**, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
-- **In a call, the round controls were stacked in two short rows.** They now sit in one row.
-
-### Under the hood
-
-- Database change 092: eight indexes for the lookups a message or channel delete runs. The first start after the update builds them, which takes a little longer on a large database. Deleting a busy channel, a thread or a group DM, and retention clean-up, are much faster on a server with many channels (a 20,000-message channel on a server with 5,000 channels: 23 s before, under 1 s after).
 
 ### Known issues
 

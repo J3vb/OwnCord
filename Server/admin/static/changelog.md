@@ -1,6 +1,6 @@
 ## v2.9.1
 
-**OwnCord 2.9.1** is a fix update to 2.9. It keeps you in your voice call after a reconnect, brings back thread replies that failed to send, loads GIFs in the picker faster, fits direct message headers on small phones, and tightens a few voice and channel permission edge cases. Emoji are now drawn as images, so they look the same everywhere and the emoji picker scrolls smoothly. The database does not change. It is still a **beta and a hobby project**: don't use it for anything sensitive. **Update the server and the desktop app together**: the reconnect fix needs both.
+**OwnCord 2.9.1** is a fix update to 2.9. It keeps you in your voice call after a reconnect, brings back thread replies that failed to send, loads GIFs in the picker faster, fits direct message headers on small phones, lets soft speech through the noise gate and lights the speaking ring for it, and tightens a few voice and channel permission edge cases. Emoji are now drawn as images, so they look the same everywhere and the emoji picker scrolls smoothly. The database does not change. It is still a **beta and a hobby project**: don't use it for anything sensitive. **Update the server and the desktop app together**: the reconnect fix needs both.
 
 ### Fixed
 
@@ -18,6 +18,7 @@
 - **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
 - **Link previews:** the outside-content cache now keeps closer to its memory limit.
 - **Voice:** a soft voice was heard, but the speaking ring the others see stayed dark, mostly with Automatic Gain Control off. The ring now lights for soft speech too. The server update brings it; with Docker, or if you manage `livekit.yaml` yourself, set `audio.active_level` to 60 in that file and restart LiveKit.
+- **Voice:** with Enhanced Noise Suppression on, a soft "hmm" or "yes" after a pause or after typing was often cut off. Short soft words now get through much more often, while keys, clicks and thumps stay out. A cough or a sneeze gets through a little more often than before.
 
 ### Changed
 
