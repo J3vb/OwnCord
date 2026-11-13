@@ -138,15 +138,15 @@ describe("AccessibilityTab", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
-      const titles = Array.from(container.querySelectorAll("h3.setting-group-title")).map(
+      const titles = Array.from(container.querySelectorAll("h2.settings-section-label")).map(
         (h) => h.textContent,
       );
       expect(titles).toEqual(["Motion", "Readability", "Colors", "Chat"]);
       const groupOf = (label: string) => {
         const row = container
           .querySelector(`.toggle[aria-label="${label}"]`)!
-          .closest(".setting-group")!;
-        return row.querySelector("h3")!.textContent;
+          .closest(".settings-section")!;
+        return row.querySelector("h2")!.textContent;
       };
       expect(groupOf("Reduce Motion")).toBe("Motion");
       expect(groupOf("Sync with OS")).toBe("Motion");

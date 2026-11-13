@@ -239,7 +239,7 @@ describe("settings search", () => {
         const known = new Set(indexed.map((x) => x.trim()));
         const unindexed = Array.from(
           pane.querySelectorAll(
-            ".setting-label, .setting-desc, .settings-section-title, .setting-group-title, .keybind-section-header, .settings-card-head h3",
+            ".setting-label, .setting-desc, .settings-section-title, .settings-section-label",
           ),
         )
           .map((el) => (el.textContent ?? "").trim())
@@ -367,7 +367,9 @@ describe("settings search", () => {
       const marks = Array.from(container.querySelectorAll("mark.settings-search-hit"));
       expect(marks.length).toBeGreaterThan(0);
       expect(marks.every((m) => m.textContent?.toLowerCase() === "sound")).toBe(true);
-      expect(marks[0]!.closest(".setting-label, .setting-desc")).not.toBeNull();
+      // The first hit is the Sounds section heading, then the rows under it.
+      expect(marks[0]!.closest("h2.settings-section-label")!.textContent).toBe("Sounds");
+      expect(marks[1]!.closest(".setting-label, .setting-desc")).not.toBeNull();
       // The label text is intact once the marks are read through.
       expect(
         Array.from(container.querySelectorAll(".setting-label")).some(
@@ -408,6 +410,40 @@ describe("settings search", () => {
       expect(root.querySelector(".setting-label")!.textContent).toBe("Aa aA");
     });
 
+    it("marks hidden labels too, but returns the displayed twin as the scroll target", () => {
+      const root = document.createElement("div");
+      root.innerHTML =
+        '<section style="display: none"><h2 class="settings-section-label">Global keys</h2></section>' +
+        '<section hidden><div class="setting-label">Global mute</div></section>' +
+        '<section><h2 class="settings-section-label">Global keys</h2></section>';
+      document.body.appendChild(root);
+      try {
+        const first = highlightMatches(root, "global");
+        // A row the tab reveals later already carries its hit...
+        expect(root.querySelector("section[hidden] mark")!.textContent).toBe("Global");
+        expect(root.querySelector("section[style] mark")!.textContent).toBe("Global");
+        // ...and the hidden twin never takes the mark from the displayed one.
+        expect(root.querySelector("section:last-child mark")!.textContent).toBe("Global");
+        expect(root.querySelectorAll("mark")).toHaveLength(3);
+        expect(first).toBe(root.querySelector("section:last-child mark"));
+      } finally {
+        root.remove();
+      }
+    });
+
+    it("marks a whole heading whose indexed label is in data-search-label", () => {
+      const root = document.createElement("div");
+      root.innerHTML =
+        '<h2 class="settings-section-label" data-search-label="Release notes">What\'s new in 2.9.0</h2>' +
+        '<div class="setting-label">Other row</div>';
+      const first = highlightMatches(root, "release notes");
+      expect(root.querySelectorAll("mark")).toHaveLength(1);
+      expect(first!.textContent).toBe("What's new in 2.9.0");
+      expect(first!.parentElement).toBe(root.querySelector("h2"));
+      clearHighlights(root);
+      expect(root.querySelector("h2")!.textContent).toBe("What's new in 2.9.0");
+    });
+
     it("drops the query when the panel closes", () => {
       mountOverlay();
       type("zoom");
@@ -446,6 +482,8 @@ describe("settings search", () => {
         const target = scroll.mock.contexts[0] as HTMLElement;
         expect(scroll).toHaveBeenCalledTimes(1);
         expect(rows[0]!.contains(target)).toBe(false);
+        // The hidden row keeps its hit, ready for when it is shown again.
+        expect(rows[0]!.querySelector("mark.settings-search-hit")).not.toBeNull();
       });
     });
 

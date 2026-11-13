@@ -187,7 +187,7 @@ describe("Appearance", () => {
     hostDesktopApp();
     const el = buildAppearanceTab(ac.signal);
     container.appendChild(el);
-    expect(el.querySelector("h3")).not.toBeNull();
+    expect(el.querySelector(".custom-themes h2")!.textContent).toBe("Custom Themes");
     expect(el.textContent).toContain("Zoom Level");
     expect(el.querySelector("[data-testid='member-layout']")).not.toBeNull();
     expect(el.textContent).toContain("Sync with computer");

@@ -32,11 +32,10 @@ function serverOffNow(): boolean {
   return hasReceivedReady() && !serverSupportsGameActivity();
 }
 
-/** The section's rows, or none where this build cannot detect a game (the web build). */
+/** The Activity section's game rows, or none where this build cannot detect a game (the web build). */
 export function buildGameActivityRows(signal: AbortSignal): HTMLElement[] {
   if (!desktop.gameDetector.available) return [];
 
-  const title = createElement("div", { class: "settings-section-title" }, t("settings.title"));
   const row = createElement("div", { class: "setting-row" });
   const info = createElement("div", {});
   const label = createElement("div", { class: "setting-label" }, t("settings.share.label"));
@@ -98,10 +97,5 @@ export function buildGameActivityRows(signal: AbortSignal): HTMLElement[] {
   signal.addEventListener("abort", unsubPolicy, { once: true });
   refresh();
 
-  return [
-    createElement("div", { class: "settings-separator" }),
-    title,
-    row,
-    ...buildGamesSection(signal),
-  ];
+  return [row, ...buildGamesSection(signal)];
 }

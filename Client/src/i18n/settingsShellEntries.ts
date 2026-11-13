@@ -71,6 +71,9 @@ export const settingsShellEntries = {
   "accessibility.largeFont.desc": "Use larger text throughout the app for better readability",
 
   "appearance.theme": "Theme",
+  "appearance.section.textSize": "Text & Size",
+  "appearance.section.layout": "Layout, Date & Time",
+  "appearance.section.colors": "Colors",
   "appearance.fontSize": "Font Size",
   "appearance.fontSize.value": "{size}px",
   "appearance.theme.system": "Sync with computer",

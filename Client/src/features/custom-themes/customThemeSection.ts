@@ -5,6 +5,7 @@
  */
 
 import { createElement, appendChildren, setText } from "../../lib/dom";
+import { buildSettingsSection } from "../settings/settingsSection";
 import { copyThenToast } from "../../lib/ui/clipboard";
 import { createLogger } from "../../lib/logger";
 import { showToast } from "../../lib/ui/toast";
@@ -105,8 +106,10 @@ export function buildCustomThemeSection(
   signal: AbortSignal,
   onDirtyCheck?: (isDirty: () => boolean) => void,
 ): HTMLElement {
-  const section = createElement("div", { class: "custom-themes" });
-  const header = createElement("h3", {}, t("appearance.customThemes"));
+  const { el: section, card } = buildSettingsSection({
+    label: t("appearance.customThemes"),
+    attrs: { class: "custom-themes" },
+  });
   const desc = createElement(
     "p",
     { class: "setting-desc" },
@@ -399,6 +402,6 @@ export function buildCustomThemeSection(
   onCustomThemeChange(render, signal);
 
   render();
-  appendChildren(section, header, desc, list, actions, editor);
+  appendChildren(card, desc, list, actions, editor);
   return section;
 }

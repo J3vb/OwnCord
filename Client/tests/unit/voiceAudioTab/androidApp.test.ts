@@ -35,7 +35,7 @@ describe("VoiceAudioTab on the Android app and the desktop app", () => {
   }
   const text = (): string => el.textContent ?? "";
   const heading = (name: string): boolean =>
-    [...el.querySelectorAll(".settings-card-head h3")].some((h) => h.textContent === name);
+    [...el.querySelectorAll(".settings-section-head h2")].some((h) => h.textContent === name);
   const labelled = (name: string): boolean =>
     el.querySelector(`select[aria-label="${name}"]`) !== null;
 

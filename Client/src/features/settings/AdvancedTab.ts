@@ -13,6 +13,8 @@ import { isAndroidApp } from "../voice/native/platform";
 import { buildGameActivityRows } from "./GameActivityRows";
 import { buildMusicActivityRows } from "./MusicActivityRows";
 import { settingsText as t } from "../../i18n/settings";
+import { gameActivityText } from "../../i18n/gameActivity";
+import { buildSettingsSection } from "./settingsSection";
 import {
   CONFIRM_SERVER_SWITCH_DEFAULT,
   CONFIRM_SERVER_SWITCH_PREF,
@@ -50,7 +52,9 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
     },
   ];
 
-  appendToggleRows(section, toggles, signal);
+  const general = buildSettingsSection({ label: t("advanced.general") });
+  section.appendChild(general.el);
+  appendToggleRows(general.card, toggles, signal);
 
   // Launch on login, close to tray and start minimized are desktop window
   // features: the Android app has no login item, tray or window to hide.
@@ -58,26 +62,28 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
 
   // Launch on login — OS-level state via the autostart plugin, not a stored pref.
   // Not drawn where the platform has no autostart (the web build).
-  if (!android && desktop.autostart.available) section.appendChild(buildAutostartRow(signal));
+  if (!android && desktop.autostart.available) general.card.appendChild(buildAutostartRow(signal));
 
   // Close to tray / Start minimized — owned by the native host, which reads
   // both before the webview exists. Not drawn where there is no host window.
   if (!android && desktop.window.available) {
-    for (const row of buildWindowPrefRows(signal)) section.appendChild(row);
+    for (const row of buildWindowPrefRows(signal)) general.card.appendChild(row);
   }
 
-  // Share the game you are playing: desktop only, nothing to show on the web.
-  for (const el of buildGameActivityRows(signal)) section.appendChild(el);
-  // Share the music you're listening to: the same section, desktop only.
-  for (const el of buildMusicActivityRows(signal)) section.appendChild(el);
+  // Share the game you are playing and the music you're listening to:
+  // desktop only, so the web build has no Activity section.
+  const activityRows = [...buildGameActivityRows(signal), ...buildMusicActivityRows(signal)];
+  if (activityRows.length > 0) {
+    const activity = buildSettingsSection({ label: gameActivityText("settings.title") });
+    activity.card.append(...activityRows);
+    section.appendChild(activity.el);
+  }
 
   // ---- Debug section (dev builds only: its one row is DevTools) --------------
 
   if (import.meta.env.DEV && desktop.devTools.available) {
-    section.appendChild(createElement("div", { class: "settings-separator" }));
-    section.appendChild(
-      createElement("div", { class: "settings-section-title" }, t("advanced.debug")),
-    );
+    const debug = buildSettingsSection({ label: t("advanced.debug") });
+    section.appendChild(debug.el);
 
     // DevTools button row
     const devtoolsRow = createElement("div", { class: "setting-row" });
@@ -112,23 +118,16 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
     );
 
     appendChildren(devtoolsRow, devtoolsInfo, devtoolsBtn);
-    section.appendChild(devtoolsRow);
+    debug.card.appendChild(devtoolsRow);
   }
 
   // ---- Storage & Cache section ------------------------------------------------
 
-  const cacheSep = createElement("div", { class: "settings-separator" });
-  section.appendChild(cacheSep);
-
-  const cacheTitle = createElement(
-    "div",
-    { class: "settings-section-title" },
-    t("advanced.storageCache"),
-  );
-  section.appendChild(cacheTitle);
+  const cache = buildSettingsSection({ label: t("advanced.storageCache") });
+  section.appendChild(cache.el);
 
   // Clear Image Cache
-  section.appendChild(
+  cache.card.appendChild(
     buildCacheRow(
       t("advanced.clearImages.label"),
       t("advanced.clearImages.desc"),
@@ -166,7 +165,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   );
 
   // Clear Log Files
-  section.appendChild(
+  cache.card.appendChild(
     buildCacheRow(
       t("advanced.clearLogs.label"),
       t("advanced.clearLogs.desc"),
@@ -208,7 +207,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   );
 
   // Clear All Cache (nuclear option)
-  section.appendChild(
+  cache.card.appendChild(
     buildCacheRow(
       t("advanced.clearAll.label"),
       t("advanced.clearAll.desc"),

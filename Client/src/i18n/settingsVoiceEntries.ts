@@ -117,6 +117,7 @@ export const settingsVoiceEntries = {
   "voiceAudio.nativeNote":
     "On Linux, the mic test cannot run during a call; the level bar then shows your call's microphone.",
 
+  "uploads.section.files": "Your files",
   "uploads.intro":
     "Files you've uploaded across all channels and DMs. Remove one to free up space.",
   "uploads.usage.of": "{used} used of {quota}",

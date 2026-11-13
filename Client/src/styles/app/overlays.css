@@ -494,11 +494,6 @@ body .toast-container.toast-container--under-dialog {
 .moderation-notice-status.form-error {
   color: var(--text-danger);
 }
-.safety-heading {
-  margin: 16px 0 4px;
-  color: var(--header-primary);
-  font-size: var(--font-size-lg);
-}
 .safety-history {
   margin: 8px 0 0;
   padding: 0;

@@ -17,10 +17,8 @@
 }
 .settings-panel {
   display: flex;
-  width: 900px;
-  max-width: calc(100vw - 80px);
-  height: 80vh;
-  max-height: 720px;
+  width: calc(100vw - 48px);
+  height: calc(100vh - 48px);
   background: var(--bg-primary);
   border-radius: var(--radius-lg);
   overflow: hidden;
@@ -28,7 +26,7 @@
   position: relative;
 }
 .settings-sidebar {
-  width: 220px;
+  width: 240px;
   background: var(--bg-secondary);
   padding: 24px 8px 16px;
   overflow-y: auto;
@@ -83,13 +81,30 @@
 .settings-content {
   flex: 1;
   overflow-y: auto;
-  padding: 48px 40px;
-  max-width: 720px;
+  padding: 48px 72px 48px 40px;
   /* B9-23 reflow: a flex child refuses to shrink below its content's
      min-content width without this, so long user text (a display name, a
      device label) pushed the panel into horizontal overflow at the 940x500
      minimum window with 20px text instead of wrapping. */
   min-width: 0;
+}
+/* The page grows with the window; its readable column does not. */
+.settings-content > * {
+  max-width: 880px;
+}
+/* A narrow desktop window: a slimmer margin, nav and gutter keep the
+   column at least as wide as the old fixed-size panel gave it. */
+@media (max-width: 999px) {
+  .settings-panel {
+    width: calc(100vw - 32px);
+    height: calc(100vh - 32px);
+  }
+  .settings-sidebar {
+    width: 200px;
+  }
+  .settings-content {
+    padding: 48px 40px 48px 24px;
+  }
 }
 /* User/server-provided row text wraps rather than clipping (B9-23). */
 .account-header-name,
@@ -331,6 +346,18 @@
 .setting-row .slider-row {
   flex: 0 1 280px;
 }
+/* A slider row with a bare label ("Font size"): the slider shrinks first and
+   drops under the label only when both cannot share a line. */
+.setting-row:has(> .setting-info > .setting-label:only-child):has(> .slider-row) {
+  flex-wrap: wrap;
+}
+.setting-row:has(> .setting-info > .setting-label:only-child) > .setting-info {
+  flex: 1 0 auto;
+}
+.setting-row:has(> .setting-info > .setting-label:only-child) > .slider-row {
+  flex: 1 1 120px;
+  max-width: 280px;
+}
 .settings-slider {
   flex: 1;
   -webkit-appearance: none;
@@ -361,10 +388,7 @@
   text-align: right;
 }
 .account-card {
-  background: var(--bg-secondary);
-  border-radius: var(--radius-md);
   overflow: hidden;
-  margin-bottom: 24px;
 }
 .ac-btn {
   padding: 8px 16px;
@@ -416,14 +440,56 @@
 }
 
 /* ── Status-first settings patterns (cards, status rows, disclosures) ── */
+/* The one section pattern (features/settings/settingsSection.ts): a small
+   uppercase heading above a card of rows, a hairline between the rows. */
+.settings-section {
+  margin-bottom: var(--space-6);
+}
+.settings-section-head {
+  min-height: 24px;
+  margin-bottom: var(--space-2);
+}
+.settings-content h2.settings-section-label {
+  margin: 0 auto 0 0;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
 .settings-card {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-4);
-  margin-bottom: var(--space-4);
 }
-.settings-card-head,
+.settings-card > :first-child {
+  margin-top: 0;
+}
+.settings-card > :last-child {
+  margin-bottom: 0;
+}
+.settings-card > .setting-row:first-child,
+.settings-card > .keybind-row:first-child,
+.settings-card > .keybind-capture:first-child > .keybind-row,
+.settings-card > .status-list > .status-item:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.settings-card > .setting-row:last-child,
+.settings-card > .keybind-row:last-child,
+.settings-card > .keybind-capture:last-child > .keybind-row,
+.settings-card > .status-list > .status-item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.settings-card.account-card {
+  padding: 0;
+}
+.settings-card > details.disclose + details.disclose {
+  border-top: 1px solid var(--border);
+}
+.settings-section-head,
 .settings-toolbar,
 .summary-line,
 details.disclose > summary {
@@ -437,12 +503,7 @@ details.disclose > summary {
   font-weight: 600;
   color: var(--text-normal);
 }
-.settings-card-head h3 {
-  margin: 0 auto 0 0;
-  font-size: var(--font-size-md);
-  color: var(--header-primary);
-}
-.settings-card-head .ac-btn,
+.settings-section-head .ac-btn,
 .settings-toolbar .ac-btn,
 .settings-toolbar .setting-label {
   margin: 0;
@@ -460,6 +521,10 @@ details.disclose > summary {
 .disclose-count {
   font-weight: 400;
   color: var(--text-muted);
+}
+/* Each count stays with its word ("1 error"); lines break between counts. */
+.disclose-count > span {
+  white-space: nowrap;
 }
 .st-ic {
   display: inline-flex;
@@ -531,9 +596,6 @@ details.disclose > summary {
 .status-pill[hidden] {
   display: none;
 }
-.account-security {
-  margin-top: var(--space-6);
-}
 /* Two-factor enrolment: QR on white (scanners need dark on light), the key, the link. */
 .totp-setup-label {
   color: var(--text-muted);
@@ -590,17 +652,6 @@ details.totp-link > summary {
   display: block;
   margin-top: 8px;
   font-size: 12px;
-}
-/* Section headings in a pane read at 4.5:1 (the generic h3 uses --text-faint). */
-.settings-content h3.setting-group-title,
-.settings-content h3.safety-heading {
-  color: var(--text-muted);
-}
-.settings-content h3.setting-group-title {
-  margin: var(--space-5) 0 var(--space-1);
-}
-.setting-group:first-child h3.setting-group-title {
-  margin-top: 0;
 }
 .setting-row.nested {
   margin-left: var(--space-6);
@@ -695,6 +746,23 @@ details.totp-link > summary {
 }
 details.danger-zone > summary {
   color: var(--text-danger);
+}
+/* A disclosure that is the card itself: the card's padding moves onto the
+   summary, so the whole head is the click target, and onto the open body. */
+details.disclose.settings-card {
+  padding: 0;
+}
+details.disclose.settings-card > summary {
+  padding: var(--space-4);
+}
+details.disclose.settings-card[open] {
+  padding-bottom: var(--space-4);
+}
+details.disclose.settings-card[open] > summary {
+  padding-bottom: var(--space-3);
+}
+details.disclose.settings-card > :not(summary) {
+  margin-inline: var(--space-4);
 }
 .diag-stepper {
   display: flex;
@@ -946,12 +1014,12 @@ details.disclose[open] > summary .icon {
   white-space: nowrap;
 }
 
-/* Section title (larger heading like Discord's "Password and Authentication") */
+/* A titled block inside a section's card (the profile editor, API tokens). */
 .settings-section-title {
-  font-size: var(--font-size-xl);
-  font-weight: 700;
+  font-size: var(--font-size-md);
+  font-weight: 600;
   color: var(--header-primary);
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 /* ── Settings Sidebar Enhancements ── */
@@ -1402,6 +1470,17 @@ details.disclose[open] > summary .icon {
 .about-history details.disclose {
   border-top: 1px solid var(--border);
 }
+.about-history details.disclose:first-child {
+  border-top: 0;
+}
+.about-header > .about-update,
+.about-header > .setting-row {
+  margin-top: var(--space-3);
+}
+.about-header > .setting-row {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
 .about-history details.disclose > .changelog-body {
   padding: 0 0 var(--space-3) var(--space-6);
 }
@@ -1690,6 +1769,10 @@ details.disclose[open] > summary .icon {
   .settings-panel--section .settings-content {
     display: block;
   }
+  /* A heading's buttons share one row under it rather than wrapping one by one. */
+  .settings-section-head:has(> .ac-btn) > .settings-section-label {
+    flex-basis: 100%;
+  }
 
   .settings-close-wrap {
     top: calc(env(safe-area-inset-top, 0px) + 8px);
@@ -1721,11 +1804,7 @@ details.disclose[open] > summary .icon {
 
 /* ── My uploads tab ── */
 .my-uploads__usage {
-  margin: var(--space-4) 0;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-secondary);
+  margin: var(--space-3) 0;
 }
 .my-uploads__usage-text {
   margin-bottom: var(--space-2);
@@ -1756,7 +1835,7 @@ details.disclose[open] > summary .icon {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  margin-bottom: var(--space-3);
+  margin: var(--space-3) 0;
 }
 .my-uploads__sort {
   display: inline-flex;

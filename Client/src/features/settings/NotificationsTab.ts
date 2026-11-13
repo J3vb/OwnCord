@@ -4,6 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { appendToggleRows, platformText, savePref } from "./helpers";
+import { buildSettingsSection } from "./settingsSection";
 import { isAndroidApp } from "../voice/native/platform";
 import { previewSounds } from "@lib/media/soundPreview";
 import {
@@ -246,6 +247,10 @@ function appendPushRow(after: HTMLElement, signal: AbortSignal): void {
 
 export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
+  const alerts = buildSettingsSection({ label: t("notifications.section.alerts") });
+  const sounds = buildSettingsSection({ label: t("notifications.section.sounds") });
+  const channels = buildSettingsSection({ label: t("notifications.section.channels") });
+  appendChildren(section, alerts.el, sounds.el, channels.el);
 
   // The OS permission the toggles below are gated on, read from the native
   // notifier (the desktop contract) rather than assumed from a user-agent or
@@ -258,12 +263,12 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     desktopRow.classList.toggle("blocked", blocked);
     blockedReason.hidden = !blocked;
   });
-  section.appendChild(permissionRow);
+  alerts.card.appendChild(permissionRow);
   appendPushRow(permissionRow, signal);
 
-  section.appendChild(buildLevelRow(signal));
+  alerts.card.appendChild(buildLevelRow(signal));
   const serverLevelRow = buildServerLevelRow(signal);
-  if (serverLevelRow !== null) section.appendChild(serverLevelRow);
+  if (serverLevelRow !== null) alerts.card.appendChild(serverLevelRow);
 
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {
@@ -299,14 +304,14 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const shownToggles = toggles.filter(
     ({ key }) => !isAndroidApp() || (key !== "flashTaskbar" && key !== "unreadBadge"),
   );
-  const [desktopRow] = appendToggleRows(section, shownToggles, signal) as [HTMLDivElement];
+  const [desktopRow] = appendToggleRows(alerts.card, shownToggles, signal) as [HTMLDivElement];
 
-  section.appendChild(buildSoundsVolumeRow(signal));
-  section.appendChild(buildSoundStyleRow(signal));
+  sounds.card.appendChild(buildSoundsVolumeRow(signal));
+  sounds.card.appendChild(buildSoundStyleRow(signal));
 
   // Each group switch keeps its pref key; its own sounds follow it, nested.
   appendSoundGroup(
-    section,
+    sounds.card,
     {
       key: "notificationSounds",
       label: t("notifications.sounds.label"),
@@ -316,7 +321,7 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     signal,
   );
   appendSoundGroup(
-    section,
+    sounds.card,
     {
       key: "callSounds",
       label: t("notifications.callSound.label"),
@@ -326,7 +331,7 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     signal,
   );
   appendSoundGroup(
-    section,
+    sounds.card,
     {
       key: "voiceSounds",
       label: t("notifications.voiceSounds.label"),
@@ -343,8 +348,8 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   blockedReason.hidden = true;
   desktopRow.querySelector(".setting-desc")!.after(blockedReason);
 
-  section.appendChild(buildMutedChannelsSection(signal));
-  section.appendChild(buildChannelLevelsSection(signal));
+  channels.card.appendChild(buildMutedChannelsSection(signal));
+  channels.card.appendChild(buildChannelLevelsSection(signal));
   return section;
 }
 

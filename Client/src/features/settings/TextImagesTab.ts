@@ -7,6 +7,7 @@ import { resetExternalConsent } from "../content-consent/external";
 import { externalConsentText } from "../../i18n/externalConsent";
 import { composerButtonPrefKey, type ComposerButton } from "../messaging/composerButtons";
 import { appendToggleRows, platformText, savePref } from "./helpers";
+import { buildSettingsSection } from "./settingsSection";
 import { isAndroidHost } from "../../lib/hostPlatform";
 import { dataSaverPreference, type DataSaverPreference } from "../messaging/content/dataSaver";
 import { settingsText as t } from "../../i18n/settings";
@@ -47,13 +48,13 @@ export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
     },
   ];
 
-  appendToggleRows(section, toggles, signal);
-  if (isAndroidHost()) section.appendChild(buildDataSaverRow(signal));
-  section.appendChild(buildConsentResetRow(signal));
+  const media = buildSettingsSection({ label: t("images.section.media") });
+  appendToggleRows(media.card, toggles, signal);
+  if (isAndroidHost()) media.card.appendChild(buildDataSaverRow(signal));
+  media.card.appendChild(buildConsentResetRow(signal));
 
-  section.appendChild(
-    createElement("div", { class: "settings-section-title" }, t("images.chatBar.title")),
-  );
+  const bar = buildSettingsSection({ label: t("images.chatBar.title") });
+  appendChildren(section, media.el, bar.el);
   const chatBar: ReadonlyArray<{ button: ComposerButton; label: string; desc: string }> = [
     {
       button: "emoji",
@@ -78,7 +79,7 @@ export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
     },
   ];
   appendToggleRows(
-    section,
+    bar.card,
     chatBar.map(({ button, label, desc }) => ({
       key: composerButtonPrefKey(button),
       label,

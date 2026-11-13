@@ -4,6 +4,7 @@ import { defineCatalog } from "./format";
 export const whatsNewText = defineCatalog("whatsNew", {
   "about.appName": "OwnCord v{version}",
   "about.appNameUnknown": "OwnCord",
+  "about.appSection": "Application",
   "about.desktop": "Desktop app",
   "about.android": "Android app",
   "about.github": "OwnCord on GitHub",

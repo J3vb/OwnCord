@@ -539,7 +539,7 @@ describe("LogsTab", () => {
 
     it("shows the card with the recording toggle and test modes in order", () => {
       const el = buildLogsPane(controller.signal);
-      expect(shareCard(el).querySelector("h3")!.textContent).toBe("Screen share testing");
+      expect(shareCard(el).querySelector("h2")!.textContent).toBe("Screen share testing");
       expect(shareCard(el).textContent).toContain("Record screen-share details");
       expect(shareCard(el).textContent).toContain(
         "Keeps the last 3 minutes of screen-share stats on this computer. They go into the support bundle. Nothing is uploaded.",
@@ -660,6 +660,10 @@ describe("LogsTab", () => {
       expect(logs.querySelector("summary")!.textContent).toContain(
         "4 entries · 1 warning · 2 errors",
       );
+      // Each count is one unbreakable span, so a narrow pane wraps between counts.
+      expect(
+        [...logs.querySelectorAll(".disclose-count > span")].map((s) => s.textContent),
+      ).toEqual(["4 entries", "1 warning", "2 errors"]);
       expect(logs.querySelectorAll(".log-entry")).toHaveLength(4);
     });
 
@@ -695,7 +699,7 @@ describe("LogsTab", () => {
     it("gives the Get help card one primary action: export the support bundle", () => {
       const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
       const card = el.querySelector<HTMLElement>("[data-testid='get-help']")!;
-      expect(card.querySelector("h3")!.textContent).toBe("Get help");
+      expect(card.querySelector("h2")!.textContent).toBe("Get help");
       const exportBtn = card.querySelector("[data-testid='export-support-bundle']")!;
       expect(exportBtn.classList.contains("secondary")).toBe(false);
       expect(buttonNamed(card, "Copy Diagnostics").classList.contains("secondary")).toBe(true);

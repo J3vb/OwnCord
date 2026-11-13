@@ -94,7 +94,7 @@ describe("Account tab: security summary", () => {
 
   it("gathers two-factor, recovery kit, password and devices as rows of one Security card", async () => {
     mount();
-    expect(card().querySelector("h3")!.textContent).toBe("Security");
+    expect(card().querySelector("h2")!.textContent).toBe("Security");
     const names = [...card().querySelectorAll(".status-item > .status-name")].map(
       (n) => n.textContent,
     );

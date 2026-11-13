@@ -504,7 +504,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
     const section = buildAdvancedTab(ac.signal);
     container.appendChild(section);
 
-    const titles = container.querySelectorAll(".settings-section-title");
+    const titles = container.querySelectorAll("h2.settings-section-label");
     const titleTexts = Array.from(titles).map((t) => t.textContent);
     expect(titleTexts).toContain("Debug");
     expect(titleTexts).toContain("Storage & Cache");
@@ -516,12 +516,12 @@ describe("AdvancedTab — Toggles & Structure", () => {
       const section = buildAdvancedTab(ac.signal);
       container.appendChild(section);
 
-      const titleTexts = Array.from(container.querySelectorAll(".settings-section-title")).map(
-        (t) => t.textContent,
-      );
-      // Activity (WP 8.3) sits before the cache section on the desktop build.
-      expect(titleTexts).toEqual(["Activity", "Storage & Cache"]);
-      expect(container.querySelectorAll(".settings-separator")).toHaveLength(2);
+      const titleTexts = Array.from(
+        container.querySelectorAll(".settings-section > .settings-section-head > h2"),
+      ).map((t) => t.textContent);
+      // Activity sits between the general rows and the cache section on the desktop build.
+      expect(titleTexts).toEqual(["General", "Activity", "Storage & Cache"]);
+      expect(container.querySelectorAll(".settings-section > .settings-card")).toHaveLength(3);
       expect(container.textContent).not.toContain("Open DevTools");
     } finally {
       vi.unstubAllEnvs();
@@ -549,11 +549,16 @@ describe("AdvancedTab — Toggles & Structure", () => {
     expect(restart.classList.contains("ac-btn-danger")).toBe(false);
   });
 
-  it("renders separators between sections", () => {
+  it("puts every row in a titled section card", () => {
     mountTab(container);
 
-    const separators = container.querySelectorAll(".settings-separator");
-    expect(separators.length).toBeGreaterThanOrEqual(2);
+    const rows = Array.from(container.querySelectorAll(".setting-row"));
+    expect(rows.length).toBeGreaterThanOrEqual(6);
+    for (const row of rows) {
+      const section = row.closest(".settings-section")!;
+      expect(row.parentElement!.classList.contains("settings-card")).toBe(true);
+      expect(section.querySelector("h2.settings-section-label")!.textContent).not.toBe("");
+    }
   });
 
   it("renders all three cache clear rows", () => {

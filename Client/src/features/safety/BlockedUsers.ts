@@ -16,6 +16,7 @@
  */
 
 import { errorText, type ApiClient } from "@lib/api";
+import { buildSettingsSection } from "../settings/settingsSection";
 import { createElement, setText } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
@@ -93,16 +94,15 @@ export function buildBlockedUsersSection(
   createAvatar: CreateAvatar,
 ): HTMLElement {
   const titleId = `blocked-users-${++sectionSeq}`;
-  const section = createElement("section", {
-    class: "blocked-users",
-    "aria-labelledby": titleId,
-    "data-testid": "blocked-users",
+  const {
+    el: section,
+    heading,
+    card,
+  } = buildSettingsSection({
+    label: t("title"),
+    headingAttrs: { id: titleId, tabindex: "-1" },
+    attrs: { class: "blocked-users", "aria-labelledby": titleId, "data-testid": "blocked-users" },
   });
-  const heading = createElement(
-    "h3",
-    { class: "safety-heading", id: titleId, tabindex: "-1" },
-    t("title"),
-  );
   const desc = createElement("p", { class: "setting-desc" }, t("desc"));
   // Both live regions exist before their text changes, so each change is read.
   const status = createElement("div", { class: "my-reports-status", role: "status" });
@@ -114,7 +114,7 @@ export function buildBlockedUsersSection(
   );
   retry.hidden = true;
   const list = createElement("ul", { class: "blocked-users-list" });
-  section.append(heading, desc, status, failure, retry, list);
+  card.append(desc, status, failure, retry, list);
 
   let phase: "loading" | "loaded" | "failed" = "loading";
   const rows = new Map<number, { el: HTMLLIElement; sig: string }>();
