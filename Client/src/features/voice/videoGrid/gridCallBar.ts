@@ -350,7 +350,10 @@ export function createGridCallBar(st: GridState, api: GridApi) {
 
   /** Show or take down the call view's View button and control bar. */
   function setCallView(on: boolean): void {
-    if (!on) closeCallPopout(false);
+    if (!on) {
+      closeCallPopout(false);
+      viewMenu.closeViewMenu();
+    }
     st.callView = on;
     if (st.root === null) return;
     if (on && st.viewBar === null) st.viewBar = viewMenu.buildViewBar();

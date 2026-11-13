@@ -467,6 +467,15 @@ describe("VideoGrid", () => {
       expect(root().querySelector("[data-grid-control='views']")).toBeNull();
     });
 
+    it("closes an open View menu when the call view ends", () => {
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      viewButton(root()).click();
+      expect(document.querySelector(".context-menu")).not.toBeNull();
+      grid.setExitVisible(false);
+      expect(document.querySelector(".context-menu")).toBeNull();
+    });
+
     it("reads the saved toggles when the grid mounts", () => {
       localStorage.setItem("owncord:settings:callShowNonVideo", "false");
       localStorage.setItem("owncord:settings:callShowSelfCamera", "false");
