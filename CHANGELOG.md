@@ -110,10 +110,6 @@ release changes the database, and anything an operator must do first.)
   - The server fetches the links in a new or edited message once and stores the card (title, description, site name, shrunk image). Message history and a new live event carry the cards; older apps ignore them.
   - Thumbnails are served to signed-in members from `GET /api/v1/link-previews/images/{hash}`.
   - `link_previews.enabled` can now be changed in the admin panel; a restart applies it. `false` stops fetching only.
-- **Groundwork for server-side link previews.** Nothing changes for members yet: the server does not fetch links, and no preview is shown from this store. It adds the storage a later release will use:
-  - Database migration 094 adds four tables for link cards and their thumbnails. The server migrates on start, so take a backup first as usual.
-  - A new `link-previews/` folder appears in the server data folder for shrunk thumbnails. The server trims it on its 15-minute maintenance pass.
-  - Three settings in `config.yaml`: `link_previews.enabled` (default on, no effect yet), `link_previews.thumbnail_cache_mb` (default 512, `0` keeps no thumbnails) and `link_previews.thumbnail_unused_days` (default 30).
 
 ### Known issues
 
