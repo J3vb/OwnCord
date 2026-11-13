@@ -45,6 +45,7 @@ export async function showCameraMenu(anchor: HTMLElement, signal: AbortSignal): 
     items: choices.map((c, i) => ({
       label: c.label,
       testId: `camera-device-${i}`,
+      icon: "camera",
       onClick: () => void switchVideoDevice(c.deviceId),
     })),
   });
