@@ -190,11 +190,11 @@ describe("Appearance", () => {
     expect(el.querySelector(".custom-themes h2")!.textContent).toBe("Custom themes");
     expect(el.textContent).toContain("Zoom level");
     expect(el.querySelector("[data-testid='member-layout']")).not.toBeNull();
-    expect(el.textContent).toContain("Sync with computer");
+    expect(el.textContent).toContain("Match my computer");
     expect(el.textContent).toContain("Ctrl+Shift+Backspace");
   });
 
-  it("leaves out both on Android, and says 'system' and no shortcut", () => {
+  it("leaves out both on Android, and says 'device' and no shortcut", () => {
     hostAndroidApp();
     const el = buildAppearanceTab(ac.signal);
     container.appendChild(el);
@@ -202,8 +202,8 @@ describe("Appearance", () => {
     expect(el.querySelector(".slider-row [aria-label='Zoom level']")).toBeNull();
     expect(el.querySelector("[data-testid='member-layout']")).toBeNull();
     expect(el.textContent).not.toContain("Member list position");
-    expect(el.textContent).toContain("Sync with system");
-    expect(el.textContent).not.toContain("Sync with computer");
+    expect(el.textContent).toContain("Match my device");
+    expect(el.textContent).not.toContain("Match my computer");
   });
 
   it("describes custom themes without the shortcut on Android", () => {

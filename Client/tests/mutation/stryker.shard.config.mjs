@@ -704,6 +704,7 @@ export const shards = {
     "src/features/settings/settingsRequests.ts",
     "src/features/settings/settingsSection.ts",
     "src/features/settings/soundPreviewButton.ts",
+    "src/features/settings/themePreview.ts",
   ],
   "safety-moderation-10": [
     "src/features/message-requests/Inbox.ts",

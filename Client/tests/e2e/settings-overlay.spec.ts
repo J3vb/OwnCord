@@ -168,18 +168,18 @@ test.describe("Settings — Appearance Tab", () => {
   });
 
   test("clicking theme option activates it and applies the body class", async ({ page }) => {
-    const themeOptions = page.locator(".theme-opt");
+    const themeOptions = page.locator(".theme-tiles [role='radio']");
     const second = themeOptions.nth(1);
     await second.click();
 
-    await expect(second).toHaveClass(/active/);
+    // Checked shows as a check mark by the name, not by colour alone.
+    await expect(second.locator(".radio-card-check")).toBeVisible();
+    await expect(themeOptions.locator(".radio-card-check:visible")).toHaveCount(1);
     // The activation is only real if it reaches the rendered document.
     await expect(second).toHaveAttribute("aria-checked", "true");
     const themeName = await second.evaluate((el) => {
-      for (const name of ["dark", "neon-glow", "midnight", "light"]) {
-        if (el.classList.contains(name)) return name;
-      }
-      return "";
+      const value = el.getAttribute("data-value") ?? "";
+      return ["dark", "neon-glow", "midnight", "light"].includes(value) ? value : "";
     });
     expect(themeName).not.toBe("");
     await expect(page.locator("body")).toHaveClass(new RegExp(`theme-${themeName}`));

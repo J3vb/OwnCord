@@ -65,7 +65,7 @@ test.describe("Settings Overlay", () => {
     await openTabIfPresent(nativePage, /appearance/i, "Appearance");
 
     // Theme options container with individual theme buttons
-    const themeOptions = nativePage.locator(".theme-opt");
+    const themeOptions = nativePage.locator(".theme-tiles [role='radio']");
     const count = await themeOptions.count();
     expect(count).toBeGreaterThan(0);
   });

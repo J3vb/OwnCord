@@ -70,12 +70,17 @@ test("every theme tile is on screen at full size on a narrow phone", async ({ pa
       hasText: "Appearance",
     })
     .click();
-  const tiles = page.locator(".theme-options .theme-opt");
+  const tiles = page.locator(".theme-tiles [role='radio']");
   expect(await tiles.count()).toBeGreaterThan(4);
+  const tops: number[] = [];
   for (const tile of await tiles.all()) {
     const box = await onScreen(page, tile);
     expect(Math.round(box.width)).toBeGreaterThanOrEqual(80);
+    tops.push(Math.round(box.y));
   }
+  // Two to a row: the first two share a row and the third starts the next.
+  expect(tops[1]).toBe(tops[0]);
+  expect(tops[2]).toBeGreaterThan(tops[1]!);
   await shot(page, "31-theme-tiles");
 });
 

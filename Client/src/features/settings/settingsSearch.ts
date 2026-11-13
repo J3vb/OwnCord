@@ -93,9 +93,14 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
   ],
   Appearance: () => [
     s("appearance.theme"),
+    s("appearance.theme.dark"),
+    s("appearance.theme.neon-glow"),
+    s("appearance.theme.midnight"),
+    s("appearance.theme.light"),
+    platformText(s("appearance.theme.system"), s("appearance.theme.system.android")),
+    s("appearance.accentColor"),
     s("appearance.section.textSize"),
     s("appearance.section.layout"),
-    s("appearance.section.colors"),
     s("appearance.fontSize"),
     ...desktopOnly(s("appearance.zoom")),
     s("appearance.compactMode"),
@@ -104,7 +109,6 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("appearance.dateFormat"),
     s("appearance.dateFormat.desc"),
     ...desktopOnly(s("appearance.memberLayout"), s("appearance.memberLayout.desc")),
-    s("appearance.accentColor"),
     s("appearance.accentNote"),
     s("appearance.customThemes"),
     platformText(s("appearance.customThemes.desc"), s("appearance.customThemes.desc.android")),
@@ -404,6 +408,7 @@ const HIGHLIGHT_SELECTOR = [
   ".setting-desc",
   ".settings-section-label",
   ".settings-section-title",
+  ".radio-card-label",
 ].join(", ");
 
 /** Remove every highlight under `root`, restoring the plain text nodes. */

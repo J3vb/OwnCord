@@ -473,7 +473,7 @@ describe("settings search", () => {
           .click();
         type("a");
         const rows = Array.from(container.querySelectorAll("mark.settings-search-hit")).map((m) =>
-          m.closest<HTMLElement>(".setting-label, .setting-desc, h3"),
+          m.closest<HTMLElement>(".radio-card, .setting-label, .setting-desc, h3"),
         );
         expect(new Set(rows).size).toBeGreaterThan(1);
         rows[0]!.style.display = "none";

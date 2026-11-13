@@ -146,6 +146,7 @@ release changes the database, and anything an operator must do first.)
 - Pins, Threads and Media in the channel header now open the same side panel: same place, same header and Close button, one open at a time, and the button shows which one is open.
 - Settings opens in a larger window that uses the space you have, and every page is laid out the same way: a small heading above a card of rows. Narrow windows and phones keep their full width.
 - Settings labels are written the same way everywhere, with a capital on the first word only ("Voice & video", "Push to talk").
+- Settings > Appearance shows each theme as a small preview tile, with "Match my computer" for following your system. The page now reads Theme, Accent color, Text & size, then Layout, date & time.
 
 ### Fixed
 

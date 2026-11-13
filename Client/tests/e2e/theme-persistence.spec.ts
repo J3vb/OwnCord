@@ -29,14 +29,11 @@ test.describe("Theme Persistence", () => {
 
     // Must be a different theme available to switch to — not an optional
     // discovery that silently skips the assertion when none is found.
-    const inactiveOption = page.locator(".theme-opt:not(.active)");
+    const inactiveOption = page.locator(".theme-tiles [role='radio'][aria-checked='false']");
     await expect(inactiveOption.first()).toBeVisible();
     const themeName = await inactiveOption.first().evaluate((el) => {
-      const classes = el.classList;
-      for (const name of ["dark", "neon-glow", "midnight", "light"]) {
-        if (classes.contains(name)) return name;
-      }
-      return "";
+      const value = el.getAttribute("data-value") ?? "";
+      return ["dark", "neon-glow", "midnight", "light"].includes(value) ? value : "";
     });
     expect(themeName).not.toBe("");
 
@@ -53,7 +50,7 @@ test.describe("Theme Persistence", () => {
 
   test("theme persists in localStorage", async ({ page }) => {
     // Click a specific theme option
-    const themeOptions = page.locator(".theme-opt");
+    const themeOptions = page.locator(".theme-tiles [role='radio']");
     const count = await themeOptions.count();
     expect(count).toBeGreaterThanOrEqual(2);
 
@@ -68,7 +65,7 @@ test.describe("Theme Persistence", () => {
 
   test("theme body class matches localStorage value", async ({ page }) => {
     // Click the first theme option to set a known state
-    const themeOptions = page.locator(".theme-opt");
+    const themeOptions = page.locator(".theme-tiles [role='radio']");
     await themeOptions.first().click();
 
     // Read what was stored — must be a real value, not null (the old guard

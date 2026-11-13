@@ -100,6 +100,70 @@ describe("createRadioCards", () => {
     expect(cards.value()).toBe("s");
   });
 
+  describe("tile layout", () => {
+    const tile = (value: Size, label: string): RadioCardOption<Size> => {
+      const preview = document.createElement("span");
+      preview.className = `pic-${value}`;
+      return { value, label, preview };
+    };
+    const TILES = [tile("s", "Small"), tile("m", "Medium"), tile("l", "Large")];
+
+    function makeTiles(value: Size | null, onChange?: (v: Size) => void) {
+      controller = new AbortController();
+      const cards = createRadioCards<Size>({
+        signal: controller.signal,
+        labelledBy: "size-label",
+        testId: "size",
+        layout: "tiles",
+        options: TILES,
+        value,
+        ...(onChange === undefined ? {} : { onChange }),
+      });
+      document.body.appendChild(cards.el);
+      const radios = Array.from(cards.el.querySelectorAll<HTMLButtonElement>("[role='radio']"));
+      return { cards, radios };
+    }
+
+    it("puts the hidden preview over the name, with a check mark and no dot or hint", () => {
+      const { cards, radios } = makeTiles("m");
+      expect(cards.el.classList.contains("radio-cards-tiles")).toBe(true);
+      const card = radios[1]!;
+      const preview = card.querySelector(".radio-card-preview")!;
+      expect(preview.getAttribute("aria-hidden")).toBe("true");
+      expect(preview.querySelector(".pic-m")).not.toBeNull();
+      expect(card.firstElementChild).toBe(preview);
+      expect(card.querySelector(".radio-card-check")?.getAttribute("aria-hidden")).toBe("true");
+      expect(card.querySelector(".radio-card-dot, .radio-card-icon, .radio-card-desc")).toBeNull();
+      expect(card.textContent).toBe("Medium");
+      expect(cards.el.querySelector(".radio-cards-hint")).toBeNull();
+    });
+
+    it("with a null value checks nothing and makes the first tile the tab stop", () => {
+      const { cards, radios } = makeTiles(null);
+      expect(cards.value()).toBeNull();
+      expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual([
+        "false",
+        "false",
+        "false",
+      ]);
+      expect(radios.map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+      expect(cards.group.hasAttribute("data-value")).toBe(false);
+    });
+
+    it("Enter or Space checks the focused tile when nothing is checked yet", () => {
+      const onChange = vi.fn();
+      const { cards, radios } = makeTiles(null, onChange);
+      radios[0]!.focus();
+      expect(press(radios[0]!, { key: " " }).defaultPrevented).toBe(true);
+      expect(cards.value()).toBe("s");
+      expect(radios[0]!.getAttribute("aria-checked")).toBe("true");
+      press(radios[0]!, { key: "ArrowRight" });
+      press(radios[1]!, { key: "Enter" });
+      expect(onChange.mock.calls).toEqual([["s"], ["m"]]);
+      expect(radios.map((r) => r.tabIndex)).toEqual([-1, 0, -1]);
+    });
+  });
+
   it("stops listening once its signal aborts", () => {
     const onChange = vi.fn();
     const { radios } = make("s", onChange);
