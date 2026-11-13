@@ -21,7 +21,9 @@ const RESTED_SPEECH_PROBABILITY = 0.9;
 const REST_FRAMES = 7;
 
 // A frame is quiet when every 8 ms of it is under the gate threshold and under
-// -55 dBFS, the lowest automatic threshold: nothing in it could open the gate.
+// -55 dBFS, the lowest automatic threshold. The gate reads its own level after
+// RNNoise and over a sliding window, so at the edge the two can differ by a
+// decibel or two, and the second model then wakes one frame later.
 // After QUIET_FRAMES of them (about half a second) the second model rests.
 const QUIET_FRAMES = 16;
 const QUIET_POWER = 10 ** (-55 / 10);

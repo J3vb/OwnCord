@@ -19,7 +19,8 @@ const FLOAT16 = 1;
 const single = new Float32Array(1);
 const bits = new Uint32Array(single.buffer);
 
-/** IEEE 754 binary16 bits of a float32 value, rounded to nearest, ties to even. */
+/** IEEE 754 binary16 bits of a float32 value, rounded to nearest. A tie goes to
+ *  even, and under the smallest normal value (6.1e-5) away from zero. */
 function halfBits(value) {
   single[0] = value;
   const sign = (bits[0] >>> 16) & 0x8000;
