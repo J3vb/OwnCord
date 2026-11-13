@@ -16,6 +16,7 @@ import { createLogger } from "@lib/logger";
 import { RestErrorCode } from "@lib/protocolTypes";
 import type { SessionScope } from "@lib/net/sessionScope";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
+import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import { authStore } from "@stores/auth.store";
 import { connectText } from "../../i18n/connect";
 import { desktop } from "../../platform/desktop";
@@ -24,6 +25,9 @@ import { deviceLabel, pushInstance } from "./pushInstance";
 import { INITIAL_PUSH_STATE, pushStore, setPushSetting, type PushSetting } from "./store";
 
 const log = createLogger("push");
+
+/** Settings → Notifications' message switch: off means no push either. */
+const NOTIFICATIONS_PREF = "desktopNotifications";
 
 export type PushApi = Pick<ApiClient, "getPushVapid" | "subscribePush" | "getSession">;
 
@@ -84,8 +88,10 @@ export function onReady(api: PushApi): void {
     instance: pushInstance(scope.identity.host, user.id),
     serverName: authStore.getState().serverName ?? scope.identity.host,
   };
+  const current = session;
   desktop.pushRegistration.follow(scope.signal, onHostEvent);
-  void registerPush(session);
+  onPrefChange([NOTIFICATIONS_PREF], () => void registerPush(current), scope.signal);
+  void registerPush(current);
 }
 
 /** The user picked a push app in Settings. */
@@ -112,6 +118,12 @@ function onHostEvent(event: PushHostEvent): void {
 async function registerPush(current: Session): Promise<void> {
   const mine = ++attempt;
   const owns = (): boolean => mine === attempt && session === current && current.scope.isCurrent();
+  if (!owns()) return;
+  if (!loadPref<boolean>(NOTIFICATIONS_PREF, true)) {
+    void desktop.pushRegistration.unregister(current.instance);
+    setPushSetting("muted");
+    return;
+  }
   setPushSetting("checking");
   try {
     const vapid = await current.api.getPushVapid(current.scope.signal);

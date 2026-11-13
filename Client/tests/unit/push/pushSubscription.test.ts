@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   PushHostEvent,
   PushRegisterRequest,
@@ -32,10 +32,15 @@ import {
   type PushApi,
 } from "../../../src/features/push/pushSubscription";
 import { pushStore } from "../../../src/features/push/store";
+import { savePref } from "../../../src/lib/prefs/preferences";
 
 const KEYS = { endpoint: "https://ntfy.example/up1", p256dh: "P", auth: "A" };
 
+/** Every session a test made; disposed after it, like a sign-out would. */
+const scopes: SessionScope[] = [];
+
 function makeApi(scope = new SessionScope({ host: "chat.example:8443", generation: 1 })) {
+  scopes.push(scope);
   const api = {
     getSession: vi.fn(() => scope),
     getPushVapid: vi.fn(async () => ({ public_key: "VAPID", key_id: "k1" })),
@@ -56,8 +61,13 @@ function lastEventHandler(): (e: PushHostEvent) => void {
 }
 
 describe("push subscription", () => {
+  afterEach(() => {
+    for (const scope of scopes.splice(0)) scope.dispose();
+  });
+
   beforeEach(() => {
     runSessionResets("user");
+    savePref("desktopNotifications", true);
     vi.clearAllMocks();
     host.register.mockResolvedValue({ ok: true, keys: KEYS });
     authStore.setState((s) => ({ ...s, user: { id: 7 } as never, serverName: "Home" }));
@@ -207,6 +217,26 @@ describe("push subscription", () => {
 
     expect(pushStore.getState().setting).toBe("off");
     expect(api.subscribePush).not.toHaveBeenCalled();
+  });
+
+  it("message notifications off means no push: the registration goes, and comes back with them", async () => {
+    const { api } = makeApi();
+    savePref("desktopNotifications", false);
+    onReady(api);
+    await settle();
+    expect(host.unregister).toHaveBeenCalledWith("chat.example:8443#7");
+    expect(host.register).not.toHaveBeenCalled();
+    expect(pushStore.getState().setting).toBe("muted");
+
+    savePref("desktopNotifications", true);
+    await settle();
+    expect(api.subscribePush).toHaveBeenCalledTimes(1);
+    expect(pushStore.getState().setting).toBe("on");
+
+    savePref("desktopNotifications", false);
+    await settle();
+    expect(host.unregister).toHaveBeenCalledTimes(2);
+    expect(pushStore.getState().setting).toBe("muted");
   });
 
   it("follows the host for as long as the session lasts", async () => {

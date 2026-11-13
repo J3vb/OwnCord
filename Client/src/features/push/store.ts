@@ -9,6 +9,8 @@
  * - install: no push app (UnifiedPush distributor) is installed
  * - choose: several are installed and none is chosen yet
  * - server-off: this server's owner has push turned off
+ * - muted: message notifications are off in Settings, so the push app's
+ *   registration is dropped until they are back on
  * - failed: the push app or the server did not answer; tried again when the
  *   app comes back into view
  */
@@ -17,7 +19,7 @@ import { createStore } from "@lib/store";
 import type { PushDistributor } from "../../platform/contracts/pushRegistration";
 
 export type PushSetting =
-  "off" | "checking" | "on" | "install" | "choose" | "server-off" | "failed";
+  "off" | "checking" | "on" | "install" | "choose" | "server-off" | "muted" | "failed";
 
 export interface PushState {
   readonly setting: PushSetting;
