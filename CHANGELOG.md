@@ -166,6 +166,7 @@ release changes the database, and anything an operator must do first.)
 - **Admin:** a blank `OWNCORD_*` list variable (such as `OWNCORD_SERVER_ADMIN_ALLOWED_CIDRS=`) locked everyone out of the admin panel. It is now ignored with a start-up warning and the list keeps its configured value.
 - **Admin:** a backup folder set to the database's own folder counted the live database as a backup, so scheduled backups stopped. That folder is now refused, and the live database is never listed, deleted or restored as a backup.
 - **Admin:** first-run setup opened over a bare IPv6 address showed a broken link after a port or TLS change.
+- **Server rail:** the connected server's icon showed digits from its address ("12" for 127.0.0.1) instead of the server's initials. It now shows the initials of the server's name.
 
 ### Messages & files
 

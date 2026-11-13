@@ -2,7 +2,6 @@
 
 import type { ServerRailOptions } from "./ServerRail";
 import { createLogger } from "@lib/logger";
-import { authStore } from "@stores/auth.store";
 import { addServer, loadSavedServers, switchToServer } from "./switchServer";
 import { confirmAndJoinInvite, currentServerName, parseInviteInput } from "./joinInvite";
 
@@ -26,7 +25,6 @@ export function mountServerRail(opts: ServerRailMount): void {
       if (opts.isTornDown()) return;
       const rail = createServerRail({
         currentHost: host,
-        currentName: authStore.getState().serverName ?? "",
         loadServers: loadSavedServers,
         switchServer: switchToServer,
         addServer,

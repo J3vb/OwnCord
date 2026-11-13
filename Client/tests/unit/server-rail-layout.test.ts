@@ -15,6 +15,7 @@ import {
   renameFolder,
   saveLayout,
   serverInitials,
+  isIpAddressName,
   setFolderColor,
   shiftItem,
   toggleCollapsed,
@@ -220,8 +221,34 @@ describe("persistence", () => {
 
 describe("serverInitials", () => {
   it("uses word initials, two letters for one word, ? for empty", () => {
-    expect(serverInitials("My Cool Server Here")).toBe("MCS");
+    expect(serverInitials("My Cool Server Here")).toBe("MC");
+    expect(serverInitials("Game Night Crew")).toBe("GN");
     expect(serverInitials("Dragon")).toBe("DR");
     expect(serverInitials("  ")).toBe("?");
+  });
+  it("skips punctuation, so a host name gives letters", () => {
+    expect(serverInitials("chat.example.com")).toBe("CH");
+    expect(serverInitials("- Night - Owls")).toBe("NO");
+    expect(serverInitials("!!")).toBe("?");
+  });
+});
+
+describe("isIpAddressName", () => {
+  it("recognises IPv4 and IPv6 literals, with or without a port", () => {
+    for (const ip of ["127.0.0.1", "10.0.0.5:8443", "::1", "[::1]:8443", "2001:db8::1"]) {
+      expect(isIpAddressName(ip), ip).toBe(true);
+    }
+  });
+  it("leaves host names and server names alone", () => {
+    for (const name of [
+      "localhost",
+      "chat.example.com",
+      "chat.example.com:8443",
+      "Game Night",
+      "",
+      "cafe",
+    ]) {
+      expect(isIpAddressName(name), name).toBe(false);
+    }
   });
 });
