@@ -1775,6 +1775,22 @@ details.disclose[open] > summary .icon {
   }
   .settings-panel--section .settings-content {
     display: block;
+    padding-top: 0;
+    /* A part scrolled to the top lands below the title bar. */
+    scroll-padding-top: calc(env(safe-area-inset-top, 0px) + 60px);
+  }
+  /* The open section's title is an opaque bar under Back and Close that stays
+     put while the section scrolls beneath it. */
+  .settings-panel--section .settings-content h1 {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    max-width: none;
+    min-height: calc(env(safe-area-inset-top, 0px) + 60px);
+    margin: 0 -16px 16px;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 60px 8px 52px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-primary);
   }
   /* A heading's buttons share one row under it rather than wrapping one by one. */
   .settings-section-head:has(> .ac-btn) > .settings-section-label {

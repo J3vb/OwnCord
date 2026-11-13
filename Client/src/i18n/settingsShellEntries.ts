@@ -103,7 +103,7 @@ export const settingsShellEntries = {
   "appearance.accentColor": "Accent color",
   "appearance.accentAria": "Custom accent color (hex)",
   "appearance.accentNote":
-    "Custom colours may reduce readability; text and focus indicators fall back to a readable colour when needed, and High contrast restores tested colours.",
+    "Custom colors may reduce readability; text and focus indicators fall back to a readable color when needed, and High contrast restores tested colors.",
   "appearance.customThemes": "Custom themes",
   "appearance.customThemes.desc":
     "Your own CSS, painted on top of the theme above. Links to outside files (url(), @import, fonts) are not allowed. Ctrl+Shift+Backspace turns a custom theme off.",

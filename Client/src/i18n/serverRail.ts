@@ -39,7 +39,7 @@ export const serverRailText = defineCatalog("serverRail", {
   removeFromFolder: "Remove from folder",
   renameFolder: "Rename folder",
   renameLabel: "Folder name",
-  folderColor: "Folder colour",
+  folderColor: "Folder color",
   "color.blurple": "Blurple",
   "color.green": "Green",
   "color.amber": "Amber",
