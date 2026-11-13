@@ -172,10 +172,12 @@ func isKnownSection(prefix string) bool {
 // envKeyToPath converts a lower-case env key (without the prefix) to a dotted path: section up to the first
 // underscore, e.g. server_data_dir -> server.data_dir.
 func envKeyToPath(s string) string {
-	// event_persistence is the only multi-word section; cutting at the first underscore would drop every
+	// event_persistence and link_previews are the multi-word sections; cutting at the first underscore would drop every
 	// override under it.
-	if rest, ok := strings.CutPrefix(s, "event_persistence_"); ok {
-		return "event_persistence." + rest
+	for _, section := range []string{"event_persistence", "link_previews"} {
+		if rest, ok := strings.CutPrefix(s, section+"_"); ok {
+			return section + "." + rest
+		}
 	}
 	before, after, ok := strings.Cut(s, "_")
 	if !ok {

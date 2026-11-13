@@ -145,7 +145,7 @@ const CONFIG_GROUPS=[
   {id:'voice',title:'Voice',sections:[['voice','Voice']]},
   {id:'backup',title:'Backup',sections:[['backup','Backup']]},
   {id:'logging',title:'Logging',sections:[['logging','Logging'],['telemetry','Telemetry']]},
-  {id:'integrations',title:'Integrations',sections:[['gif','GIF search'],['github','GitHub updates'],['push','Push notifications'],['plugins','Plugins']]},
+  {id:'integrations',title:'Integrations',sections:[['gif','GIF search'],['github','GitHub updates'],['push','Push notifications'],['link_previews','Link previews'],['plugins','Plugins']]},
   {id:'advanced',title:'Advanced',sections:[['database','Database'],['event_persistence','Event persistence'],['attention','Attention thresholds']]}
 ];
 

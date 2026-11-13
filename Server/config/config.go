@@ -33,6 +33,7 @@ type Config struct {
 	GIF              GIFConfig              `yaml:"gif"`
 	Logging          LoggingConfig          `yaml:"logging"`
 	Moderation       ModerationConfig       `yaml:"moderation"`
+	LinkPreviews     LinkPreviewsConfig     `yaml:"link_previews"`
 	Push             PushConfig             `yaml:"push"`
 	Attention        AttentionConfig        `yaml:"attention"`
 }

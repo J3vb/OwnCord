@@ -35,6 +35,8 @@ func boundedKeys(cfg *Config) []boundedKey {
 		{"logging.history_max_mb", &cfg.Logging.HistoryMaxMB, 1, 1 << 20, def.Logging.HistoryMaxMB, "the default, 200 MB", false},
 		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content", false},
 		{"moderation.action_retention_days", &cfg.Moderation.ActionRetentionDays, 0, 3650, def.Moderation.ActionRetentionDays, "0 means never retire warning/timeout rows", false},
+		{"link_previews.thumbnail_cache_mb", &cfg.LinkPreviews.ThumbnailCacheMB, 0, maxMiB, def.LinkPreviews.ThumbnailCacheMB, "the default, 512 MB; write 0 to keep no thumbnails", false},
+		{"link_previews.thumbnail_unused_days", &cfg.LinkPreviews.ThumbnailUnusedDays, 1, 3650, def.LinkPreviews.ThumbnailUnusedDays, "the default, 30 days", false},
 		{"attention.disk_warn_free_mb", &cfg.Attention.DiskWarnFreeMB, 0, maxMiB, def.Attention.DiskWarnFreeMB, "the default, 1024 MB; write 0 for only the critical level at server.min_free_disk_mb", false},
 		{"attention.writer_wait_ms_per_min", &cfg.Attention.WriterWaitMsPerMin, 1, 60_000, def.Attention.WriterWaitMsPerMin, "the default, 5000 ms per minute", false},
 		{"attention.reconnects_per_min", &cfg.Attention.ReconnectsPerMin, 1, 1_000_000, def.Attention.ReconnectsPerMin, "the default, 30 per minute", false},

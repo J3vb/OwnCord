@@ -93,6 +93,11 @@ func defaults() Config {
 			ReportRetentionDays: 180,
 			ActionRetentionDays: 90,
 		},
+		LinkPreviews: LinkPreviewsConfig{
+			Enabled:             true,
+			ThumbnailCacheMB:    512,
+			ThumbnailUnusedDays: 30,
+		},
 		Attention: AttentionConfig{DiskWarnFreeMB: 1024, WriterWaitMsPerMin: 5000, ReconnectsPerMin: 30, DeliveryDropsPerMin: 1},
 		Push: PushConfig{
 			Enabled:             false,
@@ -282,6 +287,13 @@ voice:
 #                                # is pruned; 0 = never. Open reports are never touched.
 #   action_retention_days: 90   # days after acknowledgement (warning) or expiry/lift
 #                                # (timeout) before the row retires; 0 = never.
+
+# Link previews: the server fetches a link once after a message is sent and
+# keeps the card text in the database and a shrunk thumbnail on disk.
+# link_previews:
+#   enabled: true               # false stops fetching new links; stored previews stay
+#   thumbnail_cache_mb: 512     # cap on thumbnails kept on disk; 0 = keep none
+#   thumbnail_unused_days: 30   # drop a thumbnail nothing has shown for this long
 
 # Admin attention panel (Dashboard): warning floors, raised for rates by the
 # learned baseline. Shown only in the admin panel; never exported off-host.
