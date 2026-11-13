@@ -32,7 +32,7 @@ func TestUpsertPushSubscription_InsertsARow(t *testing.T) {
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
 
-	id, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p256", "auth1", "laptop", "key1", 10)
+	id, err := database.UpsertPushSubscription(ctx, 1, nil, "https://push.example/a", "p256", "auth1", "laptop", "key1", 10)
 	if err != nil || id == 0 {
 		t.Fatalf("UpsertPushSubscription: id=%d err=%v", id, err)
 	}
@@ -56,7 +56,7 @@ func TestUpsertPushSubscription_RefreshBumpsLastSeenAtSameRow(t *testing.T) {
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
 
-	first, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p256-old", "auth-old", "old-name", "key1", 10)
+	first, err := database.UpsertPushSubscription(ctx, 1, nil, "https://push.example/a", "p256-old", "auth-old", "old-name", "key1", 10)
 	mustDo(t, "first upsert", err)
 	if _, err := database.ExecContext(ctx, `UPDATE push_subscriptions SET last_seen_at = datetime('now', '-1 day') WHERE id = ?`, first); err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestUpsertPushSubscription_RefreshBumpsLastSeenAtSameRow(t *testing.T) {
 	var before string
 	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT last_seen_at FROM push_subscriptions WHERE id = ?`, first).Scan(&before))
 
-	second, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p256-new", "auth-new", "new-name", "key2", 10)
+	second, err := database.UpsertPushSubscription(ctx, 1, nil, "https://push.example/a", "p256-new", "auth-new", "new-name", "key2", 10)
 	mustDo(t, "second upsert", err)
 	if second != first {
 		t.Fatalf("refresh id = %d, want the same row %d", second, first)
@@ -112,7 +112,7 @@ func TestUpsertPushSubscription_TrimEvictsPastKeep(t *testing.T) {
 
 	// Upserting a fourth, newest row with keep=2 must evict the two oldest
 	// (30 and 20 minutes ago), leaving the 10-minutes-ago row and the new one.
-	if _, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/new", "p", "a", "d", "k", 2); err != nil {
+	if _, err := database.UpsertPushSubscription(ctx, 1, nil, "https://push.example/new", "p", "a", "d", "k", 2); err != nil {
 		t.Fatalf("UpsertPushSubscription: %v", err)
 	}
 
@@ -144,7 +144,7 @@ func TestUpsertPushSubscription_NegativeKeepClampsToZero(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/new", "p", "a", "d", "k", -1); err != nil {
+	if _, err := database.UpsertPushSubscription(ctx, 1, nil, "https://push.example/new", "p", "a", "d", "k", -1); err != nil {
 		t.Fatalf("UpsertPushSubscription: %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestUpsertPushSubscription_CancelledContextFailsAtomically(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p", "a", "d", "k", 10); err == nil {
+	if _, err := database.UpsertPushSubscription(ctx, 1, nil, "https://push.example/a", "p", "a", "d", "k", 10); err == nil {
 		t.Fatal("want an error from an already-cancelled context")
 	}
 
@@ -191,7 +191,7 @@ func TestUpsertPushSubscription_InsertFailureIsReported(t *testing.T) {
 		t.Fatalf("creating the blocking trigger: %v", err)
 	}
 
-	if _, err := database.UpsertPushSubscription(ctx, 1, "insert-blocked", "p", "a", "d", "k", 10); err == nil {
+	if _, err := database.UpsertPushSubscription(ctx, 1, nil, "insert-blocked", "p", "a", "d", "k", 10); err == nil {
 		t.Fatal("want an error when the insert itself is blocked")
 	}
 	var n int
@@ -212,7 +212,7 @@ func TestUpsertPushSubscription_CommitFailureIsReported(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := database.UpsertPushSubscription(ctx, 999, "https://push.example/a", "p", "a", "d", "k", 10); err == nil {
+	if _, err := database.UpsertPushSubscription(ctx, 999, nil, "https://push.example/a", "p", "a", "d", "k", 10); err == nil {
 		t.Fatal("want an error when the deferred foreign key fails at commit")
 	}
 	var n int
@@ -258,7 +258,7 @@ func TestUpsertPushSubscription_RollbackOnFailingTrimDelete(t *testing.T) {
 	// keep=0: the trim tries to evict every row, including the brand new one
 	// this call writes and the 'middle' row (both delete cleanly) before it
 	// reaches 'blocked' (oldest, deleted last) and fails.
-	_, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/new", "p", "a", "d", "k", 0)
+	_, err := database.UpsertPushSubscription(ctx, 1, nil, "https://push.example/new", "p", "a", "d", "k", 0)
 	if err == nil {
 		t.Fatal("want an error when the trim's delete is blocked")
 	}
@@ -334,7 +334,7 @@ func TestDeletePushSubscription_ScopedAndReportsRows(t *testing.T) {
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
 	seedPushUser(t, database, 2)
-	id, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p", "a", "d", "k", 10)
+	id, err := database.UpsertPushSubscription(ctx, 1, nil, "https://push.example/a", "p", "a", "d", "k", 10)
 	mustDo(t, "UpsertPushSubscription", err)
 
 	if ok, err := database.DeletePushSubscription(ctx, 2, id); err != nil || ok {
@@ -410,10 +410,10 @@ func TestCountPushSubscriptions(t *testing.T) {
 	}
 	seedPushUser(t, database, 1)
 	seedPushUser(t, database, 2)
-	if _, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p", "a", "d", "k", 10); err != nil {
+	if _, err := database.UpsertPushSubscription(ctx, 1, nil, "https://push.example/a", "p", "a", "d", "k", 10); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.UpsertPushSubscription(ctx, 2, "https://push.example/b", "p", "a", "d", "k", 10); err != nil {
+	if _, err := database.UpsertPushSubscription(ctx, 2, nil, "https://push.example/b", "p", "a", "d", "k", 10); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := database.CountPushSubscriptions(ctx); err != nil || n != 2 {
@@ -464,14 +464,14 @@ func TestListPushSubscriptionsForDispatch_ScopesToTheGivenUsersAndKey(t *testing
 	seedPushUser(t, database, 2)
 	seedPushUser(t, database, 3)
 
-	idA, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p256-a", "auth-a", "d1", "key1", 10)
+	idA, err := database.UpsertPushSubscription(ctx, 1, nil, "https://push.example/a", "p256-a", "auth-a", "d1", "key1", 10)
 	mustDo(t, "UpsertPushSubscription", err)
-	if _, err := database.UpsertPushSubscription(ctx, 2, "https://push.example/b", "p256-b", "auth-b", "d2", "key1", 10); err != nil {
+	if _, err := database.UpsertPushSubscription(ctx, 2, nil, "https://push.example/b", "p256-b", "auth-b", "d2", "key1", 10); err != nil {
 		t.Fatal(err)
 	}
 	// user 3 is under the OLD key -- must not come back even though 3 is in
 	// the requested set.
-	if _, err := database.UpsertPushSubscription(ctx, 3, "https://push.example/c", "p256-c", "auth-c", "d3", "old-key", 10); err != nil {
+	if _, err := database.UpsertPushSubscription(ctx, 3, nil, "https://push.example/c", "p256-c", "auth-c", "d3", "old-key", 10); err != nil {
 		t.Fatal(err)
 	}
 
@@ -505,7 +505,7 @@ func TestDeletePushSubscriptionByID_UnscopedDeletesRegardlessOfOwner(t *testing.
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
-	id, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p", "a", "d", "k", 10)
+	id, err := database.UpsertPushSubscription(ctx, 1, nil, "https://push.example/a", "p", "a", "d", "k", 10)
 	mustDo(t, "UpsertPushSubscription", err)
 
 	ok, err := database.DeletePushSubscriptionByID(ctx, id)

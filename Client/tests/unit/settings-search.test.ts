@@ -176,6 +176,7 @@ describe("settings search", () => {
       settingsText("notifications.blockedReason"),
       settingsText("notifications.muted.empty"),
       settingsText("notifications.channelLevels.empty"),
+      settingsText("notifications.push.off"),
       settingsText("accessibility.syncOsMotion.asking"),
       settingsText("accessibility.syncOsMotion.notAsking"),
       settingsText("keybinds.pttModeOff"),
@@ -217,6 +218,11 @@ describe("settings search", () => {
         tab.click();
         if (name === "About") {
           await vi.waitFor(() => expect(container.querySelector(".about-tab")).not.toBeNull());
+        }
+        if (name === "Notifications" && _host === "Android app") {
+          await vi.waitFor(() =>
+            expect(container.querySelector("[data-testid=push-row]")).not.toBeNull(),
+          );
         }
         if (name === "Voice & Video" && _host === "desktop app") {
           await vi.waitFor(() =>

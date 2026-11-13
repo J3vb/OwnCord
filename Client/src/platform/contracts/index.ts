@@ -38,6 +38,7 @@ export type { AppAudio } from "./appAudio";
 export type { CallService } from "./callService";
 export type { MeteredNetwork } from "./meteredNetwork";
 export type { MobileAudio } from "./mobileAudio";
+export type { PushRegistration } from "./pushRegistration";
 export type { ServerScope } from "./serverScope";
 
 import type { HttpClient } from "./http";
@@ -73,6 +74,7 @@ import type { AppAudio } from "./appAudio";
 import type { CallService } from "./callService";
 import type { MeteredNetwork } from "./meteredNetwork";
 import type { MobileAudio } from "./mobileAudio";
+import type { PushRegistration } from "./pushRegistration";
 import type { ServerScope } from "./serverScope";
 import type { ShareSheet } from "./shareSheet";
 
@@ -112,6 +114,7 @@ export interface Platform {
   readonly callService: CallService;
   readonly meteredNetwork: MeteredNetwork;
   readonly mobileAudio: MobileAudio;
+  readonly pushRegistration: PushRegistration;
   readonly serverScope: ServerScope;
   readonly shareSheet: ShareSheet;
 }

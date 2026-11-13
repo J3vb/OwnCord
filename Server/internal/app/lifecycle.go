@@ -232,6 +232,11 @@ func (a *App) startHub() error {
 		rt.Services.Push.SetSubscriptionTTL(time.Duration(a.cfg.Push.SubscriptionTTLDays) * 24 * time.Hour)
 		rt.Services.Push.SetContact(a.cfg.Push.Contact)
 	}
+	// Phones can register while nothing is sent to them: say so once, since the
+	// owner sees only "push on" in the config.
+	if a.cfg.Push.Enabled && !a.cfg.Push.DispatchEnabled {
+		a.log.Warn("push: devices can register but push.dispatch_enabled is off, so no push notification is sent")
+	}
 	// Second opt-in on top of push.enabled, so an upgraded install does not acquire dispatch.
 	if pushDispatchEnabled(a.cfg) &&
 		rt.Services != nil && rt.Services.Messages != nil && rt.Services.Push != nil && rt.Services.Permissions != nil {

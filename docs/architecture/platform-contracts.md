@@ -102,9 +102,9 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 31    |
-| Distinct `invoke` command names called from `Client/src/`  | 120   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 123   |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 32    |
+| Distinct `invoke` command names called from `Client/src/`  | 124   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 127   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
@@ -137,6 +137,16 @@ alarm that wakes a sleeping phone. That alarm is not exact: Android may hold it
 back, longest while the phone is in Doze. The webview reads the idle time at each
 `look`, and once when it starts to listen, so nothing that happened before is
 lost. The delay goes out one command at a time, like the call audio commands.
+It also includes the four Android-only push registrations (`push.rs`:
+`push_status`, `push_choose`, `push_register` and `push_unregister`). The
+`owncord-push` plugin (`PushPlugin.kt`) registers each signed-in account with
+the user's UnifiedPush app (ntfy or another distributor; no Google service) and
+answers `push_register` once that app has sent the endpoint and keys. It
+delivers `resume`, `endpoint` and `unregistered` events through owned plugin
+listeners, to the newest follower only. A push that arrives while the app is
+closed is shown by `OwnCordPushService.kt` with no webview. The
+`PushRegistration` platform contract reports `supported: false` outside
+Android.
 It also includes the two Android-only registrations for a ringing call's
 notification (`call_service.rs`: `show_call_ring` and `clear_call_ring`),
 beside that file's `set_call_service`. The `owncord-call-service` plugin shows
@@ -152,13 +162,13 @@ and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
 files dragged in or copied from the file manager) behind
 `#[cfg(target_os = "linux")]` (`read_staged_file` also on Android, where it
 reads the files another app shared), so a default build (no `devtools`)
-registers 103 on Linux and 58 elsewhere, plus seventeen Android-only ones:
+registers 103 on Linux and 58 elsewhere, plus twenty-one Android-only ones:
 the three call service commands in `call_service.rs` (`set_call_service`,
 `show_call_ring`, `clear_call_ring`), `save_file`, `share_file`, `share_text`,
 `read_staged_file`, `take_shared` (`share_in.rs`, the share another app sent
 to OwnCord), the five notification commands in `android_notifications.rs`,
-the three call audio commands in `mobile_audio.rs` and `system_idle_follow`
-in `idle_android.rs`. The one environment-detection helper is
+the three call audio commands in `mobile_audio.rs`, `system_idle_follow`
+in `idle_android.rs` and the four push commands in `push.rs`. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -267,6 +277,10 @@ ptt_polling_supported
 ptt_set_key
 ptt_start
 ptt_stop
+push_choose
+push_register
+push_status
+push_unregister
 read_staged_file
 resume_saved_session
 save_credential

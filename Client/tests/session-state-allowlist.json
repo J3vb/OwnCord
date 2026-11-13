@@ -152,6 +152,12 @@
       "reason": "Lookup built from the bundled unicode catalog"
     },
     {
+      "file": "features/push/store.ts",
+      "binding": "pushStore",
+      "category": "reset-elsewhere",
+      "reason": "Phone push setting of the signed-in server; pushSubscription.ts sets it back to its initial state under the push:session reset, with the attempt it belongs to"
+    },
+    {
       "file": "lib/ui/animatedStill.ts",
       "binding": "stills",
       "category": "reset-elsewhere",

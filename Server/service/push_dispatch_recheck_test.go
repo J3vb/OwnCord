@@ -294,7 +294,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_CredentialRotated(t *testing.T) {
 			t.Error("a second attempt re-sent a request encrypted to the replaced credential")
 			return &safefetch.Response{StatusCode: 201}, nil
 		}
-		if _, err := f.database.UpsertPushSubscription(ctx, 2, endpoint,
+		if _, err := f.database.UpsertPushSubscription(ctx, 2, nil, endpoint,
 			replacement.p256dhB64, replacement.authB64, "d2", f.keyID, 10); err != nil {
 			t.Fatal(err)
 		}

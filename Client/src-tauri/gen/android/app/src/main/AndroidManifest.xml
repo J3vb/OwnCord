@@ -89,6 +89,16 @@
           android:stopWithTask="true"
           android:foregroundServiceType="microphone|camera" />
 
+        <!-- Push for a closed app, from the user's UnifiedPush app (ntfy or
+             another distributor): new endpoints and pushes (OwnCordPushService.kt). -->
+        <service
+          android:name=".OwnCordPushService"
+          android:exported="false">
+          <intent-filter>
+            <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
+          </intent-filter>
+        </service>
+
         <!-- The call notifications' buttons that act without opening the app:
              Mute, Unmute, Leave and Decline. -->
         <receiver

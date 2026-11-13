@@ -26,7 +26,7 @@ type PushSubscription struct {
 // would let a concurrent refresh revive a row a trim had chosen to evict, and a
 // cancellation between upsert and trim would leave more than keep rows. keep is
 // the per-user device cap; the newest keep rows by last_seen_at (ties by id) survive.
-func (d *DB) UpsertPushSubscription(ctx context.Context, userID int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error) {
+func (d *DB) UpsertPushSubscription(ctx context.Context, userID int64, sessionID *int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("UpsertPushSubscription begin: %w", err)
@@ -41,6 +41,7 @@ func (d *DB) UpsertPushSubscription(ctx context.Context, userID int64, endpoint,
 		Auth:       auth,
 		DeviceName: deviceName,
 		VapidKeyID: keyID,
+		SessionID:  sessionID,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("UpsertPushSubscription: %w", err)

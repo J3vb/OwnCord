@@ -469,6 +469,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"failed to delete expired sessions":                                                            "maintenance_expired_sessions_failed",
 	"failed to delete expired message delivery receipts":                                           "maintenance_delivery_receipts_failed",
 	"failed to clean up expired second-factor state":                                               "maintenance_second_factor_cleanup_failed",
+	"push: devices can register but push.dispatch_enabled is off, so no push notification is sent": "push_dispatch_disabled",
 	"push subscription sweep failed":                                                               "maintenance_push_subscriptions_failed",
 	"failed to delete orphaned attachments":                                                        "maintenance_orphaned_attachments_failed",
 	"orphaned voice mute reconciliation failed":                                                    "maintenance_voice_mute_reconciliation_failed",

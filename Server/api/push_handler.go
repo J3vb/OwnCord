@@ -151,6 +151,7 @@ func handleSubscribePush(push *service.PushService) http.HandlerFunc {
 			P256dh:     req.Keys.P256dh,
 			Auth:       req.Keys.Auth,
 			DeviceName: req.DeviceName,
+			SessionID:  subscribingSession(r),
 		})
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidSubscription) {
@@ -162,6 +163,17 @@ func handleSubscribePush(push *service.PushService) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusCreated, pushSubscribeResponse{ID: id})
 	}
+}
+
+// subscribingSession is the session a subscription is tied to, so ending the
+// session ends the pushes to that device; nil for an API-token principal.
+func subscribingSession(r *http.Request) *int64 {
+	sess, ok := r.Context().Value(SessionKey).(*db.Session)
+	if !ok || sess == nil {
+		return nil
+	}
+	id := sess.ID
+	return &id
 }
 
 func handleRevokePushSubscription(push *service.PushService) http.HandlerFunc {

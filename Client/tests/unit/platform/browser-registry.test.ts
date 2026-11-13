@@ -27,6 +27,7 @@ describe("browser platform registry", () => {
         "fileSaver",
         "gameDetector",
         "globalShortcuts",
+        "gpuAdapter",
         "http",
         "identity",
         "logFiles",
@@ -38,6 +39,7 @@ describe("browser platform registry", () => {
         "nativeVoice",
         "notifier",
         "pendingMessages",
+        "pushRegistration",
         "pushToTalk",
         "serverScope",
         "settings",
@@ -50,7 +52,6 @@ describe("browser platform registry", () => {
         "urlOpener",
         "window",
         "windowPrefs",
-        "gpuAdapter",
       ].sort(),
     );
   });

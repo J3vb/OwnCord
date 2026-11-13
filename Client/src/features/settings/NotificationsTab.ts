@@ -195,6 +195,17 @@ function buildSoundsVolumeRow(signal: AbortSignal): HTMLDivElement {
   return row;
 }
 
+/** The Android app's push row, under the permission row; it loads on demand. */
+function appendPushRow(after: HTMLElement, signal: AbortSignal): void {
+  if (!isAndroidApp()) return;
+  void import("../push/pushSettingRow").then(
+    (m) => {
+      if (!signal.aborted) after.after(m.buildPushRow(signal));
+    },
+    () => undefined,
+  );
+}
+
 export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
 
@@ -210,6 +221,7 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     blockedReason.hidden = !blocked;
   });
   section.appendChild(permissionRow);
+  appendPushRow(permissionRow, signal);
 
   section.appendChild(buildLevelRow(signal));
   const serverLevelRow = buildServerLevelRow(signal);
