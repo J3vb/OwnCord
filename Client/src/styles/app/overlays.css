@@ -1083,6 +1083,76 @@ body .toast-container.toast-container--under-dialog {
   }
 }
 
+/* Tile layout: a preview over each name, in a row that wraps. The checked
+   tile shows a ring and a check mark by its name, so colour is never the
+   only signal. */
+.radio-cards-tiles .radio-cards {
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: var(--space-3);
+}
+.radio-cards-tiles .radio-card {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+}
+.radio-cards-tiles .radio-card[aria-checked="true"] {
+  background: none;
+}
+.radio-card-preview {
+  display: block;
+  padding: 2px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+}
+.radio-cards-tiles .radio-card:hover .radio-card-preview {
+  border-color: var(--border-strong);
+}
+.radio-cards-tiles .radio-card[aria-checked="true"] .radio-card-preview {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.radio-cards-tiles .radio-card-text {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+.radio-cards-tiles .radio-card-label {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.radio-cards-tiles .radio-card[aria-checked="true"] .radio-card-label {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.radio-card-check {
+  display: none;
+  flex-shrink: 0;
+  color: var(--accent-text);
+}
+.radio-card[aria-checked="true"] .radio-card-check {
+  display: flex;
+}
+/* Two to a row on a phone, whatever width the names need. */
+@media (max-width: 600px) {
+  .radio-cards-tiles .radio-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .radio-cards-tiles .radio-card {
+    flex-wrap: nowrap;
+    padding: 0;
+  }
+  .radio-cards-tiles .radio-card-text {
+    order: 0;
+    flex-basis: auto;
+  }
+}
+
 /* A text field led by an icon (the create-channel name's type icon). */
 .input-with-icon {
   position: relative;

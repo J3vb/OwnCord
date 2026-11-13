@@ -4,14 +4,19 @@
 // card shows a filled dot as well as its accent border, so colour is never
 // the only signal. A narrow window shows the cards as names only, with the
 // checked card's description in one line under the group.
+//
+// The tile layout puts a drawn preview over each name instead of an icon and a
+// description; the checked tile shows a ring and a check mark by its name.
 import { appendChildren, createElement } from "../dom";
 import { createIcon, type IconName } from "../icons";
 
 export interface RadioCardOption<T extends string> {
   readonly value: T;
   readonly label: string;
-  readonly description: string;
-  readonly icon: IconName;
+  readonly description?: string;
+  readonly icon?: IconName;
+  /** A decorative picture of the choice, shown over the name (tile layout). */
+  readonly preview?: HTMLElement;
 }
 
 export interface RadioCardsOptions<T extends string> {
@@ -21,16 +26,20 @@ export interface RadioCardsOptions<T extends string> {
   /** data-testid of the group; each card is `<testId>-<value>`. */
   readonly testId: string;
   readonly options: readonly RadioCardOption<T>[];
-  readonly value: T;
+  /** The checked choice; null checks none, and the first card takes the tab stop. */
+  readonly value: T | null;
+  /** "tiles": previews in a wrapping row. Default: icon cards in two columns. */
+  readonly layout?: "cards" | "tiles";
   readonly onChange?: (value: T) => void;
 }
 
-export interface RadioCards<T extends string> {
+/** V is T when the group starts checked, and T | null when it may start empty. */
+export interface RadioCards<T extends string, V extends T | null = T> {
   /** The group with its description line; mount this. */
   readonly el: HTMLDivElement;
   /** The radiogroup itself. */
   readonly group: HTMLDivElement;
-  value(): T;
+  value(): V;
 }
 
 const NEXT_KEYS: ReadonlySet<string> = new Set(["ArrowRight", "ArrowDown"]);
@@ -58,21 +67,45 @@ function buildCard<T extends string>(
     "data-value": option.value,
     "data-testid": `${testId}-${option.value}`,
   });
-  const icon = createElement("span", { class: "radio-card-icon", "aria-hidden": "true" });
-  icon.appendChild(createIcon(option.icon, 20));
   const text = createElement("span", { class: "radio-card-text" });
-  appendChildren(
-    text,
-    createElement("span", { class: "radio-card-label" }, option.label),
-    createElement("span", { class: "radio-card-desc" }, option.description),
-  );
+  const label = createElement("span", { class: "radio-card-label" }, option.label);
+  if (option.preview !== undefined) {
+    // Tile: the picture, then the name led by a check mark when checked.
+    const preview = createElement("span", { class: "radio-card-preview", "aria-hidden": "true" });
+    const check = createElement("span", { class: "radio-card-check", "aria-hidden": "true" });
+    preview.appendChild(option.preview);
+    check.appendChild(createIcon("check", 14));
+    appendChildren(text, check, label);
+    appendChildren(card, preview, text);
+    return card;
+  }
+  if (option.icon !== undefined) {
+    const icon = createElement("span", { class: "radio-card-icon", "aria-hidden": "true" });
+    icon.appendChild(createIcon(option.icon, 20));
+    card.appendChild(icon);
+  }
+  text.appendChild(label);
+  if (option.description !== undefined) {
+    text.appendChild(createElement("span", { class: "radio-card-desc" }, option.description));
+  }
   const dot = createElement("span", { class: "radio-card-dot", "aria-hidden": "true" });
-  appendChildren(card, icon, text, dot);
+  appendChildren(card, text, dot);
   return card;
 }
 
-export function createRadioCards<T extends string>(opts: RadioCardsOptions<T>): RadioCards<T> {
-  const el = createElement("div", { class: "radio-cards-wrap" });
+export function createRadioCards<T extends string>(
+  opts: RadioCardsOptions<T> & { readonly value: T },
+): RadioCards<T>;
+export function createRadioCards<T extends string>(
+  opts: RadioCardsOptions<T>,
+): RadioCards<T, T | null>;
+export function createRadioCards<T extends string>(
+  opts: RadioCardsOptions<T>,
+): RadioCards<T, T | null> {
+  const tiles = opts.layout === "tiles";
+  const el = createElement("div", {
+    class: tiles ? "radio-cards-wrap radio-cards-tiles" : "radio-cards-wrap",
+  });
   const group = createElement("div", {
     class: "radio-cards",
     role: "radiogroup",
@@ -82,16 +115,21 @@ export function createRadioCards<T extends string>(opts: RadioCardsOptions<T>): 
   // Each card already carries its description for assistive tech.
   const hint = createElement("div", { class: "radio-cards-hint", "aria-hidden": "true" });
   const cards = opts.options.map((option) => buildCard(option, opts.testId));
-  const fallback = opts.options[0]?.value ?? opts.value;
-  let current: T = opts.options.some((o) => o.value === opts.value) ? opts.value : fallback;
+  const known = opts.options.some((o) => o.value === opts.value);
+  // An unknown value falls back to the first card, as before; null stays empty.
+  let current: T | null =
+    known || opts.value === null ? opts.value : (opts.options[0]?.value ?? opts.value);
 
   const paint = (): void => {
     opts.options.forEach((option, i) => {
       const on = option.value === current;
       cards[i]?.setAttribute("aria-checked", String(on));
-      cards[i]?.setAttribute("tabindex", on ? "0" : "-1");
+      // With nothing checked, the first card is the way in.
+      const stop = on || (current === null && i === 0);
+      cards[i]?.setAttribute("tabindex", stop ? "0" : "-1");
     });
-    group.setAttribute("data-value", current);
+    if (current === null) group.removeAttribute("data-value");
+    else group.setAttribute("data-value", current);
     hint.textContent = opts.options.find((o) => o.value === current)?.description ?? "";
   };
   const choose = (index: number): void => {
@@ -100,7 +138,7 @@ export function createRadioCards<T extends string>(opts: RadioCardsOptions<T>): 
     const changed = option.value !== current;
     current = option.value;
     paint();
-    if (changed) opts.onChange?.(current);
+    if (changed) opts.onChange?.(option.value);
   };
 
   cards.forEach((card, i) => {
@@ -121,7 +159,9 @@ export function createRadioCards<T extends string>(opts: RadioCardsOptions<T>): 
       if (e.altKey || e.ctrlKey || e.metaKey) return;
       const from = cards.findIndex((card) => card === e.target);
       if (from === -1) return;
-      const to = keyTarget(e.key, from, cards.length);
+      // Enter and Space check the focused card, which matters when nothing
+      // is checked yet and focus sits on an unchecked one.
+      const to = e.key === "Enter" || e.key === " " ? from : keyTarget(e.key, from, cards.length);
       if (to === null) return;
       e.preventDefault();
       choose(to);
@@ -131,7 +171,9 @@ export function createRadioCards<T extends string>(opts: RadioCardsOptions<T>): 
   );
 
   appendChildren(group, ...cards);
-  appendChildren(el, group, hint);
+  // Only a group whose cards describe themselves has a description line.
+  if (opts.options.some((o) => o.description !== undefined)) appendChildren(el, group, hint);
+  else el.appendChild(group);
   paint();
   return { el, group, value: () => current };
 }

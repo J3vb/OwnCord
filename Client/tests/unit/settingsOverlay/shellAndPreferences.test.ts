@@ -420,14 +420,14 @@ describe("SettingsOverlay", () => {
 
     getTab(container, 1).click();
 
-    const themeOptions = container.querySelectorAll(".theme-opt");
-    // Four palettes plus Sync with computer.
+    const themeOptions = container.querySelectorAll(".theme-tiles [role='radio']");
+    // Four palettes plus Match my computer.
     expect(themeOptions.length).toBe(5);
 
     const midnight = themeOptions[2] as HTMLElement;
     midnight.click();
 
-    expect(midnight.classList.contains("active")).toBe(true);
+    expect(midnight.getAttribute("aria-checked")).toBe("true");
     expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#1a1a2e");
     // Theme persists only via themes.ts (owncord:theme:active), not via savePref
     expect(localStorage.getItem("owncord:theme:active")).toBe("midnight");

@@ -1113,61 +1113,68 @@ details.disclose[open] > summary .icon {
 .settings-sidebar-version.solo {
   margin-top: auto;
 }
-.theme-options {
+/* Theme tiles (Appearance): each previews its own theme whatever theme is
+   active; the colours are set inline from THEMES (settings/themePreview.ts). */
+.theme-preview,
+.theme-preview-split {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 8px;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: calc(var(--radius-md) - 2px);
 }
-.theme-opt {
-  width: 80px;
-  height: 56px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  border: 2px solid transparent;
+.theme-preview {
+  background: var(--pv-bg);
+}
+.theme-preview-split > .theme-preview {
+  position: absolute;
+  inset: 0;
+}
+/* Match my computer: the light theme over the right half of the dark one. */
+.theme-preview-split > .theme-preview-half {
+  clip-path: inset(0 0 0 50%);
+}
+.theme-preview-side {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  transition: all 0.15s;
+  flex: 0 0 32%;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8% 6%;
+  background: var(--pv-surface);
 }
-.theme-opt:hover {
-  border-color: var(--border-strong);
+.theme-preview-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8%;
 }
-.theme-opt.active {
-  border-color: var(--accent);
+.theme-preview .pv-line {
+  height: 3px;
+  width: 80%;
+  border-radius: 2px;
+  background: var(--pv-text);
+  opacity: 0.55;
 }
-/* Each tile previews its own theme whatever theme is active, so these are
-   that theme's surface and text colours, not tokens (THEMES in helpers.ts). */
-.theme-opt.dark {
-  background: #313338;
-  color: #f2f3f5;
+.theme-preview .pv-line + .pv-line {
+  width: 60%;
 }
-.theme-opt.neon-glow {
-  background: #17181b;
-  color: #f4f5f7;
+.theme-preview .pv-accent {
+  opacity: 1;
+  background: var(--pv-accent);
 }
-.theme-opt.light {
-  background: #f2f3f5;
-  color: #2a2c31;
+.theme-preview .pv-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pv-accent);
 }
-.theme-opt.midnight {
-  background: #1a1a2e;
-  color: #f4f5fa;
-}
-/* Sync with computer: both previews on one tile, the label outlined so it
-   reads on either half. */
-.theme-opt.system {
-  width: auto;
-  min-width: 80px;
-  padding: 0 10px;
-  text-align: center;
-  background: linear-gradient(135deg, #313338 50%, #f2f3f5 50%);
-  color: #fff;
-  text-shadow:
-    0 0 2px #000,
-    0 0 4px #000;
+.theme-preview .pv-input {
+  height: 14%;
+  margin-top: auto;
+  border-radius: 2px;
+  background: var(--pv-deep);
 }
 /* Custom themes (Appearance) */
 .custom-theme-list {

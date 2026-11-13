@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { buildAppearanceTab } from "../../src/features/settings/AppearanceTab";
 import { refreshTimeFormat, refreshDateFormat, getDateFormat } from "@lib/text/timeFormat";
+import {
+  saveCustomThemes,
+  setActiveCustomTheme,
+} from "../../src/features/custom-themes/customTheme";
 
 const { mockGetActiveThemeName, mockRestoreTheme } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
@@ -45,8 +49,8 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const tiles = container.querySelectorAll(".theme-opt");
-    // Four palettes plus Sync with computer.
+    const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
+    // Four palettes plus Match my computer.
     expect(tiles.length).toBe(5);
 
     for (const tile of tiles) {
@@ -58,7 +62,7 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const themeRow = container.querySelector(".theme-options");
+    const themeRow = container.querySelector(".theme-tiles");
     expect(themeRow?.getAttribute("role")).toBe("radiogroup");
   });
 
@@ -66,7 +70,7 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    for (const group of [".theme-options", ".accent-swatches"]) {
+    for (const group of [".theme-tiles", ".accent-swatches"]) {
       const row = container.querySelector(group)!;
       // Exactly one cell in the group is tabbable.
       expect(row.querySelectorAll("[role='radio'][tabindex='0']").length).toBe(1);
@@ -88,14 +92,14 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const tiles = container.querySelectorAll(".theme-opt");
+    const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
     for (const tile of tiles) {
       expect(tile.getAttribute("role")).toBe("radio");
       expect(["true", "false"]).toContain(tile.getAttribute("aria-checked"));
     }
 
     // Active tile should have aria-checked=true
-    const active = container.querySelector(".theme-opt.active");
+    const active = container.querySelector(".theme-tiles [aria-checked='true']");
     expect(active?.getAttribute("aria-checked")).toBe("true");
   });
 
@@ -103,12 +107,12 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const tiles = container.querySelectorAll(".theme-opt");
+    const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
     const midnight = tiles[2] as HTMLElement;
 
     midnight.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
-    expect(midnight.classList.contains("active")).toBe(true);
+    expect(midnight.getAttribute("aria-checked")).toBe("true");
     expect(midnight.getAttribute("aria-checked")).toBe("true");
   });
 
@@ -116,12 +120,12 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const tiles = container.querySelectorAll(".theme-opt");
+    const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
     const dark = tiles[0] as HTMLElement;
 
     dark.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
 
-    expect(dark.classList.contains("active")).toBe(true);
+    expect(dark.getAttribute("aria-checked")).toBe("true");
   });
 
   it("uses a real preset for the default accent state", () => {
@@ -154,7 +158,7 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const tiles = container.querySelectorAll(".theme-opt");
+    const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
     const dark = tiles[0] as HTMLElement;
     const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
 
@@ -176,7 +180,7 @@ describe("AppearanceTab — Accessibility", () => {
     (swatches[1] as HTMLElement).click(); // #57f287
     expect(document.body.style.getPropertyValue("--accent")).toBe("#57f287");
 
-    const tiles = container.querySelectorAll(".theme-opt");
+    const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
     (tiles[0] as HTMLElement).click(); // switch to "dark"
 
     expect(document.body.style.getPropertyValue("--accent")).toBe("#57f287");
@@ -189,9 +193,148 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const activeTile = container.querySelector(".theme-opt.active");
+    const activeTile = container.querySelector(".theme-tiles [aria-checked='true']");
     expect(activeTile).toBeNull();
     expect(mockRestoreTheme).toHaveBeenCalledTimes(1);
+  });
+
+  // --- Theme preview tiles ---
+
+  const checkedTiles = (): HTMLElement[] =>
+    Array.from(container.querySelectorAll<HTMLElement>(".theme-tiles [aria-checked='true']"));
+
+  it("is one radiogroup named by the Theme heading, each tile named by its theme", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const group = container.querySelector<HTMLElement>(".theme-tiles")!;
+    const heading = document.getElementById(group.getAttribute("aria-labelledby")!);
+    expect(heading?.textContent).toBe("Theme");
+    expect(heading?.tagName).toBe("H2");
+    const names = Array.from(group.querySelectorAll("[role='radio']")).map((tile) =>
+      tile.textContent?.trim(),
+    );
+    expect(names).toEqual(["Dark", "Neon glow", "Midnight", "Light", "Match my computer"]);
+    // The preview is a picture only: the tile's name is its label text.
+    for (const preview of group.querySelectorAll(".radio-card-preview")) {
+      expect(preview.getAttribute("aria-hidden")).toBe("true");
+    }
+  });
+
+  it("draws each preview from its theme's own colours, the system one half light, half dark", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const light = container.querySelector<HTMLElement>(
+      "[data-testid='theme-light'] .theme-preview",
+    )!;
+    expect(light.style.getPropertyValue("--pv-bg")).toBe("#ffffff");
+    expect(light.style.getPropertyValue("--pv-text")).toBe("#2a2c31");
+    const neon = container.querySelector<HTMLElement>(
+      "[data-testid='theme-neon-glow'] .theme-preview",
+    )!;
+    expect(neon.style.getPropertyValue("--pv-accent")).toBe("#00c8ff");
+    const split = container.querySelector("[data-testid='theme-system'] .theme-preview-split")!;
+    const halves = split.querySelectorAll<HTMLElement>(":scope > .theme-preview");
+    expect(Array.from(halves, (h) => h.style.getPropertyValue("--pv-bg"))).toEqual([
+      "#313338",
+      "#ffffff",
+    ]);
+    expect(halves[1]?.classList.contains("theme-preview-half")).toBe(true);
+  });
+
+  it("checks the tile of the stored theme and makes it the only tab stop", () => {
+    mockGetActiveThemeName.mockReturnValue("midnight");
+    container.appendChild(buildAppearanceTab(ac.signal));
+    expect(checkedTiles().map((tile) => tile.dataset.value)).toEqual(["midnight"]);
+    const stops = container.querySelectorAll<HTMLElement>(".theme-tiles [tabindex='0']");
+    expect(Array.from(stops, (tile) => tile.dataset.value)).toEqual(["midnight"]);
+  });
+
+  it("arrow keys move the check, wrap at the ends and apply the theme at once", () => {
+    mockGetActiveThemeName.mockReturnValue("dark");
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const dark = container.querySelector<HTMLElement>("[data-testid='theme-dark']")!;
+    dark.focus();
+    dark.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const neon = container.querySelector<HTMLElement>("[data-testid='theme-neon-glow']")!;
+    expect(document.activeElement).toBe(neon);
+    expect(checkedTiles()).toEqual([neon]);
+    expect(localStorage.getItem("owncord:theme:active")).toBe("neon-glow");
+    expect(document.body.classList.contains("theme-neon-glow")).toBe(true);
+
+    neon.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    dark.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    const system = container.querySelector<HTMLElement>("[data-testid='theme-system']")!;
+    expect(document.activeElement).toBe(system);
+    expect(checkedTiles()).toEqual([system]);
+    expect(localStorage.getItem("owncord:theme:active")).toBe("system");
+  });
+
+  it("keeps exactly one tile checked, the theme under it, while a custom theme is on", () => {
+    mockGetActiveThemeName.mockReturnValue("light");
+    expect(
+      saveCustomThemes([{ id: "c1", name: "Sunrise", css: ":root { --accent: #f80; }" }]),
+    ).toBe(true);
+    expect(setActiveCustomTheme("c1")).toBe(true);
+    container.appendChild(buildAppearanceTab(ac.signal));
+
+    expect(checkedTiles().map((tile) => tile.dataset.value)).toEqual(["light"]);
+    expect(container.querySelector(".custom-theme-row.active")).not.toBeNull();
+
+    // Picking another tile moves the one check and leaves the custom theme on.
+    container.querySelector<HTMLElement>("[data-testid='theme-midnight']")!.click();
+    expect(checkedTiles().map((tile) => tile.dataset.value)).toEqual(["midnight"]);
+    expect(localStorage.getItem("owncord:theme:custom:active")).toBe("c1");
+    setActiveCustomTheme(null);
+  });
+
+  it("orders the page Theme, Accent color, Text & size, then Layout, date & time", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const headings = Array.from(container.querySelectorAll(".settings-section-label"), (h) =>
+      h.textContent?.trim(),
+    );
+    expect(headings.slice(0, 4)).toEqual([
+      "Theme",
+      "Accent color",
+      "Text & size",
+      "Layout, date & time",
+    ]);
+    // The heading names the section, so no row inside repeats it.
+    const rowLabels = Array.from(container.querySelectorAll(".setting-label"), (l) =>
+      l.textContent?.trim(),
+    );
+    expect(rowLabels).not.toContain("Theme");
+    expect(rowLabels).not.toContain("Accent color");
+    const swatches = container.querySelector<HTMLElement>(".accent-swatches")!;
+    expect(swatches.getAttribute("role")).toBe("radiogroup");
+    expect(document.getElementById(swatches.getAttribute("aria-labelledby")!)?.textContent).toBe(
+      "Accent color",
+    );
+  });
+
+  it("moves the accent tab stop with the check after a theme switch and a custom hex", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const stops = (): string[] =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(".accent-swatch[tabindex='0']"),
+        (s) => s.title,
+      );
+    const checked = (): string[] =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(".accent-swatch[aria-checked='true']"),
+        (s) => s.title,
+      );
+    expect(stops()).toEqual(["#00c8ff"]);
+
+    // Dark's default accent is blurple, so the check and the tab stop move to it.
+    container.querySelector<HTMLElement>("[data-testid='theme-dark']")!.click();
+    expect(checked()).toEqual(["#5865f2"]);
+    expect(stops()).toEqual(["#5865f2"]);
+
+    // A colour no swatch has checks none; the first swatch is the way in.
+    const hexInput = container.querySelector<HTMLInputElement>(".accent-hex-row input")!;
+    hexInput.value = "123456";
+    hexInput.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(checked()).toEqual([]);
+    const first = container.querySelector<HTMLElement>(".accent-swatch")!;
+    expect(stops()).toEqual([first.title]);
   });
 
   it("does not inject an accent override when no accent has been saved", () => {
@@ -338,17 +481,17 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const tiles = container.querySelectorAll(".theme-opt");
+    const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
     const midnight = tiles[2] as HTMLElement;
 
     midnight.click();
 
     for (const tile of tiles) {
       if (tile === midnight) {
-        expect(tile.classList.contains("active")).toBe(true);
+        expect(tile.getAttribute("aria-checked")).toBe("true");
         expect(tile.getAttribute("aria-checked")).toBe("true");
       } else {
-        expect(tile.classList.contains("active")).toBe(false);
+        expect(tile.getAttribute("aria-checked")).toBe("false");
         expect(tile.getAttribute("aria-checked")).toBe("false");
       }
     }
@@ -361,7 +504,7 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const tiles = container.querySelectorAll(".theme-opt");
+    const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
     const dark = tiles[0] as HTMLElement;
 
     dark.click();
@@ -388,7 +531,7 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const tiles = container.querySelectorAll(".theme-opt");
+    const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
     const light = tiles[3] as HTMLElement;
 
     light.click();
@@ -616,10 +759,10 @@ describe("AppearanceTab - system theme", () => {
     }));
   });
 
-  it("adds a Sync with computer tile that stores the system choice", () => {
+  it("adds a Match my computer tile that stores the system choice", () => {
     container.appendChild(buildAppearanceTab(ac.signal));
-    const tile = container.querySelector<HTMLElement>(".theme-opt.system")!;
-    expect(tile.textContent).toBe("Sync with computer");
+    const tile = container.querySelector<HTMLElement>("[data-testid='theme-system']")!;
+    expect(tile.textContent).toBe("Match my computer");
     tile.click();
     expect(localStorage.getItem("owncord:theme:active")).toBe("system");
     expect(tile.getAttribute("aria-checked")).toBe("true");
@@ -629,7 +772,9 @@ describe("AppearanceTab - system theme", () => {
   it("marks the system tile active when system is the stored choice", () => {
     mockGetActiveThemeName.mockReturnValue("system");
     container.appendChild(buildAppearanceTab(ac.signal));
-    expect(container.querySelector(".theme-opt.active")?.classList.contains("system")).toBe(true);
+    expect(
+      container.querySelector(".theme-tiles [aria-checked='true']")?.getAttribute("data-value"),
+    ).toBe("system");
   });
 
   it("refreshes the default accent when the OS flips light/dark under system", () => {

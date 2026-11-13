@@ -34,13 +34,13 @@ test.describe("Theme Persistence (Native)", () => {
   });
 
   test("theme options are visible in Appearance tab", async ({ nativePage }) => {
-    const themeOptions = nativePage.locator(".theme-opt");
+    const themeOptions = nativePage.locator(".theme-tiles [role='radio']");
     const count = await themeOptions.count();
     expect(count).toBeGreaterThanOrEqual(2);
   });
 
   test("switching theme changes body class", async ({ nativePage }) => {
-    const themeOptions = nativePage.locator(".theme-opt");
+    const themeOptions = nativePage.locator(".theme-tiles [role='radio']");
     const count = await themeOptions.count();
     expect(count).toBeGreaterThanOrEqual(2);
 
@@ -51,7 +51,7 @@ test.describe("Theme Persistence (Native)", () => {
 
     // Find and click an inactive theme
     for (let i = 0; i < count; i++) {
-      const isActive = await themeOptions.nth(i).evaluate((el) => el.classList.contains("active"));
+      const isActive = (await themeOptions.nth(i).getAttribute("aria-checked")) === "true";
       if (!isActive) {
         await themeOptions.nth(i).click();
         break;
@@ -102,7 +102,7 @@ test.describe("Theme Persistence (Native)", () => {
   });
 
   test("theme persists after navigating away and back", async ({ nativePage }) => {
-    const themeOptions = nativePage.locator(".theme-opt");
+    const themeOptions = nativePage.locator(".theme-tiles [role='radio']");
     const count = await themeOptions.count();
     expect(count).toBeGreaterThanOrEqual(2);
 
