@@ -220,10 +220,10 @@ test.describe("Message Request decisions (real server)", () => {
       await expect(
         bob.locator(".msg-text", { hasText: "still here after your reconnect" }),
       ).toHaveCount(1);
-      // No pending request left: Home's "Message Requests" row shows no count.
+      // No pending request left: Home's "Message requests" row shows no count.
       await bob.getByTestId("server-rail-home").click();
       await expect(bob.locator(".dm-sidebar-header")).toBeVisible();
-      await expect(bob.locator("[data-testid='dm-requests-entry']")).toHaveText("Message Requests");
+      await expect(bob.locator("[data-testid='dm-requests-entry']")).toHaveText("Message requests");
       expect(await server.api("/api/v1/dm-requests", undefined, other)).toEqual({ requests: [] });
     } finally {
       alice.close();
