@@ -1,15 +1,18 @@
 /**
  * Voice UI sounds: a short chime on join/leave — yours and another
- * member's in your channel — and on mute/unmute and deafen/undeafen.
+ * member's in your channel — and on mute/unmute and deafen/undeafen, your
+ * connection dropping and coming back, and (off by default) a tick as
+ * push-to-talk opens and closes your mic (`connectionSounds.ts`).
  *
  * The sounds themselves and their shared output device live in
  * `lib/media/notificationSound.ts`; this module only decides *when* they play. It
  * subscribes to voiceStore directly (a page-local UI reader, like the ringing
  * handler in MainPage), which is allowed as long as it never writes a store.
  *
- * Two edges are deliberately excluded:
- *  - push-to-talk: `pttGated` is never read, so a PTT press/release makes no
- *    sound;
+ * Push-to-talk ticks only for a press or release in a connected session:
+ * the gate closing as a call starts or as the input mode changes is silent.
+ *
+ * One edge is deliberately excluded:
  *  - the wholesale roster replacement (`setVoiceStates`) that the initial
  *    `ready` and a full reconnect resync use: instead of watching the roster
  *    maps, this reads `getVoiceRosterRevision`, which only the incremental
@@ -37,6 +40,7 @@ import { loadUserStatus } from "@lib/presence/userStatus";
 import { playVoiceSound, type VoiceSound } from "@lib/media/notificationSound";
 import { soundSwitchOn, type SoundSwitch } from "@lib/prefs/soundPrefs";
 import { takeVoiceMoved, isVoiceMovePending } from "./moveHint";
+import { createConnectionSounds, createPttTicks } from "./connectionSounds";
 
 /** Snapshot of the fields an edge is measured on. */
 interface SoundState {
@@ -53,6 +57,8 @@ interface SoundState {
   readonly viewers: ReadonlySet<number>;
   readonly localMuted: boolean;
   readonly localDeafened: boolean;
+  readonly pttGated: boolean;
+  readonly switching: boolean;
 }
 
 function snapshot(channelId: number | null): SoundState {
@@ -75,6 +81,8 @@ function snapshot(channelId: number | null): SoundState {
     viewers: new Set(channelId === null || self === 0 ? [] : streamViewers(self, false, s)),
     localMuted: s.localMuted,
     localDeafened: s.localDeafened,
+    pttGated: s.pttGated === true,
+    switching: (s.switchingTo ?? null) !== null,
   };
 }
 
@@ -108,12 +116,25 @@ const SOUND_SWITCH: Readonly<Record<VoiceSound, SoundSwitch>> = {
   streamEnd: "stream",
   viewerJoin: "stream",
   viewerLeave: "stream",
+  connectionLost: "connection",
+  pttOn: "ptt",
+  pttOff: "ptt",
 };
 
-/** Play `kind` unless its own switch is off. Callers have already passed the
- *  `voiceSounds` group switch and Do Not Disturb (`canPlay`). */
-function play(kind: VoiceSound): void {
-  if (soundSwitchOn(SOUND_SWITCH[kind])) playVoiceSound(kind);
+/** Play `kind` unless its own switch is off, and say whether it played.
+ *  Callers have already passed the `voiceSounds` group switch and Do Not
+ *  Disturb (`canPlay`). */
+function play(kind: VoiceSound): boolean {
+  if (!soundSwitchOn(SOUND_SWITCH[kind])) return false;
+  playVoiceSound(kind);
+  return true;
+}
+
+/** The connection lost sound, its gates read when its grace time ends. */
+function playLost(): boolean {
+  if (!authStore.getState().isAuthenticated || !canPlay()) return false;
+  if (voiceStore.getState().localDeafened) return false;
+  return play("connectionLost");
 }
 
 /**
@@ -185,6 +206,8 @@ export function startVoiceUiSounds(): () => void {
 
   /** Until when viewer changes are a join's re-sync, not people coming and going. */
   let quietUntil = 0;
+  const link = createConnectionSounds(playLost);
+  const pttTick = createPttTicks();
   let leaveTimer: ReturnType<typeof setTimeout> | null = null;
   const cancelLeave = (): void => {
     if (leaveTimer !== null) clearTimeout(leaveTimer);
@@ -247,11 +270,16 @@ export function startVoiceUiSounds(): () => void {
     if (!authStore.getState().isAuthenticated) {
       announced = null;
       cancelLeave();
+      link.cancel();
       takeVoiceMoved(null);
       return;
     }
 
     const self = selfEdge(next);
+    // Both track every update, gated or not; what they return plays below.
+    const back = link.update(prev, next);
+    const tick = pttTick(prev, next);
+    const linkEdge = back ?? tick;
     // The server re-sends the room's watch sets on a join: not viewer edges.
     if (self === "join" || self === "moved") quietUntil = Date.now() + VIEWER_SYNC_QUIET_MS;
 
@@ -264,7 +292,8 @@ export function startVoiceUiSounds(): () => void {
     // While deafened, nothing else plays (only the ringtone is exempt).
     if (next.localDeafened || !canPlay()) return;
 
-    playEdge(next, self);
+    if (linkEdge !== null) play(linkEdge);
+    else playEdge(next, self);
   };
 
   const unsubscribe = voiceStore.subscribe((state) => {
@@ -275,6 +304,7 @@ export function startVoiceUiSounds(): () => void {
   return () => {
     unsubscribe();
     cancelLeave();
+    link.cancel();
     takeVoiceMoved(null);
   };
 }

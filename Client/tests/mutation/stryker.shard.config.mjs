@@ -42,6 +42,7 @@ export const shards = {
   "livekit-3": [
     "src/features/voice/autoPlayCameras.ts",
     "src/features/voice/backgroundCamera.ts",
+    "src/features/voice/connectionSounds.ts",
     "src/features/voice/mobileRoutes.ts",
     "src/features/voice/native/devices.ts",
     "src/features/voice/native/nativeRoomModel.ts",

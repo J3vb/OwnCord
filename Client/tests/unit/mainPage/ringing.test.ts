@@ -16,6 +16,7 @@ import {
   startRingChime,
   startRingback,
   stopRingback,
+  playCallEnded,
 } from "../../../src/lib/media/notificationSound";
 import {
   alertIncomingCall,
@@ -421,9 +422,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(stopRingback).not.toHaveBeenCalled();
     expect(panel.dataset.state).toBe("outgoing");
 
+    vi.mocked(playCallEnded).mockClear();
     ws.emit("error", refusal, "ring-id");
 
     expect(stopRingback).toHaveBeenCalledTimes(1);
+    expect(playCallEnded).not.toHaveBeenCalled();
     expect(panel.dataset.state).not.toBe("outgoing");
     expect(panel.dataset.state).not.toBe("unanswered");
     m.page.destroy?.();
@@ -494,9 +497,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
     channelsStore.flush();
 
+    vi.mocked(playCallEnded).mockClear();
     callDeclined(ws);
 
     expect(stopRingback).toHaveBeenCalledTimes(1);
+    expect(playCallEnded).toHaveBeenCalledTimes(1);
     const toasts = m.container.querySelectorAll('[data-testid="toast"]');
     expect(toasts).toHaveLength(1);
     expect(toasts[0]!.textContent).toContain("bob declined");
