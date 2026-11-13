@@ -10,6 +10,7 @@ import { createStatusRow, createRevealToggle, setStatusIcon, createDisclosure } 
 import { accountText as t } from "../../i18n/account";
 import { buildSessionRow, buildApiTokensBlock } from "./AccountDevices";
 import { createLogger } from "@lib/logger";
+import { buildSettingsSection } from "./settingsSection";
 
 const log = createLogger("AccountTab");
 
@@ -30,8 +31,8 @@ const STATUS_OPTIONS: readonly { readonly value: UserStatus; readonly label: str
 export function buildStatusSelector(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
-): HTMLDivElement {
-  const wrapper = createElement("div", {});
+): HTMLElement {
+  const { el, card } = buildSettingsSection({ label: t("status.sectionTitle") });
   const row = createElement("div", { class: "setting-row" });
   const info = createElement("div", {});
   appendChildren(
@@ -62,12 +63,8 @@ export function buildStatusSelector(
     { signal },
   );
   appendChildren(row, info, select);
-  appendChildren(
-    wrapper,
-    createElement("div", { class: "settings-section-title" }, t("status.sectionTitle")),
-    row,
-  );
-  return wrapper;
+  card.appendChild(row);
+  return el;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,15 +226,15 @@ export function buildSessionsSection(
 // ---------------------------------------------------------------------------
 
 /** The server-default retention window, when the server reported one. */
-export function buildRetentionSection(notice: string): HTMLDivElement {
-  const wrapper = createElement("div", { "data-testid": "account-retention" });
-  appendChildren(
-    wrapper,
-    createElement("div", { class: "settings-separator" }),
-    createElement("div", { class: "settings-section-title" }, t("retention.sectionTitle")),
+export function buildRetentionSection(notice: string): HTMLElement {
+  const { el, card } = buildSettingsSection({
+    label: t("retention.sectionTitle"),
+    attrs: { "data-testid": "account-retention" },
+  });
+  card.appendChild(
     createElement("div", { style: "color:var(--text-muted);font-size:13px" }, notice),
   );
-  return wrapper;
+  return el;
 }
 
 // ---------------------------------------------------------------------------

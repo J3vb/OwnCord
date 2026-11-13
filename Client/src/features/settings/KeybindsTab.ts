@@ -14,6 +14,7 @@ import { inputMode } from "@lib/ui/inputMode";
 import { loadGlobalShortcutVks, type GlobalShortcutAction } from "@lib/voice/voiceShortcuts";
 import { settingsText as t } from "../../i18n/settings";
 import { buildPttControls } from "./pttControls";
+import { buildSettingsSection } from "./settingsSection";
 import {
   KEYBIND_GROUPS,
   UNBOUND_BY_DEFAULT_ROWS,
@@ -38,6 +39,10 @@ function groupRows(
 
 export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
+  const voice = buildSettingsSection({ label: t("keybinds.voiceInput") });
+  const nav = buildSettingsSection({ label: t("keybinds.navigation") });
+  const comm = buildSettingsSection({ label: t("keybinds.communication") });
+  const msg = buildSettingsSection({ label: t("keybinds.messages") });
 
   // Every rebindable row, so "Reset all" can redraw them.
   const captures: ComboCapture[] = [];
@@ -51,10 +56,10 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     return capture.element;
   };
   /** A group's catalog rows: fixed ones as text, rebindable ones as captures. */
-  const appendGroupRows = (id: KeybindGroupId): void => {
+  const appendGroupRows = (id: KeybindGroupId, card: HTMLElement): void => {
     for (const { label, combo, action } of groupRows(id)) {
       if (action !== null) {
-        section.appendChild(captureRow(action, label));
+        card.appendChild(captureRow(action, label));
         continue;
       }
       const row = createElement("div", { class: "keybind-row" });
@@ -63,14 +68,15 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
         createElement("span", { class: "setting-label" }, label),
         createElement("span", { class: "kbd" }, combo),
       );
-      section.appendChild(row);
+      card.appendChild(row);
     }
   };
 
   // ── Push to Talk ──────────────────────────────────────────
-  section.append(...buildPttControls(signal));
+  section.appendChild(voice.el);
+  voice.card.append(...buildPttControls(signal));
   if (inputMode() !== "ptt") {
-    section.appendChild(
+    voice.card.appendChild(
       createElement(
         "div",
         { class: "setting-desc", "data-testid": "ptt-mode-note" },
@@ -80,30 +86,11 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   }
 
   // ── Navigation section ────────────────────────────────────
-  section.appendChild(createElement("div", { class: "settings-separator" }));
-
-  const navHeader = createElement(
-    "div",
-    {
-      class: "keybind-section-header",
-    },
-    t("keybinds.navigation"),
-  );
-  section.appendChild(navHeader);
-
-  appendGroupRows("navigation");
+  section.appendChild(nav.el);
+  appendGroupRows("navigation", nav.card);
 
   // ── Communication section ──────────────────────────────────
-  section.appendChild(createElement("div", { class: "settings-separator" }));
-
-  const commHeader = createElement(
-    "div",
-    {
-      class: "keybind-section-header",
-    },
-    t("keybinds.communication"),
-  );
-  section.appendChild(commHeader);
+  section.appendChild(comm.el);
 
   // In-app mute and deafen fire on the global shortcut's own binding, so
   // these rows show it and follow a rebind below.
@@ -124,16 +111,16 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       ),
       kbd,
     );
-    section.appendChild(row);
+    comm.card.appendChild(row);
   }
-  appendGroupRows("communication");
+  appendGroupRows("communication", comm.card);
   for (const extra of UNBOUND_BY_DEFAULT_ROWS) {
     if (extra.group === "communication") {
-      section.appendChild(captureRow(extra.rebindable, t(extra.action)));
+      comm.card.appendChild(captureRow(extra.rebindable, t(extra.action)));
     }
   }
 
-  section.appendChild(
+  comm.card.appendChild(
     createElement(
       "div",
       {
@@ -142,7 +129,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       t("keybinds.voiceHint"),
     ),
   );
-  section.appendChild(
+  comm.card.appendChild(
     createElement(
       "div",
       { class: "keybind-hint", "data-testid": "keybinds-layout-note" },
@@ -160,49 +147,42 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     },
     t("keybinds.portalPriority"),
   );
-  section.appendChild(portalPriority);
+  comm.card.appendChild(portalPriority);
 
   const globalSection = buildGlobalShortcutSection(signal, globalKeys, comboText, commKbd);
-  section.appendChild(globalSection);
 
   // U6: the voice shortcuts also work while the app is unfocused — through the
   // global key path on Windows/X11, and always through the tray's Mute/Deafen
   // items. Where global key state is unavailable (macOS, or any Wayland session), say
-  // so instead of promising a shortcut that cannot fire.
+  // so instead of promising a shortcut that cannot fire. It opens the Global
+  // shortcuts section, above the rows it speaks of.
   const globalHint = createElement(
     "div",
     {
-      style: "font-size: 11px; color: var(--text-micro); margin: 2px 0 0 0; line-height: 1.4;",
+      style:
+        "font-size: 11px; color: var(--text-micro); margin: 0 0 var(--space-2); line-height: 1.4;",
       "data-testid": "keybinds-global-hint",
     },
     t("keybinds.globalHint"),
   );
-  section.appendChild(globalHint);
+  globalSection.el.insertBefore(globalHint, globalSection.card);
+  section.appendChild(globalSection.el);
 
   appendGlobalKeysPortal(section, {
     signal,
     commKbd,
     comboText,
     globalHint,
-    globalSection,
+    globalSection: globalSection.el,
+    globalRows: globalSection.card,
     portalPriority,
   });
 
   // ── Messages section ───────────────────────────────────────
-  section.appendChild(createElement("div", { class: "settings-separator" }));
+  section.appendChild(msg.el);
+  appendGroupRows("messages", msg.card);
 
-  const msgHeader = createElement(
-    "div",
-    {
-      class: "keybind-section-header",
-    },
-    t("keybinds.messages"),
-  );
-  section.appendChild(msgHeader);
-
-  appendGroupRows("messages");
-
-  section.appendChild(
+  msg.card.appendChild(
     createElement(
       "div",
       {
@@ -221,7 +201,6 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     {
       type: "button",
       class: "ac-btn secondary",
-      style: "margin-top: 16px;",
       "data-testid": "keybinds-reset-all",
     },
     t("keybinds.resetAll"),

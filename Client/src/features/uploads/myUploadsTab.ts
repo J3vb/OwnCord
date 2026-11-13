@@ -7,6 +7,7 @@
  */
 
 import type { ApiClient } from "@lib/api";
+import { buildSettingsSection } from "../settings/settingsSection";
 import { ApiClientError, errorText } from "@lib/api";
 import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
@@ -104,7 +105,9 @@ export function buildMyUploadsTab(
 ): HTMLDivElement {
   const { formatFileSize } = media;
   const pane = createElement("div", { class: "settings-pane active my-uploads" });
-  pane.appendChild(createElement("div", { class: "setting-desc" }, t("uploads.intro")));
+  const files = buildSettingsSection({ label: t("uploads.section.files") });
+  pane.appendChild(files.el);
+  files.card.appendChild(createElement("div", { class: "setting-desc" }, t("uploads.intro")));
 
   // ---- Usage bar ----
   const usage = createElement("div", {
@@ -165,7 +168,7 @@ export function buildMyUploadsTab(
     t("uploads.loadMore"),
   );
   more.hidden = true;
-  appendChildren(pane, usage, controls, list, status, more);
+  appendChildren(files.card, usage, controls, list, status, more);
 
   let sort: Sort = "newest";
   let nameQuery = "";

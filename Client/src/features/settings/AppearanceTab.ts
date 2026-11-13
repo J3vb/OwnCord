@@ -3,6 +3,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { buildSettingsSection } from "./settingsSection";
 import { loadPref, savePref, createToggle, platformText } from "./helpers";
 import { isAndroidApp } from "../voice/native/platform";
 import { readStored } from "@lib/prefs/preferences";
@@ -156,6 +157,11 @@ export function buildAppearanceTab(
   onDirtyCheck?: (isDirty: () => boolean) => void,
 ): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
+  const themeGroup = buildSettingsSection({ label: t("appearance.theme") });
+  const textGroup = buildSettingsSection({ label: t("appearance.section.textSize") });
+  const layoutGroup = buildSettingsSection({ label: t("appearance.section.layout") });
+  const colorGroup = buildSettingsSection({ label: t("appearance.section.colors") });
+  appendChildren(section, themeGroup.el, textGroup.el, layoutGroup.el, colorGroup.el);
   const activeThemeName = getActiveThemeName();
   const currentTheme =
     activeThemeName in THEMES || activeThemeName === SYSTEM_THEME ? activeThemeName : null;
@@ -226,16 +232,16 @@ export function buildAppearanceTab(
   // tiles are a horizontal row, so ArrowLeft/Right is the stepping axis.
   setRovingTabindex(themeRow, "[role='radio']");
   enableRovingNavigation(themeRow, "[role='radio']", signal);
-  section.appendChild(
+  themeGroup.card.appendChild(
     buildSettingRow({ label: t("appearance.theme"), control: themeRow, stacked: true }),
   );
 
-  section.appendChild(buildFontSizeRow(signal, currentFontSize));
+  textGroup.card.appendChild(buildFontSizeRow(signal, currentFontSize));
 
   // Zoom level: the native webview zoom, snapping to Discord's levels. The
   // slider follows the zoom keys (Ctrl+= / Ctrl+- / Ctrl+0) while it is open.
   const zoomRow = buildZoomRow(signal);
-  if (zoomRow !== null) section.appendChild(zoomRow);
+  if (zoomRow !== null) textGroup.card.appendChild(zoomRow);
 
   // Compact mode toggle
   const compactToggle = createToggle(currentCompact, {
@@ -246,7 +252,7 @@ export function buildAppearanceTab(
       document.documentElement.classList.toggle("compact-mode", isNowCompact);
     },
   });
-  section.appendChild(
+  textGroup.card.appendChild(
     buildSettingRow({ label: t("appearance.compactMode"), control: compactToggle }),
   );
 
@@ -276,7 +282,7 @@ export function buildAppearanceTab(
       timeFormatRow.paint();
     },
   });
-  section.append(timeFormatRow.row, dateFormatRow.row);
+  layoutGroup.card.append(timeFormatRow.row, dateFormatRow.row);
 
   // Member list position (right column / under the channels)
   const memberLayoutRow = buildChoiceRow<MemberLayout>({
@@ -292,7 +298,7 @@ export function buildAppearanceTab(
     save: (value) => savePref(MEMBER_LAYOUT_PREF, value),
   }).row;
   // A phone shows the member list as an overlay, so it has no side to pick.
-  if (!isAndroidApp()) section.appendChild(memberLayoutRow);
+  if (!isAndroidApp()) layoutGroup.card.appendChild(memberLayoutRow);
 
   // Accent color picker
   const ACCENT_PRESETS: readonly string[] = [
@@ -401,7 +407,7 @@ export function buildAppearanceTab(
   appendChildren(hexInputRow, hexPrefix, hexInput);
   const accentControl = createElement("div", { class: "accent-control" });
   appendChildren(accentControl, swatchesRow, hexInputRow, accentNote);
-  section.appendChild(
+  colorGroup.card.appendChild(
     buildSettingRow({ label: t("appearance.accentColor"), control: accentControl, stacked: true }),
   );
   section.appendChild(buildCustomThemeSection(signal, onDirtyCheck));

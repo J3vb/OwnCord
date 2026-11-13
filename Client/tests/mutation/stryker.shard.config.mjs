@@ -702,6 +702,7 @@ export const shards = {
     "src/features/safety/signInNotice.ts",
     "src/features/settings/settingRow.ts",
     "src/features/settings/settingsRequests.ts",
+    "src/features/settings/settingsSection.ts",
     "src/features/settings/soundPreviewButton.ts",
   ],
   "safety-moderation-10": [

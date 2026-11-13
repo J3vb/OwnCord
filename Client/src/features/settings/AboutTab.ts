@@ -6,6 +6,7 @@
  */
 
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
+import { buildSettingsSection } from "./settingsSection";
 import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { createDisclosure } from "./status";
@@ -49,7 +50,7 @@ function buildHistory(versions: readonly ChangelogVersion[]): HTMLDivElement {
     details.addEventListener("toggle", () => {
       if (!details.open || rendered) return;
       rendered = true;
-      details.appendChild(renderChangelogBody(entry.body));
+      details.appendChild(renderChangelogBody(entry.body, 3));
     });
     list.appendChild(details);
   }
@@ -107,7 +108,7 @@ function buildUpdateCard(signal: AbortSignal, installed: Promise<string | null>)
     notes.appendChild(notesTitle);
     notes.appendChild(
       next.body.trim() !== ""
-        ? renderChangelogBody(next.body)
+        ? renderChangelogBody(next.body, 3)
         : externalLink(
             releaseUrl(next.version),
             t("about.updateNotesMissing"),
@@ -155,7 +156,7 @@ const EMOJI_LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/";
 export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active about-tab" });
 
-  const header = createElement("div", { class: "settings-card about-header" });
+  const header = createElement("div", { class: "about-header" });
   const name = createElement(
     "div",
     { class: "about-name", "data-testid": "about-version" },
@@ -173,17 +174,15 @@ export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
     createElement("div", { class: "setting-desc" }, t("about.emojiCredit")),
     externalLink(EMOJI_LICENSE_URL, t("about.emojiLicense"), "about-repo-link"),
   );
-  section.appendChild(header);
+  section.appendChild(buildSettingsSection({ label: t("about.appSection"), card: header }).el);
 
   const versionRead = readAppVersion();
   // The update offer and the check are the desktop updater's; a platform with
   // none (the web build) does not draw them.
   if (desktop.updater.available) {
-    section.appendChild(buildUpdateCard(signal, versionRead));
-    section.appendChild(buildUpdateCheckRow(signal));
+    header.append(buildUpdateCard(signal, versionRead), buildUpdateCheckRow(signal));
   }
 
-  const notesTitle = createElement("h3", { class: "setting-group-title" });
   // Focusable so the keyboard can scroll long notes, as in the What's new window.
   const notes = createElement("div", {
     class: "about-notes",
@@ -192,9 +191,18 @@ export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
     role: "region",
     "aria-label": t("about.notesLabel"),
   });
-  const historyTitle = createElement("h3", { class: "setting-group-title" }, t("about.history"));
+  // The heading becomes "What's new in X" once the notes load; search still
+  // finds it by the label it is indexed under.
+  const notesSection = buildSettingsSection({
+    label: t("about.notesLabel"),
+    headingAttrs: { "data-search-label": t("about.notesLabel") },
+    card: notes,
+  });
+  const notesTitle = notesSection.heading;
+  const historySection = buildSettingsSection({ label: t("about.history") });
   const history = createElement("div", {});
-  appendChildren(section, notesTitle, notes, historyTitle, history);
+  historySection.card.appendChild(history);
+  appendChildren(section, notesSection.el, historySection.el);
 
   void versionRead.then((version) => {
     if (version !== null && !signal.aborted) name.textContent = t("about.appName", { version });
@@ -206,9 +214,8 @@ export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
       clearChildren(notes);
       if (current !== null) {
         notesTitle.textContent = t("about.notesFor", { version: current.version });
-        notes.appendChild(renderChangelogBody(current.body));
+        notes.appendChild(renderChangelogBody(current.body, 3));
       } else {
-        notesTitle.hidden = true;
         notes.appendChild(
           externalLink(
             version !== null ? releaseUrl(version) : `${REPO_URL}/releases`,
@@ -222,8 +229,7 @@ export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
     .catch((err: unknown) => {
       log.warn("Release notes unavailable", { error: String(err) });
       if (signal.aborted) return;
-      notesTitle.hidden = true;
-      historyTitle.hidden = true;
+      historySection.el.hidden = true;
       clearChildren(notes);
       notes.appendChild(externalLink(`${REPO_URL}/releases`, t("about.loadFailed"), ""));
     });

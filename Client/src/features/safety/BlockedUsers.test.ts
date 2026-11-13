@@ -102,7 +102,7 @@ afterEach(() => {
 });
 
 const idOf = (s: HTMLElement): number =>
-  Number(/^blocked-users-(\d+)$/.exec(s.querySelector("h3")!.id)![1]);
+  Number(/^blocked-users-(\d+)$/.exec(s.querySelector("h2")!.id)![1]);
 
 describe("blocked users list", () => {
   it("loads GET /blocks and shows avatar, name, @username and Unblock per row in server order", async () => {
@@ -150,7 +150,7 @@ describe("blocked users list", () => {
     gets[1]!.resolve({ blocked_user_ids: [5] });
     await flush();
     expect(retryBtn(s).hidden).toBe(true);
-    expect(document.activeElement).toBe(s.querySelector("h3"));
+    expect(document.activeElement).toBe(s.querySelector("h2"));
     expect(rowsOf(s)).toHaveLength(1);
     expect(alertText(s)).toBe("");
   });
@@ -292,7 +292,7 @@ describe("focus after an unblock", () => {
     unblockBtn(rowsOf(s)[0]!).focus();
     unblockBtn(rowsOf(s)[0]!).click();
     await finish(0);
-    expect(document.activeElement).toBe(s.querySelector("h3"));
+    expect(document.activeElement).toBe(s.querySelector("h2"));
   });
 });
 
@@ -418,10 +418,10 @@ describe("blocked users markup", () => {
   it("builds the section, heading, description, live regions, Retry and list", async () => {
     const s = mount();
     expect(s.tagName).toBe("SECTION");
-    expect(s.className).toBe("blocked-users");
+    expect(s.className).toBe("settings-section blocked-users");
     expect(s.dataset["testid"]).toBe("blocked-users");
-    const heading = s.querySelector("h3")!;
-    expect(heading.className).toBe("safety-heading");
+    const heading = s.querySelector("h2")!;
+    expect(heading.className).toBe("settings-section-label");
     expect(heading.getAttribute("tabindex")).toBe("-1");
     expect(heading.textContent).toBe("Blocked users");
     expect(heading.id).toMatch(/^blocked-users-\d+$/);

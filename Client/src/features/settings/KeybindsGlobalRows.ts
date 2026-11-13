@@ -12,6 +12,7 @@ import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
 import { globalShortcutTakenVks, loadEffectiveKeybinds } from "@lib/prefs/keybinds";
 import { beginCapture } from "./comboCapture";
+import { buildSettingsSection } from "./settingsSection";
 
 /** The global shortcut keys as loaded; the rows update this object as keys are rebound. */
 export type GlobalKeys = ReturnType<typeof loadGlobalShortcutVks>;
@@ -21,19 +22,17 @@ export type GlobalKeys = ReturnType<typeof loadGlobalShortcutVks>;
 // the in-app camera combination, persists the choice and pushes it to the
 // running native poller live. The key is always Ctrl+Shift in the poller, so
 // the row renders that fixed prefix and captures only the variable key.
-// The whole section hides where global keys cannot fire (see the hint below),
-// so no control promises a shortcut the platform will not deliver.
+// The rows' card stays hidden until the host says global keys can fire, so no
+// control promises a shortcut the platform will not deliver; the section
+// itself also carries the hint that says which path the keys take.
 export function buildGlobalShortcutSection(
   signal: AbortSignal,
   globalKeys: GlobalKeys,
   comboText: (action: GlobalShortcutAction) => string,
   commKbd: Partial<Record<GlobalShortcutAction, HTMLElement>>,
-): HTMLDivElement {
-  const globalSection = createElement("div", { style: "display: none;" });
-  globalSection.appendChild(createElement("div", { class: "settings-separator" }));
-  globalSection.appendChild(
-    createElement("div", { class: "keybind-section-header" }, t("keybinds.globalSection")),
-  );
+): { readonly el: HTMLElement; readonly card: HTMLElement } {
+  const { el: globalSection, card } = buildSettingsSection({ label: t("keybinds.globalSection") });
+  card.style.display = "none";
 
   const captureState: {
     binding: GlobalShortcutAction | null;
@@ -142,7 +141,7 @@ export function buildGlobalShortcutSection(
     return row;
   };
 
-  globalSection.appendChild(
+  card.appendChild(
     globalRow(
       "mute",
       t("keybinds.action.toggleMute"),
@@ -150,7 +149,7 @@ export function buildGlobalShortcutSection(
       t("keybinds.globalAria"),
     ),
   );
-  globalSection.appendChild(
+  card.appendChild(
     globalRow(
       "deafen",
       t("keybinds.action.toggleDeafen"),
@@ -158,6 +157,6 @@ export function buildGlobalShortcutSection(
       t("keybinds.globalDeafenAria"),
     ),
   );
-  globalSection.appendChild(conflict);
-  return globalSection;
+  card.appendChild(conflict);
+  return { el: globalSection, card };
 }

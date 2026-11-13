@@ -150,9 +150,9 @@ test.describe("personal appeals", () => {
     await page.keyboard.press("Enter");
 
     await expect(panel(page)).toBeHidden();
-    await expect(pane.locator(".safety-appeals > [role='status'].sr-only")).toHaveText(
-      "Appeal sent. Its status appears under Appeals.",
-    );
+    await expect(
+      pane.locator(".safety-appeals > .settings-card > [role='status'].sr-only"),
+    ).toHaveText("Appeal sent. Its status appears under Appeals.");
     await expect(page.getByRole("heading", { name: "Appeals" })).toBeFocused();
     expect(await appealPosts(page)).toEqual([
       expect.stringMatching(/^POST .*\/api\/v1\/appeals\/$/),
@@ -210,9 +210,9 @@ test.describe("personal appeals", () => {
     await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Enter");
     await expect(confirm).toBeHidden();
-    await expect(pane.locator(".safety-appeals > [role='status'].sr-only")).toHaveText(
-      "Appeal withdrawn.",
-    );
+    await expect(
+      pane.locator(".safety-appeals > .settings-card > [role='status'].sr-only"),
+    ).toHaveText("Appeal withdrawn.");
     await expect(page.getByRole("heading", { name: "Appeals" })).toBeFocused();
     expect(await appealPosts(page)).toEqual([
       expect.stringMatching(/^POST .*\/api\/v1\/appeals\/APL-1\/withdraw$/),

@@ -20,6 +20,7 @@ import {
   type MyAppeal,
   type OwnModerationAction,
 } from "@lib/api";
+import { buildSettingsSection } from "../settings/settingsSection";
 import { createElement, setText } from "@lib/dom";
 import { createInlineError } from "@lib/ui/inlineError";
 import { appealsText as at } from "../../i18n/appeals";
@@ -84,15 +85,15 @@ type Panel =
   | { readonly mode: "withdraw"; readonly appealId: string; readonly opener: string };
 
 export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal): AppealsSection {
-  const root = createElement("section", {
-    class: "safety-appeals",
-    "aria-labelledby": "safety-appeals-heading",
+  const {
+    el: root,
+    heading,
+    card,
+  } = buildSettingsSection({
+    label: at("appeals.heading"),
+    headingAttrs: { id: "safety-appeals-heading", tabindex: "-1" },
+    attrs: { class: "safety-appeals", "aria-labelledby": "safety-appeals-heading" },
   });
-  const heading = createElement(
-    "h3",
-    { class: "safety-heading", id: "safety-appeals-heading", tabindex: "-1" },
-    at("appeals.heading"),
-  );
   const status = createElement("p", { class: "setting-desc", role: "status" });
   const failure = createInlineError({
     retryLabel: t("tab.retry"),
@@ -159,7 +160,7 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
     createElement("p", { class: "setting-desc" }, at("appeals.hint")),
     createElement("p", { class: "setting-desc" }, t("appeals.unavailable")),
   );
-  root.append(heading, rules.details, panel, status, failure.el, list, announcer);
+  card.append(rules.details, panel, status, failure.el, list, announcer);
 
   let open: Panel | null = null;
   let pending = false;

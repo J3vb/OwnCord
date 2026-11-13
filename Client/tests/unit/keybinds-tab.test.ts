@@ -303,10 +303,19 @@ describe("KeybindsTab", () => {
 
   it("renders section headers instead of h1", () => {
     const el = buildTab();
-    const headers = el.querySelectorAll(".keybind-section-header");
-    expect(headers.length).toBe(4);
+    const headers = el.querySelectorAll("h2.settings-section-label");
     const headerTexts = Array.from(headers).map((h) => h.textContent);
-    expect(headerTexts).toEqual(["Navigation", "Communication", "Global Shortcuts", "Messages"]);
+    // The polling and the portal global sections both exist, hidden until
+    // the host says which one applies.
+    expect(headerTexts).toEqual([
+      "Voice Input",
+      "Navigation",
+      "Communication",
+      "Global Shortcuts",
+      "Global Shortcuts",
+      "Messages",
+    ]);
+    expect(el.querySelector("h1, h3")).toBeNull();
   });
 
   it("renders Push to Talk keybind row", () => {
@@ -479,10 +488,16 @@ describe("KeybindsTab", () => {
 
   // --- Separators ---
 
-  it("renders separators between sections", () => {
+  it("puts each section's rows in its own card", () => {
     const el = buildTab();
-    const separators = el.querySelectorAll(".settings-separator");
-    expect(separators.length).toBe(4);
+    const sections = el.querySelectorAll(".settings-section");
+    expect(sections.length).toBe(6);
+    for (const section of sections) {
+      expect(section.querySelector(":scope > .settings-card")).not.toBeNull();
+    }
+    for (const row of el.querySelectorAll(".keybind-row")) {
+      expect(row.closest(".settings-card")).not.toBeNull();
+    }
   });
 
   // --- PTT hint text ---
@@ -759,7 +774,7 @@ describe("KeybindsTab", () => {
       expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl+Alt+M");
       expect(kbdOf(el, "Toggle Deafen")).toBe("Ctrl+Alt+D");
       // The polling rows stay hidden, and the polling probe is never asked.
-      expect(testId(el, "keybind-global-mute").closest("div[style]")).toHaveProperty(
+      expect(testId(el, "keybind-global-mute").closest(".settings-section")).toHaveProperty(
         "style.display",
         "none",
       );
@@ -798,7 +813,7 @@ describe("KeybindsTab", () => {
     it("never shows the portal UI or asks the portal on a polling desktop", async () => {
       mockSupported.mockResolvedValue(true);
       const el = buildTab();
-      const row = testId(el, "keybind-global-mute").closest("div[style]") as HTMLElement;
+      const row = testId(el, "keybind-global-mute").closest(".settings-section") as HTMLElement;
       await vi.waitFor(() => expect(row.style.display).toBe(""));
       expect(testId(el, "keybinds-portal").style.display).toBe("none");
       expect(testId(el, "ptt-portal-note").style.display).toBe("none");
@@ -917,7 +932,7 @@ describe("KeybindsTab", () => {
       for (const handler of statusHandlers) handler(portal(bound));
       expect(testId(el, "keybinds-portal").style.display).toBe("");
       expect(ptt.disabled).toBe(false);
-      expect(testId(el, "keybinds-portal").querySelectorAll(".keybind-section-header").length).toBe(
+      expect(testId(el, "keybinds-portal").querySelectorAll(".settings-section-label").length).toBe(
         1,
       );
     });
@@ -1008,6 +1023,43 @@ describe("KeybindsTab", () => {
         expect(btn.textContent).toBe("Waiting for your desktop...");
       });
     });
+  });
+
+  it("opens the polling Global shortcuts section with the hint, outside every card", async () => {
+    mockSupported.mockResolvedValue(false);
+    const el = buildTab();
+    const hint = el.querySelector<HTMLElement>("[data-testid='keybinds-global-hint']")!;
+    const polling = hint.parentElement!;
+    expect(polling.matches("section.settings-section")).toBe(true);
+    expect(polling.dataset["testid"]).toBeUndefined(); // not the portal section
+    expect(hint.closest(".settings-card")).toBeNull();
+    // Head, then the hint, then the rows' card.
+    expect(hint.previousElementSibling!.classList.contains("settings-section-head")).toBe(true);
+    const rows = hint.nextElementSibling as HTMLElement;
+    expect(rows.classList.contains("settings-card")).toBe(true);
+    // No global key service: the heading and the hint stay, the rows do not.
+    await vi.waitFor(() => expect(mockSupported).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(polling.style.display).toBe("");
+    expect(rows.style.display).toBe("none");
+  });
+
+  it("hides the polling Global shortcuts section, hint included, in portal mode", async () => {
+    mockStatus.mockResolvedValue({
+      backend: "portal",
+      portalVersion: 2,
+      triggers: { ptt: null, mute: null, deafen: null },
+      canConfigure: true,
+      triggersUnnamed: false,
+      sessionRefused: false,
+    });
+    const el = buildTab();
+    const hint = el.querySelector<HTMLElement>("[data-testid='keybinds-global-hint']")!;
+    await vi.waitFor(() => expect(hint.parentElement!.style.display).toBe("none"));
+    expect(hint.style.display).toBe("none");
+    expect(el.querySelector<HTMLElement>("[data-testid='keybinds-portal']")!.style.display).toBe(
+      "",
+    );
   });
 });
 

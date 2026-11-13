@@ -587,13 +587,15 @@ describe("VoiceAudioTab UI structure", () => {
       return { el, ac };
     }
     const cardNamed = (el: HTMLElement, title: string): HTMLElement =>
-      [...el.querySelectorAll<HTMLElement>("section.settings-card")].find(
-        (c) => c.querySelector(".settings-card-head h3")!.textContent === title,
-      )!;
+      [...el.querySelectorAll<HTMLElement>("section.settings-section")]
+        .find((c) => c.querySelector(".settings-section-head h2")!.textContent === title)!
+        .querySelector<HTMLElement>(":scope > .settings-card")!;
 
     it("groups the tab into Input Mode, Microphone, Speakers, Camera & screen share and Voice processing", () => {
       const { el, ac } = build();
-      const titles = [...el.querySelectorAll(".settings-card-head h3")].map((h) => h.textContent);
+      const titles = [...el.querySelectorAll(".settings-section-head h2")].map(
+        (h) => h.textContent,
+      );
       expect(titles).toEqual([
         "Input Mode",
         "Microphone",

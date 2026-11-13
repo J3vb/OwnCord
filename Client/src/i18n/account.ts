@@ -137,6 +137,7 @@ export const accountText = defineCatalog("account", {
   "security.allSet": "All set",
 
   "delete.sectionTitle": "Delete account",
+  "delete.zoneTitle": "Danger zone",
   "delete.description": "Permanently delete your account and all associated data.",
   "delete.button": "Delete Account",
   "delete.confirm": "Confirm Delete",

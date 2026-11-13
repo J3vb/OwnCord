@@ -279,7 +279,7 @@ test.describe("Settings — Voice & Video Tab", () => {
     await page.getByRole("switch", { name: "Automatically determine input sensitivity" }).click();
     const failures: string[] = [];
     for (const selector of [
-      ".settings-card-head h3",
+      ".settings-section-label",
       ".settings-field-label",
       "[data-testid='sensitivity-value']",
       ".camera-preview-label",

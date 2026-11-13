@@ -1,5 +1,8 @@
 /** Settings catalog entries: Notifications, Text & Images and Keybinds. Spread into settingsText. */
 export const settingsNotificationsEntries = {
+  "notifications.section.alerts": "Alerts",
+  "notifications.section.sounds": "Sounds",
+  "notifications.section.channels": "Channels",
   "notifications.desktop.label": "Desktop Notifications",
   "notifications.desktop.desc": "Show desktop notifications for messages",
   "notifications.desktop.label.android": "Notifications",
@@ -103,6 +106,7 @@ export const settingsNotificationsEntries = {
   "notifications.channelLevels.resetLabel": "Reset {name}",
   "notifications.channelFallback": "Channel {id}",
 
+  "images.section.media": "Links & Media",
   "images.linkPreview.label": "Link Preview",
   "images.linkPreview.desc": "Show website previews for links shared in chat",
   "images.embeds.label": "Show Embeds",
@@ -165,6 +169,7 @@ export const settingsNotificationsEntries = {
   "keybinds.portalUnnamed":
     "OwnCord's shortcuts are registered, but your desktop does not say which keys run them. Assign keys in your desktop's settings. On Hyprland, add lines like these to hyprland.conf: bind = CTRL SHIFT, M, global, com.owncord.client:toggle-mute (also toggle-deafen for deafen, and push-to-talk for Push to Talk).",
   "keybinds.portalSetInDesktop": "Set in your desktop",
+  "keybinds.voiceInput": "Voice Input",
   "keybinds.navigation": "Navigation",
   "keybinds.communication": "Communication",
   "keybinds.messages": "Messages",

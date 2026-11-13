@@ -106,7 +106,10 @@ describe("About tab", () => {
     await vi.waitFor(() =>
       expect(el.querySelector("[data-testid=about-notes]")!.textContent).toContain("New thing"),
     );
-    expect(el.textContent).toContain("What's new in 2.1.0");
+    const notesSection = el
+      .querySelector("[data-testid=about-notes]")!
+      .closest(".settings-section")!;
+    expect(notesSection.querySelector("h2")!.textContent).toBe("What's new in 2.1.0");
     // Long notes scroll from the keyboard: the box is a named, focusable region.
     const notes = el.querySelector<HTMLElement>("[data-testid=about-notes]")!;
     expect(notes.tabIndex).toBe(0);
@@ -150,6 +153,14 @@ describe("About tab", () => {
     const el = buildAboutTab(controller.signal);
     await vi.waitFor(() => expect(el.textContent).toContain("Couldn't load the release notes"));
     expect(el.querySelector("[data-testid=about-version]")!.textContent).toBe("OwnCord v2.1.0");
+    // No heading is left without its card: the notes keep theirs, the
+    // history section goes as a whole.
+    const sections = [...el.querySelectorAll<HTMLElement>(".settings-section")];
+    expect(sections.map((x) => [x.querySelector("h2")!.textContent, x.hidden])).toEqual([
+      ["Application", false],
+      ["Release notes", false],
+      ["Version history", true],
+    ]);
     expectConsole("warn", /Release notes unavailable/);
   });
 

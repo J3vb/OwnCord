@@ -18,6 +18,7 @@ import type { SettingsOverlayOptions } from "./SettingsOverlay";
 import { buildRecoveryKitSection } from "./RecoverySections";
 import { outcomeEl } from "./helpers";
 import { statusIcon, type StatusKind, setStatusIcon } from "./status";
+import { buildSettingsSection } from "./settingsSection";
 import { accountText as t } from "../../i18n/account";
 import {
   attachLimitHint,
@@ -48,23 +49,22 @@ export { validateAvatarFile, prepareBannerFile } from "./AccountProfile";
 // ---------------------------------------------------------------------------
 
 function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal): HTMLElement {
-  const card = createElement("section", {
-    class: "settings-card account-security",
-    "data-testid": "security-card",
-    "aria-labelledby": "account-security-title",
+  const list = createElement("ul", { class: "status-list" });
+  const { el, head, card } = buildSettingsSection({
+    label: t("security.title"),
+    headingAttrs: { id: "account-security-title" },
+    attrs: {
+      class: "account-security",
+      "data-testid": "security-card",
+      "aria-labelledby": "account-security-title",
+    },
   });
-  const head = createElement("div", { class: "settings-card-head" });
+  card.appendChild(list);
   const pill = createElement("span", { class: "status-pill", "data-testid": "security-summary" });
   const pillIcon = statusIcon("pending");
   const pillText = createElement("span", {});
   pill.append(pillIcon, pillText);
-  appendChildren(
-    head,
-    createElement("h3", { id: "account-security-title" }, t("security.title")),
-    pill,
-  );
-
-  const list = createElement("ul", { class: "status-list" });
+  head.appendChild(pill);
 
   // Two-factor and the recovery kit are the recommended steps; the pill
   // counts the ones still open. The next open step holds the card's accent:
@@ -101,8 +101,7 @@ function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal)
     buildSessionsSection(options, signal, tokensChanged, sessionsChanged),
   );
   paintNextStep();
-  appendChildren(card, head, list);
-  return card;
+  return el;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +141,7 @@ export function buildAccountTab(
     avatarLarge,
     editor,
   } = buildProfileCard(displayName, username, signal);
-  section.appendChild(card);
+  section.appendChild(buildSettingsSection({ label: t("profile.sectionTitle"), card }).el);
 
   // The strip follows the stored banner, and the colour being edited while the
   // editor is open (an unsaved choice previews, as the avatar does).
@@ -322,7 +321,12 @@ export function buildAccountTab(
   if (retention !== null) section.appendChild(buildRetentionSection(retention));
 
   // Delete account (danger zone)
-  section.appendChild(buildDeleteAccountSection(options, signal));
+  section.appendChild(
+    buildSettingsSection({
+      label: t("delete.zoneTitle"),
+      card: buildDeleteAccountSection(options, signal),
+    }).el,
+  );
 
   return section;
 }

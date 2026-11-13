@@ -22,6 +22,7 @@ import {
   isShareMotionPolicy,
 } from "@lib/voice/shareFlags";
 import { createDisclosure } from "./status";
+import { buildSettingsSection } from "./settingsSection";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
 import { isAndroidApp, isLinuxDesktop } from "../voice/native/platform";
@@ -57,15 +58,22 @@ function formatLogEntry(entry: LogEntry): HTMLDivElement {
   return row;
 }
 
-/** "N entries · N warnings · N errors" for the client logs summary. */
-function logCounts(entries: readonly LogEntry[]): string {
+/** "N entries · N warnings · N errors" for the client logs summary, each
+ *  count in its own span so a narrow pane breaks between counts only. */
+function showLogCounts(el: HTMLElement, entries: readonly LogEntry[]): void {
   const warnings = entries.filter((e) => e.level === "warn").length;
   const errors = entries.filter((e) => e.level === "error").length;
-  return [
+  const parts = [
     t("logs.entries", { count: entries.length }),
     t("logs.warnings", { count: warnings }),
     t("logs.errors", { count: errors }),
-  ].join(" · ");
+  ];
+  el.replaceChildren(
+    ...parts.flatMap((part, i) => {
+      const span = createElement("span", {}, part);
+      return i === 0 ? [span] : [" · ", span];
+    }),
+  );
 }
 
 /** The event log switch: off stops recording and deletes what was kept. */
@@ -108,7 +116,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
   function renderLogEntries(): void {
     const entries = getLogBuffer();
     if (countEl !== null) {
-      countEl.textContent = logCounts(entries);
+      showLogCounts(countEl, entries);
     }
 
     if (logListEl === null) return;
@@ -139,13 +147,13 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     }
     refreshDiag();
 
-    const helpCard = createElement("section", {
-      class: "settings-card",
-      "data-testid": "get-help",
-      "aria-labelledby": "logs-get-help-title",
+    const help = buildSettingsSection({
+      label: t("logs.getHelp"),
+      headingAttrs: { id: "logs-get-help-title" },
+      attrs: { "data-testid": "get-help", "aria-labelledby": "logs-get-help-title" },
     });
-    const helpHead = createElement("div", { class: "settings-card-head" });
-    const helpTitle = createElement("h3", { id: "logs-get-help-title" }, t("logs.getHelp"));
+    const helpHead = help.head;
+    const helpCard = help.card;
 
     const diagCopy = createElement(
       "button",
@@ -235,9 +243,9 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     );
     // A page has no log folder (the browser keeps logs in memory), and the
     // Android app cannot open one, so both offer only the bundle.
-    if (__OWNCORD_WEB__ || isAndroidApp()) appendChildren(helpHead, helpTitle, diagCopy, bundleBtn);
-    else appendChildren(helpHead, helpTitle, diagCopy, openLogsBtn, bundleBtn);
-    appendChildren(helpCard, helpHead, bundleNote, bundleStatus);
+    if (__OWNCORD_WEB__ || isAndroidApp()) appendChildren(helpHead, diagCopy, bundleBtn);
+    else appendChildren(helpHead, diagCopy, openLogsBtn, bundleBtn);
+    appendChildren(helpCard, bundleNote, bundleStatus);
     appendToggleRows(
       helpCard,
       [
@@ -251,7 +259,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       ],
       buildSignal,
     );
-    section.appendChild(helpCard);
+    section.appendChild(help.el);
 
     // ---- Client logs (disclosure; the summary carries the counts) ---------
 
@@ -384,7 +392,9 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       },
       { signal: buildSignal },
     );
-    section.appendChild(logs.details);
+    const details = buildSettingsSection({ label: t("logs.technicalDetails") });
+    details.card.appendChild(logs.details);
+    section.appendChild(details.el);
 
     renderLogEntries();
 
@@ -400,20 +410,16 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     const voiceTools = createElement("div", { class: "settings-toolbar" });
     voiceTools.appendChild(diagRefresh);
     appendChildren(voice.details, voiceTools, diagPanel);
-    section.appendChild(voice.details);
+    details.card.appendChild(voice.details);
 
     // ---- Screen share testing ---------------------------------------------
 
-    const shareCard = createElement("section", {
-      class: "settings-card",
-      "data-testid": "share-testing",
-      "aria-labelledby": "logs-share-testing-title",
+    const share = buildSettingsSection({
+      label: t("logs.shareTesting"),
+      headingAttrs: { id: "logs-share-testing-title" },
+      attrs: { "data-testid": "share-testing", "aria-labelledby": "logs-share-testing-title" },
     });
-    const shareHead = createElement("div", { class: "settings-card-head" });
-    shareHead.appendChild(
-      createElement("h3", { id: "logs-share-testing-title" }, t("logs.shareTesting")),
-    );
-    shareCard.appendChild(shareHead);
+    const shareCard = share.card;
     appendToggleRows(
       shareCard,
       [
@@ -459,7 +465,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       shareCard.appendChild(modeRow);
     }
     // Screen sharing does not exist on the Android app, so there is nothing to test.
-    if (!isAndroidApp()) section.appendChild(shareCard);
+    if (!isAndroidApp()) section.appendChild(share.el);
 
     // Live update: subscribe to new log entries
     unsubLogListener?.();

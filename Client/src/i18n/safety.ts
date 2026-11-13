@@ -25,6 +25,7 @@ export const safetyText = defineCatalog("safety", {
   },
   "tab.timedOut":
     "You're timed out until {time}. You can't send messages, react or join voice until then.",
+  "tab.standing": "Account standing",
   "tab.history": "Moderation history",
   "tab.historyHint":
     "Warnings, timeouts, removed messages and lifted bans on your account. Moderators, reporters and internal notes are never shown.",

@@ -6,6 +6,7 @@ export const settingsAdvancedEntries = {
   "advanced.confirmServerSwitch.label": "Ask before switching servers",
   "advanced.confirmServerSwitch.desc":
     "Show a confirmation when you pick a different server from the server list.",
+  "advanced.general": "General",
   "advanced.debug": "Debug",
   "advanced.devtools.label": "Open DevTools",
   "advanced.devtools.desc": "Open the browser developer tools for debugging",
@@ -68,6 +69,7 @@ export const settingsAdvancedEntries = {
   "logs.entries": { one: "{count} entry", other: "{count} entries" },
   "logs.warnings": { one: "{count} warning", other: "{count} warnings" },
   "logs.errors": { one: "{count} error", other: "{count} errors" },
+  "logs.technicalDetails": "Technical details",
   "logs.clientLogs": "Client logs",
   "logs.getHelp": "Get help",
   "updates.label": "Updates",
