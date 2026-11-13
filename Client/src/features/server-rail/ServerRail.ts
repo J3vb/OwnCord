@@ -17,6 +17,7 @@ import {
   reconcile,
   renameFolder,
   saveLayout,
+  isIpAddressName,
   serverInitials,
   toggleCollapsed,
   type ItemRef,
@@ -24,6 +25,7 @@ import {
   type RailLayout,
 } from "@lib/prefs/serverRailLayout";
 import { setSidebarMode, uiStore } from "@stores/ui.store";
+import { authStore } from "@stores/auth.store";
 import { dmStore, type DmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
@@ -48,8 +50,6 @@ import { openServerSwitchConfirm } from "./switchConfirmDialog";
 export interface ServerRailOptions {
   /** `api.getConfig().host`: the server this session is connected to. */
   readonly currentHost: string;
-  /** The connected server's display name (may be empty before it is known). */
-  readonly currentName: string;
   readonly loadServers: () => Promise<readonly ServerProfile[]>;
   readonly switchServer: (host: string) => void;
   readonly addServer: () => void;
@@ -60,6 +60,10 @@ export interface ServerRailOptions {
   readonly onShowServer?: () => void;
   /** Open a DM from its icon under Home. */
   readonly onOpenDm?: (dm: DmChannel) => void;
+}
+
+function isAddressName(name: string, host: string): boolean {
+  return name === host || name === host.split(":")[0] || isIpAddressName(name);
 }
 
 export function createServerRail(options: ServerRailOptions): MountableComponent {
@@ -105,14 +109,16 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     return reconcile(layout, allHosts());
   }
 
+  // A saved profile keeps a name the user chose; one still named after its
+  // address gives way to the connected server's own name.
   function describe(host: string): { name: string; color: string } {
     const profile = profiles.find((p) => p.host === host);
-    if (profile !== undefined) {
-      return { name: profile.name !== "" ? profile.name : host, color: profile.color };
-    }
-    const name =
-      host === options.currentHost && options.currentName !== "" ? options.currentName : host;
-    return { name, color: FALLBACK_COLOR };
+    const color = profile?.color ?? FALLBACK_COLOR;
+    const saved = profile?.name ?? "";
+    if (saved !== "" && !isAddressName(saved, host)) return { name: saved, color };
+    const live = host === options.currentHost ? (authStore.getState().serverName ?? "") : "";
+    if (live !== "") return { name: live, color };
+    return { name: saved !== "" ? saved : host, color };
   }
 
   function commit(next: RailLayout): void {
@@ -276,7 +282,8 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     const { name, color } = describe(host);
     const el = createElement("span", { class: mini ? "server-rail-mini" : "server-rail-avatar" });
     el.style.background = color;
-    setText(el, serverInitials(name));
+    if (!mini && isIpAddressName(name)) el.appendChild(railIcon("server"));
+    else setText(el, serverInitials(name));
     return el;
   }
 
@@ -438,6 +445,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     container.appendChild(nav);
 
     disposable.onStoreChange(uiStore, (s) => s.sidebarMode, render);
+    disposable.onStoreChange(authStore, (s) => s.serverName, render);
     disposable.onStoreChange(
       dmStore,
       (s) => s.channels,

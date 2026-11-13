@@ -347,16 +347,24 @@ export function saveLayout(layout: RailLayout): void {
   saveStoredJson(RAIL_LAYOUT_KEY, layout);
 }
 
-/** Letters shown on a server icon: word initials ("My Cool Server" -> "MCS"), else two letters. */
+/** Letters shown on a server icon: the first two word initials ("Game Night Crew" -> "GN"), else two letters. */
 export function serverInitials(name: string): string {
   const words = name
     .trim()
     .split(/\s+/)
-    .filter((w) => w !== "");
+    .map((w) => Array.from(w).filter((c) => /[\p{L}\p{N}]/u.test(c)))
+    .filter((w) => w.length > 0);
   if (words.length === 0) return "?";
   const letters =
-    words.length === 1
-      ? Array.from(words[0] ?? "").slice(0, 2)
-      : words.slice(0, 3).map((w) => Array.from(w)[0] ?? "");
+    words.length === 1 ? (words[0] ?? []).slice(0, 2) : words.slice(0, 2).map((w) => w[0] ?? "");
   return letters.join("").toUpperCase();
+}
+
+const IPV4_NAME = /^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?$/;
+const IPV6_NAME = /^\[?[0-9a-f]*:[0-9a-f:.]*:[0-9a-f:.]*\]?(?::\d+)?$/i;
+
+/** True when a server's label is a bare IP address (with or without a port), whose digits make poor initials. */
+export function isIpAddressName(name: string): boolean {
+  const trimmed = name.trim();
+  return IPV4_NAME.test(trimmed) || IPV6_NAME.test(trimmed);
 }

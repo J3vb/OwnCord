@@ -11,6 +11,7 @@ import {
   voiceStore,
 } from "@stores/voice.store";
 import { RAIL_LAYOUT_KEY } from "@lib/prefs/serverRailLayout";
+import { authStore, clearAuth } from "@stores/auth.store";
 import type { ServerProfile } from "@lib/presence/profiles";
 
 function profile(name: string, host: string, color = "#5865f2"): ServerProfile {
@@ -30,7 +31,7 @@ interface Opts {
   profiles?: ServerProfile[];
   loadServers?: () => Promise<readonly ServerProfile[]>;
   currentHost?: string;
-  currentName?: string;
+  currentName?: string | null;
   joinInvite?: (t: string) => boolean;
   onOpenDm?: (dm: DmChannel) => void;
   onShowServer?: () => void;
@@ -42,9 +43,9 @@ async function mountRail(o: Opts = {}) {
   const switchServer = vi.fn();
   const addServer = vi.fn();
   const joinInvite = vi.fn(o.joinInvite ?? (() => false));
+  setServerName(o.currentName === undefined ? "Alpha" : o.currentName);
   const rail = createServerRail({
     currentHost: o.currentHost ?? "a.example",
-    currentName: o.currentName ?? "Alpha",
     loadServers: o.loadServers ?? (() => Promise.resolve(o.profiles ?? [])),
     switchServer,
     addServer,
@@ -65,6 +66,13 @@ function dm(channelId: number, unreadCount: number): DmChannel {
   return makeDm({ channelId, recipient: user, participants: [user], unreadCount });
 }
 
+function setServerName(serverName: string | null): void {
+  authStore.setState((s) => ({ ...s, serverName }));
+  authStore.flush();
+}
+
+const glyph = (btn: HTMLElement | undefined) => btn?.querySelector('[data-icon="server"]');
+
 const servers = () =>
   Array.from(document.querySelectorAll<HTMLButtonElement>('[data-testid="server-rail-server"]'));
 
@@ -78,6 +86,7 @@ describe("ServerRail", () => {
     document.body.innerHTML = "";
     dmStore.setState(() => ({ channels: [] }));
     resetVoiceStore();
+    setServerName(null);
   });
 
   it("clicking the connected server goes back to its channels", async () => {
@@ -198,6 +207,50 @@ describe("ServerRail", () => {
     expect(servers().map((b) => b.dataset["host"])).toEqual(["b.example", "a.example"]);
     expect(servers()[0]?.textContent).toBe("BB");
     expect(servers()[1]?.getAttribute("aria-label")).toContain("Alpha");
+  });
+
+  describe("server name on the connected server's icon", () => {
+    it("shows the name's initials once the name arrives after mount", async () => {
+      await mountRail({
+        profiles: [profile("127.0.0.1", "127.0.0.1:8443")],
+        currentHost: "127.0.0.1:8443",
+        currentName: null,
+      });
+      expect(servers()[0]?.textContent).toBe("");
+      expect(glyph(servers()[0])).not.toBeNull();
+      setServerName("Game Night Crew");
+      expect(servers()[0]?.textContent).toBe("GN");
+      expect(glyph(servers()[0])).toBeNull();
+      expect(servers()[0]?.getAttribute("aria-label")).toContain("Game Night Crew");
+      expect(servers()[0]?.title).toContain("Game Night Crew");
+      setServerName("Board Game Club");
+      expect(servers()[0]?.textContent).toBe("BG");
+    });
+
+    it("drops the old name on logout and does not carry it to the next server", async () => {
+      const { rail } = await mountRail({ currentHost: "10.0.0.5", currentName: "Game Night Crew" });
+      expect(servers()[0]?.textContent).toBe("GN");
+      clearAuth();
+      authStore.flush();
+      expect(servers()[0]?.textContent).toBe("");
+      expect(glyph(servers()[0])).not.toBeNull();
+      expect(servers()[0]?.getAttribute("aria-label")).toContain("10.0.0.5");
+      rail.destroy?.();
+      await mountRail({ currentHost: "chat.example.com", currentName: null });
+      expect(servers()[0]?.textContent).toBe("CH");
+      setServerName("Bravo");
+      expect(servers()[0]?.textContent).toBe("BR");
+    });
+
+    it("keeps a profile name the user chose, and never shows another server's live name", async () => {
+      await mountRail({
+        profiles: [profile("My LAN", "a.example"), profile("192.168.1.9", "192.168.1.9")],
+        currentHost: "a.example",
+        currentName: "Game Night Crew",
+      });
+      expect(servers().map((b) => b.textContent)).toEqual(["ML", ""]);
+      expect(glyph(servers()[1])).not.toBeNull();
+    });
   });
 
   it("marks the current server active in channels mode and Home active in DM mode", async () => {
