@@ -152,7 +152,7 @@ export const messagingText = defineCatalog("messaging", {
   "pins.unpin": "Unpin message",
   "pins.empty": "This channel doesn't have any pinned messages… yet!",
   "pins.label": "Pinned messages",
-  "pins.title": " Pinned Messages",
+  "pins.title": "Pinned Messages",
   "pins.close": "Close pinned messages",
 
   "divider.new": "NEW",

@@ -14,6 +14,7 @@ import { messagesStore, setMessagePinned } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore } from "@stores/ui.store";
 import { nsfwContentBlocked } from "../content-consent/nsfw";
+import { closeWhenChannelLeft, sidePanelStale } from "./sidePanelScope";
 import { resolveAuthor } from "@lib/text/formatting";
 import { resolveDisplayName } from "@lib/ui/avatar";
 import { shellText } from "../../i18n/shell";
@@ -72,6 +73,9 @@ export interface PinnedPanelController {
   /** Open the panel if it is closed; a no-op while it is open or opening, so a
    *  link into it can never close it. */
   open(): Promise<void>;
+  isOpen(): boolean;
+  /** Still loading for the current channel. */
+  isPending(): boolean;
   cleanup(): void;
   /** Close the panel if it was opened for `channelId`. */
   closeFor(channelId: number): void;
@@ -200,6 +204,7 @@ export function createPinnedPanelController(opts: {
             },
           );
           live.onStoreChange(membersStore, (s) => s.roleRevision ?? 0, syncPermission);
+          closeWhenChannelLeft(live, id, close);
         },
         destroy(): void {
           live.destroy();
@@ -209,8 +214,8 @@ export function createPinnedPanelController(opts: {
     },
     errorLog: "Failed to load pinned messages", // i18n-exempt: developer log line, never shown
     errorToast: shellText("pins.loadFailed"),
-    outsidePress: { panel: ".pinned-panel", toggle: ".pins-btn" },
-    backOnPhone: true,
+    isStale: () => sidePanelStale(channelId, opts.getCurrentChannelId()),
+    sidePanel: { panel: ".pinned-panel", toggle: ".pins-btn", fallbackFocus: ".ch-more-btn" },
   });
 
   async function toggle(): Promise<void> {
@@ -224,6 +229,8 @@ export function createPinnedPanelController(opts: {
   return {
     toggle,
     open: controller.open,
+    isOpen: controller.isOpen,
+    isPending: controller.isPending,
     cleanup: controller.close,
     closeFor: (id: number) => {
       if (channelId === id) controller.close();

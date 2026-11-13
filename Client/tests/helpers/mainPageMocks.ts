@@ -320,7 +320,7 @@ export function pageChatAreaMock() {
         },
         sidebarToggle: document.createElement("button"),
         refreshCallBar: vi.fn(),
-        closePinnedPanel: vi.fn(),
+        closeSidePanels: vi.fn(),
         searchCtrl: { open: vi.fn(), cleanup: vi.fn() },
         dmProfileSlot,
         children: [],

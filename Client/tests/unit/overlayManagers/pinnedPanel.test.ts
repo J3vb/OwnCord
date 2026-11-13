@@ -148,6 +148,92 @@ describe("createPinnedPanelController", () => {
     expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
   });
 
+  describe("follows its channel, like the media and thread panels", () => {
+    type ChState = ReturnType<typeof channelsStore.getState> & { activeChannelId?: number | null };
+    const setActive = (id: number | null): void =>
+      channelsStore.setState((s) => ({ ...s, activeChannelId: id }) as ChState);
+    const flushStore = (): Promise<void> => new Promise((r) => queueMicrotask(r));
+    let saved: ReturnType<typeof channelsStore.getState>;
+    beforeEach(() => {
+      saved = channelsStore.getState();
+      setActive(42);
+    });
+    afterEach(() => channelsStore.setState(() => saved));
+
+    it("closes when the viewer switches to another channel", async () => {
+      await flushStore();
+      const controller = newPinned(makeMockApi(), 42);
+      await controller.open();
+      setActive(4);
+      await flushStore();
+      expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
+      expect(controller.isOpen()).toBe(false);
+    });
+
+    it("closes when its channel is deleted", async () => {
+      await flushStore();
+      const controller = newPinned(makeMockApi(), 42);
+      await controller.open();
+      channelsStore.setState((s) => {
+        const channels = new Map(s.channels);
+        channels.delete(42);
+        return { ...s, channels };
+      });
+      await flushStore();
+      expect(controller.isOpen()).toBe(false);
+    });
+
+    it("closes when its channel falls behind the NSFW gate", async () => {
+      await flushStore();
+      const controller = newPinned(makeMockApi(), 42);
+      await controller.open();
+      channelsStore.setState((s) => {
+        const channels = new Map(s.channels);
+        channels.set(42, { ...channels.get(42)!, nsfw: true });
+        return { ...s, channels };
+      });
+      await flushStore();
+      expect(controller.isOpen()).toBe(false);
+    });
+
+    it("opens for the new channel when asked again after a switch while loading", async () => {
+      let current = 42;
+      const api = makeMockApi();
+      api.getPins.mockReturnValueOnce(new Promise(() => undefined));
+      const controller = createPinnedPanelController({
+        api: api as never,
+        getRoot: () => root,
+        getCurrentChannelId: () => current,
+      });
+      void controller.open();
+      expect(controller.isPending()).toBe(true);
+      current = 4;
+      expect(controller.isPending()).toBe(false);
+      await controller.open();
+      expect(api.getPins).toHaveBeenLastCalledWith(4);
+      expect(createPinnedMessages).toHaveBeenCalledOnce();
+      expect(firstCallOpts<{ channelId: number }>(createPinnedMessages).channelId).toBe(4);
+    });
+
+    it("never shows pins that land after the viewer left the channel", async () => {
+      let current = 42;
+      let answer: (v: unknown) => void = () => undefined;
+      const api = makeMockApi();
+      api.getPins.mockReturnValueOnce(new Promise((r) => (answer = r)));
+      const controller = createPinnedPanelController({
+        api: api as never,
+        getRoot: () => root,
+        getCurrentChannelId: () => current,
+      });
+      const opening = controller.open();
+      current = 4;
+      answer({ messages: [] });
+      await opening;
+      expect(createPinnedMessages).not.toHaveBeenCalled();
+      expect(controller.isOpen()).toBe(false);
+    });
+  });
+
   it("omits onUnpin when the viewer cannot pin (F1)", async () => {
     // A plain member must not be offered an unpin the server (MANAGE_MESSAGES)
     // would refuse; the panel is read-only for them.

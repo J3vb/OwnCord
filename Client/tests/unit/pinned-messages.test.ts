@@ -89,7 +89,7 @@ describe("PinnedMessages", () => {
   it("renders close button", () => {
     const onClose = vi.fn();
     const { panel } = makePanel({ onClose });
-    const closeBtn = container.querySelector(".pinned-panel__close") as HTMLButtonElement;
+    const closeBtn = container.querySelector(".side-panel__close") as HTMLButtonElement;
     expect(closeBtn).not.toBeNull();
     closeBtn.click();
     expect(onClose).toHaveBeenCalledOnce();
@@ -251,7 +251,7 @@ describe("PinnedMessages", () => {
   it("labels the icon-only buttons for screen readers", () => {
     const { panel } = makePanel();
 
-    const closeBtn = container.querySelector(".pinned-panel__close") as HTMLButtonElement;
+    const closeBtn = container.querySelector(".side-panel__close") as HTMLButtonElement;
     expect(closeBtn.getAttribute("aria-label")).toBe("Close pinned messages");
 
     const actionBtns = container.querySelectorAll(".pinned-msg__actions button");

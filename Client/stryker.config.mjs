@@ -284,7 +284,6 @@ const MOVED_NOT_MUTATED = [
   "src/features/settings/voice-audio/voiceTabScope.ts",
   "src/features/settings/voice-audio/voiceTabShared.ts",
   "src/features/threads/CreateThreadDialog.ts",
-  "src/features/threads/ThreadListPopover.ts",
   "src/features/threads/ThreadPanel.ts",
   "src/features/threads/threadHeader.ts",
   "src/features/threads/threadSender.ts",

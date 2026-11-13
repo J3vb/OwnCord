@@ -6,7 +6,6 @@ import type { QueuedSend } from "../../../features/messaging/sendQueue";
 import type { MessageController } from "../MessageController";
 import type { ReactionController } from "../ReactionController";
 import type { ThreadPanelHost } from "../ThreadPanelHost";
-import type { ThreadListPopover } from "../../../features/threads/ThreadListPopover";
 import type { ChatHeaderRefs } from "../ChatHeader";
 import type { SavedDraft } from "@lib/prefs/savedDrafts";
 import type { TrackedEdit } from "./channelShared";
@@ -44,7 +43,6 @@ export interface ChannelState {
   readonly onContentGated: (() => void) | undefined;
   readonly focusFallback: (() => void) | undefined;
   readonly threadHost: ThreadPanelHost | null;
-  threadList: ThreadListPopover | null;
   currentChannelId: number | null;
   channelAbort: AbortController | null;
   readonly pinsInFlight: Set<string>;

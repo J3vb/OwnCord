@@ -100,7 +100,6 @@ function fakeCtrl(channelId: number | null, scrollResult = true) {
       togglePicker: vi.fn(),
       openThread: vi.fn(),
       openThreadId: null,
-      toggleThreadList: vi.fn(),
     },
     scrollToMessage,
   };

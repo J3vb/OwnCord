@@ -271,7 +271,7 @@ test.describe("Pinned Messages", () => {
   test("pinned panel has close button", async ({ page }) => {
     await page.locator("[data-testid='pin-btn']").click();
 
-    const closeBtn = page.locator(".pinned-panel__close");
+    const closeBtn = page.locator(".side-panel__close");
     await expect(closeBtn).toBeVisible({ timeout: 3_000 });
   });
 
@@ -280,7 +280,7 @@ test.describe("Pinned Messages", () => {
     const panel = page.locator(".pinned-panel");
     await expect(panel).toBeVisible({ timeout: 3_000 });
 
-    await page.locator(".pinned-panel__close").click();
+    await page.locator(".side-panel__close").click();
     await expect(panel).not.toBeVisible();
   });
 

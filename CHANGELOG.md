@@ -143,6 +143,7 @@ release changes the database, and anything an operator must do first.)
 - The invite dialog is tidier: the link to share and its Copy button come first, a new link is made with two labelled choices, and the other links sit in a short list. A link with no uses left says "Used up", and a link you just made shows your name, not "unknown".
 - The Create channel dialog starts with the channel type, shown as cards that each say what the type is for. On a small screen the buttons of a tall dialog stay in view.
 - The alert for a new sign-in to your account is readable now: it names the device ("Chrome on Windows"), the address and the time, and a Review devices button opens the devices list in Settings. That list names devices the same way.
+- Pins, Threads and Media in the channel header now open the same side panel: same place, same header and Close button, one open at a time, and the button shows which one is open.
 
 ### Fixed
 

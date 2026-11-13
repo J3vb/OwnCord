@@ -1,20 +1,20 @@
 /**
- * The channel header's thread list: a popover under the Threads
- * button listing the channel's open threads, newest activity first, then its
- * archived ones. Each list is paged with the server's opaque `next_before`
- * cursor, one page per "Load more".
+ * The channel's thread list, in the channel side panel the Threads button
+ * opens: its open threads, newest activity first, then its archived ones.
+ * Each list is paged with the server's opaque `next_before` cursor, one page
+ * per "Load more".
  *
  * Every page is also written to threadsStore, so a thread opened from here (or
- * later, from its chip) is known. A page that lands after the popover closed,
+ * later, from its chip) is known. A page that lands after the list closed,
  * or after a newer request for the same list started, is dropped. Loaded on
  * first use, never at startup.
  */
 
-import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { claimBackOnPhone } from "@lib/ui/bottomSheet";
 import { createIcon } from "@lib/icons";
+import type { MountableComponent } from "@lib/text/safeRender";
+import { createSidePanelFrame } from "@lib/ui/sidePanelFrame";
 import type { ApiClient } from "@lib/api";
 import { errorText } from "@lib/api";
 import type { ThreadInfo } from "@lib/types";
@@ -28,20 +28,11 @@ import { threadsText } from "../../i18n/threads";
 
 const PAGE_SIZE = 25;
 
-export interface ThreadListPopoverOptions {
+export interface ThreadListOptions {
   readonly api: ApiClient;
   readonly channelId: number;
-  /** The Threads button: the popover sits under it and focus returns to it. */
-  readonly anchor: HTMLButtonElement;
-  /** The channel's lifetime: leaving it closes the popover. */
-  readonly signal: AbortSignal;
   readonly onOpenThread: (thread: ThreadInfo) => void;
-  /** Runs once when the popover goes away, by any path. */
-  readonly onClosed: () => void;
-}
-
-export interface ThreadListPopover {
-  close(): void;
+  readonly onClose: () => void;
 }
 
 type Phase = "active" | "archived";
@@ -57,47 +48,49 @@ function threadPageQuery(phase: Phase, cursor: string): string {
   return query.toString();
 }
 
-export function openThreadListPopover(options: ThreadListPopoverOptions): ThreadListPopover {
-  const { api, channelId, anchor, onOpenThread } = options;
+export function createThreadList(options: ThreadListOptions): MountableComponent {
+  const { api, channelId, onOpenThread } = options;
   const owner = new Disposable();
-  const onParentAbort = (): void => close();
-  options.signal.addEventListener("abort", onParentAbort, { once: true });
 
-  const root = createElement("div", {
-    class: "thread-popover",
-    role: "dialog",
-    "aria-label": threadsText("list.title"),
-    "data-testid": "thread-popover",
+  const frame = createSidePanelFrame({
+    className: "thread-list-panel",
+    label: threadsText("list.title"),
+    title: threadsText("list.title"),
+    icon: "message-square",
+    closeLabel: threadsText("list.close"),
+    testId: "thread-list-panel",
+    onClose: () => options.onClose(),
+    signal: owner.signal,
   });
-  const body = createElement("div", { class: "thread-popover-body" });
+  const body = createElement("div", { class: "thread-list-body" });
   const activeList = createElement("ul", {
-    class: "thread-popover-list",
+    class: "thread-list-list",
     "data-testid": "thread-list-active",
   });
   const archivedHead = createElement(
     "div",
-    { class: "thread-popover-head" },
+    { class: "thread-list-head" },
     threadsText("list.archived"),
   );
   archivedHead.hidden = true;
   const archivedList = createElement("ul", {
-    class: "thread-popover-list",
+    class: "thread-list-list",
     "data-testid": "thread-list-archived",
   });
   const emptyEl = createElement("div", {
-    class: "thread-popover-empty",
+    class: "thread-list-empty",
     "data-testid": "thread-list-empty",
   });
   emptyEl.hidden = true;
-  const statusEl = createElement("div", { class: "thread-popover-status", role: "status" });
+  const statusEl = createElement("div", { class: "thread-list-status", role: "status" });
   const moreBtn = createElement("button", {
     type: "button",
-    class: "thread-popover-more",
+    class: "thread-list-more",
     "data-testid": "thread-list-more",
   });
   moreBtn.hidden = true;
   body.append(
-    createElement("div", { class: "thread-popover-head" }, threadsText("list.active")),
+    createElement("div", { class: "thread-list-head" }, threadsText("list.active")),
     activeList,
     archivedHead,
     archivedList,
@@ -105,7 +98,7 @@ export function openThreadListPopover(options: ThreadListPopoverOptions): Thread
     statusEl,
     moreBtn,
   );
-  root.appendChild(body);
+  frame.body.appendChild(body);
 
   let phase: Phase = "active";
   let cursor = "";
@@ -118,29 +111,22 @@ export function openThreadListPopover(options: ThreadListPopoverOptions): Thread
   let closed = false;
 
   function renderItem(thread: ThreadInfo): HTMLLIElement {
-    const li = createElement("li", { class: "thread-popover-item" });
+    const li = createElement("li", { class: "thread-list-item" });
     const btn = createElement("button", {
       type: "button",
-      class: "thread-popover-open",
+      class: "thread-list-open",
       "data-testid": `thread-list-item-${thread.id}`,
     });
     btn.appendChild(thread.archived ? createArchiveIcon(14) : createIcon("message-square", 14));
-    btn.appendChild(createElement("span", { class: "thread-popover-name" }, thread.name));
+    btn.appendChild(createElement("span", { class: "thread-list-name" }, thread.name));
     btn.appendChild(
       createElement(
         "span",
-        { class: "thread-popover-meta" },
+        { class: "thread-list-meta" },
         `${threadCountLabel(thread.message_count)} · ${threadAgoLabel(thread.last_message_at ?? thread.created_at)}`,
       ),
     );
-    btn.addEventListener(
-      "click",
-      () => {
-        close();
-        onOpenThread(thread);
-      },
-      { signal: owner.signal },
-    );
+    btn.addEventListener("click", () => onOpenThread(thread), { signal: owner.signal });
     li.appendChild(btn);
     return li;
   }
@@ -210,53 +196,22 @@ export function openThreadListPopover(options: ThreadListPopoverOptions): Thread
 
   moreBtn.addEventListener("click", () => void loadNext(), { signal: owner.signal });
 
-  function place(): void {
-    const rect = anchor.getBoundingClientRect();
-    root.style.top = `${Math.round(rect.bottom + 6)}px`;
-    root.style.right = `${Math.max(8, Math.round(window.innerWidth - rect.right))}px`;
-  }
-
-  function close(): void {
+  function destroy(): void {
     if (closed) return;
     closed = true;
-    options.signal.removeEventListener("abort", onParentAbort);
     owner.destroy();
-    root.remove();
-    anchor.setAttribute("aria-expanded", "false");
-    if (document.contains(anchor)) anchor.focus();
-    options.onClosed();
+    frame.root.remove();
   }
 
-  document.body.appendChild(root);
-  place();
-  anchor.setAttribute("aria-expanded", "true");
-  document.addEventListener(
-    "mousedown",
-    (e) => {
-      if (e.target instanceof Node && !root.contains(e.target) && !anchor.contains(e.target)) {
-        close();
+  function mount(container: Element): void {
+    container.appendChild(frame.root);
+    void loadNext().then(() => {
+      // An empty open list leads straight into the archived ones.
+      if (!closed && phase === "archived" && !archivedShown && activeList.childElementCount === 0) {
+        void loadNext();
       }
-    },
-    { signal: owner.signal },
-  );
-  document.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.key === "Escape" && !isImeCommit(e)) {
-        e.stopPropagation();
-        close();
-      }
-    },
-    { signal: owner.signal, capture: true },
-  );
-  window.addEventListener("resize", place, { signal: owner.signal });
-  claimBackOnPhone(close, owner.signal);
-  void loadNext().then(() => {
-    // An empty open list leads straight into the archived ones.
-    if (!closed && phase === "archived" && !archivedShown && activeList.childElementCount === 0) {
-      void loadNext();
-    }
-  });
+    });
+  }
 
-  return { close };
+  return { mount, destroy };
 }

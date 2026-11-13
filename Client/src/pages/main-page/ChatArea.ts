@@ -17,6 +17,8 @@ import type { ChatHeaderRefs } from "./ChatHeader";
 import { createPinnedPanelController, createSearchOverlayController } from "./OverlayManagers";
 import type { SearchOverlayController } from "./OverlayManagers";
 import { createMediaGalleryController } from "./MediaGalleryController";
+import { createThreadListPanelController } from "../../features/threads/threadListPanel";
+import { createSidePanelGroup } from "@lib/ui/sidePanel";
 import type {
   MessageAttachmentsSubscriber,
   MessageDeleteSubscriber,
@@ -80,12 +82,12 @@ export interface ChatAreaResult {
   readonly refreshCallBar: () => void;
   /** The search overlay controller. */
   readonly searchCtrl: SearchOverlayController;
-  /** Close the media gallery if it is open. */
-  readonly closeMediaGallery: () => void;
-  /** Close the pinned-messages panel if it is open. */
-  readonly closePinnedPanel: () => void;
+  /** Close whichever side panel (pins, threads, media) is open. */
+  readonly closeSidePanels: () => void;
   /** Open the pinned-messages panel; a no-op when it is already open. */
   readonly openPinnedPanel: () => Promise<void>;
+  /** Open the thread list when the channel offers threads; a no-op when open. */
+  readonly openThreadList: () => Promise<void>;
   /** Where a thread's side panel mounts, beside the chat area. */
   readonly threadSlot: HTMLDivElement;
   /** Slot for the DM profile sidebar (right panel, sibling of chat area). */
@@ -139,9 +141,6 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
       void jumper.jumpTo(channelId, msgId);
     },
   });
-  unsubscribers.push(() => {
-    pinnedCtrl.cleanup();
-  });
 
   const mediaCtrl = createMediaGalleryController({
     api,
@@ -155,9 +154,16 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
       void jumper.jumpTo(channelId, msgId);
     },
   });
-  unsubscribers.push(() => {
-    mediaCtrl.cleanup();
+  // Pins, Threads and Media share one side panel: one open at a time.
+  const threadsCtrl = createThreadListPanelController({
+    api,
+    getRoot,
+    getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
+    available: () => chatHeader.refs.threadsBtn?.hidden === false,
+    onOpenThread: (thread) => getChannelCtrl()?.openThread(thread),
   });
+  const panels = createSidePanelGroup({ pins: pinnedCtrl, threads: threadsCtrl, media: mediaCtrl });
+  unsubscribers.push(panels.closeAll);
 
   const searchCtrl = createSearchOverlayController({
     api,
@@ -172,8 +178,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   });
 
   // A channel that becomes gated takes its content out of the overlays,
-  // mounted or not: the pins panel outlives a channel switch and a
-  // server-wide search spans every channel.
+  // mounted or not: a server-wide search spans every channel.
   let knownChannels = channelsStore.getState().channels;
   unsubscribers.push(
     channelsStore.subscribeSelector(
@@ -194,15 +199,9 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
 
   // --- Chat header ---
   const chatHeader = buildChatHeader({
-    onTogglePins: () => {
-      mediaCtrl.cleanup();
-      void pinnedCtrl.toggle();
-    },
-    onToggleThreads: (anchor) => getChannelCtrl()?.toggleThreadList(anchor),
-    onToggleMedia: () => {
-      pinnedCtrl.cleanup();
-      void mediaCtrl.toggle();
-    },
+    onTogglePins: () => void panels.toggle("pins"),
+    onToggleThreads: () => void panels.toggle("threads"),
+    onToggleMedia: () => void panels.toggle("media"),
     onSearchFocus: (typed) => {
       searchCtrl.open(typed);
     },
@@ -284,9 +283,9 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     sidebarToggle: chatHeader.refs.sidebarToggle,
     refreshCallBar: () => callBar?.refresh(),
     searchCtrl,
-    closePinnedPanel: pinnedCtrl.cleanup,
-    closeMediaGallery: mediaCtrl.cleanup,
-    openPinnedPanel: pinnedCtrl.open,
+    closeSidePanels: panels.closeAll,
+    openPinnedPanel: () => panels.open("pins"),
+    openThreadList: () => panels.open("threads"),
     threadSlot,
     dmProfileSlot,
     children,

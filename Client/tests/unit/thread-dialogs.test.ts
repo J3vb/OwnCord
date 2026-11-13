@@ -4,7 +4,7 @@ import {
   openCreateThreadDialog,
 } from "../../src/features/threads/CreateThreadDialog";
 import { isForwardRequest } from "../../src/features/messaging/forwardRequests";
-import { openThreadListPopover } from "../../src/features/threads/ThreadListPopover";
+import { createThreadList } from "../../src/features/threads/ThreadList";
 import { resetMessagesStore } from "@stores/messages.store";
 import { resetThreadsStore, threadsStore } from "@stores/threads.store";
 import { setConnectionStatus } from "@stores/ui.store";
@@ -13,7 +13,6 @@ import type { WsClient } from "@lib/ws";
 import type { ThreadInfo } from "@lib/types";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { makeThread } from "../helpers/thread-fixtures";
-import { guarded, pressBack } from "../helpers/backNav";
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 let ac: AbortController;
@@ -180,9 +179,24 @@ describe("CreateThreadDialog", () => {
   });
 });
 
-describe("ThreadListPopover", () => {
+describe("ThreadList", () => {
   const t = (id: number, archived = false): ThreadInfo =>
     makeThread({ id, name: `T${id}`, archived });
+
+  function mountList(
+    listThreads: (c: number, q: string) => Promise<unknown>,
+    onOpenThread = vi.fn(),
+    onClose = vi.fn(),
+  ): { destroy: () => void } {
+    const list = createThreadList({
+      api: { listThreads } as unknown as ApiClient,
+      channelId: 1,
+      onOpenThread,
+      onClose,
+    });
+    list.mount(document.body);
+    return { destroy: () => list.destroy?.() };
+  }
 
   it("lists active threads, then archived ones, paging with next_before", async () => {
     const listThreads = vi.fn(async (_c: number, query: string) => {
@@ -194,18 +208,8 @@ describe("ThreadListPopover", () => {
       }
       return { threads: [t(9, true)], next_before: "", has_more: false };
     });
-    const anchor = document.createElement("button");
-    document.body.appendChild(anchor);
     const onOpenThread = vi.fn();
-    const onClosed = vi.fn();
-    openThreadListPopover({
-      api: { listThreads } as unknown as ApiClient,
-      channelId: 1,
-      anchor,
-      signal: ac.signal,
-      onOpenThread,
-      onClosed,
-    });
+    mountList(listThreads, onOpenThread);
     await vi.waitFor(() =>
       expect(document.querySelector('[data-testid="thread-list-item-2"]')).not.toBeNull(),
     );
@@ -229,19 +233,13 @@ describe("ThreadListPopover", () => {
     await flush();
   });
 
-  it("shows the empty state and closes on Escape, calling onClosed once", async () => {
+  it("renders in the shared side panel, shows the empty state, and its Close calls onClose", async () => {
     const listThreads = vi.fn(async () => ({ threads: [], next_before: "", has_more: false }));
-    const anchor = document.createElement("button");
-    document.body.appendChild(anchor);
-    const onClosed = vi.fn();
-    openThreadListPopover({
-      api: { listThreads } as unknown as ApiClient,
-      channelId: 1,
-      anchor,
-      signal: ac.signal,
-      onOpenThread: vi.fn(),
-      onClosed,
-    });
+    const onClose = vi.fn();
+    mountList(listThreads, vi.fn(), onClose);
+    const panel = document.querySelector<HTMLElement>('[data-testid="thread-list-panel"]')!;
+    expect(panel.classList.contains("side-panel")).toBe(true);
+    expect(panel.querySelector(".side-panel__title")?.textContent).toBe("Threads");
     await vi.waitFor(() => expect(listThreads).toHaveBeenCalledTimes(1));
     await flush();
     document.querySelector<HTMLButtonElement>('[data-testid="thread-list-more"]')!.click();
@@ -250,33 +248,18 @@ describe("ThreadListPopover", () => {
         false,
       ),
     );
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(document.querySelector('[data-testid="thread-popover"]')).toBeNull();
-    expect(onClosed).toHaveBeenCalledTimes(1);
+    panel.querySelector<HTMLButtonElement>(".side-panel__close")!.click();
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("closes on Back on a phone instead of letting Back reach the drawer", async () => {
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn(() => ({ matches: true })),
-    );
-    const listThreads = vi.fn(async () => ({ threads: [], next_before: "", has_more: false }));
-    const anchor = document.createElement("button");
-    document.body.appendChild(anchor);
-    const onClosed = vi.fn();
-    openThreadListPopover({
-      api: { listThreads } as unknown as ApiClient,
-      channelId: 1,
-      anchor,
-      signal: ac.signal,
-      onOpenThread: vi.fn(),
-      onClosed,
-    });
-    expect(guarded()).toBe(true);
-    await pressBack();
-    expect(document.querySelector('[data-testid="thread-popover"]')).toBeNull();
-    expect(onClosed).toHaveBeenCalledTimes(1);
-    expect(guarded()).toBe(false);
-    vi.unstubAllGlobals();
+  it("drops a page that lands after it was destroyed", async () => {
+    let answer: (v: unknown) => void = () => undefined;
+    const listThreads = vi.fn(() => new Promise((r) => (answer = r)));
+    const list = mountList(listThreads);
+    list.destroy();
+    answer({ threads: [t(1)], next_before: "", has_more: false });
+    await flush();
+    expect(document.querySelector('[data-testid="thread-list-item-1"]')).toBeNull();
+    expect(threadsStore.getState().byId.has(1)).toBe(false);
   });
 });

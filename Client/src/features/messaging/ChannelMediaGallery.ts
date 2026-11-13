@@ -10,7 +10,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
-import { createIcon } from "@lib/icons";
+import { createSidePanelFrame } from "@lib/ui/sidePanelFrame";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type {
   ChannelMediaItem,
@@ -306,33 +306,18 @@ export function createChannelMediaGallery(
   }
 
   function mount(container: Element): void {
-    // A side panel like the pins panel: a complementary landmark, no focus trap.
-    root = createElement("div", {
-      class: "media-gallery",
-      role: "complementary",
-      "aria-label": mediaGalleryText("label"),
-      "data-testid": "media-gallery",
+    const frame = createSidePanelFrame({
+      className: "media-gallery",
+      label: mediaGalleryText("label"),
+      title: mediaGalleryText("title"),
+      icon: "image",
+      subtitle: mediaGalleryText("in", { channel: options.channelName }),
+      closeLabel: mediaGalleryText("close"),
+      testId: "media-gallery",
+      onClose: () => options.onClose(),
+      signal: disposable.signal,
     });
-
-    const header = createElement("div", { class: "media-gallery__header" });
-    const title = createElement("h3", { class: "media-gallery__title" });
-    title.appendChild(createIcon("image", 16));
-    title.appendChild(createElement("span", {}, mediaGalleryText("title")));
-    title.appendChild(
-      createElement(
-        "span",
-        { class: "media-gallery__channel" },
-        mediaGalleryText("in", { channel: options.channelName }),
-      ),
-    );
-    const closeBtn = createElement("button", {
-      type: "button",
-      class: "media-gallery__close",
-      "aria-label": mediaGalleryText("close"),
-    });
-    closeBtn.appendChild(createIcon("x", 16));
-    closeBtn.addEventListener("click", () => options.onClose(), { signal: disposable.signal });
-    appendChildren(header, title, closeBtn);
+    root = frame.root;
 
     const tabList = createElement("div", { class: "media-gallery__tabs", role: "tablist" });
     for (const k of ["media", "files"] as const) {
@@ -385,8 +370,7 @@ export function createChannelMediaGallery(
     });
     usageEl.hidden = true;
     appendChildren(
-      root,
-      header,
+      frame.body,
       tabList,
       buildToolbar(options.uploaders(), disposable.signal, {
         onSearch: (text) => {
