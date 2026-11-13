@@ -560,6 +560,11 @@
   color: var(--text-muted);
   margin-top: 4px;
 }
+/* One brand block: the server panel already shows the logo and name. */
+.connect-page:has(.server-panel) .form-logo .oc-logo-stack,
+.connect-page:has(.server-panel) .form-logo h1 {
+  display: none;
+}
 
 /* Banners */
 .error-banner {
@@ -1557,10 +1562,6 @@
     margin-bottom: 12px;
     padding-right: 52px;
     text-align: left;
-  }
-  .connect-page:has(.server-panel) .form-logo .oc-logo-stack,
-  .connect-page:has(.server-panel) .form-logo h1 {
-    display: none;
   }
   .connect-page:has(.server-panel) .form-logo p {
     margin-top: 0;
