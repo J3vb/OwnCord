@@ -374,12 +374,6 @@ func PeekClientPendingModFlagsForTest(c *Client) (serverMuted, serverDeafened bo
 	return c.voice.pendingModServerMuted, c.voice.pendingModServerDeafened
 }
 
-// ExpireSettingsCacheForTest forces the settings cache to appear stale so that
-// the next call to getCachedSettings triggers a DB refresh.
-func (h *Hub) ExpireSettingsCacheForTest() {
-	h.settings.cache.Expire()
-}
-
 // BuildJSONForTest exposes buildJSON for external tests.
 func BuildJSONForTest(v any) []byte {
 	return buildJSON(v)

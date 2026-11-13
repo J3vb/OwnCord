@@ -149,6 +149,11 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 		uid, token, inviteCode := boot.OwnerID, boot.Token, boot.InviteCode
 
 		warnings, restartRequired, restartURL := setupApplyWizard(r.Context(), setup, req.Wizard, uid, r.Host, opts)
+		if req.Wizard != nil {
+			// After the wizard's settings write, so the owner's first sign-in shows the chosen server name and
+			// motd rather than the hub's cached defaults.
+			expireHubSettingsCache(hub)
+		}
 		warnings = append(boot.Warnings, warnings...)
 
 		slog.Info("server setup completed", "owner", req.Username, "user_id", uid, "wizard", req.Wizard != nil, "restart", restartRequired)
