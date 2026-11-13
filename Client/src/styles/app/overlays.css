@@ -313,6 +313,43 @@ body .toast-container.toast-container--under-dialog {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.toast-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.toast-title,
+.toast-detail {
+  display: block;
+}
+.toast-title {
+  font-weight: 600;
+}
+.toast-detail {
+  color: var(--text-muted);
+}
+/* Phones: the detail text takes the full width, its action goes below. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .toast--detailed {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+  }
+  .toast--detailed > .toast-close {
+    grid-area: 1 / 3;
+    min-width: 40px;
+    margin: -8px -12px 0 0;
+  }
+  .toast--detailed > .toast-action {
+    grid-area: 2 / 2;
+    justify-self: start;
+  }
+  .toast--detailed > button {
+    min-height: 40px;
+  }
+  .toast--detailed > .toast-count {
+    grid-area: 2 / 3;
+  }
+}
 .toast.show {
   opacity: 1;
   animation: toastSlideUp 0.3s ease;

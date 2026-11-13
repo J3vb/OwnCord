@@ -5,7 +5,7 @@
  * Then import `showToast` anywhere to display notifications.
  */
 
-import type { ToastAction, ToastContainer, ToastType } from "@lib/ui/toastContainer";
+import type { ToastAction, ToastContainer, ToastExtras, ToastType } from "@lib/ui/toastContainer";
 import type { PartialSuccessResponse } from "@lib/types";
 
 let instance: ToastContainer | null = null;
@@ -46,8 +46,12 @@ export function showActionToast(
   type: ToastType,
   action: ToastAction,
   durationMs?: number,
+  extras?: ToastExtras,
 ): () => void {
-  return instance?.show(message, type, durationMs, action) ?? (() => {});
+  if (instance === null) return () => {};
+  return extras === undefined
+    ? instance.show(message, type, durationMs, action)
+    : instance.show(message, type, durationMs, action, extras);
 }
 
 /**

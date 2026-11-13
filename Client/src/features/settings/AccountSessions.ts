@@ -74,6 +74,21 @@ export function buildStatusSelector(
 // Devices (sessions) section
 // ---------------------------------------------------------------------------
 
+/** Asks a devices section for a fresh listing, superseding one in flight. */
+const SESSIONS_RELOAD = "sessions-reload";
+
+/** Show the signed-in devices list (the sign-in alert's Review devices): open
+ *  it, list it afresh when `reload`, bring it into view and focus its toggle. */
+export function revealSessions(root: ParentNode, reload: boolean): void {
+  const toggle = root.querySelector<HTMLButtonElement>("[data-testid='sessions-manage']");
+  if (toggle === null) return;
+  if (toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+  const row = toggle.closest("li");
+  if (reload) row?.dispatchEvent(new Event(SESSIONS_RELOAD));
+  row?.scrollIntoView?.({ block: "start" });
+  toggle.focus();
+}
+
 export function buildSessionsSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
@@ -99,7 +114,10 @@ export function buildSessionsSection(
     setText(result, t("devices.count", { count: list.childElementCount }));
   };
 
+  /** Only the latest listing is applied: an older reply that lands late is dropped. */
+  let latest = 0;
   function load(): void {
+    const request = ++latest;
     list.replaceChildren(status);
     setText(status, t("devices.loading"));
     setText(result, t("devices.loading"));
@@ -107,13 +125,13 @@ export function buildSessionsSection(
     void options
       .onListSessions()
       .then((sessions) => {
-        if (signal.aborted) return;
+        if (signal.aborted || request !== latest) return;
         list.replaceChildren(...sessions.map((s) => buildSessionRow(s, options, signal, recount)));
         recount();
         setStatusIcon(icon, "ok");
       })
       .catch((err: unknown) => {
-        if (signal.aborted) return;
+        if (signal.aborted || request !== latest) return;
         log.warn("Failed to list sessions", err);
         setText(status, t("devices.loadFailed"));
         setText(result, t("devices.loadFailed"));
@@ -122,6 +140,7 @@ export function buildSessionsSection(
   }
 
   sessionsChanged?.addEventListener("change", load, { signal });
+  row.addEventListener(SESSIONS_RELOAD, load, { signal });
 
   const revokeAllBtn = createElement(
     "button",

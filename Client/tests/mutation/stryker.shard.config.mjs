@@ -276,6 +276,7 @@ export const shards = {
     "src/lib/apiDms.ts",
     "src/lib/apiSharedTypes.ts",
     "src/lib/net/connectionDiagnostics.ts",
+    "src/lib/net/deviceLabel.ts",
     "src/lib/net/sessionNotice.ts",
     "src/lib/net/sessionRegistry.ts",
     "src/lib/net/ws/wsState.ts",
@@ -690,7 +691,10 @@ export const shards = {
     "src/features/reports/reportDialog.ts",
     "src/features/safety/BlockedUsers.ts",
     "src/features/safety/Notices.ts",
+    "src/features/safety/lazySignInNotice.ts",
+    "src/features/safety/signInNotice.ts",
     "src/features/settings/settingRow.ts",
+    "src/features/settings/settingsRequests.ts",
   ],
   "safety-moderation-10": [
     "src/features/message-requests/Inbox.ts",

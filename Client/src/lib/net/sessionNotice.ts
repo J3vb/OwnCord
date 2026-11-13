@@ -25,18 +25,8 @@
 
 import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { formatMessageTimestamp } from "@lib/text/formatting";
-import { accountText } from "../../i18n/account";
 
 const log = createLogger("session-notice");
-
-/**
- * Every desktop sign-in records one of two identical User-Agent strings — the
- * saved-password path's `OwnCord-Client/<version>` and tauri-plugin-http's
- * default — so they carry no per-device detail. Name them plainly; IP and
- * last-used are what tell two desktops apart. Anything else is shown as sent.
- */
-const DESKTOP_USER_AGENT = /^(OwnCord-Client|tauri-plugin-http)\//;
 
 /**
  * Minimum time between listings. The window is short enough that a genuine
@@ -44,29 +34,6 @@ const DESKTOP_USER_AGENT = /^(OwnCord-Client|tauri-plugin-http)\//;
  * visibility pair, a quick alt-tab and a reconnect make one request.
  */
 export const MIN_POLL_INTERVAL_MS = 30_000;
-
-export function sessionDeviceLabel(device: string): string {
-  if (device === "") return accountText("notice.unknownDevice");
-  if (DESKTOP_USER_AGENT.test(device)) return accountText("notice.desktop");
-  return device;
-}
-
-/** "OwnCord desktop from 203.0.113.5, Today at 2:34 PM" */
-export function describeSession(s: SessionInfo): string {
-  const device = sessionDeviceLabel(s.device);
-  const time = formatMessageTimestamp(s.created_at);
-  return s.ip === ""
-    ? accountText("notice.noIp", { device, time })
-    : accountText("notice.from", { device, ip: s.ip, time });
-}
-
-/** The toast text for one listing's unreviewed sign-ins (newest first). */
-export function sessionNoticeMessage(unseen: readonly SessionInfo[]): string {
-  const [newest] = unseen;
-  if (newest === undefined) return "";
-  const more = unseen.length > 1 ? accountText("notice.more", { count: unseen.length - 1 }) : "";
-  return accountText("notice.message", { session: describeSession(newest), more });
-}
 
 export interface SessionNoticeOptions {
   readonly fetchSessions: (signal: AbortSignal) => Promise<readonly SessionInfo[]>;
