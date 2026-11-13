@@ -1,20 +1,22 @@
 /**
  * CreateChannelModal — modal for creating a new channel.
  *
- * The category is a <select> of the known categories and "No category",
- * pre-selected to the group the "+" was clicked on; the request
- * carries its `category_id`. The channel TYPE is never inferred from the
- * category: every type is offered under every category, and the type is
- * pre-selected only from the caller's hint (the synthetic Voice group's "+"
- * means another voice channel).
+ * The type comes first, as a radio group of cards that each say what the
+ * type is for; the name field then shows that type's icon. The category is
+ * a <select> of the known categories and "No category", pre-selected to the
+ * group the "+" was clicked on; the request carries its `category_id`. The
+ * channel TYPE is never inferred from the category: every type is offered
+ * under every category, and the type is pre-selected only from the caller's
+ * hint (the synthetic Voice group's "+" means another voice channel).
  */
 
 import { Disposable } from "@lib/disposable";
 import { attachLimitHint, lineHintText } from "@lib/text/nameLimits";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { createIcon } from "@lib/icons";
+import { createIcon, type IconName } from "@lib/icons";
 import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
+import { createRadioCards } from "@lib/ui/radioCards";
 import { errorText } from "@lib/api";
 import { forumsEnabled } from "@lib/net/serverCapabilities";
 import type { MountableComponent } from "@lib/text/safeRender";
@@ -61,6 +63,28 @@ export function offeredChannelTypes(): readonly ChannelType[] {
   return forumsEnabled() ? [...CHANNEL_TYPES, "forum"] : CHANNEL_TYPES;
 }
 
+const TYPE_ICONS: Readonly<Record<ChannelType, IconName>> = {
+  text: "hash",
+  voice: "volume-2",
+  announcement: "megaphone",
+  forum: "messages-square",
+  dm: "message-square",
+};
+
+const TYPE_HINTS = {
+  text: "channelForm.typeHint.text",
+  voice: "channelForm.typeHint.voice",
+  announcement: "channelForm.typeHint.announcement",
+  forum: "channelForm.typeHint.forum",
+} as const;
+
+/** The one-line description of what a channel type is for. */
+function typeHint(type: ChannelType): string {
+  return Object.hasOwn(TYPE_HINTS, type)
+    ? shellText(TYPE_HINTS[type as keyof typeof TYPE_HINTS])
+    : "";
+}
+
 export function createCreateChannelModal(options: CreateChannelModalOptions): MountableComponent {
   const { category, onCreate, onClose } = options;
   const initialType: ChannelType = options.type ?? "text";
@@ -70,7 +94,11 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
   function mount(container: Element): void {
     // Header
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement("h3", { id: "create-channel-title" }, shellText("channel.create"));
+    const title = createElement(
+      "h3",
+      { id: "create-channel-title" },
+      shellText("channelForm.create"),
+    );
     // Icon-only button: without a label a screen reader announces just "button".
     const closeBtn = createElement("button", {
       class: "modal-close",
@@ -84,6 +112,83 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
 
     // Body
     const body = createElement("div", { class: "modal-body" });
+
+    // Type first: a card per type, each with a one-line hint.
+    const typeGroup = createElement("div", { class: "form-group" });
+    const typeLabel = createElement(
+      "div",
+      { class: "form-label", id: "create-channel-type-label" },
+      shellText("channelForm.type"),
+    );
+
+    // Channel name, led by the chosen type's icon
+    const nameGroup = createElement("div", { class: "form-group" });
+    const nameLabel = createElement(
+      "label",
+      { class: "form-label", for: "create-channel-name" },
+      shellText("channelForm.name"),
+    );
+    const nameField = createElement("div", { class: "input-with-icon" });
+    const nameIcon = createElement("span", { class: "input-leading-icon", "aria-hidden": "true" });
+    const nameInput = createElement("input", {
+      id: "create-channel-name",
+      class: "form-input",
+      type: "text",
+      "data-testid": "channel-name-input",
+    });
+    const showType = (type: ChannelType): void => {
+      nameIcon.replaceChildren(createIcon(TYPE_ICONS[type], 16));
+      nameInput.placeholder = shellText(
+        type === "voice" ? "channelForm.namePlaceholder.voice" : "channelForm.namePlaceholder.text",
+      );
+    };
+    const typeCards = createRadioCards<ChannelType>({
+      signal: disposable.signal,
+      labelledBy: "create-channel-type-label",
+      testId: "channel-type-select",
+      options: offeredChannelTypes().map((t) => ({
+        value: t,
+        label: channelTypeLabel(t),
+        description: typeHint(t),
+        icon: TYPE_ICONS[t],
+      })),
+      value: initialType,
+      onChange: showType,
+    });
+    typeCards.group.id = "create-channel-type";
+    appendChildren(typeGroup, typeLabel, typeCards.el);
+    showType(typeCards.value());
+
+    const nameHint = attachLimitHint(nameInput, {
+      max: MAX_CHANNEL_NAME_LENGTH,
+      countCharacters: true,
+      hint: lineHintText(MAX_CHANNEL_NAME_LENGTH),
+      id: "create-channel-name-hint",
+      signal: disposable.signal,
+    });
+    appendChildren(nameField, nameIcon, nameInput);
+    appendChildren(nameGroup, nameLabel, nameField, nameHint.el);
+
+    // Topic (optional, shown in the chat header)
+    const topicGroup = createElement("div", { class: "form-group" });
+    const topicLabel = createElement(
+      "label",
+      { class: "form-label", for: "create-channel-topic" },
+      shellText("channelForm.topic"),
+    );
+    topicLabel.append(
+      " ",
+      createElement("span", { class: "form-label-optional" }, shellText("channelForm.optional")),
+    );
+    const topicInput = createElement("input", {
+      id: "create-channel-topic",
+      class: "form-input",
+      type: "text",
+      placeholder: shellText("channelForm.topicPlaceholderCreate"),
+      maxlength: String(MAX_CHANNEL_TOPIC_LENGTH),
+      "data-testid": "channel-topic-input",
+    });
+    appendChildren(topicGroup, topicLabel, topicInput);
 
     // Category: a select of the known categories, "No category" first.
     const categoryGroup = createElement("div", { class: "form-group" });
@@ -99,70 +204,6 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     );
     appendChildren(categoryGroup, categoryLabel, categorySelect);
 
-    // Channel name
-    const nameGroup = createElement("div", { class: "form-group" });
-    const nameLabel = createElement(
-      "label",
-      { class: "form-label", for: "create-channel-name" },
-      shellText("channelForm.name"),
-    );
-    const nameInput = createElement("input", {
-      id: "create-channel-name",
-      class: "form-input",
-      type: "text",
-      placeholder: shellText(
-        initialType === "voice"
-          ? "channelForm.namePlaceholder.voice"
-          : "channelForm.namePlaceholder.text",
-      ),
-      "data-testid": "channel-name-input",
-    });
-    const nameHint = attachLimitHint(nameInput, {
-      max: MAX_CHANNEL_NAME_LENGTH,
-      countCharacters: true,
-      hint: lineHintText(MAX_CHANNEL_NAME_LENGTH),
-      id: "create-channel-name-hint",
-      signal: disposable.signal,
-    });
-    appendChildren(nameGroup, nameLabel, nameInput, nameHint.el);
-
-    // Topic (optional, shown in the chat header)
-    const topicGroup = createElement("div", { class: "form-group" });
-    const topicLabel = createElement(
-      "label",
-      { class: "form-label", for: "create-channel-topic" },
-      shellText("channelForm.topic"),
-    );
-    const topicInput = createElement("input", {
-      id: "create-channel-topic",
-      class: "form-input",
-      type: "text",
-      placeholder: shellText("channelForm.topicPlaceholder"),
-      maxlength: String(MAX_CHANNEL_TOPIC_LENGTH),
-      "data-testid": "channel-topic-input",
-    });
-    appendChildren(topicGroup, topicLabel, topicInput);
-
-    // Channel type
-    const typeGroup = createElement("div", { class: "form-group" });
-    const typeLabel = createElement(
-      "label",
-      { class: "form-label", for: "create-channel-type" },
-      shellText("channelForm.type"),
-    );
-    const typeSelect = createElement("select", {
-      id: "create-channel-type",
-      class: "form-input",
-      "data-testid": "channel-type-select",
-    });
-
-    for (const t of offeredChannelTypes()) {
-      const opt = createElement("option", { value: t }, channelTypeLabel(t));
-      typeSelect.appendChild(opt);
-    }
-    typeSelect.value = initialType;
-    appendChildren(typeGroup, typeLabel, typeSelect);
-
     // Error display
     const errorEl = createElement("div", {
       class: "form-group",
@@ -170,7 +211,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
       "data-testid": "channel-create-error",
     });
 
-    appendChildren(body, categoryGroup, nameGroup, topicGroup, typeGroup, errorEl);
+    appendChildren(body, typeGroup, nameGroup, topicGroup, categoryGroup, errorEl);
 
     // Footer
     const footer = createElement("div", { class: "modal-footer" });
@@ -188,7 +229,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
         type: "button",
         "data-testid": "channel-create-submit",
       },
-      shellText("channel.create"),
+      shellText("channelForm.create"),
     );
 
     const submit = async (): Promise<void> => {
@@ -207,7 +248,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
       setText(createBtn, shellText("channelForm.creating"));
 
       try {
-        const type = typeSelect.value as ChannelType;
+        const type = typeCards.value();
         const topic = topicInput.value.trim();
         const fields = categoryFields(categorySelect.value);
         await onCreate({
@@ -224,7 +265,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
         errorEl.style.display = "block";
         setText(errorEl, errorText(err, shellText("channel.createFailed")));
         createBtn.removeAttribute("disabled");
-        setText(createBtn, shellText("channel.create"));
+        setText(createBtn, shellText("channelForm.create"));
       }
     };
     createBtn.addEventListener("click", () => void submit(), { signal: disposable.signal });

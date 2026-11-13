@@ -953,3 +953,122 @@ body .toast-container.toast-container--under-dialog {
   font-size: var(--font-size-sm);
   color: var(--text-muted);
 }
+
+/* ── Radio cards (lib/ui/radioCards) ── */
+.radio-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.radio-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-lg);
+  background: var(--bg-input);
+  color: var(--text-normal);
+  text-align: left;
+  cursor: pointer;
+}
+.radio-card:hover {
+  border-color: var(--border-strong);
+}
+.radio-card[aria-checked="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
+}
+.radio-card-icon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.radio-card[aria-checked="true"] .radio-card-icon {
+  color: var(--accent-text);
+}
+.radio-card-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.radio-card-label {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+.radio-card-desc {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.radio-card-dot {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--text-muted);
+  border-radius: 50%;
+}
+.radio-card[aria-checked="true"] .radio-card-dot {
+  border-color: var(--accent);
+  background: radial-gradient(circle, var(--accent) 0 4px, transparent 5px);
+}
+.radio-cards-hint {
+  display: none;
+  /* Two lines, so a longer description does not change the dialog height. */
+  min-height: 2.8em;
+  margin-top: 6px;
+  line-height: 1.4;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+/* Narrow: names only in a 2x2 grid, the checked card's description below. */
+@media (max-width: 600px) {
+  .radio-card {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  .radio-card-text {
+    order: 1;
+    flex-basis: 100%;
+  }
+  .radio-card-dot {
+    margin-left: auto;
+  }
+  .radio-card-desc {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .radio-cards-hint {
+    display: block;
+  }
+}
+
+/* A text field led by an icon (the create-channel name's type icon). */
+.input-with-icon {
+  position: relative;
+}
+.input-with-icon .form-input {
+  padding-left: 38px;
+}
+.input-leading-icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  display: flex;
+  color: var(--text-muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.form-label-optional {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}

@@ -214,6 +214,7 @@ export const shards = {
     "src/features/voice-messages/wav.ts",
     "src/lib/media/publicAssets.ts",
     "src/lib/ui/qrCode.ts",
+    "src/lib/ui/radioCards.ts",
     "src/lib/voice/audioVolumePrefs.ts",
   ],
   "audio-media-6": [

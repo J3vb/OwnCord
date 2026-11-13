@@ -42,8 +42,8 @@ describe("Forum in the type list", () => {
     });
     modal.mount(container);
     const values = Array.from(
-      container.querySelectorAll<HTMLOptionElement>("[data-testid='channel-type-select'] option"),
-    ).map((o) => o.value);
+      container.querySelectorAll<HTMLElement>("[data-testid='channel-type-select'] [role='radio']"),
+    ).map((o) => o.dataset["value"] ?? "");
     modal.destroy?.();
     return values;
   };
@@ -102,10 +102,27 @@ describe("CreateChannelModal", () => {
   }
 
   function typeOptionValues(): string[] {
-    const select = container.querySelector(
-      "[data-testid='channel-type-select']",
-    ) as HTMLSelectElement;
-    return Array.from(select.options).map((o) => o.value);
+    return typeCards().map((card) => card.dataset["value"] ?? "");
+  }
+
+  function typeCards(): HTMLButtonElement[] {
+    return Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        "[data-testid='channel-type-select'] [role='radio']",
+      ),
+    );
+  }
+
+  function checkedType(): string | undefined {
+    const checked = typeCards().filter((card) => card.getAttribute("aria-checked") === "true");
+    expect(checked).toHaveLength(1);
+    return checked[0]!.dataset["value"];
+  }
+
+  function pickType(type: string): void {
+    (
+      container.querySelector(`[data-testid='channel-type-select-${type}']`) as HTMLButtonElement
+    ).click();
   }
 
   const openDialog: MakeDialog = ({ action, onClose }) =>
@@ -120,7 +137,11 @@ describe("CreateChannelModal", () => {
       ].map((l) => l.textContent);
     expect(labelOf("channel-category-select")).toEqual(["Category"]);
     expect(labelOf("channel-name-input")).toEqual(["Name"]);
-    expect(labelOf("channel-type-select")).toEqual(["Type"]);
+    expect(labelOf("channel-topic-input")).toEqual(["Topic (optional)"]);
+    const group = container.querySelector("[data-testid='channel-type-select']")!;
+    expect(group.getAttribute("role")).toBe("radiogroup");
+    const labelId = group.getAttribute("aria-labelledby")!;
+    expect(container.querySelector(`#${labelId}`)?.textContent).toBe("Type");
     modal.destroy?.();
   });
 
@@ -200,11 +221,99 @@ describe("CreateChannelModal", () => {
     modal.destroy?.();
   });
 
-  it("pre-selects the type hint it was given", () => {
-    const { modal } = makeModal(NO_CATEGORY, { type: "voice" });
+  it("pre-selects the type hint it was given and submits that type", async () => {
+    const onCreate = vi.fn(async (_data: { type: string }) => {});
+    const { modal } = makeModal(NO_CATEGORY, { type: "voice", onCreate });
+    expect(checkedType()).toBe("voice");
+    const voice = container.querySelector("[data-testid='channel-type-select-voice']")!;
+    expect(voice.getAttribute("tabindex")).toBe("0");
     expect(
-      (container.querySelector("[data-testid='channel-type-select']") as HTMLSelectElement).value,
-    ).toBe("voice");
+      container.querySelector("[data-testid='channel-name-input']")?.getAttribute("placeholder"),
+    ).toBe("lounge");
+    submitNamed("lounge");
+    await vi.waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+    expect(onCreate.mock.calls[0]![0].type).toBe("voice");
+    modal.destroy?.();
+  });
+
+  it("starts on Text without a type hint", () => {
+    const { modal } = makeModal("Chat");
+    expect(checkedType()).toBe("text");
+    modal.destroy?.();
+  });
+
+  it("orders the fields Type, Name, Topic, Category", () => {
+    const { modal } = makeModal("Chat");
+    const groups = Array.from(container.querySelectorAll(".modal-body > .form-group"));
+    const groupOf = (testId: string): number =>
+      groups.indexOf(container.querySelector(`[data-testid='${testId}']`)!.closest(".form-group")!);
+    expect(
+      [
+        "channel-type-select",
+        "channel-name-input",
+        "channel-topic-input",
+        "channel-category-select",
+      ].map(groupOf),
+    ).toEqual([0, 1, 2, 3]);
+    modal.destroy?.();
+  });
+
+  it("describes what each type is for", () => {
+    applyReadyCapabilities({ forums: true });
+    const { modal } = makeModal("Chat");
+    expect(
+      typeCards().map((card) => [
+        card.querySelector(".radio-card-label")?.textContent,
+        card.querySelector(".radio-card-desc")?.textContent,
+      ]),
+    ).toEqual([
+      ["Text", "Chat, images and links"],
+      ["Voice", "Talk, camera and screen share"],
+      ["Announcement", "Only some roles can post"],
+      ["Forum", "Posts, each with its own replies"],
+    ]);
+    modal.destroy?.();
+    resetServerCapabilities();
+  });
+
+  it("arrow keys move the choice, wrap, and submit the type they land on", async () => {
+    const onCreate = vi.fn(async (_data: { type: string }) => {});
+    const { modal } = makeModal("Chat", { onCreate });
+    const key = (k: string): KeyboardEvent => {
+      const e = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true });
+      (document.activeElement as HTMLElement).dispatchEvent(e);
+      return e;
+    };
+    const text = container.querySelector<HTMLButtonElement>(
+      "[data-testid='channel-type-select-text']",
+    )!;
+    text.focus();
+    expect(key("ArrowRight").defaultPrevented).toBe(true);
+    expect(checkedType()).toBe("voice");
+    expect(document.activeElement?.getAttribute("data-value")).toBe("voice");
+    expect(text.getAttribute("tabindex")).toBe("-1");
+    key("ArrowDown");
+    expect(checkedType()).toBe("announcement");
+    key("ArrowDown");
+    expect(checkedType()).toBe("text");
+    key("ArrowUp");
+    expect(checkedType()).toBe("announcement");
+    expect(key("Tab").defaultPrevented).toBe(false);
+    submitNamed("news");
+    await vi.waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+    expect(onCreate.mock.calls[0]![0].type).toBe("announcement");
+    modal.destroy?.();
+  });
+
+  it("leads the name field with the chosen type's icon", () => {
+    const { modal } = makeModal("Chat");
+    const icon = (): string | null | undefined =>
+      container.querySelector(".input-leading-icon svg")?.getAttribute("data-icon");
+    expect(icon()).toBe("hash");
+    pickType("voice");
+    expect(icon()).toBe("volume-2");
+    pickType("announcement");
+    expect(icon()).toBe("megaphone");
     modal.destroy?.();
   });
 
@@ -216,8 +325,7 @@ describe("CreateChannelModal", () => {
     (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
       "lounge";
     select().value = "id:5";
-    (container.querySelector("[data-testid='channel-type-select']") as HTMLSelectElement).value =
-      "voice";
+    pickType("voice");
     (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
 
     await vi.waitFor(() => {
@@ -458,7 +566,7 @@ describe("CreateChannelModal", () => {
 
     // Button should be re-enabled
     expect(submitBtn.hasAttribute("disabled")).toBe(false);
-    expect(submitBtn.textContent).toBe("Create Channel");
+    expect(submitBtn.textContent).toBe("Create channel");
 
     modal.destroy?.();
   });
@@ -542,7 +650,7 @@ describe("CreateChannelModal", () => {
   // ── dialog accessibility contract (DC-13) ──────────────────────────────────
 
   it("stamps dialog semantics named by the header title", () =>
-    checkModalSemantics(openDialog, container, "create-channel-title", "Create Channel"));
+    checkModalSemantics(openDialog, container, "create-channel-title", "Create channel"));
 
   it("labels the icon-only close button", () => checkCloseButtonLabelled(openDialog, container));
 

@@ -142,6 +142,13 @@ export const shellText = defineCatalog("shell", {
   "channelForm.type": "Type",
   "channelForm.topic": "Topic",
   "channelForm.topicPlaceholder": "What's this channel about? (optional)",
+  "channelForm.optional": "(optional)",
+  "channelForm.topicPlaceholderCreate": "What is this channel about?",
+  "channelForm.create": "Create channel",
+  "channelForm.typeHint.text": "Chat, images and links",
+  "channelForm.typeHint.voice": "Talk, camera and screen share",
+  "channelForm.typeHint.announcement": "Only some roles can post",
+  "channelForm.typeHint.forum": "Posts, each with its own replies",
   "channelForm.slowMode": "Slow Mode",
   "channelForm.slowModeHint":
     "Members must wait this long between messages. Holders of Manage Messages are exempt.",
