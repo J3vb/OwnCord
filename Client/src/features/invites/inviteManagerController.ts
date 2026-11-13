@@ -23,7 +23,18 @@ function usernameOf(o: object): string {
   return typeof name === "string" ? name : "";
 }
 
-export function mapInviteResponse(r: InviteResponse): InviteItem {
+/** The signed-in user's name, or "" before sign-in. */
+function myUsername(): string {
+  return authStore.getState().user?.username ?? "";
+}
+
+/**
+ * `fallbackCreator` names the creator when the reply carries none: the
+ * create reply leaves creator_username empty, so an invite this client just
+ * made passes the signed-in user. An erased creator stays "" and the dialog
+ * leaves the creator out.
+ */
+export function mapInviteResponse(r: InviteResponse, fallbackCreator = ""): InviteItem {
   // The server now sends creator_username; the legacy nested created_by object
   // is kept as a fallback for an older server.
   const nested = "created_by" in r ? r.created_by : undefined;
@@ -37,7 +48,7 @@ export function mapInviteResponse(r: InviteResponse): InviteItem {
   return {
     id: r.id,
     code: r.code,
-    createdBy: creatorUsername !== "" ? creatorUsername : shellText("invite.unknownCreator"),
+    createdBy: creatorUsername !== "" ? creatorUsername : fallbackCreator,
     // created_at is when the invite was made; expires_at is when it lapses.
     // The old code set createdAt from expires_at, so the two were conflated.
     createdAt: r.created_at ?? "",
@@ -128,6 +139,10 @@ export function createInviteManagerController(opts: {
             expires_in_hours: DEFAULT_INVITE_HOURS,
             max_uses: 0,
           });
+          // The create reply has no creator; this client made it.
+          if ((featured.creator_username ?? "") === "") {
+            featured = { ...featured, creator_username: myUsername() };
+          }
           visible.push(featured);
         } catch (err) {
           log.error("Fresh invite create failed", { error: String(err) });
@@ -141,17 +156,18 @@ export function createInviteManagerController(opts: {
       };
     },
     build: (data, _root, close) => {
-      const invites = data.invites.map(mapInviteResponse);
+      const invites = data.invites.map((r) => mapInviteResponse(r));
       return data.screen.createInviteManager({
         invites,
         featuredCode: data.featuredCode,
+        serverName: authStore.getState().serverName ?? null,
         formatLink: (code: string) => formatInviteLink(code, opts.api.getConfig().host),
         onCreateInvite: async (params) => {
           const created = await opts.api.createInvite({
             expires_in_hours: params.expiresInHours,
             max_uses: params.maxUses,
           });
-          return mapInviteResponse(created);
+          return mapInviteResponse(created, myUsername());
         },
         onRevokeInvite: async (id: number, code: string) => {
           try {

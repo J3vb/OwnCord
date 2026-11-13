@@ -115,7 +115,9 @@ export async function messagesStoreMock() {
 
 export function authStoreMock() {
   return {
-    authStore: { getState: () => ({ user: { username: mockMe.value } }) },
+    authStore: {
+      getState: () => ({ user: { username: mockMe.value }, serverName: "Game Night Crew" }),
+    },
   };
 }
 
