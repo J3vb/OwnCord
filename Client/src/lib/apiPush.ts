@@ -1,11 +1,9 @@
-// REST calls for push to this device (GET /push/vapid, POST and DELETE
+// REST calls for push to this device (GET /push/vapid, POST
 // /push/subscriptions). The server answers 503 PUSH_DISABLED to each while
-// its owner has push off.
+// its owner has push off. There is no sign-out call: the server deletes a
+// subscription with the session that made it.
 
 import type { ApiTransport } from "./apiShared";
-
-/** A sign-out waits at most this long for the DELETE before it revokes the session. */
-const PUSH_REVOKE_TIMEOUT_MS = 3_000;
 
 /** The server's VAPID public key (base64url) and its id. */
 export interface PushVapidResponse {
@@ -35,17 +33,6 @@ export function createPushApi(t: ApiTransport) {
      *  updates the row, so it is sent at every sign-in. */
     subscribePush(body: PushSubscribeBody, signal?: AbortSignal): Promise<PushSubscribeResponse> {
       return t.request("PushSubscribeResponse", "POST", "/push/subscriptions", body, signal);
-    },
-
-    /** Removes a subscription at sign-out, with the session's own token: it
-     *  runs outside the session's scope, before that token is revoked. */
-    revokePushSubscription(id: number, token: string): Promise<void> {
-      return t.request("NoBody", "DELETE", `/push/subscriptions/${id}`, undefined, undefined, {
-        detached: true,
-        skipUnauthorized: true,
-        token,
-        timeoutMs: PUSH_REVOKE_TIMEOUT_MS,
-      });
     },
   };
 }

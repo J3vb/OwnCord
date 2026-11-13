@@ -5,22 +5,14 @@
  * auth state. The revocation is strictly best-effort: it is fire-and-forget and
  * its failure is swallowed, so a slow, offline, or rejecting server can never
  * block or delay the local logout — `clearAuth()` always runs synchronously.
- *
- * In the Android app the phone first comes off the server's push list, with
- * the session's own token, so the revocation waits for that DELETE (a few
- * seconds at most). Both carry the token taken here, before the teardown
- * drops it.
  */
 
 import type { ApiClient } from "../../lib/api";
-import { authStore, clearAuth } from "@stores/auth.store";
-import { pushSignOut, type PushSignOutApi } from "../push/signOut";
+import { clearAuth } from "@stores/auth.store";
 
-export function logout(api: Pick<ApiClient, "logout"> & PushSignOutApi): void {
-  const { token, user } = authStore.getState();
-  const revoke = (): void => void api.logout(undefined, token ?? undefined).catch(() => {});
-  const pushGone = pushSignOut(api, user?.id ?? null, token);
-  if (pushGone === null) revoke();
-  else void pushGone.then(revoke);
+export function logout(api: Pick<ApiClient, "logout">): void {
+  // Best-effort server-side token revocation; never awaited, never allowed to
+  // throw. clearAuth() below is the authoritative local teardown.
+  void api.logout().catch(() => {});
   clearAuth();
 }

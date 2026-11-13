@@ -441,6 +441,7 @@ type PushSubscription struct {
 	VapidKeyID string `json:"vapidKeyId"`
 	CreatedAt  string `json:"createdAt"`
 	LastSeenAt string `json:"lastSeenAt"`
+	SessionID  *int64 `json:"sessionId"`
 }
 
 type RateLockout struct {

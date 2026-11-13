@@ -308,7 +308,6 @@ export const shards = {
     "src/features/push/pushSettingRow.ts",
     "src/features/push/pushSubscription.ts",
     "src/features/push/readyPush.ts",
-    "src/features/push/signOut.ts",
     "src/features/push/store.ts",
     "src/lib/apiAdmin.ts",
     "src/lib/apiModeration.ts",

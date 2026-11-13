@@ -31,7 +31,6 @@ import {
   onReady,
   type PushApi,
 } from "../../../src/features/push/pushSubscription";
-import { subscriptionId } from "../../../src/features/push/pushInstance";
 import { pushStore } from "../../../src/features/push/store";
 
 const KEYS = { endpoint: "https://ntfy.example/up1", p256dh: "P", auth: "A" };
@@ -85,7 +84,6 @@ describe("push subscription", () => {
       expect.any(AbortSignal),
     );
     expect(pushStore.getState().setting).toBe("on");
-    expect(subscriptionId("chat.example:8443#7")).toBe(42);
   });
 
   it("registers once per session: a reconnect's ready sends nothing, a new sign-in sends again", async () => {
@@ -175,6 +173,40 @@ describe("push subscription", () => {
     lastEventHandler()({ kind: "endpoint", instance: "chat.example:8443#7" });
     await settle();
     expect(api.subscribePush).toHaveBeenCalledTimes(2);
+  });
+
+  it("every sign-out drops the push app's registration; a quick switch keeps it", async () => {
+    const first = makeApi();
+    onReady(first.api);
+    await settle();
+    runSessionResets("server_switch");
+    expect(host.unregister).not.toHaveBeenCalled();
+
+    const second = makeApi(new SessionScope({ host: "chat.example:8443", generation: 2 }));
+    onReady(second.api);
+    await settle();
+    runSessionResets("user");
+    expect(host.unregister).toHaveBeenCalledExactlyOnceWith("chat.example:8443#7");
+
+    runSessionResets("user");
+    expect(host.unregister).toHaveBeenCalledTimes(1);
+  });
+
+  it("a pick that lands after a sign-out writes nothing", async () => {
+    const { api } = makeApi();
+    host.register.mockResolvedValueOnce({ ok: false, reason: "choose" });
+    onReady(api);
+    await settle();
+    let picked!: (ok: boolean) => void;
+    host.choose.mockReturnValueOnce(new Promise((resolve) => (picked = resolve)));
+
+    const choosing = chooseDistributor("io.heckel.ntfy");
+    runSessionResets("user");
+    picked(false);
+    await choosing;
+
+    expect(pushStore.getState().setting).toBe("off");
+    expect(api.subscribePush).not.toHaveBeenCalled();
   });
 
   it("follows the host for as long as the session lasts", async () => {

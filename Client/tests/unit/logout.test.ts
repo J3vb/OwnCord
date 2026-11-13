@@ -1,37 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
 // clearAuth pulls in voice/livekit/notification teardown; stub it so this test
 // stays a pure unit test of the best-effort revoke-then-teardown ordering.
 const clearAuth = vi.fn();
 vi.mock("@stores/auth.store", () => ({
   clearAuth: () => clearAuth(),
-  authStore: { getState: () => ({ token: "tok", user: { id: 4 } }) },
-}));
-
-// The phone's push sign-out: null (nothing to remove) unless a test says so.
-const pushSignOut = vi.fn<() => Promise<void> | null>(() => null);
-vi.mock("../../src/features/push/signOut", () => ({
-  pushSignOut: (...args: unknown[]) => pushSignOut(...(args as [])),
 }));
 
 import { logout } from "../../src/features/connection/logout";
 
-type Api = Parameters<typeof logout>[0];
-
-function makeApi(logoutImpl: () => Promise<void>) {
-  const api = {
-    logout: vi.fn(logoutImpl),
-    revokePushSubscription: vi.fn(() => Promise.resolve()),
-    getSession: vi.fn(),
-  };
-  return api as unknown as Api & typeof api;
+function makeApi(logoutImpl: () => Promise<void>): { logout: Mock<() => Promise<void>> } {
+  return { logout: vi.fn(logoutImpl) };
 }
 
 describe("logout", () => {
   beforeEach(() => {
     clearAuth.mockClear();
-    pushSignOut.mockReset();
-    pushSignOut.mockReturnValue(null);
   });
 
   it("calls POST /auth/logout and then clears local auth", () => {
@@ -64,21 +48,5 @@ describe("logout", () => {
     logout(api);
 
     expect(clearAuth).toHaveBeenCalledTimes(1);
-  });
-
-  it("revokes the session only after the phone is off the push list, with the token taken first", async () => {
-    let pushDone!: () => void;
-    pushSignOut.mockReturnValue(new Promise<void>((resolve) => (pushDone = resolve)));
-    const api = makeApi(() => Promise.resolve());
-
-    logout(api);
-
-    expect(pushSignOut).toHaveBeenCalledWith(api, 4, "tok");
-    expect(clearAuth).toHaveBeenCalledTimes(1);
-    expect(api.logout).not.toHaveBeenCalled();
-    pushDone();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(api.logout).toHaveBeenCalledWith(undefined, "tok");
   });
 });

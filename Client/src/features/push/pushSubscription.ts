@@ -20,7 +20,7 @@ import { authStore } from "@stores/auth.store";
 import { connectText } from "../../i18n/connect";
 import { desktop } from "../../platform/desktop";
 import type { PushHostEvent, PushRegisterFailure } from "../../platform/contracts/pushRegistration";
-import { deviceLabel, pushInstance, saveSubscriptionId } from "./pushInstance";
+import { deviceLabel, pushInstance } from "./pushInstance";
 import { INITIAL_PUSH_STATE, pushStore, setPushSetting, type PushSetting } from "./store";
 
 const log = createLogger("push");
@@ -39,10 +39,17 @@ let session: Session | null = null;
 /** Bumped by every attempt: only the newest may write. */
 let attempt = 0;
 
-// App-lifetime reset hook, registered at module load.
+// App-lifetime reset hook, registered at module load. Every sign-out ("user":
+// the button, sign out everywhere, an ended or refused session, a ban) also
+// drops the push app's registration, so nothing more shows for that account;
+// the server deletes its subscription with the session. A quick switch, an
+// epoch refusal or an unreadable reply keep the session, and so the push.
 void registerSessionReset(
   "push:session",
-  () => {
+  (reason) => {
+    if (reason === "user" && session !== null) {
+      void desktop.pushRegistration.unregister(session.instance);
+    }
     session = null;
     attempt += 1;
     pushStore.setState(() => INITIAL_PUSH_STATE);
@@ -85,11 +92,10 @@ export function onReady(api: PushApi): void {
 export async function chooseDistributor(id: string): Promise<void> {
   const current = session;
   if (current === null) return;
-  if (!(await desktop.pushRegistration.choose(id))) {
-    setPushSetting("failed");
-    return;
-  }
-  if (session === current) await registerPush(current);
+  const chosen = await desktop.pushRegistration.choose(id);
+  if (session !== current) return;
+  if (chosen) await registerPush(current);
+  else setPushSetting("failed");
 }
 
 function onHostEvent(event: PushHostEvent): void {
@@ -123,12 +129,11 @@ async function registerPush(current: Session): Promise<void> {
       return;
     }
     const { endpoint, p256dh, auth } = result.keys;
-    const reply = await current.api.subscribePush(
+    await current.api.subscribePush(
       { endpoint, keys: { p256dh, auth }, device_name: deviceLabel(navigator.userAgent) },
       current.scope.signal,
     );
     if (!owns()) return;
-    saveSubscriptionId(current.instance, reply.id);
     setPushSetting("on");
   } catch (err) {
     if (!owns()) return;

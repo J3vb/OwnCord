@@ -47,10 +47,13 @@ type PushSubscribeInput struct {
 	P256dh     string
 	Auth       string
 	DeviceName string
+	// SessionID is the subscribing session; the subscription is deleted with
+	// it. Nil for an API-token principal, whose row keeps the sweep lifetime.
+	SessionID *int64
 }
 
 type pushStore interface {
-	UpsertPushSubscription(ctx context.Context, userID int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error)
+	UpsertPushSubscription(ctx context.Context, userID int64, sessionID *int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error)
 	ListPushSubscriptions(ctx context.Context, userID int64, keyID string) ([]db.PushSubscription, error)
 	DeletePushSubscription(ctx context.Context, userID, id int64) (bool, error)
 	SweepPushSubscriptions(ctx context.Context, cutoff time.Time, keyID string) (int64, error)
@@ -137,7 +140,7 @@ func (s *PushService) Subscribe(ctx context.Context, userID int64, in PushSubscr
 	if err != nil {
 		return 0, err
 	}
-	id, err := s.st.UpsertPushSubscription(ctx, userID, in.Endpoint, p256dh, auth, deviceName, s.currentKeyID(), maxPushSubscriptionsPerUser)
+	id, err := s.st.UpsertPushSubscription(ctx, userID, in.SessionID, in.Endpoint, p256dh, auth, deviceName, s.currentKeyID(), maxPushSubscriptionsPerUser)
 	if err != nil {
 		return 0, fmt.Errorf("%w: %w", ErrInternal, err)
 	}

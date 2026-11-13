@@ -154,6 +154,15 @@ involved, and the phone shows "New messages on <server>" while the app is
 closed. With `push.enabled` on and `push.dispatch_enabled` off, phones can
 register but nothing is sent; the server logs a warning at start-up saying so.
 
+A phone's subscription belongs to the session that made it: signing out,
+"sign out everywhere", an expired session, a ban or an admin revoke deletes it
+with the session, so a signed-out phone gets no more pushes. The server only
+sends to a push server on a public address: a self-hosted ntfy on your own
+network, a VPN address or the same machine is refused at send time (the same
+rule that keeps any outbound fetch off the server's own network), so a member
+using one sees push as on but gets nothing. Use a public ntfy server such as
+ntfy.sh, or one published on a public address.
+
 | Key                          | Type   | Default | Description                                                                                                                                                                                                |
 | ---------------------------- | ------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `push.enabled`               | bool   | `false` | Owner opt-in for Web Push subscription storage. Routes are always mounted; this only gates whether they do anything.                                                                                       |

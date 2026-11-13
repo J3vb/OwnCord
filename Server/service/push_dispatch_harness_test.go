@@ -252,7 +252,7 @@ func newPushDispatchFixture(t *testing.T) *pushDispatchFixture {
 func (f *pushDispatchFixture) subscribe(t *testing.T, userID int64, endpoint string) *pushTestSubscriber {
 	t.Helper()
 	sub := newPushTestSubscriber(t)
-	if _, err := f.database.UpsertPushSubscription(context.Background(), userID, endpoint, sub.p256dhB64, sub.authB64, "d", f.keyID, 10); err != nil {
+	if _, err := f.database.UpsertPushSubscription(context.Background(), userID, nil, endpoint, sub.p256dhB64, sub.authB64, "d", f.keyID, 10); err != nil {
 		t.Fatalf("UpsertPushSubscription: %v", err)
 	}
 	return sub

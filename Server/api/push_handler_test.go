@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -370,5 +371,35 @@ func TestPushVAPID_ReturnsTheRunningKey(t *testing.T) {
 	_, wantKeyID, ok := push.PublicKey()
 	if !ok || resp.KeyID != wantKeyID {
 		t.Fatalf("key_id = %q, want the service's %q (ok=%v)", resp.KeyID, wantKeyID, ok)
+	}
+}
+
+// TestPushSubscriptions_TiedToTheSubscribingSession: the row names the
+// session that made it, so signing that session out ends the pushes to it.
+func TestPushSubscriptions_TiedToTheSubscribingSession(t *testing.T) {
+	database := openMigratedDB(t)
+	router, _ := buildPushRouter(t, database, true)
+	userID := mintUser(t, database, "push-session")
+	token, sessionID := mintSession(t, database, userID)
+
+	rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, validSubscribeBody("https://push.example.com/sub/session"))
+	requireStatus(t, rr, http.StatusCreated)
+
+	var stored sql.NullInt64
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT session_id FROM push_subscriptions WHERE user_id = ?`, userID).Scan(&stored); err != nil {
+		t.Fatalf("reading session_id: %v", err)
+	}
+	if !stored.Valid || stored.Int64 != sessionID {
+		t.Fatalf("session_id = %+v, want %d", stored, sessionID)
+	}
+
+	if _, err := database.ExecContext(context.Background(), `DELETE FROM sessions WHERE id = ?`, sessionID); err != nil {
+		t.Fatalf("ending the session: %v", err)
+	}
+	var n int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?`, userID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("subscriptions after the session ended = %d (%v), want 0", n, err)
 	}
 }

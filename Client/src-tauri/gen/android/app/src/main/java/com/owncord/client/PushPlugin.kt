@@ -102,6 +102,7 @@ object PushErrors {
   const val NO_KEYS = "NO_KEYS"
   const val UNREGISTERED = "UNREGISTERED"
   const val BAD_KEY = "BAD_KEY"
+  const val NO_SLOT = "NO_SLOT"
   const val FAILED_PREFIX = "FAILED_"
 }
 
@@ -162,7 +163,10 @@ class PushPlugin(private val activity: Activity) : Plugin(activity) {
       invoke.reject(problem)
       return
     }
-    PushStore.save(context, args.instance, args.title, args.body)
+    if (!PushStore.save(context, args.instance, args.title, args.body)) {
+      invoke.reject(PushErrors.NO_SLOT)
+      return
+    }
     PushHub.await(args.instance, invoke)
     try {
       UnifiedPush.register(context, args.instance, args.serverName, args.vapid)

@@ -14,25 +14,37 @@ function host(): Promise<Host> {
   return import("./pushRegistrationHost");
 }
 
+/** Runs `use` on the host side; `fallback` when it cannot load, so no call rejects. */
+async function withHost<T>(use: (h: Host) => Promise<T>, fallback: T): Promise<T> {
+  let h: Host;
+  try {
+    h = await host();
+  } catch (err) {
+    log.warn("Push host side unavailable", err);
+    return fallback;
+  }
+  return use(h);
+}
+
 export const pushRegistration: PushRegistration = {
   get supported() {
     return isAndroidHost();
   },
   async status() {
     if (!isAndroidHost()) return null;
-    return (await host()).status();
+    return withHost((h) => h.status(), null);
   },
   async choose(distributor) {
     if (!isAndroidHost()) return false;
-    return (await host()).choose(distributor);
+    return withHost((h) => h.choose(distributor), false);
   },
   async register(request) {
     if (!isAndroidHost()) return { ok: false, reason: "failed" };
-    return (await host()).register(request);
+    return withHost((h) => h.register(request), { ok: false, reason: "failed" });
   },
   async unregister(instance) {
     if (!isAndroidHost()) return;
-    await (await host()).unregister(instance);
+    await withHost((h) => h.unregister(instance), undefined);
   },
   follow(signal, onEvent) {
     if (!isAndroidHost()) return;

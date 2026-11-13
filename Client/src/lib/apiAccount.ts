@@ -50,14 +50,12 @@ export function createAccountApi(t: ApiTransport) {
 
     /** Revokes this session's token. It runs outside the session's scope, so the
      *  session teardown that follows a logout cannot cancel it, and a 401 (the
-     *  token is already gone) does not start a second logout. `token` is the
-     *  session's, taken before the teardown when the call goes out after it. */
-    logout(signal?: AbortSignal, token?: string): Promise<void> {
+     *  token is already gone) does not start a second logout. */
+    logout(signal?: AbortSignal): Promise<void> {
       return t.request("NoBody", "POST", "/auth/logout", undefined, signal, {
         detached: true,
         skipUnauthorized: true,
         timeoutMs: LOGOUT_TIMEOUT_MS,
-        ...(token === undefined ? {} : { token }),
       });
     },
 

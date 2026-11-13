@@ -22,14 +22,17 @@ object PushStore {
   private fun prefs(context: Context): SharedPreferences =
     context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
-  fun save(context: Context, instance: String, title: String, body: String) {
+  // False when every notification id is taken: nothing could be shown, so
+  // the registration must not go ahead and claim push is on.
+  fun save(context: Context, instance: String, title: String, body: String): Boolean {
     val prefs = prefs(context)
-    val id = PushSlots.idFor(instance, ids(prefs)) ?: return
+    val id = PushSlots.idFor(instance, ids(prefs)) ?: return false
     prefs.edit()
       .putString(TITLE + instance, title)
       .putString(BODY + instance, body)
       .putInt(ID + instance, id)
       .apply()
+    return true
   }
 
   fun forget(context: Context, instance: String) {
@@ -52,8 +55,9 @@ object PushStore {
 
 // The "new messages" notification a push shows while the app is closed or in
 // the background: one per server, replaced by the next rather than stacked,
-// and a tap opens the app on that server. While the app is on screen the page
-// shows messages itself, so a push then shows nothing.
+// and a tap opens the app (on the server it last showed: the push carries no
+// channel, and the intent names the server for a later switch). While the app
+// is on screen the page shows messages itself, so a push then shows nothing.
 object PushAlerts {
   // The channel the page's own message notifications use
   // (android_notifications.rs), so one switch in Android's settings covers both.
@@ -68,7 +72,7 @@ object PushAlerts {
     val title = PushStore.title(context, instance) ?: return
     val body = PushStore.body(context, instance).orEmpty()
     val manager = context.getSystemService(NotificationManager::class.java)
-    ensureChannel(manager, title)
+    ensureChannel(manager, context.applicationInfo.loadLabel(context.packageManager).toString())
     val notification = Notification.Builder(context, CHANNEL)
       .setSmallIcon(R.drawable.ic_message_notification)
       .setContentTitle(title)
