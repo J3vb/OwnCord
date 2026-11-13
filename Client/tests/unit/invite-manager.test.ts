@@ -469,6 +469,36 @@ describe("InviteManager", () => {
       expect(parts).toEqual(["Made by admin", "5 of 5 uses", "Never expires"]);
     });
 
+    it("shows an Expired chip instead of Copy on a link past its expiry", () => {
+      mountMgr({
+        featuredCode: "gone",
+        invites: [makeInvite({ code: "gone", maxUses: null, expiresAt: "2020-01-01T00:00:00Z" })],
+      });
+      expect(container.querySelector(".invite-manager__featured-copy")).toBeNull();
+      const row = container.querySelector(".invite-item")!;
+      expect(row.querySelector(".invite-item__chip")!.textContent).toBe("Expired");
+      expect(row.querySelector(".invite-item__copy")).toBeNull();
+      expect(row.querySelector(".invite-item__revoke")).not.toBeNull();
+    });
+
+    it("drops Copy from a link that expires while the dialog is open", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      try {
+        mountMgr({ invites: [makeInvite({ code: "soon", expiresAt: "2026-01-01T01:00:00Z" })] });
+        expect(container.querySelector(".invite-item__copy")).not.toBeNull();
+        vi.setSystemTime(new Date("2026-01-01T02:00:00Z"));
+        await clickCreate();
+        const soon = [...container.querySelectorAll(".invite-item")].find(
+          (r) => r.querySelector(".invite-item__code")!.textContent === "soon",
+        )!;
+        expect(soon.querySelector(".invite-item__copy")).toBeNull();
+        expect(soon.querySelector(".invite-item__chip")!.textContent).toBe("Expired");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("keeps Copy with a copy icon on an invite that still has uses", () => {
       mountMgr({ invites: [makeInvite({ code: "live", uses: 4, maxUses: 5 })] });
       const copy = container.querySelector(".invite-item__copy")!;
