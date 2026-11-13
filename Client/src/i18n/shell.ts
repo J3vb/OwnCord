@@ -139,6 +139,8 @@ export const shellText = defineCatalog("shell", {
   "channelForm.name": "Name",
   "channelForm.namePlaceholder.text": "general",
   "channelForm.namePlaceholder.voice": "lounge",
+  "signIn.plain": "Unreviewed sign-in to your account",
+  "signIn.review": "Review devices",
   "channelForm.type": "Type",
   "channelForm.topic": "Topic",
   "channelForm.topicPlaceholder": "What's this channel about? (optional)",
