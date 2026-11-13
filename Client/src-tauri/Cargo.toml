@@ -71,6 +71,9 @@ html5ever = "0.38"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+# owncord:// links: the desktop installers register the scheme, and on Android
+# the plugin writes the intent filter into the manifest at build time.
+tauri-plugin-deep-link = "2"
 # Minor-pinned per the plugin's own guidance: configure_client hands it a
 # preconfigured rustls ClientConfig, and a 2.x minor bump can change the
 # plugin's bundled reqwest/rustls and break that seam at runtime. 2.13 is the
@@ -136,7 +139,6 @@ base64 = "0.22"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
-tauri-plugin-deep-link = "2"
 # Message notifications that open their message on click on macOS
 # (message_notification.rs). The notification plugin's desktop backend drops
 # the click/action callback, so this calls notify-rust — already in the tree as
