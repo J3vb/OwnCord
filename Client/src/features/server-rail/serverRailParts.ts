@@ -169,3 +169,13 @@ export function dmItem(
   appendChildren(wrapper, btn, badge);
   return wrapper;
 }
+
+/** Home's name: its unread DMs and waiting requests, each said apart. */
+export function homeLabel(unread: number, requests: number): string {
+  if (requests === 0) {
+    return unread === 0 ? serverRailText("home") : serverRailText("homeUnread", { count: unread });
+  }
+  return unread === 0
+    ? serverRailText("homeRequests", { count: requests })
+    : serverRailText("homeUnreadRequests", { count: requests, unread });
+}

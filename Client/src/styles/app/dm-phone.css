@@ -88,3 +88,18 @@
   font-weight: 600;
   color: var(--text-normal);
 }
+#unified-sidebar.phone-messages .dm-requests-section {
+  padding: 0 12px 8px;
+}
+#unified-sidebar.phone-messages .dm-nav-row {
+  width: 100%;
+  min-height: 48px;
+  margin: 0;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--bg-input);
+  font-size: 15px;
+}
+#unified-sidebar.phone-messages .dm-nav-row[aria-current] {
+  background: var(--bg-active);
+}

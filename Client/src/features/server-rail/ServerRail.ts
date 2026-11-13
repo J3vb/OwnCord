@@ -32,11 +32,13 @@ import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
 import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../../i18n/serverRail";
+import type { CountSource } from "../navigation/destinations";
 import {
   FALLBACK_COLOR,
   atDmMode,
   defaultFolderId,
   dmItem,
+  homeLabel,
   railIcon,
   roundButton,
   sameItem,
@@ -60,6 +62,8 @@ export interface ServerRailOptions {
   readonly onShowServer?: () => void;
   /** Open a DM from its icon under Home. */
   readonly onOpenDm?: (dm: DmChannel) => void;
+  /** Message requests waiting for this account; they badge Home too. */
+  readonly pendingRequests?: CountSource;
 }
 
 function isAddressName(name: string, host: string): boolean {
@@ -396,23 +400,23 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     const dmList = createElement("div", { class: "server-rail-dms" });
     renderDms = (): void => {
       const channels = dmStore.getState().channels;
-      const total = totalDmUnread(channels);
+      const unread = totalDmUnread(channels);
+      const requests = options.pendingRequests?.get() ?? 0;
+      // One badge for everything behind Home; the name tells the two apart.
+      const total = unread + requests;
       homeBadge.hidden = total === 0;
       setText(homeBadge, formatBadgeCount(total));
-      homeBtn?.setAttribute(
-        "aria-label",
-        total === 0 ? serverRailText("home") : serverRailText("homeUnread", { count: total }),
-      );
+      homeBtn?.setAttribute("aria-label", homeLabel(unread, requests));
       clearChildren(dmList);
       // The DM whose call you are in stays first under Home until the call
       // ends, so the call is one click away from any server view.
       const callId = voiceStore.getState().currentChannelId;
       const callDm = callId === null ? undefined : channels.find((c) => c.channelId === callId);
       if (callDm !== undefined) dmList.appendChild(dmItem(callDm, true, options.onOpenDm));
-      const unread = channels
+      const unreadDms = channels
         .filter((c) => c !== callDm && dmUnreadCount(c) > 0)
         .toSorted((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
-      for (const dm of unread) dmList.appendChild(dmItem(dm, false, options.onOpenDm));
+      for (const dm of unreadDms) dmList.appendChild(dmItem(dm, false, options.onOpenDm));
     };
     top.appendChild(homeWrap);
     top.appendChild(dmList);
@@ -457,6 +461,8 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       () => renderDms?.(),
     );
     window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDms?.(), { signal });
+    const unsubRequests = options.pendingRequests?.subscribe(() => renderDms?.());
+    if (unsubRequests !== undefined) disposable.addCleanup(unsubRequests);
     render();
     renderDms?.();
 

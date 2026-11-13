@@ -2,7 +2,7 @@
  * Sidebar build step: the member section and switching the sidebar between
  * channels and DMs.
  */
-import { createElement, setText, clearChildren } from "@lib/dom";
+import { createElement, clearChildren } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import type { DmSidebar } from "../../../features/direct-messages/DmSidebar";
 import { createVoiceModerationCallbacks } from "../VoiceCallbacks";
@@ -21,7 +21,7 @@ import { uiStore } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
-import { trackCurrentView } from "../../../features/navigation/contentView";
+import { createDmNavRow } from "../../../features/direct-messages/dmNavRow";
 import { navigationText } from "../../../i18n/navigation";
 import { mountDmPhoneHead } from "../../../features/direct-messages/sidebarDmPhoneHead";
 import type { SidebarScope } from "./sidebarScope";
@@ -48,42 +48,39 @@ function teardownSidebarContent(sc: SidebarScope): void {
   sc.destroyMemberSection();
 }
 
-/** The People and "Message Requests (N)" entries at the top of DM mode. N is
+/** The People and Message requests rows at the top of DM mode. The badge is
  *  the pending-request count and is never folded into unread. */
 function buildDmEntries(sc: SidebarScope): HTMLElement {
   const requests = sc.opts.destinations?.requests;
   const section = createElement("div", { class: "dm-requests-section" });
+  const open = (view: "people" | "requests") => (opener: HTMLElement) =>
+    sc.opts.onOpenView?.(view, opener);
   if (sc.opts.destinations?.people !== undefined) {
-    const people = createElement(
-      "button",
+    const people = createDmNavRow(
       {
-        type: "button",
-        class: "sidebar-dm-view-all dm-requests-entry",
-        "data-testid": "dm-people-entry",
+        testId: "dm-people-entry",
+        icon: "users",
+        label: navigationText("people.title"),
+        view: "people",
+        onOpen: open("people"),
       },
-      navigationText("people.title"),
+      sc.channelModeUnsubs,
     );
-    people.addEventListener("click", () => sc.opts.onOpenView?.("people", people));
-    sc.channelModeUnsubs.push(trackCurrentView(people, "people"));
     section.appendChild(people);
   }
   if (requests !== undefined) {
-    const entry = createElement("button", {
-      type: "button",
-      class: "sidebar-dm-view-all dm-requests-entry",
-      "data-testid": "dm-requests-entry",
-    });
-    const renderEntry = (): void => {
-      const count = requests.pending.get();
-      setText(
-        entry,
-        count > 0 ? navigationText("requests.entry", { count }) : navigationText("requests.title"),
-      );
-    };
-    renderEntry();
-    entry.addEventListener("click", () => sc.opts.onOpenView?.("requests", entry));
-    sc.channelModeUnsubs.push(requests.pending.subscribe(renderEntry));
-    sc.channelModeUnsubs.push(trackCurrentView(entry, "requests"));
+    const entry = createDmNavRow(
+      {
+        testId: "dm-requests-entry",
+        icon: "inbox",
+        label: navigationText("requests.row"),
+        view: "requests",
+        onOpen: open("requests"),
+        count: requests.pending,
+        countLabel: (count) => navigationText("requests.rowWaiting", { count }),
+      },
+      sc.channelModeUnsubs,
+    );
     section.appendChild(entry);
   }
   return section;
@@ -242,8 +239,7 @@ export function mountMembersAndMode(sc: SidebarScope): void {
       // --- Member list (below channels), only in the "left" layout ---
       sc.syncMemberSection();
     } else {
-      // "Message Requests (N)" at the top of DM mode. N is the
-      // pending-request count and is never folded into unread.
+      // People and Message requests at the top of DM mode.
       mountDmPhoneHead(sc, sc.channelModeUnsubs);
       const section = buildDmEntries(sc);
       if (section.childElementCount > 0) sc.contentSlot.appendChild(section);

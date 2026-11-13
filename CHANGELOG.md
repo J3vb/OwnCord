@@ -125,6 +125,10 @@ release changes the database, and anything an operator must do first.)
 - A start-up warning says when `push.enabled` is on but `push.dispatch_enabled` is off, so devices can register but nothing is sent.
 - With push on, a direct message call also sends a ring push to the people it rings, whether or not they look online, and a ring-end push when one of them answers or declines on any device or the caller leaves. Both carry only the conversation's id, never a name, and skip a member on Do Not Disturb or already in the call.
 
+**Direct messages**
+
+- On Home, People and Message requests are now proper rows with an icon. Message requests shows how many requests are waiting, and the Home icon counts them too, so a new request is hard to miss.
+
 ### Fixed
 
 - **Invites:** the list shows all usable invites first and pages older ones; invites can be revoked by id (an older server still works through a fallback to the code); creating invites is limited to 20 per user per hour.

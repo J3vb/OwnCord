@@ -101,7 +101,7 @@ export function resetMessageRequests(): void {
 
 void registerSessionReset("message-requests:store", resetMessageRequests, { phase: "session" }); // app-lifetime reset hook, registered at module load
 
-/** N for "Message Requests (N)" and the DM header badge (a navigation CountSource). */
+/** The waiting-request count behind the Message requests badges (a navigation CountSource). */
 export const pendingRequestCount = {
   get: () => messageRequestsStore.getState().pending.length,
   subscribe: (onChange: () => void): (() => void) =>

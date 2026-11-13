@@ -61,7 +61,7 @@ const outcome = (page: Page) => page.locator("[data-testid='requests-outcome']")
 async function openInbox(page: Page, count: number): Promise<void> {
   await page.getByTestId("server-rail-home").click();
   const entry = page.locator("[data-testid='dm-requests-entry']");
-  await expect(entry).toHaveText(`Message Requests (${count})`);
+  await expect(entry).toHaveAccessibleName(`Message requests, ${count} waiting`);
   await entry.click();
   await expect(inbox(page)).toBeVisible();
 }

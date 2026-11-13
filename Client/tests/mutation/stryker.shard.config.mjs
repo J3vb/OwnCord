@@ -394,6 +394,7 @@ export const shards = {
     "src/lib/text/messageKind.ts",
   ],
   "lib-rest-6": [
+    "src/features/direct-messages/dmNavRow.ts",
     "src/features/messaging/textPreview.ts",
     "src/features/profiles/avatar.ts",
     "src/features/server-rail/switchConfirmDialog.ts",
