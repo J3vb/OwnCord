@@ -20,6 +20,7 @@ import type { WsClient } from "@lib/ws";
 import { clearHost, hostAndroidApp } from "../helpers/androidHost";
 import { resetAuthState, seedOnlineMember } from "../helpers/storeSeeds";
 import { usePhone } from "../helpers/phoneMedia";
+import { pickAvatarColor } from "../../src/features/profiles/avatar";
 
 function setUser(custom: string | null = null): void {
   authStore.setState(() => ({
@@ -94,6 +95,10 @@ describe("SelfProfileCard from the user bar", () => {
     expect(btn.getAttribute("aria-expanded")).toBe("true");
     expect(q("[data-testid='spc-name']")?.textContent).toBe("Alice A");
     expect(q("[data-testid='spc-username']")?.textContent).toBe("alice");
+    // Your letter avatar has the colour everyone else sees for you.
+    const probe = document.createElement("div");
+    probe.style.background = pickAvatarColor("alice");
+    expect(q(".spc-avatar")?.style.background).toBe(probe.style.background);
 
     btn.click();
     expect(card()).toBeNull();

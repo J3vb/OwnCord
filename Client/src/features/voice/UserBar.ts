@@ -25,7 +25,12 @@ import {
 import { parseExpiry } from "../presence/statusDefs";
 import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
 import { applyStatusIndicator, showsPhone } from "@lib/ui/statusIndicator";
-import { avatarAnimationMode, isRenderableAvatar, setAvatarSource } from "../profiles/avatar";
+import {
+  avatarAnimationMode,
+  isRenderableAvatar,
+  pickAvatarColor,
+  setAvatarSource,
+} from "../profiles/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
@@ -179,6 +184,10 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   }): void {
     if (avatarEl === null) return;
     if (avatarTextEl !== null) setText(avatarTextEl, avatarInitial(subject));
+    // The letter's colour is the one every other surface gives this user; a
+    // new identity with no picture repaints it even when the URL is unchanged.
+    const letterBackground = pickAvatarColor(subject.username);
+    if (avatarImgEl === null) avatarEl.style.background = letterBackground;
 
     const url = isRenderableAvatar(subject.avatar) ? resolveServerUrl(subject.avatar) : null;
     if (url === renderedAvatarUrl) return;
@@ -190,7 +199,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     }
     if (url === null) {
       if (avatarTextEl !== null) avatarTextEl.style.display = "";
-      avatarEl.style.background = "var(--accent)";
+      avatarEl.style.background = letterBackground;
       return;
     }
     void fetchImageAsObjectUrl(url).then(async (objectUrl) => {
@@ -241,7 +250,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
 
     avatarEl = createElement("div", {
       class: "ub-avatar",
-      style: "background: var(--accent); position: relative;",
+      style: "position: relative;",
     });
     avatarTextEl = createElement("span", {});
     avatarEl.appendChild(avatarTextEl);

@@ -163,6 +163,131 @@ describe("phone composer row", () => {
     b.comp.destroy?.();
   });
 
+  function typeText(text: string): void {
+    const textarea = container.querySelector<HTMLTextAreaElement>(".msg-textarea")!;
+    textarea.value = text;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  it("hides GIF and the smiley while the box holds text on a phone, and brings them back", () => {
+    usePhone();
+    const b = mountFull();
+    typeText("hi");
+    expect(b.gif.hidden).toBe(true);
+    expect(b.emoji.hidden).toBe(true);
+    for (const shown of [b.attach, b.send]) expect(shown.hidden).toBe(false);
+    typeText("");
+    expect(b.gif.hidden).toBe(false);
+    expect(b.emoji.hidden).toBe(false);
+    b.comp.destroy?.();
+  });
+
+  it("brings them back when a send empties the box", () => {
+    usePhone();
+    const b = mountFull();
+    typeText("hello");
+    expect(b.gif.hidden).toBe(true);
+    b.send.click();
+    expect(container.querySelector<HTMLTextAreaElement>(".msg-textarea")!.value).toBe("");
+    expect(b.gif.hidden).toBe(false);
+    expect(b.emoji.hidden).toBe(false);
+    b.comp.destroy?.();
+  });
+
+  it("keeps a button the user hid hidden when the box empties again", () => {
+    savePref(composerButtonPrefKey("gif"), false);
+    usePhone();
+    const b = mountFull();
+    typeText("hi");
+    typeText("");
+    expect(b.gif.hidden).toBe(true);
+    expect(b.emoji.hidden).toBe(false);
+    b.comp.destroy?.();
+  });
+
+  it("keeps GIF and the smiley while typing off the phone layout", () => {
+    const b = mountFull();
+    typeText("hi");
+    expect(b.gif.hidden).toBe(false);
+    expect(b.emoji.hidden).toBe(false);
+    b.comp.destroy?.();
+  });
+
+  it("brings them back when text typed on a wide layout is cleared after moving onto the phone", () => {
+    const b = mountFull();
+    typeText("hi");
+    usePhone();
+    window.dispatchEvent(new Event("resize"));
+    expect(b.gif.hidden).toBe(true);
+    typeText("");
+    expect(b.gif.hidden).toBe(false);
+    expect(b.emoji.hidden).toBe(false);
+    b.comp.destroy?.();
+  });
+
+  /** Records, for each height measurement, whether GIF was hidden at that moment. */
+  function recordMeasures(gif: HTMLButtonElement): boolean[] {
+    const reads: boolean[] = [];
+    const textarea = container.querySelector<HTMLTextAreaElement>(".msg-textarea")!;
+    Object.defineProperty(textarea, "scrollHeight", {
+      configurable: true,
+      get: () => {
+        reads.push(gif.hidden === true);
+        return 40;
+      },
+    });
+    return reads;
+  }
+
+  it("measures the text's height after GIF and the smiley give way", () => {
+    usePhone();
+    const b = mountFull();
+    const reads = recordMeasures(b.gif);
+    // The whole text at once, as a paste or a draft restore delivers it.
+    typeText("Hey, are we still on for the call tonight?");
+    expect(reads.at(-1)).toBe(true);
+    b.comp.destroy?.();
+  });
+
+  it("measures again when a layout change moves the buttons with text in the box", () => {
+    const b = mountFull();
+    typeText("Hey, are we still on for the call tonight?");
+    const reads = recordMeasures(b.gif);
+    usePhone();
+    window.dispatchEvent(new Event("resize"));
+    expect(reads).toEqual([true]);
+    reads.length = 0;
+    usePhone(false);
+    window.dispatchEvent(new Event("resize"));
+    expect(reads).toEqual([false]);
+    b.comp.destroy?.();
+  });
+
+  it("still opens the emoji picker from its shortcut while the smiley gives way", () => {
+    usePhone();
+    const b = mountFull();
+    typeText("hi");
+    expect(b.emoji.hidden).toBe(true);
+    b.comp.togglePicker("emoji");
+    const sheetEl = document.querySelector('[data-testid="expression-sheet"]');
+    expect(
+      sheetEl?.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute("data-testid"),
+    ).toBe("xp-tab-emoji");
+    b.comp.destroy?.();
+  });
+
+  it("still opens the GIF picker from its shortcut while the button gives way", () => {
+    usePhone();
+    const b = mountFull();
+    typeText("hi");
+    b.comp.togglePicker("gif");
+    const sheetEl = document.querySelector('[data-testid="expression-sheet"]');
+    expect(
+      sheetEl?.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute("data-testid"),
+    ).toBe("xp-tab-gif");
+    b.comp.destroy?.();
+  });
+
   it("swaps the + menu's Sticker tile when a resize crosses onto or off the phone layout", () => {
     const b = mountFull();
     usePhone();

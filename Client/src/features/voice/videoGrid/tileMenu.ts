@@ -11,7 +11,8 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { createMenuItem, openMenuShell } from "@lib/ui/contextMenu";
+import { createMenuItem, openMenuShell, setMenuItemLabel } from "@lib/ui/contextMenu";
+import { createIcon, type IconName } from "@lib/icons";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
@@ -124,14 +125,15 @@ function volumeRow(
   };
 }
 
-/** One action row that closes the menu before it runs. */
+/** One action row, led by `icon`, that closes the menu before it runs. */
 function actionItem(
   label: string,
   action: string,
+  icon: IconName,
   close: () => void,
   run: () => void,
 ): HTMLElement {
-  const item = createMenuItem(label, "context-menu-item");
+  const item = createMenuItem(label, "context-menu-item", { icon });
   item.setAttribute("data-action", action);
   item.addEventListener("click", () => {
     close();
@@ -186,10 +188,16 @@ export function showSelfTileMenu(opts: SelfTileMenuOptions): void {
     opts.signal,
     (menu, close) => {
       if (onHide !== undefined) {
-        menu.append(actionItem(t("tile.hideMyCamera"), "hide-self", close, onHide));
+        menu.append(actionItem(t("tile.hideMyCamera"), "hide-self", "eye-off", close, onHide));
       }
       if (onCameraOff !== undefined) {
-        const off = actionItem(t("widget.control.cameraOff"), "camera-off", close, onCameraOff);
+        const off = actionItem(
+          t("widget.control.cameraOff"),
+          "camera-off",
+          "camera-off",
+          close,
+          onCameraOff,
+        );
         if (locked !== null) {
           (off as HTMLButtonElement).disabled = true;
           off.classList.add("disabled");
@@ -223,12 +231,14 @@ function appendViewRows(menu: HTMLElement, view: TileMenuView, closeMenu: () => 
     actionItem(
       view.focused ? t("tile.backToGrid") : t("tile.focus"),
       "focus",
+      view.focused ? "layout-grid" : "square-user",
       closeMenu,
       view.onFocus,
     ),
     actionItem(
       view.fullscreen ? t("tile.exitFullscreen") : t("tile.fullscreen"),
       "fullscreen",
+      view.fullscreen ? "minimize" : "maximize",
       closeMenu,
       view.onFullscreen,
     ),
@@ -239,6 +249,7 @@ function appendViewRows(menu: HTMLElement, view: TileMenuView, closeMenu: () => 
       actionItem(
         view.poppedOut ? t("tile.popIn") : t("tile.popOut"),
         "popout",
+        "external-link",
         closeMenu,
         view.onPopout,
       ),
@@ -251,16 +262,30 @@ function buildTileMenu(menu: HTMLElement, opts: TileMenuOptions, closeMenu: () =
   const id = config.audioUserId;
 
   if (person?.onProfile !== undefined) {
-    menu.append(actionItem(t("tile.profile"), "profile", closeMenu, person.onProfile));
+    menu.append(actionItem(t("tile.profile"), "profile", "user", closeMenu, person.onProfile));
   }
   if (person?.onMessage !== undefined) {
-    menu.append(actionItem(t("tile.message"), "message", closeMenu, person.onMessage));
+    menu.append(
+      actionItem(t("tile.message"), "message", "message-square", closeMenu, person.onMessage),
+    );
   }
   if (menu.childElementCount > 0) menu.append(sep());
 
   if (config.isScreenshare) {
     let muted = getScreenshareAudioMuted(id);
     const start = muted ? 0 : Math.round(getScreenshareAudioVolume(id) * 100);
+    const muteItem = createMenuItem(
+      muted ? t("tile.unmuteStream") : t("tile.muteStream"),
+      "context-menu-item",
+      { icon: muted ? "volume-2" : "volume-x" },
+    );
+    /** Mute stream leads with volume-x, Unmute stream with volume-2. */
+    function showStreamMute(): void {
+      setMenuItemLabel(muteItem, muted ? t("tile.unmuteStream") : t("tile.muteStream"));
+      muteItem
+        .querySelector(":scope > .menu-item-icon")
+        ?.replaceChildren(createIcon(muted ? "volume-2" : "volume-x", 16));
+    }
     const stream = volumeRow(
       t("tile.menuStream"),
       t("tile.streamVolume", { name }),
@@ -271,15 +296,11 @@ function buildTileMenu(menu: HTMLElement, opts: TileMenuOptions, closeMenu: () =
         muted = v === 0;
         muteScreenshareAudio(id, muted);
         setScreenshareAudioVolume(id, v / 100);
-        setText(muteItem, muted ? t("tile.unmuteStream") : t("tile.muteStream"));
+        showStreamMute();
         opts.onVolumeChange(true, v, muted);
       },
     );
     menu.append(...stream.rows);
-    const muteItem = createMenuItem(
-      muted ? t("tile.unmuteStream") : t("tile.muteStream"),
-      "context-menu-item",
-    );
     muteItem.addEventListener("click", () => {
       muted = !muted;
       let volume = Math.round(getScreenshareAudioVolume(id) * 100);
@@ -309,15 +330,23 @@ function buildTileMenu(menu: HTMLElement, opts: TileMenuOptions, closeMenu: () =
     },
   );
   // Unchecking Mute on a user at 0 % brings them back at 100 %.
-  const localMute = createLocalMuteItem(id, () => {
-    voice.set(100);
-    opts.onVolumeChange(false, 100, false);
-  });
+  const localMute = createLocalMuteItem(
+    id,
+    () => {
+      voice.set(100);
+      opts.onVolumeChange(false, 100, false);
+    },
+    "volume-x",
+  );
   menu.append(...voice.rows, localMute.item, sep());
 
   appendViewRows(menu, view, closeMenu);
   if (opts.arrange !== undefined) appendArrangeRows(menu, opts.arrange, closeMenu);
-  menu.append(actionItem(t("tile.stopWatching"), "stop-watching", closeMenu, opts.onStopWatching));
+  menu.append(
+    actionItem(t("tile.stopWatching"), "stop-watching", "eye-off", closeMenu, opts.onStopWatching),
+  );
 
-  if (person?.moderation !== undefined) appendVoiceModeration(menu, person.moderation, closeMenu);
+  if (person?.moderation !== undefined) {
+    appendVoiceModeration(menu, person.moderation, closeMenu, true);
+  }
 }

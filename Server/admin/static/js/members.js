@@ -230,11 +230,10 @@ async function saveUploadLimit(uid){
 
 function memberRowHtml(u,storage){
   const guard=memberGuard(u);const items=memberMenuItems(u);
-  const initial=u.username?u.username[0].toUpperCase():'?';
   const name=esc(u.username);
   const more=items.length?'More actions for '+u.username:guard?MEMBER_GUARD_TEXT[guard]:'No other actions available for '+u.username;
   const role=memberChipsHtml(u,null);
-  return'<tr><td><div class="member-cell"><span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc(initial)+'</span><div><strong>'+name+'</strong>'+(guard?' <span class="badge '+(guard==='self'?'badge-accent':'badge-muted')+'" title="'+esc(MEMBER_GUARD_TEXT[guard])+'">'+MEMBER_GUARD_BADGE[guard]+'</span>':'')+(u.display_name?'<div class="member-sub member-nick">'+esc(u.display_name)+'</div>':'')+'<div class="member-role-inline">'+role+'</div></div></div></td>'
+  return'<tr><td><div class="member-cell">'+avatarHtml(u.username||'')+'<div><strong>'+name+'</strong>'+(guard?' <span class="badge '+(guard==='self'?'badge-accent':'badge-muted')+'" title="'+esc(MEMBER_GUARD_TEXT[guard])+'">'+MEMBER_GUARD_BADGE[guard]+'</span>':'')+(u.display_name?'<div class="member-sub member-nick">'+esc(u.display_name)+'</div>':'')+'<div class="member-role-inline">'+role+'</div></div></div></td>'
     +'<td class="col-role">'+role+'</td>'
     +'<td>'+memberStatusHtml(u)+'</td>'
     +(storage?'<td class="col-storage member-storage" id="mstore-'+u.id+'"><span class="member-sub">…</span></td>':'')
@@ -398,7 +397,7 @@ async function openEditUser(uid,uname,currentRole){
   const u=membersRows[uid]||{id:uid,username:uname,role_id:currentRole};
   const guard=memberGuard(u);
   const head='<div class="modal-header"><h3>Manage '+esc(uname)+'</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body">'
-    +'<div class="member-card"><span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc((uname||'?')[0].toUpperCase())+'</span><div><div class="member-card-name">'+esc(uname)+'</div>'
+    +'<div class="member-card">'+avatarHtml(uname||'')+'<div><div class="member-card-name">'+esc(uname)+'</div>'
     +'<div class="member-card-meta"><span class="role-badge"><span class="role-dot" style="background:'+esc(roleColor(currentRole))+'"></span>'+esc(roleName(currentRole,u.role_name))+'</span> '+memberStatusHtml(u)+'</div></div></div>';
   const done='<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModalAndRefresh">Close</button></div>';
   const nick=memberNicknameHtml(u,uid,!guard&&can(PERM.MANAGE_NICKNAMES));

@@ -5,7 +5,12 @@
 
 import { createElement } from "@lib/dom";
 import { applyStatusIndicator } from "@lib/ui/statusIndicator";
-import { avatarAnimationMode, isRenderableAvatar, setAvatarSource } from "../profiles/avatar";
+import {
+  avatarAnimationMode,
+  isRenderableAvatar,
+  pickAvatarColor,
+  setAvatarSource,
+} from "../profiles/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
@@ -110,7 +115,9 @@ export function buildGroupAvatarStack(
  * presented as a fact about the conversation.
  */
 export function buildAvatar(convo: DmConversation): HTMLDivElement {
-  const avatarBg = convo.avatarColor ?? "#5865F2";
+  // A 1:1 DM letter matches that user's colour everywhere else.
+  const avatarBg =
+    convo.avatarColor ?? (convo.isGroup === true ? "#5865F2" : pickAvatarColor(convo.username));
 
   if (convo.isGroup === true) {
     return buildGroupAvatarStack(

@@ -12,6 +12,7 @@ import { Permission } from "@lib/types";
 import { EVERYONE_TOKEN, HERE_TOKEN, isEveryoneToken } from "@lib/text/mentions";
 import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import { channelsStore } from "@stores/channels.store";
+import { createAvatarElement, pickAvatarColor } from "../../profiles/avatar";
 import { createInlineAutocomplete, type InlineAutocompleteComponent } from "./inlineAutocomplete";
 import { messagingText } from "../../../i18n/messaging";
 
@@ -205,16 +206,33 @@ function roleSuggestions(q: string): MentionSuggestion[] {
   return [...prefix.toSorted(byName), ...substring.toSorted(byName)];
 }
 
+/** The member's avatar for a user row; null for a broadcast or role row. */
+function mentionAvatar(s: MentionSuggestion): HTMLElement | null {
+  if (s.userId === null) return null;
+  const member = membersStore.getState().members.get(s.userId);
+  if (member === undefined) return null;
+  return createAvatarElement(member, {
+    className: "ma-avatar",
+    background: pickAvatarColor(member.username),
+    decorative: true,
+    // The name beside it is the option's name; the letter would prefix it.
+    attrs: { "aria-hidden": "true" },
+    // Up to 50 rows, rebuilt on every keystroke: fetch only the visible ones.
+    deferUntilVisible: true,
+  });
+}
+
 /**
- * One mention row: `@token`, or a display name whose @username leads the
- * detail line, plus the role / broadcast-meaning detail.
+ * One mention row: the member's avatar, `@token` or a display name whose
+ * @username leads the detail line, plus the role / broadcast-meaning detail.
  */
 function renderMentionRow(s: MentionSuggestion): HTMLElement[] {
   const name = createElement("span", { class: "ma-name" });
   setText(name, s.label === s.token ? `@${s.token}` : s.label);
   const detail = createElement("span", { class: "ma-detail" });
   setText(detail, s.detail);
-  return [name, detail];
+  const avatar = mentionAvatar(s);
+  return avatar === null ? [name, detail] : [avatar, name, detail];
 }
 
 export function createMentionAutocomplete(

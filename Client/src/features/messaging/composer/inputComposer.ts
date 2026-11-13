@@ -79,6 +79,7 @@ export function createInputComposer(st: InputState, api: InputApi) {
     if (st.textarea === null) return;
     measureTextarea();
     updateCounter();
+    st.onTextChange?.();
     st.options.onDraftChange?.();
   }
 
@@ -97,6 +98,7 @@ export function createInputComposer(st: InputState, api: InputApi) {
       measureTextarea();
     });
     updateCounter();
+    st.onTextChange?.();
     st.options.onDraftChange?.();
   }
 

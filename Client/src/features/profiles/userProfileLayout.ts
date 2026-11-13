@@ -10,7 +10,7 @@ import { applyStatusIndicator, applyStatusLine } from "@lib/ui/statusIndicator";
 import { requestsText } from "../../i18n/requests";
 import { playingForLine } from "../members/gameActivityLine";
 import { mountListeningCard } from "../members/listeningCard";
-import { createAvatarElement } from "./avatar";
+import { createAvatarElement, pickAvatarColor } from "./avatar";
 import type { UserProfileData } from "./userProfileTypes";
 
 export const POPUP_WIDTH = 300;
@@ -67,7 +67,7 @@ export function buildAvatar(user: UserProfileData): HTMLDivElement {
     {
       className: "upp-avatar",
       animate: "always",
-      background: user.isDeleted === true ? "#4e5058" : "var(--accent, #5865f2)",
+      background: user.isDeleted === true ? "#4e5058" : pickAvatarColor(user.username),
     },
   );
 

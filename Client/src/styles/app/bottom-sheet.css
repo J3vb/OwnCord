@@ -582,7 +582,7 @@
   display: none;
 }
 @media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
-  .chat-header .search-input,
+  .chat-header .search-field,
   .chat-header .ch-tools .profile-btn:not(.call-chat-btn, .member-list-btn),
   .chat-header .ch-tools .pins-btn,
   .chat-header .ch-tools .media-btn {

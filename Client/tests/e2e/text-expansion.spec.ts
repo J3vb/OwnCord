@@ -311,7 +311,7 @@ test.describe("connect and shell text", () => {
       [page.locator("label[for='host']"), "Server Address"],
       [page.locator("label[for='username']"), "Username"],
       [page.locator("label[for='password']"), "Password"],
-      [page.locator(".connect-form .btn-text"), "Login"],
+      [page.locator(".connect-form .btn-text"), "Sign in"],
       [page.locator(".form-switch button"), "Need an account? Register"],
       [
         page.locator("[data-testid='recover-account-link']"),
@@ -329,7 +329,7 @@ test.describe("connect and shell text", () => {
     // Register mode re-renders the title, the submit label and the switch link.
     await page.locator(".form-switch button").click();
     await expect(page.locator(".form-switch button")).toHaveText(
-      expanded("Already have an account? Login"),
+      expanded("Already have an account? Sign in"),
     );
     await expect(page.locator(".connect-form .btn-text")).toHaveText(expanded("Register"));
 

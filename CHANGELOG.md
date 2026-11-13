@@ -147,6 +147,13 @@ release changes the database, and anything an operator must do first.)
 - Settings opens in a larger window that uses the space you have, and every page is laid out the same way: a small heading above a card of rows. Narrow windows and phones keep their full width.
 - Settings labels are written the same way everywhere, with a capital on the first word only ("Voice & video", "Push to talk").
 - Settings > Appearance shows each theme as a small preview tile, with "Match my computer" for following your system. The page now reads Theme, Accent color, Text & size, then Layout, date & time.
+- The connect page shows the OwnCord logo once and its button reads "Sign in".
+- @mention suggestions show each member's picture or letter avatar next to their name.
+- The search box in the channel header and the one in the member list now look the same, and the header search has a magnifier icon.
+- On a phone, the GIF and emoji buttons step aside while you type, so the message box has room, and come back when the box is empty.
+- Letter avatars use ten clearly different colours with readable white letters, and a person has the same colour everywhere: chat, member list, direct messages, pins, profile card and your own user bar. Colours change once with this update.
+- The admin panel's member list gives each member the same avatar colour as the app.
+- The right-click menu on a video tile shows an icon in front of every action.
 
 ### Fixed
 

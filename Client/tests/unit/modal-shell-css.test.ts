@@ -1,6 +1,7 @@
 // The shared dialog shell lives in login.css, outside app.css, so this parses
 // that file with Lightning CSS and checks that a tall dialog scrolls its body
 // between a fixed header and footer instead of pushing the actions off screen.
+// The connect page's brand rules live there too.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { transform } from "lightningcss";
@@ -38,5 +39,20 @@ describe("the shared modal shell", () => {
     expect(body).toContain("overflow-y:auto");
     expect(declarations(".modal-footer")).toContain("flex:none");
     expect(declarations(".modal-header")).toContain("flex:none");
+  });
+});
+
+describe("the connect page brand block", () => {
+  it("hides the form's logo and name at every width when the server panel shows them", () => {
+    for (const part of [".oc-logo-stack", "h1"]) {
+      expect(declarations(`.connect-page:has(.server-panel) .form-logo ${part}`)).toContain(
+        "display:none",
+      );
+    }
+  });
+
+  it("leaves the form's logo alone on a page without the server panel", () => {
+    expect(declarations(".form-logo .oc-logo-stack")).toBe("");
+    expect(declarations(".form-logo h1")).not.toContain("display:none");
   });
 });

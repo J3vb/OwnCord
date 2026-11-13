@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { contrastRatio, parseColor } from "../../src/lib/text/colorContrast";
+import { AVATAR_COLOR_SAMPLES, AVATAR_PALETTE } from "../helpers/avatarColorSamples";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 const hasCachedImage = vi.hoisted(() => vi.fn((_url: string) => false));
@@ -19,8 +23,8 @@ vi.mock("../../src/features/messaging/content/attachments", () => ({
 }));
 
 const { avatarInitial, resolveDisplayName } = await import("@lib/ui/avatar");
-const { createAvatarElement, isRenderableAvatar } =
-  await import("../../src/features/profiles/avatar");
+const avatarModule = await import("../../src/features/profiles/avatar");
+const { createAvatarElement, isRenderableAvatar } = avatarModule;
 const { clearAnimatedStills } = await import("@lib/ui/animatedStill");
 
 describe("resolveDisplayName", () => {
@@ -573,5 +577,60 @@ describe("createAvatarElement with an animated picture", () => {
     await vi.waitFor(() => expect(el.querySelector("img")?.getAttribute("src")).toBe("blob:still"));
     expect(loads.length).toBe(0);
     expect(el.querySelector("img")?.dataset["mediaSrc"]).toBeUndefined();
+  });
+});
+
+describe("pickAvatarColor", () => {
+  const { AVATAR_COLORS, pickAvatarColor } = avatarModule;
+
+  it("spreads short, similar names and id-like names over the whole palette", () => {
+    const samples = [
+      Array.from({ length: 300 }, (_, i) => `user${i + 1}`),
+      Array.from({ length: 300 }, (_, i) => String(i + 1)),
+      Array.from({ length: 300 }, (_, i) => `u${i}`),
+      [..."abcdefghijklmnopqrstuvwxyz"].flatMap((a) => [..."abcdefghijkl"].map((b) => a + b)),
+    ];
+    for (const names of samples) {
+      const counts = new Map<string, number>();
+      for (const name of names) {
+        const colour = pickAvatarColor(name);
+        counts.set(colour, (counts.get(colour) ?? 0) + 1);
+      }
+      const fair = names.length / AVATAR_COLORS.length;
+      expect(counts.size).toBe(AVATAR_COLORS.length);
+      for (const n of counts.values()) expect(n).toBeLessThanOrEqual(fair * 2);
+    }
+  });
+
+  it("matches the colour contract the server admin panel mirrors", () => {
+    expect(AVATAR_COLORS).toEqual(AVATAR_PALETTE);
+    for (const [name, colour] of AVATAR_COLOR_SAMPLES)
+      expect(pickAvatarColor(name), name).toBe(colour);
+  });
+
+  it("gives a name the same colour on every call", () => {
+    expect(pickAvatarColor("alice")).toBe(pickAvatarColor("alice"));
+    expect(AVATAR_COLORS).toContain(pickAvatarColor(""));
+  });
+
+  it("keeps white initials at 4.5:1 or better on every palette colour", () => {
+    const white = parseColor("#ffffff")!;
+    expect(new Set(AVATAR_COLORS).size).toBe(AVATAR_COLORS.length);
+    for (const colour of AVATAR_COLORS) {
+      expect(contrastRatio(parseColor(colour)!, white), colour).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("draws initials in --on-fill, which is white in every theme", () => {
+    const dir = join(process.cwd(), "src/styles");
+    const files = readdirSync(dir, { recursive: true, encoding: "utf8" }).filter((f) =>
+      f.endsWith(".css"),
+    );
+    const values = files.flatMap((f) =>
+      [...readFileSync(join(dir, f), "utf8").matchAll(/--on-fill\s*:\s*([^;]+);/g)].map((m) =>
+        m[1]!.trim().toLowerCase(),
+      ),
+    );
+    expect(values).toEqual(["#ffffff"]);
   });
 });

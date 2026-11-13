@@ -293,6 +293,8 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     "aria-haspopup": "dialog",
     "data-testid": "search-input",
   });
+  const searchField = createElement("span", { class: "search-field" });
+  appendChildren(searchField, createIcon("search", 14), searchInput);
   // On a phone the box gives way to an icon; CSS shows one or the other.
   const searchBtn = createElement("button", {
     type: "button",
@@ -321,7 +323,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   const overflow = createChatHeaderOverflow([profileBtn, membersBtn, pinBtn, mediaBtn]);
   appendChildren(
     tools,
-    searchInput,
+    searchField,
     searchBtn,
     callBtn,
     videoCallBtn,
