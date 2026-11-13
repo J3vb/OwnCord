@@ -115,7 +115,7 @@ release changes the database, and anything an operator must do first.)
 
 **Server**
 
-- A push subscription now ends with the session that made it: signing out, "sign out everywhere", an expired session or a ban stops the pushes to that device (migration 093).
+- A push subscription now ends with the session that made it: signing out, "sign out everywhere", an expired session or a ban stops the pushes to that device (migration 093). A server older than this keeps a signed-out phone's subscription until its staleness sweep; the phone has already let go of it, so nothing shows.
 - A start-up warning says when `push.enabled` is on but `push.dispatch_enabled` is off, so devices can register but nothing is sent.
 
 ### Fixed
