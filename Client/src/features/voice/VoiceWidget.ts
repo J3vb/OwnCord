@@ -35,6 +35,7 @@ import {
   type StatsPane,
 } from "./widget/statsPane";
 import { subscribeVoiceWidget } from "./widget/subscriptions";
+import { isShareLive } from "./widget/liveShare";
 import { createListenOnlyUi, type ListenOnlyUi } from "./widget/listenOnly";
 
 export interface VoiceWidgetOptions {
@@ -267,7 +268,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     const voice = voiceStore.getState();
     const channelId = voice.currentChannelId;
-    syncStreamCard(channelId !== null && voice.localScreenshare);
+    syncStreamCard(isShareLive(voice));
 
     if (channelId === null) {
       root.classList.remove("visible");
