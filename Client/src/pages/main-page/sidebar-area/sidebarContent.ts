@@ -49,7 +49,7 @@ function teardownSidebarContent(sc: SidebarScope): void {
 }
 
 /** The People and Message requests rows at the top of DM mode. The badge is
- *  the pending-request count and is never folded into unread. */
+ *  the pending-request count, kept apart from the unread counts. */
 function buildDmEntries(sc: SidebarScope): HTMLElement {
   const requests = sc.opts.destinations?.requests;
   const section = createElement("div", { class: "dm-requests-section" });

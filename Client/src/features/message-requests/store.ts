@@ -11,7 +11,9 @@
  * so the snapshot keeps the frame's word for it. Only the latest snapshot
  * applies, and none crosses a sign-out.
  *
- * Nothing here adds to unread or mention counts (Q2): the count is its own.
+ * Requests never enter the DM or channel stores, so they raise no unread or
+ * mention count and no notification (Q2). The count is its own; the Message
+ * requests row and the Home tile show it.
  */
 
 import { createStore } from "@lib/store";
