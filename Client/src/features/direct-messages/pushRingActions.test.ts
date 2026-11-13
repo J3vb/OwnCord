@@ -129,6 +129,29 @@ describe("a press on a ring from push", () => {
     expect(host.clearCall).toHaveBeenCalledWith(CHANNEL);
   });
 
+  it("a press for another account leaves this account's waiting Accept alone", () => {
+    setConnectionStatus("reconnecting");
+    press("accept");
+    press("decline", "b.example#1");
+    setConnectionStatus("connected");
+    callerInCall();
+    expect(joinDmCall).toHaveBeenCalledWith(CHANNEL);
+  });
+
+  it("an Accept joins within one wait of the press, however it is split", () => {
+    host.instance = null;
+    setConnectionStatus("reconnecting");
+    press("accept");
+    vi.advanceTimersByTime(PUSH_ACCEPT_WAIT_MS - 1000);
+    host.instance = "a.example#1";
+    pushStore.setState((s) => ({ ...s, setting: "checking" }));
+    pushStore.flush();
+    vi.advanceTimersByTime(1000);
+    setConnectionStatus("connected");
+    callerInCall();
+    expect(joinDmCall).not.toHaveBeenCalled();
+  });
+
   it("a press that came before push knew the session waits for it", () => {
     host.instance = null;
     callerInCall();

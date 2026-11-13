@@ -159,4 +159,12 @@ class CallButtonsTest {
     val next = buttons.ringUp(50)
     assertEquals(CallEvent.ACCEPT, opened(CallActions.ACCEPT, 50, next)?.kind)
   }
+
+  @Test
+  fun aRingShownAgainCanBeTappedAgain() {
+    val token = buttons.ringUp(50)
+    assertEquals(CallEvent.OPEN, opened(CallActions.OPEN, 50, token)?.kind)
+    assertEquals(token, buttons.ringUp(50))
+    assertEquals(CallEvent.OPEN, opened(CallActions.OPEN, 50, token)?.kind)
+  }
 }

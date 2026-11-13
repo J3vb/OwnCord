@@ -47,8 +47,8 @@ function withdraw(channelId: number): void {
 }
 
 /** Join `channelId`'s call as soon as the app is connected and someone is in
- *  it, or give up after PUSH_ACCEPT_WAIT_MS; the ring comes down either way. */
-function joinWhenReady(channelId: number, pg: Joins, owner: AbortSignal): void {
+ *  it, or give up at `until`; the ring comes down either way. */
+function joinWhenReady(channelId: number, pg: Joins, owner: AbortSignal, until: number): void {
   const wait = new Disposable();
   waiting = wait;
   const finish = (): void => {
@@ -64,13 +64,19 @@ function joinWhenReady(channelId: number, pg: Joins, owner: AbortSignal): void {
   owner.addEventListener("abort", () => wait.destroy(), { once: true, signal: wait.signal });
   wait.addCleanup(uiStore.subscribe(tryJoin));
   wait.addCleanup(voiceStore.subscribe(tryJoin));
-  setOwnedTimeout(wait.signal, finish, PUSH_ACCEPT_WAIT_MS);
+  setOwnedTimeout(wait.signal, finish, Math.max(0, until - Date.now()));
   tryJoin();
 }
 
 /** A press that started the app can come in before push knows the session:
- *  hold it until then, or give up with the ring after PUSH_ACCEPT_WAIT_MS. */
-function holdForSession(action: PushRingAction, st: Sends, pg: Joins, owner: AbortSignal): void {
+ *  hold it until then, or give up with the ring at `until`. */
+function holdForSession(
+  action: PushRingAction,
+  st: Sends,
+  pg: Joins,
+  owner: AbortSignal,
+  until: number,
+): void {
   const wait = new Disposable();
   waiting = wait;
   const done = (): void => {
@@ -82,7 +88,7 @@ function holdForSession(action: PushRingAction, st: Sends, pg: Joins, owner: Abo
     pushStore.subscribe(() => {
       if (pushSessionInstance() === null) return;
       done();
-      actOnPushRing(action, st, pg, owner);
+      act(action, st, pg, owner, until);
     }),
   );
   setOwnedTimeout(
@@ -91,26 +97,28 @@ function holdForSession(action: PushRingAction, st: Sends, pg: Joins, owner: Abo
       done();
       withdraw(action.channelId);
     },
-    PUSH_ACCEPT_WAIT_MS,
+    Math.max(0, until - Date.now()),
   );
 }
 
-/** Act on a press on a ring from push, until `owner` (the page) goes. */
-export function actOnPushRing(
+function act(
   action: PushRingAction,
   st: Sends,
   pg: Joins,
   owner: AbortSignal,
+  until: number,
 ): void {
-  waiting?.destroy();
-  waiting = null;
   const session = pushSessionInstance();
-  if (session === null) {
-    holdForSession(action, st, pg, owner);
+  // Another server's or account's ring only comes down: a press of this
+  // account's that still waits is left alone.
+  if (session !== null && action.instance !== session) {
+    withdraw(action.channelId);
     return;
   }
-  if (action.instance !== session) {
-    withdraw(action.channelId);
+  waiting?.destroy();
+  waiting = null;
+  if (session === null) {
+    holdForSession(action, st, pg, owner, until);
     return;
   }
   if (action.kind === "decline") {
@@ -120,6 +128,17 @@ export function actOnPushRing(
     return;
   }
   jumpToMessage(action.channelId);
-  if (action.kind === "accept") joinWhenReady(action.channelId, pg, owner);
+  if (action.kind === "accept") joinWhenReady(action.channelId, pg, owner, until);
   else withdraw(action.channelId);
+}
+
+/** Act on a press on a ring from push, until `owner` (the page) goes. An
+ *  Accept joins within PUSH_ACCEPT_WAIT_MS of the press or not at all. */
+export function actOnPushRing(
+  action: PushRingAction,
+  st: Sends,
+  pg: Joins,
+  owner: AbortSignal,
+): void {
+  act(action, st, pg, owner, Date.now() + PUSH_ACCEPT_WAIT_MS);
 }
