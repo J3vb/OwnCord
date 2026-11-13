@@ -13,6 +13,12 @@ const mockCanChange = vi.fn<() => boolean>(() => true);
 const mockSetQuality = vi.fn().mockResolvedValue(undefined);
 const mockReapplyEnhanced = vi.fn().mockResolvedValue(undefined);
 const mockIsLinuxDesktop = vi.fn(() => false);
+const sharedWindow = {
+  getVideoTracks: () => [
+    { label: "window:42:0", getSettings: () => ({ displaySurface: "window" }) },
+  ],
+};
+const mockShareStream = vi.fn<() => unknown>(() => sharedWindow);
 vi.mock("../../src/features/voice/native/platform", () => ({
   isLinuxDesktop: () => mockIsLinuxDesktop(),
   isWindowsDesktop: () => false,
@@ -20,11 +26,7 @@ vi.mock("../../src/features/voice/native/platform", () => ({
 }));
 vi.mock("@lib/voice/livekitSession", () =>
   voiceSession.withOverrides({
-    getLocalScreenshareStream: () => ({
-      getVideoTracks: () => [
-        { label: "window:42:0", getSettings: () => ({ displaySurface: "window" }) },
-      ],
-    }),
+    getLocalScreenshareStream: () => mockShareStream(),
     getScreenshareQuality: () => mockShareQuality(),
     changeScreenshareSource: () => mockChangeSource(),
     canChangeScreenshareSource: () => mockCanChange(),
@@ -105,6 +107,7 @@ describe("VoiceWidget", () => {
   beforeEach(() => {
     resetStores();
     mockRetryMicPermission.mockClear();
+    mockShareStream.mockReturnValue(sharedWindow);
   });
 
   function mountVoiceWidget(
@@ -255,6 +258,38 @@ describe("VoiceWidget", () => {
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: false }));
     voiceStore.flush();
     expect(card()).toBeNull();
+    widget.destroy?.();
+  });
+
+  it("shows no stream card while the share picker is open, nor after it is cancelled", async () => {
+    setVoiceChannel(1, []);
+    mockShareStream.mockReturnValue(null);
+    const widget = mountVoiceWidget();
+    const card = () => container.querySelector<HTMLElement>('[data-testid="vw-stream-card"]');
+
+    // The share is asked for as the picker opens; nothing is published yet.
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+    voiceStore.flush();
+    await vi.dynamicImportSettled();
+    expect(card()).toBeNull();
+    expect(container.textContent).not.toContain("You're sharing");
+
+    // Cancelled: the ask is withdrawn and the card never appeared.
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: false }));
+    voiceStore.flush();
+    await vi.dynamicImportSettled();
+    expect(card()).toBeNull();
+
+    // Asked again and Go Live: the publish lands with a share revision.
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+    voiceStore.flush();
+    await vi.dynamicImportSettled();
+    expect(card()).toBeNull();
+    mockShareStream.mockReturnValue(sharedWindow);
+    voiceStore.setState((prev) => ({ ...prev, localShareRev: (prev.localShareRev ?? 0) + 1 }));
+    voiceStore.flush();
+    await vi.dynamicImportSettled();
+    expect(card()!.textContent).toContain("You're sharing a window");
     widget.destroy?.();
   });
 

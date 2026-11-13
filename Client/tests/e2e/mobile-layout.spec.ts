@@ -26,6 +26,7 @@ import {
   connectVoiceSession,
   dmChannel,
   emitWsMessage,
+  mockTauriFullSessionWithSessions,
   mockTauriFullSessionWithVoice,
   navigateToMainPage,
   parkLiveKitSocket,
@@ -337,6 +338,56 @@ for (const profile of PROFILES) {
       await overlay.locator("[data-testid='settings-back']").click();
       await expect(appearance).toBeInViewport();
       await expect(overlay).toHaveClass(/open/);
+    });
+
+    test("an open settings section keeps its title, Back and Close on an opaque bar", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").click();
+      await page.locator("button[aria-label='Settings']").click();
+      const overlay = page.locator("[data-testid='settings-overlay']");
+      await overlay.locator(".settings-nav-item[role='tab']", { hasText: "Appearance" }).click();
+      const title = overlay.locator(".settings-content h1");
+      await expect(title).toHaveText("Appearance");
+      await overlay.locator(".settings-content").evaluate((el) => {
+        el.scrollTop = 400;
+      });
+      await expect(title).toBeInViewport();
+      const bar = await page.evaluate(() => {
+        const h1 = document.querySelector<HTMLElement>(".settings-content h1")!;
+        const box = (s: string) => document.querySelector(s)!.getBoundingClientRect();
+        const back = box("[data-testid='settings-back']");
+        const close = box(".settings-close-btn");
+        const text = document.createRange();
+        text.selectNodeContents(h1);
+        const words = text.getBoundingClientRect();
+        // Under the bar beside its buttons, the scrolled content stays hidden.
+        const middle = window.innerWidth / 2;
+        const hit = [back.top + 2, back.bottom - 2].map((y) => {
+          const el = document.elementFromPoint(middle, y);
+          return el !== null && (el === h1 || h1.contains(el));
+        });
+        return {
+          bar: h1.getBoundingClientRect().toJSON() as DOMRect,
+          back: back.toJSON() as DOMRect,
+          close: close.toJSON() as DOMRect,
+          words: words.toJSON() as DOMRect,
+          hit,
+          opaque: getComputedStyle(h1).backgroundColor !== "rgba(0, 0, 0, 0)",
+        };
+      });
+      expect(bar.opaque).toBe(true);
+      expect(bar.hit).toEqual([true, true]);
+      expect(bar.bar.top).toBeLessThanOrEqual(0);
+      for (const button of [bar.back, bar.close]) {
+        expect(button.width).toBeGreaterThanOrEqual(44);
+        expect(button.height).toBeGreaterThanOrEqual(44);
+        expect(button.top).toBeGreaterThanOrEqual(bar.bar.top);
+        expect(button.bottom).toBeLessThanOrEqual(bar.bar.bottom);
+      }
+      expect(bar.words.left).toBeGreaterThanOrEqual(bar.back.right);
+      expect(bar.words.right).toBeLessThanOrEqual(bar.close.left);
     });
 
     test("settings has a Keybinds tab only outside the Android app", async ({ page }) => {
@@ -1417,6 +1468,34 @@ const routeButton = (page: Page): Locator =>
   callControls(page).locator("[data-call-control='route']");
 const routeSheet = (page: Page): Locator => page.locator("[data-testid='route-sheet']");
 const ROUTE_LOST = "Couldn't keep that sound route. Back to automatic.";
+
+for (const profile of PROFILES) {
+  test.describe(`phone settings opened on a part, ${profile.name}`, () => {
+    // Short enough that the Devices row can reach the top of the section.
+    test.use({ ...profile.use, viewport: { width: profile.use.viewport.width, height: 480 } });
+
+    test("Review devices brings the Devices row out from under the title bar", async ({ page }) => {
+      await mockTauriFullSessionWithSessions(page);
+      await page.goto("/");
+      await navigateToMainPage(page);
+      const toast = page.locator("[data-testid='toast']", { hasText: "Unreviewed sign-in" });
+      await toast.getByRole("button", { name: "Review devices" }).click();
+      const overlay = page.locator("[data-testid='settings-overlay']");
+      await expect(overlay.locator(".settings-content h1")).toHaveText("Account");
+      const row = overlay.locator("li", { has: page.getByTestId("sessions-manage") });
+      await expect(page.getByTestId("sessions-manage")).toHaveAttribute("aria-expanded", "true");
+      await expect(page.getByTestId("sessions-manage")).toBeFocused();
+      const scrolled = await overlay
+        .locator(".settings-content")
+        .evaluate((el) => el.scrollTop > 0 && el.scrollTop < el.scrollHeight - el.clientHeight);
+      const bar = await overlay.locator(".settings-content h1").boundingBox();
+      const top = await row.boundingBox();
+      // The row was scrolled to the top of the section, not just anywhere into view.
+      expect(scrolled).toBe(true);
+      expect(top!.y).toBeGreaterThanOrEqual(bar!.y + bar!.height - 0.5);
+    });
+  });
+}
 
 test.describe("call audio in the Android app", () => {
   test.use(pixel7);

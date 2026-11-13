@@ -577,7 +577,7 @@ describe("AppearanceTab — Accessibility", () => {
     expect(hexInput.getAttribute("aria-label")).toBe("Custom accent color (hex)");
     const note = document.getElementById(hexInput.getAttribute("aria-describedby") ?? "");
     expect(note?.textContent).toBe(
-      "Custom colours may reduce readability; text and focus indicators fall back to a readable colour when needed, and High contrast restores tested colours.",
+      "Custom colors may reduce readability; text and focus indicators fall back to a readable color when needed, and High contrast restores tested colors.",
     );
   });
 

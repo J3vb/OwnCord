@@ -150,6 +150,9 @@ release changes the database, and anything an operator must do first.)
 
 ### Fixed
 
+- **Voice:** while the Go Live dialog is open, the voice panel no longer says you are sharing your screen; the stream card shows once the share is live.
+- **Invites:** an invite link that has expired or is used up no longer offers a Copy button.
+- **Settings:** on a phone, the header of a Settings page stays solid while you scroll, and report messages point to Settings, Privacy & safety.
 - **Direct messages:** calling someone who has not accepted your message request yet no longer leaves you alone in a call. The chat now says you are waiting for them to accept.
 - **Invites:** the list shows all usable invites first and pages older ones; invites can be revoked by id (an older server still works through a fallback to the code); creating invites is limited to 20 per user per hour.
 - **Accounts:** an account recovery, sign-up, two-factor sign-in or report that already went through no longer asks you to try again just because the request ran long.

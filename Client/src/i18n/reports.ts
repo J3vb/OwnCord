@@ -16,13 +16,13 @@ export const reportsText = defineCatalog("reports", {
   "dialog.close": "Close",
   "dialog.submit": "Send report",
   "dialog.sending": "Sending report…",
-  "dialog.sent": "Report sent. You can follow it in Settings, Safety.",
+  "dialog.sent": "Report sent. You can follow it in Settings, Privacy & safety.",
   "error.reasonRequired": "Choose a reason.",
   "error.detailTooLong": "Details can be at most {max} characters.",
   "error.detailControl":
     "Details contain characters that can't be sent. Remove them and try again.",
   "error.duplicate":
-    "You already have an open report about this. You can follow it in Settings, Safety.",
+    "You already have an open report about this. You can follow it in Settings, Privacy & safety.",
   "error.rateLimited": "You've sent too many reports. Try again in a few minutes.",
   "error.notFound": "This can't be reported: it was deleted, or you can no longer see it.",
   "error.invalid": "The server refused this report. Check the details and try again.",

@@ -65,10 +65,17 @@ const HOUR_MS = 3_600_000;
 /** How many trailing characters of a code the list shows. */
 const SHORT_CODE_CHARS = 8;
 
+/** An unreadable expiry counts as passed, as the meta line says. */
+function hasExpired(expiresAt: string | null): boolean {
+  if (expiresAt === null) return false;
+  const remaining = Date.parse(expiresAt) - Date.now();
+  return Number.isNaN(remaining) || remaining <= 0;
+}
+
 function formatExpiry(expiresAt: string | null): string {
   if (expiresAt === null) return shellText("invite.expiresNever");
+  if (hasExpired(expiresAt)) return shellText("invite.expired");
   const remaining = Date.parse(expiresAt) - Date.now();
-  if (Number.isNaN(remaining) || remaining <= 0) return shellText("invite.expired");
   const hours = remaining / HOUR_MS;
   const when =
     hours >= 24
@@ -84,6 +91,12 @@ function hasUseLimit(invite: InviteItem): invite is InviteItem & { maxUses: numb
 
 function isUsedUp(invite: InviteItem): boolean {
   return hasUseLimit(invite) && invite.uses >= invite.maxUses;
+}
+
+/** Why a link can no longer be used, as its chip text, or null while it can. */
+function deadReason(invite: InviteItem): string | null {
+  if (isUsedUp(invite)) return shellText("invite.usedUp");
+  return hasExpired(invite.expiresAt) ? shellText("invite.expired") : null;
 }
 
 function formatUses(invite: InviteItem): string {
@@ -181,7 +194,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
   }
 
   function featuredInvite(): InviteItem | undefined {
-    return invites.find((i) => i.code === options.featuredCode);
+    return invites.find((i) => i.code === options.featuredCode && deadReason(i) === null);
   }
 
   function renderFeatured(featured: InviteItem | undefined): void {
@@ -281,10 +294,9 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
     appendChildren(info, code, meta);
 
     const actions = createElement("div", { class: "invite-item__actions" });
-    if (isUsedUp(invite)) {
-      actions.appendChild(
-        createElement("span", { class: "invite-item__chip" }, shellText("invite.usedUp")),
-      );
+    const dead = deadReason(invite);
+    if (dead !== null) {
+      actions.appendChild(createElement("span", { class: "invite-item__chip" }, dead));
     } else {
       const copyBtn = copyButton(invite.code, "invite-item__copy", shellText("invite.copy"));
       copyBtn.setAttribute("aria-describedby", codeId);

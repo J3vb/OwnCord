@@ -35,6 +35,7 @@ export const shards = {
     "src/features/voice/releaseRoom.ts",
     "src/features/voice/sessionE2ee.ts",
     "src/features/voice/shareGate.ts",
+    "src/features/voice/widget/liveShare.ts",
     "src/features/voice/videoTrackState.ts",
     "src/lib/voice/appAudioTrack.ts",
     "src/lib/voice/shareResolutionRecovery.ts",
