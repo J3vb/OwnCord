@@ -653,16 +653,28 @@ describe("SidebarArea", () => {
         uiStore.flush();
 
         const entry = q(result, "dm-requests-entry");
+        const badge = q(result, "dm-requests-entry-badge");
         expect(entry?.tagName).toBe("BUTTON");
-        expect(entry?.textContent).toBe("Message Requests (2)");
+        expect(entry?.querySelector(".dm-nav-row-label")?.textContent).toBe("Message requests");
+        expect(entry?.querySelector("svg[data-icon='inbox']")).not.toBeNull();
+        expect(badge?.hidden).toBe(false);
+        expect(badge?.textContent).toBe("2");
+        expect(badge?.getAttribute("aria-hidden")).toBe("true");
+        expect(entry?.getAttribute("aria-label")).toBe("Message requests, 2 waiting");
         // The top of DM mode: its section is the first thing in the content slot.
         const section = entry?.parentElement;
         expect(section?.parentElement?.firstElementChild).toBe(section);
 
+        // The last request handled: the badge and the count leave the name.
         setPending(0);
-        expect(entry?.textContent).toBe("Message Requests");
+        expect(badge?.hidden).toBe(true);
+        expect(badge?.textContent).toBe("");
+        expect(entry?.hasAttribute("aria-label")).toBe(false);
+        expect(entry?.textContent).toBe("Message requests");
         setPending(1);
-        expect(entry?.textContent).toBe("Message Requests (1)");
+        expect(badge?.hidden).toBe(false);
+        expect(badge?.textContent).toBe("1");
+        expect(entry?.getAttribute("aria-label")).toBe("Message requests, 1 waiting");
         cleanup(result);
       });
 
@@ -674,6 +686,31 @@ describe("SidebarArea", () => {
         const entry = q(result, "dm-requests-entry")!;
         entry.click();
         expect(onOpenView).toHaveBeenCalledWith("requests", entry);
+        cleanup(result);
+      });
+
+      it("badges the row when a request arrives while another view is open, and marks the open one", () => {
+        const result = mount({
+          destinations: { ...destinations(), people: { build: inert } },
+        });
+        setSidebarMode("dms");
+        uiStore.setState((prev) => ({ ...prev, activeView: "people" }));
+        uiStore.flush();
+        const people = q(result, "dm-people-entry")!;
+        const entry = q(result, "dm-requests-entry")!;
+        expect(people.getAttribute("aria-current")).toBe("page");
+        expect(people.querySelector("svg[data-icon='users']")).not.toBeNull();
+        expect(entry.hasAttribute("aria-current")).toBe(false);
+        expect(q(result, "dm-requests-entry-badge")?.hidden).toBe(true);
+
+        setPending(1);
+        expect(q(result, "dm-requests-entry-badge")?.hidden).toBe(false);
+        expect(entry.getAttribute("aria-label")).toBe("Message requests, 1 waiting");
+
+        uiStore.setState((prev) => ({ ...prev, activeView: "requests" }));
+        uiStore.flush();
+        expect(entry.getAttribute("aria-current")).toBe("page");
+        expect(people.hasAttribute("aria-current")).toBe(false);
         cleanup(result);
       });
 
@@ -775,7 +812,7 @@ describe("SidebarArea", () => {
 
         expect(uiStore.getState().sidebarMode).toBe("dms");
         const entry = q(result, "dm-requests-entry");
-        expect(entry?.textContent).toBe("Message Requests (1)");
+        expect(entry?.getAttribute("aria-label")).toBe("Message requests, 1 waiting");
         // The badge left with channel mode; focus lands on the entry, not <body>.
         expect(document.activeElement).toBe(entry);
         cleanup(result);

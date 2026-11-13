@@ -9,6 +9,14 @@ export const serverRailText = defineCatalog("serverRail", {
     one: "Home, {count} unread direct message",
     other: "Home, {count} unread direct messages",
   },
+  homeRequests: {
+    one: "Home, {count} message request waiting",
+    other: "Home, {count} message requests waiting",
+  },
+  homeUnreadRequests: {
+    one: "Home, {unread} unread, {count} message request waiting",
+    other: "Home, {unread} unread, {count} message requests waiting",
+  },
   homeMark: "OC",
   dmUnread: {
     one: "{name}, {count} unread message",

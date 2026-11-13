@@ -11,7 +11,9 @@
  * so the snapshot keeps the frame's word for it. Only the latest snapshot
  * applies, and none crosses a sign-out.
  *
- * Nothing here adds to unread or mention counts (Q2): the count is its own.
+ * Requests never enter the DM or channel stores, so they raise no unread or
+ * mention count and no notification (Q2). The count is its own; the Message
+ * requests row and the Home tile show it.
  */
 
 import { createStore } from "@lib/store";
@@ -101,7 +103,7 @@ export function resetMessageRequests(): void {
 
 void registerSessionReset("message-requests:store", resetMessageRequests, { phase: "session" }); // app-lifetime reset hook, registered at module load
 
-/** N for "Message Requests (N)" and the DM header badge (a navigation CountSource). */
+/** The waiting-request count behind the Message requests badges (a navigation CountSource). */
 export const pendingRequestCount = {
   get: () => messageRequestsStore.getState().pending.length,
   subscribe: (onChange: () => void): (() => void) =>

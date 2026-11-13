@@ -13,6 +13,13 @@ import {
 import { RAIL_LAYOUT_KEY } from "@lib/prefs/serverRailLayout";
 import { authStore, clearAuth } from "@stores/auth.store";
 import type { ServerProfile } from "@lib/presence/profiles";
+import {
+  applyFrame,
+  messageRequestsStore,
+  pendingRequestCount,
+  resetMessageRequests,
+} from "../../src/features/message-requests/store";
+import type { MessageRequest } from "../../src/features/message-requests/api";
 
 function profile(name: string, host: string, color = "#5865f2"): ServerProfile {
   return {
@@ -35,6 +42,7 @@ interface Opts {
   joinInvite?: (t: string) => boolean;
   onOpenDm?: (dm: DmChannel) => void;
   onShowServer?: () => void;
+  withRequests?: boolean;
 }
 
 const mounted: Array<{ destroy?: () => void }> = [];
@@ -53,12 +61,23 @@ async function mountRail(o: Opts = {}) {
     newFolderId: () => "fid",
     ...(o.onOpenDm !== undefined ? { onOpenDm: o.onOpenDm } : {}),
     ...(o.onShowServer !== undefined ? { onShowServer: o.onShowServer } : {}),
+    ...(o.withRequests === true ? { pendingRequests: pendingRequestCount } : {}),
   });
   rail.mount(document.body);
   mounted.push(rail);
   await Promise.resolve();
   await Promise.resolve();
   return { rail, switchServer, addServer, joinInvite };
+}
+
+function request(id: number): MessageRequest {
+  return {
+    id,
+    channelId: 200 + id,
+    sender: { id: 10 + id, username: `s${id}`, displayName: "" },
+    preview: null,
+    createdAt: "2026-11-13T10:00:00Z",
+  };
 }
 
 function dm(channelId: number, unreadCount: number): DmChannel {
@@ -119,6 +138,44 @@ describe("ServerRail", () => {
     expect(home.getAttribute("aria-label")).toBe("Home, 5 unread direct messages");
     setDmChannels([dm(1, 0)]);
     dmStore.flush();
+    expect(badge.hidden).toBe(true);
+  });
+
+  it("badges Home for a request that arrives in another view, until the last is handled", async () => {
+    resetMessageRequests();
+    await mountRail({ withRequests: true });
+    const badge = document.querySelector<HTMLElement>('[data-testid="server-rail-home-badge"]')!;
+    const home = document.querySelector<HTMLElement>('[data-testid="server-rail-home"]')!;
+    expect(badge.hidden).toBe(true);
+
+    applyFrame(request(1), true);
+    messageRequestsStore.flush();
+    expect(badge.hidden).toBe(false);
+    expect(badge.textContent).toBe("1");
+    expect(home.getAttribute("aria-label")).toBe("Home, 1 message request waiting");
+
+    // One badge for both: unread DMs and waiting requests add up, the name splits them.
+    setDmChannels([dm(1, 2)]);
+    dmStore.flush();
+    expect(document.querySelectorAll('[data-testid="server-rail-home-badge"]')).toHaveLength(1);
+    expect(badge.textContent).toBe("3");
+    expect(home.getAttribute("aria-label")).toBe("Home, 2 unread, 1 message request waiting");
+    setDmChannels([dm(1, 0)]);
+    dmStore.flush();
+
+    // Accepted, declined or blocked: the frame takes it out of pending.
+    applyFrame(request(1), false);
+    messageRequestsStore.flush();
+    expect(badge.hidden).toBe(true);
+    expect(home.getAttribute("aria-label")).toBe("Home");
+
+    // Sign-out or server switch empties the inbox, and the badge with it.
+    applyFrame(request(2), true);
+    applyFrame(request(3), true);
+    messageRequestsStore.flush();
+    expect(home.getAttribute("aria-label")).toBe("Home, 2 message requests waiting");
+    resetMessageRequests();
+    messageRequestsStore.flush();
     expect(badge.hidden).toBe(true);
   });
 

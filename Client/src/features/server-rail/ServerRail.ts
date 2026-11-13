@@ -32,15 +32,18 @@ import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
 import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../../i18n/serverRail";
+import type { CountSource } from "../navigation/destinations";
 import {
-  FALLBACK_COLOR,
   atDmMode,
   defaultFolderId,
+  describeServer,
   dmItem,
+  homeLabel,
   railIcon,
   roundButton,
   sameItem,
   zoneOf,
+  type ServerLook,
 } from "./serverRailParts";
 import { applyDrop, folderMenu, serverMenu, type RailMutations } from "./serverRailMenus";
 import { openServerRailJoinModal } from "./ServerRailJoinModal";
@@ -60,10 +63,8 @@ export interface ServerRailOptions {
   readonly onShowServer?: () => void;
   /** Open a DM from its icon under Home. */
   readonly onOpenDm?: (dm: DmChannel) => void;
-}
-
-function isAddressName(name: string, host: string): boolean {
-  return name === host || name === host.split(":")[0] || isIpAddressName(name);
+  /** Message requests waiting for this account; they badge Home too. */
+  readonly pendingRequests?: CountSource;
 }
 
 export function createServerRail(options: ServerRailOptions): MountableComponent {
@@ -109,16 +110,8 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     return reconcile(layout, allHosts());
   }
 
-  // A saved profile keeps a name the user chose; one still named after its
-  // address gives way to the connected server's own name.
-  function describe(host: string): { name: string; color: string } {
-    const profile = profiles.find((p) => p.host === host);
-    const color = profile?.color ?? FALLBACK_COLOR;
-    const saved = profile?.name ?? "";
-    if (saved !== "" && !isAddressName(saved, host)) return { name: saved, color };
-    const live = host === options.currentHost ? (authStore.getState().serverName ?? "") : "";
-    if (live !== "") return { name: live, color };
-    return { name: saved !== "" ? saved : host, color };
+  function describe(host: string): ServerLook {
+    return describeServer(host, profiles, options.currentHost);
   }
 
   function commit(next: RailLayout): void {
@@ -396,23 +389,23 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     const dmList = createElement("div", { class: "server-rail-dms" });
     renderDms = (): void => {
       const channels = dmStore.getState().channels;
-      const total = totalDmUnread(channels);
+      const unread = totalDmUnread(channels);
+      const requests = options.pendingRequests?.get() ?? 0;
+      // One badge for everything behind Home; the name tells the two apart.
+      const total = unread + requests;
       homeBadge.hidden = total === 0;
       setText(homeBadge, formatBadgeCount(total));
-      homeBtn?.setAttribute(
-        "aria-label",
-        total === 0 ? serverRailText("home") : serverRailText("homeUnread", { count: total }),
-      );
+      homeBtn?.setAttribute("aria-label", homeLabel(unread, requests));
       clearChildren(dmList);
       // The DM whose call you are in stays first under Home until the call
       // ends, so the call is one click away from any server view.
       const callId = voiceStore.getState().currentChannelId;
       const callDm = callId === null ? undefined : channels.find((c) => c.channelId === callId);
       if (callDm !== undefined) dmList.appendChild(dmItem(callDm, true, options.onOpenDm));
-      const unread = channels
+      const unreadDms = channels
         .filter((c) => c !== callDm && dmUnreadCount(c) > 0)
         .toSorted((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
-      for (const dm of unread) dmList.appendChild(dmItem(dm, false, options.onOpenDm));
+      for (const dm of unreadDms) dmList.appendChild(dmItem(dm, false, options.onOpenDm));
     };
     top.appendChild(homeWrap);
     top.appendChild(dmList);
@@ -457,6 +450,8 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       () => renderDms?.(),
     );
     window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDms?.(), { signal });
+    const unsubRequests = options.pendingRequests?.subscribe(() => renderDms?.());
+    if (unsubRequests !== undefined) disposable.addCleanup(unsubRequests);
     render();
     renderDms?.();
 

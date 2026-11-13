@@ -3,6 +3,7 @@
 import type { ServerRailOptions } from "./ServerRail";
 import { createLogger } from "@lib/logger";
 import { addServer, loadSavedServers, switchToServer } from "./switchServer";
+import { pendingRequestCount } from "../message-requests/store";
 import { confirmAndJoinInvite, currentServerName, parseInviteInput } from "./joinInvite";
 
 const log = createLogger("main-page");
@@ -30,6 +31,7 @@ export function mountServerRail(opts: ServerRailMount): void {
         addServer,
         onOpenDm: opts.onOpenDm,
         onShowServer: opts.onShowServer,
+        pendingRequests: pendingRequestCount,
         joinInvite: (text) => {
           const invite = parseInviteInput(text);
           if (invite === null) return false;
