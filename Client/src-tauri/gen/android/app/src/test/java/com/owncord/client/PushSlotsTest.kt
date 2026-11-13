@@ -36,4 +36,32 @@ class PushSlotsTest {
     assertNull(PushPayload.kindOf("""{"x":"activity"}"""))
     assertNull(PushPayload.kindOf("not json"))
   }
+
+  @Test
+  fun readsTheDmARingIsFor() {
+    assertEquals(PushPayload.RING, PushPayload.kindOf("""{"t":"ring","c":42}"""))
+    assertEquals(42L, PushPayload.channelOf("""{"t":"ring","c":42}"""))
+    assertEquals(7L, PushPayload.channelOf("""{"t":"ring_end", "c" : 7}"""))
+    assertNull(PushPayload.channelOf("""{"t":"ring"}"""))
+    assertNull(PushPayload.channelOf("""{"t":"ring","c":0}"""))
+    assertNull(PushPayload.channelOf("""{"t":"ring","c":1234567890123456789}"""))
+  }
+
+  @Test
+  fun aRingShowsOnlyWhileTheAppIsAwayAndNothingRingsYet() {
+    val ring = PushPayload.RING
+    assertEquals(PushRingRule.Step.RING, PushRingRule.step(ring, 5, onScreen = false, alreadyUp = false))
+    assertEquals(PushRingRule.Step.NONE, PushRingRule.step(ring, 5, onScreen = true, alreadyUp = false))
+    assertEquals(PushRingRule.Step.NONE, PushRingRule.step(ring, 5, onScreen = false, alreadyUp = true))
+    assertEquals(PushRingRule.Step.NONE, PushRingRule.step(ring, null, onScreen = false, alreadyUp = false))
+  }
+
+  @Test
+  fun theEndOfARingAlwaysTakesItDown() {
+    val end = PushPayload.RING_END
+    assertEquals(PushRingRule.Step.END, PushRingRule.step(end, 5, onScreen = true, alreadyUp = true))
+    assertEquals(PushRingRule.Step.END, PushRingRule.step(end, 5, onScreen = false, alreadyUp = false))
+    assertEquals(PushRingRule.Step.NONE, PushRingRule.step(end, null, onScreen = false, alreadyUp = true))
+    assertEquals(PushRingRule.Step.NONE, PushRingRule.step(PushPayload.ACTIVITY, 5, onScreen = false, alreadyUp = false))
+  }
 }

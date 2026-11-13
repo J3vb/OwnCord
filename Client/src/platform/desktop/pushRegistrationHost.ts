@@ -5,6 +5,7 @@
 import { addPluginListener, type PluginListener } from "@tauri-apps/api/core";
 import { createLogger } from "@lib/logger";
 import { tryInvoke } from "./nativeInvoke";
+import { callNotificationText } from "../../i18n/callNotification";
 import type {
   PushHostEvent,
   PushKeys,
@@ -65,8 +66,31 @@ export async function choose(distributor: string): Promise<boolean> {
   return result.ok;
 }
 
+/** What a call's ring from push shows while no page runs (`ShowRingArgs`):
+ *  no caller, since a push names nobody, but the server it came from. */
+function ringText(request: PushRegisterRequest): Record<string, string | boolean> {
+  const quiet = request.ringQuiet;
+  return {
+    title: callNotificationText("pushRingTitle", { server: request.serverName }),
+    text: callNotificationText("pushRingText"),
+    acceptLabel: callNotificationText("accept"),
+    declineLabel: callNotificationText("decline"),
+    channelName: callNotificationText(quiet ? "quietRingChannel" : "ringChannel"),
+    channelDescription: callNotificationText(quiet ? "quietRingChannelDesc" : "ringChannelDesc"),
+    quiet,
+  };
+}
+
 export async function register(request: PushRegisterRequest): Promise<PushRegisterResult> {
-  const result = await tryInvoke<unknown>("push_register", { ...request });
+  const { instance, vapid, serverName, title, body } = request;
+  const result = await tryInvoke<unknown>("push_register", {
+    instance,
+    vapid,
+    serverName,
+    title,
+    body,
+    ring: ringText(request),
+  });
   if (!result.ok) return { ok: false, reason: failureOf(result.error.message) };
   const keys = readKeys(result.value);
   return keys === null ? { ok: false, reason: "failed" } : { ok: true, keys };

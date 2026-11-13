@@ -15,7 +15,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// pushActivityPayload is the ONLY payload dispatch sends: no text, channel, sender or count.
+// pushActivityPayload is the only message payload dispatch sends: no text, channel, sender or count. A call's
+// ring and its end carry only the DM channel id (push_ring.go).
 var pushActivityPayload = []byte(`{"t":"activity"}`)
 
 // pushCoalesceWindow bounds how often one user is pushed about one channel (in memory; a restart forgets it).
@@ -87,6 +88,8 @@ type pushDispatchStore interface {
 	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 	ListPushSubscriptionsForDispatch(ctx context.Context, userIDs []int64, keyID string) ([]db.PushSubscriptionForDispatch, error)
 	DeletePushSubscriptionByID(ctx context.Context, id int64) (bool, error)
+	// GetUserByID reads the status a ring's target chose: Do Not Disturb gets no ring push.
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 }
 
 // PushDispatcher is the composition root's PushNotifier: audience, coalescing, encryption, sending, retries,
@@ -102,6 +105,8 @@ type PushDispatcher struct {
 
 	mu       syncutil.Mutex
 	lastSent map[pushCoalesceKey]time.Time
+
+	rings pushRingBook
 
 	dispatched atomic.Uint64
 	failed     atomic.Uint64
@@ -121,6 +126,7 @@ func NewPushDispatcher(st pushDispatchStore, perms *PermissionService, push *Pus
 		fetch:    fetch,
 		sleep:    sleepUnlessDone,
 		lastSent: make(map[pushCoalesceKey]time.Time),
+		rings:    pushRingBook{live: make(map[int64]*pushRing)},
 	}
 }
 
@@ -196,7 +202,7 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 	reserved := make(map[int64]bool, len(coalesced))
 	items := make([]pushRoundItem, 0, len(subs))
 	for _, sub := range subs {
-		req, ok := d.prepareRequest(sub)
+		req, ok := d.prepareRequest(sub, pushActivityPayload, pushActivityHeaders)
 		if !ok {
 			continue
 		}
@@ -216,12 +222,15 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 		if attempt > 1 {
 			d.sleep(ctx, pushRetryBackoffs[attempt-2])
 		}
-		items = d.runRound(ctx, channelID, authorID, items, attempt)
+		items = d.runRound(items, func(item pushRoundItem) bool {
+			return d.attemptOne(ctx, channelID, authorID, item, attempt)
+		})
 	}
 }
 
-// runRound performs attempt (1-based) for every item and returns the items to retry.
-func (d *PushDispatcher) runRound(ctx context.Context, channelID, authorID int64, items []pushRoundItem, attempt int) []pushRoundItem {
+// runRound runs try (one attempt) for every item, at most pushMaxConcurrentSends at a time, and returns the
+// items try asked to retry.
+func (d *PushDispatcher) runRound(items []pushRoundItem, try func(pushRoundItem) bool) []pushRoundItem {
 	sem := make(chan struct{}, pushMaxConcurrentSends)
 	var wg sync.WaitGroup
 	var mu syncutil.Mutex
@@ -233,7 +242,7 @@ func (d *PushDispatcher) runRound(ctx context.Context, channelID, authorID int64
 		go func(item *pushRoundItem) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if d.attemptOne(ctx, channelID, authorID, *item, attempt) {
+			if try(*item) {
 				mu.Lock()
 				retry = append(retry, *item)
 				mu.Unlock()
@@ -244,9 +253,18 @@ func (d *PushDispatcher) runRound(ctx context.Context, channelID, authorID int64
 	return retry
 }
 
-// prepareRequest builds the fixed, never re-encrypted request once; a failure is terminal (counted failed,
-// never retried).
-func (d *PushDispatcher) prepareRequest(sub db.PushSubscriptionForDispatch) (safefetch.Request, bool) {
+// pushDelivery is the TTL and Urgency headers (RFC 8030) a kind of push is sent with.
+type pushDelivery struct {
+	ttl     string
+	urgency string
+}
+
+// pushActivityHeaders: a message push may wait a day for a phone that is off, at normal urgency.
+var pushActivityHeaders = pushDelivery{ttl: "86400", urgency: "normal"}
+
+// prepareRequest builds the fixed, never re-encrypted request for payload once; a failure is terminal (counted
+// failed, never retried).
+func (d *PushDispatcher) prepareRequest(sub db.PushSubscriptionForDispatch, payload []byte, how pushDelivery) (safefetch.Request, bool) {
 	p256dh, err := decodePushBase64(sub.P256dh)
 	if err != nil {
 		d.failed.Add(1)
@@ -257,7 +275,7 @@ func (d *PushDispatcher) prepareRequest(sub db.PushSubscriptionForDispatch) (saf
 		d.failed.Add(1)
 		return safefetch.Request{}, false
 	}
-	body, err := encryptWebPushMessage(pushActivityPayload, p256dh, authSecret)
+	body, err := encryptWebPushMessage(payload, p256dh, authSecret)
 	if err != nil {
 		d.failed.Add(1)
 		return safefetch.Request{}, false
@@ -274,8 +292,8 @@ func (d *PushDispatcher) prepareRequest(sub db.PushSubscriptionForDispatch) (saf
 		Header: map[string]string{
 			"Authorization":    authorization,
 			"Content-Encoding": "aes128gcm",
-			"TTL":              "86400",
-			"Urgency":          "normal",
+			"TTL":              how.ttl,
+			"Urgency":          how.urgency,
 			"Content-Type":     "application/octet-stream",
 		},
 	}, true
@@ -292,6 +310,12 @@ func (d *PushDispatcher) attemptOne(ctx context.Context, channelID, authorID int
 	if !d.stillEligible(ctx, channelID, authorID, item.sub.UserID) {
 		return false
 	}
+	return d.deliver(ctx, item, attempt == pushMaxAttempts)
+}
+
+// deliver sends item once and reports whether to retry (never after the last attempt); every terminal outcome
+// lands in exactly one counter.
+func (d *PushDispatcher) deliver(ctx context.Context, item pushRoundItem, last bool) bool {
 	resp, err := d.fetch.Fetch(ctx, item.req)
 	if err == nil {
 		switch {
@@ -307,7 +331,7 @@ func (d *PushDispatcher) attemptOne(ctx context.Context, channelID, authorID int
 			return false
 		}
 	}
-	if attempt == pushMaxAttempts {
+	if last {
 		d.failed.Add(1)
 		return false
 	}

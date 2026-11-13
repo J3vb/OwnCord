@@ -47,6 +47,20 @@ pub struct PushEndpoint {
     auth: String,
 }
 
+/// What a call's ring from push shows while no page runs, in the page's
+/// language (`ShowRingArgs` in `CallRing.kt`; the DM comes with each push).
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushRingText {
+    title: String,
+    text: String,
+    accept_label: String,
+    decline_label: String,
+    channel_name: String,
+    channel_description: String,
+    quiet: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisterArgs {
@@ -55,6 +69,7 @@ struct RegisterArgs {
     server_name: String,
     title: String,
     body: String,
+    ring: PushRingText,
 }
 
 #[derive(Serialize)]
@@ -92,7 +107,8 @@ pub async fn push_choose(app: AppHandle, distributor: String) -> Result<(), Stri
 }
 
 /// Register `instance` with the push app; `title` and `body` are the text of
-/// its "new messages" notification, in the page's language.
+/// its "new messages" notification and `ring` that of a call's ring, in the
+/// page's language.
 #[tauri::command]
 pub async fn push_register(
     app: AppHandle,
@@ -101,6 +117,7 @@ pub async fn push_register(
     server_name: String,
     title: String,
     body: String,
+    ring: PushRingText,
 ) -> Result<PushEndpoint, String> {
     let args = RegisterArgs {
         instance,
@@ -108,6 +125,7 @@ pub async fn push_register(
         server_name,
         title,
         body,
+        ring,
     };
     run(&app, "register", args).await
 }

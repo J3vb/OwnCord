@@ -1894,6 +1894,13 @@ server writes nothing. With `push.enabled` true but `push.dispatch_enabled`
 false — the state an install upgraded from an earlier release starts in —
 subscriptions are stored but nothing is ever sent to one.
 
+**Call rings.** With both keys true, a DM `call_ring` also sends
+`{"t":"ring","c":<channel id>}` to every subscription of the users it rings,
+connected or not, unless their status is Do Not Disturb or they are already in the call; declining (`call_decline`),
+joining the call on any device, or the caller leaving it sends
+`{"t":"ring_end","c":<channel id>}` to the subscriptions still ringing. Urgency
+`high`, TTL 30 seconds, one retry. Only the DM channel id is sent.
+
 **What dispatch sends, and to whom.** With both keys true, a new message
 sends a fixed, generic `{"t":"activity"}` payload — no message text, channel
 name, sender or count — to: the message's direct `@mentions` in a guild

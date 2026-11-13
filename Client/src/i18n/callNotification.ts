@@ -3,7 +3,8 @@ import { defineCatalog } from "./format";
 /**
  * What the Android app's call notifications say: the "in a call" one with its
  * Mute and Leave buttons, and the incoming call's. Read by the host side only
- * (`platform/desktop/callServiceHost.ts`), so none of it loads on a desktop.
+ * (`platform/desktop/callServiceHost.ts`, and `pushRegistrationHost.ts` for
+ * the ring a push shows), so none of it loads on a desktop.
  */
 export const callNotificationText = defineCatalog("callNotification", {
   inCall: "In a call",
@@ -18,4 +19,6 @@ export const callNotificationText = defineCatalog("callNotification", {
   ringChannelDesc: "A direct message call ringing",
   quietRingChannel: "Incoming calls, silent",
   quietRingChannelDesc: "Used while the ring sound is off in the app's settings",
+  pushRingTitle: "Incoming call on {server}",
+  pushRingText: "Voice call",
 });

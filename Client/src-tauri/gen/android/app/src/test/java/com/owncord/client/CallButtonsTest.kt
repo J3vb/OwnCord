@@ -136,4 +136,35 @@ class CallButtonsTest {
     assertNull(CallFace(CallFace.LIVE, "In a call", null, "Leave").micAction())
     assertNull(CallFace.PLAIN.micAction())
   }
+
+  @Test
+  fun saysWhichRingIsUp() {
+    assertFalse(buttons.isUp(5))
+    buttons.ringUp(5)
+    assertTrue(buttons.isUp(5))
+    assertFalse(buttons.isUp(6))
+    buttons.ringDown(5)
+    assertFalse(buttons.isUp(5))
+  }
+
+  @Test
+  fun aPressThroughTheActivityCountsOnce() {
+    val token = buttons.ringUp(50)
+    assertEquals(CallEvent.OPEN, opened(CallActions.OPEN, 50, token)?.kind)
+    assertEquals(CallEvent.ACCEPT, opened(CallActions.ACCEPT, 50, token)?.kind)
+    // The activity rebuilt on the intent that started it: nothing again.
+    assertNull(opened(CallActions.ACCEPT, 50, token))
+    assertNull(opened(CallActions.OPEN, 50, token))
+    buttons.ringDown(50)
+    val next = buttons.ringUp(50)
+    assertEquals(CallEvent.ACCEPT, opened(CallActions.ACCEPT, 50, next)?.kind)
+  }
+
+  @Test
+  fun aRingShownAgainCanBeTappedAgain() {
+    val token = buttons.ringUp(50)
+    assertEquals(CallEvent.OPEN, opened(CallActions.OPEN, 50, token)?.kind)
+    assertEquals(token, buttons.ringUp(50))
+    assertEquals(CallEvent.OPEN, opened(CallActions.OPEN, 50, token)?.kind)
+  }
 }

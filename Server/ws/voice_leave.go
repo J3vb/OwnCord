@@ -88,6 +88,8 @@ func (h *Hub) finishVoiceLeaveAnnounce(ctx context.Context, txn *voiceTxn, c *Cl
 	// cleared, yet for a server-initiated eviction this is their only teardown signal.
 	if announce {
 		h.broadcastVoiceEventWithLeaver(ctx, oldChID, buildVoiceLeave(oldChID, c.userID), c.userID)
+		// A caller leaving ends their ring: every phone still ringing for it stops.
+		h.ringLeft(ctx, oldChID, c.userID)
 	}
 
 	h.updateKeyHolder(oldChID)

@@ -12,6 +12,7 @@ import { startRingChime, stopRingChime } from "../../../src/lib/media/notificati
 import { setChannelMutesHost } from "../../../src/lib/prefs/channelMutes";
 import { savePref } from "../../../src/lib/prefs/preferences";
 import { createRingController, type RingController } from "../../../src/lib/voice/callRing";
+import type { WsClient } from "../../../src/lib/ws";
 import { desktop } from "../../../src/platform/desktop";
 // What the app loads on first use: in before a test's clock is a fake one.
 import "../../../src/features/direct-messages/callAlerts";
@@ -28,7 +29,7 @@ const phone = vi.hoisted(() => ({
   /** What the app asked of the host, in the order it was done. */
   asked: [] as string[],
   /** How long the host takes over a command, by its name; none by default. */
-  slow: {} as Record<string, number>,
+  slow: new Map<string, number>(),
   listeners: new Set<(raw: unknown) => void>(),
 }));
 
@@ -45,7 +46,7 @@ function takeDown(channelId: number): void {
 }
 
 async function host(command: string, args: Record<string, unknown>): Promise<unknown> {
-  const takes = phone.slow[command] ?? 0;
+  const takes = phone.slow.get(command) ?? 0;
   if (takes > 0) await new Promise((done) => setTimeout(done, takes));
   if (command === "android_notify") {
     phone.asked.push("notify");
@@ -118,7 +119,10 @@ const pass = (ms: number): Promise<unknown> => vi.advanceTimersByTimeAsync(ms);
 /** The main page's ring controller and button handler, as it mounts them. */
 function mountPage(): { ring: RingController; joined: number[]; close(): void } {
   const joined: number[] = [];
-  const st: { ringCtrl: RingController | null } = { ringCtrl: null };
+  const st: { ringCtrl: RingController | null; ws: WsClient } = {
+    ringCtrl: null,
+    ws: { send: () => {} } as unknown as WsClient,
+  };
   const ring = createRingController({
     onRingStateChange: () => {},
     onChime: (playing) => (playing ? startRingChime() : stopRingChime()),
@@ -136,7 +140,7 @@ function mountPage(): { ring: RingController; joined: number[]; close(): void } 
   st.ringCtrl = ring;
   const stop = followCallActions(
     st,
-    { acceptRing: () => ring.accept() },
+    { acceptRing: () => ring.accept(), joinDmCall: () => {} },
     { onMuteToggle: () => {}, onDisconnect: () => {} },
   );
   return {
@@ -169,7 +173,7 @@ describe("an incoming call on the Android app", () => {
       tokens: 0,
       alertedAt: Number.NEGATIVE_INFINITY,
       asked: [],
-      slow: {},
+      slow: new Map<string, number>(),
     });
     chimeNotes.length = 0;
     setChannelMutesHost(HOST);
@@ -253,7 +257,7 @@ describe("an incoming call on the Android app", () => {
   });
 
   test("takes a ring down after it went up, however slow the phone is to show it", async () => {
-    phone.slow = { show_call_ring: 500 };
+    phone.slow = new Map([["show_call_ring", 500]]);
     page.ring.incoming(otto);
     await pass(100);
     page.ring.cancel(50, "ringer-left");

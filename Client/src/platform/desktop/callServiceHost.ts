@@ -63,6 +63,7 @@ function readAction(raw: unknown): CallAction | null {
   if (typeof raw !== "object" || raw === null) return null;
   const kind: unknown = "kind" in raw ? raw.kind : undefined;
   const channelId: unknown = "channelId" in raw ? raw.channelId : undefined;
+  const instance: unknown = "instance" in raw ? raw.instance : undefined;
   switch (kind) {
     case "mute":
     case "unmute":
@@ -71,7 +72,8 @@ function readAction(raw: unknown): CallAction | null {
     case "accept":
     case "decline":
     case "open":
-      return typeof channelId === "number" ? { kind, channelId } : null;
+      if (typeof channelId !== "number") return null;
+      return typeof instance === "string" ? { kind, channelId, instance } : { kind, channelId };
     default:
       return null;
   }

@@ -68,6 +68,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"PushDispatcher.Notify ListPushSubscriptionsForDispatch":                                  "pushdispatcher_notify_listpushsubscriptionsfordispatch",
 	"PushDispatcher.prune DeletePushSubscriptionByID":                                         "pushdispatcher_prune_deletepushsubscriptionbyid",
 	"PushDispatcher.recipientBlocksAuthor IsBlocked":                                          "pushdispatcher_recipientblocksauthor_isblocked",
+	"PushDispatcher.SendRing ListPushSubscriptionsForDispatch":                                "pushdispatcher_sendring_listpushsubscriptionsfordispatch",
 	"PushDispatcher.subscriptionStillCurrent ListPushSubscriptionsForDispatch":                "pushdispatcher_subscriptionstillcurrent_listpushsubscriptions",
 	"TLS certificate issuance failed — clients cannot connect over HTTPS until this is fixed": "tls_certificate_issuance_failed",
 	"TOTP secret decryption failed — check OWNCORD_TOTP_KEY":                                  "totp_secret_decryption_failed",

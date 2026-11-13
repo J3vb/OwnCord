@@ -60,6 +60,9 @@ func handleCallRingV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 			payload:      buildJSON(wsMsg{Type: MsgTypeDMChannelOpen, Payload: reopens[i].Summary}),
 		})
 	}
+	if d.Rings != nil {
+		d.Rings.ringStarted(ctx, ringCmd.ChannelID, info.UserID, targets)
+	}
 	for _, pid := range targets {
 		events = append(events, CallSignalEvent{
 			eventType:    MsgTypeCallIncoming,
@@ -88,6 +91,9 @@ func handleCallDeclineV2(ctx context.Context, cmd Command, info ClientInfo, deps
 		return serviceErrorToResult(err)
 	}
 
+	if d.Rings != nil {
+		d.Rings.ringAnswered(ctx, declineCmd.ChannelID, info.UserID)
+	}
 	payload := buildCallSignal(MsgTypeCallDeclined, declineCmd.ChannelID, info.UserID, info.Username)
 	events := make([]Event, 0, len(targets)+1)
 	for _, pid := range targets {
@@ -112,4 +118,6 @@ func handleCallDeclineV2(ctx context.Context, cmd Command, info ClientInfo, deps
 type CallDeps struct {
 	Limiter *auth.RateLimiter
 	DMSvc   *service.DMService
+	// Rings carries the ring and its decline to phones by push; nil in handler tests.
+	Rings callRingPush
 }

@@ -184,7 +184,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 	presenceDeps := PresenceDeps{Limiter: h.limiter, GameActivityEnabled: h.settings.gameActivity.on.Load}
 	reactionDeps := ReactionDeps{}
-	callDeps := CallDeps{Limiter: h.limiter}
+	callDeps := CallDeps{Limiter: h.limiter, Rings: h}
 	if svc != nil {
 		chatDeps.MessageSvc = svc.Messages
 		presenceDeps.ChannelSvc = svc.Channels

@@ -52,7 +52,7 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[moderationHistory]():     4,
 	reflect.TypeFor[NSFWService]():           8,
 	reflect.TypeFor[PermissionService]():     4,
-	reflect.TypeFor[PushDispatcher]():        11,
+	reflect.TypeFor[PushDispatcher]():        12,
 	reflect.TypeFor[PushService]():           4,
 	reflect.TypeFor[ReportService]():         18,
 	reflect.TypeFor[RoleService]():           11,

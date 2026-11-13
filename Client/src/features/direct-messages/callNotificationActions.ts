@@ -17,6 +17,8 @@ import type { CallAction } from "../../platform/contracts/callService";
 import { isSelfMuted, voiceStore } from "../../stores/voice.store";
 import type { PageApi, PageState } from "../../pages/main-page/pageState";
 import { isHostRing } from "./callAlerts";
+import { actOnPushRing } from "./pushRingActions";
+import { pushSessionInstance } from "../push/pushSubscription";
 
 /** The call's own controls, as every other surface presses them. */
 export interface CallControls {
@@ -24,15 +26,23 @@ export interface CallControls {
   readonly onDisconnect: () => void;
 }
 
-type Rings = Pick<PageState, "ringCtrl">;
-type Answers = Pick<PageApi, "acceptRing">;
+type Rings = Pick<PageState, "ringCtrl" | "ws">;
+type Answers = Pick<PageApi, "acceptRing" | "joinDmCall">;
 type RingAction = Extract<CallAction, { readonly channelId: number }>;
 
 /** Accept, Decline or a tap on the ringing call's notification. */
-function actOnRing(action: RingAction, st: Rings, pg: Answers): void {
-  // A ring an earlier session left on screen is not this page's.
-  if (!isHostRing(action.channelId)) return;
+function actOnRing(action: RingAction, st: Rings, pg: Answers, owner: AbortSignal): void {
   const ringing = st.ringCtrl?.current()?.channelId === action.channelId;
+  const { instance } = action;
+  // A ring a push showed, which this page never heard ring.
+  if (instance !== undefined && !ringing) {
+    actOnPushRing({ kind: action.kind, channelId: action.channelId, instance }, st, pg, owner);
+    return;
+  }
+  // Another server's or account's ring with the same channel id as this page's.
+  if (instance !== undefined && instance !== pushSessionInstance()) return;
+  // A ring an earlier session left on screen is not this page's.
+  if (instance === undefined && !isHostRing(action.channelId)) return;
   if (action.kind === "decline") {
     if (ringing) st.ringCtrl?.decline();
   } else if (action.kind === "accept" && ringing) {
@@ -57,7 +67,13 @@ function actOnMic(kind: "mute" | "unmute", controls: CallControls): void {
   if (isSelfMuted(voice) !== (kind === "mute")) controls.onMuteToggle();
 }
 
-function act(action: CallAction, st: Rings, pg: Answers, controls: CallControls): void {
+function act(
+  action: CallAction,
+  st: Rings,
+  pg: Answers,
+  controls: CallControls,
+  owner: AbortSignal,
+): void {
   switch (action.kind) {
     case "mute":
     case "unmute":
@@ -69,7 +85,7 @@ function act(action: CallAction, st: Rings, pg: Answers, controls: CallControls)
       controls.onDisconnect();
       return;
     default:
-      actOnRing(action, st, pg);
+      actOnRing(action, st, pg, owner);
   }
 }
 
@@ -79,6 +95,8 @@ function act(action: CallAction, st: Rings, pg: Answers, controls: CallControls)
  */
 export function followCallActions(st: Rings, pg: Answers, controls: CallControls): () => void {
   const owner = new Disposable();
-  desktop.callService.onAction(owner.signal, (action) => act(action, st, pg, controls));
+  desktop.callService.onAction(owner.signal, (action) =>
+    act(action, st, pg, controls, owner.signal),
+  );
   return () => owner.destroy();
 }

@@ -18,7 +18,14 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { pushRegistration } from "../../../../src/platform/desktop/pushRegistration";
 
-const REQUEST = { instance: "h#1", vapid: "V", serverName: "Home", title: "T", body: "B" };
+const REQUEST = {
+  instance: "h#1",
+  vapid: "V",
+  serverName: "Home",
+  title: "T",
+  body: "B",
+  ringQuiet: false,
+};
 
 async function settle(): Promise<void> {
   await vi.dynamicImportSettled();
@@ -42,7 +49,33 @@ describe("push registration on the Android host", () => {
       ok: true,
       keys: { endpoint: "https://up/1", p256dh: "P", auth: "A" },
     });
-    expect(native.invoke).toHaveBeenCalledWith("push_register", REQUEST);
+    expect(native.invoke).toHaveBeenCalledWith("push_register", {
+      instance: "h#1",
+      vapid: "V",
+      serverName: "Home",
+      title: "T",
+      body: "B",
+      ring: {
+        title: "Incoming call on Home",
+        text: "Voice call",
+        acceptLabel: "Accept",
+        declineLabel: "Decline",
+        channelName: "Incoming calls",
+        channelDescription: "A direct message call ringing",
+        quiet: false,
+      },
+    });
+  });
+
+  it("gives a quiet ring the silent channel", async () => {
+    native.invoke.mockResolvedValue({ endpoint: "https://up/1", p256dh: "P", auth: "A" });
+    await pushRegistration.register({ ...REQUEST, ringQuiet: true });
+    expect(native.invoke).toHaveBeenCalledWith(
+      "push_register",
+      expect.objectContaining({
+        ring: expect.objectContaining({ channelName: "Incoming calls, silent", quiet: true }),
+      }),
+    );
   });
 
   it.each([

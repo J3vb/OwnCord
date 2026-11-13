@@ -157,6 +157,8 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 	}
 
 	h.updateKeyHolder(channelID)
+	// A callee joining the call on any device answers its ring: their phone stops ringing.
+	h.ringAnswered(ctx, channelID, c.userID)
 
 	// Sent synchronously (sendVoiceEventSync) so it lands in program order on the joiner's
 	// socket among the direct sends around it.

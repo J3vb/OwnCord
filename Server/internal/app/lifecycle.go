@@ -242,6 +242,7 @@ func (a *App) startHub() error {
 		rt.Services != nil && rt.Services.Messages != nil && rt.Services.Push != nil && rt.Services.Permissions != nil {
 		dispatcher := service.NewPushDispatcher(a.database, rt.Services.Permissions, rt.Services.Push, a.hub.IsUserConnected, nil)
 		rt.Services.Messages.SetPushNotifier(dispatcher)
+		a.hub.SetRingPusher(dispatcher)
 		rt.Services.PushDispatch = dispatcher
 	}
 	a.onClose("hub", func(ctx context.Context) error {

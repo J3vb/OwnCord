@@ -11,6 +11,7 @@ import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
 import app.tauri.annotation.InvokeArg
+import java.util.UUID
 
 @InvokeArg
 class ShowRingArgs {
@@ -28,6 +29,17 @@ class ShowRingArgs {
 @InvokeArg
 class ClearRingArgs {
   var channelId: Long = 0
+}
+
+// The ring the process has up, whoever showed it: the page (CallServicePlugin)
+// or a push with no page running (PushRing).
+object CallRingState {
+  val buttons = CallButtons { UUID.randomUUID().toString() }
+
+  // The push registration (server and account) whose push put the ring up,
+  // or null for a ring the page showed. Channel ids are per server, so a push
+  // matches the ring up only when it comes for the same registration.
+  @Volatile var pushOwner: String? = null
 }
 
 // The incoming call's notification: who calls, with Accept and Decline, over
@@ -89,16 +101,24 @@ object CallRing {
     manager(context).areNotificationsEnabled() &&
       channel.importance != NotificationManager.IMPORTANCE_NONE
 
-  fun post(context: Context, args: ShowRingArgs, channel: NotificationChannel, token: String) {
-    val accept = intoApp(context, CallActions.ACCEPT, args.channelId, token)
-    val decline = CallActionReceiver.press(context, CallActions.DECLINE, args.channelId)
+  // `instance` names the push registration of a ring shown from push, so the
+  // page acts on it only while signed in to that server and account.
+  fun post(
+    context: Context,
+    args: ShowRingArgs,
+    channel: NotificationChannel,
+    token: String,
+    instance: String? = null,
+  ) {
+    val accept = intoApp(context, CallActions.ACCEPT, args.channelId, token, instance)
+    val decline = CallActionReceiver.press(context, CallActions.DECLINE, args.channelId, instance)
     val builder = Notification.Builder(context, channel.id)
       .setSmallIcon(R.drawable.ic_call_notification)
       .setContentTitle(args.title)
       .setContentText(args.text)
       .setCategory(Notification.CATEGORY_CALL)
       .setOngoing(true)
-      .setContentIntent(intoApp(context, CallActions.OPEN, args.channelId, token))
+      .setContentIntent(intoApp(context, CallActions.OPEN, args.channelId, token, instance))
       // Screen off: Android lights it and brings the app up, behind the lock
       // screen if there is one. Screen on: the notification stays on top.
       .setFullScreenIntent(toFront(context), true)
@@ -122,6 +142,11 @@ object CallRing {
     manager(context).cancel(NOTIFICATION_ID)
   }
 
+  // Whether the ring is on screen: Android takes it down by itself when its
+  // time is up, and says nothing to the app.
+  fun isUp(context: Context): Boolean =
+    manager(context).activeNotifications.any { it.id == NOTIFICATION_ID }
+
   private fun manager(context: Context): NotificationManager =
     context.getSystemService(NotificationManager::class.java)
 
@@ -129,12 +154,19 @@ object CallRing {
   // a receiver do that for a notification, so these two go to the activity,
   // with the ring's token (see CallButtons). Each conversation's ring keeps
   // intents of its own (CallActions.requestCode).
-  private fun intoApp(context: Context, action: String, channelId: Long, token: String): PendingIntent {
+  private fun intoApp(
+    context: Context,
+    action: String,
+    channelId: Long,
+    token: String,
+    instance: String?,
+  ): PendingIntent {
     val intent = Intent(action)
       .setClass(context, MainActivity::class.java)
       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
       .putExtra(CallActions.EXTRA_CHANNEL, channelId)
       .putExtra(CallActions.EXTRA_TOKEN, token)
+    if (instance != null) intent.putExtra(CallActions.EXTRA_INSTANCE, instance)
     return PendingIntent.getActivity(
       context,
       CallActions.requestCode(channelId),
