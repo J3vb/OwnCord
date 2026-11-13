@@ -13,7 +13,8 @@
  * sends the spec to the native host instead (`native_voice_play_sound`), which
  * synthesizes it and plays it on the saved output device, in or out of a call;
  * any host failure falls back to `playWeb`. Every gate (deafen,
- * DND, the switches) and the ring timers stay here, ahead of `playSpec`.
+ * DND, the switches) and the ring timers stay here, ahead of `playSpec`; the
+ * Settings previews (`soundPreview.ts`) call `playSpec` directly, ungated.
  */
 
 import { loadPref, onPrefChange } from "../prefs/preferences";
@@ -306,7 +307,7 @@ function syncSink(): void {
 }
 
 /** A sound being played: stopping it cuts the notes still sounding. */
-interface Playing {
+export interface Playing {
   stop(): void;
 }
 
@@ -399,8 +400,9 @@ function playNative(spec: ToneSpec, what: string): Playing {
 }
 
 /** Play `spec` on the Linux desktop through the native host, anywhere else
- *  through Web Audio (whose `setSinkId` carries the saved output). */
-function playSpec(spec: ToneSpec, what: string): Playing {
+ *  through Web Audio (whose `setSinkId` carries the saved output). Ungated:
+ *  only this module's gated players and the Settings previews call it. */
+export function playSpec(spec: ToneSpec, what: string): Playing {
   return isLinuxDesktop() ? playNative(spec, what) : playWeb(spec, what);
 }
 

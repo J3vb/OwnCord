@@ -78,6 +78,7 @@ export const settingsNotificationsEntries = {
   "notifications.sound.connection.desc": "When your voice connection drops and when it is back",
   "notifications.sound.ptt.label": "Push-to-talk sounds",
   "notifications.sound.ptt.desc": "A quiet tick when your talk key opens and closes your mic",
+  "notifications.sound.preview": "Play {sound}",
   "notifications.level.label": "Notification Level",
   "notifications.level.desc": "Default for every server. A server can override it below.",
   "notifications.level.all": "All Messages",
