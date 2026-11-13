@@ -134,6 +134,8 @@ release changes the database, and anything an operator must do first.)
 
 - New app sounds: a short bubble pop for a message, its own two-note chime for a mention, a marimba phrase for an incoming call, and softer voice and call sounds. Settings > Notifications has a new "Sound style" choice under the volume slider; Classic brings back the plain tones OwnCord had before.
 - Three new sounds: a short phrase when your voice connection drops (and the join sound when it is back), soft tones when your call is declined or not answered, and an optional quiet tick when push-to-talk opens and closes your mic. The connection and push-to-talk sounds have their own switches in Settings > Notifications (the push-to-talk tick starts off); the call sound follows the Ringback switch.
+- Three new sounds: a short phrase when your voice connection drops (and the join sound when it is back), soft tones when your call is declined or not answered, and an optional quiet tick when push-to-talk opens and closes your mic. Each has its own switch in Settings > Notifications; the push-to-talk tick starts off.
+- Every app sound can be tried in Settings > Notifications: each sound switch has a play button, which works with the switch off. Previews, including the volume slider's and the sound style's, now also sound while you are deafened or on Do Not Disturb.
 
 **Desktop UI**
 

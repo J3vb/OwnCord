@@ -721,6 +721,18 @@ that is sounding, every note of it. The sounds added after the Classic set
 (call ended, connection lost, the push-to-talk ticks) have no Classic version
 and play their Modern sound in both styles.
 
+**Previews** (`lib/media/soundPreview.ts`): each per-sound switch in Settings ›
+Notifications has a play button that plays that switch's sounds in the saved
+style, one after another with 300 ms of silence after each sound's last note
+ends (the ringback row plays the ringback and then the call-ended tones, the
+connection row the lost phrase and then the join sound). Letting go of the
+volume slider and picking a style preview the message sound the same way. A
+preview is a deliberate press, so it ignores deafen, Do Not Disturb and every
+switch, but it goes through the same player (volume, output device, the Linux
+host) and never touches the ring timers. One preview runs at a time: a second
+press on its button stops it, and any other preview cuts it. Leaving the tab or
+closing Settings stops it and cuts the sound in flight.
+
 When your own **outgoing call ends unanswered** (declined, no answer, or the
 callee offline), the ringback stops and three soft tones play once. A call that
 is answered, or that you hang up yourself, plays nothing. They follow the

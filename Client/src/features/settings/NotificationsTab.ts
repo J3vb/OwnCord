@@ -5,7 +5,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { appendToggleRows, platformText, savePref } from "./helpers";
 import { isAndroidApp } from "../voice/native/platform";
-import { playNotificationSound } from "@lib/media/notificationSound";
+import { previewSounds } from "@lib/media/soundPreview";
 import {
   APP_SOUNDS_VOLUME_KEY,
   SOUND_STYLE_KEY,
@@ -30,6 +30,7 @@ import {
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
 import { buildChoiceRow } from "./settingRow";
+import { addSoundPreviewButton } from "./soundPreviewButton";
 import {
   LEVEL_LABELS,
   buildChannelLevelsSection,
@@ -138,7 +139,8 @@ const SOUND_SWITCH_TEXT: Readonly<
 };
 
 /** A group switch (its pref key unchanged) followed by its nested per-sound
- *  switches. A sound plays only when both the group and its own switch are on. */
+ *  switches, each with a play button. A sound plays only when both the group
+ *  and its own switch are on; the play button plays it either way. */
 function appendSoundGroup(
   section: HTMLElement,
   group: { key: string; label: string; desc: string },
@@ -156,7 +158,11 @@ function appendSoundGroup(
     })),
     signal,
   );
-  for (const row of rows) row.classList.add("nested");
+  rows.forEach((row, i) => {
+    const sound = sounds[i]!;
+    row.classList.add("nested");
+    addSoundPreviewButton(row, sound, SOUND_SWITCH_TEXT[sound].label(), signal);
+  });
 }
 
 /** The slider's value as spoken and shown: a percent. */
@@ -168,7 +174,7 @@ function valueText(percent: number): string {
  * The "App sounds volume" slider: scales the master gain every app
  * sound shares. 100% is today's level, 0% is silent. The value is saved on
  * every move (the player re-reads it on its next sound); letting go of the
- * thumb plays the message chime once so the level can be judged.
+ * thumb previews the message chime so the level can be judged.
  */
 function buildSoundsVolumeRow(signal: AbortSignal): HTMLDivElement {
   const row = createElement("div", { class: "setting-row stacked" });
@@ -200,15 +206,15 @@ function buildSoundsVolumeRow(signal: AbortSignal): HTMLDivElement {
     },
     { signal },
   );
-  slider.addEventListener("change", () => playNotificationSound(), { signal });
+  slider.addEventListener("change", () => previewSounds(["message"], signal), { signal });
   const control = createElement("div", { class: "slider-row" });
   appendChildren(control, slider, readout);
   row.appendChild(control);
   return row;
 }
 
-/** The "Sound style" row: Modern or Classic. Picking one plays the message
- *  sound once in it, as letting go of the volume slider does. */
+/** The "Sound style" row: Modern or Classic. Picking one previews the
+ *  message sound in it, as letting go of the volume slider does. */
 function buildSoundStyleRow(signal: AbortSignal): HTMLDivElement {
   return buildChoiceRow<SoundStyle>({
     signal,
@@ -222,7 +228,7 @@ function buildSoundStyleRow(signal: AbortSignal): HTMLDivElement {
     current: loadSoundStyle,
     save: (style) => {
       savePref(SOUND_STYLE_KEY, style);
-      playNotificationSound();
+      previewSounds(["message"], signal);
     },
   }).row;
 }

@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { playNotificationSound } = vi.hoisted(() => ({ playNotificationSound: vi.fn() }));
+const { previewSounds } = vi.hoisted(() => ({ previewSounds: vi.fn() }));
 
 vi.mock("../../src/platform/desktop", () => ({
   desktop: {
@@ -16,7 +16,7 @@ vi.mock("../../src/platform/desktop", () => ({
     },
   },
 }));
-vi.mock("../../src/lib/media/notificationSound", () => ({ playNotificationSound }));
+vi.mock("../../src/lib/media/soundPreview", () => ({ previewSounds }));
 
 import { useNotificationsTabHost } from "../helpers/notificationsTabHost";
 import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
@@ -26,7 +26,7 @@ const { build } = host;
 
 beforeEach(() => {
   localStorage.clear();
-  playNotificationSound.mockClear();
+  previewSounds.mockClear();
   setChannelMutesHost(null);
 });
 
@@ -76,13 +76,14 @@ describe("App sounds volume slider", () => {
     expect(slider(second).getAttribute("aria-valuetext")).toBe("0%");
   });
 
-  it("plays one sample chime when the thumb is released, not while dragging", () => {
+  it("previews the message sound when the thumb is released, not while dragging", () => {
     const s = slider(build());
     s.dispatchEvent(new Event("input"));
-    expect(playNotificationSound).not.toHaveBeenCalled();
+    expect(previewSounds).not.toHaveBeenCalled();
 
     s.dispatchEvent(new Event("change"));
-    expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(previewSounds).toHaveBeenCalledTimes(1);
+    expect(previewSounds).toHaveBeenCalledWith(["message"], expect.any(AbortSignal));
   });
 
   it("falls back to 100% on a corrupt stored value", () => {
@@ -112,17 +113,17 @@ describe("Sound style", () => {
     expect(select(tab).value).toBe("modern");
   });
 
-  it("saves the pick and plays the message sound once in it", () => {
+  it("saves the pick and previews the message sound in it", () => {
     const tab = build();
-    playNotificationSound.mockImplementation(() => {
+    previewSounds.mockImplementation(() => {
       // The sample plays after the save, so it sounds in the new style.
       expect(stored("soundStyle")).toBe(JSON.stringify("classic"));
     });
     choice(tab, "classic").click();
-    playNotificationSound.mockImplementation(() => undefined);
+    previewSounds.mockImplementation(() => undefined);
 
-    expect(playNotificationSound).toHaveBeenCalledTimes(1);
-    expect(playNotificationSound).toHaveBeenCalledWith();
+    expect(previewSounds).toHaveBeenCalledTimes(1);
+    expect(previewSounds).toHaveBeenCalledWith(["message"], expect.any(AbortSignal));
     expect(choice(tab, "classic").getAttribute("aria-checked")).toBe("true");
     expect(choice(build(), "classic").getAttribute("aria-checked")).toBe("true");
   });
@@ -132,7 +133,7 @@ describe("Sound style", () => {
     select(tab).value = "classic";
     select(tab).dispatchEvent(new Event("change"));
     expect(stored("soundStyle")).toBe(JSON.stringify("classic"));
-    expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(previewSounds).toHaveBeenCalledTimes(1);
   });
 
   it("shows Modern for a stored value it does not know", () => {

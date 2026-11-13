@@ -183,6 +183,7 @@ export const shards = {
     "src/features/members/memberListOptions.ts",
     "src/features/members/memberRowMenu.ts",
     "src/lib/media/notificationSound.ts",
+    "src/lib/media/soundPreview.ts",
     "src/lib/media/soundTables.ts",
     "src/lib/ui/statusIndicator.ts",
     "src/lib/ui/virtualRange.ts",
@@ -696,6 +697,7 @@ export const shards = {
     "src/features/safety/signInNotice.ts",
     "src/features/settings/settingRow.ts",
     "src/features/settings/settingsRequests.ts",
+    "src/features/settings/soundPreviewButton.ts",
   ],
   "safety-moderation-10": [
     "src/features/message-requests/Inbox.ts",
