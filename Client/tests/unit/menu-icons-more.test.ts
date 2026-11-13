@@ -1,6 +1,6 @@
 /**
- * Icons in the DM, thread, category, voice volume, image, server rail and
- * camera menus: every action row leads with one (both labels of a toggled
+ * Icons in the DM, thread, category, voice volume, image, server rail,
+ * camera and video tile menus: every action row leads with one (both labels of a toggled
  * row), destructive rows keep their danger class, and a row that is a control
  * (the volume slider) stays as it was while the rows around it line up.
  */
@@ -41,6 +41,11 @@ import {
 import { openImageMenu, closeImageMenu } from "../../src/features/messaging/message-list/imageMenu";
 import { folderMenu, serverMenu } from "../../src/features/server-rail/serverRailMenus";
 import { showCameraMenu } from "../../src/features/voice/cameraMenu";
+import {
+  showSelfTileMenu,
+  showTileMenu,
+  type TileMenuOptions,
+} from "../../src/features/voice/videoGrid/tileMenu";
 import { blocksStore } from "@stores/blocks.store";
 import { isCategoryCollapsed, toggleCategory } from "@stores/ui.store";
 import type { ContextMenuItem } from "@lib/ui/contextMenu";
@@ -337,5 +342,94 @@ describe("image, server rail and camera menu icons", () => {
     }
     expect(menuRowLabel(byId("camera-device-1"))).toBe("Front");
     expect(byId("camera-device-0").getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+describe("video tile menu icons", () => {
+  const tileMenu = (): HTMLElement => document.querySelector<HTMLElement>(".video-tile-menu")!;
+  const arrange = (pinned = false): NonNullable<TileMenuOptions["arrange"]> => ({
+    size: "medium",
+    pinned,
+    onSize: vi.fn(),
+    onPin: vi.fn(),
+  });
+  const open = (o: Partial<TileMenuOptions> = {}, view: Partial<TileMenuOptions["view"]> = {}) =>
+    showTileMenu({
+      x: 0,
+      y: 0,
+      name: "Ann",
+      config: { isSelf: false, audioUserId: 5, isScreenshare: true },
+      signal: ac.signal,
+      onVolumeChange: vi.fn(),
+      onStopWatching: vi.fn(),
+      view: {
+        focused: false,
+        fullscreen: false,
+        poppedOut: false,
+        onFocus: vi.fn(),
+        onFullscreen: vi.fn(),
+        onPopout: vi.fn(),
+        ...view,
+      },
+      arrange: arrange(),
+      person: {
+        onProfile: vi.fn(),
+        onMessage: vi.fn(),
+        moderation: {
+          moveTargets: [{ id: 2, name: "Lounge" }],
+          onServerMute: vi.fn(),
+          onServerDeafen: vi.fn(),
+          onMove: vi.fn(),
+          onDisconnect: vi.fn(),
+        },
+      },
+      ...o,
+    });
+  const actionIcons = (): Record<string, string | null> =>
+    Object.fromEntries(
+      [...tileMenu().querySelectorAll<HTMLElement>(":scope > [role^='menuitem']")].map((r) => [
+        r.dataset["action"] ?? menuRowLabel(r),
+        iconOf(r),
+      ]),
+    );
+
+  it("leads every row of a person's tile menu with an icon", () => {
+    open();
+    expect(actionIcons()).toEqual({
+      profile: "user",
+      message: "message-square",
+      "Mute stream": "volume-x",
+      "local-mute": "volume-x",
+      focus: "square-user",
+      fullscreen: "maximize",
+      popout: "external-link",
+      "size-small": "size-small",
+      "size-medium": "size-medium",
+      "size-large": "size-large",
+      pin: "pin",
+      "stop-watching": "eye-off",
+      "server-mute": "mic-off",
+      "server-deafen": "headphones-off",
+      "move-to": "arrow-right",
+      "voice-disconnect": "phone-off",
+    });
+  });
+
+  it("gives the other label of each toggled row its own icon", () => {
+    open({ arrange: arrange(true) }, { focused: true, fullscreen: true });
+    const icons = actionIcons();
+    expect(icons["focus"]).toBe("layout-grid");
+    expect(icons["fullscreen"]).toBe("minimize");
+    expect(icons["pin"]).toBe("pin-off");
+
+    const slider = tileMenu().querySelector<HTMLInputElement>('[data-menu-volume="stream"]')!;
+    slider.value = "0";
+    slider.dispatchEvent(new Event("input"));
+    expect(actionIcons()["Unmute stream"]).toBe("volume-2");
+  });
+
+  it("leads both rows of your own camera tile's menu with an icon", () => {
+    showSelfTileMenu({ x: 0, y: 0, signal: ac.signal, onHide: vi.fn(), onCameraOff: vi.fn() });
+    expect(actionIcons()).toEqual({ "hide-self": "eye-off", "camera-off": "camera-off" });
   });
 });
