@@ -499,7 +499,7 @@ describe("LiveKitSession", () => {
       applySpy.mockRestore();
     });
 
-    it("does not close the gate at join for a key bound in Voice Activity mode", async () => {
+    it("does not close the gate at join for a key bound in Voice activity mode", async () => {
       stubPrefs({ pttVk: 0x41, inputMode: "vad" });
       setPttPollingLive(true);
       session.setServerHost("localhost:7880");
@@ -534,7 +534,7 @@ describe("LiveKitSession", () => {
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
     });
 
-    it("does not close the gate at join for the talk button in Voice Activity mode", async () => {
+    it("does not close the gate at join for the talk button in Voice activity mode", async () => {
       stubPrefs({ inputMode: "vad" });
       setTalkButton(true);
       setPttPollingLive(true);

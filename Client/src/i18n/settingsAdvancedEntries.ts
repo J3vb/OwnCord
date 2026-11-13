@@ -1,6 +1,6 @@
 /** Settings catalog entries: Advanced, Logs, updates and connection diagnostics. Spread into settingsText. */
 export const settingsAdvancedEntries = {
-  "advanced.developerMode.label": "Developer Mode",
+  "advanced.developerMode.label": "Developer mode",
   "advanced.developerMode.desc":
     "Add Copy Message ID, Copy User ID and Copy Channel ID to right-click menus",
   "advanced.confirmServerSwitch.label": "Ask before switching servers",
@@ -11,27 +11,27 @@ export const settingsAdvancedEntries = {
   "advanced.devtools.label": "Open DevTools",
   "advanced.devtools.desc": "Open the browser developer tools for debugging",
   "advanced.devtools.button": "Open DevTools",
-  "advanced.storageCache": "Storage & Cache",
-  "advanced.clearImages.label": "Clear Image Cache",
+  "advanced.storageCache": "Storage & cache",
+  "advanced.clearImages.label": "Clear image cache",
   "advanced.clearImages.desc":
     "Remove cached images and link previews. They will be re-downloaded as needed.",
-  "advanced.clearLogs.label": "Clear Log Files",
+  "advanced.clearLogs.label": "Clear log files",
   "advanced.clearLogs.desc": "Remove persisted client log files from disk.",
-  "advanced.clearAll.label": "Clear All Cache & Restart",
+  "advanced.clearAll.label": "Clear all cache & restart",
   "advanced.clearAll.desc":
     "Remove all cached data (images, logs, WebView storage) and restart the app. Display and behaviour settings are reset. Server profiles, credentials, themes, notification levels, voice input mode and key, muted channels, drafts, notes and server folders are kept.",
   "advanced.button.clear": "Clear",
   "advanced.button.clearing": "Clearing...",
   "advanced.button.cleared": "Cleared!",
   "advanced.button.failed": "Failed",
-  "advanced.button.clearRestart": "Clear & Restart",
+  "advanced.button.clearRestart": "Clear & restart",
   "advanced.button.confirmAgain": "Are you sure? Click again",
-  "advanced.launchOnLogin.label": "Launch on Login",
+  "advanced.launchOnLogin.label": "Launch on login",
   "advanced.launchOnLogin.desc": "Start OwnCord automatically when you sign in to your computer",
-  "advanced.minimizeToTray.label": "Close to Tray",
+  "advanced.minimizeToTray.label": "Close to tray",
   "advanced.minimizeToTray.desc":
     "Closing the window keeps OwnCord running in the tray, if your desktop shows one. Quit from the tray menu.",
-  "advanced.startMinimized.label": "Start Minimized",
+  "advanced.startMinimized.label": "Start minimized",
   "advanced.startMinimized.desc":
     "When OwnCord starts at login, keep the window hidden in the tray",
 
@@ -81,27 +81,27 @@ export const settingsAdvancedEntries = {
   "updates.noServer": "Connect to a server to check for updates.",
   "logs.filter": "Filter:",
   "logs.filterLabel": "Log filter",
-  "logs.minLevel": "Min Level:",
+  "logs.minLevel": "Min level:",
   "logs.minLevelLabel": "Minimum log level",
-  "logs.copyAll": "Copy All",
+  "logs.copyAll": "Copy all",
   "logs.copied": "Copied!",
   "logs.copyFailed": "Failed to copy",
-  "logs.clear": "Clear Logs",
+  "logs.clear": "Clear logs",
   "logs.refresh": "Refresh",
   "logs.voiceDiagnostics": "Voice engine state",
-  "logs.refreshDiagnostics": "Refresh Diagnostics",
-  "logs.copyDiagnostics": "Copy Diagnostics",
-  "logs.exportBundle": "Export Support Bundle",
+  "logs.refreshDiagnostics": "Refresh diagnostics",
+  "logs.copyDiagnostics": "Copy diagnostics",
+  "logs.exportBundle": "Export support bundle",
   "logs.bundleNote":
     "Saves a zip of your logs, diagnostics and settings on this computer. Nothing is uploaded. Tokens, links, addresses and other secrets are removed first, but read it before sharing.",
   "logs.bundleSaved": "Support bundle saved.",
   "logs.eventLog": "Keep a diagnostic event log",
   "logs.eventLogDesc":
     "Records what the camera, calls and server connection did in the last 30 minutes, without names, messages or addresses. It stays on this device and goes into the support bundle. Turning it off deletes it.",
-  "logs.shareBundle": "Share Support Bundle",
+  "logs.shareBundle": "Share support bundle",
   "logs.bundleNoteShare":
     "Makes a zip of your logs, diagnostics and settings on this phone and opens the share sheet, so you choose where it goes. Tokens, links, addresses and other secrets are removed first, but read it before sharing.",
-  "logs.openFolder": "Open Log Folder",
+  "logs.openFolder": "Open log folder",
   "logs.openFolderFailed": "Could not open the log folder: {error}",
   "logs.exportFailed": "Export failed: {error}",
   "logs.shareTesting": "Screen share testing",
@@ -155,15 +155,15 @@ export const settingsAdvancedEntries = {
   "diagnostics.detail.micTimeout":
     "The microphone prompt did not finish. Dismiss any pending prompt, then retry. Any late capture will be stopped.",
   "diagnostics.detail.micFailed":
-    "The selected microphone could not open. Check Voice & Video settings and reconnect your device.",
+    "The selected microphone could not open. Check Voice & video settings and reconnect your device.",
   "diagnostics.detail.micSilent":
-    "The microphone opened but no audio arrived. Check that it is not muted at the system level, or pick another microphone in Voice & Video settings.",
+    "The microphone opened but no audio arrived. Check that it is not muted at the system level, or pick another microphone in Voice & video settings.",
   "diagnostics.detail.micNativePresent":
     "Your microphone opened and reported audio. The test capture has stopped; nothing was recorded or sent.",
   "diagnostics.detail.micNativeDefault":
     "Your saved microphone is not connected, so calls will use the system default. The default opened and reported audio; nothing was recorded or sent.",
   "diagnostics.detail.micNativeInCall":
-    "You are in a call, so its capture already holds your microphone and it was not opened again. The level bar in Voice & Video settings shows it live.",
+    "You are in a call, so its capture already holds your microphone and it was not opened again. The level bar in Voice & video settings shows it live.",
   "diagnostics.detail.micSkipped": "Microphone check was not selected.",
   "diagnostics.detail.joinVoice": "Join a voice channel yourself, then run this test again.",
   "diagnostics.detail.joinCall":

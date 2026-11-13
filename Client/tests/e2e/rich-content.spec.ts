@@ -219,7 +219,7 @@ test.describe("rich-content states", () => {
     // B9-8 preserved: the Text & Images reset revokes the grant and re-conceals
     // the item, so the retry control is gone and no further broker call occurs.
     await openSettings(page);
-    await switchSettingsTab(page, "Text & Images");
+    await switchSettingsTab(page, "Text & images");
     await page.getByRole("button", { name: "Reset external content consent" }).click();
     await page.keyboard.press("Escape");
     await expect(card(page).locator(".msg-embed-concealed")).toHaveCount(2);
@@ -347,8 +347,8 @@ test.describe("rich-content states", () => {
   });
 
   for (const [label, scale] of [
-    ["20px Large Font", 1],
-    ["20px Large Font at 200% scale", 2],
+    ["20px Large font", 1],
+    ["20px Large font at 200% scale", 2],
   ] as const) {
     test.describe(label, () => {
       test.use({ viewport: { width: 940, height: 500 }, deviceScaleFactor: scale });

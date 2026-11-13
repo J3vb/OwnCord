@@ -1,5 +1,5 @@
 /**
- * Quick Switcher (Ctrl+K) parity (N9): ordering, DM rows, markers, the empty
+ * Quick switcher (Ctrl+K) parity (N9): ordering, DM rows, markers, the empty
  * state, and the manager routing a pick through navigateToChannel.
  */
 import { makeDm } from "../helpers/dmHarness";

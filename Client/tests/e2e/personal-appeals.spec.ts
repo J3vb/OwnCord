@@ -8,7 +8,7 @@
  * operation, focus indicator and its location through the async send and
  * withdrawal, announced errors and results, contrast in every theme, High
  * Contrast and a custom accent, reduced motion, and reflow at the 940x500
- * minimum window with 20px Large Font. The native NVDA/Orca review is
+ * minimum window with 20px Large font. The native NVDA/Orca review is
  * owner-run.
  */
 import type { Locator, Page } from "@playwright/test";
@@ -98,7 +98,7 @@ async function start(page: Page, opts: { fileStatus?: number } = {}): Promise<vo
 
 async function openSafety(page: Page): Promise<Locator> {
   await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("tab", { name: "Privacy & Safety" }).click();
+  await page.getByRole("tab", { name: "Privacy & safety" }).click();
   const pane = page.locator(".safety-tab");
   await expect(pane.locator("[data-testid='safety-appeal-APL-1']")).toBeVisible();
   return pane;
@@ -219,7 +219,7 @@ test.describe("personal appeals", () => {
     ]);
   });
 
-  test("contrast and focus hold in every theme, High Contrast and a custom accent", async ({
+  test("contrast and focus hold in every theme, High contrast and a custom accent", async ({
     page,
   }) => {
     await start(page);
@@ -259,7 +259,7 @@ test.describe("personal appeals", () => {
       .attach("b9-16-contrast.txt", { body: rows.join("\n"), contentType: "text/plain" });
   });
 
-  test("reflows at 940x500 with 20px Large Font and needs no motion", async ({ page }) => {
+  test("reflows at 940x500 with 20px Large font and needs no motion", async ({ page }) => {
     await page.setViewportSize({ width: 940, height: 500 });
     await start(page);
     await setAppearance(page, { fontSize: 20, largeFont: true, reducedMotion: true });

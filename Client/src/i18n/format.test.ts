@@ -9,7 +9,7 @@ import {
 import { settingsText } from "./settings";
 
 const text = defineCatalog("test", {
-  plain: "Reduce Motion",
+  plain: "Reduce motion",
   greet: "Hello {name}, you have {items} items",
   unread: {
     one: "{count} unread message in {channel}",
@@ -23,7 +23,7 @@ afterEach(() => {
 
 describe("defineCatalog", () => {
   it("returns the English entry for a key", () => {
-    expect(text("plain")).toBe("Reduce Motion");
+    expect(text("plain")).toBe("Reduce motion");
   });
 
   it("inserts parameters verbatim and formats numbers in the catalog locale", () => {
@@ -48,7 +48,7 @@ describe("defineCatalog", () => {
     // @ts-expect-error — a plural entry needs its count
     expect(text("unread", { channel: "#x" })).toBe("{count} unread messages in #x");
     // @ts-expect-error — a plain entry takes no parameters
-    expect(text("plain", { name: "x" })).toBe("Reduce Motion");
+    expect(text("plain", { name: "x" })).toBe("Reduce motion");
   });
 
   it("does not resolve inherited object keys", () => {
@@ -59,10 +59,10 @@ describe("defineCatalog", () => {
 
 describe("expansion", () => {
   it("lengthens the template by about 40 % and brackets it", () => {
-    const out = expandText("Reduce Motion");
-    expect(out.startsWith("⟦Reduce Motion ")).toBe(true);
+    const out = expandText("Reduce motion");
+    expect(out.startsWith("⟦Reduce motion ")).toBe(true);
     expect(out.endsWith("⟧")).toBe(true);
-    expect(out.length).toBeGreaterThanOrEqual(Math.ceil("Reduce Motion".length * 1.4));
+    expect(out.length).toBeGreaterThanOrEqual(Math.ceil("Reduce motion".length * 1.4));
   });
 
   it("keeps placeholders and never expands parameter values", () => {
@@ -75,9 +75,9 @@ describe("expansion", () => {
 
   it("applies to real catalogs and switches back to English", () => {
     setTextTransformForTesting(expandText);
-    expect(settingsText("accessibility.largeFont.label")).toMatch(/^⟦Large Font .+⟧$/);
+    expect(settingsText("accessibility.largeFont.label")).toMatch(/^⟦Large font .+⟧$/);
     setTextTransformForTesting(null);
-    expect(settingsText("accessibility.largeFont.label")).toBe("Large Font");
+    expect(settingsText("accessibility.largeFont.label")).toBe("Large font");
   });
 });
 

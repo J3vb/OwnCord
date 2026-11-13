@@ -734,7 +734,7 @@ export function buildTauriMockScript(opts: {
       for (const route of HTTP_ROUTES) {
         if (url.includes(route.pattern) && (!route.method || route.method === method)) return route;
       }
-      // Default: nobody blocked, so the Privacy & Safety tab loads without its
+      // Default: nobody blocked, so the Privacy & safety tab loads without its
       // load-failure alert. A spec's own /blocks route wins (matched above).
       if (method === "GET" && url.split("?")[0].endsWith("/api/v1/blocks")) {
         return { status: 200, body: { blocked_user_ids: [] } };
@@ -1085,7 +1085,7 @@ export function buildTauriMockScript(opts: {
         if (cmd === "global_keys_status")
           return { backend: "none", portalVersion: 0, triggers: { ptt: null, mute: null, deafen: null }, canConfigure: false };
         if (cmd === "check_client_update") return { available: false, version: null, body: null };
-        // Close to Tray / Start Minimized (WP 2B-3): the host's defaults.
+        // Close to tray / Start minimized (WP 2B-3): the host's defaults.
         if (cmd === "get_window_prefs") return { minimizeToTray: true, startMinimized: false };
         if (cmd === "set_window_pref" || cmd === "show_next_launch") return null;
         // Graphics card for video: no cards, so the row stays hidden.

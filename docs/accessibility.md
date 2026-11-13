@@ -14,27 +14,27 @@ Open **Settings** (Ctrl+,) and pick a tab.
 
 **Accessibility**
 
-- **Reduce Motion** turns off animations and transitions.
+- **Reduce motion** turns off animations and transitions.
 - **Sync with OS** (on by default) also reduces motion whenever your system
   asks for less motion. Either one is enough to reduce motion.
-- **High Contrast** raises contrast across the app and puts back the tested
+- **High contrast** raises contrast across the app and puts back the tested
   accent and focus colours, even if you picked your own accent.
-- **Large Font** makes text at least 18 px everywhere.
+- **Large font** makes text at least 18 px everywhere.
 - **Always underline links** underlines links in messages, not only when you
   point at them.
 - **Saturation** makes coloured names and main buttons more or less vivid.
   Images and video are not changed.
-- **Role Colors** turns coloured usernames in chat on or off.
+- **Role colors** turns coloured usernames in chat on or off.
 
 **Appearance**
 
-- **Font Size** from 12 to 20 px.
-- **Zoom Level** from 50 % to 200 %. Ctrl and `+`, `-` or `0` zoom in, out
+- **Font size** from 12 to 20 px.
+- **Zoom level** from 50 % to 200 %. Ctrl and `+`, `-` or `0` zoom in, out
   and back to 100 % from anywhere in the app.
 - **Theme**: dark, midnight, light, neon glow, or **Sync with computer** to
   follow your system's light or dark setting.
-- **Compact Mode** fits more messages on screen.
-- **Time Format**: 12-hour or 24-hour clocks. Until you pick one, the clock and the date order follow the device language.
+- **Compact mode** fits more messages on screen.
+- **Time format**: 12-hour or 24-hour clocks. Until you pick one, the clock and the date order follow the device language.
 
 **Keybinds** lets you change many shortcuts, set push to talk, and set global
 mute and deafen keys that work while another app has focus.
@@ -77,7 +77,7 @@ Shortcuts (Ctrl+/ shows the full list in the app):
 | Ctrl+Shift+V                       | Turn your camera on or off                 |
 
 Search, the camera, upload and the emoji and GIF pickers can be rebound in
-**Settings › Keybinds**. Toggle Screen Share and Disconnect from Voice have no
+**Settings › Keybinds**. Toggle screen share and Disconnect from voice have no
 key until you set one.
 
 ## Screen readers
@@ -120,7 +120,7 @@ the same way, so a dark role colour on a dark theme stays readable.
 - **Some small text is fainter.** A few decorative and disabled labels use a
   fainter colour that is not held to the 4.5:1 rule.
 - **Custom themes are not checked.** A custom CSS theme
-  (**Appearance › Custom Themes**) can lower contrast or hide the focus ring.
+  (**Appearance › Custom themes**) can lower contrast or hide the focus ring.
   Ctrl+Shift+Backspace turns a custom theme off.
 - **Linux on Wayland limits global keys.** Global push to talk, mute and
   deafen need a desktop with the GlobalShortcuts portal, and push to talk

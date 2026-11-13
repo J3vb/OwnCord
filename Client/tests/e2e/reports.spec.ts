@@ -13,8 +13,8 @@ import {
 
 // ---------------------------------------------------------------------------
 // B9-10: the report form and My reports against the owner's Q1 checks —
-// keyboard, names, focus, contrast in every theme and High Contrast, reduced
-// motion from the OS and the app, and reflow at 940x500 with 20 px Large Font.
+// keyboard, names, focus, contrast in every theme and High contrast, reduced
+// motion from the OS and the app, and reflow at 940x500 with 20 px Large font.
 //
 // The server here is mocked, so every send is refused as a duplicate: that
 // keeps the dialog open in its error state for measuring. The real-server
@@ -115,7 +115,7 @@ async function showErrors(page: Page): Promise<void> {
 
 async function openSafety(page: Page): Promise<Locator> {
   await page.locator("button[aria-label='Settings']").click();
-  await page.getByRole("tab", { name: "Privacy & Safety" }).click();
+  await page.getByRole("tab", { name: "Privacy & safety" }).click();
   const section = page.getByRole("region", { name: "My reports" });
   await expect(section.locator(".my-reports-item")).toHaveCount(2);
   return section;
@@ -264,7 +264,7 @@ test.describe("report form and My reports", () => {
     await expect(dialog).toHaveCSS("animation-duration", "0s");
   });
 
-  test.describe("reflow at the 940x500 minimum window with 20 px Large Font", () => {
+  test.describe("reflow at the 940x500 minimum window with 20 px Large font", () => {
     test.use({ viewport: { width: 940, height: 500 } });
 
     test("every control is reachable and nothing scrolls sideways", async ({ page }, testInfo) => {

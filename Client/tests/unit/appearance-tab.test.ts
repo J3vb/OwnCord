@@ -434,7 +434,7 @@ describe("AppearanceTab — Accessibility", () => {
     expect(hexInput.getAttribute("aria-label")).toBe("Custom accent color (hex)");
     const note = document.getElementById(hexInput.getAttribute("aria-describedby") ?? "");
     expect(note?.textContent).toBe(
-      "Custom colours may reduce readability; text and focus indicators fall back to a readable colour when needed, and High Contrast restores tested colours.",
+      "Custom colours may reduce readability; text and focus indicators fall back to a readable colour when needed, and High contrast restores tested colours.",
     );
   });
 
@@ -471,7 +471,7 @@ describe("AppearanceTab — Accessibility", () => {
 
   // --- Time format (12h / 24h) ---
 
-  it("shows a Time Format radiogroup defaulting to 12-hour", () => {
+  it("shows a Time format radiogroup defaulting to 12-hour", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
@@ -506,7 +506,7 @@ describe("AppearanceTab — Accessibility", () => {
 
   // --- Date format ---
 
-  it("defaults Date Format to Automatic, and a pinned order moves the clock default", () => {
+  it("defaults Date format to Automatic, and a pinned order moves the clock default", () => {
     try {
       const section = buildAppearanceTab(ac.signal);
       container.appendChild(section);

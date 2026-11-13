@@ -88,7 +88,7 @@ async function apply(page: Page, prefs: AppearancePrefs): Promise<void> {
 
 test.describe("token matrix (thresholds, accent policy)", () => {
   for (const theme of THEMES) {
-    test(`${theme}: qualified tokens pass in every accent and High Contrast state`, async ({
+    test(`${theme}: qualified tokens pass in every accent and High contrast state`, async ({
       page,
     }, testInfo) => {
       test.setTimeout(180_000);
@@ -139,7 +139,7 @@ test.describe("token matrix (thresholds, accent policy)", () => {
 
           // Q8 as aligned with Q1: the accent is the text colour only at
           // >= 4.5:1 and the focus ring only at >= 3:1 on every surface, and
-          // neither under High Contrast.
+          // neither under High contrast.
           const surfaces = await Promise.all(SURFACES.map((s) => tokenHex(page, s)));
           const accentMin =
             accent === null
@@ -188,11 +188,11 @@ test.describe("B9 Q13 role colours as text (role clamp)", () => {
   // Role colours are server-set: MOCK_ROLES paints admins #ff0000 (4.00:1 on
   // white, 2.84:1 on dark) and moderators #00aaff. The clamp moves a role
   // colour's lightness until the name reads at 4.5:1 where names sit,
-  // including a hovered mentioned row; High Contrast keeps --text-normal.
+  // including a hovered mentioned row; High contrast keeps --text-normal.
   const NAMES = ".msg-author, .member-item:not(.offline) .mi-name";
 
   for (const theme of THEMES) {
-    test(`${theme}: every role-coloured name reads at 4.5:1, in High Contrast too`, async ({
+    test(`${theme}: every role-coloured name reads at 4.5:1, in High contrast too`, async ({
       page,
     }, testInfo) => {
       await mockTauriFullSessionWithMessages(page);
@@ -232,7 +232,7 @@ test.describe("B9 Q13 role colours as text (role clamp)", () => {
 test.describe("shared-controls fixture", () => {
   for (const theme of THEMES) {
     for (const highContrast of [false, true]) {
-      test(`${theme}${highContrast ? " + High Contrast" : ""}: names, focus rings and text contrast in every state`, async ({
+      test(`${theme}${highContrast ? " + High contrast" : ""}: names, focus rings and text contrast in every state`, async ({
         page,
       }, testInfo) => {
         await openApp(page);
@@ -389,7 +389,7 @@ test.describe("keyboard journey at large text and reduced motion", () => {
     await expect(input).not.toHaveAttribute("aria-invalid");
     await expect(save).toBeFocused(); // pending did not drop focus to <body>
 
-    // Reflow at the 940x500 minimum window and 20px Large Font.
+    // Reflow at the 940x500 minimum window and 20px Large font.
     const overflow = await fixture.evaluate((el) => {
       const modal = el.querySelector<HTMLElement>(".modal")!;
       // The body is the dialog's scroll box, so sideways overflow shows there.
@@ -478,7 +478,7 @@ test.describe("reduced motion honours the OS and the app setting", () => {
 test.describe("reflow at the minimum window", () => {
   for (const [label, prefs, scale] of [
     ["12px text", { fontSize: 12, largeFont: false }, 1],
-    ["20px text with Large Font", { fontSize: 20, largeFont: true }, 1],
+    ["20px text with Large font", { fontSize: 20, largeFont: true }, 1],
     ["20px text at 200% scale", { fontSize: 20, largeFont: true }, 2],
   ] as const) {
     test.describe(label, () => {

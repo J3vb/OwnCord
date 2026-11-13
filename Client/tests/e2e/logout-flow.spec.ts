@@ -1,12 +1,12 @@
 /**
  * E2E tests for the logout flow.
- * Covers: settings → Log Out → returns to connect page.
+ * Covers: settings → Log out → returns to connect page.
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithAutoConnect, startFullSession } from "./helpers";
 
-/** Log Out asks first; answer the prompt. */
+/** Log out asks first; answer the prompt. */
 async function confirmLogout(page: Page): Promise<void> {
   const dialog = page.locator("[data-testid='logout-confirm-dialog']");
   await expect(dialog).toContainText("Are you sure you want to log out?");
@@ -18,15 +18,15 @@ test.describe("Logout Flow", () => {
     await startFullSession(page);
   });
 
-  test("clicking Log Out in settings returns to connect page", async ({ page }) => {
+  test("clicking Log out in settings returns to connect page", async ({ page }) => {
     // Open settings
     const settingsBtn = page.locator("button[aria-label='Settings']");
     await settingsBtn.click();
     await expect(page.locator(".settings-overlay.open")).toBeVisible({ timeout: 3000 });
 
-    // Click Log Out button
+    // Click Log out button
     const logoutBtn = page.locator(".settings-nav-item.danger", {
-      hasText: "Log Out",
+      hasText: "Log out",
     });
     await logoutBtn.click();
     await confirmLogout(page);
@@ -36,11 +36,11 @@ test.describe("Logout Flow", () => {
     await expect(connectForm).toBeVisible({ timeout: 5000 });
   });
 
-  test("Log Out asks first: cancelling keeps you signed in", async ({ page }) => {
+  test("Log out asks first: cancelling keeps you signed in", async ({ page }) => {
     await page.locator("button[aria-label='Settings']").click();
     await expect(page.locator(".settings-overlay.open")).toBeVisible({ timeout: 3000 });
 
-    await page.locator(".settings-nav-item.danger", { hasText: "Log Out" }).click();
+    await page.locator(".settings-nav-item.danger", { hasText: "Log out" }).click();
     const dialog = page.locator("[data-testid='logout-confirm-dialog']");
     await expect(dialog).toBeVisible();
     await dialog.locator("[data-testid='logout-cancel']").click();
@@ -57,7 +57,7 @@ test.describe("Logout Flow", () => {
     await expect(page.locator(".settings-overlay.open")).toBeVisible({ timeout: 3000 });
 
     const logoutBtn = page.locator(".settings-nav-item.danger", {
-      hasText: "Log Out",
+      hasText: "Log out",
     });
     await logoutBtn.click();
     await confirmLogout(page);
@@ -99,7 +99,7 @@ test.describe("Logout Flow — auto-connect profile", () => {
     await settingsBtn.click();
     await expect(page.locator(".settings-overlay.open")).toBeVisible({ timeout: 3000 });
 
-    await page.locator(".settings-nav-item.danger", { hasText: "Log Out" }).click();
+    await page.locator(".settings-nav-item.danger", { hasText: "Log out" }).click();
     await confirmLogout(page);
 
     await expect(page.locator(".connect-form, .login-form")).toBeVisible({ timeout: 5000 });

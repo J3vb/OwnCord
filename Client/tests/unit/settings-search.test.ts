@@ -267,7 +267,7 @@ describe("settings search", () => {
         type("zoom level");
         expect(visibleNames()).toEqual([]);
         type("noise suppression");
-        expect(visibleNames()).toEqual(["Voice & Video"]);
+        expect(visibleNames()).toEqual(["Voice & video"]);
       } finally {
         clearHost();
       }
@@ -315,7 +315,7 @@ describe("settings search", () => {
     it("hides tabs with no match, case-insensitively, by tab name or row text", () => {
       mountOverlay();
       type("NOISE SUPPRESSION");
-      expect(visibleNames()).toEqual(["Voice & Video"]);
+      expect(visibleNames()).toEqual(["Voice & video"]);
       type("zoom");
       expect(visibleNames()).toEqual(["Appearance"]);
       type("diagnostics");
@@ -373,7 +373,7 @@ describe("settings search", () => {
       // The label text is intact once the marks are read through.
       expect(
         Array.from(container.querySelectorAll(".setting-label")).some(
-          (l) => l.textContent === "Notification Sounds",
+          (l) => l.textContent === "Notification sounds",
         ),
       ).toBe(true);
       type("");

@@ -85,7 +85,7 @@ describe("notices banner markup", () => {
     const view = actions.querySelector<HTMLButtonElement>("button.moderation-notice-link")!;
     expect(ack.type).toBe("button");
     expect(view.type).toBe("button");
-    expect(view.textContent).toBe("View in Privacy & Safety settings");
+    expect(view.textContent).toBe("View in Privacy & safety settings");
     expect(row.querySelector(".moderation-notice-status")!.getAttribute("role")).toBe("status");
     ac.abort();
   });

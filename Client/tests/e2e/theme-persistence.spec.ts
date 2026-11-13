@@ -86,10 +86,10 @@ test.describe("Theme Persistence", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: Accent Color
+// Tests: Accent color
 // ---------------------------------------------------------------------------
 
-test.describe("Accent Color Override", () => {
+test.describe("Accent color Override", () => {
   test.beforeEach(async ({ page }) => {
     await startFullSession(page, { ready: true });
     await openSettings(page);
@@ -141,10 +141,10 @@ test.describe("Accent Color Override", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: Compact Mode
+// Tests: Compact mode
 // ---------------------------------------------------------------------------
 
-test.describe("Compact Mode", () => {
+test.describe("Compact mode", () => {
   test.beforeEach(async ({ page }) => {
     await startFullSession(page, { ready: true });
     await openSettings(page);
@@ -152,8 +152,8 @@ test.describe("Compact Mode", () => {
   });
 
   test("toggling compact mode adds .compact-mode to documentElement", async ({ page }) => {
-    // Compact mode toggle is the one next to "Compact Mode" label
-    const compactRow = page.locator(".setting-row", { hasText: "Compact Mode" });
+    // Compact mode toggle is the one next to "Compact mode" label
+    const compactRow = page.locator(".setting-row", { hasText: "Compact mode" });
     const toggle = compactRow.locator(".toggle");
     await expect(toggle).toBeVisible();
 
@@ -174,7 +174,7 @@ test.describe("Compact Mode", () => {
   });
 
   test("toggling compact mode off removes .compact-mode from documentElement", async ({ page }) => {
-    const compactRow = page.locator(".setting-row", { hasText: "Compact Mode" });
+    const compactRow = page.locator(".setting-row", { hasText: "Compact mode" });
     const toggle = compactRow.locator(".toggle");
     await expect(toggle).toBeVisible();
 

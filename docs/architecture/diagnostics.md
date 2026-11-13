@@ -53,7 +53,7 @@ support-bundle contract below treats log excerpts as sensitive.
 
 ## Desktop client support bundle
 
-B7-15c (PRD decision 7). **Settings > Diagnostics & logs > Export Support Bundle** writes a
+B7-15c (PRD decision 7). **Settings > Diagnostics & logs > Export support bundle** writes a
 zip to a path the user picks in the OS save dialog. It is user-initiated, read
 and written on the user's machine, and makes no server call. The zip is
 store-only and written in TypeScript (`Client/src/lib/supportBundle.ts`,

@@ -19,7 +19,7 @@ export function micTrack(): LocalAudioTrack {
 export const contextOf = (track: LocalAudioTrack): FakeAudioContext =>
   (track.getProcessor() as unknown as MicProcessor).context as unknown as FakeAudioContext;
 
-/** Input Volume rides on the first gain node, ahead of the detector's tap. */
+/** Input volume rides on the first gain node, ahead of the detector's tap. */
 export const inputGain = (ctx: FakeAudioContext) =>
   ctx.nodes.filter((n) => n.kind === "gain")[0]!.gain;
 

@@ -45,7 +45,7 @@ describe("the DM row context menu", () => {
     ac.abort();
   });
 
-  it("offers Copy User ID for a 1:1 DM only in Developer Mode", () => {
+  it("offers Copy User ID for a 1:1 DM only in Developer mode", () => {
     openMenu(convo());
     expect(item("dm-copy-id-100")).toBeNull();
     document.querySelectorAll(".context-menu").forEach((m) => m.remove());
@@ -56,7 +56,7 @@ describe("the DM row context menu", () => {
     ac.abort();
   });
 
-  it("never offers Copy User ID for a group, even in Developer Mode", () => {
+  it("never offers Copy User ID for a group, even in Developer mode", () => {
     setDeveloperMode(true);
     const ac = openMenu(convo({ isGroup: true }));
     expect(item("dm-close-100")).not.toBeNull();

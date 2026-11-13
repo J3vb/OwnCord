@@ -160,7 +160,7 @@ describe("connection lost", () => {
   describe("is silent", () => {
     const silencers: ReadonlyArray<readonly [string, () => void]> = [
       ["under Do Not Disturb", () => prefs.set("userStatus", "dnd")],
-      ["with Voice Sounds off", () => prefs.set("voiceSounds", false)],
+      ["with Voice sounds off", () => prefs.set("voiceSounds", false)],
       ["with its own switch off", () => prefs.set("soundConnection", false)],
       ["while deafened", () => apply(() => setLocalDeafened(true))],
     ];
@@ -231,11 +231,11 @@ describe("push-to-talk ticks", () => {
 
   it("does not tick when the input mode switches either way", () => {
     prefs.set("soundPtt", true);
-    // Voice Activity to push-to-talk: the gate closes with no press before it.
+    // Voice activity to push-to-talk: the gate closes with no press before it.
     prefs.set("inputMode", "ptt");
     setPttPollingLive(true);
     release();
-    // Push-to-talk to Voice Activity: the press source goes, then the gate opens.
+    // Push-to-talk to Voice activity: the press source goes, then the gate opens.
     prefs.set("inputMode", "vad");
     setPttPollingLive(false);
     press();

@@ -1,4 +1,4 @@
-// OC-0319 — the "Large Font" accessibility toggle used to be inert.
+// OC-0319 — the "Large font" accessibility toggle used to be inert.
 //
 // `.large-font { --font-size: 18px }` in app.css targets documentElement, but
 // that same element permanently carries an *inline* `--font-size` written by
@@ -8,7 +8,7 @@
 // reducedMotion (OC-0232): don't have two writers race over one property —
 // give it a single writer that derives from both preferences.
 //
-// The derived semantics pinned here: Large Font raises the floor to 18px and
+// The derived semantics pinned here: Large font raises the floor to 18px and
 // never lowers what the slider chose. `!important` on the CSS rule would have
 // pinned it *at* 18px, which shrinks the text of anyone whose slider sits at
 // 19 or 20 — an accessibility toggle that makes text smaller.
@@ -35,7 +35,7 @@ function fontSize(): string {
   return document.documentElement.style.getPropertyValue("--font-size");
 }
 
-describe("Large Font raises the effective font size", () => {
+describe("Large font raises the effective font size", () => {
   beforeEach(() => {
     document.documentElement.className = "";
     document.documentElement.removeAttribute("style");
@@ -51,7 +51,7 @@ describe("Large Font raises the effective font size", () => {
     document.body.removeAttribute("style");
   });
 
-  it("leaves the slider value alone when Large Font is off", () => {
+  it("leaves the slider value alone when Large font is off", () => {
     localStorage.setItem("owncord:settings:fontSize", "14");
     localStorage.setItem("owncord:settings:largeFont", "false");
 
@@ -60,7 +60,7 @@ describe("Large Font raises the effective font size", () => {
     expect(fontSize()).toBe("14px");
   });
 
-  it("raises a below-18px slider value to 18px when Large Font is on", () => {
+  it("raises a below-18px slider value to 18px when Large font is on", () => {
     localStorage.setItem("owncord:settings:fontSize", "14");
     localStorage.setItem("owncord:settings:largeFont", "true");
 
@@ -76,7 +76,7 @@ describe("Large Font raises the effective font size", () => {
     applyStoredAppearance();
 
     // The whole point of the toggle is bigger text. Pinning it at 18px would
-    // make "Large Font" shrink this user's UI.
+    // make "Large font" shrink this user's UI.
     expect(fontSize()).toBe("20px");
   });
 
@@ -90,7 +90,7 @@ describe("Large Font raises the effective font size", () => {
     const ac = new AbortController();
     container.appendChild(buildAccessibilityTab(ac.signal));
 
-    const largeFont = container.querySelector<HTMLElement>('.toggle[aria-label="Large Font"]')!;
+    const largeFont = container.querySelector<HTMLElement>('.toggle[aria-label="Large font"]')!;
     largeFont.click();
     expect(fontSize()).toBe("18px");
 
@@ -152,7 +152,7 @@ describe("the Appearance slider's label shows the effective size", () => {
     mockGetActiveThemeName.mockReturnValue("neon-glow");
   });
 
-  it("reads 18px, not the slider position, while Large Font is on", async () => {
+  it("reads 18px, not the slider position, while Large font is on", async () => {
     localStorage.setItem("owncord:settings:fontSize", "14");
     localStorage.setItem("owncord:settings:largeFont", "true");
 

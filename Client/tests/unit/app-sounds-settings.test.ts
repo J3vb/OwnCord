@@ -194,9 +194,9 @@ describe("per-sound switches", () => {
     localStorage.setItem("owncord:settings:callSounds", "false");
     const tab = build();
 
-    expect(switchFor(tab, "Incoming Call Sound").getAttribute("aria-checked")).toBe("false");
-    switchFor(tab, "Notification Sounds").click();
-    switchFor(tab, "Voice Sounds").click();
+    expect(switchFor(tab, "Incoming call sound").getAttribute("aria-checked")).toBe("false");
+    switchFor(tab, "Notification sounds").click();
+    switchFor(tab, "Voice sounds").click();
     expect(stored("notificationSounds")).toBe("false");
     expect(stored("voiceSounds")).toBe("false");
 
@@ -204,12 +204,12 @@ describe("per-sound switches", () => {
     const rows = [...tab.querySelectorAll<HTMLElement>(".setting-row")];
     const at = (label: string): number =>
       rows.findIndex((r) => r.querySelector(`[aria-label='${label}']`) !== null);
-    expect(at("Message sound")).toBe(at("Notification Sounds") + 1);
-    expect(at("Mention sound")).toBe(at("Notification Sounds") + 2);
-    expect(at("Ring sound")).toBe(at("Incoming Call Sound") + 1);
-    expect(at("Stream sounds")).toBe(at("Voice Sounds") + 3);
-    expect(at("Connection sounds")).toBe(at("Voice Sounds") + 4);
-    expect(at("Push-to-talk sounds")).toBe(at("Voice Sounds") + 5);
+    expect(at("Message sound")).toBe(at("Notification sounds") + 1);
+    expect(at("Mention sound")).toBe(at("Notification sounds") + 2);
+    expect(at("Ring sound")).toBe(at("Incoming call sound") + 1);
+    expect(at("Stream sounds")).toBe(at("Voice sounds") + 3);
+    expect(at("Connection sounds")).toBe(at("Voice sounds") + 4);
+    expect(at("Push-to-talk sounds")).toBe(at("Voice sounds") + 5);
     expect(rows[at("Ring sound")]!.classList.contains("nested")).toBe(true);
   });
 });

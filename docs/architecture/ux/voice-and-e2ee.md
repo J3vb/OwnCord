@@ -380,10 +380,10 @@ existed starts in Push to Talk when it has a key bound (`migrateInputMode` in
 
 | State               | Presentation                                                                                                                                                                                                                             |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| input mode          | Voice & Audio opens with an "Input Mode" choice: Voice Activity (shows Input Sensitivity) or Push to Talk (shows the key and release delay, hides Input Sensitivity); the Keybinds tab notes the key does nothing in Voice Activity mode |
+| input mode          | Voice & Audio opens with an "Input mode" choice: Voice activity (shows Input sensitivity) or Push to talk (shows the key and release delay, hides Input sensitivity); the Keybinds tab notes the key does nothing in Voice activity mode |
 | PTT bound, released | Gate closed (nothing is heard), the mic button reads unmuted (it shows only your own mute) with the title "Push-to-talk — hold your key to talk"; toggling mute or deafen with the key up never opens the gate                           |
 | PTT pressed         | Unmuted + speaking ring                                                                                                                                                                                                                  |
-| release delay       | Voice & Audio (Push to Talk) and Keybinds tab: a "Push to Talk release delay" slider, 0–2000 ms in 10 ms steps, read on each release                                                                                                     |
+| release delay       | Voice & Audio (Push to talk) and Keybinds tab: a "Push to talk release delay" slider, 0–2000 ms in 10 ms steps, read on each release                                                                                                     |
 | binding a key       | Keybinds tab: "Press a key…" (10 s capture window, `ptt_listen_for_key`); reject text keys with "Pick a non-text key"                                                                                                                    |
 | PTT thread error    | Toast "Push-to-talk stopped unexpectedly" on `ptt-error`, offer re-enable                                                                                                                                                                |
 | PTT unsupported     | macOS or a Wayland session (`ptt_polling_supported` false): the Keybinds tab says the key can never gate the mic and disables capturing a key (Clear stays, to remove an older binding)                                                  |
@@ -743,7 +743,7 @@ ring sounds; a new ringback ("Ring again") or an incoming ring cuts them.
 leave and move; on another member joining or leaving the channel you are in;
 on a screen share starting or ending in that channel, your own included (keyed
 off the server's roster, so a cancelled picker plays nothing); and on your
-mute/unmute and deafen/undeafen. One **Voice Sounds** toggle (Settings ›
+mute/unmute and deafen/undeafen. One **Voice sounds** toggle (Settings ›
 Notifications, on by default) gates them, and DND silences them like the message
 chime.
 

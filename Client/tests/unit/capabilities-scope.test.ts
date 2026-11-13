@@ -97,11 +97,11 @@ describe("Tauri default capability — HTTP scope", () => {
     expect(find("core:window:allow-set-fullscreen")).toBe("core:window:allow-set-fullscreen");
   });
 
-  it("grants core:window:allow-request-user-attention (the Flash Taskbar notification setting needs it)", () => {
+  it("grants core:window:allow-request-user-attention (the Flash taskbar notification setting needs it)", () => {
     // core:window:default's implicit permission set is getters only — no
     // request-user-attention — so without this explicit grant, every
     // win.requestUserAttention() call is ACL-rejected and the default-on
-    // "Flash Taskbar" setting silently does nothing.
+    // "Flash taskbar" setting silently does nothing.
     expect(find("core:window:allow-request-user-attention")).toBe(
       "core:window:allow-request-user-attention",
     );

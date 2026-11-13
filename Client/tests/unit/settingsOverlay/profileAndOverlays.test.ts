@@ -447,7 +447,7 @@ describe("SettingsOverlay", () => {
       overlay.destroy?.();
     });
 
-    it("sits under User Settings after Account and renders the feature's tab", () => {
+    it("sits under User settings after Account and renders the feature's tab", () => {
       const signals: AbortSignal[] = [];
       const overlay = createSettingsOverlay({
         ...defaultOptions,
@@ -457,13 +457,13 @@ describe("SettingsOverlay", () => {
         },
       });
       overlay.mount(container);
-      expect(tabNames().slice(0, 3)).toEqual(["Account", "Privacy & Safety", "Appearance"]);
+      expect(tabNames().slice(0, 3)).toEqual(["Account", "Privacy & safety", "Appearance"]);
 
       const tab = container.querySelector<HTMLButtonElement>("#settings-tab-safety")!;
       tab.click();
 
       expect(tab.getAttribute("aria-selected")).toBe("true");
-      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Privacy & Safety");
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Privacy & safety");
       expect(container.querySelector("[data-testid='inert-safety']")).not.toBeNull();
       expect(container.querySelector(".settings-content")?.getAttribute("aria-labelledby")).toBe(
         "settings-tab-safety",

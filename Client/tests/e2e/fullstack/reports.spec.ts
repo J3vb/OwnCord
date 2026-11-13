@@ -129,7 +129,7 @@ test.describe("Local report intake (real server)", () => {
 
     // My reports: the three summaries, and nothing a moderator sees.
     await bob.locator("button[aria-label='Settings']").click();
-    await bob.getByRole("tab", { name: "Privacy & Safety" }).click();
+    await bob.getByRole("tab", { name: "Privacy & safety" }).click();
     const mine = bob.getByRole("region", { name: "My reports" });
     await expect(mine.locator(".my-reports-what")).toHaveText([
       "User reported for Something else",

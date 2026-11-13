@@ -90,7 +90,7 @@ export const shellText = defineCatalog("shell", {
   "mute.untilOn": "Until I turn it back on",
   "channel.notifySettings": "Notification Settings",
   "channel.notify.default": "Use Server Default ({level})",
-  "channel.notify.all": "All Messages",
+  "channel.notify.all": "All messages",
   "channel.notify.mentions": "Only @mentions",
   "channel.notify.nothing": "Nothing",
   "mute.until": "Muted until {time}",

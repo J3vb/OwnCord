@@ -135,7 +135,7 @@ test.describe("Theme Persistence (Native)", () => {
 
   test("compact mode toggle adds class to body", async ({ nativePage }) => {
     const toggle = nativePage
-      .locator(".setting-row", { hasText: "Compact Mode" })
+      .locator(".setting-row", { hasText: "Compact mode" })
       .locator(".toggle");
     await expect(toggle).toBeVisible();
 

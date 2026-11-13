@@ -287,7 +287,7 @@ describe("SelfProfileCard from the user bar", () => {
     expect(card()).toBeNull();
   });
 
-  describe("Copy User ID (Developer Mode only, like the member menu)", () => {
+  describe("Copy User ID (Developer mode only, like the member menu)", () => {
     let writeText: ReturnType<typeof vi.fn>;
     beforeEach(() => {
       writeText = vi.fn().mockResolvedValue(undefined);
@@ -295,12 +295,12 @@ describe("SelfProfileCard from the user bar", () => {
     });
     afterEach(() => savePref("developerMode", false));
 
-    it("is absent with Developer Mode off", () => {
+    it("is absent with Developer mode off", () => {
       trigger().click();
       expect(q("[data-testid='spc-copy-id']")).toBeNull();
     });
 
-    it("copies the id with Developer Mode on", () => {
+    it("copies the id with Developer mode on", () => {
       savePref("developerMode", true);
       trigger().click();
       q<HTMLButtonElement>("[data-testid='spc-copy-id']")!.click();

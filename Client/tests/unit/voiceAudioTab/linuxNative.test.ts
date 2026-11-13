@@ -191,11 +191,11 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     return select!;
   }
 
-  /** The Video Codec select once the native probe has filled its slot. */
+  /** The Video codec select once the native probe has filled its slot. */
   async function codecSelect(element: HTMLElement): Promise<HTMLSelectElement> {
     let select: HTMLSelectElement | null = null;
     await vi.waitFor(() => {
-      select = element.querySelector('select[aria-label="Video Codec"]');
+      select = element.querySelector('select[aria-label="Video codec"]');
       expect(select).not.toBeNull();
     });
     return select!;
@@ -222,8 +222,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
       (h) => h.textContent,
     );
-    expect(headings).toContain("Video Codec");
-    expect(headings).toContain("Screen Share FPS");
+    expect(headings).toContain("Video codec");
+    expect(headings).toContain("Screen share FPS");
   });
 
   it("disables H.264 with the reason when the native encoder lacks it", async () => {
@@ -262,9 +262,9 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     );
     // The engine's playout mixer applies output volume.
     expect(headings).toEqual(
-      expect.arrayContaining(["Input Device", "Input Volume", "Output Device", "Output Volume"]),
+      expect.arrayContaining(["Input device", "Input volume", "Output device", "Output volume"]),
     );
-    const slider = tab.element.querySelector<HTMLInputElement>('input[aria-label="Input Volume"]')!;
+    const slider = tab.element.querySelector<HTMLInputElement>('input[aria-label="Input volume"]')!;
     slider.value = "150";
     slider.dispatchEvent(new Event("input"));
     expect(mockSetInputVolume).toHaveBeenLastCalledWith(150);
@@ -272,10 +272,10 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     // RNNoise runs on the engine's own capture path.
     expect(labels).toEqual(
       expect.arrayContaining([
-        "Echo Cancellation",
-        "Noise Suppression",
-        "Automatic Gain Control",
-        "Enhanced Noise Suppression",
+        "Echo cancellation",
+        "Noise suppression",
+        "Automatic gain control",
+        "Enhanced noise suppression",
       ]),
     );
     // The meter runs outside a call too; only the test waits for the call.
@@ -298,7 +298,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
       (h) => h.textContent,
     );
-    expect(headings).toContain("Input Sensitivity");
+    expect(headings).toContain("Input sensitivity");
     const handle = tab.element.querySelector<HTMLElement>(".mic-meter-threshold")!;
     expect(handle.hidden).toBe(false);
     handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
@@ -461,7 +461,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       // A call joined: no stop, no test messaging, the button is untouched.
       expect(stopMicTest).not.toHaveBeenCalled();
       const { button, desc } = micTestRow(tab.element);
-      expect(button.textContent).toBe("Let's Check");
+      expect(button.textContent).toBe("Let's check");
       expect(desc.textContent).toBe(NORMAL_DESC);
       expect(startMonitor).toHaveBeenCalledTimes(1);
       nativeLevelListener?.(0.05, true);
@@ -554,7 +554,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       const tab = await mount();
       await settle();
       const select = [...tab.element.querySelectorAll("select")].find(
-        (sel) => sel.getAttribute("aria-label") === "Input Device",
+        (sel) => sel.getAttribute("aria-label") === "Input device",
       )!;
       select.value = "alsa:usb";
       select.dispatchEvent(new Event("change"));
@@ -608,7 +608,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       speech: true,
     });
     const { button } = micTestRow(tab.element);
-    expect(button.textContent).toBe("Stop Testing");
+    expect(button.textContent).toBe("Stop testing");
     expect(button.getAttribute("aria-pressed")).toBe("true");
     // The host's capture, not the webview's microphone, is what is tested.
     for (const call of getUserMedia.mock.calls) {
@@ -616,7 +616,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     }
   });
 
-  it("runs the test ungated in Push to Talk", async () => {
+  it("runs the test ungated in Push to talk", async () => {
     localStorage.setItem("owncord:settings:inputMode", '"ptt"');
     const tab = await mount();
     await startTest(tab.element);
@@ -631,7 +631,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(stopMicTest).toHaveBeenCalledTimes(1);
     expect(stopMicTest).toHaveBeenCalledWith(7);
     expect(unsubscribeTest).toHaveBeenCalledTimes(1);
-    expect(button.textContent).toBe("Let's Check");
+    expect(button.textContent).toBe("Let's check");
     expect(button.getAttribute("aria-pressed")).toBe("false");
   });
 
@@ -675,7 +675,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     button.click();
     await vi.waitFor(() => expect(startMicTest).toHaveBeenCalledTimes(1));
     button.click();
-    expect(button.textContent).toBe("Let's Check");
+    expect(button.textContent).toBe("Let's check");
     resolveStart(4);
     await vi.waitFor(() => expect(stopMicTest).toHaveBeenCalledWith(4));
     expect(stopMicTest).toHaveBeenCalledTimes(1);
@@ -729,7 +729,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     await startTest(tab.element);
     testHandler!({ test: 7, event: { type: "ended" } });
     const { button, desc } = micTestRow(tab.element);
-    expect(button.textContent).toBe("Let's Check");
+    expect(button.textContent).toBe("Let's check");
     expect(button.getAttribute("aria-pressed")).toBe("false");
     expect(desc.textContent).toBe("Leave the voice channel to test your mic.");
     expect(stopMicTest).not.toHaveBeenCalled();
@@ -745,7 +745,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     resolveStart(7);
     await settle();
     const { button, desc } = micTestRow(tab.element);
-    expect(button.textContent).toBe("Let's Check");
+    expect(button.textContent).toBe("Let's check");
     expect(desc.textContent).toBe("Leave the voice channel to test your mic.");
     expect(stopMicTest).not.toHaveBeenCalled();
   });
@@ -760,7 +760,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       );
     });
     const { button } = micTestRow(tab.element);
-    expect(button.textContent).toBe("Let's Check");
+    expect(button.textContent).toBe("Let's check");
     expect(button.getAttribute("aria-pressed")).toBe("false");
     expect(stopMicTest).not.toHaveBeenCalled();
     expectConsole("warn", /mic test could not start/i);
@@ -773,7 +773,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     await vi.waitFor(() => {
       expect(micTestRow(tab.element).desc.textContent).toBe("The mic test could not start.");
     });
-    expect(micTestRow(tab.element).button.textContent).toBe("Let's Check");
+    expect(micTestRow(tab.element).button.textContent).toBe("Let's check");
     // A later successful start clears the message.
     startMicTest.mockResolvedValue(7);
     micTestRow(tab.element).button.click();
@@ -820,12 +820,12 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         ],
         [
           "echo cancellation",
-          () => toggleFor(el, "Echo Cancellation").click(),
+          () => toggleFor(el, "Echo cancellation").click(),
           { kind: "processing", audio: audio({ echoCancellation: false }) },
         ],
         [
           "enhanced noise suppression",
-          () => toggleFor(el, "Enhanced Noise Suppression").click(),
+          () => toggleFor(el, "Enhanced noise suppression").click(),
           {
             kind: "processing",
             audio: audio({ echoCancellation: false, enhancedNoiseSuppression: true }),
@@ -833,7 +833,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         ],
         [
           "noise suppression",
-          () => toggleFor(el, "Noise Suppression").click(),
+          () => toggleFor(el, "Noise suppression").click(),
           {
             kind: "processing",
             audio: audio({
@@ -845,7 +845,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         ],
         [
           "automatic gain control",
-          () => toggleFor(el, "Automatic Gain Control").click(),
+          () => toggleFor(el, "Automatic gain control").click(),
           {
             kind: "processing",
             audio: audio({
@@ -889,7 +889,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
           { kind: "voiceGate", threshold: 0.05, retune: false, speech: true },
         ],
         [
-          "mode switch to Push to Talk",
+          "mode switch to Push to talk",
           () => el.querySelector<HTMLElement>("[data-testid='input-mode-ptt']")!.click(),
           { kind: "voiceGate", threshold: 0, retune: false, speech: true },
         ],
@@ -906,12 +906,12 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       startMonitor.mockRejectedValue(new Error("mic test unavailable during a call"));
       const tab = await mount();
       const slider = tab.element.querySelector<HTMLInputElement>(
-        'input[aria-label="Input Volume"]',
+        'input[aria-label="Input volume"]',
       )!;
       slider.value = "150";
       slider.dispatchEvent(new Event("input"));
       tab.element
-        .querySelector<HTMLElement>('[role="switch"][aria-label="Echo Cancellation"]')!
+        .querySelector<HTMLElement>('[role="switch"][aria-label="Echo cancellation"]')!
         .click();
       expect(updateMicTest).not.toHaveBeenCalled();
     });
@@ -921,7 +921,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     const tab = await mount();
     await startTest(tab.element);
     tab.element
-      .querySelector<HTMLElement>('[role="switch"][aria-label="Noise Suppression"]')!
+      .querySelector<HTMLElement>('[role="switch"][aria-label="Noise suppression"]')!
       .click();
     const input = tab.element.querySelectorAll("select")[0]!;
     input.value = "guid-mic";
@@ -930,7 +930,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     await settle();
     expect(stopMicTest).not.toHaveBeenCalled();
     expect(unsubscribeTest).not.toHaveBeenCalled();
-    expect(micTestRow(tab.element).button.textContent).toBe("Stop Testing");
+    expect(micTestRow(tab.element).button.textContent).toBe("Stop testing");
     // The test still takes updates after the restart.
     updateMicTest.mockClear();
     testHandler!({ test: 7, event: { type: "inputLevel", rms: 0.01, open: true } });
@@ -947,7 +947,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(descs).toContain("Automatically adjust microphone volume");
   });
 
-  it("has no soft speech switch and no Voice Buffer: the native gate has no speech model", async () => {
+  it("has no soft speech switch and no Voice buffer: the native gate has no speech model", async () => {
     const tab = await mount();
     expect(tab.element.querySelector("[data-testid='soft-speech']")).toBeNull();
     expect(tab.element.querySelector("[data-testid='voice-buffer']")).toBeNull();
@@ -1155,7 +1155,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     // Let the support query resolve and the IIFE reach the discovery await.
     await new Promise((r) => setTimeout(r, 0));
     const videoSelect = element.querySelector(
-      'select[aria-label="Video Device"]',
+      'select[aria-label="Video device"]',
     ) as HTMLSelectElement;
     expect(videoSelect).toBeTruthy();
     videoSelect.value = "cam-1";

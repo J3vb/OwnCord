@@ -347,7 +347,7 @@ Get-Process -Name msedgewebview2 -ErrorAction SilentlyContinue | Where-Object { 
   await openSettings(page);
   await page.locator(".settings-sidebar button.settings-nav-item", { hasText: "Advanced" }).click();
   const pane = page.locator(".settings-content .settings-pane.active");
-  await expect(pane.getByText("Storage & Cache")).toBeVisible();
+  await expect(pane.getByText("Storage & cache")).toBeVisible();
   await expect(pane.getByRole("button", { name: "Open DevTools" })).toHaveCount(0);
   await page.keyboard.press("Escape");
 });
@@ -419,7 +419,7 @@ test("push-to-talk binds a key through capture and gates the mic on its real key
   nativePage: page,
 }) => {
   await ensureLoggedIn(page);
-  const keybind = page.getByRole("button", { name: "Push to Talk keybind — click to capture" });
+  const keybind = page.getByRole("button", { name: "Push to talk keybind — click to capture" });
   const openKeybinds = async () => {
     await openSettings(page);
     await page
@@ -429,12 +429,12 @@ test("push-to-talk binds a key through capture and gates the mic on its real key
   };
   let held = false;
   try {
-    // A key gates the mic only in the Push to Talk input mode (Voice & Video).
+    // A key gates the mic only in the Push to talk input mode (Voice & Video).
     await openSettings(page);
     await page
-      .locator(".settings-sidebar button.settings-nav-item", { hasText: "Voice & Video" })
+      .locator(".settings-sidebar button.settings-nav-item", { hasText: "Voice & video" })
       .click();
-    const pttMode = page.getByRole("radio", { name: "Push to Talk" });
+    const pttMode = page.getByRole("radio", { name: "Push to talk" });
     await pttMode.click();
     await expect(pttMode).toHaveAttribute("aria-checked", "true");
     await page

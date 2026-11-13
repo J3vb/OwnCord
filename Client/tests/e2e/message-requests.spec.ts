@@ -244,7 +244,7 @@ test.describe("Message Requests inbox", () => {
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
   });
 
-  test("text contrast meets Q1 in every built-in theme and High Contrast", async ({ page }) => {
+  test("text contrast meets Q1 in every built-in theme and High contrast", async ({ page }) => {
     const themes = ["neon-glow", "dark", "midnight", "light"] as const;
     for (const theme of themes) {
       for (const highContrast of [false, true]) {
@@ -291,7 +291,7 @@ test.describe("DM header badge at narrow width", () => {
   });
 });
 
-test.describe("inbox at the minimum window with 20px Large Font", () => {
+test.describe("inbox at the minimum window with 20px Large font", () => {
   test.use({ viewport: { width: 940, height: 500 } });
 
   test("keeps every request reachable, wrapped and still", async ({ page }, testInfo) => {

@@ -17,7 +17,7 @@ When a webcam freezes for a few seconds or a call drops, free-text log lines
 do not say what the camera, tracks and connections did, in order. The event log is a short, structured timeline of
 those facts. It goes into the existing support bundle
 ([Desktop client support bundle](diagnostics.md#desktop-client-support-bundle)),
-saved through the same **Export Support Bundle** button. There is no other way
+saved through the same **Export support bundle** button. There is no other way
 out: nothing is uploaded, and there is no separate report.
 
 ## How an event looks
@@ -109,7 +109,7 @@ it.
 
 ## Support bundle
 
-The support bundle (Settings → Diagnostics & logs → Export Support Bundle) is
+The support bundle (Settings → Diagnostics & logs → Export support bundle) is
 the only way the event log and the native crash and exit lines leave the
 device: the user saves the zip, nothing is uploaded. Built by
 `Client/src/lib/supportBundle.ts`, format 2:

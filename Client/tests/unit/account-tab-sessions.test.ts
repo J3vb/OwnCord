@@ -324,7 +324,7 @@ describe("Account tab — API tokens", () => {
     inputs[1]!.value = "newpassword123";
     inputs[2]!.value = "newpassword123";
     const changeBtn = [...tab.querySelectorAll<HTMLButtonElement>("button")].find(
-      (b) => b.textContent === "Change Password",
+      (b) => b.textContent === "Change password",
     )!;
     changeBtn.click();
     await vi.waitFor(() => expect(tokenRows(tab)).toHaveLength(0));
@@ -371,7 +371,7 @@ describe("Account tab — devices after a sign-out or password change", () => {
     inputs[1]!.value = "newpassword123";
     inputs[2]!.value = "newpassword123";
     [...tab.querySelectorAll<HTMLButtonElement>("button")]
-      .find((b) => b.textContent === "Change Password")!
+      .find((b) => b.textContent === "Change password")!
       .click();
     await vi.waitFor(() => expect(rows(tab)).toEqual([String(CURRENT.id)]));
   });

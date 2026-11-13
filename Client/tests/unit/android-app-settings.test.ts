@@ -86,18 +86,18 @@ describe("Notifications", () => {
   it("has the taskbar flash, unread badge and desktop wording on the desktop app", async () => {
     hostDesktopApp();
     const el = await mounted(() => buildNotificationsTab(ac.signal));
-    expect(hasText(el, "Flash Taskbar")).toBe(true);
+    expect(hasText(el, "Flash taskbar")).toBe(true);
     expect(hasText(el, "Unread message badge")).toBe(true);
-    expect(hasText(el, "Desktop Notifications")).toBe(true);
+    expect(hasText(el, "Desktop notifications")).toBe(true);
     expect(hasText(el, "Show desktop notifications for messages")).toBe(true);
   });
 
   it("leaves out the taskbar flash and unread badge, and drops 'desktop', on Android", async () => {
     hostAndroidApp();
     const el = await mounted(() => buildNotificationsTab(ac.signal));
-    expect(hasText(el, "Flash Taskbar")).toBe(false);
+    expect(hasText(el, "Flash taskbar")).toBe(false);
     expect(hasText(el, "Unread message badge")).toBe(false);
-    expect(hasText(el, "Desktop Notifications")).toBe(false);
+    expect(hasText(el, "Desktop notifications")).toBe(false);
     expect(hasText(el, "Notifications")).toBe(true);
     expect(hasText(el, "Show notifications for messages")).toBe(true);
     // The rest of the rows are still there, and the first toggle still saves its pref.
@@ -109,7 +109,7 @@ describe("Notifications", () => {
 });
 
 describe("Advanced", () => {
-  const desktopRows = ["Launch on Login", "Close to Tray", "Start Minimized"];
+  const desktopRows = ["Launch on login", "Close to tray", "Start minimized"];
   const gameRow = gameActivityText("settings.share.label");
 
   it("has the login, tray and activity rows on the desktop app", async () => {
@@ -134,7 +134,7 @@ describe("Advanced", () => {
     expect(el.querySelector("[data-testid='music-activity-row']")).toBeNull();
     expect(invokeMock).not.toHaveBeenCalledWith("get_window_prefs");
     // What every build has stays.
-    expect(hasText(el, "Developer Mode")).toBe(true);
+    expect(hasText(el, "Developer mode")).toBe(true);
   });
 });
 
@@ -187,8 +187,8 @@ describe("Appearance", () => {
     hostDesktopApp();
     const el = buildAppearanceTab(ac.signal);
     container.appendChild(el);
-    expect(el.querySelector(".custom-themes h2")!.textContent).toBe("Custom Themes");
-    expect(el.textContent).toContain("Zoom Level");
+    expect(el.querySelector(".custom-themes h2")!.textContent).toBe("Custom themes");
+    expect(el.textContent).toContain("Zoom level");
     expect(el.querySelector("[data-testid='member-layout']")).not.toBeNull();
     expect(el.textContent).toContain("Sync with computer");
     expect(el.textContent).toContain("Ctrl+Shift+Backspace");
@@ -198,8 +198,8 @@ describe("Appearance", () => {
     hostAndroidApp();
     const el = buildAppearanceTab(ac.signal);
     container.appendChild(el);
-    expect(el.textContent).not.toContain("Zoom Level");
-    expect(el.querySelector(".slider-row [aria-label='Zoom Level']")).toBeNull();
+    expect(el.textContent).not.toContain("Zoom level");
+    expect(el.querySelector(".slider-row [aria-label='Zoom level']")).toBeNull();
     expect(el.querySelector("[data-testid='member-layout']")).toBeNull();
     expect(el.textContent).not.toContain("Member list position");
     expect(el.textContent).toContain("Sync with system");
@@ -236,7 +236,7 @@ describe("Diagnostics & logs", () => {
   const shareTesting = (el: HTMLElement): Element | null =>
     el.querySelector("[data-testid='share-testing']");
 
-  it("has Open Log Folder and Screen share testing on the desktop app", () => {
+  it("has Open log folder and Screen share testing on the desktop app", () => {
     hostDesktopApp();
     const el = build();
     expect(openFolder(el)).not.toBeNull();

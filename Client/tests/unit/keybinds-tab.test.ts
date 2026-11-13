@@ -57,7 +57,7 @@ async function expectNoGlobalShortcutService(): Promise<void> {
   const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
   await vi.waitFor(() => {
     expect(hint.textContent).toBe(
-      "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop has no global shortcut service (macOS, or Linux on GNOME 47 or older, Sway or another wlroots desktop), so global mute/deafen shortcuts are not available.",
+      "Mute and deafen work while OwnCord is unfocused through the tray menu. This desktop has no global shortcut service (macOS, or Linux on GNOME 47 or older, Sway or another wlroots desktop), so global mute/deafen shortcuts are not available.",
     );
   });
 }
@@ -125,7 +125,7 @@ describe("KeybindsTab", () => {
     const value = el.querySelector("[data-testid='ptt-release-delay-value']")!;
     expect(slider.type).toBe("range");
     expect([slider.min, slider.max, slider.value]).toEqual(["0", "2000", "20"]);
-    expect(slider.getAttribute("aria-label")).toBe("Push to Talk release delay");
+    expect(slider.getAttribute("aria-label")).toBe("Push to talk release delay");
     expect(value.textContent).toBe("20 ms");
 
     slider.value = "250";
@@ -170,8 +170,8 @@ describe("KeybindsTab", () => {
           row.querySelector(".setting-label")?.textContent === label &&
           row.querySelector("span.kbd") !== null,
       )!;
-    expect(commRow("Toggle Mute").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + M");
-    expect(commRow("Toggle Deafen").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + D");
+    expect(commRow("Toggle mute").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + M");
+    expect(commRow("Toggle deafen").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + D");
     // The camera row is a capture button now, so it is found by its test id.
     expect(el.querySelector("[data-testid='keybind-toggleCamera']")!.textContent).toBe(
       "Ctrl + Shift + V",
@@ -181,8 +181,8 @@ describe("KeybindsTab", () => {
     (el.querySelector("[data-testid='keybind-global-deafen']") as HTMLButtonElement).click();
     capture(document, "KeyG");
 
-    expect(commRow("Toggle Deafen").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + G");
-    expect(commRow("Toggle Mute").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + M");
+    expect(commRow("Toggle deafen").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + G");
+    expect(commRow("Toggle mute").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + M");
   });
 
   it("rejects rebinding to a key the other global shortcut already uses", async () => {
@@ -200,7 +200,7 @@ describe("KeybindsTab", () => {
     const el = buildTab();
     const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
     muteBtn.click();
-    capture(document, "KeyV"); // Ctrl+Shift+V is Toggle Camera
+    capture(document, "KeyV"); // Ctrl+Shift+V is Toggle camera
 
     expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
     expect(el.textContent).toContain("already used");
@@ -285,7 +285,7 @@ describe("KeybindsTab", () => {
     controller.abort();
   });
 
-  it("says the key does nothing while Input Mode is Voice Activity", () => {
+  it("says the key does nothing while Input mode is Voice activity", () => {
     localStorage.setItem("owncord:settings:inputMode", '"vad"');
     const tab = buildTab();
     expect(tab.querySelector('[data-testid="ptt-mode-note"]')).not.toBeNull();
@@ -308,27 +308,27 @@ describe("KeybindsTab", () => {
     // The polling and the portal global sections both exist, hidden until
     // the host says which one applies.
     expect(headerTexts).toEqual([
-      "Voice Input",
+      "Voice input",
       "Navigation",
       "Communication",
-      "Global Shortcuts",
-      "Global Shortcuts",
+      "Global shortcuts",
+      "Global shortcuts",
       "Messages",
     ]);
     expect(el.querySelector("h1, h3")).toBeNull();
   });
 
-  it("renders Push to Talk keybind row", () => {
+  it("renders Push to talk keybind row", () => {
     const el = buildTab();
     const rows = el.querySelectorAll(".keybind-row");
     // 1 PTT + 10 Navigation + 5 Communication (mute, deafen, camera, screen
     // share, disconnect) + 2 Global + 7 Messages = 25
     expect(rows.length).toBe(25);
     const pttLabel = rows[0]!.querySelector(".setting-label");
-    expect(pttLabel!.textContent).toBe("Push to Talk");
+    expect(pttLabel!.textContent).toBe("Push to talk");
   });
 
-  it("renders Quick Switcher keybind row with Ctrl + K", () => {
+  it("renders Quick switcher keybind row with Ctrl + K", () => {
     const el = buildTab();
     const rows = el.querySelectorAll(".keybind-row");
     const kbd = rows[1]!.querySelector(".kbd");
@@ -511,15 +511,15 @@ describe("KeybindsTab", () => {
 
   // --- All keybinds present ---
 
-  it("renders Close Overlay, Search Messages, Upload File, Edit Last Message keybinds", () => {
+  it("renders Close Overlay, Search messages, Upload file, Edit last message keybinds", () => {
     const el = buildTab();
     const labels = Array.from(el.querySelectorAll(".setting-label")).map((l) => l.textContent);
     // "Mark as Read" used to be listed here with no feature behind it.
     expect(labels).not.toContain("Mark as Read");
-    expect(labels).toContain("Close Overlay / Cancel");
-    expect(labels).toContain("Search Messages");
-    expect(labels).toContain("Upload File");
-    expect(labels).toContain("Edit Last Message");
+    expect(labels).toContain("Close overlay / cancel");
+    expect(labels).toContain("Search messages");
+    expect(labels).toContain("Upload file");
+    expect(labels).toContain("Edit last message");
   });
 
   it("lists the chat keys with their combos, upload on Ctrl+Shift+U", () => {
@@ -530,29 +530,29 @@ describe("KeybindsTab", () => {
         r.querySelector(".kbd")?.textContent,
       ]),
     );
-    expect(rows.get("Upload File")).toBe("Ctrl + Shift + U");
+    expect(rows.get("Upload file")).toBe("Ctrl + Shift + U");
     expect(rows.get("Underline")).toBe("Ctrl + U");
-    expect(rows.get("Mark Channel as Read")).toBe("Escape");
-    expect(rows.get("Mark Server as Read")).toBe("Shift + Escape");
-    expect(rows.get("Scroll Chat")).toBe("Page Up / Page Down");
-    expect(rows.get("Emoji Picker")).toBe("Ctrl + E");
-    expect(rows.get("GIF Picker")).toBe("Ctrl + G");
+    expect(rows.get("Mark channel as read")).toBe("Escape");
+    expect(rows.get("Mark server as read")).toBe("Shift + Escape");
+    expect(rows.get("Scroll chat")).toBe("Page Up / Page Down");
+    expect(rows.get("Emoji picker")).toBe("Ctrl + E");
+    expect(rows.get("GIF picker")).toBe("Ctrl + G");
   });
 
-  it("lists Open Settings on Ctrl + , in the Navigation section", () => {
+  it("lists Open settings on Ctrl + , in the Navigation section", () => {
     const el = buildTab();
     const row = Array.from(el.querySelectorAll(".keybind-row")).find(
-      (r) => r.querySelector(".setting-label")?.textContent === "Open Settings",
+      (r) => r.querySelector(".setting-label")?.textContent === "Open settings",
     );
     expect(row).toBeDefined();
     expect(row!.querySelector(".kbd")?.textContent).toBe("Ctrl + ,");
     expect(row!.className).toBe("keybind-row");
   });
 
-  it("lists Show Keyboard Shortcuts on Ctrl + / in the Navigation section", () => {
+  it("lists Show keyboard shortcuts on Ctrl + / in the Navigation section", () => {
     const el = buildTab();
     const row = Array.from(el.querySelectorAll(".keybind-row")).find(
-      (r) => r.querySelector(".setting-label")?.textContent === "Show Keyboard Shortcuts",
+      (r) => r.querySelector(".setting-label")?.textContent === "Show keyboard shortcuts",
     );
     expect(row).toBeDefined();
     expect(row!.querySelector(".kbd")?.textContent).toBe("Ctrl + /");
@@ -583,12 +583,12 @@ describe("KeybindsTab", () => {
     expect(el.textContent).toContain("Formatting shortcuts wrap the selected text");
   });
 
-  it("renders Toggle Mute, Toggle Deafen, Toggle Camera keybinds", () => {
+  it("renders Toggle mute, Toggle deafen, Toggle camera keybinds", () => {
     const el = buildTab();
     const labels = Array.from(el.querySelectorAll(".setting-label")).map((l) => l.textContent);
-    expect(labels).toContain("Toggle Mute");
-    expect(labels).toContain("Toggle Deafen");
-    expect(labels).toContain("Toggle Camera");
+    expect(labels).toContain("Toggle mute");
+    expect(labels).toContain("Toggle deafen");
+    expect(labels).toContain("Toggle camera");
   });
 
   // --- Clear button stopPropagation ---
@@ -655,7 +655,7 @@ describe("KeybindsTab", () => {
     await vi.waitFor(() => expect(mockSupported).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(hint.textContent).toBe(
-      "Mute and Deafen also work while OwnCord is unfocused — via the global shortcuts you set below (Ctrl + Shift + M / Ctrl + Shift + D by default), or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
+      "Mute and deafen also work while OwnCord is unfocused — via the global shortcuts you set below (Ctrl + Shift + M / Ctrl + Shift + D by default), or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
     );
   });
 
@@ -673,13 +673,13 @@ describe("KeybindsTab", () => {
     mockPttSupported.mockResolvedValue(false);
     const el = buildTab();
     const pttBtn = el.querySelector(
-      '[aria-label="Push to Talk keybind — click to capture"]',
+      '[aria-label="Push to talk keybind — click to capture"]',
     ) as HTMLButtonElement;
     await vi.waitFor(() => {
       expect(pttBtn.disabled).toBe(true);
     });
     // The hint says why, in the same region the capture button lives.
-    expect(el.textContent).toContain("Push to Talk needs a global key service");
+    expect(el.textContent).toContain("Push to talk needs a global key service");
     // A key bound before (another session) can still be cleared.
     const clear = [...el.querySelectorAll("button")].find((b) => b.textContent === "Clear")!;
     expect(clear.disabled).toBe(false);
@@ -747,13 +747,13 @@ describe("KeybindsTab", () => {
       expect(unnamed.textContent).toContain("bind = CTRL SHIFT, M, global, com.owncord.client:");
       expect(unnamed.textContent).toContain("toggle-mute");
       expect(testId(el, "keybinds-portal-setup").style.display).toBe("none");
-      expect(kbdOf(el, "Toggle Mute")).toBe("Set in your desktop");
-      expect(kbdOf(el, "Toggle Deafen")).toBe("Set in your desktop");
+      expect(kbdOf(el, "Toggle mute")).toBe("Set in your desktop");
+      expect(kbdOf(el, "Toggle deafen")).toBe("Set in your desktop");
 
       for (const handler of statusHandlers) handler(portal(unbound));
       expect(unnamed.style.display).toBe("none");
       expect(testId(el, "keybinds-portal-setup").style.display).toBe("");
-      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl + Shift + M");
+      expect(kbdOf(el, "Toggle mute")).toBe("Ctrl + Shift + M");
     });
 
     it("remembers a bind that left the triggers unnamed, so the next start re-binds", async () => {
@@ -771,8 +771,8 @@ describe("KeybindsTab", () => {
       mockStatus.mockResolvedValue(portal(bound));
       const el = buildTab();
       await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
-      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl+Alt+M");
-      expect(kbdOf(el, "Toggle Deafen")).toBe("Ctrl+Alt+D");
+      expect(kbdOf(el, "Toggle mute")).toBe("Ctrl+Alt+M");
+      expect(kbdOf(el, "Toggle deafen")).toBe("Ctrl+Alt+D");
       // The polling rows stay hidden, and the polling probe is never asked.
       expect(testId(el, "keybind-global-mute").closest(".settings-section")).toHaveProperty(
         "style.display",
@@ -817,7 +817,7 @@ describe("KeybindsTab", () => {
       await vi.waitFor(() => expect(row.style.display).toBe(""));
       expect(testId(el, "keybinds-portal").style.display).toBe("none");
       expect(testId(el, "ptt-portal-note").style.display).toBe("none");
-      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl + Shift + M");
+      expect(kbdOf(el, "Toggle mute")).toBe("Ctrl + Shift + M");
       expect(mockBindPortal).not.toHaveBeenCalled();
       expect(el.textContent).not.toContain("Waiting for your desktop");
     });
@@ -828,13 +828,13 @@ describe("KeybindsTab", () => {
       const el = buildTab();
       await vi.waitFor(() => expect(statusHandlers.size).toBe(1));
       for (const handler of statusHandlers) handler(portal(bound));
-      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl+Alt+M");
+      expect(kbdOf(el, "Toggle mute")).toBe("Ctrl+Alt+M");
 
       // The answer was computed before the event: it must not undo it.
       answer(pollingStatus);
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(testId(el, "keybinds-portal").style.display).toBe("");
-      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl+Alt+M");
+      expect(kbdOf(el, "Toggle mute")).toBe("Ctrl+Alt+M");
       expect(mockSupported).not.toHaveBeenCalled();
     });
 
@@ -853,12 +853,12 @@ describe("KeybindsTab", () => {
       const el = buildTab();
       const setUp = testId(el, "keybinds-portal-setup") as HTMLButtonElement;
       await vi.waitFor(() => expect(setUp.style.display).toBe(""));
-      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl + Shift + M");
+      expect(kbdOf(el, "Toggle mute")).toBe("Ctrl + Shift + M");
       setUp.click();
       await vi.waitFor(() => expect(setUp.style.display).toBe("none"));
       expect(mockBindPortal).toHaveBeenCalledWith({ pttVk: 0, muteVk: 0x4d, deafenVk: 0x44 });
       expect(localStorage.getItem("owncord:settings:globalKeysPortalBound")).toBe("true");
-      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl+Alt+M");
+      expect(kbdOf(el, "Toggle mute")).toBe("Ctrl+Alt+M");
     });
 
     it("a bind resolving after unmount touches nothing and still saves the pref", async () => {
@@ -895,10 +895,10 @@ describe("KeybindsTab", () => {
       mockStatus.mockResolvedValue(portal(unbound));
       const controller = new AbortController();
       const el = buildKeybindsTab(controller.signal);
-      // The Push to Talk control and the global section share one subscription.
+      // The Push to talk control and the global section share one subscription.
       await vi.waitFor(() => expect(statusHandlers.size).toBe(1));
       for (const handler of statusHandlers) handler(portal(bound));
-      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl+Alt+M");
+      expect(kbdOf(el, "Toggle mute")).toBe("Ctrl+Alt+M");
       controller.abort();
       expect(statusHandlers.size).toBe(0);
     });
@@ -910,7 +910,7 @@ describe("KeybindsTab", () => {
       const el = buildTab();
       await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
       const ptt = el.querySelector(
-        '[aria-label="Push to Talk keybind — click to capture"]',
+        '[aria-label="Push to talk keybind — click to capture"]',
       ) as HTMLButtonElement;
       expect(ptt.disabled).toBe(false);
 
@@ -924,10 +924,10 @@ describe("KeybindsTab", () => {
           sessionRefused: false,
         });
       expect(testId(el, "keybinds-portal").style.display).toBe("none");
-      expect(kbdOf(el, "Toggle Mute")).toBe("Ctrl + Shift + M");
+      expect(kbdOf(el, "Toggle mute")).toBe("Ctrl + Shift + M");
       await vi.waitFor(() => expect(ptt.disabled).toBe(true));
       expect(testId(el, "keybinds-global-hint").style.display).toBe("");
-      expect(el.textContent).toContain("Push to Talk needs a global key service");
+      expect(el.textContent).toContain("Push to talk needs a global key service");
 
       for (const handler of statusHandlers) handler(portal(bound));
       expect(testId(el, "keybinds-portal").style.display).toBe("");
@@ -946,7 +946,7 @@ describe("KeybindsTab", () => {
         return btn;
       };
       const pttButton = (el: HTMLElement): HTMLButtonElement =>
-        el.querySelector('[aria-label="Push to Talk keybind — click to capture"]')!;
+        el.querySelector('[aria-label="Push to talk keybind — click to capture"]')!;
 
       it("accepts only function keys and binds through the portal", async () => {
         mockStatus.mockResolvedValue(portal(unbound));
@@ -955,7 +955,7 @@ describe("KeybindsTab", () => {
         const btn = pttButton(el);
         await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
         // The slider stays usable and the unsupported note never shows.
-        expect(el.textContent).not.toContain("Push to Talk needs a global key service");
+        expect(el.textContent).not.toContain("Push to talk needs a global key service");
 
         btn.click();
         expect(btn.textContent).toBe("Press a function key (F1-F24)...");
@@ -1123,7 +1123,7 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
     }
     // Mute and deafen stay display rows that follow the global binding.
     const mute = [...el.querySelectorAll(".keybind-row")].find(
-      (r) => r.querySelector(".setting-label")?.textContent === "Toggle Mute",
+      (r) => r.querySelector(".setting-label")?.textContent === "Toggle mute",
     )!;
     expect(mute.querySelector("span.kbd")!.textContent).toBe("Ctrl + Shift + M");
     expect(mute.querySelector("button")).toBeNull();
@@ -1135,13 +1135,13 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
       (l) => l.textContent,
     );
     for (const label of [
-      "Toggle Camera",
-      "Toggle Screen Share",
-      "Disconnect from Voice",
-      "Search Messages",
-      "Upload File",
-      "Emoji Picker",
-      "GIF Picker",
+      "Toggle camera",
+      "Toggle screen share",
+      "Disconnect from voice",
+      "Search messages",
+      "Upload file",
+      "Emoji picker",
+      "GIF picker",
     ]) {
       expect(
         labels.filter((l) => l === label),
@@ -1164,7 +1164,7 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
     const { el } = mount();
     byId(el, "keybind-search").click();
     press("KeyE", { key: "e", ctrlKey: true }); // the emoji picker's
-    expect(byId(el, "keybind-search-alert").textContent).toBe("Already used by Emoji Picker.");
+    expect(byId(el, "keybind-search-alert").textContent).toBe("Already used by Emoji picker.");
     expect(byId(el, "keybind-search").textContent).toBe("Ctrl + F");
     expect(stored().search).toBeUndefined();
   });
@@ -1213,7 +1213,7 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
 
     byId(el, "keybinds-reset-all").click();
     expect(byId(el, "keybind-toggleCamera").textContent).toBe("Not set");
-    expect(byId(el, "keybind-toggleCamera-alert").textContent).toBe("Already used by Toggle Mute.");
+    expect(byId(el, "keybind-toggleCamera-alert").textContent).toBe("Already used by Toggle mute.");
     expect(stored().toggleCamera).toBeNull();
     // The other rows are back on their defaults.
     expect(byId(el, "keybind-uploadFile").textContent).toBe("Ctrl + Shift + U");
@@ -1226,7 +1226,7 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
     localStorage.setItem("owncord:settings:pttVk", "70"); // F
     byId(el, "keybinds-reset-all").click();
     expect(byId(el, "keybind-search").textContent).toBe("Not set");
-    expect(byId(el, "keybind-search-alert").textContent).toBe("That key is used by Push to Talk.");
+    expect(byId(el, "keybind-search-alert").textContent).toBe("That key is used by Push to talk.");
     expect(stored().search).toBeNull();
   });
 
@@ -1245,14 +1245,14 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
   it("names the combination in each button's accessible name", () => {
     const { el } = mount();
     expect(byId(el, "keybind-toggleCamera").getAttribute("aria-label")).toBe(
-      "Toggle Camera: Ctrl + Shift + V",
+      "Toggle camera: Ctrl + Shift + V",
     );
     expect(byId(el, "keybind-global-mute").getAttribute("aria-label")).toBe(
       "Global mute keybind: Ctrl + Shift + M",
     );
     byId(el, "keybind-search").click();
     expect(byId(el, "keybind-search").getAttribute("aria-label")).toBe(
-      "Search Messages: Press a supported key...",
+      "Search messages: Press a supported key...",
     );
     press("Escape", { key: "Escape" });
   });
@@ -1300,7 +1300,7 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
     const { el } = mount();
     const note = byId(el, "keybinds-layout-note");
     expect(note.textContent).toBe(
-      "On some keyboard layouts these keys can share a physical key with Mute or Deafen, and Mute and Deafen then win.",
+      "On some keyboard layouts these keys can share a physical key with mute or deafen, and mute and deafen then win.",
     );
   });
 
@@ -1322,7 +1322,7 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
 
   describe("push to talk against in-app keys", () => {
     const pttButton = (el: HTMLElement): HTMLButtonElement =>
-      el.querySelector('[aria-label="Push to Talk keybind — click to capture"]')!;
+      el.querySelector('[aria-label="Push to talk keybind — click to capture"]')!;
 
     it("the portal capture rejects an F-key a bare in-app binding uses", async () => {
       mockStatus.mockResolvedValue(portalStatus);
@@ -1335,7 +1335,7 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
       pttButton(el).click();
       press("F6");
       const note = byId(el, "ptt-portal-note");
-      expect(note.textContent).toBe("That key is already used by the Toggle Screen Share keybind.");
+      expect(note.textContent).toBe("That key is already used by the Toggle screen share keybind.");
       expect(mockBindPortal).not.toHaveBeenCalled();
       expect(mockUpdatePttKey).not.toHaveBeenCalled();
       expect(pttButton(el).textContent).toBe("Not set");
@@ -1382,7 +1382,7 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
       mockCaptureKeyPress.mockResolvedValue(0x75); // F6
       pttButton(el).click();
       await vi.waitFor(() =>
-        expect(byId(el, "ptt-portal-note").textContent).toContain("Toggle Screen Share"),
+        expect(byId(el, "ptt-portal-note").textContent).toContain("Toggle screen share"),
       );
       expect(mockUpdatePttKey).not.toHaveBeenCalled();
       expect(pttButton(el).textContent).toBe("Not set");
@@ -1394,7 +1394,7 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
       byId(el, "keybind-toggleScreenshare").click();
       press("F6", { key: "F6" });
       expect(byId(el, "keybind-toggleScreenshare-alert").textContent).toBe(
-        "That key is used by Push to Talk.",
+        "That key is used by Push to talk.",
       );
     });
   });

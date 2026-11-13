@@ -173,7 +173,7 @@ describe("MessageList", () => {
       expect(authorSpan().textContent).toBe("Alicia");
     });
 
-    it("recolours rendered names when the Role Colors preference is toggled", () => {
+    it("recolours rendered names when the Role colors preference is toggled", () => {
       seedMember(1, "Alice", "admin");
       setMessages(1, [makeMessage({ id: 1 })]);
       w.msgList.mount(w.container);

@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildAccessibilityTab } from "../../src/features/settings/AccessibilityTab";
 
 /**
- * OC-0232: "Reduce Motion" and "Sync with OS" are two independent writers of
+ * OC-0232: "Reduce motion" and "Sync with OS" are two independent writers of
  * the `.reduced-motion` class with no arbitration. A manual toggle click
  * writes the class directly, ignoring whether OS sync currently owns it —
- * so turning "Reduce Motion" OFF while "Sync with OS" is ON and the OS still
+ * so turning "Reduce motion" OFF while "Sync with OS" is ON and the OS still
  * asks for reduced motion silently disables reduced motion app-wide.
  */
 describe("AccessibilityTab — reduced-motion arbitration", () => {
@@ -69,16 +69,16 @@ describe("AccessibilityTab — reduced-motion arbitration", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps reduced-motion applied when OS sync is on and the OS still prefers it, even after a manual Reduce Motion toggle is switched off", () => {
+  it("keeps reduced-motion applied when OS sync is on and the OS still prefers it, even after a manual Reduce motion toggle is switched off", () => {
     const syncToggle = findToggle("Sync with OS");
-    const motionToggle = findToggle("Reduce Motion");
+    const motionToggle = findToggle("Reduce motion");
 
     // Turn on "Sync with OS": the OS prefers reduced motion, so the class
     // should be applied by the media-query-driven listener.
     syncToggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(document.documentElement.classList.contains("reduced-motion")).toBe(true);
 
-    // Manually flip "Reduce Motion" on, then off. "Sync with OS" is still
+    // Manually flip "Reduce motion" on, then off. "Sync with OS" is still
     // on and the (mocked) OS still prefers reduced motion throughout, so
     // the effective state must never change out from under it.
     motionToggle.dispatchEvent(new MouseEvent("click", { bubbles: true })); // -> on
