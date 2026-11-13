@@ -95,9 +95,9 @@ func (f *fixture) card(ctx context.Context, url string, image *string) string {
 	}
 	title := "t"
 	stamp := FormatTime(f.clock.now())
-	err = f.store.PutPreview(ctx, db.LinkPreview{UrlHash: h, Url: norm, Title: &title, ImageHash: image, FetchedAt: stamp, LastUsedAt: stamp})
+	err = f.store.db.UpsertLinkPreview(ctx, db.LinkPreview{UrlHash: h, Url: norm, Title: &title, ImageHash: image, FetchedAt: stamp, LastUsedAt: stamp})
 	if err != nil {
-		f.t.Fatalf("PutPreview: %v", err)
+		f.t.Fatalf("UpsertLinkPreview: %v", err)
 	}
 	return h
 }
@@ -321,8 +321,15 @@ func TestPutCard(t *testing.T) {
 	if leftovers, err := leftoverTemps(f.dir); err != nil || len(leftovers) != 0 {
 		t.Errorf("temp files left: %v, %v", leftovers, err)
 	}
-	if err := f.store.PutCard(ctx, card("https://example.com/bad"), &NewImage{Data: []byte("x"), MIME: "", Width: 1, Height: 1}, 1<<20); !errors.Is(err, ErrInvalidImage) {
-		t.Errorf("bad image err = %v, want ErrInvalidImage", err)
+	bad := card("https://example.com/bad")
+	if err := f.store.PutCard(ctx, bad, &NewImage{Data: []byte("x"), MIME: "", Width: 1, Height: 1}, 1<<20); err != nil {
+		t.Fatalf("PutCard with a refused image: %v", err)
+	}
+	if p, err := f.store.Preview(ctx, bad.UrlHash); err != nil || p.ImageHash != nil || p.Title == nil {
+		t.Errorf("refused image: card = %+v, %v; want the text without an image", p, err)
+	}
+	if err := f.store.PutPreview(ctx, Preview{UrlHash: bad.UrlHash, Url: bad.Url, ImageHash: &bad.UrlHash, FetchedAt: bad.FetchedAt, LastUsedAt: bad.LastUsedAt}); !errors.Is(err, ErrInvalidImage) {
+		t.Errorf("PutPreview with a thumbnail err = %v, want ErrInvalidImage", err)
 	}
 }
 

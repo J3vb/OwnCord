@@ -38,12 +38,16 @@ var (
 	ErrInvalidImage = errors.New("invalid thumbnail")
 )
 
+// Preview is one stored link card, keyed by the hash of its normalised URL.
 type Preview = dbgen.LinkPreview
 
+// Image is one stored thumbnail's row; the file on disk is named by its hash.
 type Image = dbgen.LinkPreviewImage
 
+// Card is one card a message shows, with its thumbnail's size when it has one.
 type Card = dbgen.ListMessageLinkPreviewsRow
 
+// ImageRef names a thumbnail and its size, as the sweep lists them.
 type ImageRef = dbgen.ListOldestLinkPreviewImagesRow
 
 // Repo is what the Store needs from the database.
@@ -73,8 +77,8 @@ type Store struct {
 	dir string
 	now func() time.Time
 
-	// mu is held across PutImage's rename and row insert and across the whole of Sweep, so
-	// Sweep never sees a thumbnail file whose row is about to be inserted.
+	// mu covers a thumbnail's rename and row insert, Sweep's row trimming and each stray
+	// file's re-check and removal, so Sweep never removes a file whose row is on its way.
 	mu syncutil.Mutex
 }
 
@@ -128,6 +132,7 @@ func (s *Store) PutImage(ctx context.Context, data []byte, mime string, width, h
 	return s.publishLocked(ctx, st)
 }
 
+// NewImage is a thumbnail PutCard stores with its card.
 type NewImage struct {
 	Data          []byte
 	MIME          string
@@ -138,14 +143,14 @@ type NewImage struct {
 // both writes so no Sweep runs between them: the image row a card names cannot be removed
 // before the card is written. The card's ImageHash is set from img and any value in p is
 // ignored. The card is stored without an image when img is nil, when imageCapBytes is 0 (keep
-// no thumbnails) or when the image alone is larger than the cap.
+// no thumbnails), when the image alone is larger than the cap, or when the store refuses it.
 func (s *Store) PutCard(ctx context.Context, p Preview, img *NewImage, imageCapBytes int64) error {
 	p.ImageHash = nil
 	var st *staged
 	if img != nil && imageCapBytes > 0 && int64(len(img.Data)) <= imageCapBytes {
 		var err error
 		if st, err = s.stageImage(img.Data, img.MIME, img.Width, img.Height); err != nil {
-			return err
+			st = nil
 		}
 	}
 	if err := syncutil.LockContext(ctx, &s.mu); err != nil {
@@ -282,9 +287,12 @@ func (s *Store) Preview(ctx context.Context, urlHash string) (Preview, error) {
 	return p, nil
 }
 
-// PutPreview stores a card, replacing one under the same hash. Its image, if it names one,
-// must have been stored with PutImage.
+// PutPreview stores a card without a thumbnail, replacing one under the same hash. A card
+// with a thumbnail goes through PutCard, which keeps Sweep out between the two writes.
 func (s *Store) PutPreview(ctx context.Context, p Preview) error {
+	if p.ImageHash != nil {
+		return fmt.Errorf("%w: a card with a thumbnail is stored with PutCard", ErrInvalidImage)
+	}
 	if err := s.db.UpsertLinkPreview(ctx, p); err != nil {
 		return fmt.Errorf("storing link preview: %w", err)
 	}

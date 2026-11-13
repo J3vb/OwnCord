@@ -18,6 +18,7 @@ func TestNormalizeURL(t *testing.T) {
 		{"keeps query as written", "https://example.com/a?b=2&a=1", "https://example.com/a?b=2&a=1"},
 		{"keeps query with fragment dropped", "https://example.com/a?x=1#frag", "https://example.com/a?x=1"},
 		{"empty path becomes slash", "https://example.com", "https://example.com/"},
+		{"keeps an underscore host", "https://Foo_Bar.example.com/", "https://foo_bar.example.com/"},
 		{"empty path with query", "https://example.com?q=1", "https://example.com/?q=1"},
 		{"drops default https port", "https://example.com:443/a", "https://example.com/a"},
 		{"drops default http port", "http://example.com:80/a", "http://example.com/a"},

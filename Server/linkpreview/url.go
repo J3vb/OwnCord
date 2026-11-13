@@ -88,9 +88,22 @@ func normalizeHost(h string) (string, error) {
 	case strings.Contains(h, ":"):
 		return "[" + h + "]", nil
 	}
+	if isASCII(h) {
+		// Plain ASCII hosts skip IDNA, whose rules refuse names real sites use (underscores).
+		return h, nil
+	}
 	ascii, err := idna.Lookup.ToASCII(h)
 	if err != nil || ascii == "" {
 		return "", fmt.Errorf("%w: host %q", ErrInvalidURL, h)
 	}
 	return ascii, nil
+}
+
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
