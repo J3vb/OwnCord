@@ -252,7 +252,8 @@ export function isRenderableAvatar(url: string | null | undefined): url is strin
 }
 
 /** Ten distinct hues, each dark enough for white (--on-fill) initials at
- *  4.5:1 or better. */
+ *  4.5:1 or better. The server admin panel's core.js mirrors this list and
+ *  the hash below; tests/helpers/avatarColorSamples.ts pins both. */
 export const AVATAR_COLORS: readonly string[] = [
   "#5865f2",
   "#2e6db4",

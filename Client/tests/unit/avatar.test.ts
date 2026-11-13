@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { contrastRatio, parseColor } from "../../src/lib/text/colorContrast";
+import { AVATAR_COLOR_SAMPLES, AVATAR_PALETTE } from "../helpers/avatarColorSamples";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 const hasCachedImage = vi.hoisted(() => vi.fn((_url: string) => false));
@@ -599,6 +600,12 @@ describe("pickAvatarColor", () => {
       expect(counts.size).toBe(AVATAR_COLORS.length);
       for (const n of counts.values()) expect(n).toBeLessThanOrEqual(fair * 2);
     }
+  });
+
+  it("matches the colour contract the server admin panel mirrors", () => {
+    expect(AVATAR_COLORS).toEqual(AVATAR_PALETTE);
+    for (const [name, colour] of AVATAR_COLOR_SAMPLES)
+      expect(pickAvatarColor(name), name).toBe(colour);
   });
 
   it("gives a name the same colour on every call", () => {
