@@ -25,6 +25,8 @@ import {
   sileroBufferMs,
   SILERO_BUFFER_MAX_MS,
   SILERO_BUFFER_PREF,
+  SOFT_SPEECH_PREF,
+  softSpeechEnabled,
 } from "@lib/voice/micProcessor";
 import { Track, type AudioProcessorOptions } from "livekit-client";
 import { settingsText as t } from "../../../i18n/settings";
@@ -266,6 +268,7 @@ export function mountMeterAndToggles(sc: VoiceTabScope): void {
     // Enhanced noise suppression builds on noise suppression: nest it.
     if (item.key === "enhancedNoiseSuppression") {
       row.classList.add("nested");
+      const softSpeech = sc.nativeAudio ? null : mountSoftSpeech(sc);
       const bufferSlider = sc.nativeAudio ? null : mountVoiceBuffer(sc);
       renderEnhanced = (): void => {
         const available = loadPref("noiseSuppression", true);
@@ -273,11 +276,33 @@ export function mountMeterAndToggles(sc: VoiceTabScope): void {
         toggle.setAttribute("aria-disabled", String(!available));
         toggle.setAttribute("aria-checked", String(enabled));
         toggle.classList.toggle("on", enabled);
+        softSpeech?.setAttribute("aria-disabled", String(!enabled));
         if (bufferSlider !== null) bufferSlider.disabled = !enabled;
       };
       renderEnhanced();
     }
   }
+}
+
+/** The speech worker of the call and of the meter each follow the saved
+ *  preference by themselves (features/voice/sileroWorker.ts). */
+function mountSoftSpeech(sc: VoiceTabScope): HTMLDivElement {
+  const label = t("voiceAudio.softSpeech.label");
+  const toggle = createToggle(softSpeechEnabled(), {
+    signal: sc.signal,
+    label,
+    onChange: (nowOn) => savePref(SOFT_SPEECH_PREF, nowOn),
+  });
+  const row = createElement("div", { class: "setting-row nested", "data-testid": "soft-speech" });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, label),
+    createElement("div", { class: "setting-desc" }, t("voiceAudio.softSpeech.desc")),
+  );
+  appendChildren(row, info, toggle);
+  sc.processingCard.appendChild(row);
+  return toggle;
 }
 
 function mountVoiceBuffer(sc: VoiceTabScope): HTMLInputElement {

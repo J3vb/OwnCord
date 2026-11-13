@@ -114,6 +114,10 @@ release changes the database, and anything an operator must do first.)
 - `owncord://` links open the app: an invite link opens the join screen, and a message link copied on the desktop opens that message (after sign-in, if the app was closed).
 - Saved sign-ins, your voice key and unsent messages are kept in the Android Keystore. Updating moves them there once; you stay signed in and your voice safety number does not change.
 
+**Voice**
+
+- Enhanced Noise Suppression has a new switch, "Let more soft speech through", in Settings > Voice & Video. It is on by default, so a soft "hmm" or "yes" gets through. Turn it off if coughs or other short sounds get through too often; soft words are then cut off a little more often. The Linux desktop app does not have it: its gate works differently.
+
 **Server**
 
 - A push subscription now ends with the session that made it: signing out, "sign out everywhere", an expired session or a ban stops the pushes to that device (migration 093). A server older than this keeps a signed-out phone's subscription until its staleness sweep; the phone has already let go of it, so nothing shows.
