@@ -113,12 +113,16 @@ func (d *drill) stepRFix(r *rState) ([]failure, error) {
 	// costs a registration, capped at 3 a minute per IP (api/constants.go, scaled by
 	// security.auth_rate_limit_multiplier), so the boot scales that cap; otherwise the third registration is
 	// refused with 429.
+	// Invite creation is capped per user per hour, so the sessions share invites up to each one's max_uses
+	// instead of spending one invite per account.
+	var sessionInvite string
 	for i := range restartSockets {
-		invite, err := createInvite(d.baseURL(), token)
-		if err != nil {
-			return nil, d.annotate(fmt.Errorf("inviting session %d of %d: %w", i+1, restartSockets, err))
+		if i%inviteMaxUses == 0 {
+			if sessionInvite, err = createInvite(d.baseURL(), token); err != nil {
+				return nil, d.annotate(fmt.Errorf("inviting session %d of %d: %w", i+1, restartSockets, err))
+			}
 		}
-		clientToken, _, err := registerUser(d.baseURL(), invite, fmt.Sprintf("drill-client-%d", i+1))
+		clientToken, _, err := registerUser(d.baseURL(), sessionInvite, fmt.Sprintf("drill-client-%d", i+1))
 		if err != nil {
 			return nil, d.annotate(fmt.Errorf("registering session %d of %d: %w", i+1, restartSockets, err))
 		}
