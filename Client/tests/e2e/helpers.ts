@@ -1050,6 +1050,12 @@ export function buildTauriMockScript(opts: {
              "plugin:owncord-call-service|register_listener",
              "plugin:owncord-call-service|remove_listener"].includes(cmd)) return null;
         if (cmd === "is_metered") return { metered: false };
+        // The Android app's push (UnifiedPush): no push app is installed in
+        // the mocked app, so Settings offers to get one; calls stay in __invokeLog.
+        if (cmd === "push_status") return { distributors: [], current: null };
+        if (cmd === "push_register") throw "push register: NO_DISTRIBUTOR";
+        if (["push_choose", "push_unregister", "plugin:owncord-push|register_listener",
+             "plugin:owncord-push|remove_listener"].includes(cmd)) return null;
         if (["plugin:owncord-metered-network|register_listener",
              "plugin:owncord-metered-network|remove_listener"].includes(cmd)) return null;
         // The Android app's call audio (see __mobileAudio above). A picked route

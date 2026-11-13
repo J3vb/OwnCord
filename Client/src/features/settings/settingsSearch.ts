@@ -38,6 +38,11 @@ function desktopOnly(...texts: string[]): string[] {
   return isAndroidApp() ? [] : texts;
 }
 
+/** Text that is on screen only in the Android app. */
+function androidOnly(...texts: string[]): string[] {
+  return isAndroidApp() ? texts : [];
+}
+
 /** The tabs the overlay can show; `SettingsOverlay`'s `TabName` is this union. */
 export type SearchableTab =
   | "Account"
@@ -192,6 +197,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     platformText(s("notifications.desktop.label"), s("notifications.desktop.label.android")),
     platformText(s("notifications.desktop.desc"), s("notifications.desktop.desc.android")),
     s("notifications.permission.label"),
+    ...androidOnly(s("notifications.push.label")),
     ...desktopOnly(s("notifications.flash.label"), s("notifications.flash.desc")),
     s("notifications.suppress.label"),
     s("notifications.suppress.desc"),

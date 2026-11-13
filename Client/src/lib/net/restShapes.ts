@@ -159,6 +159,8 @@ export const SHAPES: readonly Shape[] = [
   [2,[],[],["purge"],[4]],
   [2,["id","username","role_id","role_name","status","created_at","banned"],[1,0,1,0,0,0,2],["avatar","role_ids","last_seen","ban_reason","ban_expires"],[12,64,0,0,0]],
   [0,138],
+  [2,["public_key","key_id"],[0,0]],
+  [2,["id"],[1]],
 ];
 
 export const REST_SHAPES: Readonly<Record<keyof RestReplyShapes, number>> = {
@@ -219,4 +221,6 @@ export const REST_SHAPES: Readonly<Record<keyof RestReplyShapes, number>> = {
   "ChannelCategoryList": 136,
   "BanMemberResponse": 137,
   "AdminUserList": 139,
+  "PushVapidResponse": 140,
+  "PushSubscribeResponse": 141,
 };

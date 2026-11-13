@@ -111,6 +111,8 @@ import {
 } from "../../src/features/message-requests/store";
 import type { MessageRequest } from "../../src/features/message-requests/api";
 import { loadRequests, requestsApi } from "../../src/features/message-requests/sync";
+import { pushSessionInstance } from "../../src/features/push/pushSubscription";
+import { pushStore, setPushSetting } from "../../src/features/push/store";
 import type { DispatchApi } from "../../src/features/connection/dispatchContext";
 import type { GifFavoritesApi } from "../../src/lib/media/gifProvider";
 import type { ReadyMember } from "../../src/lib/types";
@@ -550,6 +552,16 @@ const PROBES: readonly Probe[] = [
       expect(requestsApi()).toBeDefined();
     },
     isInitial: () => requestsApi() === undefined,
+  },
+  {
+    // The push session is only set in the Android app; the setting it shows is
+    // the store Settings reads.
+    name: "push:session",
+    mutate: () => {
+      setPushSetting("on");
+      expect(pushStore.getState().setting).toBe("on");
+    },
+    isInitial: () => pushStore.getState().setting === "off" && pushSessionInstance() === null,
   },
   {
     name: "message-requests:store",

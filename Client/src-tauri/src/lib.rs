@@ -8,6 +8,8 @@ mod commands;
 mod metered_network;
 #[cfg(target_os = "android")]
 mod mobile_audio;
+#[cfg(target_os = "android")]
+mod push;
 // Test-only: gates over tauri.conf.json and the source text itself.
 #[cfg(test)]
 mod config_gates;
@@ -241,6 +243,7 @@ pub fn run() {
         .plugin(metered_network::init())
         .plugin(mobile_audio::init())
         .plugin(idle_android::init())
+        .plugin(push::init())
         .plugin(exit_info::init())
         .plugin(files::init())
         .plugin(share_in::init())
@@ -335,6 +338,14 @@ pub fn run() {
             call_service::clear_call_ring,
             #[cfg(target_os = "android")]
             metered_network::is_metered,
+            #[cfg(target_os = "android")]
+            push::push_status,
+            #[cfg(target_os = "android")]
+            push::push_choose,
+            #[cfg(target_os = "android")]
+            push::push_register,
+            #[cfg(target_os = "android")]
+            push::push_unregister,
             #[cfg(target_os = "android")]
             mobile_audio::mobile_audio_set_session,
             #[cfg(target_os = "android")]

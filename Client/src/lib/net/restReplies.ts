@@ -63,6 +63,7 @@ import type {
   SessionsListResponse,
   UserNote,
 } from "../apiShared";
+import type { PushSubscribeResponse, PushVapidResponse } from "../apiPush";
 
 export interface RestReplyShapes {
   NoBody: void;
@@ -122,4 +123,6 @@ export interface RestReplyShapes {
   ChannelCategoryList: readonly ChannelCategory[];
   BanMemberResponse: BanMemberResponse;
   AdminUserList: AdminUser[];
+  PushVapidResponse: PushVapidResponse;
+  PushSubscribeResponse: PushSubscribeResponse;
 }

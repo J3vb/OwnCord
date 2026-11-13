@@ -284,6 +284,8 @@ export const connectText = defineCatalog("connect", {
   "notifications.spoiler": "Spoiler",
   "notifications.androidChannel.messages": "Messages",
   "notifications.androidChannel.messagesDesc": "Direct messages, mentions and channel messages",
+  "notifications.push.title": "New messages on {server}",
+  "notifications.push.body": "Open OwnCord to read them",
   "notifications.attachment": {
     one: "sent an attachment",
     other: "sent {count} attachments",

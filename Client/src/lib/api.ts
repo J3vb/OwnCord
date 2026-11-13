@@ -9,6 +9,7 @@ import { createAdminApi } from "./apiAdmin";
 import { createModerationApi } from "./apiModeration";
 import { createChannelsApi } from "./apiChannels";
 import { createDmsApi } from "./apiDms";
+import { createPushApi } from "./apiPush";
 import type { ApiTransport } from "./apiShared";
 import { SessionScope } from "./net/sessionScope";
 import {
@@ -287,6 +288,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     ...createChannelsApi(t),
     ...createDmsApi(t),
     ...createAdminApi(t),
+    ...createPushApi(t),
   };
 }
 

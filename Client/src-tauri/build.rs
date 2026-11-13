@@ -7,6 +7,7 @@ fn main() {
         .plugin("owncord-metered-network", listener())
         .plugin("owncord-mobile-audio", listener())
         .plugin("owncord-idle", listener())
+        .plugin("owncord-push", listener())
         .plugin("owncord-call-service", listener());
     if let Err(error) = tauri_build::try_build(attributes) {
         eprintln!("{error:#}");

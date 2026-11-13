@@ -30,6 +30,7 @@ import type {
   GameDetector,
   MediaDetector,
   MobileAudio,
+  PushRegistration,
   NativeFiles,
   GlobalShortcuts,
   HttpClient,
@@ -85,6 +86,16 @@ const mobileAudio: MobileAudio = {
   setSession: () => undefined,
   setRoute: () => undefined,
   refresh: () => undefined,
+};
+
+// A tab gets no push to wake it: the server does not push to the web client.
+const pushRegistration: PushRegistration = {
+  supported: false,
+  status: async () => null,
+  choose: async () => false,
+  register: async () => ({ ok: false, reason: "failed" }),
+  unregister: async () => undefined,
+  follow: () => undefined,
 };
 
 // No share sheet in a tab: callers offer no Share.
@@ -351,6 +362,7 @@ export const browser: Platform = {
     start: async () => undefined,
   },
   mobileAudio,
+  pushRegistration,
   deepLinks,
   devTools,
   fileSaver,

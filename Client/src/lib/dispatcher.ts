@@ -15,11 +15,11 @@ import { handleActivityRefusal } from "./presence/gameActivityBridge";
 import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
 import { serverErrorText } from "./api";
-import type { ApiClient } from "./api";
 import { showToast } from "./ui/toast";
 import { connectText } from "../i18n/connect";
 import { ServerMessageType as S } from "./protocolTypes";
 import {
+  applyReadyPush,
   handleAuthOk,
   handleConnectionError,
   handleRestartDrop,
@@ -69,7 +69,12 @@ import {
   wsRoutes as voiceRoutes,
 } from "../features/voice/wsHandlers";
 import { createReconnectClock, log } from "../features/connection/dispatchContext";
-import type { DispatchContext, Subscribe, WsRoute } from "../features/connection/dispatchContext";
+import type {
+  DispatchApi,
+  DispatchContext,
+  Subscribe,
+  WsRoute,
+} from "../features/connection/dispatchContext";
 import { failMarkUnread, forgetPendingMarkUnread, resetReadPointerState } from "./readState";
 import { resetServerCapabilities } from "./net/serverCapabilities";
 import {
@@ -133,26 +138,7 @@ export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () =>
  * present it is used to refresh DM block state (GET /blocks) on ready, and to
  * refetch the active channel's history after a full-ready resync.
  */
-export function wireDispatcher(
-  ws: WsClient,
-  api?: Pick<ApiClient, "listBlocks"> &
-    Partial<
-      Pick<
-        ApiClient,
-        | "updateProfile"
-        | "getConfig"
-        | "listEmoji"
-        | "listStickers"
-        | "getMessages"
-        | "getMessagesAround"
-        | "listDmRequests"
-        | "decideDmRequest"
-        | "getDmChannels"
-        | "getOwnModeration"
-        | "getMyAppeals"
-      >
-    >,
-): DispatcherCleanup {
+export function wireDispatcher(ws: WsClient, api?: DispatchApi): DispatcherCleanup {
   const unsubs: Array<() => void> = [];
   const clock = createReconnectClock();
 
@@ -219,6 +205,8 @@ export function wireDispatcher(
       // If a planned restart took us out of a voice channel, put us
       // back once ready confirms the post-restart world.
       rejoinVoiceAfterRestart(clock, ws, payload);
+      // Last: push setup is not needed for the first screen.
+      applyReadyPush(api);
 
       log.info("Ready payload applied", {
         channels: payload.channels.length,

@@ -86,6 +86,8 @@ export const REST_REPLY_FIXTURES: { readonly [K in keyof RestReplyShapes]: RestR
   DmPrivacy: { allow_member_dms: true, message_requests: true },
   OwnModerationActionList: [],
   PublicIdResponse: { id: "p1" },
+  PushVapidResponse: { public_key: "BKey", key_id: "abcd" },
+  PushSubscribeResponse: { id: 7 },
   OwnReportSummaryList: [],
   QueueRowList: [],
   ModerationReportDetail: reportDetail,

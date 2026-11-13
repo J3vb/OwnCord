@@ -118,7 +118,7 @@ var settingCopy = map[string]SettingCopy{
 		"Your admin email, if push is on. Empty is fine otherwise.",
 		"Some push services refuse requests without one. It is shared with those services, not with members."),
 	"push.dispatch_enabled": sc("Send push notifications",
-		"Lets the server send notifications to members' devices through their browser's push service.",
+		"Lets the server send notifications to members' devices through their push service (ntfy or another UnifiedPush app on Android).",
 		"Off (default). Turn on together with Enable push.",
 		"On makes the server contact outside push services. Has no effect unless Enable push is also on."),
 	"push.enabled": sc("Enable push registration",

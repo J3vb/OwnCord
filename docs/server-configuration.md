@@ -148,6 +148,12 @@ per channel per 60 seconds; a `404`/`410` response prunes the subscription,
 a `429` or `5xx` (or a network error) gets two retries — three attempts
 total — before being dropped; any other failure status drops immediately.
 
+The Android app registers through UnifiedPush: each member's own push app
+(ntfy, or another distributor) receives the pushes, so no Google service is
+involved, and the phone shows "New messages on <server>" while the app is
+closed. With `push.enabled` on and `push.dispatch_enabled` off, phones can
+register but nothing is sent; the server logs a warning at start-up saying so.
+
 | Key                          | Type   | Default | Description                                                                                                                                                                                                |
 | ---------------------------- | ------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `push.enabled`               | bool   | `false` | Owner opt-in for Web Push subscription storage. Routes are always mounted; this only gates whether they do anything.                                                                                       |
