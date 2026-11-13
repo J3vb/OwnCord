@@ -65,13 +65,29 @@ describe("InviteManager", () => {
     mgr.destroy?.();
   });
 
-  it("shows the whole code rather than a masked one", () => {
-    const opts = makeOptions({ invites: [makeInvite({ code: "abcdefghi" })] });
+  it("shows the tail of a long code and keeps the full link in its title", () => {
+    const opts = makeOptions({
+      invites: [makeInvite({ code: "c964e52a6287f9ef" })],
+      formatLink: (c) => `owncord://invite/${c}`,
+    });
     const mgr = createInviteManager(opts);
     mgr.mount(container);
 
     const codeEl = container.querySelector(".invite-item__code");
-    expect(codeEl?.textContent).toBe("abcdefghi");
+    expect(codeEl?.textContent).toBe("…6287f9ef");
+    expect(codeEl?.getAttribute("title")).toBe("owncord://invite/c964e52a6287f9ef");
+    container.querySelector<HTMLButtonElement>(".invite-item__copy")!.click();
+    expect(opts.onCopyLink).toHaveBeenCalledWith("c964e52a6287f9ef");
+
+    mgr.destroy?.();
+  });
+
+  it("shows a short code whole", () => {
+    const opts = makeOptions({ invites: [makeInvite({ code: "abc123" })] });
+    const mgr = createInviteManager(opts);
+    mgr.mount(container);
+
+    expect(container.querySelector(".invite-item__code")?.textContent).toBe("abc123");
 
     mgr.destroy?.();
   });
@@ -269,7 +285,7 @@ describe("InviteManager", () => {
     expect(dialog.getAttribute("role")).toBe("dialog");
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     expect(dialog.getAttribute("aria-labelledby")).toBe("invite-manager-title");
-    expect(container.querySelector("#invite-manager-title")?.textContent).toBe("Server Invites");
+    expect(container.querySelector("#invite-manager-title")?.textContent).toBe("Invite people");
 
     mgr.destroy?.();
   });
@@ -357,36 +373,133 @@ describe("InviteManager", () => {
       expect(onCreateInvite).toHaveBeenCalledWith({ expiresInHours: 0, maxUses: 10 });
     });
 
-    it("row shows the full link and expiry", () => {
+    it("row meta names the creator, uses and expiry", () => {
       mountMgr({
         invites: [
           makeInvite({
             code: "abcdefghijklmnop",
+            createdBy: "mira",
             expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
           }),
         ],
-        formatLink: (c) => `owncord://invite/${c}`,
       });
-      const row = container.querySelector(".invite-item")!;
-      expect(row.querySelector(".invite-item__code")!.textContent).toBe(
-        "owncord://invite/abcdefghijklmnop",
+      expect(container.querySelector(".invite-item__meta")!.textContent).toBe(
+        "Made by mira · 3 of 10 uses · Expires in 7 days",
       );
-      expect(row.querySelector(".invite-item__meta")!.textContent).toContain("Expires in 7 days");
-      expect(row.querySelector(".invite-item__meta")!.textContent).toContain("3 / 10 uses");
     });
 
-    it("shows Never expires and plain uses when unlimited", () => {
-      mountMgr({ invites: [makeInvite({ expiresAt: null, maxUses: null })] });
-      const meta = container.querySelector(".invite-item__meta")!.textContent;
-      expect(meta).toContain("Never expires");
-      expect(meta).toContain("3 uses");
+    it("leaves the creator out when it is not known", () => {
+      mountMgr({ invites: [makeInvite({ createdBy: "", expiresAt: null, maxUses: null })] });
+      expect(container.querySelector(".invite-item__meta")!.textContent).toBe(
+        "3 uses · Never expires",
+      );
     });
 
-    it("features the chosen invite with a Copy button", () => {
+    it("says not used yet and counts one use in the singular", () => {
+      mountMgr({
+        invites: [
+          makeInvite({ code: "a", createdBy: "", uses: 0, maxUses: null }),
+          makeInvite({ code: "b", createdBy: "", uses: 1, maxUses: 0 }),
+        ],
+      });
+      const metas = [...container.querySelectorAll(".invite-item__meta")].map((m) => m.textContent);
+      expect(metas).toEqual(["Not used yet · Never expires", "1 use · Never expires"]);
+    });
+
+    it("features the chosen invite on one line with a Copy link button", () => {
       const onCopyLink = vi.fn();
-      mountMgr({ featuredCode: "abc123xyz", onCopyLink });
-      container.querySelector<HTMLButtonElement>(".invite-manager__featured-copy")!.click();
+      mountMgr({
+        featuredCode: "abc123xyz",
+        onCopyLink,
+        formatLink: (c) => `owncord://invite/${c}?host=example.org`,
+        invites: [makeInvite({ code: "abc123xyz", uses: 0, maxUses: null, expiresAt: null })],
+      });
+      const box = container.querySelector(".invite-manager__link-box")!;
+      expect(box.getAttribute("title")).toBe("owncord://invite/abc123xyz?host=example.org");
+      expect(box.querySelector(".invite-manager__featured-link")!.textContent).toBe(
+        "owncord://invite/abc123xyz?host=example.org",
+      );
+      expect(box.querySelector('[data-icon="link"]')).not.toBeNull();
+      const copy = container.querySelector<HTMLButtonElement>(".invite-manager__featured-copy")!;
+      expect(copy.textContent).toBe("Copy link");
+      expect(copy.querySelector('[data-icon="copy"]')).not.toBeNull();
+      expect(container.querySelector(".invite-manager__featured-meta")!.textContent).toBe(
+        "Not used yet · Never expires",
+      );
+      copy.click();
       expect(onCopyLink).toHaveBeenCalledWith("abc123xyz");
+    });
+
+    it("does not repeat the main invite and hides Other links when it is the only one", () => {
+      mountMgr({ featuredCode: "abc123xyz", invites: [makeInvite({ code: "abc123xyz" })] });
+      expect(container.querySelectorAll(".invite-item")).toHaveLength(0);
+      expect(container.querySelector<HTMLElement>(".invite-manager__others")!.hidden).toBe(true);
+      expect(container.querySelector<HTMLElement>(".invite-manager__empty")!.hidden).toBe(true);
+    });
+
+    it("lists only the other invites under a counted heading", () => {
+      mountMgr({
+        featuredCode: "main",
+        invites: [
+          makeInvite({ code: "main" }),
+          makeInvite({ code: "o1" }),
+          makeInvite({ code: "o2" }),
+        ],
+      });
+      const others = container.querySelector<HTMLElement>(".invite-manager__others")!;
+      expect(others.hidden).toBe(false);
+      expect(others.querySelector(".invite-manager__section-title")!.textContent).toBe(
+        "Other links · 2",
+      );
+      const codes = [...others.querySelectorAll(".invite-item__code")].map((c) => c.textContent);
+      expect(codes).toEqual(["o1", "o2"]);
+    });
+
+    it("shows a Used up chip instead of Copy on an invite with no uses left", () => {
+      mountMgr({ invites: [makeInvite({ code: "full", uses: 5, maxUses: 5 })] });
+      const row = container.querySelector(".invite-item")!;
+      expect(row.querySelector(".invite-item__chip")!.textContent).toBe("Used up");
+      expect(row.querySelector(".invite-item__copy")).toBeNull();
+      expect(row.querySelector(".invite-item__revoke")).not.toBeNull();
+      expect(row.querySelector(".invite-item__meta")!.textContent).toContain("5 of 5 uses");
+      // Each part wraps as a whole.
+      const parts = [...row.querySelectorAll(".invite-item__meta > span")].map(
+        (p) => p.textContent,
+      );
+      expect(parts).toEqual(["Made by admin", "5 of 5 uses", "Never expires"]);
+    });
+
+    it("keeps Copy with a copy icon on an invite that still has uses", () => {
+      mountMgr({ invites: [makeInvite({ code: "live", uses: 4, maxUses: 5 })] });
+      const copy = container.querySelector(".invite-item__copy")!;
+      expect(copy.querySelector('[data-icon="copy"]')).not.toBeNull();
+      expect(container.querySelector(".invite-item__chip")).toBeNull();
+      expect(container.querySelector('.invite-item__revoke [data-icon="trash-2"]')).not.toBeNull();
+    });
+
+    it("names the server in the line under the title", () => {
+      mountMgr({ serverName: "Game Night Crew" });
+      const lead = container.querySelector(".invite-manager__lead")!;
+      expect(lead.textContent).toBe("Anyone with this link can join Game Night Crew.");
+      expect(lead.querySelector("strong")!.textContent).toBe("Game Night Crew");
+    });
+
+    it("falls back to this server when the name is not known", () => {
+      mountMgr({ serverName: null });
+      expect(container.querySelector(".invite-manager__lead")!.textContent).toBe(
+        "Anyone with this link can join this server.",
+      );
+    });
+
+    it("labels the create selects and reuses the shared select look", () => {
+      mountMgr({});
+      for (const id of ["invite-expiry", "invite-max-uses"]) {
+        const select = container.querySelector<HTMLSelectElement>(`#${id}`)!;
+        expect(select.classList.contains("settings-select")).toBe(true);
+        expect(select.closest("label")!.textContent).toMatch(/^(Expires after|Max uses)/);
+      }
+      const create = container.querySelector(".invite-manager__create")!;
+      expect(create.textContent).toBe("Create link");
     });
 
     it("shows the server error text when create fails", async () => {

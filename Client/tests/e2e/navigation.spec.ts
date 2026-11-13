@@ -144,7 +144,7 @@ test.describe("shared navigation", () => {
     // Enter on Invite opens the invite manager.
     await invite.focus();
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("dialog", { name: "Server Invites" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Invite people" })).toBeVisible();
   });
 
   test("Alt+ArrowDown / Alt+ArrowUp step the channel list", async ({ page }) => {

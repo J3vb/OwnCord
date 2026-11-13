@@ -218,6 +218,23 @@ describe("createInviteManagerController", () => {
     expect(opts.featuredCode).toBe("mine-new");
   });
 
+  it("credits the invite made on open to the signed-in user and names the server", async () => {
+    const api = makeMockApi({
+      getInvites: vi.fn().mockResolvedValue([]),
+      // The create reply carries an empty creator.
+      createInvite: vi
+        .fn()
+        .mockResolvedValue(makeInviteResponse({ code: "fresh1", creator_username: "" })),
+    });
+    await openInvites(api);
+    const opts = firstCallOpts<{
+      invites: Array<{ code: string; createdBy: string }>;
+      serverName: string | null;
+    }>(createInviteManager);
+    expect(opts.invites).toEqual([expect.objectContaining({ code: "fresh1", createdBy: "me" })]);
+    expect(opts.serverName).toBe("Game Night Crew");
+  });
+
   it("a failed create-on-open still opens the manager with the list and toasts the reason", async () => {
     const api = makeMockApi({
       getInvites: vi
@@ -300,7 +317,7 @@ describe("mapInviteResponse", () => {
     expect(result.uses).toBe(3);
     expect(result.maxUses).toBe(10);
     expect(result.expiresAt).toBe("2024-12-31");
-    expect(result.createdBy).toBe("unknown");
+    expect(result.createdBy).toBe("");
     // created_at is distinct from expires_at now (F4).
     expect(result.createdAt).toBe("");
   });
@@ -337,7 +354,13 @@ describe("mapInviteResponse", () => {
     expect(result.createdBy).toBe("Alice");
   });
 
-  it("falls back to 'unknown' when created_by has no username", () => {
+  it("uses the fallback creator only when the reply names none", () => {
+    const base = { id: 1, code: "abc", max_uses: null, expires_at: null };
+    expect(mapInviteResponse({ ...base, creator_username: "" }, "me").createdBy).toBe("me");
+    expect(mapInviteResponse({ ...base, creator_username: "mira" }, "me").createdBy).toBe("mira");
+  });
+
+  it("leaves the creator empty when created_by has no username", () => {
     const raw = {
       id: 1,
       code: "abc",
@@ -349,10 +372,10 @@ describe("mapInviteResponse", () => {
     };
 
     const result = mapInviteResponse(raw as never);
-    expect(result.createdBy).toBe("unknown");
+    expect(result.createdBy).toBe("");
   });
 
-  it("falls back to 'unknown' when created_by is not an object", () => {
+  it("leaves the creator empty when created_by is not an object", () => {
     const raw = {
       id: 1,
       code: "abc",
@@ -364,7 +387,7 @@ describe("mapInviteResponse", () => {
     };
 
     const result = mapInviteResponse(raw as never);
-    expect(result.createdBy).toBe("unknown");
+    expect(result.createdBy).toBe("");
   });
 
   it("uses 'uses' extra field when use_count is undefined", () => {
@@ -500,6 +523,8 @@ describe("createInviteManagerController (additional)", () => {
     const result = await opts.onCreateInvite({ expiresInHours: 24, maxUses: 5 });
     expect(api.createInvite).toHaveBeenCalledWith({ expires_in_hours: 24, max_uses: 5 });
     expect((result as { code: string }).code).toBe("new123");
+    // The create reply names no creator; this client made it.
+    expect((result as { createdBy: string }).createdBy).toBe("me");
   });
 
   it("onCopyLink copies an invite link to clipboard", async () => {
