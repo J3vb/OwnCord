@@ -1,8 +1,10 @@
 // Pieces of the server rail that need no per-rail state: its icons, drop zone
-// maths, round action buttons and the DM icons under Home.
+// maths, server names, round action buttons and the DM icons under Home.
 import { appendChildren, createElement } from "@lib/dom";
-import { type ItemRef } from "@lib/prefs/serverRailLayout";
+import { isIpAddressName, type ItemRef } from "@lib/prefs/serverRailLayout";
+import type { ServerProfile } from "@lib/presence/profiles";
 import { uiStore } from "@stores/ui.store";
+import { authStore } from "@stores/auth.store";
 import { dmDisplayName, dmStore, type DmChannel } from "@stores/dm.store";
 import { dmUnreadCount } from "@lib/dmUnread";
 import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
@@ -60,7 +62,7 @@ export function railIcon(name: keyof typeof RAIL_ICON_PATHS): SVGSVGElement {
   return svg;
 }
 
-export const FALLBACK_COLOR = "var(--accent)";
+const FALLBACK_COLOR = "var(--accent)";
 export const COLOR_NAME_KEYS = [
   "color.blurple",
   "color.green",
@@ -69,6 +71,31 @@ export const COLOR_NAME_KEYS = [
   "color.pink",
   "color.grey",
 ] as const;
+
+export interface ServerLook {
+  readonly name: string;
+  readonly color: string;
+}
+
+function isAddressName(name: string, host: string): boolean {
+  return name === host || name === host.split(":")[0] || isIpAddressName(name);
+}
+
+// A saved profile keeps a name the user chose; one still named after its
+// address gives way to the connected server's own name.
+export function describeServer(
+  host: string,
+  profiles: readonly ServerProfile[],
+  currentHost: string,
+): ServerLook {
+  const profile = profiles.find((p) => p.host === host);
+  const color = profile?.color ?? FALLBACK_COLOR;
+  const saved = profile?.name ?? "";
+  if (saved !== "" && !isAddressName(saved, host)) return { name: saved, color };
+  const live = host === currentHost ? (authStore.getState().serverName ?? "") : "";
+  if (live !== "") return { name: live, color };
+  return { name: saved !== "" ? saved : host, color };
+}
 
 export function defaultFolderId(): string {
   return `f-${globalThis.crypto.randomUUID()}`;

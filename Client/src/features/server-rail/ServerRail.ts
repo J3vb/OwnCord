@@ -34,15 +34,16 @@ import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../../i18n/serverRail";
 import type { CountSource } from "../navigation/destinations";
 import {
-  FALLBACK_COLOR,
   atDmMode,
   defaultFolderId,
+  describeServer,
   dmItem,
   homeLabel,
   railIcon,
   roundButton,
   sameItem,
   zoneOf,
+  type ServerLook,
 } from "./serverRailParts";
 import { applyDrop, folderMenu, serverMenu, type RailMutations } from "./serverRailMenus";
 import { openServerRailJoinModal } from "./ServerRailJoinModal";
@@ -64,10 +65,6 @@ export interface ServerRailOptions {
   readonly onOpenDm?: (dm: DmChannel) => void;
   /** Message requests waiting for this account; they badge Home too. */
   readonly pendingRequests?: CountSource;
-}
-
-function isAddressName(name: string, host: string): boolean {
-  return name === host || name === host.split(":")[0] || isIpAddressName(name);
 }
 
 export function createServerRail(options: ServerRailOptions): MountableComponent {
@@ -113,16 +110,8 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     return reconcile(layout, allHosts());
   }
 
-  // A saved profile keeps a name the user chose; one still named after its
-  // address gives way to the connected server's own name.
-  function describe(host: string): { name: string; color: string } {
-    const profile = profiles.find((p) => p.host === host);
-    const color = profile?.color ?? FALLBACK_COLOR;
-    const saved = profile?.name ?? "";
-    if (saved !== "" && !isAddressName(saved, host)) return { name: saved, color };
-    const live = host === options.currentHost ? (authStore.getState().serverName ?? "") : "";
-    if (live !== "") return { name: live, color };
-    return { name: saved !== "" ? saved : host, color };
+  function describe(host: string): ServerLook {
+    return describeServer(host, profiles, options.currentHost);
   }
 
   function commit(next: RailLayout): void {
