@@ -1,16 +1,12 @@
-/**
- * Shared shape behind an overlay that opens by awaiting a fetch, plus the
- * outside-press close a side panel uses.
- */
+/** Shared shape behind an overlay that opens by awaiting a fetch. */
 
 import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement } from "@lib/dom";
 import { createModal } from "@lib/ui/modalFactory";
-import { claimBackOnPhone } from "@lib/ui/bottomSheet";
+import { bindSidePanel, type SidePanelTargets } from "@lib/ui/sidePanel";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/ui/toast";
-import { dialogOpen } from "@lib/ui/dialogOpen";
 import { shellText } from "../../i18n/shell";
 
 const log = createLogger("overlays");
@@ -57,45 +53,6 @@ function mountLoadError(
   };
 }
 
-/** What counts as "inside" a side panel for closeOnOutsidePress. */
-export interface OutsidePressTargets {
-  /** Selector of the panel's own element under the root. */
-  readonly panel: string;
-  /** Selector of the header button that toggles the panel: its click closes it. */
-  readonly toggle: string;
-}
-
-// Layers stacked over the page (a dialog, menu, sheet, toast or image viewer):
-// a press there belongs to that layer, not to the page behind the panel.
-const FLOATING_LAYERS =
-  '.modal-overlay, [aria-modal="true"], [role="dialog"], .context-menu, .bottom-sheet-overlay, .toast-container, .image-lightbox';
-
-/**
- * Close a side panel when a press lands outside it. Listens on pointerdown in
- * the capture phase, so a click that re-renders or removes its target inside
- * the panel still counts as inside, and a handler that stops propagation
- * cannot hide the press.
- */
-export function closeOnOutsidePress(
-  root: ParentNode,
-  targets: OutsidePressTargets,
-  onClose: () => void,
-  signal: AbortSignal,
-): void {
-  document.addEventListener(
-    "pointerdown",
-    (e) => {
-      const target = e.target;
-      if (!(target instanceof Element)) return;
-      if (root.querySelector(targets.panel)?.contains(target) === true) return;
-      if (target.closest(targets.toggle) !== null) return;
-      if (target.closest(FLOATING_LAYERS) !== null || dialogOpen()) return;
-      onClose();
-    },
-    { capture: true, signal },
-  );
-}
-
 /**
  * Shared shape behind an overlay that opens by awaiting a fetch: an
  * instance/opening guard against a double-click during the round trip,
@@ -119,11 +76,13 @@ export function createAsyncOverlayController<T>(opts: {
   /** When set, a failed load also mounts an inline error dialog with a Retry
    *  button (re-runs the load) instead of leaving only the toast. */
   readonly inlineError?: { readonly message: string; readonly retryLabel: string };
-  /** A side panel closes on a press outside it (see closeOnOutsidePress). */
-  readonly outsidePress?: OutsidePressTargets;
-  /** A side panel closes on Back on the phone layout (see claimBackOnPhone). */
-  readonly backOnPhone?: boolean;
-}): { open(): Promise<void>; close(): void; isOpen(): boolean } {
+  /** Checked once the load lands, and by an open() during the load: true
+   *  drops the result unmounted (what it was opened for is gone, such as the
+   *  channel the viewer left) and lets a new open() start over. */
+  readonly isStale?: () => boolean;
+  /** A channel side panel: its shared behaviour (see bindSidePanel). */
+  readonly sidePanel?: SidePanelTargets;
+}): { open(): Promise<void>; close(): void; isOpen(): boolean; isPending(): boolean } {
   let instance: MountableComponent | null = null;
   let opening = false;
   let generation = 0;
@@ -145,9 +104,8 @@ export function createAsyncOverlayController<T>(opts: {
     instance = opts.build(data, liveRoot, close);
     instance.mount(liveRoot);
     mounted = new Disposable();
-    if (opts.outsidePress !== undefined)
-      closeOnOutsidePress(liveRoot, opts.outsidePress, close, mounted.signal);
-    if (opts.backOnPhone === true) claimBackOnPhone(close, mounted.signal);
+    if (opts.sidePanel !== undefined)
+      bindSidePanel(liveRoot, opts.sidePanel, close, mounted.signal);
   }
 
   function showLoadFailure(err: unknown): void {
@@ -165,7 +123,13 @@ export function createAsyncOverlayController<T>(opts: {
 
   async function open(): Promise<void> {
     const root = opts.getRoot();
-    if (instance !== null || root === null || opening) return;
+    if (instance !== null || root === null) return;
+    // A load still wanted runs on; a stale one (the viewer moved on) is
+    // cancelled, so this open starts over for what is current now.
+    if (opening) {
+      if (isPending()) return;
+      close();
+    }
     if (opts.canOpen?.() === false) return;
     opening = true;
     const gen = generation;
@@ -173,7 +137,7 @@ export function createAsyncOverlayController<T>(opts: {
       const data = await opts.load();
       if (gen !== generation) return;
       const liveRoot = opts.getRoot();
-      if (liveRoot === null) return;
+      if (liveRoot === null || opts.isStale?.() === true) return;
       mountLoaded(data, liveRoot);
     } catch (err) {
       if (gen !== generation) return;
@@ -183,5 +147,9 @@ export function createAsyncOverlayController<T>(opts: {
     }
   }
 
-  return { open, close, isOpen: () => instance !== null };
+  function isPending(): boolean {
+    return opening && opts.isStale?.() !== true;
+  }
+
+  return { open, close, isOpen: () => instance !== null, isPending };
 }

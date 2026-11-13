@@ -281,9 +281,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onContentGated: closeActiveLightbox,
       focusFallback: ms.focusReachable,
       onJoinCall: pg.joinDmCall,
-      onOpenPins: () => {
-        void ms.chatAreaResult.openPinnedPanel();
-      },
+      onOpenPins: () => void ms.chatAreaResult.openPinnedPanel(),
+      onOpenThreadList: () => void ms.chatAreaResult.openThreadList(),
     });
 
     // Wire voice error callback to toast

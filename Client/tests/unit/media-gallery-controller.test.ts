@@ -184,6 +184,28 @@ describe("createMediaGalleryController", () => {
     expect(panel.destroy).toHaveBeenCalledTimes(2);
   });
 
+  it("never mounts a gallery whose code lands after the viewer left the channel", async () => {
+    const ctrl = make();
+    const opening = ctrl.open();
+    setActiveChannel(6);
+    await opening;
+    expect(createChannelMediaGallery).not.toHaveBeenCalled();
+    expect(ctrl.isOpen()).toBe(false);
+  });
+
+  it("opens for the new channel when asked again after a switch while loading", async () => {
+    const ctrl = make();
+    const first = ctrl.open();
+    expect(ctrl.isPending()).toBe(true);
+    setActiveChannel(6);
+    expect(ctrl.isPending()).toBe(false);
+    await ctrl.open();
+    await first;
+    expect(createChannelMediaGallery).toHaveBeenCalledOnce();
+    expect(lastOptions().channelName).toBe("other");
+    ctrl.cleanup();
+  });
+
   it("does not open on a channel gated behind the NSFW check", async () => {
     setActiveChannel(7);
     const ctrl = make();

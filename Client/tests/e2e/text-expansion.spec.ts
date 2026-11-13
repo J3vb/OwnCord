@@ -487,10 +487,8 @@ test.describe("messaging text", () => {
     await page.locator("[data-testid='pin-btn']").click();
     const panel = page.locator(".pinned-panel");
     await expect(panel).toHaveAccessibleName("Pinned messages");
-    await expect(panel.locator(".pinned-panel__close")).toHaveAccessibleName(
-      "Close pinned messages",
-    );
-    await page.locator(".pinned-panel__close").click();
+    await expect(panel.locator(".side-panel__close")).toHaveAccessibleName("Close pinned messages");
+    await page.locator(".side-panel__close").click();
 
     await expect(page.locator("[data-testid='search-input']")).toHaveAttribute(
       "placeholder",
@@ -541,11 +539,11 @@ test.describe("messaging text", () => {
     await page.locator("[data-testid='pin-btn']").click();
     const panel = page.locator(".pinned-panel");
     await expect(panel).toHaveAccessibleName(expanded("Pinned messages"));
-    await expect(panel.locator(".pinned-panel__close")).toHaveAccessibleName(
+    await expect(panel.locator(".side-panel__close")).toHaveAccessibleName(
       expanded("Close pinned messages"),
     );
-    await expectWhole(panel.locator(".pinned-panel__close"));
-    await panel.locator(".pinned-panel__close").click();
+    await expectWhole(panel.locator(".side-panel__close"));
+    await panel.locator(".side-panel__close").click();
 
     // The search overlay resolves its placeholder and label through the seam.
     await page.locator("[data-testid='search-input']").click();

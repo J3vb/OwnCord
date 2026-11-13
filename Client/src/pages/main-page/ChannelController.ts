@@ -28,7 +28,6 @@ import {
 } from "../../features/threads/threadNavigation";
 import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
 import { viewChannel } from "@lib/prefs/lastChannel";
-import { messagingText } from "../../i18n/messaging";
 import { leaveChannel, markChannelRead } from "@lib/readState";
 import { readPointerEnabled } from "@lib/net/serverCapabilities";
 import { WsErrorCode } from "@lib/protocolTypes";
@@ -73,6 +72,8 @@ export interface ChannelControllerOptions {
   readonly onJoinCall?: (channelId: number) => void;
   /** Open the pinned-messages panel (the "pinned messages" link of a pin row). */
   readonly onOpenPins?: () => void;
+  /** Open the channel's thread list (a sidebar's "N more" row). */
+  readonly onOpenThreadList?: () => void;
 }
 
 export interface ChannelController {
@@ -91,8 +92,6 @@ export interface ChannelController {
   openThread(thread: ThreadInfo): void;
   /** The thread the side panel has open, or null. */
   readonly openThreadId: number | null;
-  /** Open or close the channel's thread list under the header's Threads button. */
-  toggleThreadList(anchor: HTMLButtonElement): void;
   /** Open the composer's attachment picker (Ctrl+Shift+U). No-op with no composer. */
   openFilePicker(): void;
   /** Open or close the composer's emoji or GIF picker (Ctrl+E, Ctrl+G). */
@@ -151,7 +150,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   ];
 
   function destroyChannel(): void {
-    st.threadList?.close();
     st.threadHost?.close();
     // The reaction picker is a body-mounted overlay keyed to a message in
     // this channel — every other teardown path already routes through here,
@@ -345,43 +343,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     setThreadNavigationConsumer(null);
   }
 
-  /** The header's Threads button: close the list when it is open, else open it
-   *  for the mounted channel. Its code loads on the first open. */
-  function toggleThreadList(anchor: HTMLButtonElement): void {
-    if (st.threadList !== null) {
-      st.threadList.close();
-      return;
-    }
-    const channelId = st.currentChannelId;
-    const signal = st.channelAbort?.signal;
-    if (channelId === null || signal === undefined || st.threadHost === null) return;
-    const host = st.threadHost;
-    // A second click while the code loads must not queue a second popover.
-    anchor.setAttribute("aria-expanded", "true");
-    import("../../features/threads/ThreadListPopover").then(
-      ({ openThreadListPopover }) => {
-        if (signal.aborted) {
-          anchor.setAttribute("aria-expanded", "false");
-          return;
-        }
-        st.threadList = openThreadListPopover({
-          api: st.api,
-          channelId,
-          anchor,
-          signal,
-          onOpenThread: (thread) => host.open(thread),
-          onClosed: () => {
-            st.threadList = null;
-          },
-        });
-      },
-      () => {
-        anchor.setAttribute("aria-expanded", "false");
-        st.showToast(messagingText("thread.panelLoadFailed"), "error");
-      },
-    );
-  }
-
   // The sidebar's thread rows reach this channel view through threadNavigation.
   if (st.threadHost !== null) {
     setThreadNavigationConsumer({
@@ -395,9 +356,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           st.threadHost!.openById(req.threadId, req.parentId, signal);
           return;
         }
-        const anchor = st.chatHeaderRefs?.threadsBtn;
-        if (anchor !== undefined && !anchor.hidden && st.threadList === null)
-          toggleThreadList(anchor);
+        st.opts.onOpenThreadList?.();
       },
     });
   }
@@ -407,7 +366,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     destroyChannel,
     destroy,
     openThread: (thread) => st.threadHost?.open(thread),
-    toggleThreadList,
     get openThreadId() {
       return st.threadHost?.openThreadId ?? null;
     },

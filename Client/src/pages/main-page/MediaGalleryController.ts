@@ -14,6 +14,7 @@ import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import { openSettings } from "@stores/ui.store";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
+import { closeWhenChannelLeft, sidePanelStale } from "../../features/messaging/sidePanelScope";
 import { shellText } from "../../i18n/shell";
 import { createAsyncOverlayController } from "./OverlayManagers";
 
@@ -34,6 +35,9 @@ export type MessageAttachmentsSubscriber = (
 
 export interface MediaGalleryController {
   toggle(): Promise<void>;
+  open(): Promise<void>;
+  isOpen(): boolean;
+  isPending(): boolean;
   cleanup(): void;
 }
 
@@ -101,16 +105,7 @@ export function createMediaGalleryController(opts: {
               }),
             );
           }
-          // Leaving the channel, losing it (deleted or no longer readable,
-          // which removes it from the store) or it becoming gated closes the
-          // panel; the server would refuse its next page anyway.
-          live.onStoreChange(
-            channelsStore,
-            (s) => s.activeChannelId === id && s.channels.has(id) && !nsfwContentBlocked(id),
-            (stillOpen) => {
-              if (!stillOpen) close();
-            },
-          );
+          closeWhenChannelLeft(live, id, close);
         },
         destroy(): void {
           live.destroy();
@@ -120,7 +115,8 @@ export function createMediaGalleryController(opts: {
     },
     errorLog: "Failed to open the media gallery", // i18n-exempt: developer log line, never shown
     errorToast: shellText("media.openFailed"),
-    outsidePress: { panel: ".media-gallery", toggle: ".media-btn" },
+    isStale: () => sidePanelStale(channelId, opts.getCurrentChannelId()),
+    sidePanel: { panel: ".media-gallery", toggle: ".media-btn", fallbackFocus: ".ch-more-btn" },
   });
 
   async function toggle(): Promise<void> {
@@ -131,5 +127,11 @@ export function createMediaGalleryController(opts: {
     await controller.open();
   }
 
-  return { toggle, cleanup: controller.close };
+  return {
+    toggle,
+    open: controller.open,
+    isOpen: controller.isOpen,
+    isPending: controller.isPending,
+    cleanup: controller.close,
+  };
 }

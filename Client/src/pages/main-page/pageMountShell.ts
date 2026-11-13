@@ -414,8 +414,7 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
       rail: ms.railSlot,
       onSearch: () => ms.qsManager.open(),
       onOpen: () => {
-        ms.chatAreaResult.closePinnedPanel();
-        ms.chatAreaResult.closeMediaGallery();
+        ms.chatAreaResult.closeSidePanels();
         st.memberColumn?.closeOverlay();
       },
     });

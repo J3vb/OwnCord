@@ -1,14 +1,16 @@
-/* ═══ Channel Media Gallery ═══ */
-/* Drops down below the chat header like the pins panel, so the header's
-   Media button stays clickable to close it. */
-.media-gallery {
+/* ═══ Channel side panel (pins, threads, media: lib/ui/sidePanel.ts) ═══ */
+/* Drops down below the chat header over the member list and an open thread,
+   so the header's buttons stay clickable to close it. */
+.side-panel {
   position: absolute;
   top: calc(var(--header-height, 48px) + env(safe-area-inset-top));
   right: 0;
   z-index: 200;
   width: 560px;
   max-width: 100%;
-  height: min(80vh, 720px);
+  /* Sized to its content up to this height; the gallery holds it from the
+     start, so its grid does not grow under the reader while pages load. */
+  max-height: min(80vh, 720px);
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -18,17 +20,17 @@
   animation: pinned-enter 0.15s ease-out;
 }
 
-.media-gallery__header {
+.side-panel__header {
   padding: 12px 16px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   flex-shrink: 0;
 }
 
-.media-gallery__title {
+.side-panel__title {
   margin: 0;
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -38,7 +40,7 @@
   color: var(--text-normal);
 }
 
-.media-gallery__channel {
+.side-panel__subtitle {
   font-size: var(--font-size-sm);
   font-weight: 400;
   color: var(--text-muted);
@@ -47,7 +49,16 @@
   white-space: nowrap;
 }
 
-.media-gallery__close {
+.side-panel__controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.side-panel__controls:empty {
+  display: none;
+}
+
+.side-panel__close {
   width: 24px;
   height: 24px;
   flex-shrink: 0;
@@ -60,8 +71,24 @@
   color: var(--text-muted);
   cursor: pointer;
 }
-.media-gallery__close:hover {
+.side-panel__close:hover {
   color: var(--text-normal);
+}
+
+.side-panel__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+.media-gallery.side-panel {
+  height: min(80vh, 720px);
+}
+/* The gallery's tabs draw their own line under the header. */
+.media-gallery .side-panel__body {
+  border-top: none;
 }
 
 .media-gallery__tabs {
@@ -346,12 +373,14 @@
 
 /* Phones: the panel fills the space below the header. */
 @media (max-width: 600px) {
-  .media-gallery {
+  .side-panel,
+  .media-gallery.side-panel {
     position: fixed;
     left: 0;
     bottom: 0;
     width: auto;
     height: auto;
+    max-height: none;
     border-radius: 0;
     padding-bottom: var(--safe-bottom, 0px);
   }
@@ -364,7 +393,7 @@
 }
 
 @media (pointer: coarse) {
-  .media-gallery__close {
+  .side-panel__close {
     width: 44px;
     height: 44px;
   }
@@ -375,7 +404,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .media-gallery {
+  .side-panel {
     animation: none;
   }
 }
