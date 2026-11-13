@@ -40,6 +40,10 @@ import {
   incomingBannerEl,
 } from "../../helpers/mainPageHarness";
 import { withFakeTimers } from "../../helpers/withFakeTimers";
+import {
+  markRequestPending,
+  resetPendingRequests,
+} from "../../../src/features/direct-messages/pendingRequests";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
@@ -422,6 +426,31 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(stopRingback).toHaveBeenCalledTimes(1);
     expect(panel.dataset.state).not.toBe("outgoing");
     expect(panel.dataset.state).not.toBe("unanswered");
+    m.page.destroy?.();
+  });
+
+  it("accepted with no message: a click in a DM marked as waiting still places the call", async () => {
+    const ws = fakeWs();
+    connectedDm(50);
+    m.page = await mountSettled(m.container, ws);
+    // An earlier refusal marked the DM; the other person has since accepted
+    // without writing, which reaches this client as no frame at all.
+    markRequestPending(50);
+
+    startCall();
+    finishCallJoin();
+
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "voice_join",
+        payload: expect.objectContaining({ channel_id: 50 }),
+      }),
+    );
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    expect(voiceStore.getState().currentChannelId).toBe(50);
+    expect(callPanelEl().dataset.state).toBe("outgoing");
+    expect(document.body.textContent).not.toContain("accepts your message request");
+    resetPendingRequests();
     m.page.destroy?.();
   });
 

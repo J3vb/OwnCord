@@ -311,6 +311,7 @@ export function pageChatAreaMock() {
           nameEl: document.createElement("span"),
           topicEl: document.createElement("span"),
           callBtn: document.createElement("button"),
+          videoCallBtn: document.createElement("button"),
           profileBtn,
           memberListBtn: document.createElement("button"),
           callChatBtn: document.createElement("button"),

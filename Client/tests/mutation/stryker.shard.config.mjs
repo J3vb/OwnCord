@@ -532,7 +532,10 @@ export const shards = {
     "src/lib/ui/select.ts",
   ],
   "lib-rest-17": [
+    "src/features/direct-messages/callRefusal.ts",
     "src/features/direct-messages/keptCallDms.ts",
+    "src/features/direct-messages/pendingRequestNotice.ts",
+    "src/features/direct-messages/pendingRequests.ts",
     "src/features/forums/view.ts",
     "src/features/messaging/sameValue.ts",
     "src/features/messaging/shortcodes.ts",

@@ -26,6 +26,12 @@ import type { ApiClient } from "../../src/lib/api";
 import { withThreadsStore } from "../../src/stores/threadsLoader";
 import { acceptSharesFor, sendShareTo } from "../../src/features/share/shareInbox";
 import { setFocusedThread, threadsStore, upsertThread } from "../../src/stores/threads.store";
+import {
+  isRequestPending,
+  markRequestPending,
+  noteRingSent,
+  takeRingChannel,
+} from "../../src/features/direct-messages/pendingRequests";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -286,6 +292,14 @@ const PROBES: readonly Probe[] = [
     name: "dm:store",
     mutate: () => setDmChannels([dm]),
     isInitial: () => dmStore.getState().channels.length === 0,
+  },
+  {
+    name: "dm:pending-requests",
+    mutate: () => {
+      markRequestPending(77);
+      noteRingSent("ring-77", 77);
+    },
+    isInitial: () => !isRequestPending(77) && takeRingChannel("ring-77") === null,
   },
   {
     // Bumped, not reset to INITIAL (OC-0362): a late GET /emoji from the old
