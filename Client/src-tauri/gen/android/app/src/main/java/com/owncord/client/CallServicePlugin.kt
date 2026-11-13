@@ -15,7 +15,6 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
-import java.util.UUID
 
 @InvokeArg
 class SetCallArgs {
@@ -90,7 +89,10 @@ class CallWants {
 class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
   private var askedForCallPermissions = false
   private val wants = CallWants()
-  private val buttons = CallButtons { UUID.randomUUID().toString() }
+  private val buttons = CallRingState.buttons
+  // Accept or a tap on a ring that started the app: held until the webview
+  // listens for actions, which it does only after this plugin loaded.
+  private var launchAction: JSObject? = null
   private var started = false
   private var startedWithCamera = false
   private var screenKeptOn = false
@@ -103,6 +105,17 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
   override fun load(webView: WebView) {
     super.load(webView)
     CallActionReceiver.sink = { intent -> pressed(intent, throughActivity = false) }
+    launchAction = actionOf(activity.intent, throughActivity = true)
+  }
+
+  // The webview starts listening: an action that started the app goes now.
+  @Command
+  override fun registerListener(invoke: Invoke) {
+    super.registerListener(invoke)
+    val held = launchAction ?: return
+    if (!hasListener(ACTION_EVENT)) return
+    launchAction = null
+    trigger(ACTION_EVENT, held)
   }
 
   // Accept, and a tap on the ring, open the app and arrive here.
@@ -112,14 +125,21 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   private fun pressed(intent: Intent, throughActivity: Boolean) {
+    val payload = actionOf(intent, throughActivity) ?: return
+    trigger(ACTION_EVENT, payload)
+  }
+
+  // What the webview hears of a press, or null for an intent that is no call
+  // button of ours. A decline takes the ring down here.
+  private fun actionOf(intent: Intent?, throughActivity: Boolean): JSObject? {
     // Every intent that reaches the activity comes by here: one that is not a
     // call button is not this plugin's to read.
-    if (!CallActions.names(intent.action)) return
+    if (intent == null || !CallActions.names(intent.action)) return null
     val channelId =
       if (intent.hasExtra(CallActions.EXTRA_CHANNEL)) intent.getLongExtra(CallActions.EXTRA_CHANNEL, 0)
       else null
     val token = intent.getStringExtra(CallActions.EXTRA_TOKEN)
-    val event = buttons.read(intent.action, channelId, token, throughActivity) ?: return
+    val event = buttons.read(intent.action, channelId, token, throughActivity) ?: return null
     // Declined: it stops ringing at once, whatever the webview is doing. An
     // accepted ring stays up until the webview has joined or said why not.
     if (event.kind == CallEvent.DECLINE && event.channelId != null && buttons.ringDown(event.channelId)) {
@@ -129,7 +149,8 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
     val payload = JSObject()
     payload.put("kind", event.kind)
     if (event.channelId != null) payload.put("channelId", event.channelId)
-    trigger("action", payload)
+    intent.getStringExtra(CallActions.EXTRA_INSTANCE)?.let { payload.put("instance", it) }
+    return payload
   }
 
   @Command
@@ -268,5 +289,9 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
     if (missing.isNotEmpty()) {
       activity.requestPermissions(missing.toTypedArray(), 41)
     }
+  }
+
+  companion object {
+    private const val ACTION_EVENT = "action"
   }
 }

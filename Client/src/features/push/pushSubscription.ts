@@ -17,6 +17,7 @@ import { RestErrorCode } from "@lib/protocolTypes";
 import type { SessionScope } from "@lib/net/sessionScope";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
+import { soundSwitchOn } from "@lib/prefs/soundPrefs";
 import { authStore } from "@stores/auth.store";
 import { connectText } from "../../i18n/connect";
 import { desktop } from "../../platform/desktop";
@@ -29,6 +30,13 @@ const log = createLogger("push");
 /** Settings → Notifications' message switch: off means no push either. */
 const NOTIFICATIONS_PREF = "desktopNotifications";
 
+/** A call's ring from push rings without the phone's ringtone while the ring
+ *  sound is off in the app. Do Not Disturb is left out: the server sends no
+ *  ring then. */
+function ringQuiet(): boolean {
+  return !loadPref<boolean>("callSounds", true) || !soundSwitchOn("ring");
+}
+
 export type PushApi = Pick<ApiClient, "getPushVapid" | "subscribePush" | "getSession">;
 
 interface Session {
@@ -37,6 +45,9 @@ interface Session {
   readonly instance: string;
   readonly serverName: string;
 }
+
+/** The ring sound the push app's registration was last given. */
+let registeredQuiet: boolean | null = null;
 
 /** The session push is set up for; null after sign-out. */
 let session: Session | null = null;
@@ -55,6 +66,7 @@ void registerSessionReset(
       void desktop.pushRegistration.unregister(session.instance);
     }
     session = null;
+    registeredQuiet = null;
     attempt += 1;
     pushStore.setState(() => INITIAL_PUSH_STATE);
   },
@@ -91,6 +103,15 @@ export function onReady(api: PushApi): void {
   const current = session;
   desktop.pushRegistration.follow(scope.signal, onHostEvent);
   onPrefChange([NOTIFICATIONS_PREF], () => void registerPush(current), scope.signal);
+  // The phone keeps the ring's words from the registration: register again
+  // when the ring sound is switched, and only then.
+  onPrefChange(
+    "any",
+    () => {
+      if (registeredQuiet !== null && registeredQuiet !== ringQuiet()) void registerPush(current);
+    },
+    scope.signal,
+  );
   void registerPush(current);
 }
 
@@ -121,6 +142,7 @@ async function registerPush(current: Session): Promise<void> {
   if (!owns()) return;
   if (!loadPref<boolean>(NOTIFICATIONS_PREF, true)) {
     void desktop.pushRegistration.unregister(current.instance);
+    registeredQuiet = null;
     setPushSetting("muted");
     return;
   }
@@ -128,14 +150,17 @@ async function registerPush(current: Session): Promise<void> {
   try {
     const vapid = await current.api.getPushVapid(current.scope.signal);
     if (!owns()) return;
+    const quiet = ringQuiet();
     const result = await desktop.pushRegistration.register({
       instance: current.instance,
       vapid: vapid.public_key,
       serverName: current.serverName,
       title: connectText("notifications.push.title", { server: current.serverName }),
       body: connectText("notifications.push.body"),
+      ringQuiet: quiet,
     });
     if (!owns()) return;
+    if (result.ok) registeredQuiet = quiet;
     if (!result.ok) {
       await showFailure(result.reason, owns);
       return;

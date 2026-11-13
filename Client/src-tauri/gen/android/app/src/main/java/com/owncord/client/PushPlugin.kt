@@ -25,6 +25,8 @@ class PushRegisterArgs {
   var serverName: String = ""
   var title: String = ""
   var body: String = ""
+  // The ring a call's push shows while no page runs.
+  var ring: ShowRingArgs = ShowRingArgs()
 }
 
 @InvokeArg
@@ -167,6 +169,7 @@ class PushPlugin(private val activity: Activity) : Plugin(activity) {
       invoke.reject(PushErrors.NO_SLOT)
       return
     }
+    PushStore.saveRing(context, args.instance, args.ring)
     PushHub.await(args.instance, invoke)
     try {
       UnifiedPush.register(context, args.instance, args.serverName, args.vapid)

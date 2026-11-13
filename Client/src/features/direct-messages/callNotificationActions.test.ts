@@ -60,7 +60,7 @@ let send: ReturnType<typeof vi.fn>;
 let opened: ReturnType<typeof vi.fn<(channelId: number, messageId?: number) => void>>;
 let joined: number[];
 let declined: number[];
-let st: { ringCtrl: RingController | null };
+let st: { ringCtrl: RingController | null; ws: WsClient };
 let acceptRing: ReturnType<typeof vi.fn<(withVideo: boolean) => void>>;
 let stop: () => void;
 let forgetJump: () => void;
@@ -106,7 +106,7 @@ beforeEach(() => {
   forgetJump = setMessageJumpHandler(opened);
   joined = [];
   declined = [];
-  st = { ringCtrl: null };
+  st = { ringCtrl: null, ws: { send } as unknown as WsClient };
   st.ringCtrl = createRingController({
     onRingStateChange: () => undefined,
     onChime: () => undefined,
@@ -121,7 +121,7 @@ beforeEach(() => {
     voice: { tryConsume: () => true },
     voiceVideo: { tryConsume: () => true },
   });
-  stop = followCallActions(st, { acceptRing }, controls);
+  stop = followCallActions(st, { acceptRing, joinDmCall: vi.fn() }, controls);
 });
 
 afterEach(() => {

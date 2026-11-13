@@ -148,6 +148,16 @@ per channel per 60 seconds; a `404`/`410` response prunes the subscription,
 a `429` or `5xx` (or a network error) gets two retries — three attempts
 total — before being dropped; any other failure status drops immediately.
 
+A direct message call also rings by push: the server sends `{"t":"ring","c":<channel id>}`
+to every subscription of the people it rings, online or not (a phone whose app
+sleeps keeps no connection; one whose app is open ignores it), and
+`{"t":"ring_end","c":<channel id>}` when one of them declines or joins the call
+on any device, or the caller leaves it. Both carry only the DM channel id, are
+sent at high urgency with a 30-second TTL, get one retry a second later, and
+skip a member on Do Not Disturb (a ring end is always sent). The server
+remembers a ring for 35 seconds, in memory only: after a restart a ring rings
+out on the phone instead of being taken down.
+
 The Android app registers through UnifiedPush: each member's own push app
 (ntfy, or another distributor) receives the pushes, so no Google service is
 involved, and the phone shows "New messages on <server>" while the app is

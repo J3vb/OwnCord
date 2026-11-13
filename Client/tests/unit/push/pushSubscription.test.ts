@@ -239,6 +239,24 @@ describe("push subscription", () => {
     expect(pushStore.getState().setting).toBe("muted");
   });
 
+  it("gives the ring sound to the registration, and registers again only when it is switched", async () => {
+    savePref("callSounds", true);
+    const { api } = makeApi();
+    onReady(api);
+    await settle();
+    expect(host.register).toHaveBeenLastCalledWith(expect.objectContaining({ ringQuiet: false }));
+
+    savePref("flashTaskbar", false);
+    await settle();
+    expect(host.register).toHaveBeenCalledTimes(1);
+
+    savePref("callSounds", false);
+    await settle();
+    expect(host.register).toHaveBeenCalledTimes(2);
+    expect(host.register).toHaveBeenLastCalledWith(expect.objectContaining({ ringQuiet: true }));
+    savePref("callSounds", true);
+  });
+
   it("follows the host for as long as the session lasts", async () => {
     const { api, scope } = makeApi();
     onReady(api);

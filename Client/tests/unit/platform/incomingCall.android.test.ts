@@ -12,6 +12,7 @@ import { startRingChime, stopRingChime } from "../../../src/lib/media/notificati
 import { setChannelMutesHost } from "../../../src/lib/prefs/channelMutes";
 import { savePref } from "../../../src/lib/prefs/preferences";
 import { createRingController, type RingController } from "../../../src/lib/voice/callRing";
+import type { WsClient } from "../../../src/lib/ws";
 import { desktop } from "../../../src/platform/desktop";
 // What the app loads on first use: in before a test's clock is a fake one.
 import "../../../src/features/direct-messages/callAlerts";
@@ -118,7 +119,10 @@ const pass = (ms: number): Promise<unknown> => vi.advanceTimersByTimeAsync(ms);
 /** The main page's ring controller and button handler, as it mounts them. */
 function mountPage(): { ring: RingController; joined: number[]; close(): void } {
   const joined: number[] = [];
-  const st: { ringCtrl: RingController | null } = { ringCtrl: null };
+  const st: { ringCtrl: RingController | null; ws: WsClient } = {
+    ringCtrl: null,
+    ws: { send: () => {} } as unknown as WsClient,
+  };
   const ring = createRingController({
     onRingStateChange: () => {},
     onChime: (playing) => (playing ? startRingChime() : stopRingChime()),
@@ -136,7 +140,7 @@ function mountPage(): { ring: RingController; joined: number[]; close(): void } 
   st.ringCtrl = ring;
   const stop = followCallActions(
     st,
-    { acceptRing: () => ring.accept() },
+    { acceptRing: () => ring.accept(), joinDmCall: () => {} },
     { onMuteToggle: () => {}, onDisconnect: () => {} },
   );
   return {

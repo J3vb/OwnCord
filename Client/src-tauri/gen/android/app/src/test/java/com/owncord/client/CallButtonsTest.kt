@@ -136,4 +136,14 @@ class CallButtonsTest {
     assertNull(CallFace(CallFace.LIVE, "In a call", null, "Leave").micAction())
     assertNull(CallFace.PLAIN.micAction())
   }
+
+  @Test
+  fun saysWhichRingIsUp() {
+    assertFalse(buttons.isUp(5))
+    buttons.ringUp(5)
+    assertTrue(buttons.isUp(5))
+    assertFalse(buttons.isUp(6))
+    buttons.ringDown(5)
+    assertFalse(buttons.isUp(5))
+  }
 }

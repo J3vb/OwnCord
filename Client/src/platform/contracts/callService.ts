@@ -33,7 +33,13 @@ export type CallMic = "live" | "muted" | "locked";
  *  which may have stopped ringing by the time the press arrives. */
 export type CallAction =
   | { readonly kind: "mute" | "unmute" | "leave" }
-  | { readonly kind: "accept" | "decline" | "open"; readonly channelId: number };
+  | {
+      readonly kind: "accept" | "decline" | "open";
+      readonly channelId: number;
+      /** Set on a ring a push showed with no page running: the push
+       *  registration (server and account) it came for. */
+      readonly instance?: string;
+    };
 
 export interface CallService {
   /** Tell the host the call's state. Never rejects: a host that refuses only

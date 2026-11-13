@@ -17,9 +17,14 @@ class CallActionReceiver : BroadcastReceiver() {
       heard(intent)
       return
     }
-    // The process came up for this press alone, so there is no webview to
-    // tell. A ring the process before it left on screen goes at least.
-    if (intent.action == CallActions.DECLINE) CallRing.cancel(context)
+    // No webview to tell: the process came up for this press alone, or a push
+    // showed the ring with no page running. The ring goes at least; the caller
+    // is not told, and rings until their call times out.
+    if (intent.action != CallActions.DECLINE) return
+    if (intent.hasExtra(CallActions.EXTRA_CHANNEL)) {
+      CallRingState.buttons.ringDown(intent.getLongExtra(CallActions.EXTRA_CHANNEL, 0))
+    }
+    CallRing.cancel(context)
   }
 
   companion object {
@@ -29,9 +34,15 @@ class CallActionReceiver : BroadcastReceiver() {
     // What a button sends here when it is pressed. The action tells the
     // buttons apart, and the request code the conversations, so each keeps an
     // intent of its own.
-    fun press(context: Context, action: String, channelId: Long? = null): PendingIntent {
+    fun press(
+      context: Context,
+      action: String,
+      channelId: Long? = null,
+      instance: String? = null,
+    ): PendingIntent {
       val intent = Intent(action).setClass(context, CallActionReceiver::class.java)
       if (channelId != null) intent.putExtra(CallActions.EXTRA_CHANNEL, channelId)
+      if (instance != null) intent.putExtra(CallActions.EXTRA_INSTANCE, instance)
       return PendingIntent.getBroadcast(
         context,
         CallActions.requestCode(channelId),

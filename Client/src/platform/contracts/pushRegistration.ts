@@ -35,6 +35,9 @@ export interface PushRegisterRequest {
   /** The "new messages" notification's text, in the app's language. */
   readonly title: string;
   readonly body: string;
+  /** A call's ring from push shows without the phone's ringtone: the ring
+   *  sound is off in the app. */
+  readonly ringQuiet: boolean;
 }
 
 /** Why a registration did not happen: no push app installed, several and
