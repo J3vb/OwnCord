@@ -213,9 +213,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     byPlaceholder("New password").value = "new-password-1";
     byPlaceholder("Confirm new password").value = "new-password-1";
     const changeBtn = [...m.container.querySelectorAll<HTMLButtonElement>("button")].find(
-      (b) => b.textContent === "Change Password",
+      (b) => b.textContent === "Change password",
     );
-    if (changeBtn === undefined) throw new Error("no Change Password button");
+    if (changeBtn === undefined) throw new Error("no Change password button");
     changeBtn.click();
 
     await vi.waitFor(() => {

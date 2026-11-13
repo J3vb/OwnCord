@@ -187,7 +187,7 @@ describe("Account tab: security summary", () => {
     btn("totp-disable-btn").click();
     btn("sessions-revoke-all").click();
     const armed = [...card().querySelectorAll<HTMLElement>(".account-delete-btn")].filter(shown);
-    expect(armed.map((b) => b.textContent)).toEqual(["Confirm Disable", "Sign out everywhere"]);
+    expect(armed.map((b) => b.textContent)).toEqual(["Confirm disable", "Sign out everywhere"]);
   });
 
   it("keeps the change-password form closed until Change… opens it", () => {
@@ -278,14 +278,14 @@ describe("Account tab: profile strip", () => {
     expect(inEditor(".account-field-edit")).toBe(true);
     expect(inEditor("[data-testid='username-edit-input']")).toBe(true);
 
-    // Open, Save Profile takes the accent, also with the username form open.
+    // Open, Save profile takes the accent, also with the username form open.
     edit.click();
     expect(editor.hidden).toBe(false);
     expect(edit.getAttribute("aria-expanded")).toBe("true");
-    expect(accentIn(profile)).toEqual(["Save Profile"]);
+    expect(accentIn(profile)).toEqual(["Save profile"]);
     profile.querySelector<HTMLButtonElement>(".account-field-edit")!.click();
     expect(shown(pane.querySelector("[data-testid='username-edit-input']"))).toBe(true);
-    expect(accentIn(profile)).toEqual(["Save Profile"]);
+    expect(accentIn(profile)).toEqual(["Save profile"]);
 
     edit.click();
     expect(editor.hidden).toBe(true);
@@ -365,10 +365,10 @@ describe("Account tab: status and danger zone", () => {
     expect(danger!.querySelector(".account-delete-btn")).not.toBeNull();
   });
 
-  it("makes Change Avatar a secondary action", () => {
+  it("makes Change avatar a secondary action", () => {
     pane = buildAccountTab(options(), ac.signal);
     const avatar = [...pane.querySelectorAll("button")].find(
-      (b) => b.textContent === "Change Avatar",
+      (b) => b.textContent === "Change avatar",
     )!;
     expect(avatar.classList.contains("secondary")).toBe(true);
   });

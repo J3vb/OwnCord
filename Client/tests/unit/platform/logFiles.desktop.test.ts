@@ -66,7 +66,7 @@ describeLogFilesSuite(async () => {
 });
 
 // The `clearAll` half: no exported seam until this milestone, so its coverage
-// lands with the move. The old path (the Clear Log Files button in
+// lands with the move. The old path (the Clear log files button in
 // AdvancedTab) keeps its own test in tests/unit/advanced-tab.test.ts.
 /** Initialises the module on /logs and buffers one entry that has not been flushed yet. */
 async function initWithBufferedEntry(mod: Awaited<ReturnType<typeof freshModule>>): Promise<void> {

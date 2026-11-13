@@ -332,7 +332,7 @@ describe("AdminActions", () => {
     });
   });
 
-  describe("MemberContextMenu - Developer Mode Copy User ID", () => {
+  describe("MemberContextMenu - Developer mode Copy User ID", () => {
     let writeText: ReturnType<typeof vi.fn>;
     beforeEach(() => {
       writeText = vi.fn().mockResolvedValue(undefined);
@@ -661,7 +661,7 @@ describe("MemberContextMenu - full menu (3C-3)", () => {
     destroy();
   });
 
-  it("on yourself adds Copy User ID in Developer Mode", () => {
+  it("on yourself adds Copy User ID in Developer mode", () => {
     setDeveloperMode(true);
     const { element, destroy } = open({
       isSelf: true,

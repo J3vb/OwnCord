@@ -57,7 +57,7 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("mounts the Log Out prompt inside the settings overlay so it stacks above it", () => {
+  it("mounts the Log out prompt inside the settings overlay so it stacks above it", () => {
     const overlay = openOverlay(container);
 
     clickEl(container.querySelector(".settings-nav-item.danger"));
@@ -67,7 +67,7 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("Escape with the Log Out prompt open closes only the prompt", () => {
+  it("Escape with the Log out prompt open closes only the prompt", () => {
     const overlay = openOverlay(container);
 
     clickEl(container.querySelector(".settings-nav-item.danger"));
@@ -133,7 +133,7 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("cancelling the Log Out prompt does not log out", () => {
+  it("cancelling the Log out prompt does not log out", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
@@ -145,7 +145,7 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("destroying the overlay with the Log Out prompt open removes it and does not log out", () => {
+  it("destroying the overlay with the Log out prompt open removes it and does not log out", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
@@ -160,7 +160,7 @@ describe("SettingsOverlay", () => {
     expect(defaultOptions.onLogout).not.toHaveBeenCalled();
   });
 
-  it("shows the app version in small text under Log Out", async () => {
+  it("shows the app version in small text under Log out", async () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
     await vi.waitFor(() => {
@@ -189,7 +189,7 @@ describe("SettingsOverlay", () => {
 
     fillPasswordForm(container, "oldpass123", "short", "short");
 
-    const changePwBtn = acButton(container, "Change Password");
+    const changePwBtn = acButton(container, "Change password");
     changePwBtn.click();
 
     expect(defaultOptions.onChangePassword).not.toHaveBeenCalled();
@@ -202,7 +202,7 @@ describe("SettingsOverlay", () => {
 
     fillPasswordForm(container, "oldpass123", "newpassword123", "differentpassword");
 
-    const changePwBtn = acButton(container, "Change Password");
+    const changePwBtn = acButton(container, "Change password");
     changePwBtn.click();
 
     expect(defaultOptions.onChangePassword).not.toHaveBeenCalled();
@@ -215,7 +215,7 @@ describe("SettingsOverlay", () => {
 
     fillPasswordForm(container, "", "newpassword123", "newpassword123");
 
-    const changePwBtn = acButton(container, "Change Password");
+    const changePwBtn = acButton(container, "Change password");
     changePwBtn.click();
 
     // An empty current password is a guaranteed 403 — and each one counts
@@ -238,7 +238,7 @@ describe("SettingsOverlay", () => {
 
     fillPasswordForm(container, "oldpass123", "newpassword123", "newpassword123");
 
-    const changePwBtn = acButton(container, "Change Password");
+    const changePwBtn = acButton(container, "Change password");
     changePwBtn.click();
     expect(changePwBtn.disabled).toBe(true);
     expect(changePwBtn.textContent).toBe("Changing...");
@@ -249,7 +249,7 @@ describe("SettingsOverlay", () => {
     resolveChange!();
     await vi.waitFor(() => {
       expect(changePwBtn.disabled).toBe(false);
-      expect(changePwBtn.textContent).toBe("Change Password");
+      expect(changePwBtn.textContent).toBe("Change password");
     });
 
     overlay.destroy?.();
@@ -282,7 +282,7 @@ describe("SettingsOverlay", () => {
   }
   async function changePassword(from: string, to: string): Promise<void> {
     fillPasswordForm(container, from, to, to);
-    acButton(container, "Change Password").click();
+    acButton(container, "Change password").click();
   }
 
   it("revokes API tokens with the password change while the option stays ticked", async () => {
@@ -318,7 +318,7 @@ describe("SettingsOverlay", () => {
     revokeBox().checked = false;
     revokeBox().dispatchEvent(new Event("change"));
     releaseRefresh([BOT_TOKEN]);
-    await vi.waitFor(() => expect(acButton(container, "Change Password").disabled).toBe(false));
+    await vi.waitFor(() => expect(acButton(container, "Change password").disabled).toBe(false));
     await Promise.resolve();
     expect(revokeBox().checked).toBe(false);
 
@@ -351,7 +351,7 @@ describe("SettingsOverlay", () => {
 
     const inputs = fillPasswordForm(container, "oldpass123", "newpassword123", "newpassword123");
 
-    const changePwBtn = acButton(container, "Change Password");
+    const changePwBtn = acButton(container, "Change password");
     changePwBtn.click();
 
     await vi.waitFor(() => {
@@ -379,7 +379,7 @@ describe("SettingsOverlay", () => {
     const overlay = openOverlay(container, { ...defaultOptions, onChangePassword });
 
     const inputs = fillPasswordForm(container, "oldpass123", "newpassword123", "newpassword123");
-    const changePwBtn = acButton(container, "Change Password");
+    const changePwBtn = acButton(container, "Change password");
     changePwBtn.click();
 
     const status = container.querySelector<HTMLElement>('[data-testid="pw-change-status"]');
@@ -407,7 +407,7 @@ describe("SettingsOverlay", () => {
 
     fillPasswordForm(container, "wrongold", "newpassword123", "newpassword123");
 
-    const changePwBtn = acButton(container, "Change Password");
+    const changePwBtn = acButton(container, "Change password");
     changePwBtn.click();
 
     await vi.waitFor(() => {
@@ -593,7 +593,7 @@ describe("SettingsOverlay", () => {
 
   // --- Delete account tests ---
 
-  it("shows confirmation area when Delete Account is clicked", () => {
+  it("shows confirmation area when Delete account is clicked", () => {
     const overlay = openOverlay(container);
 
     const triggerBtn = testId<HTMLElement>(container, "delete-account-trigger");
@@ -724,7 +724,7 @@ describe("SettingsOverlay", () => {
 
     const errorEl = testId<HTMLElement>(container, "delete-account-error");
     expect(errorEl.textContent).toBe("Wrong password");
-    expect(confirmBtn.textContent).toBe("Confirm Delete");
+    expect(confirmBtn.textContent).toBe("Confirm delete");
 
     overlay.destroy?.();
   });

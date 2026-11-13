@@ -16,7 +16,7 @@ import {
 // ---------------------------------------------------------------------------
 // B9-11: the Moderation Center's queue and a report's evidence against the
 // owner's Q1 checks — keyboard, names, targets, contrast in every theme and
-// High Contrast, motion, and reflow at 940x500 with 20 px Large Font.
+// High contrast, motion, and reflow at 940x500 with 20 px Large font.
 //
 // The server is mocked with one open and one assigned report so every state
 // the view draws is on screen for measuring. Authorization, consent and role
@@ -201,7 +201,7 @@ test.describe("Moderation Center accessibility", () => {
     test(c.title, c.run);
   }
 
-  test.describe("reflow at the 940x500 minimum window with 20 px Large Font", () => {
+  test.describe("reflow at the 940x500 minimum window with 20 px Large font", () => {
     test.use({ viewport: { width: 940, height: 500 } });
 
     test("every control and line is reachable and nothing scrolls sideways", async ({

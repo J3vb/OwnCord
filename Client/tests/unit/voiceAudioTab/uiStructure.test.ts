@@ -174,7 +174,7 @@ describe("VoiceAudioTab UI structure", () => {
 
     const sliders = el.querySelectorAll(VOLUME_SLIDERS);
     expect(sliders.length).toBe(2); // input volume + output volume
-    // The other two sliders are Push to Talk release delay and Voice Buffer.
+    // The other two sliders are Push to talk release delay and Voice buffer.
     expect(el.querySelectorAll('input[type="range"]').length).toBe(4);
     ac.abort();
   });
@@ -483,7 +483,7 @@ describe("VoiceAudioTab UI structure", () => {
     const { ac, el } = mountTab();
 
     const qualitySelect = el.querySelector(
-      'select[aria-label="Camera Quality"]',
+      'select[aria-label="Camera quality"]',
     ) as HTMLSelectElement;
     expect(qualitySelect.value).toBe("medium");
     qualitySelect.value = "low";
@@ -500,7 +500,7 @@ describe("VoiceAudioTab UI structure", () => {
     const { ac, el } = mountTab();
 
     const qualitySelect = el.querySelector(
-      'select[aria-label="Screen Share Quality"]',
+      'select[aria-label="Screen share quality"]',
     ) as HTMLSelectElement;
     expect(qualitySelect.value).toBe("medium");
     qualitySelect.value = "high";
@@ -517,7 +517,7 @@ describe("VoiceAudioTab UI structure", () => {
 
     // Screen share FPS is the 4th select (index 3)
     const fpsSelect = el.querySelector(
-      'select[aria-label="Screen Share FPS"]',
+      'select[aria-label="Screen share FPS"]',
     ) as HTMLSelectElement;
     expect(fpsSelect.value).toBe("30"); // default
     fpsSelect.value = "60";
@@ -532,7 +532,7 @@ describe("VoiceAudioTab UI structure", () => {
     stubNavigator();
     const { ac, el } = mountTab();
 
-    const codecSelect = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
+    const codecSelect = el.querySelector('select[aria-label="Video codec"]') as HTMLSelectElement;
     expect([...codecSelect.options].map((o) => o.value)).toEqual(["vp8", "h264", "auto"]);
     expect(codecSelect.value).toBe("auto");
     expect(localStorage.getItem("owncord:settings:videoCodec")).toBeNull();
@@ -547,7 +547,7 @@ describe("VoiceAudioTab UI structure", () => {
     stubNavigator();
     const ac = new AbortController();
     const el = createVoiceAudioTab(ac.signal).build();
-    const codecSelect = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
+    const codecSelect = el.querySelector('select[aria-label="Video codec"]') as HTMLSelectElement;
 
     const warning = codecSelect.nextElementSibling;
     expect(warning?.classList.contains("setting-desc")).toBe(true);
@@ -562,19 +562,19 @@ describe("VoiceAudioTab UI structure", () => {
     localStorage.setItem("owncord:settings:videoCodec", '"h264"');
     const ac = new AbortController();
     let el = createVoiceAudioTab(ac.signal).build();
-    expect((el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement).value).toBe(
+    expect((el.querySelector('select[aria-label="Video codec"]') as HTMLSelectElement).value).toBe(
       "h264",
     );
 
     localStorage.setItem("owncord:settings:videoCodec", '"vp8"');
     el = createVoiceAudioTab(ac.signal).build();
-    expect((el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement).value).toBe(
+    expect((el.querySelector('select[aria-label="Video codec"]') as HTMLSelectElement).value).toBe(
       "vp8",
     );
 
     localStorage.setItem("owncord:settings:videoCodec", '"av1"');
     el = createVoiceAudioTab(ac.signal).build();
-    expect((el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement).value).toBe(
+    expect((el.querySelector('select[aria-label="Video codec"]') as HTMLSelectElement).value).toBe(
       "auto",
     );
     ac.abort();
@@ -591,32 +591,32 @@ describe("VoiceAudioTab UI structure", () => {
         .find((c) => c.querySelector(".settings-section-head h2")!.textContent === title)!
         .querySelector<HTMLElement>(":scope > .settings-card")!;
 
-    it("groups the tab into Input Mode, Microphone, Speakers, Camera & screen share and Voice processing", () => {
+    it("groups the tab into Input mode, Microphone, Speakers, Camera & screen share and Voice processing", () => {
       const { el, ac } = build();
       const titles = [...el.querySelectorAll(".settings-section-head h2")].map(
         (h) => h.textContent,
       );
       expect(titles).toEqual([
-        "Input Mode",
+        "Input mode",
         "Microphone",
         "Speakers",
         "Camera & screen share",
         "Voice processing",
       ]);
       const mic = cardNamed(el, "Microphone");
-      expect(mic.querySelector('select[aria-label="Input Device"]')).not.toBeNull();
-      expect(mic.querySelector('input[aria-label="Input Volume"]')).not.toBeNull();
+      expect(mic.querySelector('select[aria-label="Input device"]')).not.toBeNull();
+      expect(mic.querySelector('input[aria-label="Input volume"]')).not.toBeNull();
       expect(mic.querySelector(".mic-meter-threshold")).not.toBeNull();
       const speakers = cardNamed(el, "Speakers");
-      expect(speakers.querySelector('select[aria-label="Output Device"]')).not.toBeNull();
-      expect(speakers.querySelector('input[aria-label="Output Volume"]')).not.toBeNull();
+      expect(speakers.querySelector('select[aria-label="Output device"]')).not.toBeNull();
+      expect(speakers.querySelector('input[aria-label="Output volume"]')).not.toBeNull();
       const camera = cardNamed(el, "Camera & screen share");
       for (const name of [
-        "Video Device",
-        "Camera Quality",
-        "Screen Share Quality",
-        "Screen Share FPS",
-        "Video Codec",
+        "Video device",
+        "Camera quality",
+        "Screen share quality",
+        "Screen share FPS",
+        "Video codec",
       ]) {
         expect(camera.querySelector(`select[aria-label="${name}"]`), name).not.toBeNull();
       }
@@ -625,20 +625,20 @@ describe("VoiceAudioTab UI structure", () => {
       ac.abort();
     });
 
-    it("nests Enhanced Noise Suppression under the Noise Suppression it builds on", () => {
+    it("nests Enhanced noise suppression under the Noise suppression it builds on", () => {
       const { el, ac } = build();
       const labels = [...cardNamed(el, "Voice processing").querySelectorAll(".setting-label")].map(
         (l) => l.textContent,
       );
       expect(labels).toEqual([
-        "Echo Cancellation",
-        "Noise Suppression",
-        "Enhanced Noise Suppression",
+        "Echo cancellation",
+        "Noise suppression",
+        "Enhanced noise suppression",
         "Let more soft speech through",
-        "Voice Buffer",
-        "Automatic Gain Control",
+        "Voice buffer",
+        "Automatic gain control",
       ]);
-      for (const name of ["Enhanced Noise Suppression", "Let more soft speech through"]) {
+      for (const name of ["Enhanced noise suppression", "Let more soft speech through"]) {
         const row = el.querySelector(`.toggle[aria-label="${name}"]`)!.closest(".setting-row")!;
         expect(row.classList.contains("nested"), name).toBe(true);
       }
@@ -811,14 +811,14 @@ describe("VoiceAudioTab UI structure", () => {
         ac.abort();
       });
 
-      it("meters the microphone after Input Volume, as the live gate does", async () => {
+      it("meters the microphone after Input volume, as the live gate does", async () => {
         localStorage.setItem("owncord:settings:inputVolume", "150");
         const { el, ac } = await meter();
         const entry = () =>
           FakeAudioContext.instances.at(-1)!.nodes.find((n) => n.kind === "gain")!.gain;
         await vi.waitFor(() => expect(entry().value).toBe(1.5));
 
-        const slider = el.querySelector<HTMLInputElement>('input[aria-label="Input Volume"]')!;
+        const slider = el.querySelector<HTMLInputElement>('input[aria-label="Input volume"]')!;
         slider.value = "50";
         slider.dispatchEvent(new Event("input"));
         expect(entry().value).toBe(0.5);

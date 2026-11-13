@@ -42,48 +42,48 @@ describe("VoiceAudioTab on the Android app and the desktop app", () => {
   it("shows every desktop control on the desktop app", () => {
     hostDesktopApp();
     mount();
-    expect(heading("Input Mode")).toBe(true);
+    expect(heading("Input mode")).toBe(true);
     expect(el.querySelector('[data-testid="input-mode-ptt"]')).not.toBeNull();
-    expect(labelled("Output Device")).toBe(true);
-    expect(labelled("Screen Share Quality")).toBe(true);
-    expect(labelled("Screen Share FPS")).toBe(true);
-    expect(labelled("Video Codec")).toBe(true);
-    expect(labelled("Input Device")).toBe(true);
+    expect(labelled("Output device")).toBe(true);
+    expect(labelled("Screen share quality")).toBe(true);
+    expect(labelled("Screen share FPS")).toBe(true);
+    expect(labelled("Video codec")).toBe(true);
+    expect(labelled("Input device")).toBe(true);
     expect(el.querySelector('[data-testid="mic-automatic"]')).toBeNull();
   });
 
   it("shows the phone's automatic mic instead of the input device picker on Android", () => {
     hostAndroidApp();
     mount();
-    expect(labelled("Input Device")).toBe(false);
-    expect(text()).not.toContain("Input Device");
+    expect(labelled("Input device")).toBe(false);
+    expect(text()).not.toContain("Input device");
     const row = el.querySelector<HTMLElement>('[data-testid="mic-automatic"]')!;
     expect(row.textContent).toContain("Microphone");
     expect(row.textContent).toContain("Automatic");
     // It sits in the microphone card, ahead of the volume slider.
-    expect(row.closest(".settings-card")?.textContent).toContain("Input Volume");
+    expect(row.closest(".settings-card")?.textContent).toContain("Input volume");
   });
 
   it("leaves out the output device, screen share and codec controls on Android", () => {
     hostAndroidApp();
     mount();
-    expect(labelled("Output Device")).toBe(false);
-    expect(labelled("Screen Share Quality")).toBe(false);
-    expect(labelled("Screen Share FPS")).toBe(false);
-    expect(labelled("Video Codec")).toBe(false);
+    expect(labelled("Output device")).toBe(false);
+    expect(labelled("Screen share quality")).toBe(false);
+    expect(labelled("Screen share FPS")).toBe(false);
+    expect(labelled("Video codec")).toBe(false);
     expect(el.querySelector('[data-testid="screen-fps-wayland-note"]')).toBeNull();
     // What a phone does have stays.
-    expect(labelled("Camera Quality")).toBe(true);
-    expect(text()).toContain("Output Volume");
-    expect(text()).toContain("Input Sensitivity");
+    expect(labelled("Camera quality")).toBe(true);
+    expect(text()).toContain("Output volume");
+    expect(text()).toContain("Input sensitivity");
     expect(heading("Camera")).toBe(true);
     expect(heading("Camera & screen share")).toBe(false);
   });
 
-  it("offers Push to Talk on Android with the talk button, not a key to bind", () => {
+  it("offers Push to talk on Android with the talk button, not a key to bind", () => {
     hostAndroidApp();
     mount();
-    expect(heading("Input Mode")).toBe(true);
+    expect(heading("Input mode")).toBe(true);
     expect(el.querySelector('[data-testid="input-mode-ptt"]')).not.toBeNull();
     const ptt = el.querySelector<HTMLElement>('[data-testid="ptt-controls"]')!;
     expect(ptt.textContent).toContain("Hold to talk");
@@ -91,7 +91,7 @@ describe("VoiceAudioTab on the Android app and the desktop app", () => {
     expect(el.querySelector('[data-testid="ptt-release-delay"]')).toBeNull();
   });
 
-  it("choosing Push to Talk on Android arms the talk button, never the key service", async () => {
+  it("choosing Push to talk on Android arms the talk button, never the key service", async () => {
     hostAndroidApp();
     mount();
     el.querySelector<HTMLButtonElement>('[data-testid="input-mode-ptt"]')!.click();
@@ -102,7 +102,7 @@ describe("VoiceAudioTab on the Android app and the desktop app", () => {
     expect(mocks.mockPttStop).not.toHaveBeenCalled();
   });
 
-  it("keeps a saved Push to Talk choice on Android, and hides the sensitivity row as on the desktop", () => {
+  it("keeps a saved Push to talk choice on Android, and hides the sensitivity row as on the desktop", () => {
     localStorage.setItem(INPUT_MODE_KEY, '"ptt"');
     hostAndroidApp();
     mount();
@@ -112,7 +112,7 @@ describe("VoiceAudioTab on the Android app and the desktop app", () => {
     expect(mocks.mockPttUpdateKey).not.toHaveBeenCalled();
   });
 
-  it("still hides the sensitivity row for a saved Push to Talk on the desktop app", () => {
+  it("still hides the sensitivity row for a saved Push to talk on the desktop app", () => {
     localStorage.setItem(INPUT_MODE_KEY, '"ptt"');
     hostDesktopApp();
     mount();

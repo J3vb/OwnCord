@@ -221,7 +221,7 @@ Disabled controls are exempt from contrast. Colour is never the only signal: an 
 
 - One visible focus indicator per control, ≥2px and ≥3:1, via `var(--focus-ring)` (see [States](#states-hover-focus-active-disabled-loading-empty-error)).
 - Every action is reachable with Tab/Shift+Tab and activates with Enter (Space for buttons); nothing is hover-only. Dialogs trap Tab and restore focus on close. Radio groups, option grids and nav lists use roving tabindex (`setRovingTabindex`/`enableRovingNavigation` in `lib/ui/a11y.ts`).
-- Motion reduces when either the in-app **Reduce Motion** toggle or, with **Sync with OS** (on by default), the OS asks for it; neither source can force motion back on over the other. `syncOsMotionListener()` in `lib/ui/osMotion.ts` derives the `.reduced-motion` class on `<html>` (`applyStoredAppearance()` pre-sets it from the manual preference, then calls it); never toggle the class anywhere else. `app/accessibility.css` zeroes animation and transition durations under it. Feedback never depends on an animation playing.
+- Motion reduces when either the in-app **Reduce motion** toggle or, with **Sync with OS** (on by default), the OS asks for it; neither source can force motion back on over the other. `syncOsMotionListener()` in `lib/ui/osMotion.ts` derives the `.reduced-motion` class on `<html>` (`applyStoredAppearance()` pre-sets it from the manual preference, then calls it); never toggle the class anywhere else. `app/accessibility.css` zeroes animation and transition durations under it. Feedback never depends on an animation playing.
 
 ### Announcements
 

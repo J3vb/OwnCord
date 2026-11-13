@@ -81,7 +81,7 @@ gates only Send (and a picked GIF), leaving the draft editable. A
 refused Send shows the reason on the composer's refusal line (linked by
 `aria-describedby`, kept current as the slow-mode countdown ticks).
 
-**Chat bar buttons (user setting).** Settings → Text & Images has one switch
+**Chat bar buttons (user setting).** Settings → Text & images has one switch
 each for the emoji, sticker, GIF, Poll and voice-message buttons
 (`features/messaging/composerButtons.ts`, local prefs `composerShow*`, all on
 by default). A switch hides its button in every open composer at once through

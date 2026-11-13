@@ -1,4 +1,4 @@
-// 3B-7: the Privacy & Safety tab's blocked-users list — load, empty, error and
+// 3B-7: the Privacy & safety tab's blocked-users list — load, empty, error and
 // Retry, unblock success and failure, live updates from blocksStore, name
 // fallback and the teardown/refetch edge cases.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

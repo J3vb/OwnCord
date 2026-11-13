@@ -66,7 +66,7 @@ describe("applyStoredAppearance", () => {
     // body class is delegated to applyThemeByName.
     expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#17181b");
     expect(document.body.classList.contains("theme-neon-glow")).toBe(true);
-    // largeFont is "true" above, so 16px is raised to the 18px Large Font floor.
+    // largeFont is "true" above, so 16px is raised to the 18px Large font floor.
     // This assertion used to read "16px" — it was pinning OC-0319, the bug where
     // the toggle changed nothing, not a behaviour worth keeping.
     expect(document.documentElement.style.getPropertyValue("--font-size")).toBe("18px");

@@ -82,10 +82,10 @@ test.describe("shared navigation", () => {
     await page.locator("button[aria-label='Settings']").click();
     await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
     const tabs = page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab");
-    await expect(tabs.filter({ hasText: "Privacy & Safety" })).toHaveCount(1);
+    await expect(tabs.filter({ hasText: "Privacy & safety" })).toHaveCount(1);
     await page.getByRole("tab", { name: "Account" }).focus();
     await page.keyboard.press("ArrowDown");
-    await expect(page.getByRole("tab", { name: "Privacy & Safety" })).toBeFocused();
+    await expect(page.getByRole("tab", { name: "Privacy & safety" })).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(page.getByRole("tab", { name: "My uploads" })).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -198,7 +198,7 @@ test.describe("shared navigation", () => {
 
     // → logout
     await gear.click();
-    await page.locator(".settings-nav-item.danger", { hasText: "Log Out" }).click();
+    await page.locator(".settings-nav-item.danger", { hasText: "Log out" }).click();
     await page.locator("[data-testid='logout-confirm']").click();
     await expect(page.locator("[data-testid='app-layout']")).toHaveCount(0, { timeout: 10_000 });
 

@@ -1287,7 +1287,7 @@ for (const profile of PROFILES) {
       await expect(page.locator("[data-testid='phone-call-bar']")).toBeHidden();
     });
 
-    test("Push to Talk in the Android app: a hold-to-talk button opens the mic while held", async ({
+    test("Push to talk in the Android app: a hold-to-talk button opens the mic while held", async ({
       page,
     }) => {
       await page.addInitScript(() =>
@@ -1296,7 +1296,7 @@ for (const profile of PROFILES) {
       await joinAndOpenCallView(page);
       const call = page.locator("[data-testid='talk-button-call']");
       if (profile.name !== "Pixel 7") {
-        // A phone browser has no talk button: Push to Talk is the app's.
+        // A phone browser has no talk button: Push to talk is the app's.
         await expect(call).toHaveCount(0);
         return;
       }

@@ -47,8 +47,8 @@ describe("SettingsOverlay", () => {
       "Account",
       "Appearance",
       "Accessibility",
-      "Voice & Video",
-      "Text & Images",
+      "Voice & video",
+      "Text & images",
       "Notifications",
       "Keybinds",
       "Advanced",
@@ -296,9 +296,9 @@ describe("SettingsOverlay", () => {
       overlay.mount(container);
       expect(navNames()).not.toContain("Keybinds");
       expect(navNames()).toHaveLength(9);
-      // Push to Talk there is the talk button, chosen under Voice & Video.
+      // Push to talk there is the talk button, chosen under Voice & Video.
       searchFor("push to talk");
-      expect(visibleNav()).toEqual(["Voice & Video"]);
+      expect(visibleNav()).toEqual(["Voice & video"]);
       searchFor("shortcut");
       expect(visibleNav()).not.toContain("Keybinds");
       overlay.destroy?.();
@@ -570,7 +570,7 @@ describe("SettingsOverlay", () => {
     getTab(container, 3).click();
 
     const echoToggle = container.querySelector(
-      ".toggle[aria-label='Echo Cancellation']",
+      ".toggle[aria-label='Echo cancellation']",
     ) as HTMLElement;
 
     // Default is on

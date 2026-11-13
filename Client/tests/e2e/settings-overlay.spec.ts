@@ -79,11 +79,11 @@ test.describe("Settings Overlay", () => {
   test("Ctrl+/ opens the keyboard shortcuts dialog and Ctrl+/ again closes it", async ({
     page,
   }) => {
-    const dialog = page.getByRole("dialog", { name: "Keyboard Shortcuts" });
+    const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
 
     await page.keyboard.press("Control+/");
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("Show Keyboard Shortcuts")).toBeVisible();
+    await expect(dialog.getByText("Show keyboard shortcuts")).toBeVisible();
 
     await page.keyboard.press("Control+/");
     await expect(dialog).toBeHidden();
@@ -99,12 +99,12 @@ test.describe("Settings Overlay", () => {
 
     await expect(page.locator(".settings-sidebar > button.settings-nav-item")).toHaveText([
       "Account",
-      "Privacy & Safety",
+      "Privacy & safety",
       "My uploads",
       "Appearance",
       "Accessibility",
-      "Voice & Video",
-      "Text & Images",
+      "Voice & video",
+      "Text & images",
       "Notifications",
       "Keybinds",
       "Advanced",
@@ -113,7 +113,7 @@ test.describe("Settings Overlay", () => {
     ]);
   });
 
-  test("has Log Out button with danger class", async ({ page }) => {
+  test("has Log out button with danger class", async ({ page }) => {
     await openSettings(page);
 
     const logoutBtn = page.locator(".settings-nav-item.danger");
@@ -147,8 +147,8 @@ test.describe("Settings — Account Tab", () => {
     expect(count).toBeGreaterThanOrEqual(2);
   });
 
-  test("opens the Change Password form on demand", async ({ page }) => {
-    const changePwBtn = page.locator(".ac-btn", { hasText: "Change Password" });
+  test("opens the Change password form on demand", async ({ page }) => {
+    const changePwBtn = page.locator(".ac-btn", { hasText: "Change password" });
     await expect(changePwBtn).toBeHidden();
     await page.getByTestId("password-change-toggle").click();
     await expect(changePwBtn).toBeVisible();
@@ -191,7 +191,7 @@ test.describe("Settings — Appearance Tab", () => {
   });
 
   test("toggling compact mode changes toggle state and the document", async ({ page }) => {
-    const toggle = page.locator(".setting-row", { hasText: "Compact Mode" }).locator(".toggle");
+    const toggle = page.locator(".setting-row", { hasText: "Compact mode" }).locator(".toggle");
     const initialOn = await toggle.evaluate((el) => el.classList.contains("on"));
     const initialClass = await page.evaluate(() =>
       document.documentElement.classList.contains("compact-mode"),
@@ -221,10 +221,10 @@ test.describe("Settings — Notifications Tab", () => {
 
   test("notification toggles persist their state", async ({ page }) => {
     // Named rows, not a bare count: the tab must render the documented toggles.
-    await expect(page.locator(".setting-row", { hasText: "Desktop Notifications" })).toBeVisible();
+    await expect(page.locator(".setting-row", { hasText: "Desktop notifications" })).toBeVisible();
     await expect(page.locator(".setting-row", { hasText: "Suppress @everyone" })).toBeVisible();
 
-    const row = page.locator(".setting-row", { hasText: "Desktop Notifications" });
+    const row = page.locator(".setting-row", { hasText: "Desktop notifications" });
     const toggle = row.locator(".toggle");
     const initialOn = await toggle.evaluate((el) => el.classList.contains("on"));
 
@@ -255,16 +255,16 @@ test.describe("Settings — Voice & Video Tab", () => {
   test.beforeEach(async ({ page }) => {
     await startFullSession(page);
     await openSettings(page);
-    await switchSettingsTab(page, "Voice & Video");
+    await switchSettingsTab(page, "Voice & video");
   });
 
   test("shows device selectors for input and output", async ({ page }) => {
     // Named sections, not a bare select count: the tab must offer both the
     // input and output device pickers.
-    const pane = page.locator(".settings-pane", { hasText: "Input Device" });
+    const pane = page.locator(".settings-pane", { hasText: "Input device" });
     await expect(pane).toBeVisible();
-    await expect(page.locator(".settings-field-label", { hasText: "Output Device" })).toBeVisible();
-    await expect(page.getByRole("combobox", { name: "Output Device" })).toBeVisible();
+    await expect(page.locator(".settings-field-label", { hasText: "Output device" })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Output device" })).toBeVisible();
 
     const selects = page.locator("select.form-input");
     await expect(selects.first()).toBeVisible();
@@ -290,10 +290,10 @@ test.describe("Settings — Voice & Video Tab", () => {
     expect(failures).toEqual([]);
   });
 
-  test("lets a keyboard user adjust Voice Buffer by one millisecond", async ({ page }) => {
-    const slider = page.getByRole("slider", { name: "Voice Buffer" });
+  test("lets a keyboard user adjust Voice buffer by one millisecond", async ({ page }) => {
+    const slider = page.getByRole("slider", { name: "Voice buffer" });
     await expect(slider).toBeDisabled();
-    await page.getByRole("switch", { name: "Enhanced Noise Suppression" }).click();
+    await page.getByRole("switch", { name: "Enhanced noise suppression" }).click();
     await expect(slider).toBeEnabled();
     expect(await keyboardReachable(page, slider)).toBe(true);
     await expect(slider).toHaveValue("200");
@@ -302,12 +302,12 @@ test.describe("Settings — Voice & Video Tab", () => {
     await expect(slider).toHaveAttribute("aria-valuetext", "201 ms");
   });
 
-  test("offers the soft speech switch once Enhanced Noise Suppression is on", async ({ page }) => {
+  test("offers the soft speech switch once Enhanced noise suppression is on", async ({ page }) => {
     const softSpeech = page.getByRole("switch", { name: "Let more soft speech through" });
     await expect(softSpeech).toBeVisible();
     await expect(softSpeech).toBeChecked();
     await expect(softSpeech).toBeDisabled();
-    await page.getByRole("switch", { name: "Enhanced Noise Suppression" }).click();
+    await page.getByRole("switch", { name: "Enhanced noise suppression" }).click();
     await expect(softSpeech).toBeEnabled();
     expect(await keyboardReachable(page, softSpeech)).toBe(true);
     await page.keyboard.press("Space");
@@ -318,7 +318,7 @@ test.describe("Settings — Voice & Video Tab", () => {
   });
 
   test("offers the video codec choice with Auto as the default", async ({ page }) => {
-    const codec = page.getByRole("combobox", { name: "Video Codec" });
+    const codec = page.getByRole("combobox", { name: "Video codec" });
     await expect(codec).toBeVisible();
     await expect(codec).toHaveValue("auto");
     await expect(codec.locator("option")).toHaveText([
@@ -330,10 +330,10 @@ test.describe("Settings — Voice & Video Tab", () => {
   });
 
   test("shows voice sensitivity slider", async ({ page }) => {
-    // Voice Activity is the default input mode, so the sensitivity gate shows:
+    // Voice activity is the default input mode, so the sensitivity gate shows:
     // automatic at first, with the level meter and no handle.
     const auto = page.getByRole("switch", { name: "Automatically determine input sensitivity" });
-    const slider = page.getByRole("slider", { name: "Input Sensitivity" });
+    const slider = page.getByRole("slider", { name: "Input sensitivity" });
     await expect(auto).toHaveAttribute("aria-checked", "true");
     await expect(page.locator(".mic-meter-bar")).toBeVisible();
     await expect(slider).toBeHidden();
@@ -361,8 +361,8 @@ test.describe("Settings — Keybinds Tab", () => {
   });
 
   test("keybind rows show named actions and their shortcuts", async ({ page }) => {
-    // Push to Talk is a real rebindable row with a kbd chip.
-    const pttRow = page.locator(".keybind-row", { hasText: "Push to Talk" });
+    // Push to talk is a real rebindable row with a kbd chip.
+    const pttRow = page.locator(".keybind-row", { hasText: "Push to talk" });
     await expect(pttRow).toBeVisible();
     await expect(pttRow.locator(".kbd")).toBeVisible();
 
@@ -477,8 +477,8 @@ test.describe("Settings — Tab Switching", () => {
       const tab = tabs.nth(i);
       const tabName = await tab.textContent();
 
-      // Skip Log Out button
-      if (tabName === "Log Out") continue;
+      // Skip Log out button
+      if (tabName === "Log out") continue;
 
       await tab.click();
       await expect(tab).toHaveClass(/active/);

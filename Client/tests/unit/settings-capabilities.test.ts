@@ -70,7 +70,7 @@ vi.mock("../../src/features/whats-new/changelogSource", () => ({
 import { buildAboutTab } from "../../src/features/settings/AboutTab";
 import { buildAdvancedTab } from "../../src/features/settings/AdvancedTab";
 
-const ADVANCED_LABELS = ["Launch on Login", "Close to Tray", "Start Minimized"];
+const ADVANCED_LABELS = ["Launch on login", "Close to tray", "Start minimized"];
 
 let controller: AbortController;
 
@@ -114,7 +114,7 @@ describe("Advanced tab capabilities", () => {
     expect(platform.loadPrefs).not.toHaveBeenCalled();
     expect(platform.openDevTools).not.toHaveBeenCalled();
     // What every platform has stays.
-    expect(labels(tab)).toContain("Developer Mode");
+    expect(labels(tab)).toContain("Developer mode");
   });
 
   it("draws them when it has them, and reads each adapter once", async () => {

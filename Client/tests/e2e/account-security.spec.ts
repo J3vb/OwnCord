@@ -261,7 +261,7 @@ test.describe("Settings > Account — avatar upload", () => {
     await expect(
       page.locator("[data-testid='toast']", { hasText: "Avatar updated" }),
     ).toBeVisible();
-    await expect(page.locator("[data-testid='avatar-upload-btn']")).toHaveText("Change Avatar");
+    await expect(page.locator("[data-testid='avatar-upload-btn']")).toHaveText("Change avatar");
 
     // Outgoing traffic: a multipart POST carrying the file (not JSON).
     const call = await waitForFetch(page, requestTo("POST", "/users/me/avatar"));
@@ -294,7 +294,7 @@ test.describe("Settings > Account — avatar upload", () => {
     // The letter fallback is still what the avatar shows.
     await expect(page.locator("[data-testid='account-avatar'] img.avatar-img")).toHaveCount(0);
     await expect(page.locator("[data-testid='account-avatar']")).toHaveText("T");
-    await expect(page.locator("[data-testid='avatar-upload-btn']")).toHaveText("Change Avatar");
+    await expect(page.locator("[data-testid='avatar-upload-btn']")).toHaveText("Change avatar");
   });
 });
 
@@ -413,7 +413,7 @@ test.describe("Settings > Account — disable 2FA", () => {
     const password = section.locator("[data-testid='totp-password-input']");
     await expect(password).toBeVisible();
 
-    await section.locator("button", { hasText: "Confirm Disable" }).click();
+    await section.locator("button", { hasText: "Confirm disable" }).click();
     await expect(section.locator("[data-testid='totp-error']")).toHaveText("Password is required.");
     expect(
       (await fetchCalls(page)).some(requestTo("DELETE", "/users/me/totp")),
@@ -421,7 +421,7 @@ test.describe("Settings > Account — disable 2FA", () => {
     ).toBe(false);
 
     await password.fill("password123");
-    await section.locator("button", { hasText: "Confirm Disable" }).focus();
+    await section.locator("button", { hasText: "Confirm disable" }).focus();
     await page.keyboard.press("Enter");
 
     await expect(section.locator("[data-testid='totp-status-badge']")).toHaveText("Disabled");
@@ -452,7 +452,7 @@ test.describe("Settings > Account — disable 2FA", () => {
 
     await section.locator("[data-testid='totp-disable-btn']").click();
     await section.locator("[data-testid='totp-password-input']").fill("nope");
-    const confirm = section.locator("button", { hasText: "Confirm Disable" });
+    const confirm = section.locator("button", { hasText: "Confirm disable" });
     await confirm.focus();
     await page.keyboard.press("Enter");
 
@@ -527,7 +527,7 @@ test.describe("Settings > Account — delete account", () => {
       "Incorrect password",
     );
     await expect(page.locator("[data-testid='delete-account-confirm']")).toHaveText(
-      "Confirm Delete",
+      "Confirm delete",
     );
     await expect(page.locator("[data-testid='delete-account-confirm']")).toBeFocused();
     await expect(page.locator("[data-testid='app-layout']")).toBeVisible();

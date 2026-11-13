@@ -172,11 +172,11 @@ describe("LogsTab", () => {
     expect(selects.length).toBe(2);
   });
 
-  it("renders Clear Logs and Refresh buttons", () => {
+  it("renders Clear logs and Refresh buttons", () => {
     const el = buildLogsPane(controller.signal);
     const buttons = el.querySelectorAll("button");
     const texts = Array.from(buttons).map((b) => b.textContent);
-    expect(texts).toContain("Clear Logs");
+    expect(texts).toContain("Clear logs");
     expect(texts).toContain("Refresh");
   });
 
@@ -224,7 +224,7 @@ describe("LogsTab", () => {
   it("clear button calls clearLogBuffer", () => {
     const el = buildLogsPane(controller.signal);
     const clearBtn = Array.from(el.querySelectorAll("button")).find(
-      (b) => b.textContent === "Clear Logs",
+      (b) => b.textContent === "Clear logs",
     );
     clearBtn!.click();
     expect(mockClearLogBuffer).toHaveBeenCalledTimes(1);
@@ -238,12 +238,12 @@ describe("LogsTab", () => {
     expect(mockSetLogLevel).toHaveBeenCalledWith("error");
   });
 
-  it("Copy All shows 'Failed to copy' on clipboard rejection", async () => {
+  it("Copy all shows 'Failed to copy' on clipboard rejection", async () => {
     mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "test")]);
     stubClipboard(vi.fn().mockRejectedValue(new Error("denied")));
 
     const el = buildLogsPane(controller.signal);
-    const copyBtn = buttonLabeled(el, "Copy All");
+    const copyBtn = buttonLabeled(el, "Copy all");
     copyBtn.click();
 
     await vi.waitFor(() => {
@@ -251,12 +251,12 @@ describe("LogsTab", () => {
     });
   });
 
-  it("Copy Diagnostics shows 'Failed to copy' on clipboard rejection", async () => {
+  it("Copy diagnostics shows 'Failed to copy' on clipboard rejection", async () => {
     mockGetLogBuffer.mockReturnValue([]);
     stubClipboard(vi.fn().mockRejectedValue(new Error("denied")));
 
     const el = buildLogsPane(controller.signal);
-    const diagCopy = buttonLabeled(el, "Copy Diagnostics");
+    const diagCopy = buttonLabeled(el, "Copy diagnostics");
     diagCopy.click();
 
     await vi.waitFor(() => {
@@ -264,7 +264,7 @@ describe("LogsTab", () => {
     });
   });
 
-  it("Copy Diagnostics copies the voice state as of the click, not as of the build", async () => {
+  it("Copy diagnostics copies the voice state as of the click, not as of the build", async () => {
     mockGetLogBuffer.mockReturnValue([]);
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
@@ -272,7 +272,7 @@ describe("LogsTab", () => {
     const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
     vi.mocked(getSessionDebugInfo).mockReturnValue({ hasRoom: true } as never);
     Array.from(el.querySelectorAll("button"))
-      .find((b) => b.textContent === "Copy Diagnostics")!
+      .find((b) => b.textContent === "Copy diagnostics")!
       .click();
 
     expect(JSON.parse(writeText.mock.calls[0]![0] as string)).toEqual({ hasRoom: true });
@@ -330,12 +330,12 @@ describe("LogsTab", () => {
     expect(localStorage.getItem("owncord:settings:logs_min_level")).toBe('"error"');
   });
 
-  it("Copy All shows 'Copied!' on successful clipboard write", async () => {
+  it("Copy all shows 'Copied!' on successful clipboard write", async () => {
     mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "test")]);
     stubClipboard(vi.fn().mockResolvedValue(undefined));
 
     const el = buildLogsPane(controller.signal);
-    const copyBtn = buttonLabeled(el, "Copy All");
+    const copyBtn = buttonLabeled(el, "Copy all");
     copyBtn.click();
 
     await vi.waitFor(() => {
@@ -343,12 +343,12 @@ describe("LogsTab", () => {
     });
   });
 
-  it("Copy Diagnostics shows 'Copied!' on successful clipboard write", async () => {
+  it("Copy diagnostics shows 'Copied!' on successful clipboard write", async () => {
     mockGetLogBuffer.mockReturnValue([]);
     stubClipboard(vi.fn().mockResolvedValue(undefined));
 
     const el = buildLogsPane(controller.signal);
-    const diagCopy = buttonLabeled(el, "Copy Diagnostics");
+    const diagCopy = buttonLabeled(el, "Copy diagnostics");
     diagCopy.click();
 
     await vi.waitFor(() => {
@@ -415,7 +415,7 @@ describe("LogsTab", () => {
     expect(el.querySelectorAll(".log-entry").length).toBe(0);
   });
 
-  it("Copy All includes data field in copied text", async () => {
+  it("Copy all includes data field in copied text", async () => {
     const writeTextMock = vi.fn().mockResolvedValue(undefined);
     stubClipboard(writeTextMock);
     mockGetLogBuffer.mockReturnValue([
@@ -423,7 +423,7 @@ describe("LogsTab", () => {
     ]);
 
     const el = buildLogsPane(controller.signal);
-    const copyBtn = buttonLabeled(el, "Copy All");
+    const copyBtn = buttonLabeled(el, "Copy all");
     copyBtn.click();
 
     await vi.waitFor(() => {
@@ -445,7 +445,7 @@ describe("LogsTab", () => {
       mockGetLogBuffer.mockReturnValue([]);
     });
 
-    const clearBtn = buttonLabeled(el, "Clear Logs");
+    const clearBtn = buttonLabeled(el, "Clear logs");
     clearBtn.click();
 
     expect(el.querySelectorAll(".log-entry").length).toBe(0);
@@ -470,11 +470,11 @@ describe("LogsTab", () => {
     expect(el.textContent).not.toContain("1 entry ·");
   });
 
-  it("Refresh Diagnostics button re-renders diagnostics panel", () => {
+  it("Refresh diagnostics button re-renders diagnostics panel", () => {
     mockGetLogBuffer.mockReturnValue([]);
     const el = buildLogsPane(controller.signal);
 
-    const diagRefresh = buttonLabeled(el, "Refresh Diagnostics");
+    const diagRefresh = buttonLabeled(el, "Refresh diagnostics");
     vi.mocked(getSessionDebugInfo).mockReturnValue({ hasRoom: true } as never);
     diagRefresh.click();
 
@@ -618,7 +618,7 @@ describe("LogsTab", () => {
 
     it("is a secondary button in the Get help card", () => {
       const card = build().querySelector<HTMLElement>("[data-testid='get-help']")!;
-      expect(button(card).textContent).toBe("Open Log Folder");
+      expect(button(card).textContent).toBe("Open log folder");
       expect(button(card).classList.contains("secondary")).toBe(true);
     });
 
@@ -702,12 +702,12 @@ describe("LogsTab", () => {
       expect(card.querySelector("h2")!.textContent).toBe("Get help");
       const exportBtn = card.querySelector("[data-testid='export-support-bundle']")!;
       expect(exportBtn.classList.contains("secondary")).toBe(false);
-      expect(buttonNamed(card, "Copy Diagnostics").classList.contains("secondary")).toBe(true);
+      expect(buttonNamed(card, "Copy diagnostics").classList.contains("secondary")).toBe(true);
     });
 
     it("makes every log and voice-state tool a secondary button", () => {
       const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
-      for (const text of ["Copy All", "Clear Logs", "Refresh", "Refresh Diagnostics"]) {
+      for (const text of ["Copy all", "Clear logs", "Refresh", "Refresh diagnostics"]) {
         expect(buttonNamed(el, text).classList.contains("secondary"), text).toBe(true);
       }
     });

@@ -201,7 +201,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     localStorage.setItem("owncord:settings:fontSize", "16");
     sessionStorage.setItem("some-session-key", "value");
 
-    const btn = getActionBtn("Clear & Restart");
+    const btn = getActionBtn("Clear & restart");
 
     // First click — confirmation
     btn.click();
@@ -223,7 +223,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     localStorage.setItem("owncord:credential:localhost", JSON.stringify({ user: "test" }));
     localStorage.setItem("owncord:settings:compactMode", "false");
 
-    const btn = getActionBtn("Clear & Restart");
+    const btn = getActionBtn("Clear & restart");
 
     btn.click();
     btn.click();
@@ -241,7 +241,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     );
     localStorage.setItem("owncord:settings:accentColor", '"#00c8ff"');
 
-    const btn = getActionBtn("Clear & Restart");
+    const btn = getActionBtn("Clear & restart");
 
     btn.click();
     btn.click();
@@ -259,7 +259,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     setServerNotificationLevel("nothing");
     localStorage.setItem("owncord:theme:active", "neon-glow");
 
-    const btn = getActionBtn("Clear & Restart");
+    const btn = getActionBtn("Clear & restart");
     btn.click();
     btn.click();
     await flush();
@@ -282,7 +282,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     localStorage.setItem(key, "kept");
     localStorage.setItem("owncord:settings:compactMode", "true");
 
-    const btn = getActionBtn("Clear & Restart");
+    const btn = getActionBtn("Clear & restart");
     btn.click();
     btn.click();
     await flush();
@@ -292,8 +292,8 @@ describe("AdvancedTab — Clear All Cache", () => {
   });
 
   it("renders two-step confirmation for Clear All", () => {
-    const btn = getActionBtn("Clear & Restart");
-    expect(btn.textContent).toBe("Clear & Restart");
+    const btn = getActionBtn("Clear & restart");
+    expect(btn.textContent).toBe("Clear & restart");
 
     btn.click();
     expect(btn.textContent).toBe("Are you sure? Click again");
@@ -380,13 +380,13 @@ describe("AdvancedTab — Toggles & Structure", () => {
     localStorage.clear();
   });
 
-  it("renders Developer Mode toggle defaulting to off", () => {
+  it("renders Developer mode toggle defaulting to off", () => {
     mountTab(container);
 
     const rows = container.querySelectorAll(".setting-row");
     const devRow = rows[0]!;
     const label = devRow.querySelector(".setting-label")!;
-    expect(label.textContent).toBe("Developer Mode");
+    expect(label.textContent).toBe("Developer mode");
 
     const toggle = devRow.querySelector(".toggle")!;
     expect(toggle.classList.contains("on")).toBe(false);
@@ -402,7 +402,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
     expect(labels).not.toContain("Hardware Acceleration");
   });
 
-  it("toggles Developer Mode on and persists to localStorage", () => {
+  it("toggles Developer mode on and persists to localStorage", () => {
     mountTab(container);
 
     const rows = container.querySelectorAll(".setting-row");
@@ -419,7 +419,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
     expect(localStorage.getItem("owncord:settings:developerMode")).toBe("false");
   });
 
-  it("restores Developer Mode toggle state from localStorage", () => {
+  it("restores Developer mode toggle state from localStorage", () => {
     localStorage.setItem("owncord:settings:developerMode", "true");
     mountTab(container);
 
@@ -428,7 +428,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
     expect(toggle.classList.contains("on")).toBe(true);
   });
 
-  it("toggles via keyboard Enter/Space on Developer Mode", () => {
+  it("toggles via keyboard Enter/Space on Developer mode", () => {
     mountTab(container);
 
     const rows = container.querySelectorAll(".setting-row");
@@ -500,14 +500,14 @@ describe("AdvancedTab — Toggles & Structure", () => {
     expect(invoke).toHaveBeenCalledWith("open_devtools");
   });
 
-  it("renders section titles for Debug and Storage & Cache", () => {
+  it("renders section titles for Debug and Storage & cache", () => {
     const section = buildAdvancedTab(ac.signal);
     container.appendChild(section);
 
     const titles = container.querySelectorAll("h2.settings-section-label");
     const titleTexts = Array.from(titles).map((t) => t.textContent);
     expect(titleTexts).toContain("Debug");
-    expect(titleTexts).toContain("Storage & Cache");
+    expect(titleTexts).toContain("Storage & cache");
   });
 
   it("shows no Debug heading or separator in a production build", () => {
@@ -520,7 +520,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
         container.querySelectorAll(".settings-section > .settings-section-head > h2"),
       ).map((t) => t.textContent);
       // Activity sits between the general rows and the cache section on the desktop build.
-      expect(titleTexts).toEqual(["General", "Activity", "Storage & Cache"]);
+      expect(titleTexts).toEqual(["General", "Activity", "Storage & cache"]);
       expect(container.querySelectorAll(".settings-section > .settings-card")).toHaveLength(3);
       expect(container.textContent).not.toContain("Open DevTools");
     } finally {
@@ -543,7 +543,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
       expect(b.classList.contains("secondary")).toBe(true);
       expect(b.classList.contains("destructive")).toBe(false);
     }
-    const restart = byText("Clear & Restart");
+    const restart = byText("Clear & restart");
     expect(restart.classList.contains("secondary")).toBe(true);
     expect(restart.classList.contains("destructive")).toBe(true);
     expect(restart.classList.contains("ac-btn-danger")).toBe(false);
@@ -567,9 +567,9 @@ describe("AdvancedTab — Toggles & Structure", () => {
     const labels = Array.from(container.querySelectorAll(".setting-label")).map(
       (l) => l.textContent,
     );
-    expect(labels).toContain("Clear Image Cache");
-    expect(labels).toContain("Clear Log Files");
-    expect(labels).toContain("Clear All Cache & Restart");
+    expect(labels).toContain("Clear image cache");
+    expect(labels).toContain("Clear log files");
+    expect(labels).toContain("Clear all cache & restart");
   });
 
   it("shows image cache clear success then resets button text after timeout", async () => {
@@ -622,21 +622,21 @@ describe("AdvancedTab — Toggles & Structure", () => {
 
   it("confirmation dialog resets after 3s timeout without second click", async () => {
     vi.useFakeTimers();
-    const btn = mountButton(container, "Clear & Restart");
+    const btn = mountButton(container, "Clear & restart");
 
     btn.click();
     expect(btn.textContent).toBe("Are you sure? Click again");
     expect(btn.classList.contains("ac-btn-danger")).toBe(true);
 
     await vi.advanceTimersByTimeAsync(3000);
-    expect(btn.textContent).toBe("Clear & Restart");
+    expect(btn.textContent).toBe("Clear & restart");
     expect(btn.classList.contains("ac-btn-danger")).toBe(false);
     vi.useRealTimers();
   });
 
   it("Clear All shows Failed when relaunch fails", async () => {
     mockRelaunch.mockRejectedValue(new Error("Relaunch not supported"));
-    const btn = mountButton(container, "Clear & Restart");
+    const btn = mountButton(container, "Clear & restart");
 
     btn.click();
     btn.click();
@@ -731,7 +731,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
   });
 });
 
-describe("AdvancedTab — Launch on Login (autostart)", () => {
+describe("AdvancedTab — Launch on login (autostart)", () => {
   let container: HTMLDivElement;
 
   useMountContainer((c) => {
@@ -748,7 +748,7 @@ describe("AdvancedTab — Launch on Login (autostart)", () => {
     mountTab(container);
     const rows = Array.from(container.querySelectorAll(".setting-row"));
     const row = rows.find(
-      (r) => r.querySelector(".setting-label")?.textContent === "Launch on Login",
+      (r) => r.querySelector(".setting-label")?.textContent === "Launch on login",
     );
     expect(row).toBeDefined();
     return row!.querySelector(".toggle") as HTMLElement;
@@ -817,7 +817,7 @@ describe("AdvancedTab — Launch on Login (autostart)", () => {
   });
 });
 
-describe("AdvancedTab — Close to Tray and Start Minimized", () => {
+describe("AdvancedTab — Close to tray and Start minimized", () => {
   let container: HTMLDivElement;
   const ac = new AbortController();
   const NATIVE_PREFS = { minimizeToTray: true, startMinimized: false };
@@ -872,8 +872,8 @@ describe("AdvancedTab — Close to Tray and Start Minimized", () => {
     mount();
     await tick();
 
-    expect(row("Close to Tray")?.querySelector(".toggle")?.classList.contains("on")).toBe(false);
-    expect(row("Start Minimized")?.querySelector(".toggle")?.classList.contains("on")).toBe(true);
+    expect(row("Close to tray")?.querySelector(".toggle")?.classList.contains("on")).toBe(false);
+    expect(row("Start minimized")?.querySelector(".toggle")?.classList.contains("on")).toBe(true);
   });
 
   it("removes both rows when the host cannot answer", async () => {
@@ -881,14 +881,14 @@ describe("AdvancedTab — Close to Tray and Start Minimized", () => {
     mount();
     await tick();
 
-    expect(row("Close to Tray")).toBeUndefined();
-    expect(row("Start Minimized")).toBeUndefined();
+    expect(row("Close to tray")).toBeUndefined();
+    expect(row("Start minimized")).toBeUndefined();
   });
 
-  it("saves a Close to Tray change through set_window_pref", async () => {
+  it("saves a Close to tray change through set_window_pref", async () => {
     mount();
     await tick();
-    (row("Close to Tray")!.querySelector(".toggle") as HTMLElement).click();
+    (row("Close to tray")!.querySelector(".toggle") as HTMLElement).click();
     await tick();
 
     expect(setCalls).toEqual([{ pref: "minimizeToTray", enabled: false }]);
@@ -898,7 +898,7 @@ describe("AdvancedTab — Close to Tray and Start Minimized", () => {
     mount();
     await tick();
     failSets = true;
-    const toggle = row("Close to Tray")!.querySelector(".toggle") as HTMLElement;
+    const toggle = row("Close to tray")!.querySelector(".toggle") as HTMLElement;
     toggle.click();
     await tick();
 
@@ -917,7 +917,7 @@ describe("AdvancedTab — Close to Tray and Start Minimized", () => {
     );
     mount();
     await tick();
-    const toggle = row("Close to Tray")!.querySelector(".toggle") as HTMLElement;
+    const toggle = row("Close to tray")!.querySelector(".toggle") as HTMLElement;
     toggle.click();
     await tick();
     release({ minimizeToTray: true, startMinimized: false });
@@ -938,7 +938,7 @@ describe("AdvancedTab — Close to Tray and Start Minimized", () => {
     });
     mount();
     await tick();
-    const toggle = row("Close to Tray")!.querySelector(".toggle") as HTMLElement;
+    const toggle = row("Close to tray")!.querySelector(".toggle") as HTMLElement;
     toggle.click();
     await tick();
     // Back to what was shown before the click.
@@ -949,22 +949,22 @@ describe("AdvancedTab — Close to Tray and Start Minimized", () => {
     expect(toggle.classList.contains("on")).toBe(false);
   });
 
-  it("refreshes the login entry when Start Minimized turns on while Launch on Login is on", async () => {
+  it("refreshes the login entry when Start minimized turns on while Launch on login is on", async () => {
     mockIsEnabled.mockResolvedValue(true);
     mount();
     await tick();
     mockEnable.mockClear();
-    (row("Start Minimized")!.querySelector(".toggle") as HTMLElement).click();
+    (row("Start minimized")!.querySelector(".toggle") as HTMLElement).click();
     await tick(6);
 
     expect(setCalls).toEqual([{ pref: "startMinimized", enabled: true }]);
     expect(mockEnable).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves the login entry alone when Launch on Login is off", async () => {
+  it("leaves the login entry alone when Launch on login is off", async () => {
     mount();
     await tick();
-    (row("Start Minimized")!.querySelector(".toggle") as HTMLElement).click();
+    (row("Start minimized")!.querySelector(".toggle") as HTMLElement).click();
     await tick(6);
 
     expect(mockEnable).not.toHaveBeenCalled();

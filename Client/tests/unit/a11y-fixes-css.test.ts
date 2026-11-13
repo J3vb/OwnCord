@@ -1,6 +1,6 @@
 // B9 exit-audit accessibility fixes whose effect is a stylesheet rule:
 // A11Y-03 (restore the focus ring on mentions/link chips and the status
-// custom input), A11Y-04 (the in-app Reduce Motion toggle must stop
+// custom input), A11Y-04 (the in-app Reduce motion toggle must stop
 // ::before/::after animations too) and A11Y-06 (--red is fill-only; text uses
 // the qualified --text-danger token).
 //

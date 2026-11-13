@@ -20,9 +20,9 @@ describe("TextImagesTab", () => {
     const labels = container.querySelectorAll(".setting-label");
     const labelTexts = Array.from(labels).map((l) => l.textContent);
 
-    expect(labelTexts).toContain("Link Preview");
-    expect(labelTexts).toContain("Show Embeds");
-    expect(labelTexts).toContain("Inline Attachment Preview");
+    expect(labelTexts).toContain("Link preview");
+    expect(labelTexts).toContain("Show embeds");
+    expect(labelTexts).toContain("Inline attachment preview");
     expect(labelTexts).toContain("Animate GIFs");
     expect(labelTexts).toContain("Animate emoji");
     expect(labelTexts).toContain("Show emoji button");
@@ -62,7 +62,7 @@ describe("TextImagesTab", () => {
     container.appendChild(section);
 
     const toggles = container.querySelectorAll(".toggle");
-    // Link Preview is first, default on
+    // Link preview is first, default on
     const linkToggle = toggles[0] as HTMLElement;
     expect(linkToggle.classList.contains("on")).toBe(true);
 

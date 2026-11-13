@@ -1,9 +1,9 @@
 import { expect, vi } from "vitest";
 import { createVoiceAudioTab } from "../../src/features/settings/VoiceAudioTab";
 
-const SELECT = 'select[aria-label="Video Codec"]';
+const SELECT = 'select[aria-label="Video codec"]';
 
-/** Builds the tab without attaching it; `select()` reads the Video Codec dropdown. */
+/** Builds the tab without attaching it; `select()` reads the Video codec dropdown. */
 export function buildTab() {
   const ac = new AbortController();
   const el = createVoiceAudioTab(ac.signal).build();

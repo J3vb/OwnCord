@@ -178,7 +178,7 @@ describe("channel context menu - injected access", () => {
   });
 });
 
-describe("channel context menu - Developer Mode Copy Channel ID", () => {
+describe("channel context menu - Developer mode Copy Channel ID", () => {
   let writeText: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     writeText = vi.fn().mockResolvedValue(undefined);
@@ -195,7 +195,7 @@ describe("channel context menu - Developer Mode Copy Channel ID", () => {
   const item = (): HTMLElement | null =>
     document.querySelector<HTMLElement>('[data-testid="ctx-copy-channel-id"]');
 
-  it("offers the item when Developer Mode is on and copies the id", () => {
+  it("offers the item when Developer mode is on and copies the id", () => {
     setDeveloperMode(true);
     open(channel(42, 0));
     expect(item()?.textContent).toBe("Copy Channel ID");
@@ -203,13 +203,13 @@ describe("channel context menu - Developer Mode Copy Channel ID", () => {
     expect(writeText).toHaveBeenCalledWith("42");
   });
 
-  it("leaves it out when Developer Mode is off", () => {
+  it("leaves it out when Developer mode is off", () => {
     setDeveloperMode(false);
     open(channel(42, 0));
     expect(item()).toBeNull();
   });
 
-  it("a voice channel's menu holds only Open chat for a non-manager, plus Copy Channel ID in Developer Mode", () => {
+  it("a voice channel's menu holds only Open chat for a non-manager, plus Copy Channel ID in Developer mode", () => {
     authStore.setState((s) => ({
       ...s,
       user: { id: 1, username: "t", avatar: null, role: "member" },

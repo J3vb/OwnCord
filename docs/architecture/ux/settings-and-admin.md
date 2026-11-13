@@ -14,9 +14,9 @@ between what the desktop client does and what lives only on the server web panel
 
 A tabbed overlay (`SettingsOverlay`) available both authenticated (in Main) and
 unauthenticated (on Connect, for appearance/advanced). Tabs: Account,
-Appearance, Accessibility, Voice & Video, Text & Images, Notifications, Keybinds,
+Appearance, Accessibility, Voice & video, Text & images, Notifications, Keybinds,
 Advanced, Diagnostics & logs, About (Discord's app-settings order, then the
-OwnCord-only tabs). The app version sits under Log Out, and Log Out asks "Are
+OwnCord-only tabs). The app version sits under Log out, and Log out asks "Are
 you sure you want to log out?" first. About shows the client version, the update
 check, the release notes of this version and every earlier one (the
 repository's `CHANGELOG.md`, built into a lazy chunk, never fetched) and a
@@ -30,7 +30,7 @@ Another surface that asks for a tab opens straight on that section. The
 Connect page folds its saved servers down to the selected one there, with an
 arrow that opens the full list and Add Server.
 
-The Safety tab (labelled "Privacy & Safety") lists, top to bottom: Direct messages (two
+The Safety tab (labelled "Privacy & safety") lists, top to bottom: Direct messages (two
 switches stored on the server: "Allow direct messages from server members" and
 "Message requests", the second disabled while the first is off; shown only when
 `ready.capabilities.dm_privacy`), Blocked users, moderation notices and
@@ -197,7 +197,7 @@ changes apply **live** — `ui.setTheme` + the `owncord:pref-change` event re-sk
 open views without reload. Appearance is editable pre-login (on the connect page)
 so the app respects the user's theme before they authenticate.
 
-**Custom themes** (Appearance > Custom Themes, `features/custom-themes/`): a saved
+**Custom themes** (Appearance > Custom themes, `features/custom-themes/`): a saved
 list of the user's own CSS, per device (`owncord:theme:custom:list` and
 `owncord:theme:custom:active` in localStorage), at most one active, painted as
 one `<style id="owncord-custom-theme">` after the built-in theme. Custom

@@ -93,7 +93,7 @@ test.describe("Settings Overlay", () => {
     // mounted.
     const pane = nativePage.locator(".settings-content .settings-pane.active");
     await expect(pane.getByRole("heading", { name: "Microphone", exact: true })).toBeVisible();
-    await expect(pane.getByRole("combobox", { name: "Input Device" })).toBeVisible();
+    await expect(pane.getByRole("combobox", { name: "Input device" })).toBeVisible();
     await expect(pane.locator(".mic-meter-wrap .mic-meter-bar")).toBeVisible();
   });
 

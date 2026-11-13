@@ -126,7 +126,7 @@ test.describe("external-content consent", () => {
     await expect(dialog(page)).toHaveCount(0);
 
     await openSettings(page);
-    await switchSettingsTab(page, "Text & Images");
+    await switchSettingsTab(page, "Text & images");
     await page.getByRole("button", { name: "Reset external content consent" }).click();
     await expect(page.getByRole("status").filter({ hasText: "Consent reset" })).toBeVisible();
     await page.keyboard.press("Escape");
@@ -221,8 +221,8 @@ test.describe("external-content consent — accessibility", () => {
   });
 
   for (const [label, scale] of [
-    ["20px Large Font", 1],
-    ["20px Large Font at 200% scale", 2],
+    ["20px Large font", 1],
+    ["20px Large font at 200% scale", 2],
   ] as const) {
     test.describe(label, () => {
       test.use({ viewport: { width: 940, height: 500 }, deviceScaleFactor: scale });

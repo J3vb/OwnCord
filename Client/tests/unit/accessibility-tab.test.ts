@@ -21,11 +21,11 @@ vi.mock("@lib/ui/osMotion", () => ({
 
 /** The tests name toggles by their original index; the tab groups them now. */
 const TOGGLE_LABELS = [
-  "Reduce Motion",
-  "High Contrast",
-  "Role Colors",
+  "Reduce motion",
+  "High contrast",
+  "Role colors",
   "Sync with OS",
-  "Large Font",
+  "Large font",
 ] as const;
 
 /** Return the toggle named by the label at `index` in TOGGLE_LABELS. */
@@ -98,12 +98,12 @@ describe("AccessibilityTab", () => {
 
       // Grouped: Motion, Readability, Chat.
       expect(labelTexts).toEqual([
-        "Reduce Motion",
+        "Reduce motion",
         "Sync with OS",
-        "High Contrast",
-        "Large Font",
+        "High contrast",
+        "Large font",
         "Always underline links",
-        "Role Colors",
+        "Role colors",
       ]);
     });
 
@@ -116,14 +116,14 @@ describe("AccessibilityTab", () => {
           .find((r) => r.querySelector(".setting-label")!.textContent === label)!
           .querySelector(".setting-desc")!.textContent;
 
-      expect(desc("Reduce Motion")).toBe("Disable animations and transitions");
-      expect(desc("High Contrast")).toBe("Increase contrast for better readability");
-      expect(desc("Role Colors")).toBe("Show colored usernames based on role in chat");
+      expect(desc("Reduce motion")).toBe("Disable animations and transitions");
+      expect(desc("High contrast")).toBe("Increase contrast for better readability");
+      expect(desc("Role colors")).toBe("Show colored usernames based on role in chat");
       // The OS row says what the system is asking for right now.
       expect(desc("Sync with OS")).toBe(
         "Follow your system setting. It is not asking for less motion right now.",
       );
-      expect(desc("Large Font")).toBe("Use larger text throughout the app for better readability");
+      expect(desc("Large font")).toBe("Use larger text throughout the app for better readability");
     });
 
     it("renders each row with setting-row class", () => {
@@ -148,22 +148,22 @@ describe("AccessibilityTab", () => {
           .closest(".settings-section")!;
         return row.querySelector("h2")!.textContent;
       };
-      expect(groupOf("Reduce Motion")).toBe("Motion");
+      expect(groupOf("Reduce motion")).toBe("Motion");
       expect(groupOf("Sync with OS")).toBe("Motion");
-      expect(groupOf("High Contrast")).toBe("Readability");
-      expect(groupOf("Large Font")).toBe("Readability");
+      expect(groupOf("High contrast")).toBe("Readability");
+      expect(groupOf("Large font")).toBe("Readability");
       expect(groupOf("Always underline links")).toBe("Readability");
-      expect(groupOf("Role Colors")).toBe("Chat");
+      expect(groupOf("Role colors")).toBe("Chat");
     });
 
-    it("nests the OS setting under Reduce Motion, which it only affects", () => {
+    it("nests the OS setting under Reduce motion, which it only affects", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
       const row = getToggle(container, 3).closest(".setting-row")!;
       expect(row.classList.contains("nested")).toBe(true);
       expect(row.previousElementSibling!.querySelector(".setting-label")!.textContent).toBe(
-        "Reduce Motion",
+        "Reduce motion",
       );
     });
 
@@ -184,7 +184,7 @@ describe("AccessibilityTab", () => {
       }
     });
 
-    it("shows the effective text size, set in Appearance, and follows Large Font", () => {
+    it("shows the effective text size, set in Appearance, and follows Large font", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 

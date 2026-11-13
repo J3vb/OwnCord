@@ -238,7 +238,7 @@ export const voiceText = defineCatalog("voice", {
   "picker.shareAppAudio": "Share the app's sound",
   "picker.shareAppAudioHint": "When you share one window, its app's sound is shared too.",
   "picker.quality": "Stream quality",
-  "picker.qualityHint": "Defaults from Settings → Voice & Video; applies to this share only.",
+  "picker.qualityHint": "Defaults from Settings → Voice & video; applies to this share only.",
   "picker.frameRate": "Frame rate",
   "picker.fps": "{fps} fps",
   "picker.fpsDefault": "Default ({fps} fps)",
@@ -321,9 +321,9 @@ export const voiceText = defineCatalog("voice", {
   "device.micFailed": "Failed to switch microphone",
   "device.speakerFailed": "Failed to switch speaker",
   "audio.settingsFailed": "Failed to update audio settings",
-  "audio.buffer.label": "Voice Buffer",
+  "audio.buffer.label": "Voice buffer",
   "audio.buffer.desc":
-    "Used with Enhanced Noise Suppression in Voice Activity. A longer buffer can preserve the start of short words and adds microphone delay.",
+    "Used with Enhanced noise suppression in Voice activity. A longer buffer can preserve the start of short words and adds microphone delay.",
   "audio.buffer.value": "{ms} ms",
 
   "passwordDialog.title": "Password required",

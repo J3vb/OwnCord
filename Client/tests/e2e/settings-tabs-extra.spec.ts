@@ -10,15 +10,15 @@
  *     `savePref` dispatches, so a message emitted AFTER the toggle proves the
  *     whole toggle -> storage -> render path, not just the switch.
  *   - Accessibility toggles own classes on <html> (reduced-motion,
- *     high-contrast, large-font, OS-motion sync) and the Role Colors colour
+ *     high-contrast, large-font, OS-motion sync) and the Role colors colour
  *     resolves on a newly rendered author.
- *   - Advanced drives Developer Mode into message rendering and the
- *     "Clear All Cache & Restart" two-step confirm into the outgoing
+ *   - Advanced drives Developer mode into message rendering and the
+ *     "Clear all cache & restart" two-step confirm into the outgoing
  *     `plugin:process|restart` IPC.
  *   - Notifications is the mute list: a mute set from the sidebar context
  *     menu must appear here and Unmute must clear it.
  *
- * Native-only bits (Launch on Login autostart, Open DevTools) are skipped: the
+ * Native-only bits (Launch on login autostart, Open DevTools) are skipped: the
  * browser mock has no autostart plugin and DevTools is native chrome.
  */
 
@@ -180,11 +180,11 @@ test.describe("Settings — Text & Images Tab", () => {
     await navigateToMainPageReady(page);
   });
 
-  test("Show Embeds off suppresses a YouTube embed, on restores it", async ({ page }) => {
+  test("Show embeds off suppresses a YouTube embed, on restores it", async ({ page }) => {
     await openSettings(page);
-    await switchSettingsTab(page, "Text & Images");
+    await switchSettingsTab(page, "Text & images");
 
-    const toggle = toggleFor(page, "Show Embeds");
+    const toggle = toggleFor(page, "Show embeds");
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -203,8 +203,8 @@ test.describe("Settings — Text & Images Tab", () => {
     // Flip it back on and prove the embed renders again — concealed, because
     // turning the toggle off revoked the external-content consent (B9-8, Q3).
     await openSettings(page);
-    await switchSettingsTab(page, "Text & Images");
-    await toggleFor(page, "Show Embeds").click();
+    await switchSettingsTab(page, "Text & images");
+    await toggleFor(page, "Show embeds").click();
     await closeSettings(page);
     await emitChat(page, 9102, "https://www.youtube.com/watch?v=aaaaaaaaaaa");
     await expect(
@@ -214,11 +214,11 @@ test.describe("Settings — Text & Images Tab", () => {
     ).toBeVisible();
   });
 
-  test("Inline Attachment Preview off suppresses a direct image URL", async ({ page }) => {
+  test("Inline attachment preview off suppresses a direct image URL", async ({ page }) => {
     await openSettings(page);
-    await switchSettingsTab(page, "Text & Images");
+    await switchSettingsTab(page, "Text & images");
 
-    const toggle = toggleFor(page, "Inline Attachment Preview");
+    const toggle = toggleFor(page, "Inline attachment preview");
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -229,8 +229,8 @@ test.describe("Settings — Text & Images Tab", () => {
     await expect(page.locator("[data-testid='message-9201'] .msg-image")).toHaveCount(0);
 
     await openSettings(page);
-    await switchSettingsTab(page, "Text & Images");
-    await toggleFor(page, "Inline Attachment Preview").click();
+    await switchSettingsTab(page, "Text & images");
+    await toggleFor(page, "Inline attachment preview").click();
     await closeSettings(page);
     await emitChat(page, 9202, "https://example.com/other.png");
     // Back on, concealed: turning it off revoked the consent (B9-8, Q3).
@@ -241,11 +241,11 @@ test.describe("Settings — Text & Images Tab", () => {
     ).toBeVisible();
   });
 
-  test("Link Preview off suppresses a generic link card", async ({ page }) => {
+  test("Link preview off suppresses a generic link card", async ({ page }) => {
     await openSettings(page);
-    await switchSettingsTab(page, "Text & Images");
+    await switchSettingsTab(page, "Text & images");
 
-    const toggle = toggleFor(page, "Link Preview");
+    const toggle = toggleFor(page, "Link preview");
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -258,8 +258,8 @@ test.describe("Settings — Text & Images Tab", () => {
     await expect(page.locator("[data-testid='message-9301'] .msg-embed-link")).toHaveCount(0);
 
     await openSettings(page);
-    await switchSettingsTab(page, "Text & Images");
-    await toggleFor(page, "Link Preview").click();
+    await switchSettingsTab(page, "Text & images");
+    await toggleFor(page, "Link preview").click();
     await closeSettings(page);
     await emitChat(page, 9302, "https://example.com/another-article");
     // Back on, concealed: turning it off revoked the consent (B9-8, Q3).
@@ -272,7 +272,7 @@ test.describe("Settings — Text & Images Tab", () => {
 
   test("Animate GIFs off renders a new GIF frozen, on renders it playing", async ({ page }) => {
     await openSettings(page);
-    await switchSettingsTab(page, "Text & Images");
+    await switchSettingsTab(page, "Text & images");
 
     const toggle = toggleFor(page, "Animate GIFs");
     await expect(toggle).toHaveAttribute("aria-checked", "true");
@@ -286,7 +286,7 @@ test.describe("Settings — Text & Images Tab", () => {
     await expect(frozen.locator(".gif-play-btn")).not.toHaveClass(/playing/);
 
     await openSettings(page);
-    await switchSettingsTab(page, "Text & Images");
+    await switchSettingsTab(page, "Text & images");
     await toggleFor(page, "Animate GIFs").click();
     await closeSettings(page);
     await emitChat(page, 9352, "https://example.com/playing.gif");
@@ -302,7 +302,7 @@ test.describe("Settings — Text & Images Tab", () => {
 
 test.describe("Settings — Accessibility Tab", () => {
   test.beforeEach(async ({ page }) => {
-    // otheruser is seeded as admin so Role Colors has a server colour
+    // otheruser is seeded as admin so Role colors has a server colour
     // (#ff0000, MOCK_ROLES) to switch away from.
     await mockSession(page, {
       members: [
@@ -314,11 +314,11 @@ test.describe("Settings — Accessibility Tab", () => {
     await navigateToMainPageReady(page);
   });
 
-  test("High Contrast toggles the html high-contrast class", async ({ page }) => {
+  test("High contrast toggles the html high-contrast class", async ({ page }) => {
     await openSettings(page);
     await switchSettingsTab(page, "Accessibility");
 
-    const toggle = toggleFor(page, "High Contrast");
+    const toggle = toggleFor(page, "High contrast");
     await toggle.click();
     expect(await htmlClasses(page)).toContain("high-contrast");
     await expect(toggle).toHaveAttribute("aria-checked", "true");
@@ -327,7 +327,7 @@ test.describe("Settings — Accessibility Tab", () => {
     expect(await htmlClasses(page)).not.toContain("high-contrast");
   });
 
-  test("Large Font toggles the html large-font class", async ({ page }) => {
+  test("Large font toggles the html large-font class", async ({ page }) => {
     await openSettings(page);
     await switchSettingsTab(page, "Accessibility");
 
@@ -337,7 +337,7 @@ test.describe("Settings — Accessibility Tab", () => {
       );
     expect(await fontSize()).toBe("16px");
 
-    const toggle = toggleFor(page, "Large Font");
+    const toggle = toggleFor(page, "Large font");
     await toggle.click();
     expect(await htmlClasses(page)).toContain("large-font");
     expect(await fontSize()).toBe("18px");
@@ -347,14 +347,14 @@ test.describe("Settings — Accessibility Tab", () => {
     expect(await fontSize()).toBe("16px");
   });
 
-  test("Reduce Motion toggles the html reduced-motion class", async ({ page }) => {
+  test("Reduce motion toggles the html reduced-motion class", async ({ page }) => {
     // Sync with OS is on by default (B9-2, Q1), so the OS must not be asking
     // for reduced motion or the class would stay on regardless of the toggle.
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await openSettings(page);
     await switchSettingsTab(page, "Accessibility");
 
-    const toggle = toggleFor(page, "Reduce Motion");
+    const toggle = toggleFor(page, "Reduce motion");
     await toggle.click();
     expect(await htmlClasses(page)).toContain("reduced-motion");
     expect(await page.evaluate(() => localStorage.getItem("owncord:settings:reducedMotion"))).toBe(
@@ -390,7 +390,7 @@ test.describe("Settings — Accessibility Tab", () => {
     expect(await htmlClasses(page)).toContain("reduced-motion");
   });
 
-  test("Role Colors off recolours a newly rendered author to the member colour", async ({
+  test("Role colors off recolours a newly rendered author to the member colour", async ({
     page,
   }) => {
     await emitChat(page, 9401, "colored when roles on");
@@ -403,7 +403,7 @@ test.describe("Settings — Accessibility Tab", () => {
 
     await openSettings(page);
     await switchSettingsTab(page, "Accessibility");
-    await toggleFor(page, "Role Colors").click();
+    await toggleFor(page, "Role colors").click();
     await closeSettings(page);
     await emitChat(page, 9402, "member color when roles off");
     const offAuthor = page.locator("[data-testid='message-9402'] .msg-author");
@@ -424,11 +424,11 @@ test.describe("Settings — Advanced Tab", () => {
     await navigateToMainPageReady(page);
   });
 
-  test("Developer Mode reveals the per-message Copy ID action", async ({ page }) => {
+  test("Developer mode reveals the per-message Copy ID action", async ({ page }) => {
     await openSettings(page);
     await switchSettingsTab(page, "Advanced");
 
-    const toggle = toggleFor(page, "Developer Mode");
+    const toggle = toggleFor(page, "Developer mode");
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "true");
@@ -446,7 +446,7 @@ test.describe("Settings — Advanced Tab", () => {
 
     await openSettings(page);
     await switchSettingsTab(page, "Advanced");
-    await toggleFor(page, "Developer Mode").click();
+    await toggleFor(page, "Developer mode").click();
     await closeSettings(page);
     await emitChat(page, 9502, "dev mode off");
     await page.locator("[data-testid='message-9502']").hover();
@@ -456,7 +456,7 @@ test.describe("Settings — Advanced Tab", () => {
     await page.keyboard.press("Escape");
   });
 
-  test("Clear Image Cache deletes the IndexedDB image cache", async ({ page }) => {
+  test("Clear image cache deletes the IndexedDB image cache", async ({ page }) => {
     await page.evaluate(
       () =>
         new Promise<void>((resolve, reject) => {
@@ -475,7 +475,7 @@ test.describe("Settings — Advanced Tab", () => {
     await switchSettingsTab(page, "Advanced");
 
     const btn = page
-      .locator(".setting-row", { hasText: "Clear Image Cache" })
+      .locator(".setting-row", { hasText: "Clear image cache" })
       .locator("button.ac-btn");
     await btn.click();
     await expect(btn).toHaveText("Cleared!");
@@ -490,12 +490,12 @@ test.describe("Settings — Advanced Tab", () => {
       .toBe(false);
   });
 
-  test("Clear Log Files removes the persisted JSONL files", async ({ page }) => {
+  test("Clear log files removes the persisted JSONL files", async ({ page }) => {
     await openSettings(page);
     await switchSettingsTab(page, "Advanced");
 
     const btn = page
-      .locator(".setting-row", { hasText: "Clear Log Files" })
+      .locator(".setting-row", { hasText: "Clear log files" })
       .locator("button.ac-btn");
     await btn.click();
     await expect(btn).toHaveText("Cleared!");
@@ -513,7 +513,7 @@ test.describe("Settings — Advanced Tab", () => {
     expect(removed.filter((p) => p.endsWith("2026-01-02.jsonl"))).toHaveLength(1);
   });
 
-  test("Clear All Cache & Restart is a two-step confirm that relaunches", async ({ page }) => {
+  test("Clear all cache & restart is a two-step confirm that relaunches", async ({ page }) => {
     await page.evaluate(() => {
       localStorage.setItem("owncord:profiles", JSON.stringify([{ name: "X" }]));
       localStorage.setItem("owncord:settings:fontSize", "20");
@@ -523,7 +523,7 @@ test.describe("Settings — Advanced Tab", () => {
     await switchSettingsTab(page, "Advanced");
 
     const btn = page
-      .locator(".setting-row", { hasText: "Clear All Cache & Restart" })
+      .locator(".setting-row", { hasText: "Clear all cache & restart" })
       .locator("button.ac-btn");
     await btn.click();
     await expect(btn).toHaveText("Are you sure? Click again");
@@ -544,9 +544,9 @@ test.describe("Settings — Advanced Tab", () => {
 });
 
 test.describe("Settings — Advanced Tab button contrast", () => {
-  // The cache actions are secondary buttons and Clear & Restart is destructive
+  // The cache actions are secondary buttons and Clear & restart is destructive
   // (danger text at rest, danger fill once armed); each must read at 4.5:1 on
-  // its composited background in every theme, with and without High Contrast.
+  // its composited background in every theme, with and without High contrast.
   for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
     test(`${theme}: secondary and destructive buttons read at 4.5:1`, async ({ page }) => {
       await mockSession(page);
@@ -563,12 +563,12 @@ test.describe("Settings — Advanced Tab button contrast", () => {
           const { ratio } = await textContrast(button(name));
           if (ratio < Q1.text) failures.push(`hc=${highContrast} ${name}: ${ratio.toFixed(2)}`);
         };
-        await check("Clear Image Cache");
-        await check("Clear All Cache & Restart");
-        await button("Clear All Cache & Restart").click();
-        await expect(button("Clear All Cache & Restart")).toHaveClass(/ac-btn-danger/);
+        await check("Clear image cache");
+        await check("Clear all cache & restart");
+        await button("Clear all cache & restart").click();
+        await expect(button("Clear all cache & restart")).toHaveClass(/ac-btn-danger/);
         await page.mouse.move(0, 0);
-        await check("Clear All Cache & Restart");
+        await check("Clear all cache & restart");
       }
       expect(failures).toEqual([]);
     });

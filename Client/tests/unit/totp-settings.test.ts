@@ -99,7 +99,7 @@ describe("TOTP Settings", () => {
   function submitDisablePassword(password: string): HTMLElement {
     byTestId<HTMLElement>("totp-disable-btn").click();
     byTestId<HTMLInputElement>("totp-password-input").value = password;
-    const confirm = acButton("Confirm Disable");
+    const confirm = acButton("Confirm disable");
     confirm.click();
     return confirm;
   }
@@ -345,12 +345,12 @@ describe("TOTP Settings", () => {
 
       const confirmBtn = byTestId<HTMLElement>("totp-confirm-btn");
       expect(confirmBtn).not.toBeNull();
-      expect(confirmBtn.textContent).toBe("Verify & Activate");
+      expect(confirmBtn.textContent).toBe("Verify & activate");
 
       overlay.destroy?.();
     });
 
-    it("calls onConfirmTotp with password and code on 'Verify & Activate' click", async () => {
+    it("calls onConfirmTotp with password and code on 'Verify & activate' click", async () => {
       const { options, overlay } = openOverlay();
 
       // Step 1: Click Enable 2FA
@@ -406,7 +406,7 @@ describe("TOTP Settings", () => {
       // Confirm button should be re-enabled
       const confirmBtnAfter = byTestId<HTMLButtonElement>("totp-confirm-btn");
       expect(confirmBtnAfter.disabled).toBe(false);
-      expect(confirmBtnAfter.textContent).toBe("Verify & Activate");
+      expect(confirmBtnAfter.textContent).toBe("Verify & activate");
 
       overlay.destroy?.();
     }
@@ -521,7 +521,7 @@ describe("TOTP Settings", () => {
 
       // Button should be re-enabled
       expect((confirmBtn as HTMLButtonElement).disabled).toBe(false);
-      expect(confirmBtn.textContent).toBe("Confirm Disable");
+      expect(confirmBtn.textContent).toBe("Confirm disable");
 
       overlay.destroy?.();
     });
@@ -562,7 +562,7 @@ describe("TOTP Settings", () => {
       const pwInput = byTestId<HTMLInputElement>("totp-password-input");
       expect(pwInput).not.toBeNull();
 
-      // Find the Cancel button that is a sibling of the "Confirm Disable" button
+      // Find the Cancel button that is a sibling of the "Confirm disable" button
       // inside the TOTP section
       const totpSection = byTestId<HTMLElement>("totp-section");
       const cancelBtn = Array.from(totpSection.querySelectorAll(".ac-btn")).find(
@@ -652,7 +652,7 @@ describe("TOTP Settings", () => {
       byTestId<HTMLInputElement>("totp-password-input").value = "mypassword123";
       (updateUser as ReturnType<typeof vi.fn>).mockClear();
 
-      acButton("Confirm Disable").click();
+      acButton("Confirm disable").click();
 
       await vi.waitFor(() => {
         expect(options.onDisableTotp).toHaveBeenCalled();

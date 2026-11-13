@@ -74,7 +74,7 @@ const test = base.extend<{ alice: Page }>({
 async function relogin(page: Page, server: TestServer): Promise<void> {
   await openSettings(page);
   await page.locator(".settings-nav-item.danger").click();
-  // Log Out asks first.
+  // Log out asks first.
   await page.locator("[data-testid='logout-confirm']").click();
   await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
   await login(page, server, "alice");
@@ -169,9 +169,9 @@ async function runCycle(
     "Account",
     "Appearance",
     "Notifications",
-    "Text & Images",
+    "Text & images",
     "Accessibility",
-    "Voice & Video",
+    "Voice & video",
     "Keybinds",
     "Advanced",
     "Logs",

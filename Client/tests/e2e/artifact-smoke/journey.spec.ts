@@ -71,6 +71,7 @@ test.beforeAll(() => {
   if (!ARTIFACTS) throw new Error("OWNCORD_ARTIFACT_DIR must name the downloaded release assets");
 });
 
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
 test("installed artifact boots, connects, joins voice and recovers an account", async ({}, info) => {
   test.setTimeout(300_000);
   const server = await startTestServer({ tls: true, livekit: true });
@@ -132,7 +133,7 @@ test("installed artifact boots, connects, joins voice and recovers an account", 
       );
       expect(secret).toMatch(/\S{16,}/);
       await app.click("[data-testid='shown-once-done']");
-      await app.click(".settings-nav-item.danger", "Log Out");
+      await app.click(".settings-nav-item.danger", "Log out");
       await app.click("[data-testid='logout-confirm']");
       await waitFor(app, "#host");
       await app.fill("#host", host);
@@ -162,6 +163,7 @@ test("installed artifact boots, connects, joins voice and recovers an account", 
   }
 });
 
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
 test("the .deb package installs through apt and boots", async ({}, info) => {
   test.skip(process.platform !== "linux", "Linux ships a .deb beside the AppImage");
   test.setTimeout(180_000);
@@ -216,6 +218,7 @@ test("the .deb package installs through apt and boots", async ({}, info) => {
  * token into the query before the server sees it, so the server's
  * Authorization forwarding keeps its own unit coverage.
  */
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
 test("installed Linux artifact joins voice by a non-loopback server address", async ({}, info) => {
   test.skip(
     process.platform !== "linux",

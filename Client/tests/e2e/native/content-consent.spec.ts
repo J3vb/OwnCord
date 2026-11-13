@@ -101,7 +101,7 @@ test("external content reaches the native broker only after consent", async ({},
 
         // The Text & Images reset re-conceals it; nothing further is fetched.
         await openSettings(page);
-        await switchSettingsTab(page, "Text & Images");
+        await switchSettingsTab(page, "Text & images");
         await page.getByRole("button", { name: "Reset external content consent" }).click();
         await expect(page.getByRole("status").filter({ hasText: "Consent reset" })).toBeVisible();
         await page.keyboard.press("Escape");

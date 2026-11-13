@@ -66,7 +66,7 @@ test.describe("reconnect media notice", () => {
     ).toEqual(["camera"]);
   });
 
-  test("contrast holds in every theme and High Contrast", async ({ page }) => {
+  test("contrast holds in every theme and High contrast", async ({ page }) => {
     await mockTauriFullSession(page);
     await signIn(page);
     const matrix: AppearancePrefs[] = [
@@ -94,7 +94,7 @@ test.describe("reconnect media notice", () => {
     }
   });
 
-  test("reflows at 200 % zoom with Large Font", async ({ page }, testInfo) => {
+  test("reflows at 200 % zoom with Large font", async ({ page }, testInfo) => {
     await page.setViewportSize(ZOOM_VIEWPORT);
     await mockTauriFullSession(page);
     await signIn(page);

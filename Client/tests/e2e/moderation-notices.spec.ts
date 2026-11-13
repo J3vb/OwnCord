@@ -6,7 +6,7 @@
  *
  * Accessibility evidence for the journey (Q1): accessible names, keyboard
  * operation, focus indicator and its stable location through the async
- * removal, contrast in every theme, High Contrast and a custom accent,
+ * removal, contrast in every theme, High contrast and a custom accent,
  * reduced motion, and reflow at the 940x500 minimum window with 20px Large
  * Font. The native NVDA/Orca review is owner-run.
  */
@@ -115,9 +115,9 @@ test.describe("moderation notices", () => {
     await expect(page.locator("[role='dialog'][aria-modal='true']:visible")).toHaveCount(0);
     await expect(region.getByRole("button")).toHaveText([
       "Acknowledge",
-      "View in Privacy & Safety settings",
+      "View in Privacy & safety settings",
       "Acknowledge",
-      "View in Privacy & Safety settings",
+      "View in Privacy & safety settings",
     ]);
     expect(await findUnnamedControls(region)).toEqual([]);
 
@@ -218,11 +218,11 @@ test.describe("moderation notices", () => {
   }) => {
     await start(page);
     await notice(page, 11)
-      .getByRole("button", { name: "View in Privacy & Safety settings" })
+      .getByRole("button", { name: "View in Privacy & safety settings" })
       .click();
     const overlay = page.locator("[data-testid='settings-overlay']");
     await expect(overlay).toHaveClass(/open/);
-    await expect(page.getByRole("tab", { name: "Privacy & Safety" })).toHaveAttribute(
+    await expect(page.getByRole("tab", { name: "Privacy & safety" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -238,7 +238,7 @@ test.describe("moderation notices", () => {
     await expect(notice(page, 11)).toBeVisible();
   });
 
-  test("contrast holds in every theme, High Contrast and a custom accent", async ({ page }) => {
+  test("contrast holds in every theme, High contrast and a custom accent", async ({ page }) => {
     await start(page);
     const rows: string[] = [];
     for (const prefs of APPEARANCE_MATRIX) {
@@ -251,7 +251,7 @@ test.describe("moderation notices", () => {
         date: first.locator(".moderation-notice-date"),
         reason: first.locator(".moderation-notice-reason"),
         ack: first.getByRole("button", { name: "Acknowledge" }),
-        link: first.getByRole("button", { name: "View in Privacy & Safety settings" }),
+        link: first.getByRole("button", { name: "View in Privacy & safety settings" }),
       };
       for (const [name, locator] of Object.entries(parts)) {
         const { ratio } = await textContrast(locator);
@@ -272,7 +272,7 @@ test.describe("moderation notices", () => {
       .attach("b9-15-contrast.txt", { body: rows.join("\n"), contentType: "text/plain" });
   });
 
-  test("reflows at 940x500 with 20px Large Font and needs no motion", async ({ page }) => {
+  test("reflows at 940x500 with 20px Large font and needs no motion", async ({ page }) => {
     await page.setViewportSize({ width: 940, height: 500 });
     await start(page);
     await setAppearance(page, { fontSize: 20, largeFont: true, reducedMotion: true });

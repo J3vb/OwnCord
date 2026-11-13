@@ -25,12 +25,12 @@ import { findUnnamedControls } from "./support/accessibility";
 // Chat); the Saturation slider is checked on its own. The playwright
 // config emulates prefers-reduced-motion: reduce, so the OS row says so.
 const ENGLISH = [
-  ["Reduce Motion", "Disable animations and transitions"],
+  ["Reduce motion", "Disable animations and transitions"],
   ["Sync with OS", "Follow your system setting. It is asking for less motion right now."],
-  ["High Contrast", "Increase contrast for better readability"],
-  ["Large Font", "Use larger text throughout the app for better readability"],
+  ["High contrast", "Increase contrast for better readability"],
+  ["Large font", "Use larger text throughout the app for better readability"],
   ["Always underline links", "Underline links in messages even when you are not pointing at them"],
-  ["Role Colors", "Show colored usernames based on role in chat"],
+  ["Role colors", "Show colored usernames based on role in chat"],
 ] as const;
 /** The Saturation row, a slider rather than a switch. */
 const SATURATION = [
@@ -53,7 +53,7 @@ async function expandCatalogText(page: Page): Promise<boolean> {
 }
 
 async function openAccessibility(page: Page, expanded: boolean): Promise<void> {
-  // Q1's largest text: 20 px with Large Font, applied by the real startup path.
+  // Q1's largest text: 20 px with Large font, applied by the real startup path.
   await page.addInitScript(() => {
     localStorage.setItem("owncord:settings:fontSize", "20");
     localStorage.setItem("owncord:settings:largeFont", "true");
@@ -578,12 +578,12 @@ test.describe("settings, account and voice text", () => {
 
     for (const [tab, english] of [
       ["Account", "Edit profile"],
-      ["Notifications", "Desktop Notifications"],
-      ["Text & Images", "Link Preview"],
-      ["Voice & Video", "Input Device"],
-      ["Keybinds", "Push to Talk"],
-      ["Advanced", "Developer Mode"],
-      ["Logs", "Export Support Bundle"],
+      ["Notifications", "Desktop notifications"],
+      ["Text & images", "Link preview"],
+      ["Voice & video", "Input device"],
+      ["Keybinds", "Push to talk"],
+      ["Advanced", "Developer mode"],
+      ["Logs", "Export support bundle"],
     ] as const) {
       await switchSettingsTab(page, tab);
       const content = page.locator("[data-testid='settings-overlay'] .settings-content");
@@ -632,8 +632,8 @@ test.describe("settings, account and voice text", () => {
     for (const [el, english] of [
       [danger.locator(".disclose-label"), "Delete account"],
       [account.locator(".account-field-label", { hasText: "Username" }), "Username"],
-      [account.locator("[data-testid='profile-save-btn']"), "Save Profile"],
-      [account.locator("[data-testid='delete-account-trigger']"), "Delete Account"],
+      [account.locator("[data-testid='profile-save-btn']"), "Save profile"],
+      [account.locator("[data-testid='delete-account-trigger']"), "Delete account"],
     ] as const) {
       await expect(el).toHaveText(expanded(english));
       await expectWhole(el);
