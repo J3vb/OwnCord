@@ -100,6 +100,29 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Known issues
+
+- **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.
+- **Linux: this release was not checked by hand on X11, GNOME Wayland and KDE Plasma Wayland.** It works, but it is less tested than Windows.
+- **Scrolling far back in a long channel while it reloads can make the list jump** to another spot. Scroll back to where you were; nothing is lost.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
+- **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
+
+## v2.10.0
+
+**OwnCord 2.10** (the eleventh public beta) gives the app a new look and new sounds, and brings Android message and call notifications that work while the app is closed. Settings, dialogs, menus and avatars get a cleaner, consistent design; the app sounds are new, with a Classic style to go back to; and the Android app gets UnifiedPush notifications, a sound route button and calls that pause for a phone call. Emoji are now drawn as images, soft speech gets through Enhanced Noise Suppression, search finds thread and forum posts, and many voice, thread and admin fixes are included.
+
+It is still a **beta and a hobby project**: don't use it for anything sensitive. Update the server and the desktop app together. **This release changes the database** (changes 092 and 093). The server upgrades it on first start and keeps a safety copy first; you cannot go back to 2.9 without restoring that copy. **If you run LiveKit through Docker or manage `livekit.yaml` yourself**, set `audio.active_level` to 60 in that file and restart LiveKit, so the speaking ring lights for soft voices.
+
+### Highlights
+
+- **A new look**: Settings in a larger window with the same layout on every page, theme preview tiles, an icon in front of every menu action, tidier invite and Create channel dialogs, and letter avatars with one colour per person everywhere.
+- **New sounds**: a fresh set of app sounds (Classic brings back the old ones), sounds for a dropped voice connection and an unanswered call, and a play button for every sound in Settings.
+- **Android notifications and calls**: messages and call rings reach the phone while the app is closed, through UnifiedPush with no Google service; plus a sound route button, calls that pause for a phone call, and Mute and Leave in the call notification.
+- **Emoji as images**: emoji look the same on every computer and the emoji picker scrolls smoothly.
+- **Soft speech**: a soft "hmm" or "yes" gets through Enhanced Noise Suppression, and the speaking ring lights for it.
+- **Search in threads**: search now finds text in threads and forum posts.
+
 ### Added
 
 **Android**
@@ -134,10 +157,9 @@ release changes the database, and anything an operator must do first.)
 
 - New app sounds: a short bubble pop for a message, its own two-note chime for a mention, a marimba phrase for an incoming call, and softer voice and call sounds. Settings > Notifications has a new "Sound style" choice under the volume slider; Classic brings back the plain tones OwnCord had before.
 - Three new sounds: a short phrase when your voice connection drops (and the join sound when it is back), soft tones when your call is declined or not answered, and an optional quiet tick when push-to-talk opens and closes your mic. The connection and push-to-talk sounds have their own switches in Settings > Notifications (the push-to-talk tick starts off); the call sound follows the Ringback switch.
-- Three new sounds: a short phrase when your voice connection drops (and the join sound when it is back), soft tones when your call is declined or not answered, and an optional quiet tick when push-to-talk opens and closes your mic. Each has its own switch in Settings > Notifications; the push-to-talk tick starts off.
 - Every app sound can be tried in Settings > Notifications: each sound switch has a play button, which works with the switch off. Previews, including the volume slider's and the sound style's, now also sound while you are deafened or on Do Not Disturb.
 
-**Desktop UI**
+### Changed
 
 - Right-click menus and the phone action sheets now show an icon in front of every action (message, channel, server, member, direct message, thread, category, folder, image, volume and camera menus), so an action is quicker to find. Destructive actions keep their red colour.
 - The invite dialog is tidier: the link to share and its Copy button come first, a new link is made with two labelled choices, and the other links sit in a short list. A link with no uses left says "Used up", and a link you just made shows your name, not "unknown".
@@ -203,7 +225,7 @@ release changes the database, and anything an operator must do first.)
 - **Admin:** first-run setup opened over a bare IPv6 address showed a broken link after a port or TLS change.
 - **Server rail:** the connected server's icon showed digits from its address ("12" for 127.0.0.1) instead of the server's initials. It now shows the initials of the server's name.
 
-### Messages & files
+**Messages & files**
 
 - **Search never found text written in a thread or a forum post.** Search now covers the threads and forum posts of every channel you can read (a forum post follows its forum's permissions and NSFW acknowledgement), and picking such a result opens it in the thread panel. Search hits gain a `thread_parent_id` field; an older desktop client lists these hits but cannot open them.
 - **An open thread could close and disappear after a reconnect when the server was slow to answer.** It now stays and can be reloaded.
@@ -224,20 +246,16 @@ release changes the database, and anything an operator must do first.)
 - **A voice message that hit the 5-minute limit and failed to stop froze the recording bar.** The bar now closes and shows "Recording failed".
 - **Link previews are limited to five per message**; further links stay plain links.
 
-### Voice
+**Voice**
 
 - **A reconnect after a live update the app could not read took you out of your call**, and everyone saw you leave. The reconnect now keeps the call. Update the app as well as the server: an older app still drops the call.
 - **A soft voice was heard, but the speaking ring the others see stayed dark**, mostly with Automatic Gain Control off. The ring now lights for soft speech too. The server update brings it; with Docker, or if you manage `livekit.yaml` yourself, set `audio.active_level` to 60 in that file and restart LiveKit.
 - **With Enhanced Noise Suppression on, a soft "hmm" or "yes" after a pause or after typing was often cut off.** Short soft words now get through much more often, while keys, clicks and thumps stay out. A cough or a sneeze gets through a little more often than before.
 
-### Phone app
+**Phone app**
 
 - **On a small phone the buttons at the end of a direct message's header were off screen**, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
 - **In a call, the round controls were stacked in two short rows.** They now sit in one row.
-
-### Under the hood
-
-- Database change 092: eight indexes for the lookups a message or channel delete runs. The first start after the update builds them, which takes a little longer on a large database. Deleting a busy channel, a thread or a group DM, and retention clean-up, are much faster on a server with many channels (a 20,000-message channel on a server with 5,000 channels: 23 s before, under 1 s after).
 
 ### Known issues
 
@@ -246,6 +264,10 @@ release changes the database, and anything an operator must do first.)
 - **Scrolling far back in a long channel while it reloads can make the list jump** to another spot. Scroll back to where you were; nothing is lost.
 - **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
 - **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
+
+### Under the hood
+
+- Database change 092: eight indexes for the lookups a message or channel delete runs. The first start after the update builds them, which takes a little longer on a large database. Deleting a busy channel, a thread or a group DM, and retention clean-up, are much faster on a server with many channels (a 20,000-message channel on a server with 5,000 channels: 23 s before, under 1 s after).
 
 ## v2.9.0
 
