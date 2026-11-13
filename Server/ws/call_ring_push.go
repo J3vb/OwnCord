@@ -36,8 +36,19 @@ type callRingPush interface {
 	ringAnswered(ctx context.Context, channelID, userID int64)
 }
 
+// ringStarted leaves out members already in this call on some device: a ring again from inside a group
+// call is for the others, and their phone must not ring over the call they are in.
 func (h *Hub) ringStarted(ctx context.Context, channelID, callerID int64, targets []int64) {
-	h.pushRing(ctx, func(p RingPusher) service.RingPush { return p.RingStarted(channelID, callerID, targets) })
+	if h.ringPush.Load() == nil {
+		return
+	}
+	away := make([]int64, 0, len(targets))
+	for _, uid := range targets {
+		if c := h.voiceClient(uid); c == nil || c.voice.channel() != channelID {
+			away = append(away, uid)
+		}
+	}
+	h.pushRing(ctx, func(p RingPusher) service.RingPush { return p.RingStarted(channelID, callerID, away) })
 }
 
 func (h *Hub) ringAnswered(ctx context.Context, channelID, userID int64) {

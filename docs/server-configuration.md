@@ -154,9 +154,10 @@ sleeps keeps no connection; one whose app is open ignores it), and
 `{"t":"ring_end","c":<channel id>}` when one of them declines or joins the call
 on any device, or the caller leaves it. Both carry only the DM channel id, are
 sent at high urgency with a 30-second TTL, get one retry a second later, and
-skip a member on Do Not Disturb (a ring end is always sent). The server
-remembers a ring for 35 seconds, in memory only: after a restart a ring rings
-out on the phone instead of being taken down.
+skip a member on Do Not Disturb or already in the call (a ring end is always
+sent). The server remembers a ring for 65 seconds (its 30-second TTL plus the
+phone's 30-second ring), in memory only: after a restart a ring rings out on
+the phone instead of being taken down.
 
 The Android app registers through UnifiedPush: each member's own push app
 (ntfy, or another distributor) receives the pushes, so no Google service is

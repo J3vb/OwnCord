@@ -15,6 +15,7 @@ import { uiStore } from "../../stores/ui.store";
 import { voiceStore } from "../../stores/voice.store";
 import type { PageApi, PageState } from "../../pages/main-page/pageState";
 import { pushSessionInstance } from "../push/pushSubscription";
+import { pushStore } from "../push/store";
 
 const log = createLogger("push-ring");
 
@@ -67,6 +68,33 @@ function joinWhenReady(channelId: number, pg: Joins, owner: AbortSignal): void {
   tryJoin();
 }
 
+/** A press that started the app can come in before push knows the session:
+ *  hold it until then, or give up with the ring after PUSH_ACCEPT_WAIT_MS. */
+function holdForSession(action: PushRingAction, st: Sends, pg: Joins, owner: AbortSignal): void {
+  const wait = new Disposable();
+  waiting = wait;
+  const done = (): void => {
+    if (waiting === wait) waiting = null;
+    wait.destroy();
+  };
+  owner.addEventListener("abort", done, { once: true, signal: wait.signal });
+  wait.addCleanup(
+    pushStore.subscribe(() => {
+      if (pushSessionInstance() === null) return;
+      done();
+      actOnPushRing(action, st, pg, owner);
+    }),
+  );
+  setOwnedTimeout(
+    wait.signal,
+    () => {
+      done();
+      withdraw(action.channelId);
+    },
+    PUSH_ACCEPT_WAIT_MS,
+  );
+}
+
 /** Act on a press on a ring from push, until `owner` (the page) goes. */
 export function actOnPushRing(
   action: PushRingAction,
@@ -74,9 +102,17 @@ export function actOnPushRing(
   pg: Joins,
   owner: AbortSignal,
 ): void {
-  if (action.instance !== pushSessionInstance()) return;
   waiting?.destroy();
   waiting = null;
+  const session = pushSessionInstance();
+  if (session === null) {
+    holdForSession(action, st, pg, owner);
+    return;
+  }
+  if (action.instance !== session) {
+    withdraw(action.channelId);
+    return;
+  }
   if (action.kind === "decline") {
     // The ring is down already (the host takes it down on Decline).
     if (connected())

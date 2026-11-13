@@ -132,3 +132,18 @@ func TestRingPush_OffByDefaultAndAfterUnset(t *testing.T) {
 	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
 	pusher.requireCalls(t)
 }
+
+func TestRingPush_MemberAlreadyInTheCallIsNotRung(t *testing.T) {
+	hub, _, alice, bob, carol, chID := newGroupDMTrio(t, "ringpush-in", "InCall")
+	pusher := newFakeRingPusher()
+	hub.SetRingPusher(pusher)
+	cAlice, _ := connectRingPair(t, hub, alice, bob, chID)
+	cCarol := ws.NewTestClientWithUser(hub, carol, chID, make(chan []byte, 64))
+	hub.Register(cCarol)
+	waitRegistered(t, hub, cCarol)
+	ws.SetVoiceChIDForTest(cCarol, chID)
+
+	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
+	pusher.requireSent(t, false, chID)
+	pusher.requireCalls(t, fmt.Sprintf("ring %d from %d to %v", chID, alice.ID, []int64{bob.ID}))
+}

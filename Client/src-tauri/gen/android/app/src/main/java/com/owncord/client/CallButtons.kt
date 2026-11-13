@@ -80,6 +80,9 @@ class CallButtons(private val newToken: () -> String) {
   private var ringing: Long? = null
   private var lastRing: Long? = null
   private var token: String? = null
+  // The activity-borne presses already taken for the current token: each counts
+  // once, so an activity rebuilt on the intent that started it acts on nothing.
+  private val taken = HashSet<String>()
 
   // A ring goes up: the token its buttons carry. One that is up already (the
   // call was rung again) keeps its token, so a press that is on its way while
@@ -92,6 +95,7 @@ class CallButtons(private val newToken: () -> String) {
     ringing = channelId
     lastRing = channelId
     token = next
+    taken.clear()
     return next
   }
 
@@ -135,6 +139,7 @@ class CallButtons(private val newToken: () -> String) {
   ): CallEvent? {
     if (!throughActivity || channelId == null || token == null) return null
     if (token != this.token || channelId != lastRing) return null
+    if (!taken.add(kind)) return null
     return CallEvent(kind, channelId)
   }
 }

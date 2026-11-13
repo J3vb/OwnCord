@@ -172,7 +172,7 @@ object PushAlerts {
 // to that server; its Decline only takes it down, since no page is there to
 // tell the server.
 object PushRing {
-  // The server remembers a ring 35 s; the phone's own ring is a little shorter.
+  // As long as the page's own ring; the server remembers the ring past it.
   private const val TIMEOUT_MS = 30_000L
 
   fun onMessage(context: Context, instance: String, kind: String, content: String) {

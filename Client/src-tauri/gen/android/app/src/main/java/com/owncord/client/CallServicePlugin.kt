@@ -105,7 +105,11 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
   override fun load(webView: WebView) {
     super.load(webView)
     CallActionReceiver.sink = { intent -> pressed(intent, throughActivity = false) }
-    launchAction = actionOf(activity.intent, throughActivity = true)
+    // Reopened from recents, the activity gets the intent that first started it
+    // again: that press was acted on then.
+    val launch = activity.intent
+    val fromHistory = launch != null && (launch.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+    launchAction = if (fromHistory) null else actionOf(launch, throughActivity = true)
   }
 
   // The webview starts listening: an action that started the app goes now.
@@ -143,6 +147,12 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
     // Declined: it stops ringing at once, whatever the webview is doing. An
     // accepted ring stays up until the webview has joined or said why not.
     if (event.kind == CallEvent.DECLINE && event.channelId != null && buttons.ringDown(event.channelId)) {
+      CallRing.cancel(activity.applicationContext)
+    }
+    // Accepted from a push the page never heard: the page joins once it is
+    // signed in, which can take seconds, and must not do so under a ringtone.
+    val pushed = intent.hasExtra(CallActions.EXTRA_INSTANCE)
+    if (pushed && event.kind == CallEvent.ACCEPT && event.channelId != null && buttons.ringDown(event.channelId)) {
       CallRing.cancel(activity.applicationContext)
     }
     NativeLog.info(ExitInfo.callButton(event.kind))

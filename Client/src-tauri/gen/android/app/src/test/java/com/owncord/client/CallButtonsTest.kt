@@ -146,4 +146,17 @@ class CallButtonsTest {
     buttons.ringDown(5)
     assertFalse(buttons.isUp(5))
   }
+
+  @Test
+  fun aPressThroughTheActivityCountsOnce() {
+    val token = buttons.ringUp(50)
+    assertEquals(CallEvent.OPEN, opened(CallActions.OPEN, 50, token)?.kind)
+    assertEquals(CallEvent.ACCEPT, opened(CallActions.ACCEPT, 50, token)?.kind)
+    // The activity rebuilt on the intent that started it: nothing again.
+    assertNull(opened(CallActions.ACCEPT, 50, token))
+    assertNull(opened(CallActions.OPEN, 50, token))
+    buttons.ringDown(50)
+    val next = buttons.ringUp(50)
+    assertEquals(CallEvent.ACCEPT, opened(CallActions.ACCEPT, 50, next)?.kind)
+  }
 }

@@ -18,6 +18,7 @@ vi.mock("../push/pushSubscription", () => ({ pushSessionInstance: () => host.ins
 import { actOnPushRing, PUSH_ACCEPT_WAIT_MS, type PushRingAction } from "./pushRingActions";
 import { Disposable } from "../../lib/disposable";
 import { setMessageJumpHandler } from "../../lib/nav/messageNavigation";
+import { pushStore } from "../push/store";
 import type { WsClient } from "../../lib/ws";
 import { setConnectionStatus } from "../../stores/ui.store";
 import { resetVoiceStore, voiceStore } from "../../stores/voice.store";
@@ -118,14 +119,36 @@ describe("a press on a ring from push", () => {
     expect(opened).not.toHaveBeenCalled();
   });
 
-  it("a ring for another server or account is not this page's", () => {
+  it("a ring for another server or account is not this page's: it only comes down", () => {
     callerInCall();
     press("accept", "b.example#1");
     press("decline", "b.example#1");
-    host.instance = null;
-    press("open");
     expect(opened).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
+    expect(joinDmCall).not.toHaveBeenCalled();
+    expect(host.clearCall).toHaveBeenCalledWith(CHANNEL);
+  });
+
+  it("a press that came before push knew the session waits for it", () => {
+    host.instance = null;
+    callerInCall();
+    press("accept");
+    expect(joinDmCall).not.toHaveBeenCalled();
+    host.instance = "a.example#1";
+    pushStore.setState((s) => ({ ...s, setting: "checking" }));
+    pushStore.flush();
+    expect(joinDmCall).toHaveBeenCalledWith(CHANNEL);
+  });
+
+  it("a press still waiting for the session gives up with the ring", () => {
+    host.instance = null;
+    press("accept");
+    vi.advanceTimersByTime(PUSH_ACCEPT_WAIT_MS);
+    expect(host.clearCall).toHaveBeenCalledWith(CHANNEL);
+    host.instance = "a.example#1";
+    callerInCall();
+    pushStore.setState((s) => ({ ...s, setting: "on" }));
+    pushStore.flush();
     expect(joinDmCall).not.toHaveBeenCalled();
   });
 });

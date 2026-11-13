@@ -1896,7 +1896,7 @@ subscriptions are stored but nothing is ever sent to one.
 
 **Call rings.** With both keys true, a DM `call_ring` also sends
 `{"t":"ring","c":<channel id>}` to every subscription of the users it rings,
-connected or not, unless their status is Do Not Disturb; declining (`call_decline`),
+connected or not, unless their status is Do Not Disturb or they are already in the call; declining (`call_decline`),
 joining the call on any device, or the caller leaving it sends
 `{"t":"ring_end","c":<channel id>}` to the subscriptions still ringing. Urgency
 `high`, TTL 30 seconds, one retry. Only the DM channel id is sent.

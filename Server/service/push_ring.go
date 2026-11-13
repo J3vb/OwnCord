@@ -14,8 +14,9 @@ import (
 // and the end of that ring (answered, declined, or the caller gave up) as a second push that takes it down.
 // Both carry only the DM channel id: who calls is shown by the app once it opens, as for a message push.
 
-// pushRingWindow is how long a ring is remembered for its end push; a little past the phone's own 30 s ring.
-const pushRingWindow = 35 * time.Second
+// pushRingWindow is how long a ring is remembered for its end push: the push may sit up to its 30 s TTL at
+// the push service and then ring 30 s on the phone, so a little past both.
+const pushRingWindow = 65 * time.Second
 
 // pushRingMapCap bounds the rings remembered; past it a new ring is still pushed but not remembered, so it
 // rings out on the phone instead of being taken down early.
