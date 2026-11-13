@@ -59,6 +59,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.ma-item .ma-avatar {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius-circle);
+  color: var(--on-fill);
+  font-size: 10px;
+  font-weight: 700;
+}
 /* The `:shortcode` popup shows what it is about to insert, so a row reads as
    the emoji rather than as its name. Fixed width keeps the labels aligned
    whether the preview is a glyph or a custom-emoji image. */
