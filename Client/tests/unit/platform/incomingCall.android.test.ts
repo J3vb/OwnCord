@@ -29,7 +29,7 @@ const phone = vi.hoisted(() => ({
   /** What the app asked of the host, in the order it was done. */
   asked: [] as string[],
   /** How long the host takes over a command, by its name; none by default. */
-  slow: {} as Record<string, number>,
+  slow: new Map<string, number>(),
   listeners: new Set<(raw: unknown) => void>(),
 }));
 
@@ -46,7 +46,7 @@ function takeDown(channelId: number): void {
 }
 
 async function host(command: string, args: Record<string, unknown>): Promise<unknown> {
-  const takes = phone.slow[command] ?? 0;
+  const takes = phone.slow.get(command) ?? 0;
   if (takes > 0) await new Promise((done) => setTimeout(done, takes));
   if (command === "android_notify") {
     phone.asked.push("notify");
@@ -173,7 +173,7 @@ describe("an incoming call on the Android app", () => {
       tokens: 0,
       alertedAt: Number.NEGATIVE_INFINITY,
       asked: [],
-      slow: {},
+      slow: new Map<string, number>(),
     });
     chimeNotes.length = 0;
     setChannelMutesHost(HOST);
@@ -257,7 +257,7 @@ describe("an incoming call on the Android app", () => {
   });
 
   test("takes a ring down after it went up, however slow the phone is to show it", async () => {
-    phone.slow = { show_call_ring: 500 };
+    phone.slow = new Map([["show_call_ring", 500]]);
     page.ring.incoming(otto);
     await pass(100);
     page.ring.cancel(50, "ringer-left");

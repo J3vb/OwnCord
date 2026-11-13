@@ -6,7 +6,7 @@ import { loggerMock } from "../../../tests/helpers/loggerMock";
 
 const host = vi.hoisted(() => ({
   clearCall: vi.fn(),
-  instance: "a.example#1" as string | null,
+  instance: null as string | null,
 }));
 
 vi.mock("@lib/logger", () => loggerMock());
