@@ -40,7 +40,7 @@ const NO_STRIP: StripSpace = { active: false, side: false, w: 0, h: 0 };
 export const isAvatarCell = (el: HTMLElement): boolean => el.classList.contains(AVATAR_CLASS);
 
 /** Leave the packed place and size behind. */
-function clearPlace(el: HTMLElement): void {
+export function clearPlace(el: HTMLElement): void {
   el.style.left = "";
   el.style.top = "";
   el.style.width = "";
@@ -48,9 +48,9 @@ function clearPlace(el: HTMLElement): void {
   el.classList.remove("video-cell--no-room");
 }
 
-/** Seat the cells in the strip, in order, reusing the elements; anything
- *  else left in it (a cell of an earlier grid) goes. */
-function fillStrip(el: HTMLDivElement, cells: readonly HTMLDivElement[]): void {
+/** Seat the cells in the strip (or the cards box), in order, reusing the
+ *  elements; anything else left in it (a cell of an earlier grid) goes. */
+export function fillStrip(el: HTMLDivElement, cells: readonly HTMLDivElement[]): void {
   for (const child of Array.from(el.children)) {
     if (!(cells as readonly Element[]).includes(child)) child.remove();
   }
@@ -187,5 +187,5 @@ export function createPeopleStrip(st: GridState, api: GridApi) {
     last = NO_STRIP;
   }
 
-  return { seat, place, holds, keepFocus, reset };
+  return { seat, place, holds, keepFocus, dissolve, reset };
 }

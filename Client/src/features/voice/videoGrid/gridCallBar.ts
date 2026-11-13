@@ -1,19 +1,19 @@
 /**
- * The video grid's call view: the control bar, the view toggles, popping the
- * whole call out, and per-tile stream stats.
+ * The video grid's call view: the control bar, the View button, and popping
+ * the whole call out.
  */
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
 import { showToast } from "@lib/ui/toast";
-import { showContextMenu, type ContextMenuItem } from "@lib/ui/contextMenu";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { voiceText } from "../../../i18n/voice";
-import { canPublishScreen, isAndroidApp } from "../native/platform";
+import { canPublishScreen } from "../native/platform";
 import { openPopoutWindow } from "../popout";
 import { createRouteSlot } from "../routeSlot";
 import { createTalkSlot } from "../talkSlot";
 import { createPausedNote, drawPausedNote } from "./gridPhoneHold";
 import { VIEW_PREFS, type ViewToggle, log, callButton } from "./gridShared";
+import { createGridViewMenu } from "./gridViewMenu";
 import type { GridState, GridApi } from "./gridState";
 import type { VideoGridCallbacks } from "./VideoGrid";
 
@@ -34,6 +34,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
   const fullscreenTalkSlot = createTalkSlot("call");
   /** The call view's sound route button (Android app only). */
   const routeSlot = createRouteSlot("call");
+  const viewMenu = createGridViewMenu(st, api);
   st.gridListeners.addCleanup(() => {
     talkSlot.clear();
     fullscreenTalkSlot.clear();
@@ -116,7 +117,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
         voiceText("grid.viewOptions"),
         "ellipsis",
         "views",
-        () => openViewMenu(views),
+        () => viewMenu.openViewMenu(views, false),
         " video-fs-btn--views",
       );
       views.setAttribute("aria-haspopup", "menu");
@@ -273,93 +274,9 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     btn.disabled = mediaLockReason() !== null;
   }
 
-  // --- Call view: view toggles and control bar --------------------------------
-
-  const VIEW_TOGGLES: readonly [ViewToggle, string, IconName][] = [
-    ["nonVideo", voiceText("grid.showNonVideo"), "user"],
-    ["selfCamera", voiceText("grid.showMyCamera"), "square-user"],
-    ["strip", voiceText("grid.showStrip"), "layout-grid"],
-  ];
-
-  function buildViewBar(): HTMLElement {
-    const bar = createElement("div", {
-      class: "video-grid__views",
-      role: "toolbar",
-      "aria-label": voiceText("grid.viewOptions"),
-    });
-    for (const [key, label, icon] of VIEW_TOGGLES) {
-      const btn = createElement("button", {
-        type: "button",
-        class: "video-grid__view",
-        "aria-label": label,
-        title: label,
-        "data-view-toggle": key,
-      });
-      btn.appendChild(createIcon(icon, 18));
-      btn.addEventListener("click", () => setView(key, !st.viewOn[key]));
-      bar.appendChild(btn);
-    }
-    // The Android app has one window, so there is nothing to pop out to.
-    if (!isAndroidApp()) {
-      st.popBtn = createElement("button", {
-        type: "button",
-        class: "video-grid__view",
-        "data-grid-control": "popout",
-      });
-      st.popBtn.appendChild(createIcon("external-link", 18));
-      st.popBtn.addEventListener("click", () => {
-        if (st.callPop === null) popOutCall();
-        else closeCallPopout(true);
-      });
-      bar.appendChild(st.popBtn);
-    }
-    if (st.exitBtn !== null) bar.appendChild(st.exitBtn);
-    syncPopButton();
-    return bar;
-  }
-
-  /** The view toggles as one menu, for the phone's round control row. */
-  function openViewMenu(anchor: HTMLButtonElement): void {
-    const items: ContextMenuItem[] = VIEW_TOGGLES.map(([key, label]) => ({
-      label,
-      checked: st.viewOn[key],
-      testId: `view-menu-${key}`,
-      onClick: () => setView(key, !st.viewOn[key]),
-    }));
-    if (st.popBtn !== null) {
-      items.push({
-        label: voiceText(st.callPop === null ? "grid.popOutCall" : "grid.popInCall"),
-        testId: "view-menu-popout",
-        onClick: () => {
-          if (st.callPop === null) popOutCall();
-          else closeCallPopout(true);
-        },
-      });
-    }
-    const rect = anchor.getBoundingClientRect();
-    showContextMenu({
-      x: rect.left,
-      y: rect.top,
-      items,
-      ariaLabel: voiceText("grid.viewOptions"),
-      restoreFocusTo: () => (anchor.isConnected ? anchor : null),
-      signal: st.gridListeners.signal,
-    });
-  }
-
   // --- Pop out the whole call ----------------------------------------------------
 
-  function syncPopButton(): void {
-    if (st.exitBtn !== null) st.exitBtn.hidden = !st.callView || st.callPop !== null;
-    for (const bar of st.root?.querySelectorAll(".video-fs-calls") ?? []) drawCallState(bar);
-    if (st.popBtn === null) return;
-    const label = voiceText(st.callPop === null ? "grid.popOutCall" : "grid.popInCall");
-    st.popBtn.setAttribute("aria-label", label);
-    st.popBtn.title = label;
-    st.popBtn.setAttribute("aria-pressed", String(st.callPop !== null));
-  }
-
-  /** Move the grid, with its toggles and control bar, into a window of its
+  /** Move the grid, with its View button and control bar, into a window of its
    *  own; the app window goes back to the chat. */
   function popOutCall(): void {
     const grid = st.root;
@@ -385,7 +302,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
       showToast(voiceText("tile.popoutFailed"), "error");
       return;
     }
-    syncPopButton();
+    redrawCallBars();
     st.callbacks.onCallPopout?.(true, false);
     api.relayout();
     api.syncViews();
@@ -399,6 +316,8 @@ export function createGridCallBar(st: GridState, api: GridApi) {
 
   /** The call's window closed: the grid goes back to the app window. */
   function bringCallBack(byUser: boolean): void {
+    // A View menu open in the window goes with it.
+    viewMenu.closeViewMenu();
     const restore = byUser || st.popRestore;
     st.popRestore = true;
     api.dropFullscreen();
@@ -406,10 +325,10 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     if (st.root !== null) st.callHome?.appendChild(st.root);
     st.callHome = null;
     api.observeGrid();
-    syncPopButton();
+    redrawCallBars();
     st.callbacks.onCallPopout?.(false, restore);
     for (const entry of st.cells.values()) entry.video.play()?.catch(() => {});
-    if (restore) st.popBtn?.focus();
+    if (restore) st.viewBtn?.focus();
     api.relayout();
     api.syncViews();
   }
@@ -419,18 +338,8 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     st.viewOn[key] = on;
     savePref(VIEW_PREFS[key], on);
     api.relayout();
-    syncViewBar();
     api.syncStatsPolling();
     api.syncViews();
-  }
-
-  /** Each toggle's pressed state. */
-  function syncViewBar(): void {
-    if (st.viewBar === null) return;
-    for (const btn of st.viewBar.querySelectorAll<HTMLButtonElement>("[data-view-toggle]")) {
-      const key = btn.dataset["viewToggle"] as ViewToggle;
-      btn.setAttribute("aria-pressed", String(st.viewOn[key]));
-    }
   }
 
   function loadViewPrefs(): void {
@@ -439,18 +348,16 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     }
   }
 
-  /** Show or take down the call view's header toggles and control bar. */
+  /** Show or take down the call view's View button and control bar. */
   function setCallView(on: boolean): void {
     if (!on) closeCallPopout(false);
     st.callView = on;
-    if (st.exitBtn !== null) st.exitBtn.hidden = !on || st.callPop !== null;
     if (st.root === null) return;
-    if (on && st.viewBar === null) st.viewBar = buildViewBar();
+    if (on && st.viewBar === null) st.viewBar = viewMenu.buildViewBar();
     if (!on && st.viewBar !== null) {
-      if (st.exitBtn !== null) st.root.insertBefore(st.exitBtn, st.root.firstChild);
       st.viewBar.remove();
       st.viewBar = null;
-      st.popBtn = null;
+      st.viewBtn = null;
     }
     const cc = st.callbacks.callControls;
     if (on && st.callBar === null && cc !== undefined) {
@@ -475,13 +382,12 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     syncFlipCheck,
     mediaLockReason,
     drawMediaButton,
-    buildViewBar,
-    syncPopButton,
+    buildViewBar: viewMenu.buildViewBar,
+    openViewMenu: viewMenu.openViewMenu,
     popOutCall,
     closeCallPopout,
     bringCallBack,
     setView,
-    syncViewBar,
     loadViewPrefs,
     setCallView,
   };

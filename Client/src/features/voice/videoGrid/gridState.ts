@@ -39,8 +39,7 @@ export interface GridState {
   flipCheck: "idle" | "checking" | "yes" | "no";
   flipCheckGen: number;
   flipping: boolean;
-  exitBtn: HTMLButtonElement | null;
-  /** The call view (setExitVisible): header toggles, control bar, filters. */
+  /** The call view (setExitVisible): View button, control bar, filters. */
   callView: boolean;
   viewBar: HTMLElement | null;
   callBar: HTMLElement | null;
@@ -56,7 +55,8 @@ export interface GridState {
    *  where the grid goes back to. */
   callPop: PopoutWindow | null;
   callHome: Element | null;
-  popBtn: HTMLButtonElement | null;
+  /** The call view's View button, where focus comes back after Bring back. */
+  viewBtn: HTMLButtonElement | null;
   /** The pop-out closes for Bring back (true) or because the call view ended. */
   popRestore: boolean;
   readonly lastInfo: Map<number, StreamInfo>;
@@ -127,12 +127,12 @@ export interface GridApi {
   mediaLockReason(): string | null;
   drawMediaButton(btn: HTMLButtonElement, on: boolean, icon: IconName): void;
   buildViewBar(): HTMLElement;
-  syncPopButton(): void;
+  /** The View menu above `anchor`; `withChat` adds Show chat. */
+  openViewMenu(anchor: HTMLButtonElement, withChat: boolean): void;
   popOutCall(): void;
   closeCallPopout(restore: boolean): void;
   bringCallBack(byUser: boolean): void;
   setView(key: ViewToggle, on: boolean): void;
-  syncViewBar(): void;
   loadViewPrefs(): void;
   setCallView(on: boolean): void;
   syncStatsPolling(): void;

@@ -149,36 +149,46 @@ with keyboard focus on the grid. A stream that arrives during focus is drawn
 Small. People without video sit in the participant strip in focus as in the
 grid (`gridPeopleStrip.ts`). Screen shares carry a
 **LIVE** badge, and the speaking ring (`--text-positive`) and a mic-slash or
-headphone-slash badge for a muted or deafened user are on camera tiles. A
-**Show chat** control in the grid's header leaves the grid for
-the chat without leaving the call. In the guild call view the header also has
-**Show non-video participants**, **Show my camera** (hides only your own
-camera tile, here) and **Show participant strip**; each is a
-saved preference (`callShowNonVideo`, `callShowSelfCamera`, `callShowStrip`)
-and none applies while the DM call panel hosts the grid. **Show non-video
-participants** decides whether people without video are drawn at all, in the
-strip or as tiles; **Show participant strip** hides or shows the strip itself
-while a video tile is up (with no video up the people are tiles in the grid and
-only the first toggle applies). A control bar at the
-bottom of the call view, focused or not, has mute, deafen, camera,
-share and disconnect; camera and share are inert until the join has connected.
-The header toggles sit beside the bar, or stack above it with room kept below
-the tiles when the call view is narrower than 680 px. On a phone the toggles
-are not square buttons: one round **View options** control in the bar opens
-them as a menu, so the call screen has a single row of round controls.
+headphone-slash badge for a muted or deafened user are on camera tiles.
+**With no camera or screen share on show** (a voice-only call, guild or DM)
+the people are not packed tiles: each is a compact card (avatar, name,
+speaking ring, mute/deafen badge), side by side and centred, wrapping onto
+more rows, in a box of their own that scrolls when they do not fit, so the
+control bar and the View button stay put (`gridCards.ts`). The first camera
+or share brings the packed grid and the participant strip back; when the last
+one stops the same card elements return, in roster order, keeping keyboard
+focus. A control bar at the bottom of the call view, focused or not, has
+mute, deafen, camera, share and disconnect; camera and share are inert until
+the join has connected. Beside it, one labelled **View** button
+(`gridViewMenu.ts`) opens a menu of named rows: **Show non-video
+participants**, **Show my camera** (hides only your own camera tile, here)
+and **Show participant strip** as checked rows, then **Pop out call** and
+**Show chat**, which leaves the grid for the chat without leaving the call.
+Each toggle is a saved preference (`callShowNonVideo`, `callShowSelfCamera`,
+`callShowStrip`) and none applies while the DM call panel hosts the grid.
+**Show non-video participants** decides whether people without video are
+drawn while a video tile is up, in the strip or as tiles; with no video up it
+waits (the cards always show) and the row keeps its state. **Show
+participant strip** hides or shows the strip itself while a video tile is up.
+The View button sits beside the bar, or above it with room kept below the
+tiles when the call view is narrower than 680 px. On a phone the View button
+gives way to one round **View options** control in the bar, which opens the
+same rows in the same order without Show chat (the phone's row has its own
+Chat control), so the call screen has a single row of round controls.
 On a phone with a front and a back camera, **Flip camera** sits beside Camera
 while the camera is on and moves it to the camera facing the other way; a tap
 while a flip is still switching does nothing. Share is left out where the
 device cannot capture its screen (the Android app, a phone browser): those can
 still watch a share.
-**Pop out call**, last in the header, moves the whole call view (tiles,
-toggles and control bar) into a pop-out window of its own and returns the app
+**Pop out call**, in the View menu, moves the whole call view (tiles, View
+button and control bar) into a pop-out window of its own and returns the app
 window to the chat; opening the call again from the app raises that window.
-**Bring the call back**, or closing the window, puts the call view back in the
-app window; leaving the call closes it. Show chat and the camera picker arrow
-are hidden there and the tile menu has no Profile row (each opens in the app
-window), and starting a share brings the call back first so its picker is in
-view.
+The View menu opens in that window, where its row reads **Bring the call
+back**; that row, or closing the window, puts the call view back in the app
+window (a View menu open in the window closes with it), and leaving the call
+closes it. Show chat and the camera picker arrow are left out there and the
+tile menu has no Profile row (each opens in the app window), and starting a
+share brings the call back first so its picker is in view.
 
 **Sound route in the Android app** (`features/voice/routeButton.ts`,
 `features/voice/mobileRoutes.ts`, the `mobileAudio` platform member): a round

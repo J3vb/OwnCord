@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoModeControllerMocks";
 import { CALL_CHAT_STACK_BELOW_PX } from "../../../src/pages/main-page/VideoModeController";
 import { createVideoGrid } from "../../../src/features/voice/videoGrid/VideoGrid";
+import { viewMenuRow } from "../../helpers/videoGridHarness";
 import {
   makeSlots,
   makeVideoGrid,
@@ -358,8 +359,7 @@ describe("createVideoModeController", () => {
       );
     }
     const popButton = () =>
-      popDoc.querySelector<HTMLButtonElement>("[data-grid-control='popout']") ??
-      container.querySelector<HTMLButtonElement>("[data-grid-control='popout']")!;
+      viewMenuRow(popDoc.querySelector("[data-testid='video-grid']") ?? container, "popout")!;
     const inWindow = () => popDoc.querySelector("[data-testid='video-grid']") !== null;
     const tileIds = (d: ParentNode) =>
       [...d.querySelectorAll<HTMLElement>(".video-cell--avatar")].map((t) => t.dataset.personId);

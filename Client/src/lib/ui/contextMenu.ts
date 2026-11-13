@@ -83,6 +83,8 @@ export interface ContextMenuOptions {
   readonly signal: AbortSignal;
   /** CSS class added to the menu root (for styling/selection). */
   readonly className?: string;
+  /** The document to open in (a pop-out window's); the app's by default. */
+  readonly doc?: Document;
 }
 
 /** Tears down the one open menu, whatever kind it is. Opening any menu runs it
@@ -287,6 +289,7 @@ export function showContextMenu(opts: ContextMenuOptions): void {
     signal,
     ...(opts.restoreFocusTo !== undefined ? { restoreFocusTo: opts.restoreFocusTo } : {}),
     ...(opts.onClosed !== undefined ? { onClosed: opts.onClosed } : {}),
+    ...(opts.doc !== undefined ? { doc: opts.doc } : {}),
     build: (menu, closeMenu, menuSignal) => {
       /** One plain row: a focusable button that closes the menu, then acts. */
       const buildRow = (item: ContextMenuItem): HTMLElement => {
