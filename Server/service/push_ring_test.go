@@ -161,3 +161,40 @@ func TestRingPush_LastFailedAttemptIsCounted(t *testing.T) {
 	}
 	requireCounters(t, d, 0, 1, 0, "(the last 503 is a failure)")
 }
+
+func TestRingPush_EndWaitsForItsRingToBeSent(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	f.seedDirectMessage(t)
+	const endpoint = "https://push.example.net/order"
+	sub := f.subscribe(t, 2, endpoint)
+	fetch := newRecordingPushFetcher()
+	release := fetch.block(endpoint)
+	d := f.ringDispatcher(fetch)
+
+	ring := d.RingStarted(20, 1, []int64{2})
+	ringDone := make(chan struct{})
+	endDone := make(chan struct{})
+	go func() { defer close(ringDone); d.SendRing(context.Background(), ring) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for fetch.countFor(endpoint) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the ring never reached the push service")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	end := d.RingLeft(20, 1)
+	go func() { defer close(endDone); d.SendRing(context.Background(), end) }()
+	time.Sleep(50 * time.Millisecond)
+	if n := fetch.countFor(endpoint); n != 1 {
+		t.Fatalf("fetches before the ring was sent = %d, want 1: the end must wait for its ring", n)
+	}
+	release()
+	<-ringDone
+	<-endDone
+	fetch.mu.Lock()
+	calls := slices.Clone(fetch.calls)
+	fetch.mu.Unlock()
+	if len(calls) != 2 || string(sub.decrypt(t, calls[1].Body)) != `{"t":"ring_end","c":20}` {
+		t.Errorf("calls = %d, want the ring and then its end", len(calls))
+	}
+}

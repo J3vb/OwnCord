@@ -42,6 +42,11 @@ type RingPush struct {
 	// CallerID is who rang: a ring is not delivered to a target who has blocked them since.
 	CallerID int64
 	UserIDs  []int64
+
+	// sent is closed once a ring's delivery is over; after is the ring's sent for its end, which waits for it
+	// so an end never overtakes its ring at the push service.
+	sent  chan struct{}
+	after <-chan struct{}
 }
 
 // Empty reports whether there is nobody to push to.
@@ -61,6 +66,7 @@ type pushRing struct {
 	caller  int64
 	targets map[int64]bool
 	until   time.Time
+	sent    chan struct{}
 }
 
 // pushRingBook remembers each DM's ring for its end push. In memory only: a restart forgets it, and a ring
@@ -112,14 +118,15 @@ func (d *PushDispatcher) RingStarted(channelID, callerID int64, targets []int64)
 	if _, ok := b.live[channelID]; !ok {
 		b.expireLocked(now)
 	}
+	sent := make(chan struct{})
 	if _, ok := b.live[channelID]; ok || len(b.live) < pushRingMapCap {
 		set := make(map[int64]bool, len(targets))
 		for _, t := range targets {
 			set[t] = true
 		}
-		b.live[channelID] = &pushRing{caller: callerID, targets: set, until: now.Add(pushRingWindow)}
+		b.live[channelID] = &pushRing{caller: callerID, targets: set, until: now.Add(pushRingWindow), sent: sent}
 	}
-	return RingPush{ChannelID: channelID, CallerID: callerID, UserIDs: append([]int64(nil), targets...)}
+	return RingPush{ChannelID: channelID, CallerID: callerID, UserIDs: append([]int64(nil), targets...), sent: sent}
 }
 
 // RingAnswered is userID declining the ring in channelID, or joining its call on any device: their phone
@@ -136,7 +143,7 @@ func (d *PushDispatcher) RingAnswered(channelID, userID int64) RingPush {
 	if len(r.targets) == 0 {
 		delete(b.live, channelID)
 	}
-	return RingPush{End: true, ChannelID: channelID, CallerID: r.caller, UserIDs: []int64{userID}}
+	return RingPush{End: true, ChannelID: channelID, CallerID: r.caller, UserIDs: []int64{userID}, after: r.sent}
 }
 
 // RingLeft is userID leaving channelID's call: when they rang it, every phone still ringing stops.
@@ -153,7 +160,7 @@ func (d *PushDispatcher) RingLeft(channelID, userID int64) RingPush {
 	for uid := range r.targets {
 		ids = append(ids, uid)
 	}
-	return RingPush{End: true, ChannelID: channelID, CallerID: userID, UserIDs: ids}
+	return RingPush{End: true, ChannelID: channelID, CallerID: userID, UserIDs: ids, after: r.sent}
 }
 
 // ringing reports whether channelID's ring still rings for userID, so a retry never rings after an answer.
@@ -169,11 +176,22 @@ func (d *PushDispatcher) ringing(channelID, userID int64) bool {
 // whose app sleeps keeps no connection, and one whose app is open ignores the push. A ring skips users on
 // Do Not Disturb, which promises no call popup. Never errors: failures are counted.
 func (d *PushDispatcher) SendRing(ctx context.Context, p RingPush) {
+	if p.sent != nil {
+		defer close(p.sent)
+	}
 	if p.Empty() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, pushRingSendTimeout)
 	defer cancel()
+	if p.after != nil {
+		// Bounded by the ring's own send timeout; a ring never sent leaves this to ctx.
+		select {
+		case <-p.after:
+		case <-ctx.Done():
+			return
+		}
+	}
 
 	userIDs := p.UserIDs
 	if !p.End {

@@ -178,10 +178,15 @@ object PushRing {
   fun onMessage(context: Context, instance: String, kind: String, content: String) {
     val channelId = PushPayload.channelOf(content)
     val buttons = CallRingState.buttons
-    val alreadyUp = channelId != null && buttons.isUp(channelId) && CallRing.isUp(context)
+    val owner = CallRingState.pushOwner
+    val upHere = channelId != null && buttons.isUp(channelId) && CallRing.isUp(context)
+    // The page's own ring is for the server it is signed in to, which a push
+    // may or may not come from: a push leaves it to the page.
+    val alreadyUp = upHere && (owner == null || owner == instance)
     when (PushRingRule.step(kind, channelId, PushAlerts.appOnScreen(), alreadyUp)) {
       PushRingRule.Step.RING -> if (channelId != null) ring(context, instance, channelId)
-      PushRingRule.Step.END -> if (channelId != null && buttons.ringDown(channelId)) CallRing.cancel(context)
+      PushRingRule.Step.END ->
+        if (channelId != null && owner == instance && buttons.ringDown(channelId)) CallRing.cancel(context)
       PushRingRule.Step.NONE -> {}
     }
   }
@@ -194,6 +199,7 @@ object PushRing {
       val channel = CallRing.channel(context, args)
       if (!CallRing.shows(context, channel)) return
       CallRing.post(context, args, channel, CallRingState.buttons.ringUp(channelId), instance)
+      CallRingState.pushOwner = instance
       NativeLog.info(ExitInfo.callRingShown(args.quiet))
     } catch (e: Exception) {
       NativeLog.warn("push ring not shown: ${e.javaClass.simpleName}")

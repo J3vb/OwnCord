@@ -35,6 +35,11 @@ class ClearRingArgs {
 // or a push with no page running (PushRing).
 object CallRingState {
   val buttons = CallButtons { UUID.randomUUID().toString() }
+
+  // The push registration (server and account) whose push put the ring up,
+  // or null for a ring the page showed. Channel ids are per server, so a push
+  // matches the ring up only when it comes for the same registration.
+  @Volatile var pushOwner: String? = null
 }
 
 // The incoming call's notification: who calls, with Accept and Decline, over

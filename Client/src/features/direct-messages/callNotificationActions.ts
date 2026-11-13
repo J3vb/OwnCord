@@ -18,6 +18,7 @@ import { isSelfMuted, voiceStore } from "../../stores/voice.store";
 import type { PageApi, PageState } from "../../pages/main-page/pageState";
 import { isHostRing } from "./callAlerts";
 import { actOnPushRing } from "./pushRingActions";
+import { pushSessionInstance } from "../push/pushSubscription";
 
 /** The call's own controls, as every other surface presses them. */
 export interface CallControls {
@@ -38,6 +39,8 @@ function actOnRing(action: RingAction, st: Rings, pg: Answers, owner: AbortSigna
     actOnPushRing({ kind: action.kind, channelId: action.channelId, instance }, st, pg, owner);
     return;
   }
+  // Another server's or account's ring with the same channel id as this page's.
+  if (instance !== undefined && instance !== pushSessionInstance()) return;
   // A ring an earlier session left on screen is not this page's.
   if (instance === undefined && !isHostRing(action.channelId)) return;
   if (action.kind === "decline") {

@@ -171,6 +171,7 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
       val channel = CallRing.channel(context, args)
       if (CallRing.shows(context, channel)) {
         CallRing.post(context, args, channel, buttons.ringUp(args.channelId))
+        CallRingState.pushOwner = null
         null
       } else {
         "notifications are off"

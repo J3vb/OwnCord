@@ -214,6 +214,15 @@ describe("the incoming call notification's buttons", () => {
     expect(opened).not.toHaveBeenCalled();
   });
 
+  it("a press on another account's ring with the same channel id leaves this one ringing", () => {
+    ringOnHost();
+    press({ kind: "accept", channelId: 50, instance: "other.example#9" });
+    press({ kind: "decline", channelId: 50, instance: "other.example#9" });
+    expect(acceptRing).not.toHaveBeenCalled();
+    expect(declined).toEqual([]);
+    expect(st.ringCtrl?.current()?.channelId).toBe(50);
+  });
+
   it("Accept on a ring that ended before the tap landed opens its conversation and joins nothing", () => {
     ringOnHost();
     // The caller hung up as the button was pressed.
