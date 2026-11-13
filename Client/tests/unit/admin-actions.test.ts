@@ -4,6 +4,7 @@ import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 import type { MemberContextMenuOptions } from "../../src/features/moderation/AdminActions";
 import type { VoiceModMenuOptions } from "../../src/features/channels/sidebar/volumeMenu";
 import { useMountContainer } from "../helpers/mountContainer";
+import { menuRowLabel } from "../helpers/menuRowLabel";
 
 const moderationNoops = () => ({
   onToggleBlock: vi.fn(async () => {}),
@@ -292,7 +293,7 @@ describe("AdminActions", () => {
       function topLevelLabels(el: HTMLElement): string[] {
         return Array.from(el.children)
           .filter((c) => c.classList.contains("context-menu__item"))
-          .map((c) => c.firstChild?.textContent ?? "");
+          .map((c) => menuRowLabel(c));
       }
 
       it("omits Change Role when canManageRoles is false", () => {
@@ -410,12 +411,12 @@ describe("MemberContextMenu - full menu (3C-3)", () => {
   function labels(el: HTMLElement): string[] {
     return Array.from(el.children)
       .filter((c) => c.classList.contains("context-menu__item"))
-      .map((c) => c.firstChild?.textContent ?? "");
+      .map((c) => menuRowLabel(c));
   }
 
   function row(el: HTMLElement, label: string): HTMLElement {
     const found = Array.from(el.querySelectorAll<HTMLElement>(".context-menu__item")).find(
-      (i) => i.firstChild?.textContent === label,
+      (i) => menuRowLabel(i) === label,
     );
     if (found === undefined) throw new Error(`no menu row "${label}"`);
     return found;

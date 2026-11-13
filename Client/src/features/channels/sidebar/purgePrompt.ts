@@ -50,6 +50,7 @@ export function appendPurgeSection(menu: HTMLElement, opts: PurgeSectionOptions)
 
   const trigger = createMenuItem(shellText("purge.trigger"), opts.itemClass, {
     testId: "ctx-purge-messages",
+    icon: "eraser",
   });
 
   const form = createElement("div", {

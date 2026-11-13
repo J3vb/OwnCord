@@ -51,6 +51,7 @@ export function buildServerMenuItems(actions: ServerMenuActions): MenuRow[] {
     top.push({
       label: shellText("serverMenu.invite"),
       testId: "server-menu-invite",
+      icon: "user-plus",
       onClick: actions.onInvite,
     });
   }
@@ -59,12 +60,14 @@ export function buildServerMenuItems(actions: ServerMenuActions): MenuRow[] {
     top.push({
       label: shellText("serverMenu.markRead"),
       testId: "server-menu-mark-read",
+      icon: "check-check",
       onClick: actions.onMarkRead,
     });
   }
   top.push({
     label: shellText("serverMenu.notifications"),
     testId: "server-menu-notifications",
+    icon: "bell",
     onClick: actions.onNotificationSettings,
   });
   // A per-device list preference, so it needs no permission and no action from
@@ -73,6 +76,7 @@ export function buildServerMenuItems(actions: ServerMenuActions): MenuRow[] {
   top.push({
     label: shellText("serverMenu.hideMuted"),
     testId: "server-menu-hide-muted",
+    icon: "eye-off",
     checked: hideMuted,
     onClick: () => setHideMutedChannels(!hideMuted),
   });
@@ -82,11 +86,13 @@ export function buildServerMenuItems(actions: ServerMenuActions): MenuRow[] {
     manage.push({
       label: shellText("serverMenu.createChannel"),
       testId: "server-menu-create-channel",
+      icon: "hash",
       onClick: actions.onCreateChannel,
     });
     manage.push({
       label: shellText("serverMenu.createCategory"),
       testId: "server-menu-create-category",
+      icon: "folder-plus",
       onClick: actions.onCreateCategory,
     });
   }
@@ -94,6 +100,7 @@ export function buildServerMenuItems(actions: ServerMenuActions): MenuRow[] {
     manage.push({
       label: shellText("serverMenu.serverSettings"),
       testId: "server-menu-server-settings",
+      icon: "settings",
       onClick: actions.onServerSettings,
     });
   }

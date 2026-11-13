@@ -3,8 +3,9 @@
  * confirm, the voice moderation rows and the Block toggle.
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
-import { createMenuItem as buildMenuItem } from "@lib/ui/contextMenu";
+import { createElement, appendChildren } from "@lib/dom";
+import type { IconName } from "@lib/icons";
+import { createMenuItem as buildMenuItem, setMenuItemLabel } from "@lib/ui/contextMenu";
 import { shellText } from "../../i18n/shell";
 import { voiceText } from "../../i18n/voice";
 import type { VoiceModMenuOptions } from "../channels/sidebar/volumeMenu";
@@ -53,7 +54,7 @@ export function withConfirmation(
       clearTimeout(disarmTimer);
       disarmTimer = null;
     }
-    setText(item, originalLabel);
+    setMenuItemLabel(item, originalLabel);
   }
 
   signal.addEventListener("abort", () => {
@@ -67,7 +68,7 @@ export function withConfirmation(
       if (running) return;
       if (!confirming) {
         confirming = true;
-        setText(item, confirmLabel);
+        setMenuItemLabel(item, confirmLabel);
         disarmTimer = setTimeout(disarm, CONFIRM_TIMEOUT_MS);
         return;
       }
@@ -77,12 +78,12 @@ export function withConfirmation(
       }
       confirming = false;
       running = true;
-      setText(item, pendingLabel);
+      setMenuItemLabel(item, pendingLabel);
       item.classList.add("context-menu__item--pending");
       const done = (): void => {
         running = false;
         item.classList.remove("context-menu__item--pending");
-        setText(item, originalLabel);
+        setMenuItemLabel(item, originalLabel);
       };
       const result = onConfirm();
       if (result instanceof Promise) {
@@ -102,13 +103,12 @@ export function appendRow(
   label: string,
   onClick: () => void,
   signal: AbortSignal,
-  opts: { testId?: string; disabledReason?: string } = {},
+  opts: { testId?: string; disabledReason?: string; icon?: IconName } = {},
 ): HTMLElement {
-  const item = buildMenuItem(
-    label,
-    "context-menu__item",
-    opts.testId === undefined ? {} : { testId: opts.testId },
-  );
+  const item = buildMenuItem(label, "context-menu__item", {
+    ...(opts.testId === undefined ? {} : { testId: opts.testId }),
+    ...(opts.icon === undefined ? {} : { icon: opts.icon }),
+  });
   if (opts.disabledReason !== undefined) {
     item.setAttribute("aria-disabled", "true");
     item.title = opts.disabledReason;
@@ -125,8 +125,12 @@ export function buildFlyout(
   label: string,
   fill: (flyout: HTMLElement) => void,
   signal: AbortSignal,
+  icon?: IconName,
 ): HTMLElement {
-  const trigger = buildMenuItem(label, "context-menu__item", { submenu: true });
+  const trigger = buildMenuItem(label, "context-menu__item", {
+    submenu: true,
+    ...(icon === undefined ? {} : { icon }),
+  });
   const flyout = createElement("div", { class: "context-menu__submenu" });
   fill(flyout);
   trigger.addEventListener(
@@ -168,15 +172,18 @@ export function appendVoiceRows(
     action(mod);
     close();
   };
-  const opts = (testId: string): { testId: string; disabledReason?: string } =>
-    reason === undefined ? { testId } : { testId, disabledReason: reason };
+  const opts = (
+    testId: string,
+    icon: IconName,
+  ): { testId: string; disabledReason?: string; icon: IconName } =>
+    reason === undefined ? { testId, icon } : { testId, icon, disabledReason: reason };
   if (has((m) => m.onServerMute)) {
     appendRow(
       parent,
       voiceText(muted ? "volume.serverUnmute" : "volume.serverMute"),
       run((m) => m.onServerMute?.(!muted)),
       signal,
-      opts("member-menu-server-mute"),
+      opts("member-menu-server-mute", muted ? "mic" : "mic-off"),
     );
   }
   if (has((m) => m.onServerDeafen)) {
@@ -185,7 +192,7 @@ export function appendVoiceRows(
       voiceText(deafened ? "volume.serverUndeafen" : "volume.serverDeafen"),
       run((m) => m.onServerDeafen?.(!deafened)),
       signal,
-      opts("member-menu-server-deafen"),
+      opts("member-menu-server-deafen", deafened ? "headphones" : "headphones-off"),
     );
   }
   if (has((m) => m.onDisconnect)) {
@@ -194,7 +201,7 @@ export function appendVoiceRows(
       voiceText("volume.disconnect"),
       run((m) => m.onDisconnect?.()),
       signal,
-      opts("member-menu-disconnect"),
+      opts("member-menu-disconnect", "phone-off"),
     );
   }
 }
@@ -207,7 +214,7 @@ export function buildBlockItem(
   const blockItem = buildMenuItem(
     shellText(options.isBlocked ? "member.unblock" : "member.block"),
     options.isBlocked ? "context-menu__item" : "context-menu__item context-menu__item--danger",
-    { testId: "block-toggle" },
+    { testId: "block-toggle", icon: options.isBlocked ? "user" : "user-x" },
   );
   if (options.isBlocked) {
     let unblockRunning = false;
@@ -217,12 +224,12 @@ export function buildBlockItem(
         e.stopPropagation();
         if (unblockRunning) return;
         unblockRunning = true;
-        setText(blockItem, shellText("member.unblocking"));
+        setMenuItemLabel(blockItem, shellText("member.unblocking"));
         blockItem.classList.add("context-menu__item--pending");
         const done = (): void => {
           unblockRunning = false;
           blockItem.classList.remove("context-menu__item--pending");
-          setText(blockItem, shellText("member.unblock"));
+          setMenuItemLabel(blockItem, shellText("member.unblock"));
           // The menu was built for the old block state: reopening shows the new one.
           closeMenu();
         };

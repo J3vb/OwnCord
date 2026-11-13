@@ -4,6 +4,7 @@
  */
 
 import { openMenuShell, createMenuItem as buildMenuItem, type OpenMenu } from "@lib/ui/contextMenu";
+import type { IconName } from "@lib/icons";
 import { shellText } from "../../i18n/shell";
 import { copyWithToast, isDeveloperMode } from "../developer-mode/developerTools";
 import { TIMEOUT_PRESETS } from "./timeoutPresets";
@@ -63,6 +64,7 @@ function appendClosingRow(
   closeMenu: () => void,
   signal: AbortSignal,
   testId: string,
+  icon: IconName,
   disabledReason?: string,
 ): void {
   appendRow(
@@ -73,7 +75,7 @@ function appendClosingRow(
       closeMenu();
     },
     signal,
-    disabledReason === undefined ? { testId } : { testId, disabledReason },
+    disabledReason === undefined ? { testId, icon } : { testId, icon, disabledReason },
   );
 }
 
@@ -89,6 +91,7 @@ function appendTopRows(
     const onProfile = options.onProfile;
     appendRow(top, shellText("member.profile"), () => onProfile(), signal, {
       testId: "member-menu-profile",
+      icon: "user",
     });
   }
   if (options.onMention !== undefined) {
@@ -99,6 +102,7 @@ function appendTopRows(
       closeMenu,
       signal,
       "member-menu-mention",
+      "at-sign",
       options.mentionDisabledReason,
     );
   }
@@ -110,6 +114,7 @@ function appendTopRows(
       closeMenu,
       signal,
       "member-menu-message",
+      "message-square",
     );
   }
   if (!isSelf && options.onCall !== undefined) {
@@ -120,6 +125,7 @@ function appendTopRows(
       closeMenu,
       signal,
       "member-menu-call",
+      "phone",
     );
   }
 }
@@ -164,6 +170,7 @@ function buildRoleFlyout(
       }
     },
     signal,
+    "shield",
   );
 }
 
@@ -204,6 +211,7 @@ function appendTimeoutRows(
           }
         },
         signal,
+        "clock",
       ),
     );
   }
@@ -223,7 +231,7 @@ function appendTimeoutRows(
         onRemove().then(done, done);
       },
       signal,
-      { testId: "member-menu-remove-timeout" },
+      { testId: "member-menu-remove-timeout", icon: "clock" },
     );
   }
 }
@@ -248,7 +256,7 @@ function appendManageRows(
         onChangeNickname();
       },
       signal,
-      { testId: "member-menu-change-nickname" },
+      { testId: "member-menu-change-nickname", icon: "pencil" },
     );
   }
 
@@ -270,7 +278,7 @@ function appendDangerRows(
     const kickItem = buildMenuItem(
       shellText("member.forceLogout"),
       "context-menu__item context-menu__item--danger",
-      { testId: "force-logout" },
+      { testId: "force-logout", icon: "log-out" },
     );
     withConfirmation(
       kickItem,
@@ -291,7 +299,7 @@ function appendDangerRows(
         options.onBan();
       },
       signal,
-      { testId: "member-menu-ban" },
+      { testId: "member-menu-ban", icon: "ban" },
     ).classList.add("context-menu__item--danger");
   }
 }
@@ -310,6 +318,7 @@ function appendBottomRows(
       shellText("member.copyId"),
       () => copyWithToast(String(options.userId), "toast.userIdCopied", "toast.userIdCopyFailed"),
       signal,
+      { icon: "copy" },
     );
   }
 

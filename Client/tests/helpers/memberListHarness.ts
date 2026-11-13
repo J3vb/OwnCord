@@ -7,6 +7,7 @@ import { type UserStatus } from "../../src/lib/types";
 import { applyThemeByName } from "@lib/prefs/themes";
 import { resetMembersState } from "./storeResets";
 import { resetAuthState } from "./storeSeeds";
+import { menuRowLabel } from "./menuRowLabel";
 
 /**
  * Give the role clamp (B9 Q13) the dark theme's surfaces to measure names
@@ -81,7 +82,7 @@ export async function rightClickMember(container: HTMLElement, id: number): Prom
 export function topMenuLabels(menu: HTMLElement): string[] {
   return Array.from(menu.children)
     .filter((el) => el.classList.contains("context-menu__item"))
-    .map((el) => el.firstChild?.textContent ?? "");
+    .map((el) => menuRowLabel(el));
 }
 
 /**

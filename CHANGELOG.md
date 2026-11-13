@@ -129,6 +129,10 @@ release changes the database, and anything an operator must do first.)
 
 - On Home, People and Message requests are now proper rows with an icon. Message requests shows how many requests are waiting, and the Home icon counts them too, so a new request is hard to miss.
 
+**Desktop UI**
+
+- Right-click menus and the phone action sheets now show an icon in front of every action (message, channel, server and member menus), so an action is quicker to find. Destructive actions keep their red colour.
+
 ### Fixed
 
 - **Invites:** the list shows all usable invites first and pages older ones; invites can be revoked by id (an older server still works through a fallback to the code); creating invites is limited to 20 per user per hour.

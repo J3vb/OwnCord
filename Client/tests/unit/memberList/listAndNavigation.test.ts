@@ -26,6 +26,7 @@ import {
   topMenuLabels,
 } from "../../helpers/memberListHarness";
 import { signInAs } from "../../helpers/storeSeeds";
+import { menuRowLabel } from "../../helpers/menuRowLabel";
 
 describe("MemberList", () => {
   let container: HTMLDivElement;
@@ -615,7 +616,7 @@ describe("MemberList", () => {
     expect(menu).not.toBeNull();
     const labels = Array.from(menu!.children)
       .filter((el) => el.classList.contains("context-menu__item"))
-      .map((el) => el.firstChild?.textContent ?? "");
+      .map((el) => menuRowLabel(el));
     expect(labels).toEqual(expect.arrayContaining(["Change Role", "Force Logout", "Ban"]));
 
     document.body.querySelector(".context-menu")?.remove();
