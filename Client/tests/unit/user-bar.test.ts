@@ -15,6 +15,7 @@ import {
   setPttGated,
 } from "@stores/voice.store";
 import { resetAuthState } from "../helpers/storeSeeds";
+import { pickAvatarColor } from "../../src/features/profiles/avatar";
 
 vi.mock("@stores/ui.store", () => ({
   openSettings: vi.fn(),
@@ -232,6 +233,25 @@ describe("UserBar", () => {
     authStore.flush();
 
     expect(container.querySelector(".ub-avatar span")?.textContent).toBe("Z");
+  });
+
+  it("paints the letter on the user's own avatar colour, and repaints it for a new identity", () => {
+    const shade = (name: string): string => {
+      const probe = document.createElement("div");
+      probe.style.background = pickAvatarColor(name);
+      return probe.style.background;
+    };
+    setAuthState({ username: "alice" }, true);
+    comp = createUserBar();
+    comp.mount(container);
+    const avatar = (): HTMLElement => container.querySelector<HTMLElement>(".ub-avatar")!;
+    expect(avatar().style.background).toBe(shade("alice"));
+
+    // Signed in as someone else, still without a picture: the URL is unchanged.
+    setAuthState({ username: "bob" }, true);
+    authStore.flush();
+    expect(shade("bob")).not.toBe(shade("alice"));
+    expect(avatar().style.background).toBe(shade("bob"));
   });
 
   describe("speaking ring", () => {

@@ -17,6 +17,7 @@ import { nsfwContentBlocked } from "../content-consent/nsfw";
 import { closeWhenChannelLeft, sidePanelStale } from "./sidePanelScope";
 import { resolveAuthor } from "@lib/text/formatting";
 import { resolveDisplayName } from "@lib/ui/avatar";
+import { pickAvatarColor } from "../profiles/avatar";
 import { shellText } from "../../i18n/shell";
 
 const log = createLogger("overlays");
@@ -25,15 +26,6 @@ const pinnedMessagesScreen = createLazyScreen("pinned-messages", () => import(".
 
 /** Quiet period before an open pinned panel refetches after a pin change. */
 const PIN_REFETCH_DEBOUNCE_MS = 250;
-
-function pickPinAvatarColor(username: string): string {
-  let hash = 0;
-  for (let i = 0; i < username.length; i++) {
-    hash = username.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 55%, 55%)`;
-}
 
 export function mapToPinnedMessage(msg: {
   readonly id: number;
@@ -61,7 +53,7 @@ export function mapToPinnedMessage(msg: {
     timestamp: msg.created_at ?? msg.timestamp ?? "",
     // Hashed from the raw username (not the resolved display name) so the hue
     // stays stable across renames — matches every other avatar-color surface.
-    avatarColor: pickPinAvatarColor(msg.user.username),
+    avatarColor: pickAvatarColor(msg.user.username),
     ...(msg.mentions !== undefined ? { mentions: msg.mentions } : {}),
     ...(msg.mentions_everyone !== undefined ? { mentionsEveryone: msg.mentions_everyone } : {}),
     ...(msg.mention_roles !== undefined ? { mentionRoles: msg.mention_roles } : {}),

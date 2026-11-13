@@ -251,16 +251,36 @@ export function isRenderableAvatar(url: string | null | undefined): url is strin
   return isSafeUrl(resolveServerUrl(url));
 }
 
-const AVATAR_COLORS = ["#5865f2", "#57f287", "#fee75c", "#eb459e", "#ed4245"];
+/** Ten distinct hues, each dark enough for white (--on-fill) initials at
+ *  4.5:1 or better. */
+export const AVATAR_COLORS: readonly string[] = [
+  "#5865f2",
+  "#2e6db4",
+  "#00796b",
+  "#2f7d32",
+  "#8a6d00",
+  "#a35200",
+  "#c62828",
+  "#ad1457",
+  "#7b3fb3",
+  "#5c6b7a",
+];
 
-/** The letter fallback's background: one of five colours, stable per
- *  username, so the member list, chat, voice roster and call view agree. */
+/** The letter fallback's background, stable per username, so every surface
+ *  agrees. FNV-1a with a final avalanche spreads short, similar names
+ *  ("user1", "user2") across the whole palette. */
 export function pickAvatarColor(username: string): string {
-  let hash = 0;
+  let hash = 0x811c9dc5;
   for (let i = 0; i < username.length; i++) {
-    hash = (hash * 31 + username.charCodeAt(i)) | 0;
+    hash ^= username.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
   }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#5865f2";
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x85ebca6b);
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 0xc2b2ae35);
+  hash ^= hash >>> 16;
+  return AVATAR_COLORS[(hash >>> 0) % AVATAR_COLORS.length] ?? "#5865f2";
 }
 
 /**

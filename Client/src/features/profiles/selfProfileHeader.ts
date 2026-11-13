@@ -6,7 +6,7 @@ import { resolveDisplayName } from "@lib/ui/avatar";
 import { authStore } from "@stores/auth.store";
 import { customStatusClearsLine, parseExpiry } from "../presence/statusDefs";
 import { shellText } from "../../i18n/shell";
-import { createAvatarElement } from "./avatar";
+import { createAvatarElement, pickAvatarColor } from "./avatar";
 import type { CardSession } from "./selfProfileTypes";
 
 export interface OwnIdentity {
@@ -39,7 +39,11 @@ export function buildHeader(s: CardSession, identity: OwnIdentity): HeaderPart {
       displayName: identity.displayName,
       avatar: authStore.getState().user?.avatar ?? null,
     },
-    { className: "spc-avatar", background: "var(--accent)", animate: "always" },
+    {
+      className: "spc-avatar",
+      background: pickAvatarColor(identity.username),
+      animate: "always",
+    },
   );
   const names = createElement("div", { class: "spc-names" });
   const nameEl = createElement(

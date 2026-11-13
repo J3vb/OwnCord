@@ -7,6 +7,7 @@ import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
 import { mapToPinnedMessage } from "@pages/main-page/OverlayManagers";
+import { pickAvatarColor } from "../../../src/features/profiles/avatar";
 import {
   createPinnedPanelController,
   firstCallOpts,
@@ -813,7 +814,8 @@ describe("mapToPinnedMessage", () => {
     expect(result.author).toBe("Alice");
     expect(result.content).toBe("Hello");
     expect(result.timestamp).toBe("2024-01-01");
-    expect(result.avatarColor).toMatch(/^hsl\(\d+, 55%, 55%\)$/);
+    // The same colour the member list and messages give this user.
+    expect(result.avatarColor).toBe(pickAvatarColor("Alice"));
   });
 
   it("carries the author's avatar from the payload", () => {
