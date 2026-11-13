@@ -44,6 +44,15 @@
 //! to save at all, so credentials and the voice-E2EE identity key silently
 //! never survived a restart. Secrets at rest are never plaintext, and the OS
 //! credential store always wins again the moment it starts round-tripping.
+//!
+//! # Android
+//!
+//! Android has no `keyring` backend. Its OS store is the Android Keystore
+//! ([`crate::android_secrets`]): values sealed under a Keystore-held key, under
+//! the same verified round-trip rule and the same sealed-file fallback. Builds
+//! before it kept every secret in the fallback file, so the first store call of
+//! each run moves what that file still holds into the Keystore, and removes the
+//! fallback key file once nothing is left to open.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -61,7 +70,8 @@ pub const SERVICE: &str = "com.owncord.client";
 /// TypeScript union disagree with the values actually sent over IPC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Backend {
-    /// The OS credential store. The expected answer on every healthy machine.
+    /// The OS credential store (the Android Keystore on Android). The expected
+    /// answer on every healthy machine.
     Keyring,
     /// DPAPI-protected file under the app data dir (Windows), used only after
     /// the OS credential store accepted a write and then failed to return it.
@@ -91,12 +101,14 @@ const FALLBACK_BACKEND: Backend = Backend::EncryptedFile;
 /// secret — the caller's in-memory copy is all that is left, so the current
 /// session still works but nothing survives a restart.
 pub fn set(app: &AppHandle, account: &str, secret: &str) -> Result<Backend, String> {
+    #[cfg(target_os = "android")]
+    migrate_fallback_once(app);
     set_with(
         account,
         secret,
-        keyring_set,
-        |acct| keyring_get(acct).map_err(|f| f.message),
-        keyring_delete,
+        |acct, sec| os_set(app, acct, sec),
+        |acct| os_get(app, acct).map_err(|f| f.message),
+        |acct| os_delete(app, acct),
         |acct, sec| set_fallback(app, acct, sec),
         // Best-effort here: the keyring copy just proved it round-trips, so
         // it is authoritative regardless of whether the stale fallback copy
@@ -195,7 +207,13 @@ fn set_with(
 /// The OS credential store wins over the fallback file, so a machine that
 /// recovers goes back to the real store without any migration step.
 pub fn get(app: &AppHandle, account: &str) -> Result<Option<String>, String> {
-    get_with(account, keyring_get, |acct| get_fallback(app, acct))
+    #[cfg(target_os = "android")]
+    migrate_fallback_once(app);
+    get_with(
+        account,
+        |acct| os_get(app, acct),
+        |acct| get_fallback(app, acct),
+    )
 }
 
 /// A failed OS credential store read.
@@ -249,7 +267,13 @@ fn get_with(
 /// Both stores are cleared even if one errors: a delete that left the fallback
 /// copy behind would resurrect a "deleted" secret on the next read.
 pub fn delete(app: &AppHandle, account: &str) -> Result<(), String> {
-    delete_with(account, keyring_delete, |acct| clear_fallback(app, acct))
+    #[cfg(target_os = "android")]
+    migrate_fallback_once(app);
+    delete_with(
+        account,
+        |acct| os_delete(app, acct),
+        |acct| clear_fallback(app, acct),
+    )
 }
 
 /// Core decision logic for [`delete`], with the keyring and fallback removals
@@ -278,6 +302,7 @@ fn delete_with(
 /// mock when a platform's feature is missing, so this is a property of the
 /// build, not of the machine. `CredentialPersistence` is `#[non_exhaustive]`
 /// and carries no `Debug`, hence the explicit description.
+#[cfg(not(target_os = "android"))]
 fn compiled_backend_persistence() -> (bool, &'static str) {
     // `CredentialBuilderApi` needs no import: `default_credential_builder`
     // returns a `dyn` trait object, whose methods resolve without it.
@@ -300,13 +325,15 @@ fn compiled_backend_persistence() -> (bool, &'static str) {
 /// A shipped release build has no console, so the log file is the only place a
 /// user can be asked to look. Stating the backend there turns "my identity key
 /// keeps changing" into a one-line answer.
+#[cfg(target_os = "android")]
+pub fn log_compiled_backend() {
+    log::info!("credential store: Android Keystore");
+}
+
+#[cfg(not(target_os = "android"))]
 pub fn log_compiled_backend() {
     let (persistent, description) = compiled_backend_persistence();
-    if cfg!(target_os = "android") {
-        // No OS keyring backend is compiled for Android: every secret lives
-        // in the encrypted fallback file, which persists.
-        log::info!("credential store: encrypted fallback file (no OS keyring on Android)");
-    } else if persistent {
+    if persistent {
         log::info!("credential store: OS keyring, {description}");
     } else {
         log::error!(
@@ -322,16 +349,54 @@ pub fn log_compiled_backend() {
 // OS credential store
 // ---------------------------------------------------------------------------
 
+#[cfg(not(target_os = "android"))]
+fn os_set(_app: &AppHandle, account: &str, secret: &str) -> Result<(), String> {
+    keyring_set(account, secret)
+}
+
+#[cfg(not(target_os = "android"))]
+fn os_get(_app: &AppHandle, account: &str) -> Result<Option<String>, ReadFailure> {
+    keyring_get(account)
+}
+
+#[cfg(not(target_os = "android"))]
+fn os_delete(_app: &AppHandle, account: &str) -> Result<(), String> {
+    keyring_delete(account)
+}
+
+#[cfg(target_os = "android")]
+fn os_set(app: &AppHandle, account: &str, secret: &str) -> Result<(), String> {
+    crate::android_secrets::set(app, account, secret)
+}
+
+/// The Keystore is always there on Android, so a failed read is never "no
+/// store".
+#[cfg(target_os = "android")]
+fn os_get(app: &AppHandle, account: &str) -> Result<Option<String>, ReadFailure> {
+    crate::android_secrets::get(app, account).map_err(|message| ReadFailure {
+        message,
+        no_store: false,
+    })
+}
+
+#[cfg(target_os = "android")]
+fn os_delete(app: &AppHandle, account: &str) -> Result<(), String> {
+    crate::android_secrets::delete(app, account)
+}
+
+#[cfg(not(target_os = "android"))]
 fn entry(account: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(SERVICE, account).map_err(|e| format!("keyring entry error: {e}"))
 }
 
+#[cfg(not(target_os = "android"))]
 fn keyring_set(account: &str, secret: &str) -> Result<(), String> {
     entry(account)?
         .set_password(secret)
         .map_err(|e| format!("{e}"))
 }
 
+#[cfg(not(target_os = "android"))]
 fn keyring_get(account: &str) -> Result<Option<String>, ReadFailure> {
     let entry = entry(account).map_err(|message| ReadFailure {
         message,
@@ -369,7 +434,7 @@ fn no_os_store(err: &keyring::Error) -> bool {
     false
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn no_os_store(_err: &keyring::Error) -> bool {
     false
 }
@@ -425,6 +490,7 @@ fn secret_service_absent() -> bool {
         && activatable.is_ok_and(|(names,)| !names.iter().any(|n| n == SECRETS_NAME))
 }
 
+#[cfg(not(target_os = "android"))]
 fn keyring_delete(account: &str) -> Result<(), String> {
     match entry(account)?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -576,6 +642,86 @@ fn clear_fallback(app: &AppHandle, account: &str) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// Android: move the fallback file into the Keystore
+// ---------------------------------------------------------------------------
+
+/// Run the fallback move once per process, before the first store call. The
+/// lock holds any other caller until it has finished; a run that panicked is
+/// tried again by the next call instead of poisoning every later one.
+#[cfg(target_os = "android")]
+fn migrate_fallback_once(app: &AppHandle) {
+    static MIGRATED: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+    let mut done = crate::sync::lock(&MIGRATED);
+    if !*done {
+        migrate_fallback(app);
+        *done = true;
+    }
+}
+
+/// Move every fallback entry the Keystore can hold, then remove the fallback
+/// key file once the file holds nothing more to open. Whatever fails stays in
+/// the file, which `get` still reads, and the next run tries again.
+#[cfg(target_os = "android")]
+fn migrate_fallback(app: &AppHandle) {
+    use tauri::Manager;
+
+    let store = match crate::json_store::open(app, CREDENTIAL_FALLBACK_STORE) {
+        Ok(store) => store,
+        Err(e) => {
+            log::warn!("{SERVICE}: the fallback file was not moved to the Keystore: {e}");
+            return;
+        }
+    };
+    let accounts = store.keys();
+    let mut all_moved = true;
+    if !accounts.is_empty() {
+        let moved = migrate_fallback_with(
+            &accounts,
+            |acct| os_get(app, acct),
+            |acct, sec| os_set(app, acct, sec),
+            |acct| os_delete(app, acct),
+            |acct| get_fallback(app, acct),
+            |acct| clear_fallback(app, acct),
+        );
+        log::info!(
+            "{SERVICE}: moved {moved} of {} fallback entries to the Android Keystore",
+            accounts.len()
+        );
+        // A clear whose flush failed is gone from memory but not from disk.
+        all_moved = moved == accounts.len();
+    }
+    if !all_moved || !store.keys().is_empty() {
+        return;
+    }
+    let Ok(dir) = app.path().app_data_dir() else {
+        return;
+    };
+    if may_remove_fallback_key(&dir) {
+        if let Err(e) = crate::fallback_crypto::remove_key(&dir) {
+            log::warn!("{SERVICE}: {e}");
+        }
+    }
+}
+
+/// A copy of an unreadable fallback file (`json_store` saves one aside) can
+/// only be opened with the key, so the key stays while such a copy exists.
+#[cfg(any(target_os = "android", test))]
+mod fallback_move;
+#[cfg(target_os = "android")]
+use fallback_move::migrate_fallback_with;
+
+#[cfg(target_os = "android")]
+fn may_remove_fallback_key(dir: &std::path::Path) -> bool {
+    let corrupt_prefix = format!("{CREDENTIAL_FALLBACK_STORE}.corrupt-");
+    match std::fs::read_dir(dir) {
+        Ok(entries) => !entries
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().starts_with(&corrupt_prefix)),
+        Err(_) => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -592,6 +738,7 @@ mod tests {
     /// test failure rather than a silent loss of credential storage on a user's
     /// machine. It needs no live keychain — it inspects the compiled backend.
     #[test]
+    #[cfg(not(target_os = "android"))]
     fn compiled_keyring_backend_is_persistent() {
         let (persistent, description) = compiled_backend_persistence();
         assert!(

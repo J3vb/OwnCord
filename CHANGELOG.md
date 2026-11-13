@@ -112,6 +112,7 @@ release changes the database, and anything an operator must do first.)
 - New messages reach the phone while the app is closed, through UnifiedPush: install ntfy (Settings > Notifications offers it from the Play Store or F-Droid) and the app sets itself up, with no Google service involved. The phone shows "New messages on <server>", one notification per server, and opening the app clears it. Signing out, or turning off message notifications, stops them. Needs a server with push turned on (`push.enabled` and `push.dispatch_enabled`) and a push server on a public address, such as ntfy.sh.
 - Your status goes Idle once the app has been out of view for ten minutes (in the background, or the screen off) and back to Online as soon as you open it. A phone that sleeps can take several minutes longer, and a phone that stops the app in the background shows you as offline instead.
 - `owncord://` links open the app: an invite link opens the join screen, and a message link copied on the desktop opens that message (after sign-in, if the app was closed).
+- Saved sign-ins, your voice key and unsent messages are kept in the Android Keystore. Updating moves them there once; you stay signed in and your voice safety number does not change.
 
 **Server**
 

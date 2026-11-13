@@ -208,6 +208,17 @@ pub fn unprotect(key: &[u8; KEY_LEN], blob: &[u8], aad: &[u8]) -> Result<Vec<u8>
     Ok(plaintext.to_vec())
 }
 
+/// Delete the sealing key in `dir` once no fallback entry needs it (Android,
+/// after the move to the Keystore). A missing key is not an error.
+#[cfg(any(target_os = "android", test))]
+pub fn remove_key(dir: &Path) -> Result<(), String> {
+    match fs::remove_file(dir.join(CREDENTIAL_FALLBACK_KEY_FILE)) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("failed to remove the credential fallback key: {e}")),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -221,6 +232,22 @@ mod tests {
         let mut key = [0u8; KEY_LEN];
         SystemRandom::new().fill(&mut key).unwrap();
         key
+    }
+
+    #[test]
+    fn remove_key_deletes_the_key_and_accepts_a_missing_one() {
+        let dir = std::env::temp_dir().join(format!(
+            "owncord-fallback-key-remove-{}-{}",
+            std::process::id(),
+            test_key()[0]
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        load_or_create_key(&dir).unwrap();
+        assert!(dir.join(CREDENTIAL_FALLBACK_KEY_FILE).exists());
+        remove_key(&dir).unwrap();
+        assert!(!dir.join(CREDENTIAL_FALLBACK_KEY_FILE).exists());
+        remove_key(&dir).unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

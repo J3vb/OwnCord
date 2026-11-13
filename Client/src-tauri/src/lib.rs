@@ -2,6 +2,8 @@ mod active_session;
 #[cfg(target_os = "android")]
 mod android_notifications;
 #[cfg(target_os = "android")]
+mod android_secrets;
+#[cfg(target_os = "android")]
 mod call_service;
 mod commands;
 #[cfg(target_os = "android")]
@@ -248,6 +250,7 @@ pub fn run() {
         .plugin(exit_info::init())
         .plugin(files::init())
         .plugin(share_in::init())
+        .plugin(android_secrets::init())
         .plugin(android_notifications::init());
 
     // Desktop-only convenience plugins. window-state auto-saves/restores window
