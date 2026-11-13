@@ -1,6 +1,10 @@
 ## v2.9.1
 
-**OwnCord 2.9.1** is a fix update to 2.9. It keeps you in your voice call after a reconnect, brings back thread replies that failed to send, loads GIFs in the picker faster, fits direct message headers on small phones, lets soft speech through the noise gate and lights the speaking ring for it, and tightens a few voice and channel permission edge cases. Emoji are now drawn as images, so they look the same everywhere and the emoji picker scrolls smoothly. The database does not change. It is still a **beta and a hobby project**: don't use it for anything sensitive. **Update the server and the desktop app together**: the reconnect fix needs both.
+**OwnCord 2.9.1** is a fix update to 2.9. It keeps you in your voice call after a reconnect, brings back thread replies that failed to send, loads GIFs in the picker faster, fits direct message headers on small phones, lets soft speech through the noise gate (with a new switch, on by default) and lights the speaking ring for it, and tightens a few voice and channel permission edge cases. Emoji are now drawn as images, so they look the same everywhere and the emoji picker scrolls smoothly. The database does not change. It is still a **beta and a hobby project**: don't use it for anything sensitive. **Update the server and the desktop app together**: the reconnect fix needs both.
+
+### Added
+
+- **Voice:** Enhanced Noise Suppression has a new switch, "Let more soft speech through", in Settings > Voice & Video. It is on by default, so a soft "hmm" or "yes" gets through. Turn it off if coughs or other short sounds get through too often; soft words are then cut off a little more often. The Linux desktop app does not have it: its gate works differently.
 
 ### Fixed
 
