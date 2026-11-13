@@ -96,7 +96,12 @@ input gate** on the web path (`public/silero-vad-worker.js`, started by
 microphone as it is after Input Volume and before RNNoise, with the gate
 threshold. The worker scores every frame with two Silero VAD models, and a
 frame is speech when the first scores 0.35 or more or the second clears its
-own, stricter bar (`RESTED_SPEECH_PROBABILITY`). The gate opens after two
+own, stricter bar: 0.9, or 0.95 once the user turns "Let more soft speech
+through" off in Settings (the `softSpeech` preference; `sileroWorker.ts` sends
+it to the worker at the start and whenever it changes, so the call and the
+settings meter of that window follow it at once; the worker names the setting
+it runs with in its `ready`, and a worker file from an older release, which
+names none, is sent no change). The gate opens after two
 speech frames in a row, once the loudest frame of that run has reached the
 threshold. It stays open while speech frames keep reaching the level 6 dB
 under the threshold, and closes about 0.4 s after the last one. The first

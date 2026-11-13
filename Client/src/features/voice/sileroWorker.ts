@@ -1,5 +1,8 @@
+import { Disposable } from "../../lib/disposable";
 import { createLogger } from "../../lib/logger";
 import { publicAssetUrl } from "../../lib/media/publicAssets";
+import { onPrefChange } from "../../lib/prefs/preferences";
+import { SOFT_SPEECH_PREF, softSpeechEnabled } from "../../lib/voice/micProcessor";
 
 const log = createLogger("sileroWorker");
 // Covers loading and setting up both model files.
@@ -27,10 +30,12 @@ function startSileroDetection(
     return null;
   }
   const channel = new MessageChannel();
+  const lifetime = new Disposable();
   let closed = false;
   const close = (): void => {
     if (closed) return;
     closed = true;
+    lifetime.destroy();
     clearTimeout(timer);
     worker.terminate();
     input.source.disconnect(node, 0, 2);
@@ -46,6 +51,19 @@ function startSileroDetection(
   };
   // i18n-exempt: internal diagnostic log for the RNNoise fallback
   const timer = setTimeout(() => failed("model initialization timed out"), INIT_TIMEOUT_MS);
+  const sendSoftSpeech = (): void => {
+    // oxlint-disable-next-line require-post-message-target-origin -- Worker.postMessage
+    worker.postMessage({ softSpeech: softSpeechEnabled() });
+  };
+  /** Keep the worker's bar on the setting, under a running call and meter
+   *  alike. `inForce` is the setting the worker says it runs with. A worker
+   *  file from an older release says none: it would take a message without a
+   *  port for a second start and fail, so it gets none. */
+  const followSoftSpeech = (inForce: unknown): void => {
+    if (typeof inForce !== "boolean") return;
+    if (inForce !== softSpeechEnabled()) sendSoftSpeech();
+    onPrefChange([SOFT_SPEECH_PREF], sendSoftSpeech, lifetime.signal);
+  };
 
   worker.addEventListener("error", (event) => failed(event.message));
   // i18n-exempt: internal diagnostic log for the RNNoise fallback
@@ -59,13 +77,14 @@ function startSileroDetection(
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage
       node.port.postMessage({ type: "sileroReady" });
       log.info("Silero speech detection active");
+      followSoftSpeech(event.data.softSpeech);
     }
   });
 
   input.source.connect(node, 0, 2);
   // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage
   node.port.postMessage({ type: "silero", port: channel.port1 }, [channel.port1]);
-  worker.postMessage({ port: channel.port2 }, [channel.port2]);
+  worker.postMessage({ port: channel.port2, softSpeech: softSpeechEnabled() }, [channel.port2]);
   return close;
 }
 

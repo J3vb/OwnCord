@@ -226,7 +226,7 @@ describe("Silero speech gate", () => {
         close() {},
       };
       scope.onmessage?.({ data: { port } });
-      await vi.waitFor(() => expect(messages).toEqual([{ type: "ready" }]));
+      await vi.waitFor(() => expect(messages).toEqual([{ type: "ready", softSpeech: true }]));
 
       const speech = quietSpeech();
       const silentFrames = 31;

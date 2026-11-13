@@ -58,6 +58,33 @@ and only when it changes something a contributor or fork holder must do
 ## v2.9.1
 
 **OwnCord 2.9.1** is a fix update to 2.9. It keeps you in your voice call after a reconnect, brings back thread replies that failed to send, loads GIFs in the picker faster, fits direct message headers on small phones, lets soft speech through the noise gate and lights the speaking ring for it, and tightens a few voice and channel permission edge cases. Emoji are now drawn as images, so they look the same everywhere and the emoji picker scrolls smoothly. The database does not change. It is still a **beta and a hobby project**: don't use it for anything sensitive. **Update the server and the desktop app together**: the reconnect fix needs both.
+- Internal, CI and test-only changes, short.
+```
+
+## Unreleased
+
+### Added
+
+**Android**
+
+- Calls have a sound route button, in the call view and in a DM call: pick Speaker, Earpiece, or a wired or Bluetooth headset. A headset you connect is used by itself, and the call goes back to the speaker when it disconnects. Needs Android 12 or newer.
+- A phone call now pauses your OwnCord call: your mic closes and the call goes silent, and both come back by themselves when the phone call ends. Your own mute and deafen stay as you left them.
+- The screen stays on while a call shows a camera or a stream, and may sleep again once no picture is on screen.
+- The "In a call" notification has Mute and Leave buttons, so you can mute, unmute or hang up without opening the app. It also says when you are muted.
+- A direct message call that comes in while the app is not on screen rings like a phone call: a notification with Accept and Decline and your phone's ringtone, on the lock screen too. Accept joins the call (after you unlock, on a locked phone). A call you missed leaves a notification that opens the conversation. The app has to be running for this: a phone that has stopped the app in the background does not ring yet. On a phone with Android's notification cooldown switched on, a call that comes right after a message can ring more quietly.
+- New messages reach the phone while the app is closed, through UnifiedPush: install ntfy (Settings > Notifications offers it from the Play Store or F-Droid) and the app sets itself up, with no Google service involved. The phone shows "New messages on <server>", one notification per server, and opening the app clears it. Signing out, or turning off message notifications, stops them. Needs a server with push turned on (`push.enabled` and `push.dispatch_enabled`) and a push server on a public address, such as ntfy.sh.
+- Your status goes Idle once the app has been out of view for ten minutes (in the background, or the screen off) and back to Online as soon as you open it. A phone that sleeps can take several minutes longer, and a phone that stops the app in the background shows you as offline instead.
+- `owncord://` links open the app: an invite link opens the join screen, and a message link copied on the desktop opens that message (after sign-in, if the app was closed).
+- Saved sign-ins, your voice key and unsent messages are kept in the Android Keystore. Updating moves them there once; you stay signed in and your voice safety number does not change.
+
+**Voice**
+
+- Enhanced Noise Suppression has a new switch, "Let more soft speech through", in Settings > Voice & Video. It is on by default, so a soft "hmm" or "yes" gets through. Turn it off if coughs or other short sounds get through too often; soft words are then cut off a little more often. The Linux desktop app does not have it: its gate works differently.
+
+**Server**
+
+- A push subscription now ends with the session that made it: signing out, "sign out everywhere", an expired session or a ban stops the pushes to that device (migration 093). A server older than this keeps a signed-out phone's subscription until its staleness sweep; the phone has already let go of it, so nothing shows.
+- A start-up warning says when `push.enabled` is on but `push.dispatch_enabled` is off, so devices can register but nothing is sent.
 
 ### Fixed
 

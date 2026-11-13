@@ -17,8 +17,14 @@ const HALF = (TAP_COUNT - 1) / 2;
 // running through the silence would let the thump through as well, and one
 // cleared to zero would miss the word. In a room that is never quiet it runs
 // on like the first, and at its bar it adds little there.
+//
+// The bar is the user's "Let more soft speech through": on is the lower one,
+// off the higher one, which keeps more coughs and other short sounds out and
+// misses a few more soft words.
 const RESTED_SPEECH_PROBABILITY = 0.9;
+const STRICT_RESTED_SPEECH_PROBABILITY = 0.95;
 const REST_FRAMES = 7;
+let softSpeech = true;
 
 // A frame is quiet when every 8 ms of it is under the gate threshold and under
 // -55 dBFS, the lowest automatic threshold. The gate reads its own level after
@@ -68,7 +74,7 @@ function createRestedDetector(vad) {
       }
       const score = vad.score(frame);
       if (!Number.isFinite(score)) throw new Error("Invalid Silero score");
-      return score >= RESTED_SPEECH_PROBABILITY;
+      return score >= (softSpeech ? RESTED_SPEECH_PROBABILITY : STRICT_RESTED_SPEECH_PROBABILITY);
     },
   };
 }
@@ -144,10 +150,16 @@ async function start(port) {
       port.close();
     }
   };
-  self.postMessage({ type: "ready" });
+  // The setting in force tells the app that this worker takes one.
+  self.postMessage({ type: "ready", softSpeech });
 }
 
+// The first message brings the port. The setting comes with it, and by itself
+// whenever it changes. Only a plain on or off moves the bar, so an app from an
+// older release, which sends none, keeps the lower one.
 self.onmessage = ({ data }) => {
+  if (typeof data.softSpeech === "boolean") softSpeech = data.softSpeech;
+  if (data.port === undefined) return;
   void start(data.port).catch((error) => {
     self.postMessage({ type: "error", message: String(error) });
     data.port.close();
