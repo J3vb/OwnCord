@@ -44,9 +44,75 @@ describe("VoiceAudioTab UI structure", () => {
     const settingRows = el.querySelectorAll(
       ".setting-row:not([data-testid='voice-buffer']):not([data-testid='auto-sensitivity']):not([data-testid='mic-test']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera']):not([data-testid='screen-backup-layer'])",
     );
-    // 4 toggles: echo cancellation, noise suppression, auto gain control, enhanced NS
-    expect(settingRows.length).toBe(4);
+    // 5 toggles: echo cancellation, noise suppression, auto gain control,
+    // enhanced NS and its soft speech switch
+    expect(settingRows.length).toBe(5);
     ac.abort();
+  });
+
+  it("Let more soft speech through is on by default, needs Enhanced Noise Suppression, and saves its choice", () => {
+    stubNavigator();
+    const { ac, el } = mountTab();
+    try {
+      const toggle = el.querySelector<HTMLElement>("[data-testid='soft-speech'] .toggle")!;
+      expect(toggle.getAttribute("aria-label")).toBe("Let more soft speech through");
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+      // Without Enhanced Noise Suppression there is no speech detector to tune.
+      expect(toggle.getAttribute("aria-disabled")).toBe("true");
+      toggle.click();
+      expect(localStorage.getItem("owncord:settings:softSpeech")).toBeNull();
+
+      el.querySelector<HTMLElement>(
+        "[role='switch'][aria-label='Enhanced Noise Suppression']",
+      )!.click();
+      expect(toggle.getAttribute("aria-disabled")).toBe("false");
+      toggle.click();
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
+      expect(localStorage.getItem("owncord:settings:softSpeech")).toBe("false");
+      toggle.click();
+      expect(localStorage.getItem("owncord:settings:softSpeech")).toBe("true");
+      // The speech worker follows the preference: no capture is reopened.
+      expect(mockReapplyAudioProcessing).not.toHaveBeenCalled();
+    } finally {
+      ac.abort();
+    }
+  });
+
+  it("shows a saved Let more soft speech through off", () => {
+    localStorage.setItem("owncord:settings:softSpeech", "false");
+    stubNavigator();
+    const { ac, el } = mountTab();
+    try {
+      const toggle = el.querySelector<HTMLElement>("[data-testid='soft-speech'] .toggle")!;
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
+    } finally {
+      ac.abort();
+    }
+  });
+
+  it("disables Let more soft speech through while Noise Suppression is off, which turns the enhanced one off too", () => {
+    stubNavigator();
+    const { ac, el } = mountTab();
+    try {
+      const toggle = el.querySelector<HTMLElement>("[data-testid='soft-speech'] .toggle")!;
+      const noiseSuppression = el.querySelector<HTMLElement>(
+        "[role='switch'][aria-label='Noise Suppression']",
+      )!;
+      el.querySelector<HTMLElement>(
+        "[role='switch'][aria-label='Enhanced Noise Suppression']",
+      )!.click();
+      expect(toggle.getAttribute("aria-disabled")).toBe("false");
+
+      noiseSuppression.click();
+      expect(toggle.getAttribute("aria-disabled")).toBe("true");
+      toggle.click();
+      expect(localStorage.getItem("owncord:settings:softSpeech")).toBeNull();
+
+      noiseSuppression.click();
+      expect(toggle.getAttribute("aria-disabled")).toBe("false");
+    } finally {
+      ac.abort();
+    }
   });
 
   it("saves a fine buffer adjustment and applies it without reopening the microphone", async () => {

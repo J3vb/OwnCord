@@ -201,6 +201,16 @@ describe("buildSupportBundle", () => {
     });
   });
 
+  it("keeps the soft speech setting, which decides what the microphone gate lets through", () => {
+    const entries = readZip(
+      buildSupportBundle(
+        sources({ storage: storageWith({ "owncord:settings:softSpeech": "false" }) }),
+      ),
+    );
+    const settings = JSON.parse(text(entries.find((e) => e.name === "settings.json")!.data));
+    expect(settings.settings).toEqual({ softSpeech: false });
+  });
+
   it("records OS and webview in app.json, and no server version", () => {
     const entries = readZip(buildSupportBundle(sources()));
     const app = JSON.parse(text(entries.find((e) => e.name === "app.json")!.data));

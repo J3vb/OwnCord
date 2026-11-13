@@ -14,7 +14,7 @@ interface Port {
   close(): void;
 }
 interface WorkerScope {
-  onmessage: ((event: { data: { port: Port } }) => void) | null;
+  onmessage: ((event: { data: { port?: Port; softSpeech?: unknown } }) => void) | null;
   postMessage(message: unknown): void;
 }
 
@@ -52,7 +52,8 @@ const QUIET = 0.0005;
 const LOUD = 0.02;
 const FRAME = 1536;
 
-async function startWorker(missingFile?: string) {
+/** `first` is what the app sends with the port, as an app of this release does. */
+async function startWorker(missingFile?: string, first: { softSpeech?: unknown } = {}) {
   fake.scores = [0, 0];
   fake.calls.length = 0;
   fake.starts.length = 0;
@@ -79,7 +80,7 @@ async function startWorker(missingFile?: string) {
     postMessage: (reply) => replies.push(reply),
     close: vi.fn(),
   };
-  scope.onmessage?.({ data: { port } });
+  scope.onmessage?.({ data: { port, ...first } });
   await vi.waitFor(() => expect(messages).toHaveLength(1));
   let next = 0;
   const post = (samples: Float32Array, threshold?: number): Reply | undefined => {
@@ -95,6 +96,8 @@ async function startWorker(missingFile?: string) {
     send: (level: number, threshold?: number) =>
       post(new Float32Array(FRAME).fill(level), threshold),
     skipFrame: () => next++,
+    /** A later message from the app: the setting alone. */
+    setSoftSpeech: (softSpeech: unknown) => scope.onmessage?.({ data: { softSpeech } }),
     secondModelScores: () => fake.calls.filter((call) => call.startsWith("second.score")).length,
   };
 }
@@ -106,7 +109,8 @@ describe("Silero speech worker", () => {
 
   it("loads both models and gives the second its rest state and the first's STFT table", async () => {
     const worker = await startWorker();
-    expect(worker.messages).toEqual([{ type: "ready" }]);
+    // The setting in force comes with "ready": on, when the app sent none.
+    expect(worker.messages).toEqual([{ type: "ready", softSpeech: true }]);
     expect(worker.fetched.toSorted()).toEqual(["silero-v5.1.2.bin", "silero-v6.2.0-slim.bin"]);
     expect(fake.options).toEqual([undefined, { restFrames: 7, stftBasis: fake.table }]);
   });
@@ -119,6 +123,46 @@ describe("Silero speech worker", () => {
     expect(worker.send(LOUD)).toEqual({ frame: 1, probability: 1, peak: 0.5 });
     fake.scores = [0.6, 0];
     expect(worker.send(LOUD)).toEqual({ frame: 2, probability: 0.6, peak: 0.5 });
+  });
+
+  // "Let more soft speech through": on is the 0.9 bar, off the 0.95 one. An
+  // app from an older release sends no setting, as the tests above do.
+  it.each([
+    ["on", true, true, 1],
+    ["off", false, false, 0.2],
+    // Not a plain on or off: the bar stays where it starts, at the lower one.
+    ["on when it cannot read the value", "off", true, 1],
+  ])("starts with soft speech %s", async (_case, softSpeech, inForce, heard) => {
+    const worker = await startWorker(undefined, { softSpeech });
+    expect(worker.messages).toEqual([{ type: "ready", softSpeech: inForce }]);
+    fake.scores = [0.2, 0.94];
+    expect(worker.send(LOUD)?.probability).toBe(heard);
+    fake.scores = [0.2, 0.95];
+    expect(worker.send(LOUD)?.probability).toBe(1);
+  });
+
+  it("moves the second model's bar when the setting changes, and nothing else", async () => {
+    const worker = await startWorker();
+    fake.scores = [0.2, 0.9];
+    expect(worker.send(LOUD)?.probability).toBe(1);
+    fake.calls.length = 0;
+
+    worker.setSoftSpeech(false);
+    expect(worker.send(LOUD)?.probability).toBe(0.2);
+    // A message without a plain on or off leaves the bar where the user put it.
+    worker.setSoftSpeech(undefined);
+    worker.setSoftSpeech("on");
+    expect(worker.send(LOUD)?.probability).toBe(0.2);
+    fake.scores = [0.2, 0.95];
+    expect(worker.send(LOUD)?.probability).toBe(1);
+    worker.setSoftSpeech(true);
+    fake.scores = [0.2, 0.9];
+    expect(worker.send(LOUD)?.probability).toBe(1);
+
+    // No model started over, and no second start.
+    expect(fake.calls.filter((call) => call.endsWith(".reset"))).toEqual([]);
+    expect(worker.fetched).toHaveLength(2);
+    expect(worker.messages).toEqual([{ type: "ready", softSpeech: true }]);
   });
 
   it("rests the second model after half a second of quiet and wakes it from its rest state", async () => {

@@ -302,6 +302,21 @@ test.describe("Settings — Voice & Video Tab", () => {
     await expect(slider).toHaveAttribute("aria-valuetext", "201 ms");
   });
 
+  test("offers the soft speech switch once Enhanced Noise Suppression is on", async ({ page }) => {
+    const softSpeech = page.getByRole("switch", { name: "Let more soft speech through" });
+    await expect(softSpeech).toBeVisible();
+    await expect(softSpeech).toBeChecked();
+    await expect(softSpeech).toBeDisabled();
+    await page.getByRole("switch", { name: "Enhanced Noise Suppression" }).click();
+    await expect(softSpeech).toBeEnabled();
+    expect(await keyboardReachable(page, softSpeech)).toBe(true);
+    await page.keyboard.press("Space");
+    await expect(softSpeech).not.toBeChecked();
+    expect(await page.evaluate(() => localStorage.getItem("owncord:settings:softSpeech"))).toBe(
+      "false",
+    );
+  });
+
   test("offers the video codec choice with Auto as the default", async ({ page }) => {
     const codec = page.getByRole("combobox", { name: "Video Codec" });
     await expect(codec).toBeVisible();

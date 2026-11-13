@@ -53,6 +53,14 @@ function clampSileroBufferMs(ms: number): number {
 export function sileroBufferMs(): number {
   return clampSileroBufferMs(loadPref(SILERO_BUFFER_PREF, SILERO_BUFFER_DEFAULT_MS));
 }
+
+/** "Let more soft speech through": the speech worker's second model at its
+ *  lower bar (silero-vad-worker.js). On until the user turns it off. */
+export const SOFT_SPEECH_PREF = "softSpeech";
+
+export function softSpeechEnabled(): boolean {
+  return loadPref(SOFT_SPEECH_PREF, true);
+}
 /** Gain smoothing: opening has to finish inside the lookahead. */
 const GATE_OPEN_TIME_CONSTANT_S = 0.005;
 const GAIN_TIME_CONSTANT_S = 0.015;

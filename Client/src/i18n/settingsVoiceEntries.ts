@@ -111,6 +111,9 @@ export const settingsVoiceEntries = {
   "voiceAudio.enhanced.label": "Enhanced Noise Suppression",
   "voiceAudio.enhanced.desc":
     "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
+  "voiceAudio.softSpeech.label": "Let more soft speech through",
+  "voiceAudio.softSpeech.desc":
+    'Used with Enhanced Noise Suppression in Voice Activity. A soft "hmm" or "yes" gets through more often. Turn it off if coughs or other short sounds get through too much.',
   "voiceAudio.nativeNote":
     "On Linux, the mic test cannot run during a call; the level bar then shows your call's microphone.",
 

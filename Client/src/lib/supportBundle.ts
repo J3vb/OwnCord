@@ -159,6 +159,7 @@ const SETTINGS_ALLOWLIST = [
   "noiseSuppression",
   "autoGainControl",
   "enhancedNoiseSuppression",
+  "softSpeech",
   "inputVolume",
   "outputVolume",
   "voiceSensitivity",
