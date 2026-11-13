@@ -130,6 +130,17 @@ func (q *Queries) InsertMessageLinkPreview(ctx context.Context, arg InsertMessag
 	return err
 }
 
+const linkPreviewImageExists = `-- name: LinkPreviewImageExists :one
+SELECT EXISTS (SELECT 1 FROM link_preview_images WHERE hash = ?)
+`
+
+func (q *Queries) LinkPreviewImageExists(ctx context.Context, hash string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, linkPreviewImageExists, hash)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const listLinkPreviewImagesUnusedBefore = `-- name: ListLinkPreviewImagesUnusedBefore :many
 SELECT hash, size FROM link_preview_images WHERE last_used_at < ? ORDER BY last_used_at ASC, hash ASC LIMIT ?
 `
@@ -344,14 +355,14 @@ func (q *Queries) ListOldestLinkPreviewImages(ctx context.Context, limit int64) 
 
 const listUnreferencedLinkPreviewImages = `-- name: ListUnreferencedLinkPreviewImages :many
 SELECT i.hash, i.size FROM link_preview_images i
-WHERE i.created_at < ?
+WHERE i.last_used_at < ?
   AND NOT EXISTS (SELECT 1 FROM link_previews p WHERE p.image_hash = i.hash)
-ORDER BY i.created_at ASC, i.hash ASC LIMIT ?
+ORDER BY i.last_used_at ASC, i.hash ASC LIMIT ?
 `
 
 type ListUnreferencedLinkPreviewImagesParams struct {
-	CreatedAt string `json:"createdAt"`
-	Limit     int64  `json:"limit"`
+	LastUsedAt string `json:"lastUsedAt"`
+	Limit      int64  `json:"limit"`
 }
 
 type ListUnreferencedLinkPreviewImagesRow struct {
@@ -359,10 +370,11 @@ type ListUnreferencedLinkPreviewImagesRow struct {
 	Size int64  `json:"size"`
 }
 
-// Images no preview names, made before the cutoff so one stored a moment ago
-// (its preview row not written yet) is left alone.
+// Images no preview names and nothing has stored or shown since the cutoff.
+// last_used_at, not created_at: storing the same bytes again refreshes it, so
+// an old image reused a moment ago (its preview row not written yet) is kept.
 func (q *Queries) ListUnreferencedLinkPreviewImages(ctx context.Context, arg ListUnreferencedLinkPreviewImagesParams) ([]ListUnreferencedLinkPreviewImagesRow, error) {
-	rows, err := q.db.QueryContext(ctx, listUnreferencedLinkPreviewImages, arg.CreatedAt, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, listUnreferencedLinkPreviewImages, arg.LastUsedAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -471,6 +483,7 @@ INSERT INTO message_unfurls (message_id, unfurled_at, content_version)
 SELECT m.id, ?1, ?2
 FROM messages m
 WHERE m.id = ?3 AND m.deleted = 0 AND COALESCE(m.edited_at, m.timestamp) = ?2
+  AND m.content = ?4
 ON CONFLICT(message_id) DO UPDATE SET
     unfurled_at     = excluded.unfurled_at,
     content_version = excluded.content_version
@@ -480,13 +493,21 @@ type UpsertMessageUnfurlIfCurrentParams struct {
 	UnfurledAt     string `json:"unfurledAt"`
 	ContentVersion string `json:"contentVersion"`
 	MessageID      int64  `json:"messageId"`
+	Content        string `json:"content"`
 }
 
 // Writes the unfurl marker only while the message exists, is not deleted and
-// still carries the version the caller saw (edited_at, else timestamp). Zero
-// rows means the result is stale and the caller writes nothing more.
+// still carries the version (edited_at, else timestamp) and the exact content
+// the caller parsed. edited_at has one-second resolution, so the content check
+// is what tells two edits in one second apart. Zero rows means the result is
+// stale and the caller writes nothing more.
 func (q *Queries) UpsertMessageUnfurlIfCurrent(ctx context.Context, arg UpsertMessageUnfurlIfCurrentParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, upsertMessageUnfurlIfCurrent, arg.UnfurledAt, arg.ContentVersion, arg.MessageID)
+	result, err := q.db.ExecContext(ctx, upsertMessageUnfurlIfCurrent,
+		arg.UnfurledAt,
+		arg.ContentVersion,
+		arg.MessageID,
+		arg.Content,
+	)
 	if err != nil {
 		return 0, err
 	}

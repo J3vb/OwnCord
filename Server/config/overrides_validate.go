@@ -56,7 +56,6 @@ var editableRules = map[string]func(any) (any, error){
 	"voice.udp_port":                            udpPortRule,
 
 	"event_persistence.enabled":          boolRule,
-	"link_previews.enabled":              boolRule,
 	"plugins.enabled":                    boolRule,
 	"push.dispatch_enabled":              boolRule,
 	"push.enabled":                       boolRule,

@@ -277,6 +277,90 @@ func TestSweepDropsUnreferencedAfterGrace(t *testing.T) {
 	}
 }
 
+func TestPutCard(t *testing.T) {
+	ctx := t.Context()
+	f := newFixture(t)
+	hash := func(u string) string { return mustHash(t, u) }
+	stamp := FormatTime(f.clock.now())
+	card := func(u string) db.LinkPreview {
+		title := "t"
+		return db.LinkPreview{UrlHash: hash(u), Url: u, Title: &title, FetchedAt: stamp, LastUsedAt: stamp,
+			ImageHash: new(string)} // a caller value is ignored
+	}
+	img := &NewImage{Data: []byte("0123456789"), MIME: "image/webp", Width: 5, Height: 5}
+
+	tests := []struct {
+		name      string
+		img       *NewImage
+		capBytes  int64
+		wantImage bool
+	}{
+		{"stores card and image", img, 1 << 20, true},
+		{"cap 0 keeps no thumbnails", img, 0, false},
+		{"image larger than the cap", img, 9, false},
+		{"no image", nil, 1 << 20, false},
+	}
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			u := fmt.Sprintf("https://example.com/card/%d", i)
+			if err := f.store.PutCard(ctx, card(u), tc.img, tc.capBytes); err != nil {
+				t.Fatal(err)
+			}
+			p, err := f.store.Preview(ctx, hash(u))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := p.ImageHash != nil; got != tc.wantImage {
+				t.Fatalf("card names an image = %v, want %v", got, tc.wantImage)
+			}
+			if tc.wantImage && !f.fileExists(*p.ImageHash) {
+				t.Error("the card's image file is missing")
+			}
+		})
+	}
+	if leftovers, err := leftoverTemps(f.dir); err != nil || len(leftovers) != 0 {
+		t.Errorf("temp files left: %v, %v", leftovers, err)
+	}
+	if err := f.store.PutCard(ctx, card("https://example.com/bad"), &NewImage{Data: []byte("x"), MIME: "", Width: 1, Height: 1}, 1<<20); !errors.Is(err, ErrInvalidImage) {
+		t.Errorf("bad image err = %v, want ErrInvalidImage", err)
+	}
+}
+
+// An image stored long ago and stored again must survive a sweep that runs before its card is
+// written: the unreferenced test looks at when the image was last stored, not first.
+func TestReusedOldImageSurvivesSweepBeforeCard(t *testing.T) {
+	ctx := t.Context()
+	f := newFixture(t)
+	old := f.put(ctx, "old image")
+	f.clock.advance(3 * unreferencedGrace)
+	if again := f.put(ctx, "old image"); again != old {
+		t.Fatal("same bytes, different hash")
+	}
+	if res, err := f.store.Sweep(ctx, 1<<30, 365*24*time.Hour); err != nil || res.Images != 0 || !f.fileExists(old) {
+		t.Fatalf("sweep dropped a just-reused image: %+v, %v", res, err)
+	}
+	// The card can be written now: its foreign key finds the image row.
+	f.card(ctx, "https://example.com/reused", &old)
+
+	// Through PutCard the same holds, with no gap at all.
+	f.clock.advance(3 * unreferencedGrace)
+	title := "t"
+	stamp := FormatTime(f.clock.now())
+	p := db.LinkPreview{UrlHash: mustHash(t, "https://example.com/two"), Url: "https://example.com/two", Title: &title, FetchedAt: stamp, LastUsedAt: stamp}
+	other := f.put(ctx, "another")
+	f.clock.advance(3 * unreferencedGrace)
+	if err := f.store.PutCard(ctx, p, &NewImage{Data: []byte("another"), MIME: "image/webp", Width: 2, Height: 2}, 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := f.store.Sweep(ctx, 1<<30, 365*24*time.Hour); err != nil || !f.fileExists(other) {
+		t.Errorf("sweep after PutCard = %+v, %v, file present %v", res, err, f.fileExists(other))
+	}
+	got, err := f.store.Preview(ctx, p.UrlHash)
+	if err != nil || got.ImageHash == nil || *got.ImageHash != other {
+		t.Errorf("card = %+v, %v", got, err)
+	}
+}
+
 func TestSweepRemovesStraysAndStaleTemps(t *testing.T) {
 	ctx := t.Context()
 	f := newFixture(t)

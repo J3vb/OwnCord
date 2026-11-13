@@ -83,10 +83,6 @@ var settingCopy = map[string]SettingCopy{
 		"info (default). Use debug only while troubleshooting.",
 		"debug is very verbose and may fill the disk; warn and error hide routine events."),
 
-	"link_previews.enabled": sc("Link previews",
-		"Whether the server fetches links in new messages and attaches a preview card.",
-		"On (default).",
-		"Off stops new fetches only. Stored previews stay, and stored thumbnails are still trimmed to the size limit."),
 	"link_previews.thumbnail_cache_mb": sc("Link preview thumbnail space (MB)",
 		"How much disk the saved link preview thumbnails may use.",
 		"512 (default). 0 keeps no thumbnails.",

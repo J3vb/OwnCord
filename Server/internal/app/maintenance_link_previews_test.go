@@ -11,22 +11,22 @@ import (
 	"github.com/J3vb/OwnCord/Server/linkpreview"
 )
 
-// The thumbnail sweep runs with link_previews.enabled off and trims down to the cap.
+// The thumbnail sweep runs with link_previews.enabled off and trims down to the cap, on the
+// one store the composition root opened.
 func TestMaintenance_SweepLinkPreviewsTrimsWhileDisabled(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	database := newMaintenanceTestDB(t)
 	cfg := &config.Config{Server: config.ServerConfig{DataDir: dataDir}}
 	cfg.LinkPreviews = config.LinkPreviewsConfig{Enabled: false, ThumbnailCacheMB: 0, ThumbnailUnusedDays: 30}
-	m := newMaintenance(slog.Default(), cfg, database, nil, nil)
-	if m.linkPreviews == nil {
-		t.Fatal("no link preview store was built from server.data_dir")
-	}
 
-	store, err := linkpreview.NewStore(database, filepath.Join(dataDir, linkpreview.DirName))
-	if err != nil {
-		t.Fatal(err)
+	store := OpenLinkPreviews(slog.Default(), cfg, database)
+	if store == nil {
+		t.Fatal("no link preview store was opened from server.data_dir")
 	}
+	m := newMaintenance(slog.Default(), cfg, database, nil, nil)
+	m.linkPreviews = store
+
 	hash, err := store.PutImage(ctx, []byte("thumbnail"), "image/webp", 4, 4)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,10 @@ func TestMaintenance_SweepLinkPreviewsTrimsWhileDisabled(t *testing.T) {
 func TestMaintenance_SweepLinkPreviewsNoStoreIsNoop(t *testing.T) {
 	m := newMaintenance(slog.Default(), &config.Config{}, newMaintenanceTestDB(t), nil, nil)
 	if m.linkPreviews != nil {
-		t.Fatal("a store was built without a data dir")
+		t.Fatal("a store was set without being passed in")
 	}
 	mustDo(t, "sweepLinkPreviews", m.sweepLinkPreviews(context.Background()))
+	if OpenLinkPreviews(slog.Default(), &config.Config{}, nil) != nil {
+		t.Error("a store was opened without a data dir")
+	}
 }

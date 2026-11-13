@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	stdlog "log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -152,6 +155,7 @@ func (a *App) startErasureMarkers() error {
 	// Opened here because the replay removes erased accounts' files;
 	// StartRuntime shares it with the router and maintenance loop.
 	a.storage = OpenStorage(a.log, a.cfg)
+	a.linkPreviews = OpenLinkPreviews(a.log, a.cfg, a.database)
 	markers, err := openMarkers(context.Background(), a.log, a.cfg, a.database, a.storage)
 	if err != nil {
 		return err
@@ -322,7 +326,7 @@ func (a *App) startAuditWriter() error {
 // startMaintenance starts the periodic purge of expired sessions, scheduled
 // backups and orphaned attachments.
 func (a *App) startMaintenance() error {
-	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services, a.runtime.Storage)
+	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services, a.runtime.Storage, a.linkPreviews)
 	a.onClose("maintenance", func(context.Context) error {
 		stop()
 		return nil
@@ -397,4 +401,19 @@ func (a *App) startSignals() error {
 		return nil
 	})
 	return nil
+}
+
+// OpenLinkPreviews opens the link preview store under server.data_dir, logging a failure once
+// and returning nil so callers degrade rather than stop. Build one and share it: its mutex
+// orders a thumbnail write against the sweep.
+func OpenLinkPreviews(log *slog.Logger, cfg *config.Config, database linkpreview.Repo) *linkpreview.Store {
+	if cfg.Server.DataDir == "" {
+		return nil
+	}
+	store, err := linkpreview.NewStore(database, filepath.Join(cfg.Server.DataDir, linkpreview.DirName))
+	if err != nil {
+		log.Warn("failed to open link preview store; thumbnail sweep disabled", "error", err)
+		return nil
+	}
+	return store
 }

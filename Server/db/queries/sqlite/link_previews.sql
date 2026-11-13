@@ -24,6 +24,9 @@ UPDATE link_previews SET last_used_at = ? WHERE url_hash = ?;
 SELECT hash, mime_type, size, width, height, created_at, last_used_at
 FROM link_preview_images WHERE hash = ?;
 
+-- name: LinkPreviewImageExists :one
+SELECT EXISTS (SELECT 1 FROM link_preview_images WHERE hash = ?);
+
 -- name: InsertLinkPreviewImage :exec
 -- The same bytes twice are one row: a repeat only refreshes last_used_at.
 INSERT INTO link_preview_images (hash, mime_type, size, width, height, created_at, last_used_at)
@@ -56,12 +59,15 @@ ORDER BY mlp.message_id ASC, mlp.position ASC;
 
 -- name: UpsertMessageUnfurlIfCurrent :execrows
 -- Writes the unfurl marker only while the message exists, is not deleted and
--- still carries the version the caller saw (edited_at, else timestamp). Zero
--- rows means the result is stale and the caller writes nothing more.
+-- still carries the version (edited_at, else timestamp) and the exact content
+-- the caller parsed. edited_at has one-second resolution, so the content check
+-- is what tells two edits in one second apart. Zero rows means the result is
+-- stale and the caller writes nothing more.
 INSERT INTO message_unfurls (message_id, unfurled_at, content_version)
 SELECT m.id, sqlc.arg(unfurled_at), sqlc.arg(content_version)
 FROM messages m
 WHERE m.id = sqlc.arg(message_id) AND m.deleted = 0 AND COALESCE(m.edited_at, m.timestamp) = sqlc.arg(content_version)
+  AND m.content = sqlc.arg(content)
 ON CONFLICT(message_id) DO UPDATE SET
     unfurled_at     = excluded.unfurled_at,
     content_version = excluded.content_version;
@@ -85,12 +91,13 @@ SELECT hash, size FROM link_preview_images ORDER BY last_used_at ASC, hash ASC L
 SELECT hash, size FROM link_preview_images WHERE last_used_at < ? ORDER BY last_used_at ASC, hash ASC LIMIT ?;
 
 -- name: ListUnreferencedLinkPreviewImages :many
--- Images no preview names, made before the cutoff so one stored a moment ago
--- (its preview row not written yet) is left alone.
+-- Images no preview names and nothing has stored or shown since the cutoff.
+-- last_used_at, not created_at: storing the same bytes again refreshes it, so
+-- an old image reused a moment ago (its preview row not written yet) is kept.
 SELECT i.hash, i.size FROM link_preview_images i
-WHERE i.created_at < ?
+WHERE i.last_used_at < ?
   AND NOT EXISTS (SELECT 1 FROM link_previews p WHERE p.image_hash = i.hash)
-ORDER BY i.created_at ASC, i.hash ASC LIMIT ?;
+ORDER BY i.last_used_at ASC, i.hash ASC LIMIT ?;
 
 -- name: DeleteLinkPreviewImage :execrows
 -- A preview that named the image keeps its text and loses its image_hash.

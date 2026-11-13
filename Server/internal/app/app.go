@@ -17,6 +17,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
@@ -95,8 +96,11 @@ type App struct {
 	totpKey []byte
 	// storage is the one upload file store, opened by startErasureMarkers (nil
 	// when it could not be).
-	storage  *storage.Storage
-	serveCtx context.Context
+	storage *storage.Storage
+	// linkPreviews is the one link preview store, opened beside storage and shared by every
+	// user of the thumbnail folder (nil when it could not be opened).
+	linkPreviews *linkpreview.Store
+	serveCtx     context.Context
 
 	closers []closeStep
 	closed  bool

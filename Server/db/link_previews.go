@@ -21,10 +21,7 @@ type LinkPreviewImage = dbgen.LinkPreviewImage
 type LinkPreviewCard = dbgen.ListMessageLinkPreviewsRow
 
 // LinkPreviewImageRef names a thumbnail row and its size.
-type LinkPreviewImageRef struct {
-	Hash string
-	Size int64
-}
+type LinkPreviewImageRef = dbgen.ListOldestLinkPreviewImagesRow
 
 // GetLinkPreview returns the card stored under urlHash, or ErrNotFound.
 func (d *DB) GetLinkPreview(ctx context.Context, urlHash string) (LinkPreview, error) {
@@ -64,6 +61,15 @@ func (d *DB) GetLinkPreviewImage(ctx context.Context, hash string) (LinkPreviewI
 		return LinkPreviewImage{}, fmt.Errorf("GetLinkPreviewImage: %w", err)
 	}
 	return row, nil
+}
+
+// LinkPreviewImageExists reports whether a thumbnail row is stored under hash.
+func (d *DB) LinkPreviewImageExists(ctx context.Context, hash string) (bool, error) {
+	ok, err := d.q.LinkPreviewImageExists(ctx, hash)
+	if err != nil {
+		return false, fmt.Errorf("LinkPreviewImageExists: %w", err)
+	}
+	return ok != 0, nil
 }
 
 // InsertLinkPreviewImage records a thumbnail. A hash already stored only has its
@@ -111,9 +117,10 @@ func (d *DB) ListLinkPreviewsForMessages(ctx context.Context, messageIDs []int64
 
 // ReplaceMessageLinkPreviews makes urlHashes (in order) the links of messageID and
 // records the unfurl, in one transaction, only while the message still exists, is not
-// deleted and its version (edited_at, else timestamp) equals contentVersion. It reports
-// whether it applied; false writes nothing. Every hash must already have a stored card.
-func (d *DB) ReplaceMessageLinkPreviews(ctx context.Context, messageID int64, contentVersion, unfurledAt string, urlHashes []string) (bool, error) {
+// deleted, its version (edited_at, else timestamp) equals contentVersion and its text
+// equals content, the text the caller parsed. It reports whether it applied; false writes
+// nothing. Every hash must already have a stored card.
+func (d *DB) ReplaceMessageLinkPreviews(ctx context.Context, messageID int64, contentVersion, content, unfurledAt string, urlHashes []string) (bool, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("ReplaceMessageLinkPreviews begin: %w", err)
@@ -124,7 +131,7 @@ func (d *DB) ReplaceMessageLinkPreviews(ctx context.Context, messageID int64, co
 	// The guarded marker write comes first: it is the transaction's first statement, so
 	// the version check and the writes after it see one state of the message.
 	n, err := q.UpsertMessageUnfurlIfCurrent(ctx, dbgen.UpsertMessageUnfurlIfCurrentParams{
-		UnfurledAt: unfurledAt, ContentVersion: contentVersion, MessageID: messageID,
+		UnfurledAt: unfurledAt, ContentVersion: contentVersion, Content: content, MessageID: messageID,
 	})
 	if err != nil {
 		return false, fmt.Errorf("ReplaceMessageLinkPreviews marker: %w", err)
@@ -163,11 +170,7 @@ func (d *DB) ListOldestLinkPreviewImages(ctx context.Context, limit int) ([]Link
 	if err != nil {
 		return nil, fmt.Errorf("ListOldestLinkPreviewImages: %w", err)
 	}
-	out := make([]LinkPreviewImageRef, len(rows))
-	for i, r := range rows {
-		out[i] = LinkPreviewImageRef{Hash: r.Hash, Size: r.Size}
-	}
-	return out, nil
+	return rows, nil
 }
 
 // ListLinkPreviewImagesUnusedBefore returns up to limit thumbnails last used before cutoff.
@@ -178,21 +181,21 @@ func (d *DB) ListLinkPreviewImagesUnusedBefore(ctx context.Context, cutoff strin
 	}
 	out := make([]LinkPreviewImageRef, len(rows))
 	for i, r := range rows {
-		out[i] = LinkPreviewImageRef{Hash: r.Hash, Size: r.Size}
+		out[i] = LinkPreviewImageRef(r)
 	}
 	return out, nil
 }
 
-// ListUnreferencedLinkPreviewImages returns up to limit thumbnails created before
-// createdBefore that no stored card names.
-func (d *DB) ListUnreferencedLinkPreviewImages(ctx context.Context, createdBefore string, limit int) ([]LinkPreviewImageRef, error) {
-	rows, err := d.q.ListUnreferencedLinkPreviewImages(ctx, dbgen.ListUnreferencedLinkPreviewImagesParams{CreatedAt: createdBefore, Limit: int64(limit)})
+// ListUnreferencedLinkPreviewImages returns up to limit thumbnails last stored or shown
+// before cutoff that no stored card names.
+func (d *DB) ListUnreferencedLinkPreviewImages(ctx context.Context, cutoff string, limit int) ([]LinkPreviewImageRef, error) {
+	rows, err := d.q.ListUnreferencedLinkPreviewImages(ctx, dbgen.ListUnreferencedLinkPreviewImagesParams{LastUsedAt: cutoff, Limit: int64(limit)})
 	if err != nil {
 		return nil, fmt.Errorf("ListUnreferencedLinkPreviewImages: %w", err)
 	}
 	out := make([]LinkPreviewImageRef, len(rows))
 	for i, r := range rows {
-		out[i] = LinkPreviewImageRef{Hash: r.Hash, Size: r.Size}
+		out[i] = LinkPreviewImageRef(r)
 	}
 	return out, nil
 }

@@ -5,6 +5,9 @@ import (
 	"testing"
 )
 
+// msgContent is the text every test message is created with.
+const msgContent = "see https://example.com/a"
+
 type msgFixture struct {
 	*fixture
 	channelID, userID int64
@@ -26,7 +29,7 @@ func newMsgFixture(ctx context.Context, t *testing.T) *msgFixture {
 
 func (m *msgFixture) message(ctx context.Context) (id int64, version string) {
 	m.t.Helper()
-	id, err := m.db.CreateMessage(ctx, m.channelID, m.userID, "see https://example.com/a", nil)
+	id, err := m.db.CreateMessage(ctx, m.channelID, m.userID, msgContent, nil)
 	if err != nil {
 		m.t.Fatal(err)
 	}
@@ -67,7 +70,7 @@ func TestReplaceMessagePreviews(t *testing.T) {
 	b := m.card(ctx, "https://example.com/b", nil)
 
 	// Applies when the version matches, in link order.
-	ok, err := m.store.ReplaceMessagePreviews(ctx, id, version, []string{b, a})
+	ok, err := m.store.ReplaceMessagePreviews(ctx, id, version, msgContent, []string{b, a})
 	if err != nil || !ok {
 		t.Fatalf("Replace = %v, %v; want applied", ok, err)
 	}
@@ -81,13 +84,13 @@ func TestReplaceMessagePreviews(t *testing.T) {
 	}
 
 	// Replacing swaps the whole set, and an empty set still records the unfurl.
-	if ok, err = m.store.ReplaceMessagePreviews(ctx, id, version, []string{a}); err != nil || !ok {
+	if ok, err = m.store.ReplaceMessagePreviews(ctx, id, version, msgContent, []string{a}); err != nil || !ok {
 		t.Fatalf("second Replace = %v, %v", ok, err)
 	}
 	if cards, _ = m.store.MessagePreviews(ctx, id); len(cards) != 1 || cards[0].UrlHash != a {
 		t.Errorf("cards after replace = %+v", cards)
 	}
-	if ok, err = m.store.ReplaceMessagePreviews(ctx, id, version, nil); err != nil || !ok {
+	if ok, err = m.store.ReplaceMessagePreviews(ctx, id, version, msgContent, nil); err != nil || !ok {
 		t.Fatalf("empty Replace = %v, %v", ok, err)
 	}
 	if cards, _ = m.store.MessagePreviews(ctx, id); len(cards) != 0 {
@@ -134,7 +137,7 @@ func TestReplaceMessagePreviewsRefusesStale(t *testing.T) {
 			if tc.name == "never existed" {
 				target = id + 1000
 			}
-			ok, err := m.store.ReplaceMessagePreviews(ctx, target, version, []string{h})
+			ok, err := m.store.ReplaceMessagePreviews(ctx, target, version, msgContent, []string{h})
 			if err != nil || ok {
 				t.Fatalf("Replace = %v, %v; want refused without error", ok, err)
 			}
@@ -154,11 +157,11 @@ func TestReplaceRefusalKeepsEarlierResult(t *testing.T) {
 	m := newMsgFixture(ctx, t)
 	id, version := m.message(ctx)
 	a := m.card(ctx, "https://example.com/a", nil)
-	if ok, err := m.store.ReplaceMessagePreviews(ctx, id, version, []string{a}); err != nil || !ok {
+	if ok, err := m.store.ReplaceMessagePreviews(ctx, id, version, msgContent, []string{a}); err != nil || !ok {
 		t.Fatal(ok, err)
 	}
 	m.exec(ctx, `UPDATE messages SET edited_at = '2031-02-03 04:05:06' WHERE id = ?`, id)
-	if ok, err := m.store.ReplaceMessagePreviews(ctx, id, version, nil); err != nil || ok {
+	if ok, err := m.store.ReplaceMessagePreviews(ctx, id, version, msgContent, nil); err != nil || ok {
 		t.Fatalf("stale Replace = %v, %v", ok, err)
 	}
 	if cards, _ := m.store.MessagePreviews(ctx, id); len(cards) != 1 {
@@ -177,10 +180,10 @@ func TestMessageDeleteDropsLinks(t *testing.T) {
 			id, version := m.message(ctx)
 			otherID, otherVersion := m.message(ctx)
 			a := m.card(ctx, "https://example.com/a", nil)
-			if ok, err := m.store.ReplaceMessagePreviews(ctx, id, version, []string{a}); err != nil || !ok {
+			if ok, err := m.store.ReplaceMessagePreviews(ctx, id, version, msgContent, []string{a}); err != nil || !ok {
 				t.Fatal(ok, err)
 			}
-			if ok, err := m.store.ReplaceMessagePreviews(ctx, otherID, otherVersion, []string{a}); err != nil || !ok {
+			if ok, err := m.store.ReplaceMessagePreviews(ctx, otherID, otherVersion, msgContent, []string{a}); err != nil || !ok {
 				t.Fatal(ok, err)
 			}
 			m.exec(ctx, tc.stmt, id)
@@ -214,7 +217,7 @@ func TestPreviewsForMessagesJoinsImage(t *testing.T) {
 		version string
 		hashes  []string
 	}{{id1, v1, []string{without, withImage}}, {id2, v2, []string{withImage}}} {
-		if ok, err := m.store.ReplaceMessagePreviews(ctx, w.id, w.version, w.hashes); err != nil || !ok {
+		if ok, err := m.store.ReplaceMessagePreviews(ctx, w.id, w.version, msgContent, w.hashes); err != nil || !ok {
 			t.Fatal(ok, err)
 		}
 	}
@@ -260,5 +263,37 @@ func TestPreviewRoundTrip(t *testing.T) {
 	p, err := f.store.Preview(ctx, h)
 	if err != nil || p.Failure == nil || *p.Failure != "unavailable" || p.Title != nil {
 		t.Errorf("preview after refetch = %+v, %v", p, err)
+	}
+}
+
+// edited_at has one-second resolution: two edits in one second share a version, and only the
+// text tells a result parsed from the first edit from one parsed from the second.
+func TestReplaceRefusesStaleResultWithinOneSecond(t *testing.T) {
+	ctx := t.Context()
+	m := newMsgFixture(ctx, t)
+	id, _ := m.message(ctx)
+	a := m.card(ctx, "https://example.com/a", nil)
+	b := m.card(ctx, "https://example.com/b", nil)
+
+	m.exec(ctx, `UPDATE messages SET content = 'first edit', edited_at = '2031-02-03 04:05:06' WHERE id = ?`, id)
+	version := m.version(ctx, id)
+	// The second edit lands in the same second: same edited_at, different text.
+	m.exec(ctx, `UPDATE messages SET content = 'second edit', edited_at = '2031-02-03 04:05:06' WHERE id = ?`, id)
+	if got := m.version(ctx, id); got != version {
+		t.Fatalf("setup: versions differ: %q %q", got, version)
+	}
+
+	ok, err := m.store.ReplaceMessagePreviews(ctx, id, version, "first edit", []string{a})
+	if err != nil || ok {
+		t.Fatalf("stale Replace = %v, %v; want refused", ok, err)
+	}
+	if n := m.count(ctx, `SELECT COUNT(*) FROM message_unfurls`); n != 0 {
+		t.Errorf("unfurl rows = %d after a refused write", n)
+	}
+	if ok, err = m.store.ReplaceMessagePreviews(ctx, id, version, "second edit", []string{b}); err != nil || !ok {
+		t.Fatalf("current Replace = %v, %v; want applied", ok, err)
+	}
+	if cards, _ := m.store.MessagePreviews(ctx, id); len(cards) != 1 || cards[0].UrlHash != b {
+		t.Errorf("cards = %+v, want only b", cards)
 	}
 }

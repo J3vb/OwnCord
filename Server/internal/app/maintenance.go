@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -32,7 +31,8 @@ type maintenance struct {
 	reportRetentionDays int
 	actionRetentionDays int
 	push                *service.PushService
-	// linkPreviews is the thumbnail store the sweep trims; nil when its folder could not be made.
+	// linkPreviews is the shared thumbnail store the sweep trims, set by startMaintenanceLoop; nil when
+	// its folder could not be made.
 	linkPreviews        *linkpreview.Store
 	linkPreviewCapBytes int64
 	linkPreviewUnused   time.Duration
@@ -76,14 +76,6 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 	}
 	m.linkPreviewCapBytes = int64(cfg.LinkPreviews.ThumbnailCacheMB) << 20
 	m.linkPreviewUnused = time.Duration(cfg.LinkPreviews.ThumbnailUnusedDays) * 24 * time.Hour
-	if cfg.Server.DataDir != "" {
-		lp, lpErr := linkpreview.NewStore(database, filepath.Join(cfg.Server.DataDir, linkpreview.DirName))
-		if lpErr != nil {
-			log.Warn("failed to open link preview store; thumbnail sweep disabled", "error", lpErr)
-		} else {
-			m.linkPreviews = lp
-		}
-	}
 	// files is the upload store StartRuntime shares; it already holds the
 	// erasure and retention runners' file remover (wireAuth), so no setter runs
 	// after the hub started.
@@ -97,8 +89,9 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 
 // startMaintenanceLoop starts the periodic loop and returns the stop step the
 // stage registers with App.Close.
-func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services, files *storage.Storage) func() {
+func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services, files *storage.Storage, previews *linkpreview.Store) func() {
 	m := newMaintenance(log, cfg, database, svc, files)
+	m.linkPreviews = previews
 	erasureCtx, cancelErasure := context.WithCancel(bgCtx)
 	m.erasureCtx = erasureCtx
 	stop := runMaintenanceLoop(bgCtx, log, m)

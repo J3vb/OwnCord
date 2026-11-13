@@ -100,6 +100,13 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Under the hood
+
+- **Groundwork for server-side link previews.** Nothing changes for members yet: the server does not fetch links, and no preview is shown from this store. It adds the storage a later release will use:
+  - Database migration 094 adds four tables for link cards and their thumbnails. The server migrates on start, so take a backup first as usual.
+  - A new `link-previews/` folder appears in the server data folder for shrunk thumbnails. The server trims it on its 15-minute maintenance pass.
+  - Three settings in `config.yaml`: `link_previews.enabled` (default on, no effect yet), `link_previews.thumbnail_cache_mb` (default 512, `0` keeps no thumbnails) and `link_previews.thumbnail_unused_days` (default 30).
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

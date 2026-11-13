@@ -26,6 +26,9 @@ func TestNormalizeURL(t *testing.T) {
 		{"keeps path encoding", "https://example.com/a%2Fb%20c", "https://example.com/a%2Fb%20c"},
 		{"trims surrounding space", "  https://example.com/a \n", "https://example.com/a"},
 		{"ipv6 host", "http://[::1]:8080/x", "http://[::1]:8080/x"},
+		{"drops trailing dot", "https://Example.com./a", "https://example.com/a"},
+		{"unicode host to punycode", "https://B\u00fccher.example/x", "https://xn--bcher-kva.example/x"},
+		{"punycode host unchanged", "https://xn--bcher-kva.example/x", "https://xn--bcher-kva.example/x"},
 		{"keeps trailing slash", "https://example.com/a/", "https://example.com/a/"},
 	}
 	for _, tc := range tests {
@@ -48,7 +51,7 @@ func TestNormalizeURL(t *testing.T) {
 func TestNormalizeURLRejects(t *testing.T) {
 	for _, in := range []string{
 		"", "example.com/a", "ftp://example.com/a", "javascript:alert(1)", "file:///etc/passwd",
-		"https:///nohost", "https://user:pw@example.com/", "https://user@example.com/", "http://%zz/",
+		"https:///nohost", "http://[fe80::1%25eth0]/", "http://.", "http://exa mple.com/", "https://user:pw@example.com/", "https://user@example.com/", "http://%zz/",
 	} {
 		t.Run(in, func(t *testing.T) {
 			if got, err := NormalizeURL(in); !errors.Is(err, ErrInvalidURL) {
