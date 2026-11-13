@@ -78,6 +78,7 @@ function muteSheetItems(channel: Channel): SheetTop {
     items.push({
       label: shellText("channel.unmute"),
       testId: "ctx-mute-channel",
+      icon: "bell",
       ...(until !== null ? { detail: until } : {}),
       onClick: () => unmuteChannel(channel.id),
     });
@@ -86,6 +87,7 @@ function muteSheetItems(channel: Channel): SheetTop {
     items.push({
       label: shellText("channel.mute"),
       testId: "ctx-mute-channel",
+      icon: "bell-off",
       onClick: () => muteChannel(channel.id),
       submenu: muteChoices().map((choice) => ({
         label: choice.label,
@@ -110,6 +112,7 @@ function muteSheetItems(channel: Channel): SheetTop {
   items.push({
     label: shellText("channel.notifySettings"),
     testId: "ctx-notify-settings",
+    icon: "bell",
     onClick: () => undefined,
     submenu: [
       levelRow(
@@ -138,12 +141,14 @@ function moveSheetItems(
     {
       label: shellText("channel.moveUp"),
       testId: "ctx-move-up",
+      icon: "arrow-up",
       disabled: up === null,
       onClick: () => up?.(),
     },
     {
       label: shellText("channel.moveDown"),
       testId: "ctx-move-down",
+      icon: "arrow-down",
       disabled: down === null,
       onClick: () => down?.(),
     },
@@ -159,6 +164,7 @@ function topSheetItems(req: ChannelSheetRequest): SheetTop {
     top.push({
       label: shellText("channel.openChat"),
       testId: "ctx-open-chat",
+      icon: "message-square",
       onClick: () => navigateToChannel(channel.id),
     });
   }
@@ -169,6 +175,7 @@ function topSheetItems(req: ChannelSheetRequest): SheetTop {
     top.push({
       label: shellText("channel.markRead"),
       testId: "ctx-mark-read",
+      icon: "check-check",
       disabled: !unread,
       onClick: () => markChannelRead(channel.id),
     });
@@ -180,6 +187,7 @@ function topSheetItems(req: ChannelSheetRequest): SheetTop {
     top.push({
       label: shellText("channel.copyLink"),
       testId: "ctx-copy-channel-link",
+      icon: "link",
       onClick: () =>
         copyWithToast(
           formatChannelLink(channel.id, getChannelMutesHost() ?? ""),
@@ -194,6 +202,7 @@ function topSheetItems(req: ChannelSheetRequest): SheetTop {
     top.push({
       label: shellText("channel.invite"),
       testId: "ctx-invite-people",
+      icon: "user-plus",
       onClick: () => onInvite(channel),
     });
   }
@@ -206,6 +215,7 @@ function topSheetItems(req: ChannelSheetRequest): SheetTop {
     top.push({
       label: shellText("channel.copyId"),
       testId: "ctx-copy-channel-id",
+      icon: "copy",
       onClick: () =>
         copyWithToast(String(channel.id), "toast.channelIdCopied", "toast.channelIdCopyFailed"),
     });
@@ -222,6 +232,7 @@ function manageSheetItems(req: ChannelSheetRequest): SheetTop {
     manage.push({
       label: shellText("channel.edit"),
       testId: "ctx-edit-channel",
+      icon: "pencil",
       onClick: () => onEdit(channel),
     });
   }
@@ -230,6 +241,7 @@ function manageSheetItems(req: ChannelSheetRequest): SheetTop {
     manage.push({
       label: shellText("channel.delete"),
       testId: "ctx-delete-channel",
+      icon: "trash-2",
       danger: true,
       onClick: () => onDelete(channel),
     });

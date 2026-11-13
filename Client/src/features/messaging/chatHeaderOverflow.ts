@@ -11,7 +11,7 @@
 
 import { Disposable } from "../../lib/disposable";
 import { createElement } from "../../lib/dom";
-import { createIcon } from "../../lib/icons";
+import { createIcon, isIconName, type IconName } from "../../lib/icons";
 import type { ContextMenuItem } from "../../lib/ui/contextMenu";
 import { openMenuSheet } from "../menus/menuSheet";
 import { messagingText } from "../../i18n/messaging";
@@ -26,10 +26,18 @@ function isShown(btn: HTMLButtonElement): boolean {
   return !btn.hidden && btn.style.display !== "none";
 }
 
+/** The icon the header button draws, so its row shows the same one. */
+function iconOf(btn: HTMLButtonElement): IconName | undefined {
+  const name = btn.querySelector("svg[data-icon]")?.getAttribute("data-icon") ?? "";
+  return isIconName(name) ? name : undefined;
+}
+
 function rowFor(btn: HTMLButtonElement): ContextMenuItem {
   const pressed = btn.getAttribute("aria-pressed");
+  const icon = iconOf(btn);
   return {
     label: btn.getAttribute("aria-label") ?? btn.title,
+    ...(icon !== undefined ? { icon } : {}),
     testId: `chat-header-more-${btn.dataset["testid"] ?? ""}`,
     ...(pressed === null ? {} : { checked: pressed === "true" }),
     onClick: () => btn.click(),

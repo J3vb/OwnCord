@@ -8,7 +8,7 @@
  * locked, and what each does all come from there.
  */
 
-import type { ContextMenuItem, ContextMenuSeparator } from "@lib/ui/contextMenu";
+import { menuIconSlot, type ContextMenuItem, type ContextMenuSeparator } from "@lib/ui/contextMenu";
 import { openBottomSheet } from "@lib/ui/bottomSheet";
 import { createElement } from "@lib/dom";
 
@@ -24,12 +24,19 @@ export interface MessageSheetRequest {
 }
 
 const ADD_REACTION_TEST_ID = "msg-menu-add-reaction";
+/** The icon size of a sheet row, larger than a popover menu's for a finger. */
+const SHEET_ICON_SIZE = 20;
 
 function isSeparator(item: ContextMenuItem | ContextMenuSeparator): item is ContextMenuSeparator {
   return "separator" in item;
 }
 
-function actionButton(item: ContextMenuItem, className: string, close: () => void): HTMLElement {
+function actionButton(
+  item: ContextMenuItem,
+  className: string,
+  close: () => void,
+  iconed = false,
+): HTMLElement {
   const btn = createElement("button", {
     type: "button",
     class: className,
@@ -42,6 +49,7 @@ function actionButton(item: ContextMenuItem, className: string, close: () => voi
   } else {
     btn.textContent = item.label;
   }
+  if (iconed) btn.prepend(menuIconSlot(item.icon, SHEET_ICON_SIZE));
   if (item.danger === true) btn.classList.add("danger");
   if (item.disabled === true) {
     // Still focusable, so the reason in the title can be read out.
@@ -84,6 +92,11 @@ export function openMessageSheet(req: MessageSheetRequest): void {
   });
   const sections: HTMLElement[] = [];
   let section: HTMLElement | null = null;
+  // The rows below the quick row reserve an icon column when any has an icon.
+  const iconed = items.some(
+    (item, i) =>
+      !isSeparator(item) && !inGroup(i) && i !== addReactionAt && item.icon !== undefined,
+  );
   for (const [i, item] of items.entries()) {
     if (isSeparator(item)) {
       section = null;
@@ -103,7 +116,7 @@ export function openMessageSheet(req: MessageSheetRequest): void {
       section = createElement("div", { class: "msg-sheet-section" });
       sections.push(section);
     }
-    section.appendChild(actionButton(item, "msg-sheet-action", close));
+    section.appendChild(actionButton(item, "msg-sheet-action", close, iconed));
   }
 
   if (quick.childElementCount > 0) content.appendChild(quick);

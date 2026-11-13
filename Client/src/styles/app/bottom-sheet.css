@@ -241,6 +241,31 @@
   font-size: 24px;
   line-height: 1;
 }
+/* A sheet row's leading icon (the popover's .menu-item-icon, finger-sized). */
+.msg-sheet-action:has(> .menu-item-icon) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.msg-sheet-action > .menu-item-icon {
+  width: 20px;
+  height: 20px;
+}
+.msg-sheet-action.danger > .menu-item-icon {
+  color: inherit;
+}
+.menu-sheet-row:has(> .menu-item-icon):has(> .menu-sheet-detail) {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  column-gap: 12px;
+  align-items: center;
+}
+.menu-sheet-row:has(> .menu-sheet-detail) > .menu-item-icon {
+  grid-row: 1 / span 2;
+}
+.menu-sheet-row:has(> .menu-item-icon) > .menu-sheet-detail {
+  grid-column: 2;
+}
 .menu-sheet-row.checked::after {
   content: "\2713" / "";
   margin-left: auto;

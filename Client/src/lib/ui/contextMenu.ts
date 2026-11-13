@@ -11,7 +11,8 @@
 import { Disposable } from "../disposable";
 import { createElement, setOwnedTimeout } from "../dom";
 import { enableMenuKeyboard } from "./contextMenuKeyboard";
-import { createMenuItem, createSubmenuTrigger } from "./contextMenuFlyout";
+import { alignMenuIcons, createMenuItem, createSubmenuTrigger } from "./contextMenuFlyout";
+import type { IconName } from "../icons";
 
 export {
   openMenuOnKeyboard,
@@ -21,6 +22,9 @@ export {
 export {
   createMenuItem,
   createSubmenuTrigger,
+  menuIconSlot,
+  setMenuItemLabel,
+  MENU_ICON_CLASS,
   type SubmenuTriggerOptions,
 } from "./contextMenuFlyout";
 
@@ -31,6 +35,8 @@ export interface ContextMenuItem {
    *  (Enter/Space) arrives as a click too. */
   readonly onClick: (e: MouseEvent) => void;
   readonly danger?: boolean;
+  /** A decorative icon before the label, in the label's colour. */
+  readonly icon?: IconName;
   readonly testId?: string;
   /** Shown but not actionable: skipped by the arrow keys, ignores clicks, and
    *  stays open so the reason in `title` can be read. */
@@ -217,6 +223,7 @@ export function openMenuShell(opts: MenuShellOptions): OpenMenu {
   }
 
   opts.build(menu, close, owner.signal);
+  alignMenuIcons(menu);
   (doc.fullscreenElement ?? doc.body).appendChild(menu);
   // A full close: focus inside the replaced menu goes back to its opener
   // before this menu records where to return it.
@@ -284,11 +291,10 @@ export function showContextMenu(opts: ContextMenuOptions): void {
       /** One plain row: a focusable button that closes the menu, then acts. */
       const buildRow = (item: ContextMenuItem): HTMLElement => {
         const disabled = item.disabled === true;
-        const el = createMenuItem(
-          item.label,
-          rowClassOf(item),
-          item.testId !== undefined ? { testId: item.testId } : {},
-        );
+        const el = createMenuItem(item.label, rowClassOf(item), {
+          ...(item.testId !== undefined ? { testId: item.testId } : {}),
+          ...(item.icon !== undefined && item.content === undefined ? { icon: item.icon } : {}),
+        });
         if (item.content !== undefined) {
           el.replaceChildren(item.content);
           el.setAttribute("aria-label", item.label);
@@ -337,6 +343,7 @@ export function showContextMenu(opts: ContextMenuOptions): void {
             rowClass,
             {
               ...(item.testId !== undefined ? { testId: item.testId } : {}),
+              ...(item.icon !== undefined ? { icon: item.icon } : {}),
               activates: true,
               onActivate: activate,
             },
