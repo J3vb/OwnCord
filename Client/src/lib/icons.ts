@@ -65,6 +65,7 @@ export type IconName =
   | "picture-in-picture-2"
   | "play"
   | "pause"
+  | "square"
   | "check"
   | "circle-check"
   | "circle-x"
@@ -242,6 +243,9 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Pause bars
   pause: `<rect width="4" height="16" x="6" y="4"/><rect width="4" height="16" x="14" y="4"/>`,
+
+  // Stop
+  square: `<rect width="18" height="18" x="3" y="3" rx="2"/>`,
 
   // Checkmark
   check: `<path d="M20 6 9 17l-5-5"/>`,

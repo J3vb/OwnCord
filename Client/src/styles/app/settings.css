@@ -618,6 +618,33 @@ details.totp-link > summary {
   justify-content: flex-end;
   gap: var(--space-2);
 }
+/* A sound's play button beside its switch (soundPreviewButton.ts). */
+.sound-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.sound-preview-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-circle);
+  color: var(--text-muted);
+}
+.sound-preview-btn:hover,
+.sound-preview-btn[aria-pressed="true"] {
+  background: var(--bg-modifier-hover);
+  color: var(--text-normal);
+}
+@media (pointer: coarse) {
+  .sound-preview-btn {
+    width: 40px;
+    height: 40px;
+  }
+}
 /* Blocked by the OS: the switch dims, its words stay readable and say why. */
 .setting-row.blocked .toggle {
   opacity: 0.5;
