@@ -36,6 +36,8 @@ var editableRules = map[string]func(any) (any, error){
 	"event_persistence.replay_cold_limit":       intRule(0, 1_000_000),
 	"event_persistence.replay_ring_size":        intRule(1, 1_000_000),
 	"event_persistence.retention_hours":         intRule(1, 8_760),
+	"link_previews.thumbnail_cache_mb":          intRule(0, maxMiB),
+	"link_previews.thumbnail_unused_days":       intRule(1, 3_650),
 	"moderation.action_retention_days":          intRule(0, 3_650),
 	"moderation.report_retention_days":          intRule(0, 3_650),
 	"plugins.cpu_budget_ms":                     intRule(1, 60_000),
@@ -54,6 +56,7 @@ var editableRules = map[string]func(any) (any, error){
 	"voice.udp_port":                            udpPortRule,
 
 	"event_persistence.enabled":          boolRule,
+	"link_previews.enabled":              boolRule,
 	"plugins.enabled":                    boolRule,
 	"push.dispatch_enabled":              boolRule,
 	"push.enabled":                       boolRule,

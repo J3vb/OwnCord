@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
 )
@@ -30,6 +32,10 @@ type maintenance struct {
 	reportRetentionDays int
 	actionRetentionDays int
 	push                *service.PushService
+	// linkPreviews is the thumbnail store the sweep trims; nil when its folder could not be made.
+	linkPreviews        *linkpreview.Store
+	linkPreviewCapBytes int64
+	linkPreviewUnused   time.Duration
 	// attention records each step's outcome for the admin panel; nil-safe.
 	attention *service.AttentionService
 	// erasureCtx is cancelled when the loop is told to stop, so a resumed
@@ -67,6 +73,16 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 		m.moderation = svc.Moderation
 		m.push = svc.Push
 		m.attention = svc.Attention
+	}
+	m.linkPreviewCapBytes = int64(cfg.LinkPreviews.ThumbnailCacheMB) << 20
+	m.linkPreviewUnused = time.Duration(cfg.LinkPreviews.ThumbnailUnusedDays) * 24 * time.Hour
+	if cfg.Server.DataDir != "" {
+		lp, lpErr := linkpreview.NewStore(database, filepath.Join(cfg.Server.DataDir, linkpreview.DirName))
+		if lpErr != nil {
+			log.Warn("failed to open link preview store; thumbnail sweep disabled", "error", lpErr)
+		} else {
+			m.linkPreviews = lp
+		}
 	}
 	// files is the upload store StartRuntime shares; it already holds the
 	// erasure and retention runners' file remover (wireAuth), so no setter runs
@@ -180,6 +196,7 @@ func (m *maintenance) steps() []maintenanceStep {
 		{job: "Push subscriptions", failLog: "push subscription sweep failed", run: m.sweepPushSubscriptions},
 		{job: service.AttentionBackupJob, failLog: "backup maintenance failed", run: m.maintainBackups},
 		{job: "Orphaned attachments", failLog: "failed to delete orphaned attachments", run: m.sweepOrphans},
+		{job: "Link preview thumbnails", failLog: "link preview thumbnail sweep failed", run: m.sweepLinkPreviews},
 		{job: "Message retention", failLog: "retention sweep failed", run: m.sweepRetention},
 		{job: "Report content retention", failLog: "report content retention failed", run: m.pruneReportContent},
 		{job: "Voice mute reconciliation", failLog: "orphaned voice mute reconciliation failed", run: m.reconcileOrphanedVoiceMutes},
@@ -289,6 +306,23 @@ func (m *maintenance) sweepOrphans(ctx context.Context) error {
 	}
 	if err != nil {
 		return fmt.Errorf("sweep orphans: %w", err)
+	}
+	return nil
+}
+
+// sweepLinkPreviews trims the link preview thumbnails to link_previews.thumbnail_cache_mb and
+// link_previews.thumbnail_unused_days. It runs whether or not link_previews.enabled is set, so
+// turning the feature off reclaims disk down to the cap.
+func (m *maintenance) sweepLinkPreviews(ctx context.Context) error {
+	if m.linkPreviews == nil {
+		return nil
+	}
+	res, err := m.linkPreviews.Sweep(ctx, m.linkPreviewCapBytes, m.linkPreviewUnused)
+	if res.Images+res.Strays+res.Temps > 0 {
+		m.log.Info("link preview thumbnails trimmed", "images", res.Images, "bytes", res.ImageBytes, "strays", res.Strays, "temps", res.Temps)
+	}
+	if err != nil {
+		return fmt.Errorf("sweep link previews: %w", err)
 	}
 	return nil
 }

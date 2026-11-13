@@ -36,6 +36,9 @@ var panelEditableKeys = []string{
 	"github.owner",
 	"github.repo",
 	"github.token",
+	"link_previews.enabled",
+	"link_previews.thumbnail_cache_mb",
+	"link_previews.thumbnail_unused_days",
 	"logging.level",
 	"moderation.action_retention_days",
 	"moderation.report_retention_days",
@@ -135,9 +138,9 @@ func TestEditableKeys_ProtectedKeysStayOut(t *testing.T) {
 			t.Errorf("IsEditable(%q) = true for a key that is not a config leaf", key)
 		}
 	}
-	// The two lists together hold 79 distinct keys.
-	if n := len(panelEditableKeys) + len(panelExcludedKeys); n != 79 {
-		t.Errorf("editable %d + excluded %d = %d keys, want 79",
+	// The two lists together hold 82 distinct keys.
+	if n := len(panelEditableKeys) + len(panelExcludedKeys); n != 82 {
+		t.Errorf("editable %d + excluded %d = %d keys, want 82",
 			len(panelEditableKeys), len(panelExcludedKeys), n)
 	}
 }

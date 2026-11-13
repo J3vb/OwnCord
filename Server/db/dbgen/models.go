@@ -248,6 +248,28 @@ type InviteRedemption struct {
 	RedeemedAt string `json:"redeemedAt"`
 }
 
+type LinkPreview struct {
+	UrlHash     string  `json:"urlHash"`
+	Url         string  `json:"url"`
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	SiteName    *string `json:"siteName"`
+	ImageHash   *string `json:"imageHash"`
+	FetchedAt   string  `json:"fetchedAt"`
+	Failure     *string `json:"failure"`
+	LastUsedAt  string  `json:"lastUsedAt"`
+}
+
+type LinkPreviewImage struct {
+	Hash       string `json:"hash"`
+	MimeType   string `json:"mimeType"`
+	Size       int64  `json:"size"`
+	Width      int64  `json:"width"`
+	Height     int64  `json:"height"`
+	CreatedAt  string `json:"createdAt"`
+	LastUsedAt string `json:"lastUsedAt"`
+}
+
 type LoginAttempt struct {
 	ID        int64   `json:"id"`
 	IpAddress string  `json:"ipAddress"`
@@ -326,6 +348,12 @@ type MessageImportAuthor struct {
 	Color         *string `json:"color"`
 }
 
+type MessageLinkPreview struct {
+	MessageID int64  `json:"messageId"`
+	Position  int64  `json:"position"`
+	UrlHash   string `json:"urlHash"`
+}
+
 type MessageMention struct {
 	MessageID       int64 `json:"messageId"`
 	MentionedUserID int64 `json:"mentionedUserId"`
@@ -352,6 +380,12 @@ type MessageSticker struct {
 	MessageID int64  `json:"messageId"`
 	StickerID *int64 `json:"stickerId"`
 	Name      string `json:"name"`
+}
+
+type MessageUnfurl struct {
+	MessageID      int64  `json:"messageId"`
+	UnfurledAt     string `json:"unfurledAt"`
+	ContentVersion string `json:"contentVersion"`
 }
 
 type MessagesFt struct {

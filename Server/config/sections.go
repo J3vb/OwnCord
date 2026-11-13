@@ -11,6 +11,18 @@ type ModerationConfig struct {
 	ActionRetentionDays int `yaml:"action_retention_days"`
 }
 
+// LinkPreviewsConfig controls the server-side link preview store: the text of a fetched page card in the
+// database and its shrunk thumbnail on disk under <data_dir>/link-previews.
+type LinkPreviewsConfig struct {
+	// Enabled: Fetch links in new messages and keep their previews. false stops fetching only; the thumbnail
+	// sweep still runs so turning it off reclaims disk down to ThumbnailCacheMB.
+	Enabled bool `yaml:"enabled"`
+	// ThumbnailCacheMB caps the thumbnails kept on disk, oldest-used first out. 0 keeps no thumbnails.
+	ThumbnailCacheMB int `yaml:"thumbnail_cache_mb"`
+	// ThumbnailUnusedDays drops a thumbnail nothing has shown for this many days, whatever the cap says.
+	ThumbnailUnusedDays int `yaml:"thumbnail_unused_days"`
+}
+
 // LoggingConfig controls log verbosity; Level gates both stdout and the admin panel's in-memory log view.
 type LoggingConfig struct {
 	// Level: The minimum level logged: "debug" | "info" | "warn" | "error". Override with

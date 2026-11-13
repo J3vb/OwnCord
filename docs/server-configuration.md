@@ -293,6 +293,16 @@ never ships in the desktop bundle — the client only ever calls
 > manager) over writing it into `config.yaml`, and rotate it if it has ever
 > been exposed to a client build.
 
+### Link previews (`link_previews`)
+
+The server fetches a link in a new message once and keeps the card text in the database and a shrunk thumbnail on disk under `<data_dir>/link-previews/`. Thumbnails are stored by content hash, so the same image is kept once.
+
+| Key                                   | Type | Default | Description                                                                                                                                                                                    |
+| ------------------------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `link_previews.enabled`               | bool | `true`  | Fetch links in new messages and keep their previews. `false` stops fetching only; stored previews stay and the thumbnail sweep still runs, so turning it off reclaims disk down to the cap.    |
+| `link_previews.thumbnail_cache_mb`    | int  | `512`   | Cap on the thumbnails kept on disk. When it is passed, the thumbnails shown longest ago are deleted first. `0` keeps no thumbnails. A negative value falls back to the default with a warning. |
+| `link_previews.thumbnail_unused_days` | int  | `30`    | A thumbnail nothing has shown for this many days is deleted, whatever the cap says. Range 1 to 3650.                                                                                           |
+
 ### Logging (`logging`)
 
 Controls server log verbosity. The level gates both stdout and the in-memory
@@ -566,7 +576,7 @@ anyway, so the panel would add risk and save no work. To move it:
 
 <!-- gendocs:config:start -->
 
-Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 82 keys.
+Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 85 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -589,6 +599,9 @@ Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags 
 | `github.owner`                              | GitHub / Updates (`github`)             |
 | `github.repo`                               | GitHub / Updates (`github`)             |
 | `github.token`                              | GitHub / Updates (`github`)             |
+| `link_previews.enabled`                     | Link previews (`link_previews`)         |
+| `link_previews.thumbnail_cache_mb`          | Link previews (`link_previews`)         |
+| `link_previews.thumbnail_unused_days`       | Link previews (`link_previews`)         |
 | `logging.history_days`                      | Logging (`logging`)                     |
 | `logging.history_max_mb`                    | Logging (`logging`)                     |
 | `logging.level`                             | Logging (`logging`)                     |
