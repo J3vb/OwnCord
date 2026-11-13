@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/settingsOverlayMocks";
 import { createSettingsOverlay } from "../../../src/features/settings/SettingsOverlay";
 import { makeOverlayOptions } from "../../helpers/settingsOverlayOptions";
+import type { SessionInfo } from "../../../src/lib/api";
 import {
   APP_LIFETIME_MODULES,
   clickEl,
@@ -197,6 +198,21 @@ describe("SettingsOverlay", () => {
     });
   });
 
+  it("a 'Devices' request (the sign-in alert) opens Account with the devices list shown", () => {
+    mockUiState.settingsOpen = true;
+    mockUiState.settingsTab = "Devices";
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    const manage = container.querySelector<HTMLButtonElement>("[data-testid='sessions-manage']")!;
+    expect(container.querySelector(".settings-nav-item.active")?.id).toBe("settings-tab-account");
+    expect(manage.getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById(manage.getAttribute("aria-controls")!)?.hidden).toBe(false);
+    expect(document.activeElement).toBe(manage);
+    // The section's own first listing is the fresh one: no second request.
+    expect(defaultOptions.onListSessions).toHaveBeenCalledTimes(1);
+    overlay.destroy?.();
+  });
+
   it("hides 'Edit Profile' link when isAuthenticated is false", () => {
     const overlay = createSettingsOverlay({ ...defaultOptions, isAuthenticated: false });
     overlay.mount(container);
@@ -288,6 +304,36 @@ describe("SettingsOverlay", () => {
     expect(container.querySelector(".settings-content .settings-pane")).toBeNull();
     expect(container.querySelectorAll(".session-row").length).toBe(0);
 
+    overlay.destroy?.();
+  });
+
+  it("names each device as the sign-in alert does, keeping the full User-Agent as its title", async () => {
+    const ua =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    const overlay = createSettingsOverlay({
+      ...defaultOptions,
+      onListSessions: vi.fn().mockResolvedValue([
+        { id: 1, device: "", ip: "", last_used: "2026-01-01T00:00:00Z", is_current: true },
+        {
+          id: 2,
+          device: ua,
+          ip: "203.0.113.7",
+          last_used: "2026-01-01T00:00:00Z",
+          is_current: false,
+        },
+        { id: 3, device: "<b>x</b>", ip: "", last_used: "2026-01-01T00:00:00Z", is_current: false },
+      ]),
+    });
+    overlay.mount(container);
+    overlay.open();
+    await vi.waitFor(() => expect(container.querySelectorAll(".session-row").length).toBe(3));
+    const names = [...container.querySelectorAll<HTMLElement>(".session-device")];
+    expect(names[1]!.textContent).toBe("Chrome on Windows");
+    expect(names[1]!.title).toBe(ua);
+    expect(names[2]!.textContent).toBe("Unknown device");
+    expect(names[2]!.title).toBe("<b>x</b>");
+    expect(names[2]!.querySelector("b")).toBeNull();
+    expect(names[0]!.hasAttribute("title")).toBe(false);
     overlay.destroy?.();
   });
 
@@ -462,7 +508,7 @@ describe("SettingsOverlay", () => {
 
     describe("a tab requested while Settings is already open", () => {
       /** Fire the tab-request subscription: the one selecting `settingsTabSeq`. */
-      function requestTab(tab: "Notifications" | "Safety"): void {
+      function requestTab(tab: "Notifications" | "Safety" | "Devices"): void {
         mockUiState.settingsTab = tab;
         mockUiState.settingsTabSeq += 1;
         const sub = uiSubscriptions.all.find(
@@ -498,6 +544,88 @@ describe("SettingsOverlay", () => {
 
         expect(active()).toBe("settings-tab-notifications");
         overlay.destroy?.();
+      });
+
+      it("reloads the devices list on a 'Devices' request while Settings is open on Account", async () => {
+        mockUiState.settingsOpen = true;
+        const onListSessions = vi.fn().mockResolvedValue([]);
+        const overlay = createSettingsOverlay(makeOverlayOptions({ onListSessions }));
+        overlay.mount(container);
+        await vi.waitFor(() => expect(onListSessions).toHaveBeenCalledTimes(1));
+        const manage = container.querySelector<HTMLButtonElement>(
+          "[data-testid='sessions-manage']",
+        )!;
+        expect(manage.getAttribute("aria-expanded")).toBe("false");
+
+        requestTab("Devices");
+        expect(onListSessions).toHaveBeenCalledTimes(2);
+        expect(manage.getAttribute("aria-expanded")).toBe("true");
+        expect(document.activeElement).toBe(manage);
+
+        // Already expanded: a later alert's request still lists afresh.
+        await Promise.resolve();
+        await Promise.resolve();
+        requestTab("Devices");
+        expect(onListSessions).toHaveBeenCalledTimes(3);
+        expect(manage.getAttribute("aria-expanded")).toBe("true");
+        overlay.destroy?.();
+      });
+
+      describe("a 'Devices' request during a slow listing", () => {
+        const row = (id: number): SessionInfo => ({
+          id,
+          device: "OwnCord-Client/1.4.0",
+          ip: "203.0.113.7",
+          created_at: "2026-11-13 09:09:00",
+          last_used: "2026-11-13 09:09:00",
+          is_current: id === 1,
+          unseen: id !== 1,
+        });
+        const shownIds = (): string[] =>
+          [...container.querySelectorAll<HTMLElement>("[data-testid='session-row']")].map(
+            (el) => el.dataset.sessionId ?? "",
+          );
+
+        function deferred() {
+          let resolve: (rows: SessionInfo[]) => void = () => {};
+          const promise = new Promise<SessionInfo[]>((r) => (resolve = r));
+          return { promise, resolve: (rows: SessionInfo[]) => resolve(rows) };
+        }
+
+        /** Open on Account with its listing held, then ask for Devices. */
+        function openThenRequest() {
+          mockUiState.settingsOpen = true;
+          const replies = [deferred(), deferred()] as const;
+          let call = 0;
+          const onListSessions = vi.fn(() => replies[call++]!.promise);
+          const overlay = createSettingsOverlay(makeOverlayOptions({ onListSessions }));
+          overlay.mount(container);
+          requestTab("Devices");
+          expect(onListSessions).toHaveBeenCalledTimes(2);
+          return { overlay, older: replies[0], newer: replies[1] };
+        }
+
+        it("ignores the older reply when it lands after the newer one", async () => {
+          const { overlay, older, newer } = openThenRequest();
+          newer.resolve([row(1), row(2)]);
+          await vi.waitFor(() => expect(shownIds()).toEqual(["1", "2"]));
+          older.resolve([row(1)]);
+          await Promise.resolve();
+          await Promise.resolve();
+          expect(shownIds()).toEqual(["1", "2"]);
+          overlay.destroy?.();
+        });
+
+        it("ends with the fresh list when the older reply lands first", async () => {
+          const { overlay, older, newer } = openThenRequest();
+          older.resolve([row(1)]);
+          await Promise.resolve();
+          await Promise.resolve();
+          expect(shownIds()).toEqual([]);
+          newer.resolve([row(1), row(2)]);
+          await vi.waitFor(() => expect(shownIds()).toEqual(["1", "2"]));
+          overlay.destroy?.();
+        });
       });
 
       it("ignores a request while the panel is closed (show() reads it on open)", () => {

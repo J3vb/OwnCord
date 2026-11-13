@@ -178,11 +178,13 @@ export const accountText = defineCatalog("account", {
 
   "notice.unknownDevice": "Unknown device",
   "notice.desktop": "OwnCord desktop",
-  "notice.from": "{device} from {ip}, {time}",
-  "notice.noIp": "{device}, {time}",
-  "notice.more": " and {count} more",
-  "notice.message":
-    "A sign-in to your account you have not reviewed: {session}{more}. Review your devices in Settings > Account.",
+  "notice.browserOn": "{browser} on {os}",
+  "notice.title": "Unreviewed sign-in to your account",
+  "notice.titleShort": "Unreviewed sign-in",
+  "notice.detail": "{device} · {ip} · {time}",
+  "notice.detailNoIp": "{device} · {time}",
+  "notice.detailMore": "{detail}, and {count} more",
+  "notice.review": "Review devices",
 
   "voice.canAnswerWhileReconnecting": "Can't answer while reconnecting",
   "toast.passwordChanged": "Password changed successfully",

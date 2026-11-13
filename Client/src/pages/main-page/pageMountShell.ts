@@ -16,11 +16,10 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { desktop } from "../../platform/desktop";
 import { createServerBanner, applyConnectionStatus } from "../../features/server-rail/ServerBanner";
-import { showToast } from "@lib/ui/toast";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { focusFirst } from "@lib/ui/focusFirst";
 import { shellText } from "../../i18n/shell";
-import { sessionNoticeMessage, startSessionNotice } from "@lib/net/sessionNotice";
+import { startSessionNotice } from "@lib/net/sessionNotice";
 import { authStore } from "@stores/auth.store";
 import { setSessionReplaced, uiStore } from "@stores/ui.store";
 import { onPrefChange } from "@lib/prefs/preferences";
@@ -38,7 +37,8 @@ import { loadMemberLayout, MEMBER_LAYOUT_PREF } from "../../features/members/mem
 import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";
 import { createContentNavigator } from "../../features/navigation/contentView";
 import { createNoticesBanner } from "../../features/safety/Notices";
-import { log, SESSION_NOTICE_TOAST_MS, getCurrentUserId, deviceNetworkOffline } from "./pageShared";
+import { notifySignIn } from "../../features/safety/lazySignInNotice";
+import { log, getCurrentUserId, deviceNetworkOffline } from "./pageShared";
 import type { PageState, PageApi, MountScope } from "./pageState";
 
 export function mountConnectionBanner(st: PageState, pg: PageApi, ms: MountScope): void {
@@ -124,7 +124,7 @@ export function mountConnectionBanner(st: PageState, pg: PageApi, ms: MountScope
 
   ms.pollSessions = startSessionNotice({
     fetchSessions: (signal) => st.api.getSessions(signal),
-    notify: (unseen) => showToast(sessionNoticeMessage(unseen), "info", SESSION_NOTICE_TOAST_MS),
+    notify: (unseen) => void notifySignIn(unseen, ms.sessionNotice.signal),
     signal: ms.sessionNotice.signal,
   });
 

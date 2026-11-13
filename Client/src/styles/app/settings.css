@@ -941,6 +941,10 @@ details.disclose[open] > summary .icon {
   color: var(--text-normal);
   font-size: var(--font-size-sm);
 }
+.session-row > .ac-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 
 /* Section title (larger heading like Discord's "Password and Authentication") */
 .settings-section-title {

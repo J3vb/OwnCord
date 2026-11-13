@@ -309,9 +309,37 @@ describe("ToastContainer", () => {
     expect(container.querySelectorAll(".toast").length).toBe(0);
   });
 
+  it("shows a detail line, an icon and a dismiss button on an auto-dismissing toast", () => {
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    toast.show("Title", "info", 3000, undefined, { detail: "More", icon, closable: true });
+    const el = container.querySelector(".toast")!;
+    expect(el.querySelector(".toast-title")?.textContent).toBe("Title");
+    expect(el.querySelector(".toast-detail")?.textContent).toBe("More");
+    expect(el.classList.contains("toast--detailed")).toBe(true);
+    expect(el.firstElementChild).toBe(icon);
+    expect(icon.classList.contains("toast-icon")).toBe(true);
+    expect(icon.getAttribute("aria-hidden")).toBe("true");
+    el.querySelector<HTMLButtonElement>(".toast-close")!.click();
+    vi.advanceTimersByTime(400);
+    expect(container.querySelector(".toast")).toBeNull();
+    toast.show("Again", "info", 3000, undefined, { detail: "x", closable: true });
+    vi.advanceTimersByTime(3400);
+    expect(container.querySelector(".toast")).toBeNull();
+  });
+
+  it("coalesces only toasts whose detail line matches too", () => {
+    toast.show("Title", "info", 3000, undefined, { detail: "A" });
+    toast.show("Title", "info", 3000, undefined, { detail: "B" });
+    toast.show("Title", "info", 3000, undefined, { detail: "B" });
+    const els = container.querySelectorAll(".toast");
+    expect(els.length).toBe(2);
+    expect(els[1]!.querySelector(".toast-count")?.textContent).toBe("2");
+  });
+
   it("shows no action button on a plain toast", () => {
     toast.show("Hello");
     expect(container.querySelector(".toast-action")).toBeNull();
+    expect(container.querySelector(".toast--detailed")).toBeNull();
   });
 
   describe("anchorTo", () => {

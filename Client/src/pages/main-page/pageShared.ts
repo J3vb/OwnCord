@@ -8,9 +8,6 @@ import { membersStore, memberDisplayName } from "@stores/members.store";
 
 export const log = createLogger("main-page");
 
-/** Long enough to read which sign-in it names (cf. toast.ts PARTIAL_SUCCESS_TOAST_MS). */
-export const SESSION_NOTICE_TOAST_MS = 12_000;
-
 /**
  * The call notification and missed-call notice. They are re-exported by the
  * DM call panel, which the page already loads at mount, so the ring's OS alert

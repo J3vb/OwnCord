@@ -13,9 +13,10 @@ test.describe("Signed-in devices", () => {
     await navigateToMainPage(page);
 
     // The other desktop's sign-in is announced; this device's own row is not.
-    const toast = page.locator("[data-testid='toast']", { hasText: "not reviewed" });
-    await expect(toast).toContainText("OwnCord desktop from 198.51.100.2");
-    await expect(toast).toContainText("Settings > Account");
+    const toast = page.locator("[data-testid='toast']", { hasText: "Unreviewed sign-in" });
+    await expect(toast).toContainText("OwnCord desktop");
+    await expect(toast).toContainText("198.51.100.2");
+    await expect(toast.getByRole("button", { name: "Review devices" })).toBeVisible();
 
     await openSettings(page);
     // The Security card counts the devices; Manage lists them.

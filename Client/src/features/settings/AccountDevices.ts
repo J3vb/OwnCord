@@ -4,7 +4,7 @@ import { createElement, appendChildren } from "@lib/dom";
 import { errorText, ApiClientError } from "@lib/api";
 import type { OwnApiToken, SessionInfo } from "@lib/api";
 import { showToast } from "@lib/ui/toast";
-import { sessionDeviceLabel } from "@lib/net/sessionNotice";
+import { deviceLabel } from "@lib/net/deviceLabel";
 import { formatMessageTimestamp } from "@lib/text/formatting";
 import { uiStore } from "@stores/ui.store";
 import type { SettingsOverlayOptions } from "./SettingsOverlay";
@@ -25,7 +25,12 @@ export function buildSessionRow(
     "data-session-id": String(s.id),
   });
   const info = createElement("div", { class: "session-info" });
-  const name = createElement("div", { class: "session-device" }, sessionDeviceLabel(s.device));
+  // The full User-Agent stays one hover away, as plain text.
+  const name = createElement(
+    "div",
+    { class: "session-device", ...(s.device === "" ? {} : { title: s.device }) },
+    deviceLabel(s.device, t),
+  );
   if (s.is_current) {
     name.appendChild(createElement("span", { class: "session-current" }, t("devices.thisDevice")));
   }

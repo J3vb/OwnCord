@@ -31,6 +31,7 @@ import {
 import type { TabName } from "./settingsTabs";
 import { createSecretHold, createUnsavedGuard } from "./settingsGuards";
 import { createTabBuilders } from "./settingsTabBuilders";
+import { requestedTab, revealRequestedPart, subscribeSettingsRequests } from "./settingsRequests";
 import type { SettingsOverlayOptions } from "./settingsOverlayOptions";
 
 export type { SettingsOverlayOptions } from "./settingsOverlayOptions";
@@ -49,6 +50,7 @@ export function createSettingsOverlay(
   let activeTab: TabName = authenticated ? ACCOUNT : "Appearance";
   /** False once the active tab's content has been torn down by `hide()`. */
   let contentLive = false;
+  let builtForSeq = -1; // the tab request current when the shown tab was built
   /** Puts focus back on whatever opened the panel; null while closed. */
   let restoreFocus: (() => void) | null = null;
   const tabButtons = new Map<TabName, HTMLButtonElement>();
@@ -120,6 +122,7 @@ export function createSettingsOverlay(
     const builder = TAB_BUILDERS[activeTab];
     contentArea.appendChild(builder(buildSignal));
     contentLive = true;
+    builtForSeq = uiStore.getState().settingsTabSeq ?? 0;
     markSearchHits();
   }
 
@@ -246,10 +249,7 @@ export function createSettingsOverlay(
   /** Another surface asked for a tab (a Q4 notice links to Safety, the server
    *  menu to Notifications). A tab that is not shown here is ignored. */
   function applyRequestedTab(): void {
-    const raw = uiStore.getState().settingsTab;
-    // "Profile" is the Account tab with its editor open, done once the tab is
-    // built and focus has moved in (revealRequestedEditor).
-    const requested = raw === "Profile" ? ACCOUNT : raw;
+    const requested = requestedTab();
     if (requested !== null && requested !== activeTab && tabButtons.has(requested)) {
       // A hidden requested tab would strand the only tab stop: reset search.
       clearSearch();
@@ -258,10 +258,10 @@ export function createSettingsOverlay(
     if (requested !== null && requested === activeTab) setSectionOpen(true);
   }
 
-  /** Open the profile editor when the last request asked for it. */
+  /** Open the part of Account the last request asked for, if Account is on screen. */
   function revealRequestedEditor(): void {
-    if (uiStore.getState().settingsTab !== "Profile" || activeTab !== ACCOUNT) return;
-    if (contentArea !== null) openProfileEditor(contentArea);
+    const rebuilt = builtForSeq === (uiStore.getState().settingsTabSeq ?? 0);
+    if (activeTab === ACCOUNT && contentArea !== null) revealRequestedPart(contentArea, rebuilt);
   }
 
   function show(): void {
@@ -385,30 +385,9 @@ export function createSettingsOverlay(
     return parts.sidebar;
   }
 
-  function subscribeUiStore(): void {
-    const unsubUi = uiStore.subscribeSelector(
-      (s) => s.settingsOpen,
-      (settingsOpen) => {
-        if (settingsOpen) {
-          show();
-        } else {
-          hide();
-        }
-      },
-    );
-
-    // A tab requested while the panel is already open (show() only runs on the
-    // closed-to-open transition). Each request bumps `settingsTabSeq`, so a
-    // repeat of the same tab is heard too.
-    const unsubTabRequest = uiStore.subscribeSelector(
-      (s) => s.settingsTabSeq,
-      () => {
-        if (root?.classList.contains("open") !== true) return;
-        applyRequestedTab();
-        revealRequestedEditor();
-      },
-    );
-    unsubs.push(unsubUi, unsubTabRequest);
+  /** A request while open is shown as on open; while closed, show() reads it on open. */
+  function onTabRequest(): void {
+    if (root?.classList.contains("open") === true) show();
   }
 
   function mount(container: Element): void {
@@ -451,8 +430,8 @@ export function createSettingsOverlay(
     contentLive = uiStore.getState().settingsOpen;
     if (contentLive) renderActiveTab();
 
-    // Subscribe to uiStore for open/close
-    subscribeUiStore();
+    // Subscribe to uiStore for open/close and tab requests
+    unsubs.push(...subscribeSettingsRequests((open) => (open ? show() : hide()), onTabRequest));
 
     // Attach before syncing initial state: show() moves focus into the panel
     // via focusDialog(), and .focus() on a still-detached subtree is a
