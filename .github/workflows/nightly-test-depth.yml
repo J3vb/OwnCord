@@ -252,8 +252,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: ${{ env.FUZZ_TOOLCHAIN }}
+      # cargo-fuzz's locked dependencies (rustix 0.36) do not compile on a
+      # nightly, so the tool is built with stable; only the fuzz runs use the
+      # pinned nightly.
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
       - name: Fuzz every target
         working-directory: Client/src-tauri/crates/owncord-parse/fuzz
         run: |
