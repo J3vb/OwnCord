@@ -77,6 +77,18 @@ security badge shows "Unsecured" for the rest of the session
 (`src/features/voice/mediaEncryption.ts`). A participant who republishes with
 encryption is subscribed again.
 
+**The speaking ring has two sources.** A client's own ring follows its input
+gate (`setLocalGateSpeaking` in `src/stores/voice.store.ts`). The ring the
+others see comes from LiveKit's speaker detection on the audio that reaches
+the SFU (`ActiveSpeakersChanged`, `src/lib/voice/roomSpeakers.ts`), tuned by
+the `audio:` block of the generated `livekit.yaml`
+(`Server/livekitproc/process.go`; `Server/livekit.yaml.example` carries the
+same values). `active_level: 60` (0 is the loudest, 127 the softest) lights it
+for the soft speech a gate lets through, and `update_interval: 100` with one
+smoothing interval lights it within about a tenth of a second. A microphone
+with no gate (sensitivity 100, or push-to-talk) takes its own ring from the
+same detection.
+
 Supporting pieces:
 
 - **Server:** `Server/ws/voice_e2ee.go` (relay + key-holder map),

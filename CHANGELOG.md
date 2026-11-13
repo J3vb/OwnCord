@@ -175,6 +175,7 @@ release changes the database, and anything an operator must do first.)
 ### Voice
 
 - **A reconnect after a live update the app could not read took you out of your call**, and everyone saw you leave. The reconnect now keeps the call. Update the app as well as the server: an older app still drops the call.
+- **A soft voice was heard, but the speaking ring the others see stayed dark**, mostly with Automatic Gain Control off. The ring now lights for soft speech too. The server update brings it; with Docker, or if you manage `livekit.yaml` yourself, set `audio.active_level` to 60 in that file and restart LiveKit.
 
 ### Phone app
 

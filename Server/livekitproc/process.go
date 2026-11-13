@@ -132,7 +132,7 @@ rtc:
     high_quality: 1s
 
 audio:
-  active_level: 45
+  active_level: 60
   min_percentile: 30
   update_interval: 100
   smooth_intervals: 1

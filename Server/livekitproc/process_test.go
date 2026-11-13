@@ -94,9 +94,10 @@ func TestGenerateConfig_TunesSpeakerDetection(t *testing.T) {
 	content, err := os.ReadFile(cfgPath)
 	mustDo(t, "ReadFile", err)
 	// LiveKit's defaults (400ms interval, 2 smoothing intervals, active_level 35)
-	// light the speaking ring ~0.8s late and only for loud speech.
+	// light the speaking ring ~0.8s late and only for loud speech. At level 60
+	// the ring the others see also lights for the soft speech a client sends.
 	for _, want := range []string{
-		"audio:\n  active_level: 45\n  min_percentile: 30\n  update_interval: 100\n  smooth_intervals: 1\n",
+		"audio:\n  active_level: 60\n  min_percentile: 30\n  update_interval: 100\n  smooth_intervals: 1\n",
 	} {
 		if !strings.Contains(string(content), want) {
 			t.Errorf("config missing %q.\nGot:\n%s", want, content)
