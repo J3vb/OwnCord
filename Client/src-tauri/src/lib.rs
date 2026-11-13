@@ -231,6 +231,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
 
@@ -248,7 +249,7 @@ pub fn run() {
 
     // Desktop-only convenience plugins. window-state auto-saves/restores window
     // geometry (off-screen correction lives in the frontend); autostart backs
-    // the "launch on login" toggle; deep-link registers the owncord:// scheme.
+    // the "launch on login" toggle.
     #[cfg(desktop)]
     let builder = builder
         .plugin(
@@ -270,8 +271,7 @@ pub fn run() {
             // A login launch carries the flag; `startMinimized` decides what it
             // does (window_prefs.rs).
             Some(vec![window_prefs::MINIMIZED_ARG]),
-        ))
-        .plugin(tauri_plugin_deep_link::init());
+        ));
 
     match builder
         .manage(json_store::JsonStores::default())

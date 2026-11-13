@@ -84,6 +84,7 @@
       }
     },
     "deep-link": {
+      "mobile": [{ "scheme": ["owncord"], "appLink": false }],
       "desktop": {
         "schemes": ["owncord"]
       }
