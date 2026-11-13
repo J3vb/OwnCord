@@ -12,6 +12,7 @@ import {
   SOUND_SWITCH_KEYS,
   loadAppSoundsGain,
   loadSoundStyle,
+  soundSwitchDefault,
   type SoundStyle,
   type SoundSwitch,
 } from "@lib/prefs/soundPrefs";
@@ -126,6 +127,14 @@ const SOUND_SWITCH_TEXT: Readonly<
     label: () => t("notifications.sound.stream.label"),
     desc: () => t("notifications.sound.stream.desc"),
   },
+  connection: {
+    label: () => t("notifications.sound.connection.label"),
+    desc: () => t("notifications.sound.connection.desc"),
+  },
+  ptt: {
+    label: () => t("notifications.sound.ptt.label"),
+    desc: () => t("notifications.sound.ptt.desc"),
+  },
 };
 
 /** A group switch (its pref key unchanged) followed by its nested per-sound
@@ -143,7 +152,7 @@ function appendSoundGroup(
       key: SOUND_SWITCH_KEYS[sound],
       label: SOUND_SWITCH_TEXT[sound].label(),
       desc: SOUND_SWITCH_TEXT[sound].desc(),
-      fallback: true,
+      fallback: soundSwitchDefault(sound),
     })),
     signal,
   );
@@ -317,7 +326,7 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
       label: t("notifications.voiceSounds.label"),
       desc: t("notifications.voiceSounds.desc"),
     },
-    ["joinLeave", "muteDeafen", "stream"],
+    ["joinLeave", "muteDeafen", "stream", "connection", "ptt"],
     signal,
   );
   const blockedReason = createElement(

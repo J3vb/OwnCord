@@ -39,6 +39,7 @@ import {
   stopRingChime,
   startRingback,
   stopRingback,
+  playCallEnded,
 } from "@lib/media/notificationSound";
 import { createTileMenuActions } from "./tileMenuActions";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
@@ -91,6 +92,7 @@ export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
       toastOutgoingCallOutcome(state);
     },
     onRingback: (playing) => (playing ? startRingback() : stopRingback()),
+    onUnanswered: playCallEnded,
   });
 
   // Loaded on demand like the sidebar drawer: the panel is only drawn in a

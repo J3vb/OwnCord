@@ -33,19 +33,28 @@ const log = createLogger("notifications");
 
 let notifAudioCtx: AudioContext | null = null;
 /** The master gain every sound routes through: the "App sounds
- *  volume" slider scales it, 100% being a gain of 1, i.e. the notes below
- *  exactly as they are. Lives and dies with `notifAudioCtx`. */
+ *  volume" slider scales it, 100% being a gain of 1, i.e. the notes of
+ *  `soundTables.ts` exactly as they are. Lives and dies with `notifAudioCtx`. */
 let masterGain: GainNode | null = null;
 /** The output id currently applied to `notifAudioCtx`, so a play does not
  *  re-issue `setSinkId` for an unchanged device. Empty string means the system
  *  default. Reset with the context, and cleared again if an apply fails so the
  *  next play retries rather than staying on the default for the session. */
 let appliedSink = "";
+/** The tone that says your outgoing call ended unanswered, if it is sounding. */
+let callEndedBurst: Playing | null = null;
+
+/** Cut the call-ended tone if it is still sounding. */
+function stopCallEnded(): void {
+  callEndedBurst?.stop();
+  callEndedBurst = null;
+}
 
 /** Close and release the notification AudioContext. Call on logout/cleanup. */
 export function cleanupNotificationAudio(): void {
   stopRingback();
   stopRingChime();
+  stopCallEnded();
   appliedSink = "";
   masterGain = null;
   if (notifAudioCtx !== null) {
@@ -103,6 +112,7 @@ function soundRingChime(): void {
   // outgoing ringback. The outgoing call keeps wanting its
   // ringback, so it resumes when this chime ends.
   silenceRingback();
+  stopCallEnded();
   playRingtone();
   // The ring switch is re-read before each burst, so turning it off while the
   // phone rings stops the chime (and lets a pre-empted ringback resume). The
@@ -197,19 +207,26 @@ function incomingRingSounds(): boolean {
   return ringInterval !== null || (chimeWanted && hostRings === true && ringSoundOn());
 }
 
-/** (Re)evaluate whether the ringback should be sounding right now. */
-function syncRingback(): void {
-  const shouldPlay =
-    ringbackWanted &&
+/** The caller's tones may sound: no incoming ring over them, not Do Not
+ *  Disturb, and both the call sound switch and the ringback's own on. */
+function callerTonesOn(): boolean {
+  return (
     !incomingRingSounds() &&
     loadUserStatus() !== "dnd" &&
     loadPref<boolean>("callSounds", true) &&
-    soundSwitchOn("ringback");
+    soundSwitchOn("ringback")
+  );
+}
+
+/** (Re)evaluate whether the ringback should be sounding right now. */
+function syncRingback(): void {
+  const shouldPlay = ringbackWanted && callerTonesOn();
   if (!shouldPlay) {
     silenceRingback();
     return;
   }
   if (ringbackInterval !== null) return;
+  stopCallEnded();
   playRingback();
   ringbackInterval = setInterval(() => playRingback(), REPEAT_MS[loadSoundStyle()].ringback);
 }
@@ -228,6 +245,16 @@ export function stopRingback(): void {
   ringbackWanted = false;
   unwatchRingbackInputs();
   silenceRingback();
+}
+
+/** Your outgoing call was declined, went unanswered or could not ring: play
+ *  the call-ended tone once, under the ringback's gates. Call it after the
+ *  ringback stopped, so its last burst is already cut. */
+export function playCallEnded(): void {
+  if (!callerTonesOn() || deafened()) return;
+  stopCallEnded();
+  // i18n-exempt: log text, never displayed
+  callEndedBurst = playSpec(soundSpec(loadSoundStyle(), "callEnded"), "Call ended sound");
 }
 
 /** Every sound this module makes is silenced while the local user is deafened

@@ -65,7 +65,8 @@ export const settingsNotificationsEntries = {
   "notifications.sound.ring.label": "Ring sound",
   "notifications.sound.ring.desc": "The chime that repeats while someone calls you",
   "notifications.sound.ringback.label": "Ringback sound",
-  "notifications.sound.ringback.desc": "The soft tone you hear while your call rings",
+  "notifications.sound.ringback.desc":
+    "The soft tones you hear while your call rings, and when it is not answered",
   "notifications.sound.joinLeave.label": "Join and leave sounds",
   "notifications.sound.joinLeave.desc":
     "When you or someone in your call joins, leaves or is moved",
@@ -73,6 +74,10 @@ export const settingsNotificationsEntries = {
   "notifications.sound.muteDeafen.desc": "When you mute, unmute, deafen or undeafen",
   "notifications.sound.stream.label": "Stream sounds",
   "notifications.sound.stream.desc": "When a screen share starts or ends in your call",
+  "notifications.sound.connection.label": "Connection sounds",
+  "notifications.sound.connection.desc": "When your voice connection drops and when it is back",
+  "notifications.sound.ptt.label": "Push-to-talk sounds",
+  "notifications.sound.ptt.desc": "A quiet tick when your talk key opens and closes your mic",
   "notifications.level.label": "Notification Level",
   "notifications.level.desc": "Default for every server. A server can override it below.",
   "notifications.level.all": "All Messages",

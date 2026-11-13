@@ -36,6 +36,7 @@ import { REPEAT_MS, soundSpec, type AppSound, type ToneSpec } from "@lib/media/s
 import { loadSoundStyle } from "@lib/prefs/soundPrefs";
 import { savePref } from "@lib/prefs/preferences";
 import { RecordingAudioContext, recordedOscillators } from "../helpers/audioContextMock";
+import { peakDbfs, renderToneSpec } from "../helpers/renderToneSpec";
 
 const oscillators = recordedOscillators;
 /** The frequency points of a spec, note by note, as the oscillators see them. */
@@ -57,7 +58,13 @@ const SOUNDS: readonly AppSound[] = [
   "streamEnd",
   "viewerJoin",
   "viewerLeave",
+  "callEnded",
+  "connectionLost",
+  "pttOn",
+  "pttOff",
 ];
+/** The sounds with no classic version of their own. */
+const MODERN_ONLY: readonly AppSound[] = ["callEnded", "connectionLost", "pttOn", "pttOff"];
 const STYLES = ["modern", "classic"] as const;
 
 async function settle(): Promise<void> {
@@ -167,7 +174,7 @@ describe("the tables", () => {
       plain(0.07, 0.12, 0.1, 659),
     ]);
     expect(soundSpec("classic", "streamEnd").map((n) => n.freqs[0]![1])).toEqual([880, 587, 440]);
-    for (const sound of SOUNDS) {
+    for (const sound of SOUNDS.filter((s) => !MODERN_ONLY.includes(s))) {
       for (const n of soundSpec("classic", sound)) {
         expect(n).not.toHaveProperty("attack");
         expect(n).not.toHaveProperty("release");
@@ -225,11 +232,85 @@ describe("the tables", () => {
     );
   });
 
+  it("plays the modern spec in classic for the sounds classic never had", () => {
+    for (const sound of MODERN_ONLY) {
+      expect(soundSpec("classic", sound), sound).toEqual(soundSpec("modern", sound));
+    }
+  });
+
+  it("builds the newer sounds from their voices", () => {
+    const soft = { attack: 0.018, release: 0.05 };
+    const callEnded = soundSpec("modern", "callEnded");
+    expect(callEnded).toHaveLength(6);
+    expect(callEnded.filter((n) => n.freqs[0]![1] === 392).map((n) => n.at)).toEqual([
+      0, 0.22, 0.44,
+    ]);
+    expect(callEnded[0]).toEqual({
+      at: 0,
+      duration: 0.11,
+      gain: 0.156,
+      endGain: 0.156 * 0.75,
+      ...soft,
+      freqs: [[0, 392]],
+    });
+    const lost = soundSpec("modern", "connectionLost");
+    expect(lost).toHaveLength(12);
+    expect(lost.filter((_, i) => i % 4 === 0).map((n) => n.freqs[0]![1])).toEqual([
+      659.25, 523.25, 440,
+    ]);
+    expect(lost[0]!.gain).toBe(0.317);
+    const tick = { at: 0, attack: 0.001, release: 0.004 };
+    expect(soundSpec("modern", "pttOn")).toEqual([
+      { ...tick, duration: 0.035, gain: 0.168, endGain: 0.168 * 0.01, freqs: [[0, 1250]] },
+      {
+        ...tick,
+        duration: 0.035 * 0.7,
+        gain: 0.168 * 0.25,
+        endGain: 0.168 * 0.25 * 0.01,
+        freqs: [[0, 2500]],
+      },
+    ]);
+    expect(soundSpec("modern", "pttOff")[0]).toMatchObject({ gain: 0.182, freqs: [[0, 940]] });
+  });
+
   it("repeats the ring every 2.8 s in modern and 2 s in classic, the ringback every 3 s", () => {
     expect(REPEAT_MS).toEqual({
       modern: { ring: 2800, ringback: 3000 },
       classic: { ring: 2000, ringback: 3000 },
     });
+  });
+});
+
+describe("every modern sound peaks at its planned level", () => {
+  // Peak dBFS of each sound from the reference renderer at 48 kHz, volume 1.
+  const PEAK_DBFS: Readonly<Record<AppSound, number>> = {
+    message: -6.9,
+    mention: -10.2,
+    ring: -11.5,
+    ringback: -21.0,
+    join: -13.2,
+    leave: -13.4,
+    moved: -12.2,
+    mute: -12.9,
+    unmute: -13.3,
+    deafen: -9.3,
+    undeafen: -9.2,
+    streamStart: -13.8,
+    streamEnd: -12.9,
+    viewerJoin: -19.5,
+    viewerLeave: -19.4,
+    callEnded: -15.8,
+    connectionLost: -9.4,
+    pttOn: -15.0,
+    pttOff: -14.3,
+  };
+
+  it.each(SOUNDS)("%s", (sound) => {
+    const peak = peakDbfs(renderToneSpec(soundSpec("modern", sound), 48_000));
+    expect(
+      Math.abs(peak - PEAK_DBFS[sound]),
+      `${sound} peaks at ${peak.toFixed(2)}`,
+    ).toBeLessThanOrEqual(0.5);
   });
 });
 

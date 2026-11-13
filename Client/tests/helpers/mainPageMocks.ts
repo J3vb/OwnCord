@@ -121,6 +121,7 @@ export function mediaNotificationSoundMock() {
     stopRingChime: vi.fn(),
     startRingback: vi.fn(),
     stopRingback: vi.fn(),
+    playCallEnded: vi.fn(),
     cleanupNotificationAudio: vi.fn(),
     playVoiceSound: vi.fn(),
   };
