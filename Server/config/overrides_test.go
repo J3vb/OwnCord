@@ -36,6 +36,7 @@ var panelEditableKeys = []string{
 	"github.owner",
 	"github.repo",
 	"github.token",
+	"link_previews.enabled",
 	"link_previews.thumbnail_cache_mb",
 	"link_previews.thumbnail_unused_days",
 	"logging.level",
@@ -107,9 +108,6 @@ var panelExcludedKeys = []string{
 	// A voice grant rule the person running the server sets in config.yaml
 	// or the environment, read once at start-up.
 	"voice.restrict_data_publishing",
-	// The switch does nothing until the fetching worker lands, so the panel
-	// does not offer it. config.yaml and the environment still set it.
-	"link_previews.enabled",
 }
 
 func TestEditableKeys_ExactInventory(t *testing.T) {

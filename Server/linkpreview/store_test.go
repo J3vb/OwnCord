@@ -530,3 +530,27 @@ func TestPutImageBytesOnDisk(t *testing.T) {
 func dbPreview(hash, url string, failure *string, stamp string) db.LinkPreview {
 	return db.LinkPreview{UrlHash: hash, Url: url, Failure: failure, FetchedAt: stamp, LastUsedAt: stamp}
 }
+
+func TestTouchManyAndPruneCards(t *testing.T) {
+	ctx := t.Context()
+	f := newFixture(t)
+	old := FormatTime(f.clock.now().Add(-90 * 24 * time.Hour))
+	for _, h := range []string{"a", "b"} {
+		if err := f.store.PutPreview(ctx, Preview{UrlHash: h, Url: "https://x/" + h, FetchedAt: old, LastUsedAt: old}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.store.TouchMany(ctx, []string{"a"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	n, err := f.store.PruneCards(ctx, 30*24*time.Hour)
+	if err != nil || n != 1 {
+		t.Fatalf("PruneCards = %d, %v; want only the untouched card", n, err)
+	}
+	if _, err := f.store.Preview(ctx, "a"); err != nil {
+		t.Errorf("touched card was pruned: %v", err)
+	}
+	if _, err := f.store.Preview(ctx, "b"); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("untouched card: %v, want ErrNotFound", err)
+	}
+}

@@ -18,6 +18,7 @@ import type {
   ChatPinnedPayload,
   ChatSendOkPayload,
   GameActivityPolicyPayload,
+  MessageLinkPreviewsPayload,
   VideoBitrateCapPayload,
   MemberTimeoutsPayload,
   MentionCountPayload,
@@ -123,6 +124,7 @@ export type ServerMessage =
   | (WsEnvelope<ChatPinnedPayload> & { readonly type: "chat_pinned" })
   | (WsEnvelope<ReactionUpdatePayload> & { readonly type: "reaction_update" })
   | (WsEnvelope<PollUpdatePayload> & { readonly type: "poll_update" })
+  | (WsEnvelope<MessageLinkPreviewsPayload> & { readonly type: "message_link_previews" })
   | (WsEnvelope<PollCreateOkPayload> & { readonly type: "poll_create_ok" })
   | (WsEnvelope<PollVoteOkPayload> & { readonly type: "poll_vote_ok" })
   | (WsEnvelope<PollEndOkPayload> & { readonly type: "poll_end_ok" })

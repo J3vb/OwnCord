@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 264 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 265 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -207,6 +207,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/api/v1/invites/id/{id}`                                            |
 | DELETE  | `/api/v1/invites/{code}`                                             |
 | GET     | `/api/v1/invites/{code}/redemptions`                                 |
+| GET     | `/api/v1/link-previews/images/{hash}`                                |
 | GET     | `/api/v1/livekit/health`                                             |
 | POST    | `/api/v1/livekit/webhook`                                            |
 | GET     | `/api/v1/metrics`                                                    |
@@ -1376,6 +1377,18 @@ edit; an `@word` that matches no username, a `<@&id>` the author may not ping,
 or an `@everyone` from a user without the bit, carries no mention semantics and
 stays plain text. The same fields appear on pinned-message responses and on the
 WebSocket `chat_message`/`chat_edited` payloads.
+
+A message whose links the server has previewed also carries
+`"link_previews": [{"url", "title"?, "description"?, "site_name"?, "image"?: {"hash", "width", "height"}}]`
+on history, pins and `around` (never on search results or `referenced_message`). The
+array is in the order the links appear in the text, holds at most five cards, and is
+omitted when the message has none. Only a link still in the message's current text
+has a card, so an edit that removed a link hides its card at once. A card with
+`image` has a thumbnail at `GET /api/v1/link-previews/images/{hash}`. A message with
+links and no card yet is queued for the server to preview, so a later read of it, or a
+`message_link_previews` frame (see [protocol.md](protocol.md)), brings the cards. The
+send and edit payloads (`chat_message`, `chat_edited`) carry none: the server builds
+them after the message is delivered.
 
 A message imported from a Discord export also carries
 `"imported_author": {"name", "color"}` (`color` omitted when the export had none)
@@ -3025,6 +3038,28 @@ than 5 seconds for its turn gets the original bytes instead, or for a HEIC,
 HEIF or TIFF a `503` with `Retry-After`, and nothing is remembered, so a later
 request makes the preview. A server that has this route says so with
 `upload_policy.thumbnails` on `auth_ok`.
+
+### GET /api/v1/link-previews/images/{hash}
+
+Serve the stored thumbnail of a link preview card. `{hash}` is the `image.hash` of a
+card: 64 lower-case hex characters, the SHA-256 of the thumbnail's bytes, so a name
+never changes its content.
+
+**Auth:** Required (Bearer token). Any signed-in member may fetch any stored thumbnail:
+the picture is public content the server fetched from the open web, and the hash is
+only ever sent with a card the member can read. **Rate limit:** 300 requests per minute
+per client.
+
+**Response 200:** the thumbnail (a JPEG, or a PNG when it has transparency, at most 640
+pixels on a side) with its `Content-Type`, `ETag: "{hash}"` and `Cache-Control: private,
+max-age=31536000, immutable`, plus `X-Content-Type-Options: nosniff` and
+`Content-Security-Policy: default-src 'none'; sandbox`. A request carrying a matching
+`If-None-Match` gets `304`. Each response marks the thumbnail as used, which defers
+its removal (`link_previews.thumbnail_unused_days`).
+
+**Errors:** `404` for a hash that is not 64 lower-case hex characters, one with no
+stored thumbnail, or one whose file is gone (the sweep removed it). A card whose
+thumbnail was removed arrives without `image` on its next read.
 
 ---
 

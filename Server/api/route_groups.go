@@ -66,6 +66,12 @@ var routeGroups = []routeGroup{
 	}},
 	// Mounted unconditionally; with push.enabled false every route answers 503 PUSH_DISABLED after
 	// authentication.
+	// Needs the shared link preview store; without it the thumbnail route is not mounted.
+	{"linkPreviews", func(r chi.Router, d *routeDeps) {
+		if d.rt.LinkPreviews != nil {
+			MountLinkPreviewImageRoute(r, d.svc.Sessions, d.limiter, d.cfg.Server.TrustedProxies, d.rt.LinkPreviews)
+		}
+	}},
 	{"push", func(r chi.Router, d *routeDeps) {
 		MountPushRoutes(r, d.svc.Sessions, d.svc.Push, d.cfg.Push.Enabled)
 	}},

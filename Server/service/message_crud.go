@@ -9,6 +9,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
@@ -105,6 +106,9 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		result.Sticker = db.NewMessageStickerInfo(&id, stickerRef.Name)
 	}
 	result.ReferencedMessage = s.replySnippet(ctx, p, msgID)
+	s.enqueueUnfurl(linkpreview.Job{
+		MessageID: msgID, ChannelID: p.ChannelID, AuthorID: p.UserID, Content: msg.Content, Version: msg.Timestamp,
+	})
 
 	if isDM && !s.sendMessageDMSideEffects(ctx, p, result) {
 		return result, nil // Message saved, skip DM side effects.
@@ -330,6 +334,11 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		slog.Error("MessageService.EditMessage ReplaceMessageMentions", "err", mErr, "msg_id", msgID)
 	}
 	mentions = mentions.withReplyPing(replyPingID)
+	if editedAt != "" {
+		s.enqueueUnfurl(linkpreview.Job{
+			MessageID: msgID, ChannelID: msg.ChannelID, AuthorID: userID, Content: msg.Content, Version: editedAt, Edited: true,
+		})
+	}
 	result := &EditMessageResult{
 		MessageID:        msgID,
 		ChannelID:        msg.ChannelID,

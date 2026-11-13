@@ -316,12 +316,13 @@ func eventNamesUser(data []byte, userID int64) bool {
 // messageFamily lists the frame types that carry or name a message's content: what a retention
 // purge removes and a tombstone drops.
 var messageFamily = map[string]struct{}{
-	MsgTypeChatMessage:     {},
-	MsgTypeChatEdited:      {},
-	MsgTypeChatDeleted:     {},
-	MsgTypeChatBulkDeleted: {},
-	MsgTypeReactionUpdate:  {},
-	MsgTypePollUpdate:      {},
+	MsgTypeChatMessage:         {},
+	MsgTypeChatEdited:          {},
+	MsgTypeChatDeleted:         {},
+	MsgTypeChatBulkDeleted:     {},
+	MsgTypeReactionUpdate:      {},
+	MsgTypePollUpdate:          {},
+	MsgTypeMessageLinkPreviews: {},
 }
 
 func eventNamesMessage(data []byte, ids map[int64]struct{}) bool {

@@ -67,6 +67,9 @@ type Repo interface {
 	ListLinkPreviewImagesUnusedBefore(ctx context.Context, cutoff string, limit int) ([]ImageRef, error)
 	ListUnreferencedLinkPreviewImages(ctx context.Context, cutoff string, limit int) ([]ImageRef, error)
 	DeleteLinkPreviewImage(ctx context.Context, hash string) (bool, error)
+	TouchLinkPreviews(ctx context.Context, urlHashes []string, lastUsedAt string) error
+	TouchLinkPreviewImages(ctx context.Context, hashes []string, lastUsedAt string) error
+	DeleteUnreferencedLinkPreviews(ctx context.Context, cutoff string) (int64, error)
 }
 
 // Store keeps link cards in the database and thumbnails on disk. Build one per data folder
@@ -342,4 +345,26 @@ func (s *Store) ReplaceMessagePreviews(ctx context.Context, messageID int64, con
 		return false, fmt.Errorf("replacing message previews: %w", err)
 	}
 	return applied, nil
+}
+
+// TouchMany records that cards and thumbnails were just shown, one statement for each kind.
+func (s *Store) TouchMany(ctx context.Context, urlHashes, imageHashes []string) error {
+	stamp := FormatTime(s.now())
+	if err := s.db.TouchLinkPreviews(ctx, urlHashes, stamp); err != nil {
+		return fmt.Errorf("touching link previews: %w", err)
+	}
+	if err := s.db.TouchLinkPreviewImages(ctx, imageHashes, stamp); err != nil {
+		return fmt.Errorf("touching thumbnails: %w", err)
+	}
+	return nil
+}
+
+// PruneCards removes the cards no message names that were last used before cutoff, and
+// returns how many it removed. A thumbnail they named is left to Sweep.
+func (s *Store) PruneCards(ctx context.Context, unusedFor time.Duration) (int64, error) {
+	n, err := s.db.DeleteUnreferencedLinkPreviews(ctx, FormatTime(s.now().Add(-unusedFor)))
+	if err != nil {
+		return 0, fmt.Errorf("pruning link preview cards: %w", err)
+	}
+	return n, nil
 }

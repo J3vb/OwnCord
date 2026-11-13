@@ -185,6 +185,9 @@ export function handlePollUpdate(payload: Payload<"poll_update">): void {
   updatePoll(payload, authStore.getState().user?.id ?? 0);
 }
 
+/** Server-built link cards arrive here; nothing renders them yet, so the event is accepted and ignored. */
+export function handleMessageLinkPreviews(_payload: Payload<"message_link_previews">): void {}
+
 /** The sender's stored selection, so the card shows it before the poll_update that carries the counts. */
 export function handlePollVoteOk(payload: Payload<"poll_vote_ok">): void {
   applyPollVoteOk(payload);
@@ -237,6 +240,7 @@ export const wsRoutes: readonly WsRoute[] = [
   route(S.CHAT_SEND_OK, (c) => (p, id) => handleChatSendOk(c.api, p, id)),
   route(S.REACTION_UPDATE, () => handleReactionUpdate),
   route(S.POLL_UPDATE, () => handlePollUpdate),
+  route(S.MESSAGE_LINK_PREVIEWS, () => handleMessageLinkPreviews),
   route(S.POLL_VOTE_OK, () => handlePollVoteOk),
   route(S.TYPING, () => handleTyping),
 ];

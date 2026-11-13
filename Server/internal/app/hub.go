@@ -34,6 +34,9 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 	svc := service.New(database, limiter)
 	// Before NewHub: its first settings-cache fill reads the file-type lists auth_ok carries.
 	svc.Uploads.SetStorageLimits(storageLimits(cfg))
+	if in.LinkPreviews != nil {
+		svc.Messages.SetLinkPreviews(in.LinkPreviews)
+	}
 
 	lk, proc, voiceEnabled := buildVoice(cfg)
 
@@ -110,7 +113,7 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled, MetricsWindows: windows,
 		SystemStats:  sysstats.NewSampler(),
 		LiveKitStats: liveKitStats(cfg, hub, voiceEnabled),
-		Auth:         authSvc, Storage: in.Storage,
+		Auth:         authSvc, Storage: in.Storage, LinkPreviews: in.LinkPreviews,
 		Updater: updater.NewUpdater(in.Version, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo),
 	}, nil
 }

@@ -224,6 +224,8 @@ type MessageAPIResponse struct {
 	// RoleMentions adds mention_roles; embedded so its json tag lives outside models.go, whose tag
 	// count is pinned.
 	RoleMentions
+	// LinkPreviews adds link_previews, embedded for the same reason as RoleMentions.
+	LinkPreviews
 	// ReferencedMessage is the reply parent's snippet, computed at read time; null when not a reply or
 	// the parent is gone or in another channel.
 	ReferencedMessage *ReferencedMessage  `json:"referenced_message"`

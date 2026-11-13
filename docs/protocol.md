@@ -98,10 +98,10 @@ The sequence number system enables reconnection with state recovery.
 
 | Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                                                                                                               |
 | ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                                                                                                                    |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`, `message_link_previews`                                                                                                                                                                                                                                                           |
 | Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_update_batch`, `member_ban`, `roles_update`, `emoji_update`, `sticker_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                                                        |
 | Ephemeral          | No       | `typing`, `upload_policy` (see below), `game_activity_policy` (see below), `video_bitrate_cap` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `thread_follow_update`, `channel_create` (targeted per recipient; see below) |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                                                                                                 |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update`, `message_link_previews` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                                                                        |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                                                                                                             |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                                                                                                                       |
 | Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `poll_vote_ok`, `poll_end_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                                                                                            |
@@ -1159,6 +1159,55 @@ and whose version is above the last such version. The `results.version` and `me`
 of a history read are both watermarks too, so a replayed `chat_message` (version 0) or an older history page never moves a poll back. A `poll_update` for a message
 the client has not loaded is dropped; loading it later brings fresh state.
 
+### message_link_previews (Server -> Client)
+
+The link preview cards the server built for a message. The server fetches the links of
+a message once, after it was sent or edited and delivered, keeps the card text and a
+shrunk thumbnail, and sends the result here. Sequenced and replayable like
+`chat_edited`, to the channel's subscribers or a DM's participants (the same readers a
+`chat_edited` for the message reaches), and withheld from a member who has not
+acknowledged a labelled (NSFW) channel:
+
+```json
+{
+  "type": "message_link_previews",
+  "seq": 1043,
+  "payload": {
+    "message_id": 1104,
+    "channel_id": 9,
+    "link_previews": [
+      {
+        "url": "https://example.com/post",
+        "title": "A post",
+        "description": "What it says",
+        "site_name": "Example",
+        "image": { "hash": "3a20...a316", "width": 640, "height": 336 }
+      }
+    ]
+  }
+}
+```
+
+`link_previews` is always an array and replaces whatever cards the client holds for
+the message. An empty array removes them: it is sent when an edit took away the links a
+message had cards for. A card has `url` (the link, normalised: lower-case scheme and
+host, default port and fragment dropped) and any of `title`, `description` and
+`site_name`, each omitted when the page had none. `image` names the thumbnail, at most
+640 pixels on a side, fetched from `GET /api/v1/link-previews/images/{hash}` (see
+`docs/api.md`). A link that is a picture is a card with only `image`; a YouTube link is a
+card with the video's title, `site_name` `"YouTube"` and its still. A link the server
+could not fetch, or whose page has nothing to show, has no card. At most five links of a
+message get a card, chosen by the rules the client uses to find a message's links (code,
+masked links, spoilers and `<url>` excluded), so the two agree.
+
+A frame is sent only when a message's cards change to something visible or from
+something visible. A client ignores a frame for a message it has not loaded, and one
+older than the cards it already holds is harmless: the array is the whole state. An
+older client ignores the frame type; a server with `link_previews.enabled` off sends none.
+The same `link_previews` array rides on messages in history reads (`docs/api.md`), where
+a message with links and no cards yet is queued for the server to preview, so scrolling
+to an old message brings its cards in a `message_link_previews` frame shortly after.
+
 ### chat_forward_ok (Server -> Client)
 
 Direct response to the sender (no seq):
@@ -1366,6 +1415,7 @@ carried over: people who rejoin start a new row.
 | `mentions_everyone`  | bool           | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel.                                                                                                                                                                                                                   |
 | `mentions_here`      | bool           | `true` when `mentions_everyone` came from `@here` rather than `@everyone` (never both).                                                                                                                                                                                                                                               |
 | `referenced_message` | object or null | Snippet of the `reply_to` parent, so a reply to a message outside the loaded window still shows who and what. See below.                                                                                                                                                                                                              |
+| `link_previews`      | object[]       | History reads only (`chat_message` and `chat_edited` carry none): the link cards the server has built for the message, as in `message_link_previews` above. Omitted when there are none. An older server omits it.                                                                                                                    |
 
 `referenced_message` is `{id, user: {id, username, avatar}, content, deleted,
 has_attachments}`, computed when the frame is built (never stored). `content`
@@ -4120,73 +4170,74 @@ tables below add per-type behavioral notes.
 
 ### Server -> Client (46 types)
 
-| Type                   | Has seq? | Delivery                                                                                               |
-| ---------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
-| `auth_ok`              | No       | Direct                                                                                                 |
-| `auth_error`           | No       | Direct (then close)                                                                                    |
-| `ready`                | No       | Direct                                                                                                 |
-| `chat_message`         | Yes      | Channel or DM participants                                                                             |
-| `chat_send_ok`         | No       | Direct to sender                                                                                       |
-| `chat_forward_ok`      | No       | Direct to sender                                                                                       |
-| `poll_create_ok`       | No       | Direct to sender                                                                                       |
-| `poll_vote_ok`         | No       | Direct to sender                                                                                       |
-| `poll_end_ok`          | No       | Direct to sender                                                                                       |
-| `thread_create_ok`     | No       | Direct to sender                                                                                       |
-| `thread_update_ok`     | No       | Direct to sender                                                                                       |
-| `thread_follow_ok`     | No       | Direct to sender                                                                                       |
-| `thread_follow_update` | No       | The one user (low queue, not replayed)                                                                 |
-| `thread_changed`       | Yes      | Parent channel (coalesced, at most 1 per thread per 2 s)                                               |
-| `thread_deleted`       | Yes      | Parent channel; unsequenced copy to sockets with the thread open                                       |
-| `chat_edited`          | Yes      | Channel or DM participants                                                                             |
-| `chat_deleted`         | Yes      | Channel or DM participants                                                                             |
-| `chat_bulk_deleted`    | Yes      | Channel                                                                                                |
-| `chat_pinned`          | Yes      | Channel                                                                                                |
-| `reaction_update`      | Yes      | Channel or DM participants                                                                             |
-| `poll_update`          | Yes      | Channel or DM participants                                                                             |
-| `typing`               | No       | Channel (excl. sender) or DM                                                                           |
-| `presence`             | Yes      | All clients                                                                                            |
-| `presence_batch`       | Yes      | All clients (a full snapshot: no, direct to one client)                                                |
-| `channel_create`       | No       | Each client that may view the channel (per-recipient)                                                  |
-| `channel_update`       | Yes      | All clients                                                                                            |
-| `channel_delete`       | Yes      | All clients                                                                                            |
-| `voice_state`          | Yes      | All clients                                                                                            |
-| `voice_leave`          | Yes      | All clients                                                                                            |
-| `voice_moved`          | No       | Direct to moved user                                                                                   |
-| `voice_disconnected`   | No       | Direct to disconnected user                                                                            |
-| `voice_config`         | No       | Direct to joiner                                                                                       |
-| `voice_token`          | No       | Direct to joiner                                                                                       |
-| `member_join`          | Yes      | All clients                                                                                            |
-| `member_update`        | Yes      | All clients                                                                                            |
-| `member_update_batch`  | Yes      | All clients (several members)                                                                          |
-| `user_update`          | Yes      | All clients (profile changes)                                                                          |
-| `member_ban`           | Yes      | All clients                                                                                            |
-| `roles_update`         | Yes      | All clients (full role list)                                                                           |
-| `emoji_update`         | Yes      | All clients (full custom-emoji set)                                                                    |
-| `sticker_update`       | Yes      | All clients (full custom-sticker set)                                                                  |
-| `upload_policy`        | No       | All clients (both upload file-type lists)                                                              |
-| `game_activity_policy` | No       | All clients (the game activity switch)                                                                 |
-| `video_bitrate_cap`    | No       | All clients (the video upload cap per person)                                                          |
-| `dm_channel_open`      | No       | Direct to participant                                                                                  |
-| `dm_channel_close`     | No       | Direct to participant                                                                                  |
-| `dm_request`           | No       | Direct to recipient (B5-6)                                                                             |
-| `call_incoming`        | No       | Direct to each other DM participant                                                                    |
-| `call_declined`        | No       | Direct to each other DM participant                                                                    |
-| `voice_e2ee_announce`  | No       | Voice channel (excl. sender)                                                                           |
-| `voice_e2ee_offer`     | No       | Direct to target participant                                                                           |
-| `voice_watching`       | No       | Voice channel (excl. sender)                                                                           |
-| `server_restart`       | Yes      | All clients                                                                                            |
-| `mod_queue`            | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only                                              |
-| `mod_action`           | No       | Direct to the live target only                                                                         |
-| `member_timeouts`      | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders (full list) and each timed-out member (own entry) |
-| `channel_categories`   | No       | Connected `MANAGE_CHANNELS`/`ADMINISTRATOR` holders only (full list, judged at send time)              |
-| `appeal_status`        | No       | Direct to the appellant only                                                                           |
-| `mention_count`        | No       | Direct to the reader whose mention badge changed (DP-27)                                               |
-| `read_state`           | No       | Direct to the caller after an accepted `mark_read` or `mark_unread` (WP 3D-5c)                         |
-| `error`                | No       | Direct to requester                                                                                    |
-| `pong`                 | No       | Direct to pinger                                                                                       |
-| `command_reply`        | No       | Direct to invoking client (ephemeral plugin reply)                                                     |
-| `plugin_broadcast`     | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable)                                |
-| `nsfw_ack`             | No       | Direct to the user's own sockets (B5-7)                                                                |
+| Type                    | Has seq? | Delivery                                                                                               |
+| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `auth_ok`               | No       | Direct                                                                                                 |
+| `auth_error`            | No       | Direct (then close)                                                                                    |
+| `ready`                 | No       | Direct                                                                                                 |
+| `chat_message`          | Yes      | Channel or DM participants                                                                             |
+| `chat_send_ok`          | No       | Direct to sender                                                                                       |
+| `chat_forward_ok`       | No       | Direct to sender                                                                                       |
+| `poll_create_ok`        | No       | Direct to sender                                                                                       |
+| `poll_vote_ok`          | No       | Direct to sender                                                                                       |
+| `poll_end_ok`           | No       | Direct to sender                                                                                       |
+| `thread_create_ok`      | No       | Direct to sender                                                                                       |
+| `thread_update_ok`      | No       | Direct to sender                                                                                       |
+| `thread_follow_ok`      | No       | Direct to sender                                                                                       |
+| `thread_follow_update`  | No       | The one user (low queue, not replayed)                                                                 |
+| `thread_changed`        | Yes      | Parent channel (coalesced, at most 1 per thread per 2 s)                                               |
+| `thread_deleted`        | Yes      | Parent channel; unsequenced copy to sockets with the thread open                                       |
+| `chat_edited`           | Yes      | Channel or DM participants                                                                             |
+| `chat_deleted`          | Yes      | Channel or DM participants                                                                             |
+| `chat_bulk_deleted`     | Yes      | Channel                                                                                                |
+| `chat_pinned`           | Yes      | Channel                                                                                                |
+| `reaction_update`       | Yes      | Channel or DM participants                                                                             |
+| `poll_update`           | Yes      | Channel or DM participants                                                                             |
+| `message_link_previews` | Yes      | Channel or DM participants                                                                             |
+| `typing`                | No       | Channel (excl. sender) or DM                                                                           |
+| `presence`              | Yes      | All clients                                                                                            |
+| `presence_batch`        | Yes      | All clients (a full snapshot: no, direct to one client)                                                |
+| `channel_create`        | No       | Each client that may view the channel (per-recipient)                                                  |
+| `channel_update`        | Yes      | All clients                                                                                            |
+| `channel_delete`        | Yes      | All clients                                                                                            |
+| `voice_state`           | Yes      | All clients                                                                                            |
+| `voice_leave`           | Yes      | All clients                                                                                            |
+| `voice_moved`           | No       | Direct to moved user                                                                                   |
+| `voice_disconnected`    | No       | Direct to disconnected user                                                                            |
+| `voice_config`          | No       | Direct to joiner                                                                                       |
+| `voice_token`           | No       | Direct to joiner                                                                                       |
+| `member_join`           | Yes      | All clients                                                                                            |
+| `member_update`         | Yes      | All clients                                                                                            |
+| `member_update_batch`   | Yes      | All clients (several members)                                                                          |
+| `user_update`           | Yes      | All clients (profile changes)                                                                          |
+| `member_ban`            | Yes      | All clients                                                                                            |
+| `roles_update`          | Yes      | All clients (full role list)                                                                           |
+| `emoji_update`          | Yes      | All clients (full custom-emoji set)                                                                    |
+| `sticker_update`        | Yes      | All clients (full custom-sticker set)                                                                  |
+| `upload_policy`         | No       | All clients (both upload file-type lists)                                                              |
+| `game_activity_policy`  | No       | All clients (the game activity switch)                                                                 |
+| `video_bitrate_cap`     | No       | All clients (the video upload cap per person)                                                          |
+| `dm_channel_open`       | No       | Direct to participant                                                                                  |
+| `dm_channel_close`      | No       | Direct to participant                                                                                  |
+| `dm_request`            | No       | Direct to recipient (B5-6)                                                                             |
+| `call_incoming`         | No       | Direct to each other DM participant                                                                    |
+| `call_declined`         | No       | Direct to each other DM participant                                                                    |
+| `voice_e2ee_announce`   | No       | Voice channel (excl. sender)                                                                           |
+| `voice_e2ee_offer`      | No       | Direct to target participant                                                                           |
+| `voice_watching`        | No       | Voice channel (excl. sender)                                                                           |
+| `server_restart`        | Yes      | All clients                                                                                            |
+| `mod_queue`             | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only                                              |
+| `mod_action`            | No       | Direct to the live target only                                                                         |
+| `member_timeouts`       | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders (full list) and each timed-out member (own entry) |
+| `channel_categories`    | No       | Connected `MANAGE_CHANNELS`/`ADMINISTRATOR` holders only (full list, judged at send time)              |
+| `appeal_status`         | No       | Direct to the appellant only                                                                           |
+| `mention_count`         | No       | Direct to the reader whose mention badge changed (DP-27)                                               |
+| `read_state`            | No       | Direct to the caller after an accepted `mark_read` or `mark_unread` (WP 3D-5c)                         |
+| `error`                 | No       | Direct to requester                                                                                    |
+| `pong`                  | No       | Direct to pinger                                                                                       |
+| `command_reply`         | No       | Direct to invoking client (ephemeral plugin reply)                                                     |
+| `plugin_broadcast`      | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable)                                |
+| `nsfw_ack`              | No       | Direct to the user's own sockets (B5-7)                                                                |
 
 ### Plugin command types
 

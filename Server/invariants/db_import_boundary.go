@@ -99,6 +99,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/push_handler.go":             {Disposition: "adapter", Note: "db.User type on the context key only; PushService owns every call"},
 	"api/report_handler.go":           {Disposition: "adapter", Note: "db.User from the auth context only; ReportService owns every call"},
 	"api/route_groups.go":             {Disposition: "boundary", Note: "the metrics source (SQLDb, SQLReaderDB) and the System health page's database card (HealthStats); hands the handle (read from routeDeps) to the admin panel, the plugin admin, the Discord importer and the metrics routes", Calls: calls{"HealthStats": 1, "SQLDb": 1, "SQLReaderDB": 1}, Hands: calls{"NewPluginAdminHandler": 2, "admin.NewHandler": 1, "newDiscordImporter": 1, "routerMetricsRoutes": 1, "withSystemDatabase": 1}},
+	"api/link_preview_image.go":       {Disposition: "adapter", Note: "db.ErrNotFound sentinel only; the linkpreview store owns the read"},
 	"api/router.go":                   {Disposition: "boundary", Note: "takes the handle from internal/app and passes it to the health probe and the route groups; no calls"},
 	"api/router_health.go":            {Disposition: "boundary", Note: "the /health database probe (PingRead)", Calls: calls{"PingRead": 1}},
 	// ── auth ──────────────────────────────────────────────────────────────
