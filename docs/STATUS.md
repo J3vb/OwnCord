@@ -8,11 +8,11 @@ live in the [changelog](../CHANGELOG.md) and the linked pages.
 builds (`scripts/release/verify-release-status.mjs`), so add the row in the release PR,
 together with the changelog section.
 
-_Last updated 2026-11-12._
+_Last updated 2026-11-13._
 
 ## Current release
 
-**v2.9.1**, published 2026-11-12. It is still a beta and a hobby project:
+**v2.9.1**, published 2026-11-13. It is still a beta and a hobby project:
 Windows and Linux desktop (x64 and ARM64), plus a sideloaded Android app (arm64). Update the server and the
 desktop app together. From 2.5 on, version numbers drop the `-beta.N` suffix.
 
@@ -24,7 +24,7 @@ Newest first, one line each. The full notes are the matching section of
 <!-- prettier-ignore -->
 | Version | Date | What it brought |
 | --- | --- | --- |
-| v2.9.1 | 2026-11-12 | Fixes only: voice calls survive a reconnect after an unreadable update, failed thread replies come back with Retry after a restart, and voice and channel permission edge cases. |
+| v2.9.1 | 2026-11-13 | Fixes: voice calls survive a reconnect after an unreadable update, failed thread replies come back with Retry, faster GIFs and long messages, a softer speaking ring, voice and channel permission edge cases, and emoji drawn as images. |
 | v2.9.0 | 2026-11-12 | A faster start and smoother chat and member lists, lighter screen shares, the Silero VAD speech model for Enhanced Noise Suppression, a call layout with tile shapes, a participant strip and pinned tiles, steadier voice switching, and an admin video cap. |
 | v2.8.0 | 2026-11-04 | Share to OwnCord and notifications in the Android app, a People page with Active now, a "+" tile menu, image viewer swipes, calls that no longer freeze on a key change, an admin System health page and LiveKit card, and support bundles that remove private details. |
 | v2.7.0 | 2026-10-31 | The first Android app (an APK that updates itself), a phone layout with a drawer, call bar, call screen and Push to Talk, a phone status dot, My uploads, an admin Storage page and health row, saved server logs and a voice gate in decibels. |

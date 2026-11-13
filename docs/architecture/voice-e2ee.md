@@ -77,6 +77,47 @@ security badge shows "Unsecured" for the rest of the session
 (`src/features/voice/mediaEncryption.ts`). A participant who republishes with
 encryption is subscribed again.
 
+**The speaking ring has two sources.** A client's own ring follows its input
+gate (`setLocalGateSpeaking` in `src/stores/voice.store.ts`). The ring the
+others see comes from LiveKit's speaker detection on the audio that reaches
+the SFU (`ActiveSpeakersChanged`, `src/lib/voice/roomSpeakers.ts`), tuned by
+the `audio:` block of the generated `livekit.yaml`
+(`Server/livekitproc/process.go`; `Server/livekit.yaml.example` carries the
+same values). `active_level: 60` (0 is the loudest, 127 the softest) lights it
+for the soft speech a gate lets through, and `update_interval: 100` with one
+smoothing interval lights it within about a tenth of a second. A microphone
+with no gate (sensitivity 100, or push-to-talk) takes its own ring from the
+same detection.
+
+**With Enhanced Noise Suppression on, speech models decide what opens the
+input gate** on the web path (`public/silero-vad-worker.js`, started by
+`src/features/voice/sileroWorker.ts`; the gate itself is
+`public/vad-worklet.js`). The worklet sends the worker each 32 ms of the
+microphone as it is after Input Volume and before RNNoise, with the gate
+threshold. The worker scores every frame with two Silero VAD models, and a
+frame is speech when the first scores 0.35 or more or the second clears its
+own, stricter bar: 0.9, or 0.95 once the user turns "Let more soft speech
+through" off in Settings (the `softSpeech` preference; `sileroWorker.ts` sends
+it to the worker at the start and whenever it changes, so the call and the
+settings meter of that window follow it at once; the worker names the setting
+it runs with in its `ready`, and a worker file from an older release, which
+names none, is sent no change). The gate opens after two
+speech frames in a row, once the loudest frame of that run has reached the
+threshold. It stays open while speech frames keep reaching the level 6 dB
+under the threshold, and closes about 0.4 s after the last one. The first
+model, v5.1.2, keeps its memory from frame to frame: it follows running
+speech, and scores a soft word near zero after seconds of silence or after
+typing. The second, v6.2.0, covers that case: after about half a second in
+which every 8 ms stays under the gate threshold and under -55 dBFS it rests,
+and the sound that ends the quiet is scored from a fixed rest state (the
+model's memory after seven silent frames from a cold start) behind the last
+quiet frame. From there a soft "hmm" clears the bar while a key, a click or a
+thump stays under it. A skipped frame starts both models over. If the worker
+cannot start, a model file does not load within six seconds, or a score is
+not a number, the worker is stopped and the gate takes RNNoise's speech
+probability instead. The Linux native gate has no speech model: its rule is
+under "Audio parity: RNNoise and the capture path".
+
 Supporting pieces:
 
 - **Server:** `Server/ws/voice_e2ee.go` (relay + key-holder map),

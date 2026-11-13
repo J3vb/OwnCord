@@ -1,6 +1,7 @@
-// Silero VAD v5.1.2, 16 kHz model. The GGML layout and forward pass follow
-// whisper.cpp's Silero implementation. See silero-license.txt.
+// Silero VAD, 16 kHz models v5.1.2 and v6.2.0. The GGML layout and forward pass
+// follow whisper.cpp's Silero implementation. See silero-license.txt.
 export const FRAME_SAMPLES = 512;
+const CONTEXT_SAMPLES = 64;
 const BINS = 129;
 const FEATURES = 128;
 const STFT_SIZE = 256;
@@ -11,6 +12,16 @@ const ENCODERS = [
   [64, 64, 2],
   [64, 128, 1],
 ];
+// The header after the version: the layout both versions share.
+const LAYOUT = [512, 64, 4, 129, 128, 3, 128, 64, 3, 64, 64, 3, 64, 128, 3, 128, 128, 128, 1];
+// Whether a version scores a frame behind the last 64 samples of the frame
+// before it, as the model's own reference code does. v6.2.0 needs that.
+// v5.1.2 keeps whisper.cpp's framing, a mirror of the frame's own start, which
+// its speech threshold was set with.
+const KEEPS_CONTEXT = new Map([
+  ["5.1.2", false],
+  ["6.2.0", true],
+]);
 
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
 
@@ -40,10 +51,10 @@ function readWeights(bytes) {
   if (int() !== GGML_MAGIC || string(int()) !== "silero-16k") {
     throw new Error("Invalid Silero model header");
   }
-  const expected = [
-    5, 1, 2, 512, 64, 4, 129, 128, 3, 128, 64, 3, 64, 64, 3, 64, 128, 3, 128, 128, 128, 1,
-  ];
-  for (const field of expected) {
+  const version = `${int()}.${int()}.${int()}`;
+  const keepsContext = KEEPS_CONTEXT.get(version);
+  if (keepsContext === undefined) throw new Error("Unsupported Silero model version");
+  for (const field of LAYOUT) {
     if (int() !== field) throw new Error("Unsupported Silero model layout");
   }
 
@@ -75,17 +86,20 @@ function readWeights(bytes) {
     tensors.set(name, values);
   }
 
-  return (name, length) => {
+  const tensor = (name, length) => {
     const values = tensors.get("_model." + name);
     if (values?.length !== length) throw new Error("Missing or invalid Silero tensor " + name);
     return values;
   };
+  return { tensor, keepsContext };
 }
 
-function stft(frame, basis, magnitude, padded) {
-  padded.set(frame, 64);
+// `padded` is 64 samples, the frame, and the frame's mirrored end. With
+// `keepsContext` the first 64 are what the last call left there.
+function stft(frame, basis, magnitude, padded, keepsContext) {
+  padded.set(frame, CONTEXT_SAMPLES);
   for (let i = 1; i <= 64; i++) {
-    padded[64 - i] = frame[i];
+    if (!keepsContext) padded[64 - i] = frame[i];
     padded[FRAME_SAMPLES + 63 + i] = frame[FRAME_SAMPLES - 1 - i];
   }
   for (let bin = 0; bin < BINS; bin++) {
@@ -103,6 +117,7 @@ function stft(frame, basis, magnitude, padded) {
       magnitude[bin * 4 + t] = Math.sqrt(re * re + im * im);
     }
   }
+  if (keepsContext) padded.copyWithin(0, FRAME_SAMPLES, FRAME_SAMPLES + CONTEXT_SAMPLES);
 }
 
 function encoderLayer(input, width, layer) {
@@ -124,9 +139,16 @@ function encoderLayer(input, width, layer) {
   }
 }
 
-export function createSileroVad(bytes) {
-  const tensor = readWeights(bytes);
-  const basis = tensor("stft.forward_basis_buffer", STFT_SIZE * BINS * 2);
+/**
+ * `restFrames`: reset() returns to the memory the model has after this many
+ * frames of silence from a cold start, instead of to the cold start itself.
+ * `stftBasis`: another model's STFT table, for a model file stored without its
+ * own (the two versions use the same one).
+ */
+export function createSileroVad(bytes, { restFrames = 0, stftBasis } = {}) {
+  const { tensor, keepsContext } = readWeights(bytes);
+  const basis = stftBasis ?? tensor("stft.forward_basis_buffer", STFT_SIZE * BINS * 2);
+  if (basis.length !== STFT_SIZE * BINS * 2) throw new Error("Invalid Silero STFT table");
   const magnitude = new Float32Array(BINS * 4);
   const padded = new Float32Array(FRAME_SAMPLES + 128);
   let width = 4;
@@ -154,15 +176,19 @@ export function createSileroVad(bytes) {
   const gates = new Float32Array(gateCount);
   const hidden = new Float32Array(FEATURES);
   const cell = new Float32Array(FEATURES);
+  const restHidden = new Float32Array(FEATURES);
+  const restCell = new Float32Array(FEATURES);
 
-  return {
+  const vad = {
+    stftBasis: basis,
     reset() {
-      hidden.fill(0);
-      cell.fill(0);
+      hidden.set(restHidden);
+      cell.set(restCell);
+      padded.fill(0, 0, CONTEXT_SAMPLES);
     },
     score(frame) {
       if (frame.length !== FRAME_SAMPLES) throw new Error("Silero needs 512 samples");
-      stft(frame, basis, magnitude, padded);
+      stft(frame, basis, magnitude, padded, keepsContext);
       let input = magnitude;
       let width = 4;
       for (const layer of layers) {
@@ -193,4 +219,9 @@ export function createSileroVad(bytes) {
       return sigmoid(score);
     },
   };
+  const silence = new Float32Array(FRAME_SAMPLES);
+  for (let i = 0; i < restFrames; i++) vad.score(silence);
+  restHidden.set(hidden);
+  restCell.set(cell);
+  return vad;
 }

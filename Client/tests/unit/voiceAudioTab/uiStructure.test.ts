@@ -619,7 +619,7 @@ describe("VoiceAudioTab UI structure", () => {
         expect(camera.querySelector(`select[aria-label="${name}"]`), name).not.toBeNull();
       }
       expect(camera.querySelector("video")).not.toBeNull();
-      expect(cardNamed(el, "Voice processing").querySelectorAll(".toggle")).toHaveLength(4);
+      expect(cardNamed(el, "Voice processing").querySelectorAll(".toggle")).toHaveLength(5);
       ac.abort();
     });
 
@@ -632,13 +632,14 @@ describe("VoiceAudioTab UI structure", () => {
         "Echo Cancellation",
         "Noise Suppression",
         "Enhanced Noise Suppression",
+        "Let more soft speech through",
         "Voice Buffer",
         "Automatic Gain Control",
       ]);
-      const enhanced = el
-        .querySelector('.toggle[aria-label="Enhanced Noise Suppression"]')!
-        .closest(".setting-row")!;
-      expect(enhanced.classList.contains("nested")).toBe(true);
+      for (const name of ["Enhanced Noise Suppression", "Let more soft speech through"]) {
+        const row = el.querySelector(`.toggle[aria-label="${name}"]`)!.closest(".setting-row")!;
+        expect(row.classList.contains("nested"), name).toBe(true);
+      }
       ac.abort();
     });
 

@@ -160,7 +160,14 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("voiceAudio.agc.desc"),
     s("voiceAudio.enhanced.label"),
     s("voiceAudio.enhanced.desc"),
-    ...(!isLinuxDesktop() ? [voiceText("audio.buffer.label"), voiceText("audio.buffer.desc")] : []),
+    ...(!isLinuxDesktop()
+      ? [
+          s("voiceAudio.softSpeech.label"),
+          s("voiceAudio.softSpeech.desc"),
+          voiceText("audio.buffer.label"),
+          voiceText("audio.buffer.desc"),
+        ]
+      : []),
   ],
   "Text & Images": () => [
     ...(isAndroidApp() ? [s("images.dataSaver.label"), s("images.dataSaver.desc")] : []),

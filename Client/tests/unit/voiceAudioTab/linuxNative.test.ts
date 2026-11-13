@@ -947,6 +947,12 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(descs).toContain("Automatically adjust microphone volume");
   });
 
+  it("has no soft speech switch and no Voice Buffer: the native gate has no speech model", async () => {
+    const tab = await mount();
+    expect(tab.element.querySelector("[data-testid='soft-speech']")).toBeNull();
+    expect(tab.element.querySelector("[data-testid='voice-buffer']")).toBeNull();
+  });
+
   it("lists the native engine's audio devices, not the webview's", async () => {
     const tab = await mount();
     const selects = tab.element.querySelectorAll("select");

@@ -1,5 +1,9 @@
 Silero VAD v5.1.2 model: https://huggingface.co/ggml-org/silero-v5.1.2/tree/60cbe3094451f5bb86ecd0307c814356da24cdf6
 SHA-256: 29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf
+Silero VAD v6.2.0 model: https://github.com/ggml-org/whisper.cpp/blob/d2c6f05a46dacf663e357bcf0ed40f542a72825d/models/for-tests-silero-v6.2.0-ggml.bin
+SHA-256: 2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987
+Packaged as silero-v6.2.0-slim.bin by scripts/slim-silero-model.mjs (16-bit LSTM matrices, STFT table taken from the v5.1.2 file)
+SHA-256: 536704196b47fb7495731fc0e0d87043b036828f9b963a357d22a1ff6c35ee6a
 GGML layout and inference graph: https://github.com/ggml-org/whisper.cpp/tree/b5454
 
 MIT License
