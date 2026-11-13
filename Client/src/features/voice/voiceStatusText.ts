@@ -108,6 +108,13 @@ export function micControlState(voice: VoiceState): MicControlState {
   };
 }
 
+/** Whether the mic is the user's to open: not muted by them or a moderator,
+ *  not listen-only, not in the AFK channel, not held by a phone call. */
+export function micIsUsersToOpen(voice: VoiceState): boolean {
+  const mic = micControlState(voice);
+  return !mic.micOff && !mic.disabled;
+}
+
 /** Everything `micControlState` reads, as one comparable key. */
 export function micControlKey(s: VoiceState): string {
   return [

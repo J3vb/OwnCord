@@ -2,7 +2,8 @@
  * Every app sound as data: one tone spec per sound and style, which both
  * renderers in `notificationSound.ts` draw. "modern" builds each musical note
  * from a voice (a few sine partials with a short attack and release);
- * "classic" keeps the plain sine tones OwnCord played before, note for note.
+ * "classic" keeps the plain sine tones OwnCord played before, note for note;
+ * a sound OwnCord did not have then plays its modern spec in both styles.
  * Pure data and builders: no imports beyond types, no side effects.
  */
 
@@ -12,9 +13,10 @@ import type { SoundStyle } from "../prefs/soundPrefs";
 /** A sound as data. */
 export type ToneSpec = readonly NativeToneNote[];
 
-/** The short voice UI sounds: join/leave, a moderator's move,
- *  mute/unmute, deafen/undeafen, a stream starting and ending. */
-export type VoiceSound =
+/** The voice UI sounds that have a classic version: join/leave, a
+ *  moderator's move, mute/unmute, deafen/undeafen, a stream starting and
+ *  ending, a viewer coming and going. */
+type ClassicVoiceSound =
   | "join"
   | "leave"
   | "moved"
@@ -27,8 +29,22 @@ export type VoiceSound =
   | "viewerJoin"
   | "viewerLeave";
 
-/** Every sound with a spec in both styles. */
-export type AppSound = "message" | "mention" | "ring" | "ringback" | VoiceSound;
+/** Every short voice UI sound, with the voice connection dropping and the
+ *  push-to-talk gate opening and closing. */
+export type VoiceSound = ClassicVoiceSound | "connectionLost" | "pttOn" | "pttOff";
+
+/** Every app sound. */
+export type AppSound = "message" | "mention" | "ring" | "ringback" | "callEnded" | VoiceSound;
+
+/** The sounds with no classic version: classic plays their modern spec. */
+type ModernOnlySound = "callEnded" | "connectionLost" | "pttOn" | "pttOff";
+type ClassicSound = Exclude<AppSound, ModernOnlySound>;
+const MODERN_ONLY: ReadonlySet<AppSound> = new Set<ModernOnlySound>([
+  "callEnded",
+  "connectionLost",
+  "pttOn",
+  "pttOff",
+]);
 
 /** A voice: attack, release, the end gain as a share of the start gain, and
  *  its partials as `[frequency ratio, level, share of the note's length]`. */
@@ -62,9 +78,14 @@ const SOFT = voice(0.018, 0.05, 0.75, [
   [1, 1, 1],
   [2, 0.14, 1],
 ]);
+const TICK = voice(0.001, 0.004, 0.01, [
+  [1, 1, 1],
+  [2, 0.25, 0.7],
+]);
 
 const C4 = 261.63;
 const E4 = 329.63;
+const G4 = 392;
 const A4 = 440;
 const C5 = 523.25;
 const D5 = 587.33;
@@ -189,6 +210,20 @@ const MODERN: Readonly<Record<AppSound, () => ToneSpec>> = {
       [A5, 0, 0.16],
       [E5, 0.075, 0.26],
     ]),
+  callEnded: () =>
+    phrase(SOFT, 0.156, [
+      [G4, 0, 0.11],
+      [G4, 0.22, 0.11],
+      [G4, 0.44, 0.11],
+    ]),
+  connectionLost: () =>
+    phrase(MALLET, 0.317, [
+      [E5, 0, 0.3],
+      [C5, 0.16, 0.3],
+      [A4, 0.32, 0.5],
+    ]),
+  pttOn: () => phrase(TICK, 0.168, [[1250, 0, 0.035]]),
+  pttOff: () => phrase(TICK, 0.182, [[940, 0, 0.035]]),
 };
 
 /** A plain sine note with today's fixed tail. */
@@ -201,7 +236,7 @@ const plain = (at: number, duration: number, gain: number, hz: number): NativeTo
 });
 
 /** The classic voice sounds: a short note per `[hz, at]` pair. */
-const CLASSIC_VOICE: Readonly<Record<VoiceSound, readonly (readonly [number, number])[]>> = {
+const CLASSIC_VOICE: Readonly<Record<ClassicVoiceSound, readonly (readonly [number, number])[]>> = {
   join: [
     [523, 0],
     [784, 0.09],
@@ -238,7 +273,7 @@ const CLASSIC_VOICE: Readonly<Record<VoiceSound, readonly (readonly [number, num
   ],
 };
 
-function classic(sound: AppSound): ToneSpec {
+function classic(sound: ClassicSound): ToneSpec {
   switch (sound) {
     case "message":
     case "mention":
@@ -263,9 +298,11 @@ function classic(sound: AppSound): ToneSpec {
   }
 }
 
+const hasClassic = (sound: AppSound): sound is ClassicSound => !MODERN_ONLY.has(sound);
+
 /** The spec of `sound` in `style`. */
 export function soundSpec(style: SoundStyle, sound: AppSound): ToneSpec {
-  return style === "classic" ? classic(sound) : MODERN[sound]();
+  return style === "classic" && hasClassic(sound) ? classic(sound) : MODERN[sound]();
 }
 
 /** How often each style repeats the ring and the ringback, in milliseconds. */

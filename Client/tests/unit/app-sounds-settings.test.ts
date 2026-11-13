@@ -150,13 +150,27 @@ describe("per-sound switches", () => {
     ["Join and leave sounds", "soundJoinLeave"],
     ["Mute and deafen sounds", "soundMuteDeafen"],
     ["Stream sounds", "soundStream"],
+    ["Connection sounds", "soundConnection"],
   ];
 
-  it("offers one switch per sound, all on by default", () => {
+  it("offers one switch per sound, all on by default but push-to-talk", () => {
     const tab = build();
     for (const [label] of SOUND_SWITCHES) {
       expect(switchFor(tab, label).getAttribute("aria-checked")).toBe("true");
     }
+    expect(switchFor(tab, "Push-to-talk sounds").getAttribute("aria-checked")).toBe("false");
+    expect(tab.textContent).toContain("When your voice connection drops and when it is back");
+    expect(tab.textContent).toContain("A quiet tick when your talk key opens and closes your mic");
+    expect(tab.textContent).toContain(
+      "The soft tones you hear while your call rings, and when it is not answered",
+    );
+  });
+
+  it("turns the push-to-talk sound on, saving its own key", () => {
+    const tab = build();
+    switchFor(tab, "Push-to-talk sounds").click();
+    expect(stored("soundPtt")).toBe("true");
+    expect(switchFor(build(), "Push-to-talk sounds").getAttribute("aria-checked")).toBe("true");
   });
 
   it("turns each sound off on its own, saving only its own key", () => {
@@ -193,6 +207,8 @@ describe("per-sound switches", () => {
     expect(at("Mention sound")).toBe(at("Notification Sounds") + 2);
     expect(at("Ring sound")).toBe(at("Incoming Call Sound") + 1);
     expect(at("Stream sounds")).toBe(at("Voice Sounds") + 3);
+    expect(at("Connection sounds")).toBe(at("Voice Sounds") + 4);
+    expect(at("Push-to-talk sounds")).toBe(at("Voice Sounds") + 5);
     expect(rows[at("Ring sound")]!.classList.contains("nested")).toBe(true);
   });
 });

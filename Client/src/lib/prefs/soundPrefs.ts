@@ -1,6 +1,6 @@
 /**
- * Preferences for the app's own sounds: one master volume and one
- * on/off switch per sound. Kept in a leaf module (preferences only) so the
+ * Preferences for the app's own sounds: one master volume, the sound
+ * style and one on/off switch per sound. Kept in a leaf module (preferences only) so the
  * settings tab, the sound player, `notifications.ts` and the voice sound
  * subscriber can all read them without importing one another.
  *
@@ -8,7 +8,8 @@
  * (`notificationSounds`, `callSounds`, `voiceSounds`, whose keys and meaning
  * are unchanged): a sound plays only when its group switch AND its own switch
  * are on. A per-sound switch that was never set is on, so nobody loses a
- * sound they have today.
+ * sound they have today; only the push-to-talk tick, which is new and plays
+ * on every press, starts off.
  */
 
 import { loadPref } from "./preferences";
@@ -18,7 +19,15 @@ export const APP_SOUNDS_VOLUME_KEY = "appSoundsVolume";
 
 /** Every sound that has its own switch. */
 export type SoundSwitch =
-  "message" | "mention" | "ring" | "ringback" | "joinLeave" | "muteDeafen" | "stream";
+  | "message"
+  | "mention"
+  | "ring"
+  | "ringback"
+  | "joinLeave"
+  | "muteDeafen"
+  | "stream"
+  | "connection"
+  | "ptt";
 
 /** The pref key behind each per-sound switch. */
 export const SOUND_SWITCH_KEYS: Readonly<Record<SoundSwitch, string>> = {
@@ -29,11 +38,18 @@ export const SOUND_SWITCH_KEYS: Readonly<Record<SoundSwitch, string>> = {
   joinLeave: "soundJoinLeave",
   muteDeafen: "soundMuteDeafen",
   stream: "soundStream",
+  connection: "soundConnection",
+  ptt: "soundPtt",
 };
+
+/** Whether a per-sound switch that was never set is on. */
+export function soundSwitchDefault(sound: SoundSwitch): boolean {
+  return sound !== "ptt";
+}
 
 /** Is this sound's own switch on? (Not the group switch above it.) */
 export function soundSwitchOn(sound: SoundSwitch): boolean {
-  return loadPref<boolean>(SOUND_SWITCH_KEYS[sound], true);
+  return loadPref<boolean>(SOUND_SWITCH_KEYS[sound], soundSwitchDefault(sound));
 }
 
 /** The saved master volume as a gain in [0, 1]; a bad stored value reads as 100%. */

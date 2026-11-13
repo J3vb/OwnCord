@@ -1,7 +1,8 @@
 /**
  * DP-40: voice join/leave and mute/deafen sounds. The edge logic lives in
  * features/voice/uiSounds.ts; this pins the tricky ones — a remote join in the
- * current channel plays once, a PTT gate edge plays nothing, and an initial
+ * current channel plays once, a PTT gate edge plays nothing by default (the
+ * ticks are voice-link-sounds.test.ts's), and an initial
  * roster or reconnect replay does not produce a storm.
  *
  * The audio graph itself (the shared sink, the deafen silence) is
@@ -147,7 +148,7 @@ describe("voice UI sounds", () => {
     expect(playVoiceSound).not.toHaveBeenCalled();
   });
 
-  it("plays nothing for a push-to-talk gate edge", () => {
+  it("plays nothing for a push-to-talk gate edge with its sound off, the default", () => {
     seedVoice({ currentChannelId: 10 });
 
     setPttGated(true);
