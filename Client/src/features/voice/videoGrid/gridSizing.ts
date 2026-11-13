@@ -15,6 +15,7 @@ import {
 import { packTiles, type PackTile, type TileSize } from "./packLayout";
 import type { GridState, GridApi } from "./gridState";
 import { createPeopleStrip, isAvatarCell } from "./gridPeopleStrip";
+import { createGridCards } from "./gridCards";
 
 /** The shape of a tile whose picture has no size yet, and of an avatar tile. */
 const DEFAULT_ASPECT = 16 / 9;
@@ -44,6 +45,7 @@ export function createGridSizing(st: GridState, api: GridApi) {
   /** The aspect each tile was last packed with. */
   const packedAspect = new WeakMap<HTMLElement, number>();
   const peopleStrip = createPeopleStrip(st, api);
+  const cards = createGridCards(st, api, peopleStrip.keepFocus);
 
   /** The room the call view's control bar takes below the tiles. */
   function barSpaceOf(viewsAbove: boolean): number {
@@ -76,6 +78,22 @@ export function createGridSizing(st: GridState, api: GridApi) {
     });
   }
 
+  /** With no camera or screen share on show, the people are compact cards
+   *  side by side in their own box, laid out by CSS: true when it drew them
+   *  so. Otherwise the box gives its cards back for the strip or the packer. */
+  function seatCards(shown: readonly HTMLDivElement[]): boolean {
+    const on = shown.length > 0 && shown.every(isAvatarCell);
+    st.root?.classList.toggle("video-grid--cards", on);
+    if (!on) {
+      cards.dissolve();
+      return false;
+    }
+    peopleStrip.dissolve();
+    st.root?.classList.remove("video-grid--packed");
+    cards.seat(shown);
+    return true;
+  }
+
   /** Place the tiles: the packer sets each one's left, top, width and height. */
   function applyGridSizes(): void {
     if (st.root === null) return;
@@ -85,6 +103,7 @@ export function createGridSizing(st: GridState, api: GridApi) {
     api.syncTileArrange();
     const sized = cw > 0 && ch > 0;
     const shown = api.shownTiles();
+    if (seatCards(shown)) return;
     const barSpace = barSpaceOf(viewsAbove);
     // With a video tile on show the people leave the packed area for the strip.
     const space = peopleStrip.seat(cw, ch, shown, barSpace);
@@ -129,8 +148,11 @@ export function createGridSizing(st: GridState, api: GridApi) {
   return {
     applyGridSizes,
     watchTileShape,
-    inPeopleStrip: peopleStrip.holds,
+    inPeopleStrip: (el: HTMLElement) => peopleStrip.holds(el) || cards.holds(el),
     keepFocus: peopleStrip.keepFocus,
-    resetPeopleStrip: peopleStrip.reset,
+    resetPeopleStrip: () => {
+      peopleStrip.reset();
+      cards.reset();
+    },
   };
 }

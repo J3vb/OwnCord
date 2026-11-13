@@ -9,6 +9,7 @@ import {
   fakeStream,
   makeTileConfig,
   useVideoGridHarness,
+  viewMenuRow,
 } from "../../helpers/videoGridHarness";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
@@ -137,7 +138,7 @@ describe("VideoGrid packed layout", () => {
     addCamera(2);
     const popup = fakePopup();
     vi.stubGlobal("open", () => popup.win);
-    document.querySelector<HTMLButtonElement>("[data-grid-control='popout']")!.click();
+    viewMenuRow(document, "popout")!.click();
     vi.advanceTimersByTime(50);
 
     const cell = popup.doc.querySelector<HTMLElement>(".video-cell[data-user-id='2']")!;

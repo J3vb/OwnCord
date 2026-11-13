@@ -5,12 +5,10 @@
 
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { createIcon } from "@lib/icons";
 import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { syncVideoSurface } from "@lib/voice/videoSurface";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { voiceText } from "../../../i18n/voice";
 import type { StreamInfo } from "./streamInfo";
 import type { VoiceModMenuOptions } from "../../channels/sidebar/volumeMenu";
 import type { StreamSample, VideoView } from "../remoteTracks";
@@ -218,7 +216,6 @@ export function createVideoGrid(): VideoGridComponent {
     flipCheck: "idle",
     flipCheckGen: 0,
     flipping: false,
-    exitBtn: null,
     callView: false,
     viewBar: null,
     callBar: null,
@@ -230,7 +227,7 @@ export function createVideoGrid(): VideoGridComponent {
     gridListeners: new Disposable(),
     callPop: null,
     callHome: null,
-    popBtn: null,
+    viewBtn: null,
     popRestore: true,
     lastInfo: new Map<number, StreamInfo>(),
     infoModule: null,
@@ -284,27 +281,6 @@ export function createVideoGrid(): VideoGridComponent {
       // (its peer left), focus lands here rather than dropping to <body>.
       tabindex: "-1",
     });
-
-    // An exit control, always reachable while a tile is focused too: the focused
-    // tile's own "Back to grid" nav can be scrolled off, and an empty grid
-    // could otherwise cover the chat with no way back (OC video-grid exit).
-    st.exitBtn = createElement("button", {
-      type: "button",
-      class: "video-grid__exit",
-      "aria-label": voiceText("grid.showChat"),
-      title: voiceText("grid.showChat"),
-      "data-tile-control": "exit-grid",
-    });
-    st.exitBtn.appendChild(createIcon("message-square", 18));
-    st.exitBtn.hidden = true;
-    st.exitBtn.addEventListener("click", () => {
-      // Clearing the grid's own focus keeps it consistent if the host only
-      // hides the grid (rather than tearing it down) and later reopens it.
-      api.setFocusedTile(null);
-      st.callbacks.onExitGrid?.();
-    });
-    st.root.appendChild(st.exitBtn);
-
     container.appendChild(st.root);
     if (st.callView) api.setCallView(true);
     // The size controls give way to the tile menu on a phone, and back.
@@ -375,7 +351,7 @@ export function createVideoGrid(): VideoGridComponent {
     st.personCells.clear();
     st.callView = false;
     st.viewBar = null;
-    st.popBtn = null;
+    st.viewBtn = null;
     st.callBar = null;
 
     if (st.root !== null) {

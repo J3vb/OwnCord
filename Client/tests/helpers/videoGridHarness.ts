@@ -138,6 +138,24 @@ export function useVideoGridHarness(
   };
 }
 
+/** The call view's View button in `scope`. */
+export function viewButton(scope: ParentNode): HTMLButtonElement {
+  return scope.querySelector<HTMLButtonElement>("[data-grid-control='views']")!;
+}
+
+/** Open the View menu from the button in `scope` and return its row
+ *  (`view-menu-<key>`), or null when the menu has no such row. */
+export function viewMenuRow(scope: ParentNode, key: string): HTMLElement | null {
+  const btn = viewButton(scope);
+  btn.click();
+  return btn.ownerDocument.querySelector<HTMLElement>(`[data-testid='view-menu-${key}']`);
+}
+
+/** A view toggle's state as its View menu row shows it (aria-checked). */
+export function viewChecked(scope: ParentNode, key: string): string | null {
+  return viewMenuRow(scope, key)!.getAttribute("aria-checked");
+}
+
 /** How long tile sizes settle before the grid acts on them (`VIEW_RESIZE_MS`). */
 const SIZES_SETTLE_MS = 150;
 

@@ -17,6 +17,8 @@ import {
   tileLookups,
   makeTileConfig,
   useVideoGridHarness,
+  viewButton,
+  viewMenuRow,
 } from "../../helpers/videoGridHarness";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
@@ -507,11 +509,10 @@ describe("VideoGrid", () => {
     const root = () =>
       document.querySelector<HTMLElement>("[data-testid='video-grid']") ??
       popup.doc.querySelector<HTMLElement>("[data-testid='video-grid']")!;
-    const popButton = () =>
-      root().querySelector<HTMLButtonElement>("[data-grid-control='popout']")!;
+    const popRow = () => viewMenuRow(root(), "popout")!;
+    const chatRow = () => viewMenuRow(root(), "chat");
     const barButton = (id: string) =>
       root().querySelector<HTMLButtonElement>(`.video-grid__controls [data-call-control='${id}']`)!;
-    const exit = () => root().querySelector<HTMLButtonElement>("[data-tile-control='exit-grid']")!;
 
     beforeEach(() => {
       localStorage.clear();
@@ -534,7 +535,7 @@ describe("VideoGrid", () => {
     function startCall() {
       const cc = controls();
       const onCallPopout = vi.fn();
-      grid.setCallbacks({ callControls: cc, onCallPopout });
+      grid.setCallbacks({ callControls: cc, onCallPopout, onExitGrid: vi.fn() });
       grid.setExitVisible(true);
       grid.addStream(OTTO, "Otto", fakeStream(), makeTileConfig({ audioUserId: OTTO }));
       return { cc, onCallPopout };
@@ -542,25 +543,25 @@ describe("VideoGrid", () => {
 
     it("offers Pop out only in the call view", () => {
       grid.setCallbacks({ callControls: controls() });
-      expect(container.querySelector("[data-grid-control='popout']")).toBeNull();
+      expect(container.querySelector("[data-grid-control='views']")).toBeNull();
       grid.setExitVisible(true);
-      expect(popButton().getAttribute("aria-label")).toBe("Pop out call");
-      expect(popButton().getAttribute("aria-pressed")).toBe("false");
+      expect(popRow().textContent).toBe("Pop out call");
     });
 
-    it("builds no Pop out button in the Android app, and the rest of the bar still works", () => {
+    it("offers no Pop out in the Android app, and the rest of the bar still works", () => {
       hostAndroidApp();
       try {
         const { cc } = startCall();
-        expect(container.querySelector("[data-grid-control='popout']")).toBeNull();
-        expect(root().querySelectorAll(".video-grid__views [data-view-toggle]")).toHaveLength(3);
-        expect(exit().hidden).toBe(false);
+        expect(viewMenuRow(root(), "popout")).toBeNull();
+        for (const key of ["nonVideo", "selfCamera", "strip", "chat"]) {
+          expect(viewMenuRow(root(), key)).not.toBeNull();
+        }
         // The state sync and a call-state change have no button to touch.
         grid.setCallState({ muted: true, deafened: false, listenOnly: false });
         barButton("mute").click();
         expect(cc.onMuteToggle).toHaveBeenCalledTimes(1);
         grid.setExitVisible(false);
-        expect(exit().hidden).toBe(true);
+        expect(root().querySelector("[data-grid-control='views']")).toBeNull();
         expect(open).not.toHaveBeenCalled();
       } finally {
         clearHost();
@@ -572,7 +573,7 @@ describe("VideoGrid", () => {
       const grid0 = root();
       const video = grid0.querySelector("video")!;
 
-      popButton().click();
+      popRow().click();
 
       expect(open).toHaveBeenCalledTimes(1);
       expect(String(open.mock.calls[0]![1])).toMatch(/^owncord-popout-\d+$/);
@@ -583,17 +584,18 @@ describe("VideoGrid", () => {
       expect(grid0.querySelector(".video-grid__views")).not.toBeNull();
       expect(grid0.querySelector(".video-grid__controls")).not.toBeNull();
       expect(onCallPopout).toHaveBeenCalledWith(true, false);
-      expect(popButton().getAttribute("aria-pressed")).toBe("true");
-      expect(popButton().getAttribute("aria-label")).toBe("Bring the call back");
-      // No Show chat in the window (the app window shows the chat), and no
-      // camera picker (its menu opens in the app window).
-      expect(exit().hidden).toBe(true);
+      // The View menu opens in the window, with Bring back and without Show
+      // chat (the app window shows the chat); no camera picker (its menu
+      // opens in the app window).
+      expect(popRow().textContent).toBe("Bring the call back");
+      expect(popRow().ownerDocument).toBe(popup.doc);
+      expect(chatRow()).toBeNull();
       expect(barButton("camera-device").style.display).toBe("none");
     });
 
     it("keeps the call controls working in the pop-out", () => {
       const { cc } = startCall();
-      popButton().click();
+      popRow().click();
 
       barButton("mute").click();
       barButton("leave").click();
@@ -606,7 +608,7 @@ describe("VideoGrid", () => {
 
     it("brings the call back to the app window before a share picker opens there", () => {
       const { cc, onCallPopout } = startCall();
-      popButton().click();
+      popRow().click();
       const grid0 = root();
 
       barButton("share").click();
@@ -619,7 +621,7 @@ describe("VideoGrid", () => {
     it("stops a share from the pop-out without leaving it", () => {
       const { cc } = startCall();
       grid.setCallState({ muted: false, deafened: false, listenOnly: false, screenshare: true });
-      popButton().click();
+      popRow().click();
 
       barButton("share").click();
 
@@ -629,24 +631,41 @@ describe("VideoGrid", () => {
 
     it("brings the grid back to the app window with Bring back", () => {
       const { onCallPopout } = startCall();
-      popButton().click();
+      popRow().click();
       const grid0 = root();
 
-      popButton().click();
+      popRow().click();
 
       expect(popup.win.close).toHaveBeenCalled();
       expect(container.contains(grid0)).toBe(true);
       expect(grid0.querySelector(".video-grid__controls")).not.toBeNull();
       expect(onCallPopout).toHaveBeenLastCalledWith(false, true);
-      expect(popButton().getAttribute("aria-pressed")).toBe("false");
-      expect(exit().hidden).toBe(false);
       expect(barButton("camera-device").style.display).toBe("");
-      expect(document.activeElement).toBe(popButton());
+      expect(document.activeElement).toBe(viewButton(root()));
+      expect(popRow().textContent).toBe("Pop out call");
+      expect(chatRow()).not.toBeNull();
+    });
+
+    it("closes a View menu open in the window when the user closes the window", () => {
+      startCall();
+      popRow().click();
+      const btn = viewButton(root());
+      btn.click();
+      expect(btn.getAttribute("aria-expanded")).toBe("true");
+      expect(popup.doc.querySelector(".context-menu")).not.toBeNull();
+
+      popup.win.closed = true;
+      vi.advanceTimersByTime(300);
+
+      expect(container.contains(btn)).toBe(true);
+      expect(btn.getAttribute("aria-expanded")).toBe("false");
+      expect(popup.doc.querySelector(".context-menu")).toBeNull();
+      expect(document.querySelector(".context-menu")).toBeNull();
     });
 
     it("brings the grid back when the user closes the window", () => {
       const { onCallPopout } = startCall();
-      popButton().click();
+      popRow().click();
       const grid0 = root();
 
       popup.win.closed = true;
@@ -658,7 +677,7 @@ describe("VideoGrid", () => {
 
     it("closes the window without restoring when the call view ends", () => {
       const { onCallPopout } = startCall();
-      popButton().click();
+      popRow().click();
       const grid0 = root();
 
       grid.setExitVisible(false);
@@ -671,7 +690,7 @@ describe("VideoGrid", () => {
 
     it("closes the window when the grid is torn down", () => {
       startCall();
-      popButton().click();
+      popRow().click();
       grid.destroy?.();
       expect(popup.win.close).toHaveBeenCalled();
     });
@@ -679,18 +698,18 @@ describe("VideoGrid", () => {
     it("stays in the app window, with a toast, when no window opens", () => {
       vi.stubGlobal("open", () => null);
       const { onCallPopout } = startCall();
-      popButton().click();
+      popRow().click();
       expectConsole("warn", "Call pop out window refused");
       expect(mockShowToast).toHaveBeenCalledWith("Couldn't open the pop-out window", "error");
       expect(container.querySelector("[data-testid='video-grid']")).not.toBeNull();
       expect(onCallPopout).not.toHaveBeenCalled();
-      expect(popButton().getAttribute("aria-pressed")).toBe("false");
+      expect(popRow().textContent).toBe("Pop out call");
     });
 
     it("raises the window rather than moving the call back", () => {
       startCall();
       expect(grid.raiseCallPopout()).toBe(false);
-      popButton().click();
+      popRow().click();
       expect(grid.raiseCallPopout()).toBe(true);
       expect(focusWindow).toHaveBeenCalledTimes(1);
       expect(popup.doc.body.contains(root())).toBe(true);
@@ -703,7 +722,7 @@ describe("VideoGrid", () => {
       });
       grid.setExitVisible(true);
       grid.addStream(OTTO, "Otto", fakeStream(), makeTileConfig({ audioUserId: OTTO }));
-      popButton().click();
+      popRow().click();
 
       root()
         .querySelector(`.video-cell[data-user-id='${OTTO}']`)!
@@ -722,7 +741,7 @@ describe("VideoGrid", () => {
       grid.setCallbacks({ callControls: controls(), setWindowFullscreen });
       grid.setExitVisible(true);
       grid.addStream(OTTO, "Otto", fakeStream(), makeTileConfig({ audioUserId: OTTO }));
-      popButton().click();
+      popRow().click();
       const label = String(open.mock.calls[0]![1]);
       const tile = root().querySelector(`.video-cell[data-user-id='${OTTO}']`)!;
 

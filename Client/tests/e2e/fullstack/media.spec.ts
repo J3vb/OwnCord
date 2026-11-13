@@ -215,7 +215,8 @@ test("a remote camera sends no video while the grid is closed, and resumes when 
   expect(closed).toBeLessThan(shown / 10);
 
   // Back to the chat: the video stops again, and comes back on the next watch.
-  await alice.locator("[data-tile-control='exit-grid']").click();
+  await alice.locator("[data-grid-control='views']").click();
+  await alice.getByTestId("view-menu-chat").click();
   await expect(gridSlot).toBeHidden();
   await alice.waitForTimeout(1_500);
   expect(await videoBytesOver(alice, 3_000)).toBeLessThan(shown / 10);
@@ -300,7 +301,8 @@ test("starting and stopping a screen share publishes a labelled screenshare tile
   await expect(selfScreen).toHaveAttribute("data-stream-type", "screenshare");
   await expect(selfScreen.locator(".video-username")).toHaveText("alice (Screen)");
   // Back to the chat before stopping, so the stop below closes nothing itself.
-  await alice.locator("[data-tile-control='exit-grid']").click();
+  await alice.locator("[data-grid-control='views']").click();
+  await alice.getByTestId("view-menu-chat").click();
   expect(
     outbound.some((f) => f.type === "voice_screenshare" && f.payload?.enabled === true),
     "starting a share must announce voice_screenshare(enabled: true)",

@@ -118,6 +118,7 @@ release changes the database, and anything an operator must do first.)
 **Voice**
 
 - Enhanced Noise Suppression has a new switch, "Let more soft speech through", in Settings > Voice & Video. It is on by default, so a soft "hmm" or "yes" gets through. Turn it off if coughs or other short sounds get through too often; soft words are then cut off a little more often. The Linux desktop app does not have it: its gate works differently.
+- A call with no camera or screen share on shows one small card per person instead of large empty tiles, and on desktop the five small view buttons are now one View menu.
 
 **Server**
 

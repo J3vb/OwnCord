@@ -4,7 +4,12 @@ import type {
   GridPerson,
   VideoGridComponent,
 } from "../../../src/features/voice/videoGrid/VideoGrid";
-import { fakeStream, makeTileConfig, useVideoGridHarness } from "../../helpers/videoGridHarness";
+import {
+  fakeStream,
+  makeTileConfig,
+  useVideoGridHarness,
+  viewMenuRow,
+} from "../../helpers/videoGridHarness";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -37,7 +42,7 @@ describe("VideoGrid participant strip", () => {
   const people = (n: number, from = 10): GridPerson[] =>
     Array.from({ length: n }, (_, i) => person(from + i));
   const flip = (key: string): void => {
-    root().querySelector<HTMLButtonElement>(`[data-view-toggle='${key}']`)!.click();
+    viewMenuRow(root(), key)!.click();
     vi.advanceTimersByTime(50);
   };
   const focusTile = (id: number): void =>
@@ -85,7 +90,7 @@ describe("VideoGrid participant strip", () => {
     expect(px(bar, "top") + px(bar, "height")).toBe(1080);
   });
 
-  it("brings the people back to the main area, packed, when the last camera ends", () => {
+  it("brings the people back to the main area as cards when the last camera ends", () => {
     grid.setPeople(people(2));
     addCamera(2);
     vi.advanceTimersByTime(50);
@@ -97,9 +102,10 @@ describe("VideoGrid participant strip", () => {
 
     expect(strip()).toBeNull();
     expect(avatar(10)).toBe(before);
-    expect(avatar(10).parentElement).toBe(root());
-    expect(root().classList.contains("video-grid--packed")).toBe(true);
-    expect(px(avatar(10), "width")).toBeGreaterThan(0);
+    expect(avatar(10).parentElement).toBe(root().querySelector(".video-grid__cards"));
+    expect(root().classList.contains("video-grid--packed")).toBe(false);
+    expect(root().classList.contains("video-grid--cards")).toBe(true);
+    for (const prop of PLACE) expect(avatar(10).style[prop]).toBe("");
     expect(document.activeElement).toBe(avatar(10).querySelector("button"));
   });
 
@@ -193,7 +199,7 @@ describe("VideoGrid participant strip", () => {
     addCamera(2);
     addCamera(3);
     vi.advanceTimersByTime(50);
-    expect(root().querySelector<HTMLElement>("[data-view-toggle='strip']")!.hidden).toBe(false);
+    expect(viewMenuRow(root(), "strip")).not.toBeNull();
     expect(strip()!.hidden).toBe(false);
 
     flip("strip");
@@ -210,13 +216,14 @@ describe("VideoGrid participant strip", () => {
     expect(strip()!.hidden).toBe(false);
   });
 
-  it("leaves the people as tiles when no video is up, whatever the strip toggle says", () => {
+  it("leaves the people as cards when no video is up, whatever the strip toggle says", () => {
     grid.setExitVisible(true);
     grid.setPeople(people(2));
     flip("strip");
     expect(avatar(10).hidden).toBe(false);
-    expect(avatar(10).parentElement).toBe(root());
-    expect(px(avatar(10), "width")).toBeGreaterThan(0);
+    expect(avatar(10).parentElement).toBe(root().querySelector(".video-grid__cards"));
+    expect(root().classList.contains("video-grid--cards")).toBe(true);
+    expect(strip()).toBeNull();
   });
 
   it("hides the people for good with Show non-video participants, strip on or off", () => {

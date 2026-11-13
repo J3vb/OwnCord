@@ -19,10 +19,9 @@
   container-type: inline-size;
 }
 
-/* The call view's own controls (view toggles, pop-out, show chat) sit bottom
-   right, beside the control bar, as Discord's do, so they never cover a
-   tile's name or its own top-right nav. Show chat stays reachable when the
-   focus layout has scrolled the focused tile's nav off. */
+/* The call view's View button (its menu holds the view toggles, pop-out and
+   show chat) sits bottom right, beside the control bar, so it never covers a
+   tile's name or its own top-right nav. */
 .video-grid__views {
   position: absolute;
   right: 12px;
@@ -31,32 +30,22 @@
   display: flex;
   gap: 4px;
 }
-.video-grid__exit,
-.video-grid__view {
+.video-grid__view-menu {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 32px;
+  gap: 6px;
   height: 32px;
-  padding: 0;
-  border: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
-  background: var(--scrim);
-  color: var(--on-fill);
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
   cursor: pointer;
 }
-
-.video-grid__exit:hover,
-.video-grid__view:hover {
-  background: var(--scrim-hover);
-}
-
-.video-grid__exit[hidden],
-.video-grid__view[hidden] {
-  display: none;
-}
-.video-grid__view[aria-pressed="false"] {
-  opacity: 0.55;
+.video-grid__view-menu:hover,
+.video-grid__view-menu[aria-expanded="true"] {
+  background: var(--bg-tertiary);
 }
 /* Room below the tiles for the call view's control bar.
    Too narrow for both in one row (VIEWS_ABOVE_PX in gridShared.ts), the
@@ -88,12 +77,44 @@
     transition: none;
   }
 }
-/* With the tiles out of the flow, the exit control keeps its corner. */
-.video-grid--packed > .video-grid__exit {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 5;
+/* No camera or screen share on show: one compact card per person, side by
+   side and centred, wrapping onto more rows. The box scrolls on its own, so
+   the control bar and the View button stay put and the last row stays above
+   the bar (the grid's bottom padding is the bar's room). */
+.video-grid__cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-content: safe center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  overflow-y: auto;
+  container-type: inline-size;
+}
+.video-grid__cards > .video-cell--avatar {
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 12px;
+  width: clamp(140px, 30cqi, 220px);
+  aspect-ratio: 10 / 9;
+  padding: 12px;
+  border: 1px solid var(--border);
+}
+.video-grid__cards .dcp-avatar--lg {
+  width: min(88px, 60%);
+}
+.video-grid__cards .video-username {
+  position: static;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  background: none;
+  color: var(--text-normal);
+  text-shadow: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .video-grid .video-cell.video-cell--no-room {
   display: none;
@@ -858,14 +879,6 @@ video[hidden] + .video-surface {
      CALL_BAR_SPACE_PHONE). */
   .video-grid--call {
     padding-bottom: 112px;
-  }
-  .video-grid__exit,
-  .video-grid__view {
-    width: 44px;
-    height: 44px;
-  }
-  .video-grid--call .video-grid__exit {
-    display: none;
   }
   .video-tile-btn {
     min-width: 44px;
