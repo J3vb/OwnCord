@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net"
@@ -89,14 +90,21 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	getOnlineUsers = func() int { return hub.UserCount() }
 	hubAlive = func() bool { return hub.DispatchAlive() }
 
+	bgCtx, cancelBg := context.WithCancel(context.Background())
 	d := newRouteDeps(cfg, database, ver, logBuf, pluginRegistry, rt, slowRoutes)
+	d.bgCtx = bgCtx
 	for _, g := range routeGroups {
 		g.mount(r, d)
 	}
 
 	warnOnServerConfig(cfg)
 
-	return r, func() {}
+	return r, func() {
+		cancelBg()
+		if d.portalReady != nil {
+			<-d.portalReady
+		}
+	}
 }
 
 // routerMiddleware installs the global middleware stack. The order is a security property (request-id
