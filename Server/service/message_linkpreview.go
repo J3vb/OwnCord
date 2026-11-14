@@ -1,10 +1,12 @@
 package service
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/linkpreview"
@@ -28,13 +30,26 @@ func (s *MessageService) SetLinkPreviews(r linkPreviewReader) { s.previews = r }
 // queue it backfills old messages through; nil leaves link previews to what is already stored.
 func (s *MessageService) SetLinkUnfurler(u linkpreview.Unfurler) { s.unfurler = u }
 
-// enqueueUnfurl hands a committed message to the unfurl queue. It never waits and never fails
-// the send: the queue drops the job when full.
-func (s *MessageService) enqueueUnfurl(job linkpreview.Job) {
-	if s.unfurler == nil {
+// newLinkJob builds the unfurl job of a committed message, or nil when its text names no link
+// worth a fetch, so the caller carries nothing for the common message. An edit always carries
+// one: it must clear the cards of a link the author removed.
+func newLinkJob(msgID, channelID, authorID int64, content, version string, edited bool) *linkpreview.Job {
+	if !edited && len(linkpreview.Links(content)) == 0 {
+		return nil
+	}
+	return &linkpreview.Job{
+		MessageID: msgID, ChannelID: channelID, AuthorID: authorID, Content: content, Version: version, Edited: edited,
+	}
+}
+
+// QueueLinkPreviews hands a committed message's job to the unfurl queue. Callers run it after
+// the message's own events are emitted, so a preview that is ready at once is sequenced behind
+// the message. It never waits and never fails the send: the queue drops the job when full.
+func (s *MessageService) QueueLinkPreviews(job *linkpreview.Job) {
+	if s.unfurler == nil || job == nil {
 		return
 	}
-	s.unfurler.Enqueue(job)
+	s.unfurler.Enqueue(*job)
 }
 
 // LinkPreviewAudience is who hears a link preview update for a message in channelID: whether
@@ -120,7 +135,7 @@ func (s *messageReads) attachLinkPreviews(ctx context.Context, msgs []db.Message
 				shownImages = append(shownImages, *r.ImageHash)
 			}
 		}
-		if len(own) < len(set) {
+		if len(own) < len(set) || hasStaleFailure(own, time.Now()) {
 			backfill = append(backfill, backfillJob(m))
 		}
 	}
@@ -129,8 +144,30 @@ func (s *messageReads) attachLinkPreviews(ctx context.Context, msgs []db.Message
 	}
 	s.unfurler.NoteShown(shownCards, shownImages)
 	if len(backfill) > 0 {
-		slices.SortFunc(backfill, func(a, b linkpreview.Job) int { return int(b.MessageID - a.MessageID) })
+		slices.SortFunc(backfill, func(a, b linkpreview.Job) int { return cmp.Compare(b.MessageID, a.MessageID) })
 		s.unfurler.EnqueueBackfill(backfill[:min(len(backfill), backfillPerPage)])
+	}
+}
+
+// hasStaleFailure reports whether a message's only record of a link is a failed fetch old
+// enough to be tried again.
+func hasStaleFailure(rows []linkpreview.Card, now time.Time) bool {
+	for i := range rows {
+		if rows[i].Failure == nil {
+			continue
+		}
+		fetched, err := time.Parse(time.RFC3339, rows[i].FetchedAt)
+		if err != nil || now.Sub(fetched) >= linkpreview.FailureReuse {
+			return true
+		}
+	}
+	return false
+}
+
+// NoteLinkImageShown records that a thumbnail was just served, for the batched last-used update.
+func (s *MessageService) NoteLinkImageShown(hash string) {
+	if s.unfurler != nil {
+		s.unfurler.NoteShown(nil, []string{hash})
 	}
 }
 

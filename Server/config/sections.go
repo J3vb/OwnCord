@@ -20,6 +20,7 @@ type LinkPreviewsConfig struct {
 	// ThumbnailCacheMB caps the thumbnails kept on disk, oldest-used first out. 0 keeps no thumbnails.
 	ThumbnailCacheMB int `yaml:"thumbnail_cache_mb"`
 	// ThumbnailUnusedDays drops a thumbnail nothing has shown for this many days, whatever the cap says.
+	// Link cards no message names are pruned on the same clock, but never within seven days of use.
 	ThumbnailUnusedDays int `yaml:"thumbnail_unused_days"`
 }
 

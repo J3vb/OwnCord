@@ -297,11 +297,11 @@ never ships in the desktop bundle — the client only ever calls
 
 The server fetches a link in a new message once and keeps the card text in the database and a shrunk thumbnail on disk under `<data_dir>/link-previews/`. Thumbnails are stored by content hash, so the same image is kept once.
 
-| Key                                   | Type | Default | Description                                                                                                                                                                                    |
-| ------------------------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `link_previews.enabled`               | bool | `true`  | Fetch links in new messages and keep their previews. `false` stops fetching only; stored previews stay and the thumbnail sweep still runs, so turning it off reclaims disk down to the cap.    |
-| `link_previews.thumbnail_cache_mb`    | int  | `512`   | Cap on the thumbnails kept on disk. When it is passed, the thumbnails shown longest ago are deleted first. `0` keeps no thumbnails. A negative value falls back to the default with a warning. |
-| `link_previews.thumbnail_unused_days` | int  | `30`    | A thumbnail nothing has shown for this many days is deleted, whatever the cap says. Range 1 to 3650.                                                                                           |
+| Key                                   | Type | Default | Description                                                                                                                                                                                          |
+| ------------------------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `link_previews.enabled`               | bool | `true`  | Fetch links in new messages and keep their previews. `false` stops fetching only; stored previews stay and the thumbnail sweep still runs, so turning it off reclaims disk down to the cap.          |
+| `link_previews.thumbnail_cache_mb`    | int  | `512`   | Cap on the thumbnails kept on disk. When it is passed, the thumbnails shown longest ago are deleted first. `0` keeps no thumbnails. A negative value falls back to the default with a warning.       |
+| `link_previews.thumbnail_unused_days` | int  | `30`    | A thumbnail nothing has shown for this many days is deleted, whatever the cap says. Cards no message names are pruned on the same clock, but never within 7 days of their last use. Range 1 to 3650. |
 
 ### Logging (`logging`)
 

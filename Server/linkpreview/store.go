@@ -19,6 +19,12 @@ import (
 const DirName = "link-previews"
 
 const (
+	// CardReuse is how long a fetched card is reused before its page is fetched again, and the
+	// least time a card nothing names is kept.
+	CardReuse = 7 * 24 * time.Hour
+	// FailureReuse is how long a failed fetch is remembered.
+	FailureReuse = time.Hour
+
 	hashLen = 64
 	// tempPrefix starts the name of a thumbnail being written; Sweep removes one older than tempMaxAge.
 	tempPrefix = ".tmp-"
@@ -307,6 +313,15 @@ func (s *Store) PutPreview(ctx context.Context, p Preview) error {
 	return nil
 }
 
+// KeepCard rewrites a card as it is, with its thumbnail reference, to change only when it was
+// fetched. It is how a failed refresh leaves the old card in place.
+func (s *Store) KeepCard(ctx context.Context, p Preview) error {
+	if err := s.db.UpsertLinkPreview(ctx, p); err != nil {
+		return fmt.Errorf("keeping link preview: %w", err)
+	}
+	return nil
+}
+
 // Touch records that a card and its thumbnail were just shown.
 func (s *Store) Touch(ctx context.Context, urlHash string, imageHash *string) error {
 	stamp := FormatTime(s.now())
@@ -364,9 +379,12 @@ func (s *Store) TouchMany(ctx context.Context, urlHashes, imageHashes []string) 
 	return nil
 }
 
-// PruneCards removes the cards no message names that were last used before cutoff, and
-// returns how many it removed. A thumbnail they named is left to Sweep.
+// PruneCards removes the cards no message names that were last used more than unusedFor ago,
+// and returns how many it removed. A card is never removed within CardReuse of its last use,
+// whatever unusedFor says, so a link posted again inside the reuse window still finds its card.
+// A thumbnail they named is left to Sweep.
 func (s *Store) PruneCards(ctx context.Context, unusedFor time.Duration) (int64, error) {
+	unusedFor = max(unusedFor, CardReuse)
 	n, err := s.db.DeleteUnreferencedLinkPreviews(ctx, FormatTime(s.now().Add(-unusedFor)))
 	if err != nil {
 		return 0, fmt.Errorf("pruning link preview cards: %w", err)

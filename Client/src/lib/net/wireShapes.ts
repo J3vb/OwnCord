@@ -107,7 +107,7 @@ export const SHAPES: readonly Shape[] = [
   [2,["hash","width","height"],[0,1,1]],
   [2,["url"],[0],["title","description","site_name","image"],[0,0,0,79]],
   [0,80],
-  [2,["message_id","channel_id","link_previews"],[1,1,81]],
+  [2,["message_id","channel_id","content_version","link_previews"],[1,1,0,81]],
   [2,["message_id","version","answer_ids"],[1,1,5]],
   [2,["message_id"],[1]],
   [2,["channel_id","user_id","username"],[1,1,0]],

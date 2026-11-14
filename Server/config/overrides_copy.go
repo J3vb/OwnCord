@@ -94,7 +94,7 @@ var settingCopy = map[string]SettingCopy{
 	"link_previews.thumbnail_unused_days": sc("Link preview thumbnail lifetime (days)",
 		"How long a thumbnail nobody has viewed is kept.",
 		"30 (default).",
-		"After this a thumbnail is deleted even if the space limit is not reached."),
+		"After this a thumbnail is deleted even if the space limit is not reached. Unused link cards are removed on the same schedule, but never within 7 days of use."),
 	"moderation.action_retention_days": sc("Warning and timeout history (days)",
 		"How long old warnings and timeouts are kept before being retired.",
 		"90 (default). 0 keeps them forever.",

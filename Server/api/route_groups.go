@@ -64,14 +64,14 @@ var routeGroups = []routeGroup{
 	{"externalContent", func(r chi.Router, d *routeDeps) {
 		mountExternalContent(r, d.cfg, d.svc.Sessions, d.limiter)
 	}},
-	// Mounted unconditionally; with push.enabled false every route answers 503 PUSH_DISABLED after
-	// authentication.
 	// Needs the shared link preview store; without it the thumbnail route is not mounted.
 	{"linkPreviews", func(r chi.Router, d *routeDeps) {
 		if d.rt.LinkPreviews != nil {
-			MountLinkPreviewImageRoute(r, d.svc.Sessions, d.limiter, d.cfg.Server.TrustedProxies, d.rt.LinkPreviews)
+			MountLinkPreviewImageRoute(r, d.svc.Sessions, d.limiter, d.cfg.Server.TrustedProxies, d.rt.LinkPreviews, d.svc.Messages.NoteLinkImageShown)
 		}
 	}},
+	// Mounted unconditionally; with push.enabled false every route answers 503 PUSH_DISABLED after
+	// authentication.
 	{"push", func(r chi.Router, d *routeDeps) {
 		MountPushRoutes(r, d.svc.Sessions, d.svc.Push, d.cfg.Push.Enabled)
 	}},

@@ -7,12 +7,12 @@ package unfurl
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/linkwire"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -33,7 +33,10 @@ type Ready struct {
 	MessageID int64
 	ChannelID int64
 	AuthorID  int64
-	Cards     []linkwire.Card
+	// Version is the content version the cards were built for: the message's edited_at, else
+	// its timestamp.
+	Version string
+	Cards   []linkwire.Card
 }
 
 // Announcer tells the readers of a message's channel that its cards changed.
@@ -45,7 +48,6 @@ type Announcer interface {
 type Options struct {
 	// Enabled is link_previews.enabled: false queues nothing.
 	Enabled bool
-	// Workers is the size of the pool.
 	Workers int
 	// QueueSize and BackfillSize bound the live and the backfill queues.
 	QueueSize    int
@@ -54,8 +56,7 @@ type Options struct {
 	ThumbCapBytes int64
 	// LinksPerMinute caps the links one author has fetched per minute.
 	LinksPerMinute int
-	// Now is the clock; tests set it.
-	Now func() time.Time
+	Now            func() time.Time
 	// Log receives the worker's lines; nil uses slog.Default.
 	Log *slog.Logger
 }
@@ -75,6 +76,12 @@ type Unfurler struct {
 	flight singleflight.Group
 	limit  *userLimit
 	shown  shownSet
+
+	// pending holds the jobs queued or running, so a message sent for unfurling twice at the
+	// same version (a history page read while its first job is still queued) runs once.
+	// A leaf lock.
+	pendingMu syncutil.Mutex
+	pending   map[pendingKey]struct{}
 
 	dropped     atomic.Uint64
 	rateLimited atomic.Uint64
@@ -107,9 +114,10 @@ func New(store *linkpreview.Store, src Source, ann Announcer, opt Options) *Unfu
 	}
 	return &Unfurler{
 		opt: opt, store: store, src: src, ann: ann, log: log, now: now,
-		live:  make(chan linkpreview.Job, opt.QueueSize),
-		low:   make(chan linkpreview.Job, opt.BackfillSize),
-		limit: newUserLimit(opt.LinksPerMinute, time.Minute, now),
+		live:    make(chan linkpreview.Job, opt.QueueSize),
+		low:     make(chan linkpreview.Job, opt.BackfillSize),
+		limit:   newUserLimit(opt.LinksPerMinute, time.Minute, now),
+		pending: make(map[pendingKey]struct{}),
 	}
 }
 
@@ -117,16 +125,28 @@ func New(store *linkpreview.Store, src Source, ann Announcer, opt Options) *Unfu
 // waits for them. Cancel ctx to stop them; the returned function gives up waiting when its
 // own context ends, and reports whether every goroutine had exited by then.
 func (u *Unfurler) Start(ctx context.Context) (wait func(context.Context) bool) {
-	var wg sync.WaitGroup
-	for range u.opt.Workers {
-		wg.Go(func() { u.worker(ctx) })
-	}
-	wg.Go(func() { u.runShown(ctx) })
 	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		wg.Wait()
-	}()
+	var running atomic.Int64
+	spawn := func(run func(context.Context)) {
+		running.Add(1)
+		go func() {
+			defer func() {
+				if running.Add(-1) == 0 {
+					close(done)
+				}
+			}()
+			run(ctx)
+		}()
+	}
+	// Held across the spawns so done cannot close before the last goroutine starts.
+	running.Add(1)
+	for range u.opt.Workers {
+		spawn(u.worker)
+	}
+	spawn(u.runShown)
+	if running.Add(-1) == 0 {
+		close(done)
+	}
 	return func(waitCtx context.Context) bool {
 		select {
 		case <-done:
@@ -137,13 +157,13 @@ func (u *Unfurler) Start(ctx context.Context) (wait func(context.Context) bool) 
 	}
 }
 
-// Dropped counts jobs refused because a queue was full.
+// Dropped counts jobs a full queue refused.
 func (u *Unfurler) Dropped() uint64 { return u.dropped.Load() }
 
 // RateLimited counts jobs refused because their author was over the per-minute link cap.
 func (u *Unfurler) RateLimited() uint64 { return u.rateLimited.Load() }
 
-// Processed counts jobs a worker ran to the end.
+// Processed counts jobs run to the end.
 func (u *Unfurler) Processed() uint64 { return u.processed.Load() }
 
 // Enqueue implements linkpreview.Unfurler. A message with no links is skipped unless it was
@@ -152,20 +172,15 @@ func (u *Unfurler) Enqueue(job linkpreview.Job) {
 	if !u.opt.Enabled {
 		return
 	}
-	n := len(linkpreview.Links(job.Content))
-	if n == 0 && !job.Edited {
-		return
-	}
-	if n > 0 && !u.limit.allow(job.AuthorID, n) {
-		u.rateLimited.Add(1)
-		u.log.Debug("link preview job skipped: author over the link cap", "user_id", job.AuthorID, "message_id", job.MessageID)
+	if len(linkpreview.Links(job.Content)) == 0 && !job.Edited {
 		return
 	}
 	u.offer(u.live, job)
 }
 
-// EnqueueBackfill implements linkpreview.Unfurler. Backfill is not charged to an author: the
-// messages are old, and the small queue and the broker's fetch slots bound the load.
+// EnqueueBackfill implements linkpreview.Unfurler. The fetches a backfill job makes are charged
+// to the message's author like any other, so reading history cannot spend more of a site's
+// patience than the author could by posting.
 func (u *Unfurler) EnqueueBackfill(jobs []linkpreview.Job) int {
 	if !u.opt.Enabled {
 		return 0
@@ -179,12 +194,42 @@ func (u *Unfurler) EnqueueBackfill(jobs []linkpreview.Job) int {
 	return accepted
 }
 
-// offer queues a job without blocking and counts it dropped when the queue is full.
+// pendingKey includes the text because the version has one-second resolution.
+type pendingKey struct {
+	messageID int64
+	version   string
+	content   string
+}
+
+// claim marks a job pending; false when it already is.
+func (u *Unfurler) claim(job linkpreview.Job) bool {
+	k := pendingKey{job.MessageID, job.Version, job.Content}
+	u.pendingMu.Lock()
+	defer u.pendingMu.Unlock()
+	if _, ok := u.pending[k]; ok {
+		return false
+	}
+	u.pending[k] = struct{}{}
+	return true
+}
+
+func (u *Unfurler) release(job linkpreview.Job) {
+	u.pendingMu.Lock()
+	delete(u.pending, pendingKey{job.MessageID, job.Version, job.Content})
+	u.pendingMu.Unlock()
+}
+
+// offer queues a job without blocking and counts it dropped when the queue is full. A job for
+// a message and version already pending is not queued again, and is not counted as dropped.
 func (u *Unfurler) offer(q chan linkpreview.Job, job linkpreview.Job) bool {
+	if !u.claim(job) {
+		return false
+	}
 	select {
 	case q <- job:
 		return true
 	default:
+		u.release(job)
 		if n := u.dropped.Add(1); n%dropLogEvery == 1 {
 			u.log.Warn("link preview queue full; job dropped", "dropped_total", n, "message_id", job.MessageID)
 		}
@@ -192,7 +237,7 @@ func (u *Unfurler) offer(q chan linkpreview.Job, job linkpreview.Job) bool {
 	}
 }
 
-// worker runs jobs until ctx ends, taking a live job before a backfill one.
+// worker runs jobs until ctx ends, live before backfill.
 func (u *Unfurler) worker(ctx context.Context) {
 	for {
 		select {
@@ -218,6 +263,7 @@ func (u *Unfurler) worker(ctx context.Context) {
 func (u *Unfurler) run(ctx context.Context, job linkpreview.Job) {
 	ctx, cancel := context.WithTimeout(ctx, jobTimeout)
 	defer cancel()
+	defer u.release(job)
 	defer func() {
 		if r := recover(); r != nil {
 			u.log.Error("link preview job panicked", "message_id", job.MessageID, "panic", r)

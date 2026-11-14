@@ -13,7 +13,10 @@ type LinkPreviewUpdate struct {
 	ChannelID      int64
 	IsDM           bool
 	ParticipantIDs []int64
-	Cards          []linkwire.Card
+	// Version is the message's content version (edited_at, else timestamp) the cards were
+	// built for; a client keeps the frame with the newest.
+	Version string
+	Cards   []linkwire.Card
 }
 
 // messageLinkPreviewsPayload is the message_link_previews frame. link_previews is always an
@@ -21,6 +24,7 @@ type LinkPreviewUpdate struct {
 type messageLinkPreviewsPayload struct {
 	MessageID    int64           `json:"message_id"`
 	ChannelID    int64           `json:"channel_id"`
+	Version      string          `json:"content_version"`
 	LinkPreviews []linkwire.Card `json:"link_previews"`
 }
 
@@ -31,7 +35,7 @@ func buildMessageLinkPreviews(u LinkPreviewUpdate) []byte {
 	}
 	return buildJSON(wsMsg{
 		Type:    MsgTypeMessageLinkPreviews,
-		Payload: messageLinkPreviewsPayload{MessageID: u.MessageID, ChannelID: u.ChannelID, LinkPreviews: cards},
+		Payload: messageLinkPreviewsPayload{MessageID: u.MessageID, ChannelID: u.ChannelID, Version: u.Version, LinkPreviews: cards},
 	})
 }
 

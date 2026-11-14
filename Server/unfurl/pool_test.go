@@ -56,19 +56,61 @@ func TestEnqueue_FullQueueDropsAndCounts(t *testing.T) {
 	}
 }
 
-func TestEnqueue_PerAuthorLinkCap(t *testing.T) {
+// A fetch is charged to the author; a stored link and a dropped job cost nothing, and another
+// author has their own allowance.
+func TestProcess_PerAuthorLinkCapChargesFetchesOnly(t *testing.T) {
 	f := newFixture(t, Options{Enabled: true, LinksPerMinute: 3})
-	two := "https://a.example/ https://b.example/"
-	f.u.Enqueue(linkpreview.Job{MessageID: 1, AuthorID: 7, Content: two})
-	f.u.Enqueue(linkpreview.Job{MessageID: 2, AuthorID: 7, Content: two}) // 4 links in the minute: refused
-	f.u.Enqueue(linkpreview.Job{MessageID: 3, AuthorID: 8, Content: two}) // another author has their own
-	if len(f.u.live) != 2 || f.u.RateLimited() != 1 {
-		t.Fatalf("queued %d, limited %d; want 2 and 1", len(f.u.live), f.u.RateLimited())
+	for _, u := range []string{"https://a.example/", "https://b.example/", "https://c.example/"} {
+		f.src.pages[u] = Page{Title: new("T")}
+	}
+	two := f.message("https://a.example/ https://b.example/")
+	f.u.process(t.Context(), two)
+	if len(f.ann.all()) != 1 {
+		t.Fatalf("first message announced %d times, want 1", len(f.ann.all()))
+	}
+	// Both links are stored: this message costs nothing however many times it is read.
+	f.u.process(t.Context(), f.message("https://a.example/ https://b.example/"))
+	if f.u.RateLimited() != 0 {
+		t.Errorf("cached links were charged: limited %d", f.u.RateLimited())
+	}
+	over := f.message("https://c.example/ https://d.example/") // 2 more fetches, 1 left
+	f.src.pages["https://d.example/"] = Page{Title: new("D")}
+	f.u.process(t.Context(), over)
+	if f.u.RateLimited() != 1 || f.src.count("https://d.example/") != 0 {
+		t.Fatalf("limited %d, d fetched %d; want 1 and 0", f.u.RateLimited(), f.src.count("https://d.example/"))
+	}
+	other := f.message("https://d.example/")
+	other.AuthorID = f.userID + 100
+	f.u.process(t.Context(), other)
+	if f.src.count("https://d.example/") != 1 {
+		t.Error("another author shares the first author's allowance")
 	}
 	f.clock.advance(61 * time.Second)
-	f.u.Enqueue(linkpreview.Job{MessageID: 4, AuthorID: 7, Content: two})
-	if len(f.u.live) != 3 {
-		t.Errorf("queued %d after the window, want 3", len(f.u.live))
+	f.u.process(t.Context(), over)
+	if f.src.count("https://d.example/") != 1 {
+		t.Errorf("after the window d fetches = %d, want the stored card reused", f.src.count("https://d.example/"))
+	}
+}
+
+func TestEnqueue_DropsRepeatsOfAPendingMessageVersion(t *testing.T) {
+	f := newFixture(t, Options{Enabled: true, QueueSize: 8})
+	job := f.message(pageURL)
+	f.u.Enqueue(job)
+	f.u.Enqueue(job)
+	f.u.EnqueueBackfill([]linkpreview.Job{job})
+	if len(f.u.live) != 1 || len(f.u.low) != 0 || f.u.Dropped() != 0 {
+		t.Fatalf("queued %d/%d, dropped %d; want 1/0/0", len(f.u.live), len(f.u.low), f.u.Dropped())
+	}
+	edited := f.edit(job.MessageID, "now "+pageURL)
+	f.u.Enqueue(edited)
+	if len(f.u.live) != 2 {
+		t.Errorf("an edit of a pending message was not queued: %d", len(f.u.live))
+	}
+	f.src.pages[pageURL] = Page{Title: new("T")}
+	f.u.run(t.Context(), <-f.u.live)
+	f.u.Enqueue(job)
+	if len(f.u.live) != 2 {
+		t.Errorf("a finished job stayed pending: %d queued", len(f.u.live))
 	}
 }
 

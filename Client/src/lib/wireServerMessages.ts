@@ -134,6 +134,8 @@ export interface LinkPreviewCard {
 export interface MessageLinkPreviewsPayload {
   readonly message_id: number;
   readonly channel_id: number;
+  /** The message's edited_at, else its timestamp: a frame older than the cards held is dropped. */
+  readonly content_version: string;
   readonly link_previews: readonly LinkPreviewCard[];
 }
 

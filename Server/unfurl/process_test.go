@@ -262,3 +262,58 @@ func mustHash(t *testing.T, raw string) string {
 	}
 	return h
 }
+
+func TestProcess_SameLinksAndFreshCardsWriteAndAnnounceOnce(t *testing.T) {
+	f := newFixture(t, Options{Enabled: true})
+	f.src.pages[pageURL] = Page{Title: new("T")}
+	job := f.message(pageURL)
+	f.u.process(t.Context(), job)
+	f.u.process(t.Context(), job)
+	edited := f.edit(job.MessageID, "reworded "+pageURL)
+	f.u.process(t.Context(), edited)
+	seen := f.ann.all()
+	if len(seen) != 1 {
+		t.Fatalf("announced %d times, want 1", len(seen))
+	}
+	if seen[0].Version != job.Version {
+		t.Errorf("announced version %q, want the job's %q", seen[0].Version, job.Version)
+	}
+}
+
+// A page that is down when a week-old card is refreshed leaves the card text in place.
+func TestProcess_FailedRefreshKeepsTheOldCard(t *testing.T) {
+	f := newFixture(t, Options{Enabled: true})
+	f.src.pages[pageURL] = Page{Title: new("Kept")}
+	f.u.process(t.Context(), f.message(pageURL))
+	f.clock.advance(8 * 24 * time.Hour)
+	f.src.errs[pageURL] = &externalcontent.Error{Failure: externalcontent.Oversized}
+	job := f.message(pageURL)
+	f.u.process(t.Context(), job)
+
+	p, err := f.store.Preview(t.Context(), mustHash(t, pageURL))
+	if err != nil || p.Failure != nil || p.Title == nil || *p.Title != "Kept" {
+		t.Fatalf("stored = %+v, %v; want the old card", p, err)
+	}
+	if f.cards(job.MessageID) != 1 {
+		t.Error("the message lost its card")
+	}
+	f.u.process(t.Context(), f.message(pageURL))
+	if n := f.src.count(pageURL); n != 2 {
+		t.Errorf("fetches inside the hour after a failed refresh = %d, want 2 in all", n)
+	}
+	f.clock.advance(61 * time.Minute)
+	f.u.process(t.Context(), f.message(pageURL))
+	if n := f.src.count(pageURL); n != 3 {
+		t.Errorf("fetches after the hour = %d, want a retry", n)
+	}
+}
+
+func TestProcess_NoPictureFetchOnceTheJobIsCancelled(t *testing.T) {
+	f := newFixture(t, Options{Enabled: true, ThumbCapBytes: 1 << 20})
+	f.src.images["https://example.com/i.png"] = pngBytes(t, 10, 10)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if img := f.u.fetchPicture(ctx, "https://example.com/i.png"); img != nil || f.src.count("https://example.com/i.png") != 0 {
+		t.Error("a cancelled job fetched a picture")
+	}
+}

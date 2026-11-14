@@ -1175,6 +1175,7 @@ acknowledged a labelled (NSFW) channel:
   "payload": {
     "message_id": 1104,
     "channel_id": 9,
+    "content_version": "2026-11-13T10:15:30Z",
     "link_previews": [
       {
         "url": "https://example.com/post",
@@ -1188,8 +1189,10 @@ acknowledged a labelled (NSFW) channel:
 }
 ```
 
-`link_previews` is always an array and replaces whatever cards the client holds for
-the message. An empty array removes them: it is sent when an edit took away the links a
+`content_version` is the message's version the cards were built for: its `edited_at`,
+else its `timestamp`. `link_previews` is always an array and replaces whatever cards the
+client holds for the message, unless the client already holds cards for a newer
+`content_version`. An empty array removes them: it is sent when an edit took away the links a
 message had cards for. A card has `url` (the link, normalised: lower-case scheme and
 host, default port and fragment dropped) and any of `title`, `description` and
 `site_name`, each omitted when the page had none. `image` names the thumbnail, at most
@@ -1201,9 +1204,11 @@ message get a card, chosen by the rules the client uses to find a message's link
 masked links, spoilers and `<url>` excluded), so the two agree.
 
 A frame is sent only when a message's cards change to something visible or from
-something visible. A client ignores a frame for a message it has not loaded, and one
-older than the cards it already holds is harmless: the array is the whole state. An
-older client ignores the frame type; a server with `link_previews.enabled` off sends none.
+something visible, and always after the `chat_message` or `chat_edited` it belongs to
+(it has the higher `seq`). A client ignores a frame for a message it has not loaded and
+drops one whose `content_version` is older than the version of the cards it holds; the
+versions are timestamps in one format, so a plain string comparison orders them. Two
+frames for the same version are the same state. An older client ignores the frame type; a server with `link_previews.enabled` off sends none.
 The same `link_previews` array rides on messages in history reads (`docs/api.md`), where
 a message with links and no cards yet is queued for the server to preview, so scrolling
 to an old message brings its cards in a `message_link_previews` frame shortly after.

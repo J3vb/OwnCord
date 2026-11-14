@@ -212,6 +212,3 @@ func pngBytes(t *testing.T, w, h int) []byte {
 	}
 	return buf.Bytes()
 }
-
-//go:fix inline
-func ptr(s string) *string { return new(s) }

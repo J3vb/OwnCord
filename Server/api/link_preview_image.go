@@ -24,17 +24,17 @@ const linkPreviewImageRateLimitPerMinute = 300
 // the thumbnail's bytes, so a name names its content: a member who holds a card holds the hash,
 // and one who guesses a 64-character hash has the picture, which is already public content
 // fetched from the open web.
-func MountLinkPreviewImageRoute(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, trustedProxies []string, store *linkpreview.Store) {
+func MountLinkPreviewImageRoute(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, trustedProxies []string, store *linkpreview.Store, noteShown func(imageHash string)) {
 	r.With(
 		AuthMiddleware(sessions),
 		RateLimitMiddleware(limiter, "link_preview_img:", linkPreviewImageRateLimitPerMinute, time.Minute, trustedProxies),
-	).Get("/api/v1/link-previews/images/{hash}", handleLinkPreviewImage(store))
+	).Get("/api/v1/link-previews/images/{hash}", handleLinkPreviewImage(store, noteShown))
 }
 
 // handleLinkPreviewImage answers a stored thumbnail with its type, a year of private caching
 // (a name never changes its bytes) and headers that keep the response inert. A name that is not
 // a stored thumbnail is a 404; so is a stored name whose file is gone.
-func handleLinkPreviewImage(store *linkpreview.Store) http.HandlerFunc {
+func handleLinkPreviewImage(store *linkpreview.Store, noteShown func(imageHash string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		hash := chi.URLParam(r, "hash")
 		if !linkpreview.ValidHash(hash) {
@@ -55,8 +55,8 @@ func handleLinkPreviewImage(store *linkpreview.Store) http.HandlerFunc {
 			return
 		}
 		defer f.Close() //nolint:errcheck // read-only file
-		if err := store.TouchMany(r.Context(), nil, []string{hash}); err != nil {
-			slog.Debug("link preview thumbnail touch failed", "error", err)
+		if noteShown != nil {
+			noteShown(hash)
 		}
 		h := w.Header()
 		h.Set("Content-Type", img.MimeType)

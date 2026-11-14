@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/linkpreview"
@@ -187,29 +188,89 @@ func TestHistory_WithoutAStoreNothingIsAttached(t *testing.T) {
 	}
 }
 
-func TestSendAndEdit_QueueTheCommittedMessage(t *testing.T) {
+// The send and the edit hand back the job instead of queueing it: the caller queues it after the
+// message's own events are out, so a cached card is sequenced behind the message.
+func TestSendAndEdit_ReturnTheJobAndQueueNothingThemselves(t *testing.T) {
 	svc, database, _, q := linkPreviewHistory(t)
 	ctx := context.Background()
 	res := mustSendMessage(ctx, t, svc, SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", Content: "hi https://a.example/"})
-
-	if len(q.jobs) != 1 {
-		t.Fatalf("jobs after send = %+v", q.jobs)
+	if len(q.jobs) != 0 {
+		t.Fatalf("send queued %+v before its events were out", q.jobs)
 	}
 	stored, err := database.GetMessage(ctx, res.MessageID)
 	mustDo(t, "GetMessage", err)
-	j := q.jobs[0]
-	if j.MessageID != res.MessageID || j.Content != stored.Content || j.Version != stored.Timestamp || j.Edited || j.AuthorID != 1 || j.ChannelID != 10 {
-		t.Errorf("send job = %+v, stored = %+v", j, stored)
+	j := res.LinkJob
+	if j == nil || j.MessageID != res.MessageID || j.Content != stored.Content || j.Version != stored.Timestamp || j.Edited || j.AuthorID != 1 || j.ChannelID != 10 {
+		t.Fatalf("send job = %+v, stored = %+v", j, stored)
+	}
+	svc.QueueLinkPreviews(j)
+	if len(q.jobs) != 1 || q.jobs[0] != *j {
+		t.Errorf("queued = %+v", q.jobs)
 	}
 
 	edit, err := svc.EditMessage(ctx, 1, res.MessageID, "now https://b.example/")
 	mustDo(t, "EditMessage", err)
-	if len(q.jobs) != 2 {
-		t.Fatalf("jobs after edit = %+v", q.jobs)
-	}
-	if e := q.jobs[1]; !e.Edited || e.Version != edit.EditedAt || e.Content != "now https://b.example/" || e.MessageID != res.MessageID {
+	if e := edit.LinkJob; e == nil || !e.Edited || e.Version != edit.EditedAt || e.Content != "now https://b.example/" || e.MessageID != res.MessageID {
 		t.Errorf("edit job = %+v, edited_at = %q", e, edit.EditedAt)
 	}
+	cleared, err := svc.EditMessage(ctx, 1, res.MessageID, "no link now")
+	mustDo(t, "EditMessage", err)
+	if cleared.LinkJob == nil {
+		t.Error("an edit that removed its links carries no job, so its cards would stay")
+	}
+	plain := mustSendMessage(ctx, t, svc, SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", Content: "just words"})
+	if plain.LinkJob != nil {
+		t.Errorf("a message with no links carries a job: %+v", plain.LinkJob)
+	}
+	svc.QueueLinkPreviews(nil)
+	if len(q.jobs) != 1 {
+		t.Errorf("queued %d jobs, want only the first", len(q.jobs))
+	}
+}
+
+func TestNoteLinkImageShown_ReachesTheUnfurler(t *testing.T) {
+	svc, _, _, q := linkPreviewHistory(t)
+	svc.NoteLinkImageShown("abc")
+	if len(q.images) != 1 || q.images[0] != "abc" {
+		t.Errorf("noted images = %v", q.images)
+	}
+}
+
+// A message whose only record is a failed fetch older than the failure window is queued again.
+func TestHistory_StaleFailureRowsAreRequeuedFreshOnesAreNot(t *testing.T) {
+	svc, database, reader, q := linkPreviewHistory(t)
+	ctx := context.Background()
+	stale := mustCreateMessage(t, database, 10, 1, "https://stale.example/", nil)
+	fresh := mustCreateMessage(t, database, 10, 1, "https://fresh.example/", nil)
+	for _, c := range []struct {
+		id  int64
+		url string
+		at  time.Time
+	}{{stale, "https://stale.example/", time.Now().Add(-2 * time.Hour)}, {fresh, "https://fresh.example/", time.Now()}} {
+		hash, norm, err := linkpreview.URLHash(c.url)
+		mustDo(t, "URLHash", err)
+		fail := "unavailable"
+		mustDo(t, "PutPreview", reader.PutPreview(ctx, linkpreview.Preview{
+			UrlHash: hash, Url: norm, FetchedAt: linkpreview.FormatTime(c.at), Failure: &fail, LastUsedAt: linkpreview.FormatTime(c.at),
+		}))
+		_, err = reader.ReplaceMessagePreviews(ctx, c.id, versionOf(t, database, c.id), c.url, []string{hash})
+		mustDo(t, "ReplaceMessagePreviews", err)
+	}
+	_, _, err := svc.GetMessages(ctx, 1, 10, 0, 50)
+	mustDo(t, "GetMessages", err)
+	if len(q.backfill) != 1 || len(q.backfill[0]) != 1 || q.backfill[0][0].MessageID != stale {
+		t.Fatalf("backfill = %+v, want only the message whose failure is past the window", q.backfill)
+	}
+}
+
+func versionOf(t *testing.T, database *db.DB, id int64) string {
+	t.Helper()
+	m, err := database.GetMessage(context.Background(), id)
+	mustDo(t, "GetMessage", err)
+	if m.EditedAt != nil {
+		return *m.EditedAt
+	}
+	return m.Timestamp
 }
 
 func TestLinkPreviewAudience(t *testing.T) {

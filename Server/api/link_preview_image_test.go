@@ -54,8 +54,9 @@ func TestLinkPreviewImageRoute(t *testing.T) {
 			}
 		}
 		img, err := store.Image(t.Context(), hash)
-		if err != nil || img.LastUsedAt <= "2000-01-01T00:00:00Z" {
-			t.Errorf("last_used_at = %q (%v), want it touched", img.LastUsedAt, err)
+		// A GET writes nothing: the last-used mark is noted for the unfurler's batched flush.
+		if err != nil || img.LastUsedAt != "2000-01-01T00:00:00Z" {
+			t.Errorf("last_used_at = %q (%v), want it left for the batched update", img.LastUsedAt, err)
 		}
 	})
 

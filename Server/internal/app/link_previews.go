@@ -32,7 +32,7 @@ func (a previewAnnouncer) LinkPreviewsReady(ctx context.Context, r unfurl.Ready)
 		return
 	}
 	a.hub.LinkPreviewsChanged(ctx, ws.LinkPreviewUpdate{
-		MessageID: r.MessageID, ChannelID: r.ChannelID, IsDM: isDM, ParticipantIDs: participants, Cards: r.Cards,
+		MessageID: r.MessageID, ChannelID: r.ChannelID, IsDM: isDM, ParticipantIDs: participants, Version: r.Version, Cards: r.Cards,
 	})
 }
 

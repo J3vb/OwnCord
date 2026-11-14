@@ -284,6 +284,7 @@ func (s *MessageService) forwardResult(ctx context.Context, sp SendMessageParams
 		MessageID: msg.ID, Timestamp: msg.Timestamp, Content: snap.msg.Content,
 		IsDM: isDM, Channel: target, Attachments: attachments, Mentions: []int64{},
 		ThreadJoined: msg.ThreadJoined,
+		LinkJob:      newLinkJob(msg.ID, target.ID, sp.UserID, snap.msg.Content, msg.Timestamp, false),
 		Forward: &db.ForwardInfo{
 			SourceChannelID: snap.origin.SourceChannelID, SourceMessageID: snap.origin.SourceMessageID,
 			SourceTimestamp: snap.origin.SourceTimestamp,

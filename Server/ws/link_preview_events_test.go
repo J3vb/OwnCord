@@ -2,10 +2,12 @@ package ws_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/linkwire"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -101,5 +103,66 @@ func TestLinkPreviewsChanged_NSFWGated(t *testing.T) {
 	}
 	if f := nextFrameOfType(h.bobFr, "message_link_previews", 200*time.Millisecond); f != nil {
 		t.Errorf("an unacknowledged member received %+v", f)
+	}
+}
+
+// readyUnfurler stands for a worker whose card is already cached: it announces the moment it is
+// handed a job.
+type readyUnfurler struct {
+	hub *ws.Hub
+}
+
+func (u readyUnfurler) Enqueue(j linkpreview.Job) {
+	u.hub.LinkPreviewsChanged(context.Background(), ws.LinkPreviewUpdate{
+		MessageID: j.MessageID, ChannelID: j.ChannelID, Version: j.Version, Cards: []linkwire.Card{titledCard("cached")},
+	})
+}
+func (readyUnfurler) EnqueueBackfill([]linkpreview.Job) int { return 0 }
+func (readyUnfurler) NoteShown([]string, []string)          {}
+
+func seqOf(t *testing.T, f map[string]any) float64 {
+	t.Helper()
+	seq, _ := f["seq"].(float64)
+	if seq == 0 {
+		t.Fatalf("frame %v has no seq", f["type"])
+	}
+	return seq
+}
+
+// A card that is already cached is announced the instant its job is queued; the job is queued
+// only after the message's own frame is out, so the card never overtakes its message.
+func TestLinkPreviews_CachedCardIsSequencedAfterItsMessage(t *testing.T) {
+	h := newForwardHarness(t)
+	h.svc.Messages.SetLinkUnfurler(readyUnfurler{hub: h.hub})
+	h.focus(h.bobCl, h.dstChan)
+	drainChanTimeout(h.bobFr, 50*time.Millisecond)
+
+	send, _ := json.Marshal(map[string]any{
+		"type": "chat_send", "id": "r1",
+		"payload": map[string]any{"channel_id": h.dstChan, "content": "see https://example.com/a"},
+	})
+	h.hub.HandleMessageForTest(h.aliceCl, send)
+	if f := nextFrameOfType(h.aliceFrames, "error", 100*time.Millisecond); f != nil {
+		t.Fatalf("chat_send refused: %v", f)
+	}
+	msg := rawFrame(t, h.bobFr, "chat_message", 2*time.Second)
+	card := rawFrame(t, h.bobFr, "message_link_previews", 2*time.Second)
+	if seqOf(t, msg) >= seqOf(t, card) {
+		t.Fatalf("chat_message seq %v is not before message_link_previews seq %v", msg["seq"], card["seq"])
+	}
+	id := payloadOf(msg)["id"]
+	if payloadOf(card)["message_id"] != id || payloadOf(card)["content_version"] == "" {
+		t.Errorf("card payload = %+v for message %v", payloadOf(card), id)
+	}
+
+	edit, _ := json.Marshal(map[string]any{
+		"type": "chat_edit", "id": "r2",
+		"payload": map[string]any{"message_id": id, "content": "now https://example.com/b"},
+	})
+	h.hub.HandleMessageForTest(h.aliceCl, edit)
+	edited := rawFrame(t, h.bobFr, "chat_edited", 2*time.Second)
+	card = rawFrame(t, h.bobFr, "message_link_previews", 2*time.Second)
+	if seqOf(t, edited) >= seqOf(t, card) {
+		t.Fatalf("chat_edited seq %v is not before message_link_previews seq %v", edited["seq"], card["seq"])
 	}
 }

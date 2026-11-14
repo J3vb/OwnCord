@@ -286,6 +286,9 @@ func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envel
 	if len(result.Events) > 0 {
 		h.emitEventsFrom(ctx, c.userID, result.Events)
 	}
+	if result.AfterEmit != nil {
+		result.AfterEmit()
+	}
 	// Voice join/leave hand off to hub-internal routines (also called un-
 	// throttled on disconnect/switch); handleVoiceJoin re-reads channel_id from
 	// the validated payload.

@@ -7,12 +7,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-//go:fix inline
-func s(v string) *string { return new(v) }
-
-//go:fix inline
-func n(v int64) *int64 { return new(v) }
-
 func TestFromRow(t *testing.T) {
 	cases := []struct {
 		name string
@@ -20,7 +14,7 @@ func TestFromRow(t *testing.T) {
 		ok   bool
 	}{
 		{"text only", dbgen.ListMessageLinkPreviewsRow{Url: "u", Title: new("t")}, true},
-		{"image only", dbgen.ListMessageLinkPreviewsRow{Url: "u", ImageHash: new("h"), ImageWidth: n(5), ImageHeight: n(4)}, true},
+		{"image only", dbgen.ListMessageLinkPreviewsRow{Url: "u", ImageHash: new("h"), ImageWidth: new(int64(5)), ImageHeight: new(int64(4))}, true},
 		{"failed fetch", dbgen.ListMessageLinkPreviewsRow{Url: "u", Title: new("t"), Failure: new("oversized")}, false},
 		{"nothing to show", dbgen.ListMessageLinkPreviewsRow{Url: "u"}, false},
 		{"empty strings are nothing", dbgen.ListMessageLinkPreviewsRow{Url: "u", Title: new(""), SiteName: new("")}, false},
@@ -35,7 +29,7 @@ func TestFromRow(t *testing.T) {
 
 func TestCards_KeepOrderAndJSONShape(t *testing.T) {
 	rows := []dbgen.ListMessageLinkPreviewsRow{
-		{Url: "https://a/", Title: new("A"), Description: new("d"), SiteName: new("S"), ImageHash: new("h"), ImageWidth: n(640), ImageHeight: n(320)},
+		{Url: "https://a/", Title: new("A"), Description: new("d"), SiteName: new("S"), ImageHash: new("h"), ImageWidth: new(int64(640)), ImageHeight: new(int64(320))},
 		{Url: "https://b/", Failure: new("unavailable")},
 		{Url: "https://c/", Title: new("C")},
 	}
