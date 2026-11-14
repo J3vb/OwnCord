@@ -228,6 +228,7 @@ export const connectText = defineCatalog("connect", {
   "error.forbidden": "You don't have permission to do that.",
   "error.notFound": "That item no longer exists.",
   "error.banned": "Your account has been suspended.",
+  "error.bannedAppeal": "To appeal, contact the server owner: {contact}",
   "error.unavailable": "The server is temporarily unavailable. Try again.",
   "error.storageQuota": "Your storage is full — delete files or ask a server admin.",
   "error.transferTimedOut":
