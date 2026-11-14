@@ -128,6 +128,8 @@ release changes the database, and anything an operator must do first.)
 - **Moderators can warn a member from the member list.** Right-click a member and choose Warn; until now a warning could only come from a report.
 - **Three new warnings on the admin Attention page.** One says the owner has no recovery kit (without one, a lost owner password means restoring a backup and running setup again). One says fewer than two people can work reports. One says no role besides Owner carries Moderate Members, which a customised Moderator role can be missing. Each clears by itself once fixed.
 - **Owners can set an appeal contact in admin Settings; a banned member sees it when sign-in is refused.**
+- **Owners can give the server an icon.** Choose a picture under Settings > General in the admin panel (it is cropped to a square and shrunk), and it shows in your members' server list in place of the initials. Remove it there to go back to initials.
+- **The settings request no longer takes `server_icon` by hand.** Use the new icon control (`PUT` and `DELETE /admin/api/server-icon`); a request that sets it directly is refused. A regular backup holds the database only, so after a restore on a new machine the icon has to be uploaded again (the full archive carries it).
 
 - **The server owner gets a notice on their phone when something needs fixing.** When a disk, backup, certificate, last-exit, last-restore or voice warning turns critical, the owner's devices get one notice that says only "Your OwnCord server needs attention"; the admin panel says what. At most one per warning every 6 hours while the server runs, and only when `push.enabled` is on.
 

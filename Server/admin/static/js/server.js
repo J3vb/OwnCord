@@ -91,6 +91,67 @@ function settingsRow(key,name,desc,ctrl){
 function settingsCard(title,body){const id='sc-'+title.replace(/\W+/g,'-');return'<section class="section-card" aria-labelledby="'+id+'"><div class="section-card-header"><h3 id="'+id+'">'+esc(title)+'</h3></div><div class="section-card-body">'+body+'</div></section>'}
 function voiceQualityLabel(q){return{low:'Low',medium:'Medium',high:'High'}[q]||q||'Unknown'}
 
+/* ═══ Server icon ═══ */
+/* Saved at once, not with the Save bar: the picture is a file the server stores
+   (PUT/DELETE /server-icon), not a settings value. The chosen image is centre
+   cropped to a square and drawn on a 128 px canvas, so what the server gets is
+   a small PNG inside its 32-256 px square limit. */
+const SERVER_ICON_PX=128;
+function serverIconRow(hash){
+  const shown=hash?'<img class="server-icon-preview" src="/api/v1/server-icon?v='+encodeURIComponent(hash)+'" alt="Current server icon" width="48" height="48">':'<span class="setting-desc">No icon set</span>';
+  return'<div class="setting-row" id="serverIconRow"><div class="setting-info"><div class="setting-name">Server icon</div><div class="setting-desc" id="serverIconDesc">Shown in the server list of the desktop client. The picture is cropped to a square and shrunk to '+SERVER_ICON_PX+' px. It applies as soon as you choose it, without Save</div></div>'
+    +'<div class="setting-ctrl server-icon-ctrl">'+shown+pickFile('serverIconFile','image/*','Choose a server icon',{after:'uploadServerIcon'})
+    +(hash?'<button class="btn btn-ghost" data-action="removeServerIcon">Remove</button>':'')+'</div></div>';
+}
+async function serverIconRequest(method,body){
+  const headers={'Authorization':'Bearer '+state.token};
+  if(body)headers['Content-Type']='image/png';
+  const res=await fetch('/admin/api/server-icon',{method,headers,body});
+  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
+  const data=await res.json().catch(()=>null);
+  if(!res.ok)throw new Error((data&&data.message)||res.statusText);
+  return data||{icon:''};
+}
+function showServerIcon(hash){
+  state._settings={...state._settings,server_icon:hash};
+  const row=document.getElementById('serverIconRow');
+  if(row)row.outerHTML=serverIconRow(hash);
+}
+/* The picture as a 128 px PNG, centre cropped to a square. */
+async function serverIconBlob(file){
+  const bmp=await createImageBitmap(file);
+  const side=Math.min(bmp.width,bmp.height);
+  const canvas=document.createElement('canvas');
+  canvas.width=canvas.height=SERVER_ICON_PX;
+  const ctx=canvas.getContext('2d');
+  if(!ctx)throw new Error('This browser cannot draw the icon');
+  ctx.drawImage(bmp,(bmp.width-side)/2,(bmp.height-side)/2,side,side,0,0,SERVER_ICON_PX,SERVER_ICON_PX);
+  if(typeof bmp.close==='function')bmp.close();
+  const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+  if(!blob)throw new Error('Could not turn the picture into a PNG');
+  return blob;
+}
+/** @this {HTMLInputElement} */
+async function uploadServerIcon(){
+  const input=this;
+  const file=input.files&&input.files[0];
+  if(!file)return;
+  try{
+    const blob=await serverIconBlob(file);
+    const out=await serverIconRequest('PUT',blob);
+    showServerIcon(out.icon);showToast('Server icon updated');
+  }catch(e){showToast(e&&e.message?e.message:'Could not use that picture','error')}
+  /* Cleared so choosing the same file again fires a change event; a success has
+     already replaced the row, so this reaches the old input only on failure. */
+  input.value='';
+  const name=document.getElementById('serverIconFileName');
+  if(name)name.textContent='No file chosen';
+}
+async function removeServerIcon(){
+  try{await serverIconRequest('DELETE');showServerIcon('');showToast('Server icon removed')}
+  catch(e){showToast(e.message,'error')}
+}
+
 async function renderSettings(){
   let settings,facts=null;
   try{settings=await api('GET','/settings')}catch(e){return'<div class="page-title">Settings</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
@@ -104,7 +165,8 @@ async function renderSettings(){
   html+=settingsCard('General',
     settingsRow('server_name','Server name','Shown in the client and at the top of this panel','<input class="form-input" id="s-server_name" value="'+esc(v('server_name'))+'" aria-describedby="s-server_name-desc" data-input-action="markSettingsChanged">')
     +settingsRow('motd','Message of the day','Shown to members when they connect','<input class="form-input" id="s-motd" value="'+esc(v('motd'))+'" aria-describedby="s-motd-desc" data-input-action="markSettingsChanged">')
-    +settingsRow('appeal_contact','Appeal contact','Shown to a banned member when they try to sign in, so they know how to reach you. Leave empty to show nothing. Up to 200 characters.','<input class="form-input" id="s-appeal_contact" value="'+esc(v('appeal_contact'))+'" aria-describedby="s-appeal_contact-desc" data-input-action="markSettingsChanged">'));
+    +settingsRow('appeal_contact','Appeal contact','Shown to a banned member when they try to sign in, so they know how to reach you. Leave empty to show nothing. Up to 200 characters.','<input class="form-input" id="s-appeal_contact" value="'+esc(v('appeal_contact'))+'" aria-describedby="s-appeal_contact-desc" data-input-action="markSettingsChanged">')
+    +serverIconRow(v('server_icon')));
   html+=settingsCard('Access & registration',regModeCards(v('registration_mode')||'invite'));
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
@@ -794,6 +856,6 @@ async function confirmApplyUpdate(){
 Object.assign(ACTIONS,{showPendingMembers,applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
   confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,downloadBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,videoCapChanged,
   openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
-  saveSettings,saveAfkChannel,syncUpdateConfirm,
+  saveSettings,saveAfkChannel,syncUpdateConfirm,uploadServerIcon,removeServerIcon,
   reloadPage(){location.reload()},
   toggleSetting(){toggleSwitch(this);markSettingsChanged()}});

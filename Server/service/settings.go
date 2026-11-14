@@ -31,6 +31,12 @@ type settingsStore interface {
 type SettingsService struct {
 	st settingsStore
 	mu syncutil.Mutex
+	// iconDir is where the server icon file lives (SetServerIconDir); iconMu serializes its set and clear;
+	// iconRename is os.Rename unless a test swaps it.
+	iconDir    string
+	iconMu     syncutil.Mutex
+	iconRename func(oldpath, newpath string) error
+	iconSnap   *iconSnapshot // guarded by iconMu
 }
 
 // NewSettingsService creates a SettingsService.
@@ -42,7 +48,6 @@ func NewSettingsService(st settingsStore) *SettingsService {
 // handler grows its own copy.
 var allowedSettingKeys = map[string]struct{}{
 	"server_name":              {},
-	"server_icon":              {},
 	"motd":                     {},
 	AppealContactKey:           {},
 	"require_2fa":              {},
@@ -110,6 +115,12 @@ var afkTimeoutChoices = []int{60, 300, 900, 1800, 3600}
 var inertSettingKeys = map[string]struct{}{
 	"max_upload_bytes": {},
 	"voice_quality":    {},
+}
+
+// dedicatedSettingKeys have their own route, so the settings PATCH refuses them: the server icon is a file
+// plus the hash of it, set with PUT /admin/api/server-icon.
+var dedicatedSettingKeys = map[string]string{
+	ServerIconKey: "the server icon upload",
 }
 
 // ownerOnlySettingKeys decide the owner-only backup policy: readable (GET /settings is MANAGE_SERVER) but a
@@ -181,6 +192,9 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 	for key := range updates {
 		if _, inert := inertSettingKeys[key]; inert {
 			return nil, fmt.Errorf("%s is set in config.yaml, not here%.0w", key, ErrBadRequest)
+		}
+		if route, dedicated := dedicatedSettingKeys[key]; dedicated {
+			return nil, fmt.Errorf("%s is set with %s, not here%.0w", key, route, ErrBadRequest)
 		}
 		if _, ok := allowedSettingKeys[key]; !ok {
 			return nil, fmt.Errorf("unknown setting key: %q%.0w", key, ErrBadRequest)

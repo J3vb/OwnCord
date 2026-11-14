@@ -250,6 +250,8 @@ export interface ServerInfoResponse {
   readonly retention?: { readonly messages_days: number };
   /** How long an upload may take before the server answers 408 TRANSFER_TIMED_OUT. */
   readonly upload?: { readonly transfer_lifetime_seconds: number };
+  /** Content hash of the owner-uploaded server icon; "" = none; absent on an older server. */
+  readonly icon?: string;
 }
 
 /** Single channel object from REST API. */

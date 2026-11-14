@@ -95,6 +95,7 @@ export const shards = {
     "src/features/voice/native/nativeDevice.ts",
     "src/features/voice/reconnectDeps.ts",
     "src/features/voice/roomLifecycle.ts",
+    "src/lib/prefs/serverIcons.ts",
     "src/lib/prefs/serverRailLayout.ts",
     "src/lib/voice/videoCapture.ts",
   ],
