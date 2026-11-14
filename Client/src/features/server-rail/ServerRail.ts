@@ -17,8 +17,6 @@ import {
   reconcile,
   renameFolder,
   saveLayout,
-  isIpAddressName,
-  serverInitials,
   toggleCollapsed,
   type ItemRef,
   type RailItem,
@@ -43,6 +41,7 @@ import {
   railIcon,
   roundButton,
   sameItem,
+  serverAvatar,
   zoneOf,
   type ServerLook,
 } from "./serverRailParts";
@@ -276,18 +275,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
 
   function avatar(host: string, mini: boolean): HTMLElement {
     const { name, color } = describe(host);
-    const el = createElement("span", { class: mini ? "server-rail-mini" : "server-rail-avatar" });
-    el.style.background = color;
-    const icon = icons.get(host);
-    if (icon !== undefined) {
-      el.appendChild(
-        createElement("img", { class: "server-rail-icon", src: icon.dataUrl, alt: name }),
-      );
-      return el;
-    }
-    if (!mini && isIpAddressName(name)) el.appendChild(railIcon("server"));
-    else setText(el, serverInitials(name));
-    return el;
+    return serverAvatar(name, color, mini, icons.get(host)?.dataUrl);
   }
 
   function serverItem(host: string, inFolder: boolean): HTMLElement {
