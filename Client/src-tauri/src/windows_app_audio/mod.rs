@@ -32,11 +32,11 @@
 #![cfg_attr(not(windows), allow(dead_code))]
 
 mod icon_png;
-mod music;
+pub mod music;
 #[cfg(windows)]
 mod windows_music;
 
-pub use music::{list_audio_apps, start_music_audio, stop_music_audio, MusicAudioState};
+pub use music::MusicAudioState;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -402,9 +402,9 @@ pub fn run() {
             windows_app_audio::app_audio_available,
             windows_app_audio::start_app_audio,
             windows_app_audio::stop_app_audio,
-            windows_app_audio::list_audio_apps,
-            windows_app_audio::start_music_audio,
-            windows_app_audio::stop_music_audio,
+            windows_app_audio::music::list_audio_apps,
+            windows_app_audio::music::start_music_audio,
+            windows_app_audio::music::stop_music_audio,
             #[cfg(desktop)]
             tray::open_log_folder,
             external_open::open_external_url,
