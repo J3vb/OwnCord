@@ -10,7 +10,11 @@ impl NativeSession {
     /// track is published as the screen-share-audio source, stereo, no DTX, at
     /// the music bitrate: the options of the screen share's own audio.
     /// Returns the publication's sid.
-    pub async fn publish_music(&mut self, app_id: String) -> (Retired, Result<String, String>) {
+    pub async fn publish_music(
+        &mut self,
+        app_id: String,
+        closing: Option<tokio::sync::watch::Receiver<bool>>,
+    ) -> (Retired, Result<String, String>) {
         // Replace semantics. On any error below the new feed is retired,
         // leaving the slot empty and no capture thread behind.
         let mut retired = self.release_music().await;
@@ -18,12 +22,20 @@ impl NativeSession {
         let feed = ShareAudio::start_music(source.clone(), app_id);
         let track =
             LocalAudioTrack::create_audio_track(MUSIC_TRACK_NAME, RtcAudioSource::Native(source));
-        let published = self
-            .room
-            .local_participant()
-            .publish_track(LocalTrack::Audio(track), screen_audio_publish_options())
-            .await
-            .map_err(|e| e.to_string());
+        let participant = self.room.local_participant();
+        // Given up on once a leave starts: the feed is then retired like any
+        // failed publish.
+        let published = crate::native_voice::quick::unless_closing(
+            closing,
+            async {
+                participant
+                    .publish_track(LocalTrack::Audio(track), screen_audio_publish_options())
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            || "the session is closing".to_string(),
+        )
+        .await;
         let publication = match published {
             Ok(publication) => publication,
             Err(e) => {

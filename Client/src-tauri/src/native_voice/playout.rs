@@ -206,7 +206,21 @@ impl Mixer {
             }
             let gain = q
                 .volume
-                .and_then(|v| gains[v as usize].get(&q.identity).copied())
+                .and_then(|v| {
+                    let own = gains[v as usize].get(&q.identity).copied();
+                    // Deafen and a tile mute reach native playout only as the
+                    // screen-share gain: music with no gain of its own yet
+                    // follows it, so it is never louder than that.
+                    own.or_else(|| {
+                        (v == Volume::Music)
+                            .then(|| {
+                                gains[Volume::ScreenShare as usize]
+                                    .get(&q.identity)
+                                    .copied()
+                            })
+                            .flatten()
+                    })
+                })
                 .unwrap_or(1.0)
                 / 32768.0;
             let n = frames.min(q.frames());

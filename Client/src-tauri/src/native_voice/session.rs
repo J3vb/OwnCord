@@ -1176,13 +1176,6 @@ impl NativeSession {
             .set_gain(identity, playout::Volume::ScreenShare, volume);
     }
 
-    /// The gain for `identity`'s music track, 1.0 is unity, 0 when muted.
-    pub fn set_music_volume(&self, identity: &str, volume: f32) {
-        self.playout_controls
-            .mixer()
-            .set_gain(identity, playout::Volume::Music, volume);
-    }
-
     /// Switch the capture or playout device (a running stream moves to it).
     /// An empty id selects the default, the first listed device.
     /// The caller runs [`DeviceSwitch::apply`] on a blocking thread, without

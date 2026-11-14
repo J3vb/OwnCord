@@ -441,11 +441,11 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_video_view,
             #[cfg(target_os = "linux")]
-            native_voice::native_voice_set_volume,
+            native_voice::volume::native_voice_set_volume,
             #[cfg(target_os = "linux")]
-            native_voice::native_voice_set_screenshare_volume,
+            native_voice::volume::native_voice_set_screenshare_volume,
             #[cfg(target_os = "linux")]
-            native_voice::music::native_voice_set_music_volume,
+            native_voice::volume::native_voice_set_music_volume,
             #[cfg(target_os = "linux")]
             native_voice::music::native_voice_list_audio_apps,
             #[cfg(target_os = "linux")]

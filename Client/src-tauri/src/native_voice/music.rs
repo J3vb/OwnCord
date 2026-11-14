@@ -1,24 +1,6 @@
 //! The music share's Tauri commands (Linux): list the applications with
-//! sound, start and stop sharing one, and the listener's music volume.
+//! sound, and start and stop sharing one.
 use super::{share_audio, NativeVoiceState};
-
-/// Music share volume: the gain for `identity`'s music track (1.0 is unity,
-/// 0 when muted), apart from their screen-share audio and microphone.
-#[tauri::command]
-pub async fn native_voice_set_music_volume(
-    state: tauri::State<'_, NativeVoiceState>,
-    session: u64,
-    identity: String,
-    volume: f32,
-) -> Result<(), String> {
-    state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .set_music_volume(&identity, volume);
-    Ok(())
-}
 
 /// The applications with sound on the default output, for the music picker,
 /// as `list_audio_apps` answers on Windows. Rejects `unavailable` when no
@@ -60,16 +42,32 @@ pub async fn native_voice_start_music(
     }
     let (retired, published) = {
         let mut inner = state.inner.lock().await;
-        if state.music_ticket.load(Ordering::SeqCst) != ticket {
+        if is_superseded(state.music_ticket.load(Ordering::SeqCst), ticket) {
             return Err("superseded".into());
         }
-        inner.current(session)?.publish_music(app_id).await
+        // A session that is not current (a leave, a newer join) ended this
+        // start the same way a newer start would.
+        let live = inner
+            .current(session)
+            .map_err(|_| "superseded".to_string())?;
+        live.publish_music(app_id, state.quick.closing(session))
+            .await
     };
     retired.release().await;
+    // A stop or newer start queued behind this publish bumped the ticket: it
+    // runs next on `inner` and releases the track, so only answer here.
+    if is_superseded(state.music_ticket.load(Ordering::SeqCst), ticket) {
+        return Err("superseded".into());
+    }
     published.map_err(|e| {
         log::warn!("[native_voice] music publish: {e}");
         "activation_failed".to_string()
     })
+}
+
+/// Whether a start holding `ticket` was overtaken by a newer start or a stop.
+fn is_superseded(current: u64, ticket: u64) -> bool {
+    current != ticket
 }
 
 /// Stop the music share: unpublish its track and end its capture. Nothing
@@ -82,13 +80,23 @@ pub async fn native_voice_stop_music(
     state
         .music_ticket
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let retired = state
-        .inner
-        .lock()
-        .await
-        .current(session)?
-        .release_music()
-        .await;
+    // A session that is not current has nothing of ours published: quiet Ok.
+    let retired = match state.inner.lock().await.current(session) {
+        Ok(session) => session.release_music().await,
+        Err(_) => return Ok(()),
+    };
     retired.release().await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_superseded;
+
+    #[test]
+    fn a_start_is_superseded_once_the_ticket_moved() {
+        assert!(!is_superseded(5, 5));
+        // A newer start or a stop bumped it.
+        assert!(is_superseded(6, 5));
+    }
 }

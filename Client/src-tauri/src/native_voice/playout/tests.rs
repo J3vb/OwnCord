@@ -630,6 +630,43 @@ fn music_follows_its_own_gain_apart_from_screen_share_audio_and_the_mic() {
 }
 
 #[test]
+fn music_without_a_gain_of_its_own_follows_the_screen_share_gain() {
+    let tone = sine(8000.0, PRIME);
+    let level = |music: Option<f32>, screen: Option<f32>| {
+        let m = Mixer::default();
+        m.add("TR_m", "user-1", Some(Volume::Music), 1);
+        if let Some(g) = music {
+            m.set_gain("user-1", Volume::Music, g);
+        }
+        if let Some(g) = screen {
+            m.set_gain("user-1", Volume::ScreenShare, g);
+        }
+        m.push("TR_m", &tone);
+        rms(&mixed(&m, PRIME))
+    };
+    let unity = level(None, None);
+    assert!(unity > 0.1);
+    // Deafened: the screen-share gain is 0 and no music gain is set.
+    assert_eq!(level(None, Some(0.0)), 0.0);
+    // Its own gain wins over the screen-share one.
+    assert!((level(Some(0.5), Some(0.0)) / unity - 0.5).abs() < 0.01);
+}
+
+#[test]
+fn a_deafened_music_track_is_silent_whatever_its_gains_are() {
+    let m = Mixer::default();
+    m.add("TR_m", "user-1", Some(Volume::Music), 1);
+    m.set_gain("user-1", Volume::Music, 1.0);
+    m.set_muted("TR_m", true);
+    m.push("TR_m", &sine(8000.0, PRIME));
+    assert_eq!(rms(&mixed(&m, PRIME)), 0.0);
+    // Resubscribed: it plays again.
+    m.set_muted("TR_m", false);
+    m.push("TR_m", &sine(8000.0, PRIME));
+    assert!(rms(&mixed(&m, PRIME)) > 0.1);
+}
+
+#[test]
 fn a_gain_set_before_the_track_arrives_applies_to_it() {
     let m = Mixer::default();
     m.set_gain("user-1", Volume::Microphone, 0.0);
