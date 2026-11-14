@@ -16,11 +16,12 @@
 import { errorText } from "@lib/api";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText } from "@lib/dom";
-import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/text/nameLimits";
 import type { ToastType } from "@lib/ui/toastContainer";
 import { shellText } from "../../i18n/shell";
 import { moderationText as t } from "../../i18n/moderation";
+import { createFormStatus, openFormModal } from "./formModal";
 
 /** Server/service/moderation.go reasonMaxRunes. */
 export const WARN_REASON_MAX = 500;
@@ -77,12 +78,7 @@ export function openWarnDialog(options: WarnDialogOptions): ModalInstance {
     hint.el,
   );
 
-  const status = createElement("div", {
-    class: "form-group",
-    role: "alert",
-    style: "color: var(--text-danger); font-size: 13px; display: none;",
-    "data-testid": "warn-status",
-  });
+  const status = createFormStatus("warn-status");
   body.append(createElement("p", {}, t("warnDialog.body")), group, status);
 
   const footer = createElement("div", { class: "modal-footer" });
@@ -99,26 +95,18 @@ export function openWarnDialog(options: WarnDialogOptions): ModalInstance {
   footer.append(cancel, send);
   content.append(header, body, footer);
 
-  let closed = false;
   let inFlight = false;
 
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "warn-dialog" },
-    // A stray backdrop click must not drop a typed reason.
-    closeOnBackdrop: false,
-    onClose: () => {
-      closed = true;
+  const { modal, isClosed, showStatus, hideStatus } = openFormModal(
+    {
+      content,
+      titleId,
+      testId: "warn-dialog",
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(options.fallbackFocus === undefined ? {} : { fallbackFocus: options.fallbackFocus }),
     },
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-    ...(options.fallbackFocus === undefined ? {} : { fallbackFocus: options.fallbackFocus }),
-  });
-
-  function showStatus(text: string): void {
-    status.style.display = "block";
-    setText(status, text);
-  }
+    status,
+  );
 
   function setBusy(busy: boolean): void {
     inFlight = busy;
@@ -140,13 +128,13 @@ export function openWarnDialog(options: WarnDialogOptions): ModalInstance {
       input.focus();
       return;
     }
-    status.style.display = "none";
+    hideStatus();
     setBusy(true);
     try {
       await options.submit(reason);
     } catch (err) {
       // The dialog may have closed with its owner while the request ran.
-      if (closed) {
+      if (isClosed()) {
         notify(errorText(err, t("warnDialog.failed")), "error");
         return;
       }
