@@ -65,7 +65,7 @@ const EXCLUDED = [
  */
 const OWNERS = [
   [
-    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|features\/direct-messages\/(SidebarDmSection|SidebarDmHelpers)\.ts|features\/(connection\/(CertMismatchModal|ConnectedOverlay)|invites\/InviteManager|navigation\/(QuickSwitchOverlay|QuickSwitcher)|server-rail\/ServerBanner|voice\/UserBar)\.ts|features\/channels\/(editChannelDialog|channelTypes|channelCategorySelect|CreateChannelModal|DeleteChannelModal)\.ts|features\/channels\/sidebar\/purgePrompt\.ts|features\/moderation\/(AdminActions|memberMenuRows)\.ts|features\/(members\/MemberList|channels\/(ChannelSidebar|channelListRender|voiceSidebarRows))\.ts|features\/channels\/sidebar\/contextMenu\.ts|lib\/(text\/safeRender|net\/credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
+    /^src\/(pages\/ConnectPage|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|features\/direct-messages\/(SidebarDmSection|SidebarDmHelpers)\.ts|features\/(connection\/(CertMismatchModal|ConnectedOverlay|IncompatibleNotice|LoginForm|RecoverOverlay|ServerPanel|serverPanelParts|login-form\/[A-Za-z]+)|invites\/InviteManager|navigation\/(QuickSwitchOverlay|QuickSwitcher)|server-rail\/ServerBanner|voice\/UserBar)\.ts|features\/channels\/(editChannelDialog|channelTypes|channelCategorySelect|CreateChannelModal|DeleteChannelModal)\.ts|features\/channels\/sidebar\/purgePrompt\.ts|features\/moderation\/(AdminActions|memberMenuRows)\.ts|features\/(members\/MemberList|channels\/(ChannelSidebar|channelListRender|voiceSidebarRows))\.ts|features\/channels\/sidebar\/contextMenu\.ts|lib\/(text\/safeRender|net\/credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
     "B9-18",
   ],
   [

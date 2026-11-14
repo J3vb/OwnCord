@@ -3,7 +3,7 @@
  * so the update exit reads "Reload page" and runs the caller's update action.
  */
 import { describe, expect, it, vi } from "vitest";
-import { createIncompatibleNotice } from "../../src/pages/connect-page/IncompatibleNotice";
+import { createIncompatibleNotice } from "../../src/features/connection/IncompatibleNotice";
 import { portalText } from "../../src/i18n/portal";
 
 /** Shows the notice for a mismatch and clicks Reload page; returns what the click ran. */
