@@ -178,7 +178,8 @@ object PushAttention {
   private const val CHANNEL = "attention"
   private const val TITLE = "Your OwnCord server needs attention"
   private const val BODY = "Open the admin panel to see what needs fixing."
-  // Clear of the message slots (4200-4299) and the call notifications.
+  // Clear of the message slots (4200-4299) and the call notifications; the
+  // tap's request code is the instance's hash so servers never share one.
   private const val ID = 4300
 
   fun onMessage(context: Context, instance: String) {
@@ -196,7 +197,7 @@ object PushAttention {
       .setCategory(Notification.CATEGORY_STATUS)
       .setVisibility(Notification.VISIBILITY_PRIVATE)
       .setAutoCancel(true)
-      .setContentIntent(PushAlerts.open(context, instance, ID + (instance.hashCode() and 0xFF)))
+      .setContentIntent(PushAlerts.open(context, instance, instance.hashCode()))
       .build()
     // One per server, replaced by the next rather than stacked.
     manager.notify(instance, ID, notification)

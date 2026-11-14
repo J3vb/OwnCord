@@ -24,8 +24,9 @@ object PushPayload {
   private val kind = Regex("\"t\"\\s*:\\s*\"([a-z_]{1,32})\"")
   private val channel = Regex("\"c\"\\s*:\\s*([0-9]{1,18})(?![0-9])")
 
-  // The kind of push (`{"t":"activity"}`; `{"t":"attention"}` is the server telling its owner it needs a look), or null for anything else. The
-  // server sends no message text or sender.
+  // The kind of push (`{"t":"activity"}`), or null for anything else.
+  // `{"t":"attention"}` is the server telling its owner it needs a look.
+  // The server sends no message text or sender.
   fun kindOf(content: String): String? = kind.find(content)?.groupValues?.get(1)
 
   // The DM a ring is for (`{"t":"ring","c":42}`), or null when there is none.

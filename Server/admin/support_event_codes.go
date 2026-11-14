@@ -66,6 +66,8 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"PermissionService.getOrPopulate override fetch failed, denying":                          "permissionservice_getorpopulate_override_fetch_failed",
 	"PushDispatcher.Notify ListBlockersOf":                                                    "pushdispatcher_notify_listblockersof",
 	"PushDispatcher.Notify ListPushSubscriptionsForDispatch":                                  "pushdispatcher_notify_listpushsubscriptionsfordispatch",
+	"PushDispatcher.ownerAudience GetOwnerUser":                                               "pushdispatcher_owneraudience_getowneruser",
+	"PushDispatcher.ownerAudience GetRoleByID":                                                "pushdispatcher_owneraudience_getrolebyid",
 	"PushDispatcher.prune DeletePushSubscriptionByID":                                         "pushdispatcher_prune_deletepushsubscriptionbyid",
 	"PushDispatcher.recipientBlocksAuthor IsBlocked":                                          "pushdispatcher_recipientblocksauthor_isblocked",
 	"PushDispatcher.SendRing ListPushSubscriptionsForDispatch":                                "pushdispatcher_sendring_listpushsubscriptionsfordispatch",

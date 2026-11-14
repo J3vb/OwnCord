@@ -18,15 +18,24 @@ var pushAttentionPayload = []byte(`{"t":"attention"}`)
 // asks the push service to wake a sleeping phone at once.
 var pushAttentionHeaders = pushDelivery{ttl: "3600", urgency: "high"}
 
-// ownerAudience returns the account holding the owner role, or nil when there is none (a server whose owner
-// is gone does not hand the alert to the next highest account). Fails closed on a read error.
+// ownerAudience returns the one account holding the owner role (the highest-position account, taken only
+// when its role passes permissions.IsOwner), or nil when there is none: a server whose owner is gone does
+// not hand the alert to the next highest account. Fails closed on a read error, which is logged.
 func (d *PushDispatcher) ownerAudience(ctx context.Context) []int64 {
 	u, err := d.st.GetOwnerUser(ctx)
-	if err != nil || u == nil {
+	if err != nil {
+		slog.Warn("PushDispatcher.ownerAudience GetOwnerUser", "err", err)
+		return nil
+	}
+	if u == nil {
 		return nil
 	}
 	role, err := d.st.GetRoleByID(ctx, u.RoleID)
-	if err != nil || role == nil || !permissions.IsOwner(role.ID, role.Position) {
+	if err != nil {
+		slog.Warn("PushDispatcher.ownerAudience GetRoleByID", "err", err, "user_id", u.ID)
+		return nil
+	}
+	if role == nil || !permissions.IsOwner(role.ID, role.Position) {
 		return nil
 	}
 	return []int64{u.ID}

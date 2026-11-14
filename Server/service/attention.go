@@ -354,18 +354,30 @@ func (s *AttentionService) read(ctx context.Context) attentionReadings {
 // Evaluate takes one sample at now and updates signals and warnings.
 func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 	r := s.read(ctx)
-	notify := s.evaluate(r, now)
+	s.settled(ctx, func() { s.evaluate(r, now) })
+}
+
+// settled runs apply under the lock, the one door every path that settles signals goes through, and then
+// calls the owner notifier outside the lock when apply made a signal newly critical. The throttle is marked
+// in the same pass, so a path that skipped the call would lose the push and still hold the next one back.
+func (s *AttentionService) settled(ctx context.Context, apply func()) {
+	notify := func() func(context.Context) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.pushDue = false
+		apply()
+		if s.pushDue {
+			return s.notify
+		}
+		return nil
+	}()
 	if notify != nil {
 		notify(ctx)
 	}
 }
 
-// evaluate applies one reading and returns the notifier to call, outside the lock, when a signal newly
-// turned critical.
-func (s *AttentionService) evaluate(r attentionReadings, now time.Time) func(context.Context) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pushDue = false
+// evaluate applies one reading. s.mu held.
+func (s *AttentionService) evaluate(r attentionReadings, now time.Time) {
 	s.evaluatedAt = now
 	s.signals = s.signals[:0]
 	s.evalDisk(r, now)
@@ -398,10 +410,6 @@ func (s *AttentionService) evaluate(r attentionReadings, now time.Time) func(con
 			delete(s.warnings, id)
 		}
 	}
-	if s.pushDue {
-		return s.notify
-	}
-	return nil
 }
 
 // Report returns a copy: active warnings first (most severe first), then recovered, newest first.

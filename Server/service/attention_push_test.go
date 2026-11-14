@@ -110,3 +110,23 @@ func TestAttentionPush_ThrottleUsesTheSampleClock(t *testing.T) {
 		t.Fatalf("pushes = %d inside the window, want 1", *n)
 	}
 }
+
+// RefreshBackup is a path of its own into settle: a backup turning critical there pushes the owner too,
+// and the next full sample does not push it again.
+func TestAttentionPush_RefreshBackupCrossingCriticalPushes(t *testing.T) {
+	f := newAttentionFixture(t)
+	n := pushWatch(f)
+	f.schedule = "daily"
+	f.step()
+	f.last = f.now.Add(-4 * 24 * time.Hour)
+	f.s.RefreshBackup(context.Background(), f.now)
+	if *n != 1 {
+		t.Fatalf("pushes = %d after the refresh crossed critical, want 1", *n)
+	}
+	wantStatus(t, f.s.Report(), "backup", AttentionStatusCritical)
+	f.step()
+	f.step()
+	if *n != 1 {
+		t.Fatalf("pushes = %d after the next samples, want still 1", *n)
+	}
+}
