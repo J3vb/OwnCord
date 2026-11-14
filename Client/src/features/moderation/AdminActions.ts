@@ -40,6 +40,7 @@ interface AdminGates {
   readonly kick: boolean;
   readonly ban: boolean;
   readonly timeout: boolean;
+  readonly warn: boolean;
   readonly nicknames: boolean;
 }
 
@@ -52,6 +53,7 @@ function resolveGates(options: MemberContextMenuOptions, isSelf: boolean): Admin
     kick: gate(options.canKick),
     ban: gate(options.canBan),
     timeout: gate(options.canTimeout),
+    warn: gate(options.canWarn),
     nicknames: gate(options.canManageNicknames),
   };
 }
@@ -236,7 +238,7 @@ function appendTimeoutRows(
   }
 }
 
-/** Role, nickname and timeout rows. */
+/** Role, nickname, warn and timeout rows. */
 function appendManageRows(
   manage: Node,
   options: MemberContextMenuOptions,
@@ -257,6 +259,20 @@ function appendManageRows(
       },
       signal,
       { testId: "member-menu-change-nickname", icon: "pencil" },
+    );
+  }
+
+  if (gates.warn && options.onWarn !== undefined) {
+    const onWarn = options.onWarn;
+    appendRow(
+      manage,
+      shellText("member.warn"),
+      () => {
+        closeMenu();
+        onWarn();
+      },
+      signal,
+      { testId: "member-menu-warn" },
     );
   }
 

@@ -182,6 +182,15 @@ export const moderationText = defineCatalog("moderation", {
   "nicknameDialog.tooLong": "A nickname can have at most {max} characters.",
   "nicknameDialog.changed": "Changed the nickname of {username}.",
   "nicknameDialog.cleared": "Removed the nickname of {username}.",
+  "warnDialog.title": "Warn {name}",
+  "warnDialog.body": "The member sees this warning in their moderation record.",
+  "warnDialog.label": "Reason",
+  "warnDialog.send": "Send warning",
+  "warnDialog.sending": "Sending...",
+  "warnDialog.required": "Write a reason: a warning without one tells the member nothing.",
+  "warnDialog.tooLong": "A reason can have at most {max} characters.",
+  "warnDialog.failed": "Could not send the warning. Try again.",
+  "warnDialog.warned": "Warned {username}.",
   "banDialog.retryExpired":
     "Too much time has passed to continue the deletion. Check the fields and ban again.",
   "banDialog.purgeUnsupported":

@@ -18,6 +18,9 @@ export interface MemberListOptions {
   /** Open the Change Nickname dialog (MANAGE_NICKNAMES); `current` is the
    *  member's nickname now, null when they have none. Absent hides the item. */
   readonly onChangeNickname?: (userId: number, username: string, current: string | null) => void;
+  /** Open the Warn dialog (MODERATE_MEMBERS); `name` is the member's display
+   *  name. Absent hides the item. */
+  readonly onWarnMember?: (userId: number, username: string, name: string) => void;
   /** Add / remove one role from the profile popup's chips. */
   readonly onAddRole?: (userId: number, username: string, roleId: number) => Promise<void>;
   readonly onRemoveRole?: (userId: number, username: string, roleId: number) => Promise<void>;

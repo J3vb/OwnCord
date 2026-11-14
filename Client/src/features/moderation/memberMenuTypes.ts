@@ -24,6 +24,9 @@ export interface MemberContextMenuOptions {
   /** MODERATE_MEMBERS plus outrank; defaults to `showAdminActions`. The items
    *  also need their callbacks, so a caller that wires none shows none. */
   canTimeout?: boolean;
+  /** MODERATE_MEMBERS plus outrank; defaults to `showAdminActions`. The item
+   *  also needs `onWarn`. */
+  canWarn?: boolean;
   /** MANAGE_NICKNAMES plus outrank plus the server capability; defaults to
    *  `showAdminActions`. The item also needs `onChangeNickname`. */
   canManageNicknames?: boolean;
@@ -45,6 +48,8 @@ export interface MemberContextMenuOptions {
   /** Time the member out for `seconds` (one of the six presets). */
   onTimeout?(seconds: number): Promise<void>;
   onRemoveTimeout?(): Promise<void>;
+  /** Opens the Warn dialog. The menu closes first. */
+  onWarn?(): void;
   /** Opens the Change Nickname dialog. The menu closes first. */
   onChangeNickname?(): void;
   /** Runs once when the menu goes away, by any path. */

@@ -650,6 +650,45 @@ describe("MemberContextMenu - full menu (3C-3)", () => {
     });
   });
 
+  describe("Warn", () => {
+    const warning = (over: Partial<MemberContextMenuOptions> = {}) => ({
+      showAdminActions: true,
+      canKick: false,
+      canBan: false,
+      canManageRoles: false,
+      canTimeout: false,
+      canWarn: true,
+      onWarn: vi.fn(),
+      ...over,
+    });
+
+    it("runs onWarn and closes the menu", () => {
+      const opts = warning();
+      const { element, destroy } = open(opts);
+      row(element, "Warn").click();
+      expect(opts.onWarn).toHaveBeenCalledTimes(1);
+      expect(container.querySelector(".context-menu")).toBeNull();
+      destroy();
+    });
+
+    it("sits above Timeout", () => {
+      const { element, destroy } = open(
+        warning({ canTimeout: true, onTimeout: vi.fn(async () => {}), timeoutState: "none" }),
+      );
+      expect(labels(element)).toEqual(["Warn", "Timeout", "Block"]);
+      destroy();
+    });
+
+    it("is absent without canWarn or without onWarn", () => {
+      const off = open(warning({ canWarn: false }));
+      expect(labels(off.element)).toEqual(["Block"]);
+      off.destroy();
+      const unwired = open(warning({ onWarn: undefined }));
+      expect(labels(unwired.element)).toEqual(["Block"]);
+      unwired.destroy();
+    });
+  });
+
   // (11)
   it("on yourself shows Profile and Mention only, never Message, Call, moderation or Block", () => {
     const { element, destroy } = open({

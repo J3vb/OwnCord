@@ -291,6 +291,23 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
         () => getToast()?.show(shellText("member.nicknameFailed"), "error"),
       );
     },
+    // Loaded on first use, like the Ban dialog.
+    onWarnMember: (userId, username, name) => {
+      import("../../features/moderation/WarnDialog").then(
+        ({ openWarnDialog }) => {
+          if (owner.signal.aborted) return;
+          openWarnDialog({
+            name,
+            username,
+            submit: (reason) => api.warnMember(userId, reason),
+            notify: (msg, type) => getToast()?.show(msg, type),
+            signal: owner.signal,
+            fallbackFocus: () => memberList.focusMember(userId),
+          });
+        },
+        () => getToast()?.show(shellText("member.warnFailed"), "error"),
+      );
+    },
     // Loaded on first use: the dialog and request code stay out of MainPage.
     onToggleBlock: async (userId, username, block) => {
       try {
