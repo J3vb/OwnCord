@@ -143,6 +143,11 @@ updates:
       # regressions and the native cancellation scenario unpatched -- a deliberate
       # human upgrade, not an automated bump.
       - dependency-name: "@tauri-apps/plugin-http"
+      # Held at an exact version by Client/patches/livekit-client+<version>.patch,
+      # for the same patch-package install check. A bump would also fail npm ci
+      # for the whole group. Move it by hand: port the patch, then run
+      # tests/unit/livekit-e2ee-enable-ack.test.ts and the voice E2E specs.
+      - dependency-name: "livekit-client"
 
   # Root tooling npm dependencies (changelogen, prettier)
   - package-ecosystem: npm
