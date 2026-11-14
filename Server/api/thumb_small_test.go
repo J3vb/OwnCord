@@ -72,10 +72,11 @@ func TestServeThumb_SmallSizesFitTheirBoxAndAreKeptSeparately(t *testing.T) {
 				t.Errorf("size %d: cache control %q", c.size, rr.Header().Get("Cache-Control"))
 			}
 		}
-		f, err := store.OpenThumbSize(id, c.size)
+		open := store.OpenThumbSize
 		if c.size == 0 {
-			f, err = store.OpenThumb(id)
+			open = func(id string, _ int) (storage.File, error) { return store.OpenThumb(id) }
 		}
+		f, err := open(id, c.size)
 		if err != nil {
 			t.Fatalf("size %d not kept: %v", c.size, err)
 		}
