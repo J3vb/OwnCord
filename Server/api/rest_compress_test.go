@@ -63,19 +63,26 @@ var restCompressBody = `{"messages":[` + strings.Repeat(`{"id":1,"content":"hell
 
 func restCompressHandler(status int) http.Handler {
 	return api.CompressJSONForTest(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, restCompressBody)
 	}))
 }
 
 func TestRESTCompression_GzipsWhenAccepted(t *testing.T) {
+	for _, accept := range []string{"gzip", "gzip, deflate, br", "gzip, deflate, br, zstd"} {
+		assertRESTGzip(t, accept)
+	}
+}
+
+func assertRESTGzip(t *testing.T, accept string) {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels/", nil)
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	req.Header.Set("Accept-Encoding", accept)
 	rec := httptest.NewRecorder()
 	restCompressHandler(http.StatusOK).ServeHTTP(rec, req)
 	if rec.Header().Get("Content-Encoding") != "gzip" {
-		t.Fatalf("Content-Encoding %q, want gzip", rec.Header().Get("Content-Encoding"))
+		t.Fatalf("Accept-Encoding %q: Content-Encoding %q, want gzip", accept, rec.Header().Get("Content-Encoding"))
 	}
 	if !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
 		t.Fatalf("Vary %q lacks Accept-Encoding", rec.Header().Get("Vary"))
@@ -93,7 +100,7 @@ func TestRESTCompression_GzipsWhenAccepted(t *testing.T) {
 // The desktop and Android app's HTTP client before this change sends no
 // Accept-Encoding: it must keep getting plain JSON.
 func TestRESTCompression_PlainWhenNotAccepted(t *testing.T) {
-	for _, accept := range []string{"", "identity", "br", "gzip;q=0"} {
+	for _, accept := range []string{"", "identity", "br", "zstd", "gzip;q=0"} {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/channels/", nil)
 		if accept != "" {
 			req.Header.Set("Accept-Encoding", accept)

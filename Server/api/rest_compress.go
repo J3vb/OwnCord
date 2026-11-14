@@ -12,7 +12,8 @@ import (
 // to text the requester controls (sign-in, tokens, invites, voice grants and
 // file bodies stay plain), and its mount wraps the handler in compressJSON.
 // api/rest_compress_test.go fails when the two disagree, so a new route is
-// plain until someone reviews it.
+// plain until someone reviews it. Mount compression only through
+// compressJSON, never restGzip or gzhttp directly, so that test sees it.
 
 // restCompressMinSize skips replies too small to gain from gzip.
 const restCompressMinSize = 1024
@@ -45,6 +46,8 @@ func mustRESTGzip() func(http.Handler) http.HandlerFunc {
 	wrap, err := gzhttp.NewWrapper(
 		gzhttp.MinSize(restCompressMinSize),
 		gzhttp.ContentTypes([]string{"application/json"}),
+		// gzhttp also offers zstd by default; only gzip was reviewed and tested.
+		gzhttp.EnableZstd(false),
 	)
 	if err != nil {
 		panic(fmt.Errorf("rest gzip wrapper: %w", err))
