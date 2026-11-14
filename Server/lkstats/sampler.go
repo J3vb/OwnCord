@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/internal/timering"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -106,9 +107,7 @@ type Sampler struct {
 	log    *slog.Logger
 
 	mu      syncutil.Mutex
-	ring    []sample
-	next    int
-	size    int
+	ring    *timering.Ring[sample]
 	prev    Metrics
 	prevAt  time.Time
 	hasPrev bool
@@ -127,7 +126,7 @@ func New(url string, log *slog.Logger) *Sampler {
 }
 
 func newSampler(source string, fetch func(context.Context) fetchResult, now func() time.Time, log *slog.Logger, size int) *Sampler {
-	return &Sampler{source: source, fetch: fetch, now: now, log: log, ring: make([]sample, size)}
+	return &Sampler{source: source, fetch: fetch, now: now, log: log, ring: timering.New[sample](size)}
 }
 
 // newClient builds the HTTP client for the page. The address is the
@@ -240,11 +239,7 @@ func (s *Sampler) sample(ctx context.Context) {
 		s.hasPrev = false
 	}
 
-	s.ring[s.next] = sm
-	s.next = (s.next + 1) % len(s.ring)
-	if s.size < len(s.ring) {
-		s.size++
-	}
+	s.ring.Push(sm)
 }
 
 // noteStatus records a status change and logs it once. The first read is
@@ -296,63 +291,30 @@ func (s *Sampler) Snapshot(window time.Duration, maxPoints int) Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snap := Snapshot{Source: s.source, Status: s.status, Since: s.since, Points: []Point{}}
-	if s.size == 0 {
+	newest, ok := s.ring.Newest()
+	if !ok {
 		return snap
 	}
-	snap.Latest, snap.OK = s.ring[(s.next-1+len(s.ring))%len(s.ring)].point(), true
-
-	from := s.now().Add(-window).Unix()
-	start := (s.next - s.size + len(s.ring)) % len(s.ring)
-	var in []sample
-	for i := range s.size {
-		sm := s.ring[(start+i)%len(s.ring)]
-		if sm.at > from {
-			in = append(in, sm)
-		}
-	}
-	snap.Points = downsample(in, maxPoints)
+	snap.Latest, snap.OK = newest.point(), true
+	in := s.ring.After(s.now().Add(-window).Unix(), func(sm sample) int64 { return sm.at })
+	snap.Points = timering.Downsample(in, maxPoints, average)
 	return snap
 }
 
-// downsample averages consecutive runs of samples so at most maxPoints remain.
-// A run is stamped with its last sample's time; a figure missing from every
-// sample of a run stays missing.
-func downsample(in []sample, maxPoints int) []Point {
-	if maxPoints < 1 {
-		maxPoints = 1
-	}
-	step := max((len(in)+maxPoints-1)/maxPoints, 1)
-	out := make([]Point, 0, (len(in)+step-1)/step)
-	for i := 0; i < len(in); i += step {
-		run := in[i:min(i+step, len(in))]
-		avg := sample{at: run[len(run)-1].at}
-		avg.cpu = mean(run, func(s sample) float32 { return s.cpu })
-		avg.mem = mean(run, func(s sample) float32 { return s.mem })
-		avg.rooms = mean(run, func(s sample) float32 { return s.rooms })
-		avg.parts = mean(run, func(s sample) float32 { return s.parts })
-		avg.pub = mean(run, func(s sample) float32 { return s.pub })
-		avg.sub = mean(run, func(s sample) float32 { return s.sub })
-		avg.bytesIn = mean(run, func(s sample) float32 { return s.bytesIn })
-		avg.bytesOut = mean(run, func(s sample) float32 { return s.bytesOut })
-		avg.cores = mean(run, func(s sample) float32 { return s.cores })
-		out = append(out, avg.point())
-	}
-	return out
-}
-
-func mean(run []sample, field func(sample) float32) float32 {
-	var sum float64
-	var n int
-	for _, s := range run {
-		if v := field(s); !math.IsNaN(float64(v)) {
-			sum += float64(v)
-			n++
-		}
-	}
-	if n == 0 {
-		return float32(math.NaN())
-	}
-	return float32(sum / float64(n))
+// average turns a run of samples into one point stamped with its last
+// sample's time; a figure missing from every sample of the run stays missing.
+func average(run []sample) Point {
+	avg := sample{at: run[len(run)-1].at}
+	avg.cpu = timering.Mean(run, func(s sample) float32 { return s.cpu })
+	avg.mem = timering.Mean(run, func(s sample) float32 { return s.mem })
+	avg.rooms = timering.Mean(run, func(s sample) float32 { return s.rooms })
+	avg.parts = timering.Mean(run, func(s sample) float32 { return s.parts })
+	avg.pub = timering.Mean(run, func(s sample) float32 { return s.pub })
+	avg.sub = timering.Mean(run, func(s sample) float32 { return s.sub })
+	avg.bytesIn = timering.Mean(run, func(s sample) float32 { return s.bytesIn })
+	avg.bytesOut = timering.Mean(run, func(s sample) float32 { return s.bytesOut })
+	avg.cores = timering.Mean(run, func(s sample) float32 { return s.cores })
+	return avg.point()
 }
 
 func (s sample) point() Point {

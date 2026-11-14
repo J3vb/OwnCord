@@ -5,6 +5,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/internal/timering"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -57,9 +58,7 @@ type Sampler struct {
 	cores int
 
 	mu       syncutil.Mutex
-	ring     []sample
-	next     int
-	size     int
+	ring     *timering.Ring[sample]
 	prev     Reading
 	prevAt   time.Time
 	hasPrev  bool
@@ -73,7 +72,7 @@ func NewSampler() *Sampler {
 }
 
 func newSampler(read func() Reading, now func() time.Time, cores, size int) *Sampler {
-	return &Sampler{read: read, now: now, cores: cores, ring: make([]sample, size)}
+	return &Sampler{read: read, now: now, cores: cores, ring: timering.New[sample](size)}
 }
 
 // Run takes a sample now and then every Interval until ctx is done. The
@@ -126,11 +125,7 @@ func (s *Sampler) sample() {
 	}
 	s.prev, s.prevAt, s.hasPrev = r, at, true
 
-	s.ring[s.next] = sm
-	s.next = (s.next + 1) % len(s.ring)
-	if s.size < len(s.ring) {
-		s.size++
-	}
+	s.ring.Push(sm)
 }
 
 // Snapshot returns the newest sample and the samples of the last window,
@@ -139,59 +134,25 @@ func (s *Sampler) Snapshot(window time.Duration, maxPoints int) Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snap := Snapshot{MemTotal: s.memTotal, MemScope: s.memScope, Cores: s.cores, Points: []Point{}}
-	if s.size == 0 {
+	newest, ok := s.ring.Newest()
+	if !ok {
 		return snap
 	}
-	newest := s.ring[(s.next-1+len(s.ring))%len(s.ring)]
 	snap.Latest, snap.OK = newest.point(), true
-
-	from := s.now().Add(-window).Unix()
-	start := (s.next - s.size + len(s.ring)) % len(s.ring)
-	var in []sample
-	for i := range s.size {
-		sm := s.ring[(start+i)%len(s.ring)]
-		if sm.at > from {
-			in = append(in, sm)
-		}
-	}
-	snap.Points = downsample(in, maxPoints)
+	in := s.ring.After(s.now().Add(-window).Unix(), func(sm sample) int64 { return sm.at })
+	snap.Points = timering.Downsample(in, maxPoints, average)
 	return snap
 }
 
-// downsample averages consecutive runs of samples so at most maxPoints remain.
-// A run is stamped with its last sample's time; a figure missing from every
-// sample of a run stays missing.
-func downsample(in []sample, maxPoints int) []Point {
-	if maxPoints < 1 {
-		maxPoints = 1
-	}
-	step := max((len(in)+maxPoints-1)/maxPoints, 1)
-	out := make([]Point, 0, (len(in)+step-1)/step)
-	for i := 0; i < len(in); i += step {
-		run := in[i:min(i+step, len(in))]
-		avg := sample{at: run[len(run)-1].at}
-		avg.procCPU = mean(run, func(s sample) float32 { return s.procCPU })
-		avg.machCPU = mean(run, func(s sample) float32 { return s.machCPU })
-		avg.procMem = mean(run, func(s sample) float32 { return s.procMem })
-		avg.memUsed = mean(run, func(s sample) float32 { return s.memUsed })
-		out = append(out, avg.point())
-	}
-	return out
-}
-
-func mean(run []sample, field func(sample) float32) float32 {
-	var sum float64
-	var n int
-	for _, s := range run {
-		if v := field(s); !math.IsNaN(float64(v)) {
-			sum += float64(v)
-			n++
-		}
-	}
-	if n == 0 {
-		return float32(math.NaN())
-	}
-	return float32(sum / float64(n))
+// average turns a run of samples into one point stamped with its last
+// sample's time; a figure missing from every sample of the run stays missing.
+func average(run []sample) Point {
+	avg := sample{at: run[len(run)-1].at}
+	avg.procCPU = timering.Mean(run, func(s sample) float32 { return s.procCPU })
+	avg.machCPU = timering.Mean(run, func(s sample) float32 { return s.machCPU })
+	avg.procMem = timering.Mean(run, func(s sample) float32 { return s.procMem })
+	avg.memUsed = timering.Mean(run, func(s sample) float32 { return s.memUsed })
+	return avg.point()
 }
 
 func (s sample) point() Point {

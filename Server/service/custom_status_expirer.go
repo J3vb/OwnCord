@@ -117,44 +117,9 @@ func (e *CustomStatusExpirer) Sweep(ctx context.Context) error {
 
 // Run is the expirer loop.
 func (e *CustomStatusExpirer) Run(ctx context.Context) {
-	timer := time.NewTimer(0)
-	defer timer.Stop()
-	for {
-		sleep, failed := e.nextSleep(ctx)
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-		timer.Reset(sleep)
-		select {
-		case <-ctx.Done():
-			return
-		case <-e.wake:
-			continue
-		case <-timer.C:
-		}
-		if failed {
-			continue
-		}
-		if err := e.Sweep(ctx); err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			slog.Warn("custom status expirer: sweep failed", "err", err)
-			e.sleepOrDone(ctx, e.retryAfter)
-		}
-	}
-}
-
-func (e *CustomStatusExpirer) sleepOrDone(ctx context.Context, d time.Duration) {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-	case <-t.C:
-	}
+	runDueLoop(ctx, e.wake, e.nextSleep, e.Sweep, e.retryAfter, func(err error) {
+		slog.Warn("custom status expirer: sweep failed", "err", err)
+	})
 }
 
 func (e *CustomStatusExpirer) nextSleep(ctx context.Context) (sleep time.Duration, failed bool) {
@@ -173,6 +138,5 @@ func (e *CustomStatusExpirer) nextSleep(ctx context.Context) (sleep time.Duratio
 		slog.Warn("custom status expirer: unparseable expiry", "expires_at", next, "err", err)
 		return e.retryAfter, false
 	}
-	sleep = at.Add(e.slack).Sub(e.now())
-	return min(max(sleep, 0), e.maxSleep), false
+	return dueSleep(at, e.now(), e.slack, e.maxSleep), false
 }

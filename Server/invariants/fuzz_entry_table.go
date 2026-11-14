@@ -102,13 +102,10 @@ var FuzzEntryPoints = map[string]FuzzEntry{
 // only shrinks: fuzzGapCeiling pins its size, and closing a gap moves the row
 // to FuzzEntryPoints and lowers the ceiling by one.
 var FuzzGaps = map[string]FuzzGap{
-	"admin.decodeJSON":                  {Source: "admin REST bodies"},
-	"admin.decodeOptionalJSON":          {Source: "admin REST bodies"},
-	"admin.decodeStrictJSON":            {Source: "admin REST bodies"},
+	"httperr.DecodeJSON":                {Source: "REST and admin bodies"},
+	"httperr.DecodeOptionalJSON":        {Source: "REST and admin bodies"},
+	"httperr.DecodeStrictJSON":          {Source: "REST and admin bodies"},
 	"admin.handlePutAFKChannel":         {Source: "admin REST body field"},
-	"api.decodeJSON":                    {Source: "REST bodies"},
-	"api.decodeOptionalJSON":            {Source: "REST bodies"},
-	"api.decodeStrictJSON":              {Source: "REST bodies"},
 	"api.handleModerationNickname":      {Source: "REST body field"},
 	"api.decodeGIFNext":                 {Source: "GIF provider response"},
 	"api.fetchGIFs":                     {Source: "GIF provider response"},
@@ -135,7 +132,7 @@ var FuzzGaps = map[string]FuzzGap{
 }
 
 // fuzzGapCeiling is len(FuzzGaps). It only goes down.
-const fuzzGapCeiling = 27
+const fuzzGapCeiling = 24
 
 // FuzzTrustedDecodes decode bytes this server wrote itself (its database, its
 // own frames and files) or files the operator owns. Each value says why the
