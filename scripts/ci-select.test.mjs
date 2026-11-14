@@ -541,7 +541,10 @@ test("permissions.ts and the files that kill its mutants select the mutation hot
   for (const path of [
     "Client/src/lib/permissions.ts",
     "Client/tests/unit/permissions.test.ts",
+    "Client/tests/unit/session-isolation.test.ts",
     "Client/tests/mutation/stryker.ci.config.mjs",
+    "Client/tests/mutation/vitest.permissions.config.mjs",
+    "Client/tsconfig.mutation-permissions.json",
     "Client/stryker.config.mjs",
   ]) {
     assert.equal(runs(`M\t${path}`, "permissions"), true, path);
