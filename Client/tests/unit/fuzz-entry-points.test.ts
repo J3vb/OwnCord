@@ -150,6 +150,8 @@ const commandPassThrough: Record<string, string> = {
   native_voice_set_video_bitrate: "video kind and track id used as lookup keys",
   native_voice_set_volume: "participant id used as a lookup key",
   native_voice_set_screenshare_volume: "participant id used as a lookup key",
+  native_voice_set_music_volume: "participant id used as a lookup key",
+  native_voice_start_music: "app id used as a lookup key against the listed apps",
   set_gpu_adapter: "card id matched against the listed cards",
   mobile_audio_set_route: "route kind matched against the phone's own routes",
 };
