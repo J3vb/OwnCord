@@ -119,9 +119,7 @@ release changes the database, and anything an operator must do first.)
 ### Accounts & admin
 
 - **Moderators can warn a member from the member list.** Right-click a member and choose Warn; until now a warning could only come from a report.
-### Admin panel
-
-- **Three new warnings on the Attention page.** One says the owner has no recovery kit (without one, a lost owner password means restoring a backup and running setup again). One says fewer than two people can work reports. One says no role besides Owner carries Moderate Members, which a customised Moderator role can be missing. Each clears by itself once fixed.
+- **Three new warnings on the admin Attention page.** One says the owner has no recovery kit (without one, a lost owner password means restoring a backup and running setup again). One says fewer than two people can work reports. One says no role besides Owner carries Moderate Members, which a customised Moderator role can be missing. Each clears by itself once fixed.
 
 ### Under the hood
 
