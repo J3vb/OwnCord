@@ -36,6 +36,7 @@ use crate::sync::lock;
 
 mod audio_line;
 mod events;
+mod music;
 mod publish_options;
 mod screen_share;
 mod video_bitrate;
@@ -52,6 +53,7 @@ use publish_options::{
 };
 pub use publish_options::{
     process_threads, screen_audio_source, CameraOptions, PublishCodec, ScreenOptions,
+    MUSIC_TRACK_NAME,
 };
 
 /// The key index a session starts on, and the one an older client uses for
@@ -437,6 +439,13 @@ pub struct NativeSession {
     /// The capture feeding the published screen audio (none for the interop
     /// example's synthetic source). Lives and dies with `screen_audio`.
     share_audio: Option<ShareAudio>,
+    /// The music share's publication (its `capture` is always `None`), a slot
+    /// of its own beside `screen_audio` so neither touches the other. Same
+    /// lock order as `screen_audio`: locked alone, below the session's mutex.
+    music_audio: VideoSlot,
+    /// The capture feeding the published music track. Lives and dies with
+    /// `music_audio`.
+    music_feed: Option<ShareAudio>,
     next_capture: u64,
     next_camera: u64,
     on_event: EventSink,
@@ -522,6 +531,7 @@ impl NativeSession {
         let camera = VideoSlot::default();
         let screen_publication = VideoSlot::default();
         let screen_audio = VideoSlot::default();
+        let music_audio = VideoSlot::default();
         let playout = Playout::default();
         let playout_controls = playout.controls();
         let capture = Capture::default();
@@ -536,6 +546,7 @@ impl NativeSession {
                 camera.clone(),
                 screen_publication.clone(),
                 screen_audio.clone(),
+                music_audio.clone(),
             ],
             mic_withdrawn.clone(),
         ));
@@ -557,6 +568,8 @@ impl NativeSession {
             screen_publication,
             screen_audio,
             share_audio: None,
+            music_audio,
+            music_feed: None,
             next_capture: 0,
             next_camera: 0,
             on_event,
@@ -1180,9 +1193,10 @@ impl NativeSession {
         let camera = usize::from(lock(&self.camera).is_some());
         let screen = usize::from(lock(&self.screen_publication).is_some());
         let screen_audio = usize::from(lock(&self.screen_audio).is_some());
+        let music = usize::from(lock(&self.music_audio).is_some());
         Resources {
             rooms: 1,
-            local_tracks: usize::from(self.mic.is_some()) + camera + screen + screen_audio,
+            local_tracks: usize::from(self.mic.is_some()) + camera + screen + screen_audio + music,
             capture_streams: self.capture_controls.streams(),
             audio_streams: self.playout_controls.readers(),
             video_sockets: self.frames.sockets(),
@@ -1205,6 +1219,7 @@ impl NativeSession {
         }
         self.release_camera().await.release().await;
         self.release_screen().await.release().await;
+        self.release_music().await.release().await;
         // The track's sid follows a republish; a stored publication's would not.
         if let Some(track) = self.mic.take() {
             let _ = self

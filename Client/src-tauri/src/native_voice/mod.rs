@@ -27,6 +27,7 @@ mod codecs;
 mod hotplug;
 mod keys;
 pub mod mic_test;
+pub mod music;
 pub mod page_gone;
 pub mod playout;
 mod quick;
@@ -36,6 +37,7 @@ pub mod share_audio;
 pub mod stats;
 pub mod stream_format;
 pub mod video;
+pub mod volume;
 
 #[cfg(test)]
 use codecs::{decode_codec_name, decode_names, is_h264_mime, is_vp9_mime};
@@ -212,6 +214,11 @@ pub struct NativeVoiceState {
     /// The live session's push-to-talk, gain, volume and mute-hold controls
     /// and its close signal, reachable without `inner` (`quick.rs`).
     quick: QuickSlot,
+    /// Bumped by every music start and stop, before anything is awaited. A
+    /// start that finds it moved once it holds the session was superseded by
+    /// a newer start or a stop, and publishes nothing. Not a gate: it is
+    /// read and written without holding anything, and never held.
+    music_ticket: std::sync::atomic::AtomicU64,
 }
 
 impl NativeVoiceState {
@@ -1384,40 +1391,6 @@ pub async fn native_voice_set_video_view(
         .current(session)?
         .remote_publication(&identity, &sid)?;
     session::set_video_view(&publication, enabled, quality).await;
-    Ok(())
-}
-
-/// Per-user volume: `volume` is the gain for `identity`'s microphone (1.0 is
-/// unity), the value the web path hands `RemoteParticipant.setVolume`.
-#[tauri::command]
-pub async fn native_voice_set_volume(
-    state: tauri::State<'_, NativeVoiceState>,
-    session: u64,
-    identity: String,
-    volume: f32,
-) -> Result<(), String> {
-    state.quick.get(session)?.playout.mixer().set_gain(
-        &identity,
-        playout::Volume::Microphone,
-        volume,
-    );
-    Ok(())
-}
-
-/// Screen-share audio volume: the gain for `identity`'s screen-share audio (1.0
-/// is unity, 0 when muted), the value the web path gives its audio element.
-#[tauri::command]
-pub async fn native_voice_set_screenshare_volume(
-    state: tauri::State<'_, NativeVoiceState>,
-    session: u64,
-    identity: String,
-    volume: f32,
-) -> Result<(), String> {
-    state.quick.get(session)?.playout.mixer().set_gain(
-        &identity,
-        playout::Volume::ScreenShare,
-        volume,
-    );
     Ok(())
 }
 

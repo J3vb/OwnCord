@@ -104,7 +104,7 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 32    |
 | Distinct `invoke` command names called from `Client/src/`  | 124   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 130   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 134   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
@@ -234,6 +234,7 @@ native_voice_connect
 native_voice_debug_info
 native_voice_disconnect
 native_voice_get_stats
+native_voice_list_audio_apps
 native_voice_list_cameras
 native_voice_list_devices
 native_voice_play_sound
@@ -246,6 +247,7 @@ native_voice_set_device
 native_voice_set_input_gain
 native_voice_set_key
 native_voice_set_microphone
+native_voice_set_music_volume
 native_voice_set_ptt_gated
 native_voice_set_screen_quality
 native_voice_set_screenshare_volume
@@ -257,10 +259,12 @@ native_voice_set_volume
 native_voice_start_camera
 native_voice_start_camera_preview
 native_voice_start_mic_test
+native_voice_start_music
 native_voice_start_screen
 native_voice_stop_camera
 native_voice_stop_camera_preview
 native_voice_stop_mic_test
+native_voice_stop_music
 native_voice_stop_screen
 native_voice_stop_sound
 native_voice_unpublish_camera

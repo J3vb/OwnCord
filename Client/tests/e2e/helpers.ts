@@ -1096,6 +1096,10 @@ export function buildTauriMockScript(opts: {
           return { cards: [], saved: "auto", active: null, notFound: false, resetAfterCrash: false };
         if (cmd === "set_gpu_adapter") return null;
         if (cmd === "native_voice_set_video_bitrate") return;
+        // Music share (Linux host): nothing plays in the mocked app.
+        if (cmd === "native_voice_list_audio_apps") return [];
+        if (cmd === "native_voice_start_music") return "TR_music";
+        if (cmd === "native_voice_stop_music" || cmd === "native_voice_set_music_volume") return;
         // ---- External-content broker (B7-16) ----
         // No external network here: refuse the way the native broker does,
         // with a bare failure-class string. Teardown also names a fresh

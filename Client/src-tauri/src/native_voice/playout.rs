@@ -23,7 +23,7 @@ use livekit::webrtc::audio_stream::native::NativeAudioStream;
 use tokio::task::JoinHandle;
 
 use super::capture::{Apm, Reference, Shared};
-use super::session::{resolve_device, DeviceInfo};
+use super::session::{resolve_device, DeviceInfo, MUSIC_TRACK_NAME};
 use super::stream_format::{pick_config, typed};
 use crate::sync::lock;
 
@@ -54,21 +54,32 @@ const PERIOD_FRAMES: u32 = SAMPLE_RATE / 50;
 pub(super) const FOLLOW_EVERY: Duration = Duration::from_secs(2);
 
 /// Which of a participant's volumes a queue follows, as on the web path: the
-/// microphone's (`RemoteParticipant.setVolume`) or the screen-share audio's
-/// (the stream tile's volume and mute). Other audio plays at unity.
+/// microphone's (`RemoteParticipant.setVolume`), the screen-share audio's
+/// (the stream tile's volume and mute) or the music share's (a track of the
+/// screen-share-audio source named `music`, with a volume of its own). Other
+/// audio plays at unity.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Volume {
     Microphone,
     ScreenShare,
+    Music,
 }
 
 impl Volume {
-    fn of(source: TrackSource) -> Option<Self> {
+    /// The volume a remote track of `source` named `name` follows.
+    fn of(source: TrackSource, name: &str) -> Option<Self> {
         match source {
             TrackSource::Microphone => Some(Self::Microphone),
+            TrackSource::ScreenshareAudio if name == MUSIC_TRACK_NAME => Some(Self::Music),
             TrackSource::ScreenshareAudio => Some(Self::ScreenShare),
             _ => None,
         }
+    }
+
+    /// Whether the track arrives as stereo (the publisher's stereo is kept)
+    /// rather than mono.
+    fn stereo(self) -> bool {
+        !matches!(self, Self::Microphone)
     }
 }
 
@@ -99,7 +110,7 @@ impl Queue {
 struct MixerState {
     queues: HashMap<String, Queue>,
     /// Per identity, indexed by `Volume`.
-    gains: [HashMap<String, f32>; 2],
+    gains: [HashMap<String, f32>; 3],
     /// Track sids that play nothing (deafen), set before the unsubscribe
     /// that follows reaches the room.
     muted: std::collections::HashSet<String>,
@@ -195,7 +206,21 @@ impl Mixer {
             }
             let gain = q
                 .volume
-                .and_then(|v| gains[v as usize].get(&q.identity).copied())
+                .and_then(|v| {
+                    let own = gains[v as usize].get(&q.identity).copied();
+                    // Deafen and a tile mute reach native playout only as the
+                    // screen-share gain: music with no gain of its own yet
+                    // follows it, so it is never louder than that.
+                    own.or_else(|| {
+                        (v == Volume::Music)
+                            .then(|| {
+                                gains[Volume::ScreenShare as usize]
+                                    .get(&q.identity)
+                                    .copied()
+                            })
+                            .flatten()
+                    })
+                })
                 .unwrap_or(1.0)
                 / 32768.0;
             let n = frames.min(q.frames());
@@ -252,9 +277,9 @@ impl Listener {
                 participant,
             } => {
                 let sid = publication.sid().to_string();
-                let volume = Volume::of(publication.source());
-                // Screen-share audio keeps the publisher's stereo.
-                let channels = if volume == Some(Volume::ScreenShare) {
+                let volume = Volume::of(publication.source(), &publication.name());
+                // Screen-share audio and music keep the publisher's stereo.
+                let channels = if volume.is_some_and(Volume::stereo) {
                     2
                 } else {
                     1
