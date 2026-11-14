@@ -50,7 +50,16 @@ const (
 	attentionCertCritical  = 7 * 24 * time.Hour
 	attentionACMERenewMax  = 30 * 24 * time.Hour
 	attentionRecoveredKeep = 24 * time.Hour
+	// attentionPushEvery is the least time between two owner pushes about one signal, however often
+	// it flaps between critical and healthy.
+	attentionPushEvery = 6 * time.Hour
 )
+
+// attentionPushSignals are the signals whose turning critical is worth waking the owner for.
+var attentionPushSignals = map[string]bool{
+	"disk": true, attentionBackupSignal: true, "certificate": true,
+	"last_exit": true, "last_restore": true, "voice": true,
+}
 
 // AttentionThresholds are the operator's floors (attention.* plus server.min_free_disk_mb).
 type AttentionThresholds struct {
@@ -134,6 +143,9 @@ type AttentionWarning struct {
 	LastObserved  time.Time  `json:"last_observed"`
 	Occurrences   int        `json:"occurrences"`
 	RecoveredAt   *time.Time `json:"recovered_at"`
+
+	// pushedAt is when the owner was last pushed about this signal turning critical; zero when never.
+	pushedAt time.Time
 }
 
 // AttentionReport is what GET /admin/api/attention returns.
@@ -162,6 +174,10 @@ type AttentionService struct {
 	jobs        []*attentionJob
 	boot        BootStatus
 	restore     RestoreOutcome
+	// notify tells the owner something is critical; nil means push is off. It must not block: it hands
+	// the send to a goroutine its owner joins. pushDue is set under mu by settle and read by Evaluate.
+	notify  func(context.Context)
+	pushDue bool
 }
 
 type attentionJob struct {
@@ -228,6 +244,18 @@ func (s *AttentionService) job(label string) *attentionJob {
 		}
 	}
 	return nil
+}
+
+// SetCriticalNotifier installs the owner push sent when a warning turns critical; nil turns it off. notify
+// runs on the sampling goroutine, outside the service's lock, and hands the send to a goroutine its owner
+// joins. Set before Run.
+func (s *AttentionService) SetCriticalNotifier(notify func(context.Context)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.notify = notify
 }
 
 // RecordBootStatus records the previous run's marker; set once at start-up, before Run samples.
@@ -326,8 +354,30 @@ func (s *AttentionService) read(ctx context.Context) attentionReadings {
 // Evaluate takes one sample at now and updates signals and warnings.
 func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 	r := s.read(ctx)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.settled(ctx, func() { s.evaluate(r, now) })
+}
+
+// settled runs apply under the lock, the one door every path that settles signals goes through, and then
+// calls the owner notifier outside the lock when apply made a signal newly critical. The throttle is marked
+// in the same pass, so a path that skipped the call would lose the push and still hold the next one back.
+func (s *AttentionService) settled(ctx context.Context, apply func()) {
+	notify := func() func(context.Context) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.pushDue = false
+		apply()
+		if s.pushDue {
+			return s.notify
+		}
+		return nil
+	}()
+	if notify != nil {
+		notify(ctx)
+	}
+}
+
+// evaluate applies one reading. s.mu held.
+func (s *AttentionService) evaluate(r attentionReadings, now time.Time) {
 	s.evaluatedAt = now
 	s.signals = s.signals[:0]
 	s.evalDisk(r, now)
@@ -417,10 +467,12 @@ func (s *AttentionService) settle(sig AttentionSignal, title, action string) {
 			w = &AttentionWarning{ID: sig.ID}
 			s.warnings[sig.ID] = w
 		}
-		if w.Occurrences == 0 || w.RecoveredAt != nil {
+		fresh := w.Occurrences == 0 || w.RecoveredAt != nil
+		if fresh {
 			w.Occurrences++
 			w.FirstObserved = now
 		}
+		s.markPush(w, sig, fresh, now)
 		w.Severity, w.Title, w.Detail, w.Action = sig.Status, title, detail, action
 		w.LastObserved, w.RecoveredAt = now, nil
 	case AttentionStatusOK:
@@ -428,4 +480,21 @@ func (s *AttentionService) settle(sig AttentionSignal, title, action string) {
 			w.RecoveredAt = &now
 		}
 	}
+}
+
+// markPush notes that the owner is due a push when a signal worth one turns critical, either as a new
+// occurrence or by worsening from a warning, and was not pushed about within attentionPushEvery. w still
+// holds the previous severity. s.mu held.
+func (s *AttentionService) markPush(w *AttentionWarning, sig AttentionSignal, fresh bool, now time.Time) {
+	if s.notify == nil || sig.Status != AttentionStatusCritical || !attentionPushSignals[sig.ID] {
+		return
+	}
+	if !fresh && w.Severity == AttentionStatusCritical {
+		return
+	}
+	if !w.pushedAt.IsZero() && now.Sub(w.pushedAt) < attentionPushEvery {
+		return
+	}
+	w.pushedAt = now
+	s.pushDue = true
 }

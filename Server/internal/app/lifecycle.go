@@ -242,6 +242,12 @@ func (a *App) startHub() error {
 		rt.Services.Messages.SetPushNotifier(dispatcher)
 		a.hub.SetRingPusher(dispatcher)
 		rt.Services.PushDispatch = dispatcher
+		if rt.Services.Attention != nil {
+			// The group is created by startBackgroundJobs below and is read when a sample first turns critical.
+			rt.Services.Attention.SetCriticalNotifier(func(ctx context.Context) {
+				a.background.Go(ctx, dispatcher.SendAttention)
+			})
+		}
 	}
 	a.onClose("hub", func(ctx context.Context) error {
 		return stopHub(ctx, a.runtime.Hub, a.deps.Restart.noticeReason())

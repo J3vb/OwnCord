@@ -127,6 +127,8 @@ release changes the database, and anything an operator must do first.)
 - **Three new warnings on the admin Attention page.** One says the owner has no recovery kit (without one, a lost owner password means restoring a backup and running setup again). One says fewer than two people can work reports. One says no role besides Owner carries Moderate Members, which a customised Moderator role can be missing. Each clears by itself once fixed.
 - **Owners can set an appeal contact in admin Settings; a banned member sees it when sign-in is refused.**
 
+- **The server owner gets a notice on their phone when something needs fixing.** When a disk, backup, certificate, last-exit, last-restore or voice warning turns critical, the owner's devices get one notice that says only "Your OwnCord server needs attention"; the admin panel says what. At most one per warning every 6 hours while the server runs, and only when `push.enabled` is on.
+
 ### Under the hood
 
 - **Message history, search and other big lists download smaller.** The server gzips them (about a fifth of the size) for the browser client, and the desktop and Android app now ask for it too. Sign-in, tokens, invites, voice and files are sent as before.
