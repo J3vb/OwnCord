@@ -8,7 +8,7 @@
   },
   "chunks": {
     "MainPage": {
-      "budget": 139500,
+      "budget": 140000,
       "note": "src/pages/MainPage.ts and what only it imports: the signed-in app shell (channels, messages, members, DMs)."
     },
     "livekit": {
@@ -17,7 +17,7 @@
       "note": "The LiveKit client SDK. Not in the startup closure; it arrives with the voice session, screen share and Settings voice chunks."
     },
     "livekitSession": {
-      "budget": 37500,
+      "budget": 38500,
       "lazy": true,
       "note": "The voice session facades (livekitSession, livekitE2EE) and the voice modules they import statically. 34500 -> 35000 for the video cap follower's hooks (34554 B). 37000 -> 37500 for the tile size icons in the shared icon set (37001 B)."
     },
@@ -57,7 +57,7 @@
       "note": "The Tauri window API (@tauri-apps/api/window), imported on demand by the desktop shell."
     },
     "screenShare": {
-      "budget": 10200,
+      "budget": 10700,
       "lazy": true,
       "note": "Screen share, the peer codec pick and the H.264 profile hook, shared by camera and share. Not in the startup closure. 8700 -> 10200 for the video cap follower and sender layer clamp (10036 B)."
     }
@@ -67,7 +67,7 @@
     "note": "No emitted JS chunk may contain the base64 WASM magic. Generalises decision 10's forbidWasmInStartup: the RNNoise barrel regression (C-07) embeds 1.9 MB of sync WASM in whatever chunk pulls it, which is exactly this marker."
   },
   "css": {
-    "budget": 48500,
+    "budget": 49000,
     "note": "Total gzip of every emitted stylesheet, deduplicated by file (D5, 2026-09-28): its own ratchet, so a CSS-only change does not move the startup JS budget."
   }
 }

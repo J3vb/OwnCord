@@ -122,6 +122,8 @@ export interface CallState {
   readonly listenOnly: boolean;
   readonly camera?: boolean;
   readonly screenshare?: boolean;
+  /** You are sharing music: the music control reads Stop. */
+  readonly music?: boolean;
   /** The join has not reached the room yet: camera and share are inert. */
   readonly connecting?: boolean;
   /** A moderator muted or deafened you: that control is inert. */

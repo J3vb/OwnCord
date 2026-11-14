@@ -53,6 +53,9 @@ export abstract class SessionCore {
   /** What teardownForReconnect stopped, restored once the reconnect (or its
    *  rejoin) lands. Cleared by leaveVoice, so a give-up restores nothing. */
   protected _lostOnReconnect: LostMedia | null = null;
+  /** The app whose music share a drop stopped; shared again once the call
+   *  is back. Merged across drops like `_lostOnReconnect`. */
+  protected _lostMusicApp: string | null = null;
 
   /** Temporary holding field: populated by setRoom(null) in handleDisconnected's
    *  callback sequence so setReconnectAc can form the "reconnecting" state atomically. */

@@ -85,8 +85,9 @@ async function resumeBriefly(ctx: AudioContext): Promise<void> {
 
 /** Connect to the host's app-audio socket and turn it into a track. Rejects
  *  (after releasing everything it opened) if the worklet cannot load or the
- *  socket does not open. */
-export async function openAppAudio(url: string): Promise<AppAudioHandle> {
+ *  socket does not open. `onClosed` runs when the host closes the socket
+ *  after it opened and `close()` has not been called (the capture ended). */
+export async function openAppAudio(url: string, onClosed?: () => void): Promise<AppAudioHandle> {
   const ctx = new AudioContext({ sampleRate: APP_AUDIO_SAMPLE_RATE });
   let ws: WebSocket | null = null;
   let node: AudioWorkletNode | null = null;
@@ -131,7 +132,9 @@ export async function openAppAudio(url: string): Promise<AppAudioHandle> {
     await opened(ws);
     const socket = ws;
     socket.addEventListener("close", () => {
-      if (!closed) log.debug("App audio socket closed by the host");
+      if (closed) return;
+      log.debug("App audio socket closed by the host");
+      onClosed?.();
     });
     // A context made outside a user gesture can start suspended.
     // resume() can stay pending when the context may not start yet: wait a

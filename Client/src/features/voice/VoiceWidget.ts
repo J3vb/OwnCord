@@ -26,6 +26,7 @@ import { voiceText as t } from "../../i18n/voice";
 import { callStatusText, isConnecting, isPhoneCallHold } from "./voiceStatusText";
 import { shareBlockReason } from "./shareGate";
 import { canPublishScreen } from "./native/platform";
+import { createMusicButton, syncMusicButton, watchMusicSupport } from "./musicControl";
 import { createSecuredBadge, type SecuredBadge } from "./securedBadge";
 import type { StreamCard } from "./voiceWidget/streamCard";
 import {
@@ -67,6 +68,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let controlsRow: HTMLDivElement | null = null;
   let cameraBtn: HTMLButtonElement | null = null;
   let shareBtn: HTMLButtonElement | null = null;
+  /** Share music; stays visible (disabled with its reason) where unsupported. */
+  let musicBtn: HTMLButtonElement | null = null;
   let disconnectBtn: HTMLButtonElement | null = null;
   /** Quick toggle for the Enhanced Noise Suppression pref Settings also sets. */
   let nsBtn: HTMLButtonElement | null = null;
@@ -280,6 +283,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     renderChannelName(channelId);
     renderModStatus(voice.localServerMuted === true, voice.localServerDeafened === true);
     renderMediaButtons(voice.localCamera, voice.localScreenshare);
+    if (musicBtn !== null) syncMusicButton(musicBtn, voice);
     listenOnly?.sync(voice.listenOnly);
   }
 
@@ -402,6 +406,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       options.onScreenshareToggle,
       "vw-share-btn",
     );
+    musicBtn = createMusicButton(disposable.signal);
     disconnectBtn = createControlButton(
       t("widget.control.disconnect"),
       "phone",
@@ -410,9 +415,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     );
     // A phone can watch a share but not start one.
     if (!canPublishScreen()) {
-      appendChildren(controls, cameraBtn, disconnectBtn);
+      appendChildren(controls, cameraBtn, musicBtn, disconnectBtn);
     } else {
-      appendChildren(controls, cameraBtn, shareBtn, disconnectBtn);
+      appendChildren(controls, cameraBtn, shareBtn, musicBtn, disconnectBtn);
     }
     return controls;
   }
@@ -444,6 +449,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     );
 
     render();
+    watchMusicSupport(render, disposable.signal);
     unsubs.push(...subscribeVoiceWidget(render));
     container.appendChild(root);
   }
@@ -465,6 +471,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     cameraBtn = null;
     nsBtn = null;
     shareBtn = null;
+    musicBtn = null;
     disconnectBtn = null;
     streamCardScope?.destroy();
     streamCardScope = null;

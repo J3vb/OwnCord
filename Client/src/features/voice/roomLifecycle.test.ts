@@ -77,6 +77,7 @@ function setup(initial: SessionState = { type: "idle" }) {
     getEffectiveVolume: (userId: number) => userId / 10,
     getScreenshareGain: (userId: number) => userId / 20,
     setScreenshareGainListener: vi.fn(),
+    setMusicGainListener: vi.fn(),
   };
   const deviceManager = {
     setRoom: vi.fn(),
@@ -331,6 +332,7 @@ describe("RoomLifecycle on the Linux native backend", () => {
         autoGainControl: true,
         enhancedNoiseSuppression: false,
       },
+      expect.any(Function),
       expect.any(Function),
       expect.any(Function),
     );

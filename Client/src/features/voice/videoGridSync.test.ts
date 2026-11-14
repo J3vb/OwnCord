@@ -131,6 +131,15 @@ describe("syncGridCallState", () => {
     expect(setCallState.mock.calls[1]![0]).not.toHaveProperty("phoneHold");
   });
 
+  it("tells the grid when you start and stop sharing music", () => {
+    const { setCallState, grid, seen } = callStateSetup();
+    syncGridCallState(voiceState(1, [], { localMusic: true }), seen, grid);
+    expect(setCallState).toHaveBeenLastCalledWith(expect.objectContaining({ music: true }));
+    syncGridCallState(voiceState(1, [], { localMusic: false }), seen, grid);
+    expect(setCallState).toHaveBeenCalledTimes(2);
+    expect(setCallState.mock.calls[1]![0]).not.toHaveProperty("music");
+  });
+
   it("holds nothing where there is no call", () => {
     const { setCallState, grid, seen } = callStateSetup();
     syncGridCallState(voiceState(null, [], { phoneCallHold: true }), seen, grid);

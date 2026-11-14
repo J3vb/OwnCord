@@ -21,6 +21,9 @@ import {
   stopManualScreenTracks,
 } from "./screenShare";
 import type { JoinOrchestration } from "./joinOrchestration";
+import type { MusicShare, MusicStartOptions, MusicStartOutcome } from "./musicShare";
+import { createLogger } from "@lib/logger";
+import { showToast } from "@lib/ui/toast";
 import { isDmKeptForCall } from "../direct-messages/keptCallDms";
 import { joinSequence, noteJoinSent } from "./joinRequest";
 import { restoreMediaAfterReconnect } from "./localVoiceRestore";
@@ -33,10 +36,14 @@ import type { VoiceRoom } from "@lib/voice/voiceRoom";
  *  server answers a voice_join in one round trip; past this it was lost. */
 const YIELD_ANSWER_WAIT_MS = 15_000;
 
+const log = createLogger("sessionReconnect");
+
 export abstract class SessionReconnect extends SessionTokens {
   protected abstract readonly _join: JoinOrchestration;
   protected abstract readonly _audioElements: AudioElements;
   protected abstract readonly _cameraState: CameraTrackState;
+  protected abstract _music: MusicShare | null;
+  abstract startMusic(appId: string, options?: MusicStartOptions): Promise<MusicStartOutcome>;
   protected abstract createRoom(channelId?: number): Promise<VoiceRoom>;
   protected abstract syncModuleRooms(room?: VoiceRoom | null): void;
   protected abstract sweepPublications(room: VoiceRoom): void;
@@ -139,6 +146,12 @@ export abstract class SessionReconnect extends SessionTokens {
         // Stop leaked camera/screen tracks before room is nulled.
         stopManualCameraTrack(this._cameraState, this._room);
         stopManualScreenTracks(this._screenState, this._room);
+        // The music share is stopped with the room and shared again after
+        // the reconnect, by the same app.
+        // A start still waiting on the host counts: a second drop during the
+        // restore keeps the app too.
+        this._lostMusicApp = this._music?.appId ?? this._music?.pendingAppId ?? this._lostMusicApp;
+        this._music?.stop();
         setLocalCamera(false);
         setLocalScreenshare(false);
       },
@@ -205,8 +218,10 @@ export abstract class SessionReconnect extends SessionTokens {
       rejoinVoice: () => {
         // The rejoin's join brings back what the drop stopped, as a reconnect does.
         const lost = this._lostOnReconnect;
+        const lostMusic = this._lostMusicApp;
         void this.leaveVoice(false, true);
         this._lostOnReconnect = lost;
+        this._lostMusicApp = lostMusic;
         this._rejoinPending = true;
         setVoiceStatus("joining");
         noteJoinSent(this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } }));
@@ -267,6 +282,9 @@ export abstract class SessionReconnect extends SessionTokens {
 
   /** Once a reconnect (or its rejoin) lands: bring back what the drop stopped. */
   protected restoreLostMedia(): void {
+    const musicApp = this._lostMusicApp;
+    this._lostMusicApp = null;
+    if (musicApp !== null) void this.restoreMusic(musicApp);
     restoreMediaAfterReconnect({
       sendWatching: () => this.sendWatching(),
       getLost: () => this._lostOnReconnect,
@@ -280,12 +298,26 @@ export abstract class SessionReconnect extends SessionTokens {
     });
   }
 
+  /** Share the dropped music again; a refusal (the app is gone) ends it with a
+   *  notice. A newer start or a stop meanwhile leaves it as it is. */
+  private async restoreMusic(appId: string): Promise<void> {
+    try {
+      if ((await this.startMusic(appId, { quiet: true })) === "failed") {
+        showToast(voiceText("music.lost"), "warning");
+      }
+    } catch (err) {
+      showToast(voiceText("music.lost"), "warning");
+      log.warn("Sharing the music again failed", err);
+    }
+  }
+
   /** A refused voice_join ends a reconnect's rejoin for good: tell the user
    *  the call was lost, as the loop's own give-up does. */
   failPendingRejoin(): void {
     if (!this._rejoinPending) return;
     this._rejoinPending = false;
     this._lostOnReconnect = null;
+    this._lostMusicApp = null;
     this.onErrorCallback?.(voiceText("reconnect.voiceLost"));
   }
 }

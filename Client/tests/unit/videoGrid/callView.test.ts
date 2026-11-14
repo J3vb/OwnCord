@@ -80,7 +80,7 @@ describe("VideoGrid", () => {
         [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
           (b) => b.dataset["callControl"],
         ),
-      ).toEqual(["mute", "deafen", "camera", "share", "views", "leave"]);
+      ).toEqual(["mute", "deafen", "camera", "share", "music", "views", "leave"]);
 
       grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
       grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
@@ -121,7 +121,7 @@ describe("VideoGrid", () => {
         [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
           (b) => b.dataset["callControl"],
         ),
-      ).toEqual(["mute", "deafen", "camera", "camera-device", "share", "views", "leave"]);
+      ).toEqual(["mute", "deafen", "camera", "camera-device", "share", "music", "views", "leave"]);
 
       const pick = barButton("camera-device");
       expect(pick.getAttribute("aria-label")).toBe("Choose camera");
@@ -380,6 +380,19 @@ describe("VideoGrid", () => {
       expect(grid.getFocusedTileId()).toBeNull();
       expect(tile(SELF).hidden).toBe(true);
       expect(tile(3).hidden).toBe(false);
+    });
+
+    it("reads Stop music on the bar while you share music, and Share music after", () => {
+      document.body.appendChild(container);
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      const base = { muted: false, deafened: false, listenOnly: false };
+      grid.setCallState({ ...base, music: true });
+      expect(barButton("music").getAttribute("aria-pressed")).toBe("true");
+      expect(barButton("music").getAttribute("aria-label")).toBe("Stop music");
+      grid.setCallState({ ...base, music: false });
+      expect(barButton("music").getAttribute("aria-pressed")).toBe("false");
+      expect(barButton("music").getAttribute("aria-label")).toBe("Share music");
     });
 
     it("keeps keyboard focus on a bar button or toggle while focus view redraws", () => {

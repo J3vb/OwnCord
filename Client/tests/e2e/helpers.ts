@@ -660,6 +660,9 @@ export function buildTauriMockScript(opts: {
     preview?: Record<string, Record<string, unknown> | string>;
     image?: Record<string, number[] | string>;
   };
+  /** The apps the music share picker lists (the Windows and the Linux host
+   *  answer the same shape). Without it the list is empty. */
+  musicApps?: Array<{ id: string; name: string; icon?: string; playing?: boolean }>;
 }): string {
   const readyPayload = buildReadyPayload(opts.readyOverrides);
   // A profile read is GET /auth/me; /users/me only supports PATCH. Keep the
@@ -1079,9 +1082,9 @@ export function buildTauriMockScript(opts: {
           return __mobileAudioState();
         if (cmd === "ptt_polling_supported") return false;
         // Windows per-app share audio (6.7): no WASAPI host, no picker switch.
-        if (cmd === "app_audio_available") return false;
+        if (cmd === "app_audio_available") return ${opts.musicApps !== undefined};
         // Music share host: no apps to list, nothing to capture.
-        if (cmd === "list_audio_apps") return [];
+        if (cmd === "list_audio_apps") return ${JSON.stringify(opts.musicApps ?? [])};
         if (cmd === "stop_music_audio") return null;
         if (cmd === "voice_shortcuts_supported") return false;
         // Global keys backend (LP-9b): matches the two probes above, nothing delivers a key.
@@ -1097,7 +1100,7 @@ export function buildTauriMockScript(opts: {
         if (cmd === "set_gpu_adapter") return null;
         if (cmd === "native_voice_set_video_bitrate") return;
         // Music share (Linux host): nothing plays in the mocked app.
-        if (cmd === "native_voice_list_audio_apps") return [];
+        if (cmd === "native_voice_list_audio_apps") return ${JSON.stringify(opts.musicApps ?? [])};
         if (cmd === "native_voice_start_music") return "TR_music";
         if (cmd === "native_voice_stop_music" || cmd === "native_voice_set_music_volume") return;
         // ---- External-content broker (B7-16) ----
@@ -1317,6 +1320,18 @@ export const mockTauriFullSessionWithVoice = mock({
   simulateWsFlow: true,
   wsHandlers: voiceWsHandlers(),
   readyOverrides: READY_VOICE,
+});
+
+/** A voice session whose host lists one playing app to share as music. */
+export const mockTauriFullSessionWithMusic = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES],
+  simulateWsFlow: true,
+  wsHandlers: voiceWsHandlers(),
+  readyOverrides: READY_VOICE,
+  musicApps: [
+    { id: "p1", name: "Test Player", playing: true },
+    { id: "p2", name: "Idle Player", playing: false },
+  ],
 });
 
 export const mockTauriFullSessionWithVoiceFailure = mock({
