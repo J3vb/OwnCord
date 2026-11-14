@@ -168,8 +168,7 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 // stranded upload. The default-size thumbnail is thumbs/<uuid>; a small size is thumbs/<size>/<uuid>.
 const thumbDir = "thumbs"
 
-// ThumbSizes are the small thumbnail sizes (box edge in pixels) kept beside the default one. Delete removes
-// every one of them with the original.
+// ThumbSizes are the small thumbnail box edges, in pixels, kept beside the default one.
 var ThumbSizes = []int{128, 256}
 
 // Delete removes the file named uuid and its thumbnails, of every size (erasure, retention and
@@ -202,12 +201,10 @@ func (s *Storage) Delete(uuid string) error {
 	return err
 }
 
-// animatedSuffix names the sidecar of a small thumbnail that records whether its GIF original is animated.
-// It lives beside the thumbnail, so List never sees it and Delete removes it with the rest.
+// animatedSuffix names a small thumbnail's sidecar recording whether its GIF original is animated.
 const animatedSuffix = ".animated"
 
-// ThumbAnimation reports whether the original behind uuid's thumbnail of the given size was recorded as
-// animated; known is false when nothing was recorded.
+// ThumbAnimation reports the recorded animated flag; known is false when nothing was recorded.
 func (s *Storage) ThumbAnimation(uuid string, size int) (animated, known bool) {
 	p, _, err := s.thumbPath(uuid, size)
 	if err != nil {
@@ -220,8 +217,7 @@ func (s *Storage) ThumbAnimation(uuid string, size int) (animated, known bool) {
 	return b[0] == '1', true
 }
 
-// SetThumbAnimation records whether the original is animated, next to uuid's thumbnail of the given size.
-// If the original is gone afterwards the record is removed and fs.ErrNotExist returned.
+// SetThumbAnimation records whether the original is animated, beside the thumbnail of that size.
 func (s *Storage) SetThumbAnimation(uuid string, size int, animated bool) error {
 	p, original, err := s.thumbPath(uuid, size)
 	if err != nil {
@@ -234,8 +230,7 @@ func (s *Storage) SetThumbAnimation(uuid string, size int, animated bool) error 
 	return writeThumbFile(p+animatedSuffix, original, value, "thumbnail record")
 }
 
-// thumbPath is where uuid's thumbnail of the given size lives (0 is the default size) and where its
-// original does.
+// thumbPath is where uuid's thumbnail of the given size (0 = default) and its original live.
 func (s *Storage) thumbPath(uuid string, size int) (thumb, original string, err error) {
 	if err := sanitizeFilename(uuid); err != nil {
 		return "", "", err
@@ -280,8 +275,7 @@ func (s *Storage) SaveThumbSize(uuid string, size int, data []byte) error {
 	return writeThumbFile(p, original, data, "thumbnail")
 }
 
-// writeThumbFile writes data to p atomically via rename. If original is gone afterwards p is removed and
-// fs.ErrNotExist returned, so a thumbnail never outlives its original.
+// writeThumbFile writes p atomically; a thumbnail never outlives its original (fs.ErrNotExist).
 func writeThumbFile(p, original string, data []byte, what string) error {
 	dir := filepath.Dir(p)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
