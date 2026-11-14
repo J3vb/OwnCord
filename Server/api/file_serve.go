@@ -28,13 +28,7 @@ func handleServeFile(uploads *service.UploadService, store FileStore, allowedOri
 		if !ok {
 			return
 		}
-		f, err := store.Open(aa.StoredAs)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		defer f.Close() //nolint:errcheck
-		serveFileContent(w, r, aa, aa.MimeType, fileModTime(f), f, allowedOrigins)
+		serveStoredOriginal(w, r, aa, store, allowedOrigins)
 	}
 }
 
@@ -135,13 +129,11 @@ func serveKeptThumb(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAcc
 	defer t.Close() //nolint:errcheck
 	mimeType := aa.MimeType
 	if mimeType == mimeWebP {
-		var head [8]byte
-		n, _ := io.ReadFull(t, head[:])
-		if _, err := t.Seek(0, io.SeekStart); err != nil {
-			http.NotFound(w, r)
+		head, ok := peekHead(w, r, t)
+		if !ok {
 			return
 		}
-		mimeType = thumbMIME(mimeType, head[:n])
+		mimeType = thumbMIME(mimeType, head)
 	}
 	serveFileContent(w, r, aa, mimeType, fileModTime(t), t, allowedOrigins)
 }
@@ -271,17 +263,27 @@ func serveSmallThumb(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAc
 		return
 	}
 	defer t.Close() //nolint:errcheck
-	var head [8]byte
-	n, _ := io.ReadFull(t, head[:])
-	if _, err := t.Seek(0, io.SeekStart); err != nil {
-		http.NotFound(w, r)
+	head, ok := peekHead(w, r, t)
+	if !ok {
 		return
 	}
 	if !markAnimated(w, aa, store, size) {
 		http.NotFound(w, r)
 		return
 	}
-	serveFileContent(w, r, aa, smallThumbContentType(head[:n]), fileModTime(t), t, allowedOrigins)
+	serveFileContent(w, r, aa, smallThumbContentType(head), fileModTime(t), t, allowedOrigins)
+}
+
+// peekHead reads a kept thumbnail's first bytes and rewinds it; on a failed rewind it answers 404 and
+// reports false.
+func peekHead(w http.ResponseWriter, r *http.Request, t storage.File) ([]byte, bool) {
+	var head [8]byte
+	n, _ := io.ReadFull(t, head[:])
+	if _, err := t.Seek(0, io.SeekStart); err != nil {
+		http.NotFound(w, r)
+		return nil, false
+	}
+	return head[:n], true
 }
 
 // serveSmallBytes serves a thumbnail that could not be kept (no disk headroom).
