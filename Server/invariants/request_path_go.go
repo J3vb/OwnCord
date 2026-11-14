@@ -37,6 +37,7 @@ var GoAllow = map[string]GoEntry{
 	"ws/event_persister.go":              {1, "lifecycle worker, joined by its close step"},
 	"ws/event_pruner.go":                 {1, "lifecycle worker, joined by its close step"},
 	"livekitproc/process.go":             {1, "supervised process monitor, joined by its close step"},
+	"api/portal.go":                      {1, "portal compression worker, bounded and joined by NewRouter's cleanup (the router close step)"},
 	"ws/serve.go":                        {2, "connection-scoped write and ping pumps; Shutdown does not wait on hijacked connections (residual class, follow-up: connection teardown join)"},
 	"ws/focus_defer.go":                  {1, "connection-scoped deferred focus drain (residual class, as in ws/serve.go)"},
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"io/fs"
 	"log/slog"
 	"mime"
@@ -97,14 +98,28 @@ func portalContentType(name string) string {
 // answers 404 with a one-line note and /assets/* serves nothing. The index
 // and every file under assets/ are read once here, so a request never copies
 // a file; names with a dot-segment (".vite/", ".DS_Store") are not served.
-func MountPortal(r chi.Router, bundle fs.FS) {
-	var index []byte
-	assets := map[string][]byte{}
+// The gzip and brotli copies are made by a goroutine that stops when ctx ends;
+// the returned channel is closed when it has returned (at once for the
+// placeholder build).
+func MountPortal(ctx context.Context, r chi.Router, bundle fs.FS) (ready <-chan struct{}) {
+	var index *portalFile
+	assets := map[string]*portalFile{}
 	if webclient.HasIndex(bundle) {
 		if b, err := fs.ReadFile(bundle, "index.html"); err == nil {
-			index = b
+			index = newPortalFile(b)
 			assets = loadPortalAssets(bundle)
 		}
+	}
+	done := make(chan struct{})
+	if index == nil {
+		close(done)
+	} else {
+		files := make(map[string]*portalFile, len(assets)+1)
+		for name, f := range assets {
+			files["assets/"+name] = f
+		}
+		files["index.html"] = index
+		go encodePortalFiles(ctx, files, done)
 	}
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
 		if index == nil {
@@ -118,11 +133,11 @@ func MountPortal(r chi.Router, bundle fs.FS) {
 		h.Set("Content-Security-Policy", portalCSP(req.Host))
 		h.Set("Permissions-Policy", portalPermissions)
 		h.Set("Cache-Control", portalIndexCache)
-		_, _ = w.Write(index)
+		writePortalFile(w, req, index)
 	})
 	r.Get("/assets/*", func(w http.ResponseWriter, req *http.Request) {
 		name := chi.URLParam(req, "*")
-		body, ok := assets[name]
+		f, ok := assets[name]
 		if !ok {
 			http.NotFound(w, req)
 			return
@@ -130,15 +145,16 @@ func MountPortal(r chi.Router, bundle fs.FS) {
 		h := w.Header()
 		h.Set("Content-Type", portalContentType(name))
 		h.Set("Cache-Control", portalAssetCache)
-		_, _ = w.Write(body)
+		writePortalFile(w, req, f)
 	})
+	return done
 }
 
 // loadPortalAssets reads every regular file under assets/ into memory, keyed
 // by its path below assets/. A file that cannot be read is left out, and a
 // walk error stops the walk with what was read so far.
-func loadPortalAssets(bundle fs.FS) map[string][]byte {
-	assets := map[string][]byte{}
+func loadPortalAssets(bundle fs.FS) map[string]*portalFile {
+	assets := map[string]*portalFile{}
 	_ = fs.WalkDir(bundle, "assets", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -154,7 +170,7 @@ func loadPortalAssets(bundle fs.FS) map[string][]byte {
 			return nil
 		}
 		if b, readErr := fs.ReadFile(bundle, p); readErr == nil {
-			assets[name] = b
+			assets[name] = newPortalFile(b)
 		}
 		return nil
 	})
@@ -163,15 +179,16 @@ func loadPortalAssets(bundle fs.FS) map[string][]byte {
 
 // mountBrowserClient mounts the browser client portal, an owner
 // opt-in. Off, nothing is mounted at / or /assets/*
-// (browser_hosting_posture_test.go). A nil bundle uses the embedded one.
-func mountBrowserClient(r chi.Router, cfg *config.Config, bundle fs.FS) {
+// (browser_hosting_posture_test.go). A nil bundle uses the embedded one. The
+// returned channel closes once the portal's background encoding has stopped.
+func mountBrowserClient(ctx context.Context, r chi.Router, cfg *config.Config, bundle fs.FS) (ready <-chan struct{}) {
 	if !cfg.Server.BrowserClientEnabled {
-		return
+		return nil
 	}
 	if bundle == nil {
 		bundle, _ = webclient.Assets()
 	}
-	MountPortal(r, bundle)
+	return MountPortal(ctx, r, bundle)
 }
 
 // warnOnBrowserClient reports a browser-client portal that is switched on but
