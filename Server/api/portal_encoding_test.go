@@ -141,7 +141,7 @@ func TestPortal_SkipsFilesThatDoNotShrink(t *testing.T) {
 
 func containsFold(values []string, want string) bool {
 	for _, v := range values {
-		for _, part := range strings.Split(v, ",") {
+		for part := range strings.SplitSeq(v, ",") {
 			if strings.EqualFold(strings.TrimSpace(part), want) {
 				return true
 			}

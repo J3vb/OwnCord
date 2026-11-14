@@ -151,7 +151,7 @@ func writePortalFile(w http.ResponseWriter, req *http.Request, f *portalFile) {
 func acceptedEncodings(values []string) (gzipOK, brotliOK bool) {
 	var gzipSet, brotliSet, star, starSet bool
 	for _, v := range values {
-		for _, part := range strings.Split(v, ",") {
+		for part := range strings.SplitSeq(v, ",") {
 			name, params, _ := strings.Cut(part, ";")
 			name = strings.ToLower(strings.TrimSpace(name))
 			ok := portalQualityAllows(params)
@@ -179,7 +179,7 @@ func acceptedEncodings(values []string) (gzipOK, brotliOK bool) {
 // portalQualityAllows reads the q parameter of one Accept-Encoding entry; an
 // entry without one, or with one that does not parse, counts as allowed.
 func portalQualityAllows(params string) bool {
-	for _, p := range strings.Split(params, ";") {
+	for p := range strings.SplitSeq(params, ";") {
 		k, v, found := strings.Cut(strings.TrimSpace(p), "=")
 		if !found || !strings.EqualFold(strings.TrimSpace(k), "q") {
 			continue
