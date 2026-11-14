@@ -103,7 +103,7 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 32    |
-| Distinct `invoke` command names called from `Client/src/`  | 124   |
+| Distinct `invoke` command names called from `Client/src/`  | 131   |
 | `#[tauri::command]` handlers in `Client/src-tauri/`        | 134   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
@@ -350,7 +350,14 @@ contract, a twenty-seventh importer. They still belong in the registration
 inventory. The music share host half adds three more beside them,
 `list_audio_apps`, `start_music_audio` and `stop_music_audio`: the same
 "unavailable" answer off Windows, a second independent capture slot so music
-and a window share's audio run together, and no TypeScript caller yet. `set_call_service` (Android only, `src-tauri/src/call_service.rs`)
+and a window share's audio run together. They have their caller in
+`src/platform/desktop/musicAudio.ts`, behind the `MusicAudio` contract
+(`src/platform/contracts/musicAudio.ts`): it picks the Windows commands or the
+Linux host's `native_voice_list_audio_apps` by OS, and every call goes through
+`tryInvoke`, so a refusal becomes a typed answer. The Linux room starts and
+stops its music capture through the `nativeVoice` contract instead
+(`startMusic`, `stopMusic`, `setMusicVolume`), and the web build answers
+"unavailable" for all of it. `set_call_service` (Android only, `src-tauri/src/call_service.rs`)
 starts, updates and stops the foreground service that keeps a call's mic and
 camera running while the app is in the background, and keeps the screen on
 while the call has a camera or a stream on screen (a window flag, set and

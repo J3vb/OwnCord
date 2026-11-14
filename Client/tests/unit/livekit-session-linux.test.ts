@@ -164,6 +164,18 @@ vi.mock("../../src/platform/desktop", () => ({
         host.commands.push(["setScreenshareVolume", args]);
         return Promise.resolve();
       },
+      setMusicVolume: (...args: unknown[]) => {
+        host.commands.push(["setMusicVolume", args]);
+        return Promise.resolve();
+      },
+      startMusic: (...args: unknown[]) => {
+        host.commands.push(["startMusic", args]);
+        return Promise.resolve("sid");
+      },
+      stopMusic: (...args: unknown[]) => {
+        host.commands.push(["stopMusic", args]);
+        return Promise.resolve();
+      },
       setDevice: (...args: unknown[]) => {
         host.commands.push(["setDevice", args]);
         return Promise.resolve();
@@ -428,6 +440,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     // re-asserts the mic mute, as on the web path.
     expect(host.commands).toEqual([
       ["setScreenshareVolume", [1, "user-2", 0]],
+      ["setMusicVolume", [1, "user-2", 0]],
       ["setSubscribed", [1, "user-2", "TR_a", false]],
       ["setMicrophone", [1, false]],
     ]);
@@ -454,6 +467,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(host.commands).toEqual([
       ["setVolume", [1, "user-3", 1]],
       ["setScreenshareVolume", [1, "user-3", 0]],
+      ["setMusicVolume", [1, "user-3", 0]],
       ["setSubscribed", [1, "user-3", "TR_b", false]],
     ]);
   });
@@ -469,8 +483,10 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(host.commands).toEqual([
       ["setVolume", [1, "user-3", 0.5]],
       ["setScreenshareVolume", [1, "user-3", 1]],
+      ["setMusicVolume", [1, "user-3", 1]],
       ["setVolume", [1, "user-4", 1]],
       ["setScreenshareVolume", [1, "user-4", 1]],
+      ["setMusicVolume", [1, "user-4", 1]],
     ]);
     host.commands.length = 0;
     // The volume menu, then the master output volume scaling everyone.

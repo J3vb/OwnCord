@@ -109,6 +109,12 @@ export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(
 export const getScreenshareAudioVolume = session.getScreenshareAudioVolume.bind(session);
 export const muteScreenshareAudio = session.muteScreenshareAudio.bind(session);
 export const getScreenshareAudioMuted = session.getScreenshareAudioMuted.bind(session);
+export const startMusic = session.startMusic.bind(session);
+export const stopMusic = session.stopMusic.bind(session);
+export const setMusicVolume = session.setMusicVolume.bind(session);
+export const getMusicVolume = session.getMusicVolume.bind(session);
+export const setMusicMuted = session.setMusicMuted.bind(session);
+export const getMusicMuted = session.getMusicMuted.bind(session);
 
 /** True while a join is in flight ("connecting"/"reconnecting") OR a room is
  *  live ("connected") — i.e. there is something for leaveVoice() to tear

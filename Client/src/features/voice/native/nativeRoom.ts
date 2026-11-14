@@ -211,8 +211,9 @@ export class NativeRoom extends NativeRoomRemote {
     private audio: NativeVoiceAudioOptions,
     volumeOf?: (identity: string) => number,
     screenshareVolumeOf?: (identity: string) => number,
+    musicVolumeOf?: (identity: string) => number,
   ) {
-    super(volumeOf, screenshareVolumeOf);
+    super(volumeOf, screenshareVolumeOf, musicVolumeOf);
   }
 
   // --- Emitter (the livekit Room surface roomLifecycle wires) ---
@@ -486,6 +487,7 @@ export function createNativeRoom(
   audio: NativeVoiceAudioOptions,
   volumeOf?: (identity: string) => number,
   screenshareVolumeOf?: (identity: string) => number,
+  musicVolumeOf?: (identity: string) => number,
 ): NativeRoom {
-  return new NativeRoom(audio, volumeOf, screenshareVolumeOf);
+  return new NativeRoom(audio, volumeOf, screenshareVolumeOf, musicVolumeOf);
 }

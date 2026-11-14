@@ -624,6 +624,12 @@
       "binding": "scopes",
       "category": "dom-owned",
       "reason": "WeakMap keyed by live message row elements; a scope is destroyed with its row's owner, and the entry goes with the row"
+    },
+    {
+      "file": "stores/voicePttLive.ts",
+      "binding": "pttPollingListeners",
+      "category": "app-lifetime",
+      "reason": "Listeners of the push-to-talk poller's live flag, which runs for the whole app and is not per server; moved out of voice.store.ts unchanged."
     }
   ]
 }

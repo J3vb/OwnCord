@@ -33,6 +33,7 @@ import { nativeCounters } from "./native/counters";
 import { speechDetectionOf } from "./sileroDetection";
 import { desktop } from "../../platform/desktop";
 import { SessionReconnect } from "./sessionReconnect";
+import { MusicShare, type MusicStartOutcome } from "./musicShare";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("livekitSession");
@@ -134,6 +135,7 @@ export class LiveKitSession extends SessionReconnect {
   protected _eventHandlers: RoomEventHandlers;
 
   /** Manually published local tracks (camera/screenshare) for explicit cleanup. */
+  protected readonly _music = new MusicShare({ getRoom: () => this._room });
   protected _cameraState: CameraTrackState = { manualCameraTrack: null };
   protected _screenState: ScreenTrackState = { manualScreenTracks: [] };
 
@@ -233,6 +235,8 @@ export class LiveKitSession extends SessionReconnect {
     this._rejoinPending = false;
     this.clearYield();
     this._lostOnReconnect = null;
+    this._lostMusicApp = null;
+    this._music.stop();
     if (this._watchRetry !== null) clearTimeout(this._watchRetry);
     this._watchRetry = null;
     dismissMediaLostNotice();
@@ -247,6 +251,32 @@ export class LiveKitSession extends SessionReconnect {
     this._media.stopCodecSwitch();
     this.stopShareDiagnostics();
     return this._lifecycle.leaveVoice(sendWs);
+  }
+
+  setMusicVolume(userId: number, percent: number): void {
+    this._audioElements.setMusicVolume(userId, percent);
+  }
+
+  getMusicVolume(userId: number): number {
+    return this._audioElements.getMusicVolume(userId);
+  }
+
+  setMusicMuted(userId: number, muted: boolean): void {
+    this._audioElements.setMusicMuted(userId, muted);
+  }
+
+  getMusicMuted(userId: number): boolean {
+    return this._audioElements.getMusicMuted(userId);
+  }
+
+  /** Share app `appId`'s sound as music (see MusicShare). */
+  startMusic(appId: string): Promise<MusicStartOutcome> {
+    return this._music.start(appId);
+  }
+
+  /** Stop the music share. */
+  stopMusic(): void {
+    this._music.stop();
   }
 
   /** Stays on the facade: past leaveVoice(false) it only clears the session's

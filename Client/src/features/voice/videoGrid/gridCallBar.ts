@@ -10,6 +10,13 @@ import { voiceText } from "../../../i18n/voice";
 import { canPublishScreen } from "../native/platform";
 import { openPopoutWindow } from "../popout";
 import { createRouteSlot } from "../routeSlot";
+import { voiceStore } from "@stores/voice.store";
+import {
+  cachedMusicSupport,
+  getMusicSupport,
+  musicButtonState,
+  toggleMusicShare,
+} from "../musicControl";
 import { createTalkSlot } from "../talkSlot";
 import { createPausedNote, drawPausedNote } from "./gridPhoneHold";
 import { VIEW_PREFS, type ViewToggle, log, callButton } from "./gridShared";
@@ -35,6 +42,8 @@ export function createGridCallBar(st: GridState, api: GridApi) {
   /** The call view's sound route button (Android app only). */
   const routeSlot = createRouteSlot("call");
   const viewMenu = createGridViewMenu(st, api);
+  // The probe settles once; the bars draw again then.
+  void getMusicSupport().then(() => redrawCallBars());
   st.gridListeners.addCleanup(() => {
     talkSlot.clear();
     fullscreenTalkSlot.clear();
@@ -109,6 +118,12 @@ export function createGridCallBar(st: GridState, api: GridApi) {
       };
       bar.appendChild(
         callButton(voiceText("widget.control.shareStart"), "monitor", "share", onShare),
+      );
+    }
+    // Music goes where a share does: a phone, or a call without a share control, has no button.
+    if (canPublishScreen() && cc.onScreenshareToggle !== undefined) {
+      bar.appendChild(
+        callButton(voiceText("music.share"), "music", "music", () => void toggleMusicShare()),
       );
     }
     if (inCallView) {
@@ -224,12 +239,23 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     if (st.callState.shareBlock !== undefined) share.disabled = true;
   }
 
+  function drawMusicControl(bar: Element): void {
+    const music = bar.querySelector<HTMLButtonElement>("[data-call-control='music']");
+    if (music === null) return;
+    const state = musicButtonState(voiceStore.getState(), cachedMusicSupport(), mediaLockReason());
+    music.setAttribute("aria-pressed", String(state.sharing));
+    music.setAttribute("aria-label", voiceText(state.sharing ? "music.stop" : "music.share"));
+    music.title = state.title;
+    music.disabled = state.disabled;
+  }
+
   function drawCallState(bar: Element): void {
     drawPausedNote(bar, st.callState.phoneHold === true);
     drawMuteControl(bar);
     drawDeafenControl(bar);
     drawCameraControls(bar);
     drawShareControl(bar);
+    drawMusicControl(bar);
   }
 
   function redrawCallBars(): void {

@@ -155,3 +155,36 @@ export function withVoiceConfig(prev: VoiceState, payload: VoiceConfigPayload): 
   });
   return { ...prev, voiceConfigs: nextConfigs };
 }
+
+/** `userId` joins or leaves the music sharers. */
+export function withMusicSharer(prev: VoiceState, userId: number, sharing: boolean): VoiceState {
+  const current = prev.musicSharers ?? new Set<number>();
+  if (current.has(userId) === sharing) return prev;
+  const next = new Set(current);
+  if (sharing) next.add(userId);
+  else next.delete(userId);
+  return { ...prev, musicSharers: next };
+}
+
+/** The sharers become `userIds`, plus `self` while you share (0: not signed in). */
+export function withRemoteMusicSharers(
+  prev: VoiceState,
+  userIds: readonly number[],
+  self: number,
+): VoiceState {
+  const next = new Set(userIds);
+  if (prev.localMusic === true && self !== 0) next.add(self);
+  const current = prev.musicSharers ?? new Set<number>();
+  const same = current.size === next.size && [...next].every((id) => current.has(id));
+  return same ? prev : { ...prev, musicSharers: next };
+}
+
+/** You started or stopped sharing: `localMusic` and your own sharer entry. */
+export function withLocalMusic(prev: VoiceState, sharing: boolean, self: number): VoiceState {
+  const next = new Set(prev.musicSharers ?? []);
+  if (self !== 0) {
+    if (sharing) next.add(self);
+    else next.delete(self);
+  }
+  return { ...prev, localMusic: sharing, musicSharers: next };
+}

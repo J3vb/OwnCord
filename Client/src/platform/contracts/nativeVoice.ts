@@ -96,6 +96,8 @@ export interface NativeVoiceTrack {
   sid: string;
   kind: "audio" | "video";
   source: "microphone" | "camera" | "screen_share" | "screen_share_audio" | "unknown";
+  /** The track's name; a music share's is "music". Absent from an older host. */
+  name?: string;
   muted: boolean;
   /** Whether the server reports the track end-to-end encrypted. */
   encrypted: boolean;
@@ -134,6 +136,9 @@ export type NativeVoiceEvent =
   /** Camera capture `capture` ended on its own after it started: the device
    *  was unplugged or the pipeline errored. */
   | { type: "cameraCaptureEnded"; capture: number }
+  /** The published music track was withdrawn; the capture stays until the
+   *  page stops it. */
+  | { type: "musicShareEnded" }
   | { type: "reconnecting" }
   | { type: "reconnected" }
   | { type: "disconnected"; reason: string };
@@ -261,6 +266,16 @@ export interface NativeVoice {
   /** Play `identity`'s screen-share audio at `volume` (1 is unity, 0 when
    *  muted), the value the web path gives its screen-share audio element. */
   setScreenshareVolume(session: number, identity: string, volume: number): Promise<void>;
+  /** Play `identity`'s music share at `volume` (1 is unity). The value folds
+   *  in deafen and the per-user Mute music: 0 silences it. */
+  setMusicVolume(session: number, identity: string, volume: number): Promise<void>;
+  /** Share application `appId` (from the music contract's `listApps`) as a
+   *  `music` track published by the host; resolves with its sid. Rejects with
+   *  a code: `unavailable`, `not_found`, `activation_failed`, `superseded`,
+   *  `internal`. A running music share is replaced. */
+  startMusic(session: number, appId: string): Promise<string>;
+  /** Stop the music share; nothing running is a no-op. */
+  stopMusic(session: number): Promise<void>;
   /** Publish (or replace) camera capture `capture`; its frames then go to
    *  remote peers from the host. E2EE covers it with the room key, as for
    *  the microphone. Resolves with the publication's sid. */

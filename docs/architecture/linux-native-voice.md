@@ -103,3 +103,19 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   or a new connect holds the microphone and ends the session's pending SFU
   waits (publishes, the microphone steps, share audio) through the same slot,
   so it gets `inner` at once.
+
+## Share music
+
+The Linux room shares one app's sound as a second audio track named `music`
+(source `ScreenShareAudio`) beside the microphone, with no screen share
+needed. The client side lives in `features/voice/musicShare.ts` and reaches the
+host through `NativeRoom.startMusic`/`stopMusic` (`native_voice_start_music`,
+`native_voice_stop_music`); the app list is `native_voice_list_audio_apps`.
+The host's `musicShareEnded` event ends a share the host dropped on its own.
+
+- A listener tells music from a screen share's sound by the track name alone
+  (`lib/voice/musicTrack.ts`), in the native roster as on the web path.
+- Music has its own per-user volume and Mute music, folded into one gain
+  together with deafen and the output volume (`AudioElements.getMusicGain`);
+  the room pushes that gain to the playout mixer with
+  `native_voice_set_music_volume`, so the host needs no other state.

@@ -21,6 +21,7 @@ vi.mock("../../src/platform/desktop", () => ({
       getStats: () => Promise.resolve(host.stats),
       onEvent: () => () => undefined,
     },
+    musicAudio: { support: () => Promise.resolve({ ok: false, reason: "platform" }) },
   },
 }));
 vi.mock("../../src/features/voice/native/platform", () => ({

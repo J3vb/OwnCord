@@ -80,7 +80,7 @@ describe("VideoGrid", () => {
         [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
           (b) => b.dataset["callControl"],
         ),
-      ).toEqual(["mute", "deafen", "camera", "share", "views", "leave"]);
+      ).toEqual(["mute", "deafen", "camera", "share", "music", "views", "leave"]);
 
       grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
       grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
@@ -121,7 +121,7 @@ describe("VideoGrid", () => {
         [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
           (b) => b.dataset["callControl"],
         ),
-      ).toEqual(["mute", "deafen", "camera", "camera-device", "share", "views", "leave"]);
+      ).toEqual(["mute", "deafen", "camera", "camera-device", "share", "music", "views", "leave"]);
 
       const pick = barButton("camera-device");
       expect(pick.getAttribute("aria-label")).toBe("Choose camera");

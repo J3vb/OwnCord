@@ -12,7 +12,12 @@ import {
   getUserVolume,
   setUserLocalMute,
   getUserLocalMute,
+  setMusicVolume,
+  getMusicVolume,
+  setMusicMuted,
+  getMusicMuted,
 } from "@lib/voice/livekitSession";
+import { voiceStore } from "@stores/voice.store";
 import { voiceText as t } from "../../../i18n/voice";
 
 /** Moderation section wiring. Passed only when the local user may moderate
@@ -143,7 +148,82 @@ function buildVolumeMenu(
   const mute = createLocalMuteItem(userId, showFullVolume, "volume-x");
   menu.appendChild(mute.item);
 
+  if (voiceStore.getState().musicSharers?.has(userId) === true) appendMusicSection(menu, userId);
+
   if (mod !== undefined) appendVoiceModeration(menu, mod, closeMenu, true);
+}
+
+/**
+ * The music share's own rows, for a member who shares music: a Music volume
+ * slider and a Mute music toggle, remembered per member. They never touch
+ * the member's voice volume or Mute.
+ */
+function appendMusicSection(menu: HTMLElement, userId: number): void {
+  menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+  const level = getMusicVolume(userId);
+  const label = createElement(
+    "div",
+    {
+      class: "context-menu-item",
+      "data-testid": "music-volume-label",
+      style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
+    },
+    t("music.volume", { percent: level }),
+  );
+  menu.appendChild(label);
+  const row = createElement("div", {
+    style: "padding:4px 10px;display:flex;align-items:center;gap:8px",
+  });
+  const slider = createElement("input", {
+    type: "range",
+    class: "settings-slider",
+    min: "0",
+    max: "100",
+    value: String(level),
+    style: "flex:1",
+    "aria-label": t("music.volume", { percent: level }),
+    "data-testid": "music-volume-slider",
+  });
+  const valLabel = createElement(
+    "span",
+    {
+      class: "slider-val",
+      style: "min-width:40px;text-align:right;font-size:12px;color:var(--text-muted)",
+    },
+    `${level}%`,
+  );
+  slider.addEventListener("input", () => {
+    const val = Number(slider.value);
+    setText(valLabel, `${val}%`);
+    setMenuItemLabel(label, t("music.volume", { percent: val }));
+    slider.setAttribute("aria-label", t("music.volume", { percent: val }));
+    setMusicVolume(userId, val);
+  });
+  appendChildren(row, slider, valLabel);
+  menu.appendChild(row);
+
+  const mute = createMenuItem(t("music.mute"), "context-menu-item", { icon: "volume-x" });
+  mute.setAttribute("role", "menuitemcheckbox");
+  mute.setAttribute("data-action", "music-mute");
+  mute.style.display = "flex";
+  mute.style.alignItems = "center";
+  const check = createElement("span", {
+    "aria-hidden": "true",
+    style: "margin-left:auto;display:inline-flex",
+  });
+  check.appendChild(createIcon("check", 14));
+  mute.appendChild(check);
+  const sync = (): void => {
+    const muted = getMusicMuted(userId);
+    mute.setAttribute("aria-checked", String(muted));
+    check.style.visibility = muted ? "visible" : "hidden";
+  };
+  sync();
+  mute.addEventListener("click", () => {
+    setMusicMuted(userId, !getMusicMuted(userId));
+    sync();
+  });
+  menu.appendChild(mute);
 }
 
 /**

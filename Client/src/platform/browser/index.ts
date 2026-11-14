@@ -18,6 +18,7 @@
 // enforce it).
 import type {
   AppAudio,
+  MusicAudio,
   AppMetadata,
   AppProcess,
   AppUpdater,
@@ -66,6 +67,13 @@ import { settings as browserSettings } from "./settings";
 import { socket as browserSocket } from "./socket";
 import { inertUnsubscribe, refuse, UnsupportedKeysError } from "./unavailable";
 import { urlOpener } from "./urlOpener";
+
+const musicAudio: MusicAudio = {
+  support: async () => ({ ok: false, reason: "browser" }),
+  listApps: async () => ({ ok: false, code: "unavailable" }),
+  start: async () => ({ ok: false, code: "unavailable" }),
+  stop: async () => undefined,
+};
 
 const appAudio: AppAudio = {
   available: async () => false,
@@ -362,6 +370,7 @@ export const browser: Platform = {
     start: async () => undefined,
   },
   mobileAudio,
+  musicAudio,
   pushRegistration,
   deepLinks,
   devTools,

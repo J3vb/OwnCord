@@ -12,6 +12,7 @@ import { autostart } from "./autostart";
 import { callService } from "./callService";
 import { meteredNetwork } from "./meteredNetwork";
 import { mobileAudio } from "./mobileAudio";
+import { musicAudio } from "./musicAudio";
 import { pushRegistration } from "./pushRegistration";
 import { credentials } from "./credentials";
 import { deepLinks } from "./deepLinks";
@@ -54,6 +55,7 @@ export const desktop: Platform = {
   callService,
   meteredNetwork,
   mobileAudio,
+  musicAudio,
   pushRegistration,
   credentials,
   deepLinks,

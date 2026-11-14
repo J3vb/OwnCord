@@ -52,6 +52,7 @@ export abstract class NativeRoomRemote implements NativeRoomOps {
   constructor(
     protected readonly volumeOf: (identity: string) => number = () => 1,
     protected readonly screenshareVolumeOf: (identity: string) => number = () => 1,
+    protected readonly musicVolumeOf?: (identity: string) => number,
   ) {}
 
   state: "disconnected" | "connecting" | "connected" | "reconnecting" = "disconnected";
@@ -189,12 +190,53 @@ export abstract class NativeRoomRemote implements NativeRoomOps {
       this.setScreenshareVolume(identity, this.screenshareVolumeOf(identity));
   }
 
+  /** Music volume, with deafen and Mute music already folded in (0 silences). */
+  protected setMusicVolume(identity: string, volume: number): void {
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setMusicVolume(this.sessionId, identity, volume)
+      .catch((err) => log.warn("native setMusicVolume failed", { identity, volume, err }));
+  }
+
+  /** Re-read every participant's music volume after a change to it, its mute,
+   *  deafen or the output volume. */
+  applyMusicVolumes(): void {
+    if (this.musicVolumeOf === undefined) return;
+    for (const identity of this.remoteParticipants.keys())
+      this.setMusicVolume(identity, this.musicVolumeOf(identity));
+  }
+
+  private readonly musicEndedListeners = new Set<() => void>();
+
+  /** Publish app `appId` as the `music` track in the host. */
+  async startMusic(appId: string): Promise<string> {
+    // i18n-exempt: internal native-room state guard, the caller shows the catalog failure text
+    if (this.sessionId === null) throw new Error("native room is not connected");
+    return desktop.nativeVoice.startMusic(this.sessionId, appId);
+  }
+
+  /** Stop the music share. A room that is not connected has none. */
+  async stopMusic(): Promise<void> {
+    if (this.sessionId === null) return;
+    await desktop.nativeVoice.stopMusic(this.sessionId);
+  }
+
+  /** `listener` runs when the host withdraws the published music track. */
+  onMusicEnded(listener: () => void): () => void {
+    this.musicEndedListeners.add(listener);
+    return () => {
+      this.musicEndedListeners.delete(listener);
+    };
+  }
+
   protected participant(identity: string): NativeRemoteParticipant {
     let p = this.remoteParticipants.get(identity);
     if (p === undefined) {
       this.remoteParticipants.set(identity, (p = new NativeRemoteParticipant(identity, this)));
       p.setVolume(this.volumeOf(identity));
       this.setScreenshareVolume(identity, this.screenshareVolumeOf(identity));
+      if (this.musicVolumeOf !== undefined)
+        this.setMusicVolume(identity, this.musicVolumeOf(identity));
     }
     return p;
   }
@@ -260,6 +302,9 @@ export abstract class NativeRoomRemote implements NativeRoomOps {
         return true;
       case "trackMuted":
         this.onTrackMuted(event.identity, event.sid, event.muted);
+        return true;
+      case "musicShareEnded":
+        for (const listener of this.musicEndedListeners) listener();
         return true;
       default:
         return false;

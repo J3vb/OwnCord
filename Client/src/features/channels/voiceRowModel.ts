@@ -42,6 +42,8 @@ export interface VoiceRowInputs {
   readonly timeout: SafetyState["timeout"];
   /** Sorted ids of the voice channels whose `canMoveVoice` is true: the rows a drag may move from. */
   readonly movable: readonly number[];
+  /** Members sharing music (you included), or absent when none does. */
+  readonly musicSharers?: ReadonlySet<number>;
   /** A fresh token per local-mute event: `localSilenced` answers differ after it. */
   readonly localMute: object;
 }
@@ -113,6 +115,7 @@ export function voiceUserModel(
     speaking: user.speaking,
     camera: user.camera,
     live: user.screenshare,
+    music: inputs.musicSharers?.has(user.userId) === true,
     audio: audioModel(user),
     localMuted: !self && ctx.localSilenced(user.userId),
     ownFingerprintTitle: self

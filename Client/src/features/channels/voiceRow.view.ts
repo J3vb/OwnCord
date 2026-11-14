@@ -62,6 +62,8 @@ export type VoiceUserRowModel = {
   readonly camera: boolean;
   /** Screen share: the monitor icon and the LIVE badge. */
   readonly live: boolean;
+  /** Shares music: a music note beside the name. Absent reads as false. */
+  readonly music?: boolean;
   readonly audio: VoiceAudioModel | null;
   /** Muted for this client only. */
   readonly localMuted: boolean;
@@ -148,6 +150,11 @@ export function drawVoiceUserRow(
   row.appendChild(avatar);
   row.appendChild(createElement("span", { class: "vu-name" }, model.name));
 
+  if (model.music === true) {
+    const note = iconSpan("vu-status vu-music", "music");
+    note.title = shellText("channel.sharingMusic");
+    row.appendChild(note);
+  }
   if (model.camera) row.appendChild(iconSpan("vu-status", "camera"));
   if (model.live) {
     row.appendChild(iconSpan("vu-status", "monitor"));

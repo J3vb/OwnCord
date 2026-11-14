@@ -176,6 +176,9 @@ export function voiceStoreActionStubs() {
     setLocalSafetyNumber: vi.fn(),
     setEncryptionDegraded: vi.fn(),
     setSwitchingTo: vi.fn(),
+    setMusicSharer: vi.fn(),
+    replaceRemoteMusicSharers: vi.fn(),
+    setLocalMusic: vi.fn(),
   };
 }
 

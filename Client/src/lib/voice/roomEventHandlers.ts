@@ -15,6 +15,8 @@ import {
   leaveVoiceChannel,
   setEncryptionDegraded,
   setVoiceStatus,
+  setMusicSharer,
+  replaceRemoteMusicSharers,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { recordEvent } from "@lib/diagnostics/eventSink";
@@ -28,6 +30,7 @@ import {
 } from "@lib/voice/voiceJoinTrace";
 import { voiceText } from "../../i18n/voice";
 import { createSpeakerTracker } from "./roomSpeakers";
+import { isMusicPublication } from "./musicTrack";
 import type { RoomEventDeps, RoomEventHandlers } from "./roomEventTypes";
 import type {
   VoiceRemoteParticipant,
@@ -177,8 +180,11 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     markFirstRemoteTrackSubscribed();
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
+      // A music share is heard by default; only a screen share's sound waits
+      // for its Watch.
       if (
         publication.source === Track.Source.ScreenShareAudio &&
+        !isMusicPublication(publication) &&
         userId > 0 &&
         !deps.isWatched(userId, true)
       ) {
@@ -232,6 +238,12 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     }
     const userId = parseUserId(participant.identity);
     const isVideo = publication.kind === Track.Kind.Video;
+    if (isMusicPublication(publication)) {
+      // Heard by default, at the user's remembered level; deafen mutes it.
+      if (userId > 0) setMusicSharer(userId, true);
+      publication.setSubscribed(true);
+      return;
+    }
     if (!isVideo && publication.source !== Track.Source.ScreenShareAudio) {
       publication.setSubscribed(!voiceStore.getState().localDeafened);
       return;
@@ -249,6 +261,10 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     participant: RemoteParticipant,
   ): void => {
     const userId = parseUserId(participant.identity);
+    if (isMusicPublication(publication)) {
+      if (userId > 0) setMusicSharer(userId, false);
+      return;
+    }
     if (publication.kind !== Track.Kind.Video || userId <= 0) return;
     deps.getOnRemoteVideoRemovedCallback()?.(
       userId,
@@ -257,11 +273,16 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   };
 
   const handleConnected = (room: VoiceRoom): void => {
+    const sharers: number[] = [];
     for (const participant of room.remoteParticipants.values()) {
       for (const publication of participant.trackPublications.values()) {
+        if (isMusicPublication(publication) && !isUnencryptedPublication(publication)) {
+          sharers.push(parseUserId(participant.identity));
+        }
         handleTrackPublished(publication, participant);
       }
     }
+    replaceRemoteMusicSharers(sharers.filter((id) => id > 0));
   };
 
   const handleParticipantDisconnected = (participant: RemoteParticipant): void => {

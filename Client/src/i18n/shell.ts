@@ -107,6 +107,7 @@ export const shellText = defineCatalog("shell", {
   "channel.notConnected": "Not connected",
   "channel.voiceCapacity": "{connected} of {max} connected",
   "channel.live": "LIVE",
+  "channel.sharingMusic": "Sharing music",
   "channel.afk": "AFK",
   "channel.afkTitle": "AFK channel — idle members are moved here and can only listen",
   "channel.mutedByModerator": "Muted by a moderator",

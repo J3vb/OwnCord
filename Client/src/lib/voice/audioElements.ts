@@ -30,35 +30,17 @@ import {
   attachScreenshareAudio,
   detachScreenshareAudio,
 } from "./audioTrackElements";
-import { ScreenshareAudioState } from "./audioScreenshareState";
+import { MusicAudioState } from "./audioMusicState";
+import { isMusicPublication } from "./musicTrack";
 import { resendStreamAudioDelivery, syncScreenshareDelivery } from "./screenshareDelivery";
+import { hasNativePlayout, type MicGraph, type SinkableContext } from "./audioGraphTypes";
 import type { VoiceRemoteParticipant, VoiceRoom } from "@lib/voice/voiceRoom";
 
 export { setAudioVolumeHost } from "./audioVolumePrefs";
 
 const log = createLogger("audioElements");
 
-/** Where a remote voice track plays above 100%: its <audio> element stays
- *  attached (Chromium feeds a remote WebRTC track to Web Audio only while an
- *  element plays it) but muted, and the sound goes through this gain. At or
- *  below 100% the element plays it directly, as before. */
-interface MicGraph {
-  readonly userId: number;
-  readonly audioEl: HTMLAudioElement;
-  readonly source: MediaStreamAudioSourceNode;
-  readonly gain: GainNode;
-}
-
-/** AudioContext.setSinkId is not in TypeScript's DOM lib yet; WKWebView has
- *  none at all. */
-type SinkableContext = AudioContext & { setSinkId?: (sinkId: string) => Promise<void> };
-
-/** The native room plays voice in its own mixer, which takes gains above 1. */
-function hasNativePlayout(room: VoiceRoom | null): boolean {
-  return room !== null && "nativePlayout" in room;
-}
-
-export class AudioElements extends ScreenshareAudioState {
+export class AudioElements extends MusicAudioState {
   private room: VoiceRoom | null = null;
 
   /** Shared by the gain nodes of boosted voice tracks. Created the first time
@@ -104,7 +86,7 @@ export class AudioElements extends ScreenshareAudioState {
     onRoom(room, RoomEvent.TrackSubscriptionStatusChanged, (pub, status, participant) => {
       if (this.room !== room || status !== "subscribed") return;
       const userId = parseUserId(participant.identity);
-      resendStreamAudioDelivery(pub, !this.isScreenshareSilenced(userId));
+      resendStreamAudioDelivery(pub, !this.isStreamSilenced(pub, userId));
     });
     if (typeof AudioContext === "undefined") return;
     // Every output switch (settings, hot-plug fallback, join) goes through
@@ -328,7 +310,9 @@ export class AudioElements extends ScreenshareAudioState {
     }
 
     const userId = parseUserId(participant.identity);
-    if (publication.source === Track.Source.ScreenShareAudio) {
+    if (isMusicPublication(publication)) {
+      this.attachMusic(track, userId);
+    } else if (publication.source === Track.Source.ScreenShareAudio) {
       const audioEl = attachScreenshareAudio(
         track,
         this.screenshareAudioElements,
@@ -361,7 +345,9 @@ export class AudioElements extends ScreenshareAudioState {
     participant: RemoteParticipant,
   ): void {
     const userId = parseUserId(participant.identity);
-    if (publication.source === Track.Source.ScreenShareAudio) {
+    if (isMusicPublication(publication)) {
+      this.detachMusic(track, userId);
+    } else if (publication.source === Track.Source.ScreenShareAudio) {
       detachScreenshareAudio(track, this.screenshareAudioElements, userId);
       log.debug("Screenshare audio track unsubscribed and detached", {
         userId,
@@ -382,6 +368,7 @@ export class AudioElements extends ScreenshareAudioState {
 
   applyRemoteAudioSubscriptionState(deafened: boolean): void {
     this.applyScreenshareDeafen(deafened);
+    this.applyMusicDeafen();
     if (this.room === null) return;
     for (const participant of this.room.remoteParticipants.values()) {
       for (const publication of participant.audioTrackPublications.values()) {
@@ -393,14 +380,19 @@ export class AudioElements extends ScreenshareAudioState {
     this.syncScreenshareDelivery(undefined, deafened);
   }
 
-  /** The Linux native room plays stream audio itself and is left as it is. */
+  /** The Linux native room plays stream audio and music itself and is left as
+   *  it is. Music answers to its own mute, never the stream's. */
   protected syncScreenshareDelivery(onlyUserId?: number, deafened = this.isLocalDeafened()): void {
     if (hasNativePlayout(this.room)) return;
-    syncScreenshareDelivery(this.room, (identity) => {
+    const audible = (identity: string, muted: (userId: number) => boolean): boolean | null => {
       const userId = parseUserId(identity);
-      if (onlyUserId !== undefined && userId !== onlyUserId) return null;
-      return !deafened && !this.getScreenshareAudioMuted(userId);
-    });
+      return onlyUserId !== undefined && userId !== onlyUserId ? null : !deafened && !muted(userId);
+    };
+    syncScreenshareDelivery(
+      this.room,
+      (identity) => audible(identity, (id) => this.getScreenshareAudioMuted(id)),
+      (identity) => audible(identity, (id) => this.getMusicMuted(id)),
+    );
   }
 
   // --- Volume control ---
@@ -462,6 +454,7 @@ export class AudioElements extends ScreenshareAudioState {
     this.outputVolumeMultiplier = clamped / 100;
     this.applyAllVolumes();
     this.applyScreenshareVolumes();
+    this.applyMusicVolumes();
   }
 
   // --- Screenshare audio ---
@@ -488,6 +481,7 @@ export class AudioElements extends ScreenshareAudioState {
       }
     }
     this.screenshareAudioElements.clear();
+    this.releaseMusicElements();
   }
 
   /** Full cleanup including screenshare mute/volume state — used on intentional leave. */

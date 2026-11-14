@@ -35,6 +35,20 @@ export function userLocalMuteKey(userId: number): string {
   return currentHost === null ? key : `${key}:${currentHost}`;
 }
 
+/** The remembered Music volume (0-100) of a user, scoped to the server. */
+export function userMusicVolumeKey(userId: number): string {
+  const key = `userMusicVolume_${userId}`;
+  // i18n-exempt: localStorage key, not display text
+  return currentHost === null ? key : `${key}:${currentHost}`;
+}
+
+/** The remembered Mute music of a user, scoped to the server. */
+export function userMusicMuteKey(userId: number): string {
+  const key = `userMusicMute_${userId}`;
+  // i18n-exempt: localStorage key, not display text
+  return currentHost === null ? key : `${key}:${currentHost}`;
+}
+
 export function announceLocalMute(userId: number): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(USER_LOCAL_MUTE_CHANGED, { detail: { userId } }));
