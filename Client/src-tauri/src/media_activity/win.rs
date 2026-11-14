@@ -48,12 +48,12 @@ fn init_com() {
 }
 
 /// The cached manager, or a new one. The lock is not held while the request
-/// runs (`get()` can stall); `detect_media` allows one read at a time anyway.
+/// runs (`join()` can stall); `detect_media` allows one read at a time anyway.
 fn manager() -> Option<Manager> {
     if let Some(cached) = crate::sync::lock(&MANAGER).clone() {
         return Some(cached);
     }
-    let fresh = Manager::RequestAsync().and_then(|op| op.get()).ok()?;
+    let fresh = Manager::RequestAsync().and_then(|op| op.join()).ok()?;
     *crate::sync::lock(&MANAGER) = Some(fresh.clone());
     Some(fresh)
 }
@@ -95,7 +95,7 @@ fn read_session(session: &Session, now_ticks: i64) -> Option<Candidate> {
     if status != PlaybackStatus::Playing {
         return None;
     }
-    let props = session.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
+    let props = session.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
     let title = props.Title().ok()?.to_string();
     let artist = {
         let artist = props.Artist().ok()?.to_string();

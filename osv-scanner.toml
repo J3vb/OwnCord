@@ -68,15 +68,15 @@ reason = "rust-unic unmaintained, reached only via urlpattern -> tauri-utils (se
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0370"
-reason = "zvariant unmaintained (merged into zbus 6), reached only via zbus 4/5 on Linux D-Bus paths (see deny.toml)"
+reason = "zvariant unmaintained (merged into zbus 6), reached only via zbus 5 on Linux D-Bus paths (see deny.toml)"
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0371"
-reason = "zbus_names unmaintained (merged into zbus 6), reached only via zbus 4/5 on Linux D-Bus paths (see deny.toml)"
+reason = "zbus_names unmaintained (merged into zbus 6), reached only via zbus 5 on Linux D-Bus paths (see deny.toml)"
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0372"
-reason = "zvariant_derive unmaintained (merged into zbus 6), reached only via zbus 4/5 on Linux D-Bus paths (see deny.toml)"
+reason = "zvariant_derive unmaintained (merged into zbus 6), reached only via zbus 5 on Linux D-Bus paths (see deny.toml)"
 
 # --- Rust: Linux native voice (livekit), phase-0 build plumbing ---
 #

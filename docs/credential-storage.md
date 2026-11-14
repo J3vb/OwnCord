@@ -239,24 +239,33 @@ not a Windows policy fault, a roaming-profile fault, or a target-name fault.
 
 ### The fix
 
-`src-tauri/Cargo.toml` now names the backends explicitly:
+The 2026-07 fix named the keyring 3 backend features explicitly. Since keyring
+4 the platform stores are separate crates behind `keyring-core`, and the client
+names one per target in `src-tauri/Cargo.toml` (`os_store` in
+`secret_store.rs`):
 
 ```toml
-keyring = { version = "3", default-features = false, features = [
-    "windows-native",       # Windows Credential Manager
-    "apple-native",         # macOS Keychain
-    "sync-secret-service",  # Linux Secret Service (GNOME Keyring / KWallet)
-    "crypto-rust",          # pure-Rust session crypto for Secret Service
-] }
+keyring-core = "1"
+# [target.'cfg(windows)']
+windows-native-keyring-store = { version = "1", default-features = false }      # Credential Manager
+# [target.'cfg(target_os = "macos")']
+apple-native-keyring-store = { version = "1", features = ["keychain"] }          # Keychain
+# [target.'cfg(target_os = "linux")']
+dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] } # Secret Service
 ```
 
-`sync-secret-service` links libdbus, so Linux builds need `libdbus-1-dev`.
+No mock store can be picked by accident any more: a desktop target without a
+store crate fails to compile. The stores use the same names keyring 3 wrote
+(Windows target `{account}.{service}`, the Keychain's service/account pair, the
+Secret Service's `service` and `username` attributes), so saved logins and
+identity keys carry over. The Secret Service store links libdbus, so Linux
+builds need `libdbus-1-dev`.
 
 Two guards keep this from regressing silently:
 
 - `secret_store::tests::compiled_keyring_backend_is_persistent` fails the build
-  if the compiled backend is not disk-persistent. It inspects the backend, so it
-  needs no live keychain and runs in CI.
+  if the compiled store is not disk-persistent. It needs no live keychain and
+  runs in CI.
 - Every write is read back before `save_*` returns (see below).
 
 ## Verifying the credential store on a machine

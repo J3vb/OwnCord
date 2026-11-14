@@ -35,13 +35,12 @@ ignore = [
   { id = "RUSTSEC-2024-0370", reason = "unmaintained; Linux GTK build chain only" },
 
   # zvariant, zvariant_derive and zbus_names were folded into zbus 6.0.0 and are
-  # no longer published on their own. zbus 4 and 5 still depend on them, through
-  # notify-rust, secret-service, tauri-plugin-opener and
-  # tauri-plugin-single-instance, all Linux D-Bus paths. Drop these when every
-  # dependent resolves zbus >= 6.
-  { id = "RUSTSEC-2026-0370", reason = "unmaintained; zvariant via zbus 4/5, Linux D-Bus only" },
-  { id = "RUSTSEC-2026-0371", reason = "unmaintained; zbus_names via zbus 4/5, Linux D-Bus only" },
-  { id = "RUSTSEC-2026-0372", reason = "unmaintained; zvariant_derive via zbus 4/5, Linux D-Bus only" },
+  # no longer published on their own. zbus 5 still depends on them, through
+  # notify-rust, tauri-plugin-opener and tauri-plugin-single-instance, all
+  # Linux D-Bus paths. Drop these when every dependent resolves zbus >= 6.
+  { id = "RUSTSEC-2026-0370", reason = "unmaintained; zvariant via zbus 5, Linux D-Bus only" },
+  { id = "RUSTSEC-2026-0371", reason = "unmaintained; zbus_names via zbus 5, Linux D-Bus only" },
+  { id = "RUSTSEC-2026-0372", reason = "unmaintained; zvariant_derive via zbus 5, Linux D-Bus only" },
 
 ]
 # --- Rust: Linux native camera (gstreamer-rs) ---
