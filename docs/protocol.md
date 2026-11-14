@@ -1175,7 +1175,7 @@ acknowledged a labelled (NSFW) channel:
   "payload": {
     "message_id": 1104,
     "channel_id": 9,
-    "content_version": "2026-11-13T10:15:30Z",
+    "content_version": "2026-11-13 10:15:30",
     "link_previews": [
       {
         "url": "https://example.com/post",
@@ -1207,8 +1207,9 @@ A frame is sent only when a message's cards change to something visible or from
 something visible, and always after the `chat_message` or `chat_edited` it belongs to
 (it has the higher `seq`). A client ignores a frame for a message it has not loaded and
 drops one whose `content_version` is older than the version of the cards it holds; the
-versions are timestamps in one format, so a plain string comparison orders them. Two
-frames for the same version are the same state. An older client ignores the frame type; a server with `link_previews.enabled` off sends none.
+versions are timestamps in one format, so a plain string comparison orders them. The
+version has one-second resolution, so a frame for the same version replaces the cards held:
+two edits in one second share a version, and the later frame is the newer state. An older client ignores the frame type; a server with `link_previews.enabled` off sends none.
 The same `link_previews` array rides on messages in history reads (`docs/api.md`), where
 a message with links and no cards yet is queued for the server to preview, so scrolling
 to an old message brings its cards in a `message_link_previews` frame shortly after.

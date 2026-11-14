@@ -316,6 +316,15 @@ func (s *Store) PutPreview(ctx context.Context, p Preview) error {
 // KeepCard rewrites a card as it is, with its thumbnail reference, to change only when it was
 // fetched. It is how a failed refresh leaves the old card in place.
 func (s *Store) KeepCard(ctx context.Context, p Preview) error {
+	if err := syncutil.LockContext(ctx, &s.mu); err != nil {
+		return fmt.Errorf("waiting for the thumbnail store: %w", err)
+	}
+	defer s.mu.Unlock()
+	if p.ImageHash != nil {
+		if ok, err := s.db.LinkPreviewImageExists(ctx, *p.ImageHash); err != nil || !ok {
+			p.ImageHash = nil
+		}
+	}
 	if err := s.db.UpsertLinkPreview(ctx, p); err != nil {
 		return fmt.Errorf("keeping link preview: %w", err)
 	}

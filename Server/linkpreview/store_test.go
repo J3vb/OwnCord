@@ -554,3 +554,25 @@ func TestTouchManyAndPruneCards(t *testing.T) {
 		t.Errorf("untouched card: %v, want ErrNotFound", err)
 	}
 }
+
+// A kept card whose thumbnail was swept meanwhile is still kept, without the thumbnail.
+func TestKeepCardDropsASweptThumbnail(t *testing.T) {
+	ctx := t.Context()
+	f := newFixture(t)
+	img := f.put(ctx, "kept image")
+	h := f.card(ctx, "https://example.com/kept", &img)
+	p, err := f.store.Preview(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.ExecContext(ctx, `DELETE FROM link_preview_images WHERE hash = ?`, img); err != nil {
+		t.Fatal(err)
+	}
+	p.ImageHash = &img
+	if err := f.store.KeepCard(ctx, p); err != nil {
+		t.Fatalf("KeepCard: %v", err)
+	}
+	if got, err := f.store.Preview(ctx, h); err != nil || got.ImageHash != nil || got.Title == nil {
+		t.Errorf("kept card = %+v, %v; want the text without a thumbnail", got, err)
+	}
+}
