@@ -84,6 +84,10 @@ package is pinned to 2.24.1 for the same install check described above. 2.23.0
 and 2.24.1 still throw there, so the patch was carried forward unchanged (only
 the line numbers moved).
 
+Since 2.24.0 the package also exports `livekit-client/core`, which ships its
+own unbundled copy of the E2EE manager. That copy is not patched, so import
+only the bare `livekit-client` specifier.
+
 **Regenerating.** After you edit the installed file, regenerate the patch from
 `Client/`:
 
