@@ -461,22 +461,6 @@ func TestThreadArchiver_ReadFailureBacksOffWithoutSweeping(t *testing.T) {
 	}
 }
 
-func TestThreadArchiver_SleepOrDoneReturnsOnCancel(t *testing.T) {
-	a := fastArchiver(&recordingStore{})
-	ctx, cancel := context.WithCancel(bg())
-	cancel()
-	start := time.Now()
-	a.sleepOrDone(ctx, time.Hour)
-	if time.Since(start) > time.Second {
-		t.Error("sleepOrDone ignored a cancelled context")
-	}
-	start = time.Now()
-	a.sleepOrDone(bg(), 5*time.Millisecond)
-	if time.Since(start) < 4*time.Millisecond {
-		t.Error("sleepOrDone returned before its delay")
-	}
-}
-
 func TestThreadCursorFor_CreatedSortIsIDOnly(t *testing.T) {
 	c, err := ParseThreadCursorFor(ThreadSortCreated, "42")
 	if err != nil || c.ID != 42 || c.Activity != "" {

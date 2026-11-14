@@ -2,7 +2,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -15,6 +14,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/netclass"
 	"github.com/J3vb/OwnCord/Server/plugin"
@@ -249,9 +249,5 @@ func requestLogger(proxyNets []*net.IPNet, slow *metrics.SlowRoutes) func(http.H
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Error("writeJSON: failed to encode response", "error", err)
-	}
+	httperr.WriteJSON(w, status, v)
 }
