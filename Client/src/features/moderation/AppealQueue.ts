@@ -22,9 +22,9 @@
  * appeal can still take it and the view is live.
  */
 
-import { isImeCommit } from "@lib/text/ime";
-import { Disposable } from "@lib/disposable";
-import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
+import { RestErrorCode } from "@lib/protocolTypes";
+import type { ModerationAppealDetail, ModerationAppealRow } from "@lib/api";
+import { clearChildren, setText } from "@lib/dom";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
 import { moderationText as t } from "../../i18n/moderation";
@@ -40,15 +40,33 @@ import { captureDetailFocus, restoreDetailFocus } from "./detailFocus";
 import { dateText } from "./Evidence";
 import { actorName } from "./History";
 import { modAppealStore } from "./store";
-import { RestErrorCode } from "@lib/protocolTypes";
 import { FILTERS, errorText, type AppealsOptions, type AppealsView } from "./appealModel";
+import { createQueueCore } from "./queueCore";
+import { buildQueueDom, buildRowItem, closeOnEscape, createQueueListView } from "./queueParts";
 
 export type { AppealsOptions, AppealsView } from "./appealModel";
 
-let viewSeq = 0;
-
 const me = (): number => authStore.getState().user?.id ?? -1;
 const NO_DRAFT = (): AppealDraft & { id: string } => ({ id: "", note: "", outcome: null });
+
+function buildAppealRow(
+  item: AppealItem,
+  onOpen: (id: string) => void,
+  signal: AbortSignal,
+): HTMLLIElement {
+  return buildRowItem({
+    id: item.id,
+    idAttr: "data-appeal-id",
+    testId: "mod-appeal-row",
+    parts: [
+      ["what", t("appeal.row.title", { name: actorName(item.appellantId, me()) })],
+      ["state", appealStateText(item.state)],
+      ["when", t("appeal.row.filed", { date: dateText(item.createdAt) })],
+    ],
+    onOpen,
+    signal,
+  });
+}
 
 export function renderAppeals(
   root: HTMLElement,
@@ -58,219 +76,31 @@ export function renderAppeals(
   const { signal, api } = ctx;
   let filter: (typeof FILTERS)[number] = FILTERS[0];
   let items: readonly AppealItem[] = [];
-  let selected: string | null = null;
-  let shown: AppealDetail | null = null;
-  let listReq: Disposable | null = null;
-  let detailReq: Disposable | null = null;
-  let detailFocus = false;
-  let denied = false;
   /** The unsaved decision, for the appeal it was entered on. */
   let draft = NO_DRAFT();
-  /** A write being sent, or its answer waiting on the re-read of the appeal. */
-  let writing: "sending" | "reading" | null = null;
 
-  const filterId = `mod-appeal-filter-${++viewSeq}`;
-  const toolbar = createElement("div", { class: "mod-center-toolbar" });
-  const select = createElement("select", {
-    id: filterId,
-    class: "form-input",
-    "data-testid": "mod-appeal-filter",
+  const dom = buildQueueDom(root, {
+    introKey: "appeal.intro",
+    listLabelKey: "appeal.list.label",
+    filters: FILTERS,
+    idPrefix: "mod-appeal",
   });
-  for (const f of FILTERS)
-    select.appendChild(createElement("option", { value: f.value }, t(f.labelKey)));
-  appendChildren(toolbar, createElement("label", { for: filterId }, t("filter.label")), select);
-  // Live regions exist before their text changes, so each change is read.
-  const status = createElement("p", {
-    class: "mod-center-status",
-    role: "status",
-    "data-testid": "mod-appeal-status",
+  const { select, detailSlot, writeAlert } = dom;
+
+  const listView = createQueueListView<AppealItem>({
+    list: dom.list,
+    select,
+    signal,
+    idAttr: "data-appeal-id",
+    buildRow: buildAppealRow,
+    onOpen: (id) => open(id),
   });
-  const failure = createElement("p", { class: "form-error", role: "alert" });
-  const retry = createElement("button", { type: "button", class: "btn-modal-save" }, t("retry"));
-  retry.hidden = true;
-  const list = createElement("ul", {
-    class: "mod-queue",
-    "aria-label": t("appeal.list.label"),
-    "data-testid": "mod-appeal-queue",
-  });
-  const detailStatus = createElement("p", { class: "mod-center-status", role: "status" });
-  const detailFailure = createElement("p", { class: "form-error", role: "alert" });
-  const detailRetry = createElement(
-    "button",
-    { type: "button", class: "btn-modal-save" },
-    t("retry"),
-  );
-  detailRetry.hidden = true;
-  const detailSlot = createElement("div", { class: "mod-report-slot" });
-  const writeStatus = createElement("p", {
-    class: "mod-center-status",
-    role: "status",
-    "data-testid": "mod-appeal-write-status",
-  });
-  const writeAlert = createElement("p", { class: "form-error", role: "alert" });
-  appendChildren(
-    root,
-    createElement("p", { class: "mod-center-intro" }, t("appeal.intro")),
-    toolbar,
-    status,
-    failure,
-    retry,
-    list,
-    detailStatus,
-    detailFailure,
-    detailRetry,
-    writeStatus,
-    writeAlert,
-    detailSlot,
-  );
-
-  const rowFor = (id: string | null): HTMLButtonElement | null =>
-    id === null
-      ? null
-      : ([...list.querySelectorAll<HTMLButtonElement>("button[data-appeal-id]")].find(
-          (b) => b.dataset.appealId === id,
-        ) ?? null);
-
-  /** Focus somewhere that stays: the row for `id`, else the first row, else the filter. */
-  function focusList(id: string | null): void {
-    (rowFor(id) ?? list.querySelector<HTMLButtonElement>("button") ?? select).focus();
-  }
-
-  function syncCurrent(): void {
-    for (const b of list.querySelectorAll<HTMLButtonElement>("button[data-appeal-id]")) {
-      if (b.dataset.appealId === selected) b.setAttribute("aria-current", "true");
-      else b.removeAttribute("aria-current");
-    }
-  }
-
-  /** Remove the open appeal from the DOM and from memory. */
-  function dropDetail(): void {
-    detailReq?.destroy();
-    detailReq = null;
-    clearChildren(detailSlot);
-    shown = null;
-  }
-
-  function setDetailError(message: string): void {
-    setText(detailFailure, message);
-    detailRetry.hidden = message === "";
-  }
-
-  /** Close the open appeal, saying why, and keep focus in the view. */
-  function clearDetail(message: string): void {
-    const hadFocus =
-      detailSlot.contains(document.activeElement) || detailRetry === document.activeElement;
-    const was = selected;
-    if (writing === "reading") writing = null;
-    dropDetail();
-    selected = null;
-    draft = NO_DRAFT();
-    syncCurrent();
-    setDetailError("");
-    setText(detailStatus, message);
-    if (hadFocus) focusList(was);
-  }
-
-  /** The server refused: nothing the reader held stays on screen, here or in Reports. */
-  function deny(): void {
-    if (denied) return;
-    const hadFocus = root.contains(document.activeElement);
-    denied = true;
-    writing = null;
-    listReq?.destroy();
-    listReq = null;
-    dropDetail();
-    items = [];
-    selected = null;
-    draft = NO_DRAFT();
-    clearChildren(list);
-    for (const el of [toolbar, list, retry, detailRetry]) el.hidden = true;
-    for (const el of [status, detailStatus, detailFailure, writeStatus, writeAlert])
-      setText(el, "");
-    setText(failure, t("denied"));
-    if (hadFocus) {
-      root.closest(".feature-view")?.querySelector<HTMLElement>(".feature-view-title")?.focus();
-    }
-    opts.onDenied();
-  }
-
-  function renderRow(item: AppealItem): HTMLLIElement {
-    const li = createElement("li");
-    const what = t("appeal.row.title", { name: actorName(item.appellantId, me()) });
-    const state = appealStateText(item.state);
-    const when = t("appeal.row.filed", { date: dateText(item.createdAt) });
-    const button = createElement("button", {
-      type: "button",
-      class: "mod-queue-row",
-      "data-appeal-id": item.id,
-      "data-testid": "mod-appeal-row",
-      // Spans carry no separators of their own, so name the button in full.
-      "aria-label": `${what}. ${state}. ${when}`,
-    });
-    appendChildren(
-      button,
-      createElement("span", { class: "mod-queue-what" }, what),
-      createElement("span", { class: "mod-queue-state" }, state),
-      createElement("span", { class: "mod-queue-when" }, when),
-    );
-    button.addEventListener("click", () => open(item.id), { signal });
-    li.appendChild(button);
-    return li;
-  }
-
-  function renderList(): void {
-    const focused = list.contains(document.activeElement)
-      ? ((document.activeElement as HTMLElement).dataset.appealId ?? null)
-      : undefined;
-    clearChildren(list);
-    list.append(...items.map(renderRow));
-    list.hidden = items.length === 0;
-    syncCurrent();
-    if (focused !== undefined) focusList(focused);
-  }
-
-  function loadList(announce: boolean, refreshDetail: boolean): void {
-    if (denied) return;
-    listReq?.destroy();
-    const req = new Disposable();
-    listReq = req;
-    const forFilter = filter;
-    list.setAttribute("aria-busy", "true");
-    if (announce) setText(status, t("appeal.list.loading"));
-    api.getModerationAppeals(forFilter.value, req.signal).then(
-      (rows) => {
-        if (req !== listReq || signal.aborted) return;
-        listReq = null;
-        list.removeAttribute("aria-busy");
-        const retryHadFocus = document.activeElement === retry;
-        items = rows.map(mapAppealRow);
-        renderList();
-        setText(failure, "");
-        retry.hidden = true;
-        setText(status, t(forFilter.countKey, { count: items.length }));
-        if (retryHadFocus) focusList(null);
-        if (selected !== null && refreshDetail) loadDetail(selected, false);
-      },
-      (err: unknown) => {
-        if (req !== listReq || signal.aborted) return;
-        listReq = null;
-        list.removeAttribute("aria-busy");
-        if (isStatus(err, 403)) {
-          deny();
-          return;
-        }
-        setText(status, "");
-        setText(failure, t("appeal.list.error"));
-        retry.hidden = false;
-      },
-    );
-  }
 
   function showDetail(detail: AppealDetail, takeFocus: boolean): void {
     // A re-read rebuilds the appeal: put focus back on the same control.
-    const before = captureDetailFocus(detailSlot, detailRetry, false);
-    dropDetail();
-    shown = detail;
+    const before = captureDetailFocus(detailSlot, dom.detailRetry, false);
+    core.dropDetail();
+    core.state.shown = detail;
     if (draft.id !== detail.id) draft = { ...NO_DRAFT(), id: detail.id };
     const view = buildAppealDetail({
       detail,
@@ -285,173 +115,98 @@ export function renderAppeals(
         setText(writeAlert, t("appeal.draftLost"));
       draft = { ...NO_DRAFT(), id: detail.id };
     }
-    view.element.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        // Escape closes the appeal first; the view's own Escape is the next one.
-        if (e.key !== "Escape" || isImeCommit(e) || e.defaultPrevented) return;
-        e.preventDefault();
-        closeToRow();
-      },
-      { signal },
-    );
+    closeOnEscape(view.element, () => core.closeToRow(), signal);
     detailSlot.appendChild(view.element);
     restoreDetailFocus(view, before, takeFocus, false);
   }
 
-  function send(id: string, w: AppealWrite): Promise<void> {
-    if (w.kind === "assign") return api.assignModerationAppeal(id, signal);
-    return api.decideModerationAppeal(id, w.outcome, w.note, signal);
-  }
+  const core = createQueueCore<
+    ModerationAppealRow,
+    ModerationAppealDetail,
+    AppealDetail,
+    (typeof FILTERS)[number]["value"]
+  >({
+    signal,
+    dom,
+    listView,
+    root,
+    filter: () => filter,
+    readList: (value, sig) => api.getModerationAppeals(value, sig),
+    readDetail: (id, sig) => api.getModerationAppeal(id, sig),
+    replaceRows: (rows) => {
+      items = rows.map(mapAppealRow);
+      listView.render(items, core.state.selected);
+      return {
+        count: items.length,
+        settle: (refreshDetail) => {
+          const { selected } = core.state;
+          if (selected !== null && refreshDetail) core.loadDetail(selected, false);
+        },
+      };
+    },
+    onDetail: (_id, wire, takeFocus) => {
+      showDetail(mapAppealDetail(wire), takeFocus);
+    },
+    onDetailError: (err) => {
+      if (!isStatus(err, 403, RestErrorCode.SELF_REVIEW)) return false;
+      core.clearDetail(t("appeal.detail.own"));
+      return true;
+    },
+    forget: () => {
+      draft = NO_DRAFT();
+    },
+    onLost: () => {
+      items = [];
+      draft = NO_DRAFT();
+    },
+    onDenied: opts.onDenied,
+    keys: {
+      listLoading: "appeal.list.loading",
+      listError: "appeal.list.error",
+      detailLoading: "appeal.detail.loading",
+      detailError: "appeal.detail.error",
+      notFound: "appeal.detail.notFound",
+    },
+  });
 
-  /** Read the queue and the appeal again after a write; the next write waits for the appeal. */
-  function reread(id: string): void {
-    writing = "reading";
-    loadList(false, false);
-    loadDetail(id, false);
-  }
-
-  /** Send one write, then read the appeal again whatever the answer. */
+  /** Taking and deciding are single writes; the queue and the appeal are read again after. */
   function write(id: string, w: AppealWrite): boolean {
-    if (writing !== null || denied) return false;
-    writing = "sending";
-    setText(writeStatus, "");
-    setText(writeAlert, "");
-    send(id, w).then(
-      () => {
-        if (signal.aborted || denied) return;
+    return core.write(id, {
+      send: () =>
+        w.kind === "assign"
+          ? api.assignModerationAppeal(id, signal)
+          : api.decideModerationAppeal(id, w.outcome, w.note, signal),
+      onSent: () => {
         if (w.kind === "decide" && draft.id === id) draft = { ...NO_DRAFT(), id };
-        if (selected !== id) {
-          writing = null;
-          return;
-        }
-        setText(writeStatus, t(w.kind === "assign" ? "appeal.done.assign" : "appeal.done.decide"));
-        reread(id);
       },
-      (err: unknown) => {
-        if (signal.aborted || denied) return;
-        if (isStatus(err, 403) && !isStatus(err, 403, RestErrorCode.SELF_REVIEW)) {
-          deny();
-          return;
-        }
-        if (selected !== id) {
-          writing = null;
-          return;
-        }
-        if (isStatus(err, 404)) {
-          writing = null;
-          clearDetail(t("appeal.detail.notFound"));
-          loadList(false, false);
-          return;
-        }
-        setText(writeAlert, errorText(w, err));
-        reread(id);
-      },
-    );
-    return true;
-  }
-
-  function closeToRow(): void {
-    const was = selected;
-    clearDetail("");
-    focusList(was);
-  }
-
-  function loadDetail(id: string, askedFocus: boolean): void {
-    const takeFocus = askedFocus || (detailReq !== null && detailFocus);
-    detailReq?.destroy();
-    const req = new Disposable();
-    detailReq = req;
-    detailFocus = takeFocus;
-    setDetailError("");
-    if (takeFocus) {
-      clearChildren(detailSlot);
-      shown = null;
-      setText(detailStatus, t("appeal.detail.loading"));
-    }
-    detailSlot.setAttribute("aria-busy", "true");
-    api.getModerationAppeal(id, req.signal).then(
-      (wire) => {
-        if (req !== detailReq || signal.aborted || selected !== id) return;
-        detailReq = null;
-        if (writing === "reading") writing = null;
-        detailSlot.removeAttribute("aria-busy");
-        // Only move focus if the reader is still where they asked from.
-        const active = document.activeElement;
-        const stayed =
-          active === null ||
-          active === document.body ||
-          active === rowFor(id) ||
-          detailSlot.contains(active);
-        if (takeFocus) setText(detailStatus, "");
-        showDetail(mapAppealDetail(wire), takeFocus && stayed);
-      },
-      (err: unknown) => {
-        if (req !== detailReq || signal.aborted || selected !== id) return;
-        detailReq = null;
-        if (writing === "reading") writing = null;
-        detailSlot.removeAttribute("aria-busy");
-        if (isStatus(err, 403, RestErrorCode.SELF_REVIEW)) {
-          clearDetail(t("appeal.detail.own"));
-          return;
-        }
-        if (isStatus(err, 403)) {
-          deny();
-          return;
-        }
-        if (isStatus(err, 404)) {
-          clearDetail(t("appeal.detail.notFound"));
-          loadList(false, false);
-          return;
-        }
-        const hadFocus = detailSlot.contains(document.activeElement);
-        dropDetail();
-        setText(detailStatus, "");
-        setDetailError(t("appeal.detail.error"));
-        if (hadFocus) detailRetry.focus();
-      },
-    );
+      onDone: () => t(w.kind === "assign" ? "appeal.done.assign" : "appeal.done.decide"),
+      errorText: (err) => errorText(w, err),
+    });
   }
 
   function open(id: string): void {
-    if (denied) return;
-    if (selected === id && shown !== null) {
-      detailSlot.querySelector<HTMLElement>("h3")?.focus();
-      return;
-    }
-    if (draft.id !== id) draft = NO_DRAFT();
-    setText(writeStatus, "");
-    setText(writeAlert, "");
-    selected = id;
-    syncCurrent();
-    loadDetail(id, true);
+    core.open(id, () => {
+      if (draft.id !== id) draft = NO_DRAFT();
+    });
   }
 
   select.addEventListener(
     "change",
     () => {
       filter = FILTERS.find((f) => f.value === select.value) ?? FILTERS[0];
-      loadList(true, false);
-    },
-    { signal },
-  );
-  retry.addEventListener("click", () => loadList(true, false), { signal });
-  detailRetry.addEventListener(
-    "click",
-    () => {
-      if (selected !== null) loadDetail(selected, true);
+      core.loadList(true, false);
     },
     { signal },
   );
 
   const unsubs = [
     // mod_queue carries no appeal data: read the queue (and the open appeal) again.
-    modAppealStore.subscribe(() => loadList(false, true)),
+    modAppealStore.subscribe(() => core.loadList(false, true)),
     // mod_queue is never replayed, so a reconnect reads again too.
     uiStore.subscribeSelector(
       (s) => s.connectionStatus,
       (st) => {
-        if (st === "connected") loadList(false, true);
+        if (st === "connected") core.loadList(false, true);
       },
     ),
   ];
@@ -460,17 +215,14 @@ export function renderAppeals(
     "abort",
     () => {
       for (const u of unsubs) u();
-      listReq?.destroy();
-      listReq = null;
-      dropDetail();
+      core.dispose();
       items = [];
-      selected = null;
       draft = NO_DRAFT();
       clearChildren(root);
     },
     { once: true },
   );
 
-  loadList(true, false);
-  return { deny };
+  core.loadList(true, false);
+  return { deny: core.deny };
 }
