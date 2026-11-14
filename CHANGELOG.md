@@ -100,13 +100,22 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Messages & files
+
+- **Link previews show up instantly after a restart.** The server fetches each link once, keeps the preview and its picture, and sends both with the message. Your app no longer fetches them again on every launch.
+- **Your computer no longer contacts the sites people link to.** Page previews and YouTube titles and stills now come from your server, so the linked site never sees your IP address and the "Load external content" prompt does not appear for them.
+- **A message with a link can show its preview a moment after it appears.** The server builds it right after sending; an older message you scroll to gets its preview shortly after it loads.
+- **Servers that do not build previews work as before for one more release** (an older server, or one with `link_previews.enabled` off; the server now says so in its `ready` capabilities): the app fetches those previews itself and still asks first.
+- **Pictures and GIFs linked in chat work as before.** A link that is itself an image is still loaded by your app, still animates and still asks first; only page previews and YouTube cards come from your server.
+- **Settings > Text & Images says which content still needs your say-so.** Link previews built by your server no longer do.
+
 ### Under the hood
 
 - **Groundwork for server-side link previews.** Nothing changes for members yet. It adds the storage a later release will use:
   - Database migration 094 adds four tables for link cards and their thumbnails. The server migrates on start, so take a backup first as usual.
   - A new `link-previews/` folder appears in the server data folder for shrunk thumbnails. The server trims it on its 15-minute maintenance pass.
   - Three settings in `config.yaml`: `link_previews.enabled` (default on), `link_previews.thumbnail_cache_mb` (default 512, `0` keeps no thumbnails) and `link_previews.thumbnail_unused_days` (default 30).
-- **The server now builds link previews once and keeps them.** Members see no change yet: the desktop app shows previews in a later release.
+- **The server now builds link previews once and keeps them.** The desktop app now shows them (see Messages & files above).
   - The server fetches the links in a new or edited message once and stores the card (title, description, site name, shrunk image). Message history and a new live event carry the cards; older apps ignore them.
   - Thumbnails are served to signed-in members from `GET /api/v1/link-previews/images/{hash}`.
   - `link_previews.enabled` can now be changed in the admin panel; a restart applies it. `false` stops fetching only.

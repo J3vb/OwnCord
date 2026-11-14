@@ -99,12 +99,17 @@ export function isTrustedServerUrl(url: string): boolean {
 /**
  * Server content routes that legitimately require the session bearer token:
  * attachments (channel ACLs), custom emoji and stickers (authenticated so an
- * emoji or sticker is not a tracking pixel). A server-host URL outside these is fetched without
+ * emoji or sticker is not a tracking pixel) and link preview thumbnails. A server-host URL outside these is fetched without
  * credentials — otherwise a same-host URL someone put in a field the client
  * renders, such as an avatar, makes every viewer issue an authenticated
  * request to an arbitrary path on the server's own origin.
  */
-const TOKEN_BEARING_ROUTES = ["/api/v1/files/", "/api/v1/emoji/", "/api/v1/stickers/"];
+const TOKEN_BEARING_ROUTES = [
+  "/api/v1/files/",
+  "/api/v1/emoji/",
+  "/api/v1/stickers/",
+  "/api/v1/link-previews/images/",
+];
 
 function isTokenBearingServerPath(pathname: string): boolean {
   return TOKEN_BEARING_ROUTES.some((route) => pathname.startsWith(route));

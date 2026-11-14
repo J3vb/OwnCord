@@ -108,7 +108,8 @@ export const settingsNotificationsEntries = {
 
   "images.section.media": "Links & media",
   "images.linkPreview.label": "Link preview",
-  "images.linkPreview.desc": "Show website previews for links shared in chat",
+  "images.linkPreview.desc":
+    "Show website previews for links shared in chat. A server that builds previews fetches each link once, so your computer does not contact the linked site",
   "images.embeds.label": "Show embeds",
   "images.embeds.desc": "Display rich embeds in chat messages",
   "images.inline.label": "Inline attachment preview",

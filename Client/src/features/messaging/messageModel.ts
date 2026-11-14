@@ -3,6 +3,7 @@
 // extracted from stores/messages.store.ts, which re-exports the types and
 // stays the only import path consumers use.
 import type { JournalEntry } from "./loadJournal";
+import { linkPreviewFields } from "../../lib/linkPreviewState";
 import type {
   CallInfo,
   GroupEventInfo,
@@ -18,6 +19,7 @@ import type {
   ReferencedMessage,
   MessageResponse,
   ImportedAuthor,
+  LinkPreviewCard,
 } from "../../lib/types";
 
 // -----------------------------------------------------------------------------
@@ -84,6 +86,11 @@ export interface Message {
   readonly sticker?: MessageStickerInfo;
   /** Set on a thread's starter message; threadsStore holds the live state. */
   readonly thread?: ThreadInfo;
+  /** The link cards the server built for this message. Absent until the server
+   *  has sent any (an older server never does); an empty list means it cleared them. */
+  readonly linkPreviews?: readonly LinkPreviewCard[];
+  /** The content version (edited_at, else timestamp) `linkPreviews` were built for. */
+  readonly linkPreviewsVersion?: string;
   /** Set on an imported message: the Discord author shown in place of `user`. */
   readonly importedAuthor?: ImportedAuthor;
 }
@@ -242,6 +249,7 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     ...(response.sticker !== undefined && { sticker: response.sticker }),
     ...(response.thread !== undefined && { thread: response.thread }),
     ...(response.imported_author !== undefined && { importedAuthor: response.imported_author }),
+    ...linkPreviewFields(response.link_previews, response.edited_at ?? response.timestamp),
   };
 }
 

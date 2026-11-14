@@ -70,6 +70,7 @@ export type {
   PollInfo,
   PollView,
   PollUpdatePayload,
+  MessageLinkPreviewsPayload,
   LinkPreviewCard,
   PollCreateOkPayload,
   PollVoteOkPayload,

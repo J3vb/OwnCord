@@ -7,6 +7,7 @@ import {
   addMessage,
   updateReaction,
   updatePoll,
+  updateLinkPreviews,
   applyPollVoteOk,
   rollbackReaction,
   confirmSend,
@@ -185,8 +186,11 @@ export function handlePollUpdate(payload: Payload<"poll_update">): void {
   updatePoll(payload, authStore.getState().user?.id ?? 0);
 }
 
-/** Server-built link cards arrive here; nothing renders them yet, so the event is accepted and ignored. */
-export function handleMessageLinkPreviews(_payload: Payload<"message_link_previews">): void {}
+/** The cards the server built for a message: kept on its row in content-version order, and a
+ *  frame for a message that is not loaded is dropped. */
+export function handleMessageLinkPreviews(payload: Payload<"message_link_previews">): void {
+  updateLinkPreviews(payload);
+}
 
 /** The sender's stored selection, so the card shows it before the poll_update that carries the counts. */
 export function handlePollVoteOk(payload: Payload<"poll_vote_ok">): void {

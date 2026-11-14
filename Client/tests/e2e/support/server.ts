@@ -23,6 +23,10 @@ export async function startTestServer(
     /** `security.auth_rate_limit_multiplier`, for a seed that signs up and
      *  signs in more accounts than the per-minute auth limits allow. */
     authRateLimitMultiplier?: number;
+    /** `link_previews.enabled`. The server builds link previews by default, and
+     *  the client then never asks the broker; false keeps the legacy local
+     *  fetch behind consent, which a spec of that path must start with. */
+    linkPreviews?: boolean;
   } = {},
 ) {
   const livekit = process.env.OWNCORD_E2E_LIVEKIT_BINARY;
@@ -73,6 +77,9 @@ export async function startTestServer(
     },
     database: { path: join(dataDir, "chatserver.db") },
     tls: { mode: options.tls ? "self_signed" : "off" },
+    ...(options.linkPreviews === undefined
+      ? {}
+      : { link_previews: { enabled: options.linkPreviews } }),
     ...(options.authRateLimitMultiplier
       ? { security: { auth_rate_limit_multiplier: options.authRateLimitMultiplier } }
       : {}),

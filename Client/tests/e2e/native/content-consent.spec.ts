@@ -48,7 +48,8 @@ const brokerUrls = (page: Page): Promise<string[]> =>
 
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
 test("external content reaches the native broker only after consent", async ({}, info) => {
-  const server = await startTestServer({ tls: true });
+  // The legacy path: a server that builds link previews never asks the broker.
+  const server = await startTestServer({ tls: true, linkPreviews: false });
   let app: Awaited<ReturnType<typeof startNativeApp>> | undefined;
   try {
     configureNativeServer(server.origin);
@@ -113,6 +114,46 @@ test("external content reaches the native broker only after consent", async ({},
           body: JSON.stringify(await brokerUrls(page), null, 2),
           contentType: "application/json",
         });
+      },
+      info,
+    );
+  } finally {
+    try {
+      await app?.close();
+    } finally {
+      await server.close();
+    }
+  }
+});
+
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
+test("a server that builds link previews never asks the viewer or the broker for a page link", async ({}, info) => {
+  // The default server: link_previews.enabled is on, so ready advertises it.
+  const server = await startTestServer({ tls: true });
+  let app: Awaited<ReturnType<typeof startNativeApp>> | undefined;
+  try {
+    configureNativeServer(server.origin);
+    app = await startNativeApp();
+    await withNativeArtifacts(
+      app,
+      async () => {
+        const page = app!.page;
+        await nativeLoginAndReady(page);
+        await waitForMessages(page);
+        await observeBroker(page);
+
+        const textarea = page.getByTestId("msg-textarea");
+        await textarea.fill(`server previews ${PREVIEW}`);
+        await textarea.press("Enter");
+        await expect(page.getByText("server previews", { exact: false }).first()).toBeVisible();
+
+        // The page is unreachable for the server (.invalid), so no card ever arrives; the
+        // client neither conceals the link behind a consent item nor fetches it itself.
+        await page.waitForTimeout(2000);
+        await expect(
+          page.getByRole("button", { name: "Load external content from preview.invalid" }),
+        ).toHaveCount(0);
+        expect(await brokerUrls(page)).toEqual([]);
       },
       info,
     );

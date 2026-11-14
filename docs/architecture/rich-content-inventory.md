@@ -11,7 +11,10 @@ state" section. The detailed table further down is a dated snapshot.
 ## Current state
 
 Since B7-16, the desktop renderer makes **no** direct fetch of external
-content. Two native owners split the work:
+content. Link previews have since moved off the viewer's machine altogether
+when the server supports it (see
+[Server-built link previews](#server-built-link-previews)); the rest is split
+between two native owners:
 
 - **The external-content broker** (`Client/src-tauri/src/external_content.rs`,
   reached through `Client/src/platform/contracts/externalContent.ts`) fetches
@@ -27,7 +30,10 @@ content. Two native owners split the work:
   fetches the connected server's own files: attachments, avatars and custom
   emoji. It carries the session token and trusts only the pinned certificate.
 
-No broker call and no GIF-proxy query happens until the viewer has chosen,
+For everything that still goes through the broker (the GIF picker, every link
+that is itself an image, external avatars, and the link previews and YouTube
+titles of a server that does not build previews itself), no broker call and no
+GIF-proxy query happens until the viewer has chosen,
 once per server, "Load automatically on this server" or "Ask each time"
 (`Client/src/features/content-consent/external.ts`). The YouTube player is
 the one deliberate exception to brokering: it is an iframe loaded on click,
@@ -40,16 +46,42 @@ Those rows in the table below are still current.
 The full policy is the C-09 contract in
 [trust-model.md](trust-model-evidence.md#desktop-preview-destination-policy-c-09--contract-for-b7).
 
-## Why previews stay client-side
+## Server-built link previews
+
+A server with `link_previews.enabled` on fetches each link of a message once,
+after it was sent or edited, through `Server/safefetch`, and stores the card
+(title, description, site name and a shrunk thumbnail named by its hash). The
+desktop client shows those cards and loads their thumbnails from
+`GET /api/v1/link-previews/images/{hash}` through the cert-pinned HTTP proxy
+with the session token, into the same durable image cache attachments use. It
+makes **no** broker call and contacts **no** linked site for them, so the
+per-server external-content consent does not apply to them, and a restart shows
+the previews from disk. The wire side is in [protocol.md](../protocol.md)
+(`message_link_previews`, `link_previews` on messages) and [api.md](../api.md).
+
+The client uses server cards only when `ready.capabilities.link_previews` is
+true (the server sets it while `link_previews.enabled` is on and the unfurl
+workers run). A server that does not advertise it (older, or the setting off)
+keeps the legacy path for one release: the broker fetch behind the consent gate
+described above. Once advertised, a message with no card yet shows none and
+never falls back to a local fetch. Only page previews and YouTube cards use the
+cards: a link that is itself an image (any host, GIFs included) keeps the broker
+path and its consent on every server, because the stored thumbnail is a still;
+so does an image-only card on a link with no image file name. Pressing Play on a
+YouTube card connects to YouTube and asks for the same consent.
+
+## Why the rest stays client-side
 
 Two rules this document keeps visible.
 
-1. **Link previews stay client-fetched** (plan decision 3). A server-side
-   preview proxy would make the server dial hosts an attacker chose, every
-   time a message contains a link. That would break the "your server does not
-   phone home" property that `egress-sites` enforces. The cost is that a
-   hostile link reaches the _viewer's_ machine, not the operator's server.
-   The broker and the consent gate above are how the client limits that.
+1. **The server dials a hostile link once, not every viewer.** Moving
+   previews to the server (decision 3 reversed) makes the server fetch hosts
+   an attacker chose, which is why that fetch goes through `Server/safefetch`
+   with the same blocked-range list the broker uses, and why a link is fetched
+   once rather than by every member. The viewer's machine, and its IP address,
+   no longer reach the linked site for a server-built preview. The broker and
+   the consent gate above remain how the client limits the paths that still
+   fetch outside content.
 2. **The server owns exactly one outbound content path that fetches
    attacker-influenced hosts**: the GIF proxy, routed through
    `Server/safefetch` since B5-1. The plugin `http` capability shares that

@@ -49,6 +49,9 @@ import {
 } from "./imageSizes";
 import { clearMediaCaches, extractYouTubeId, renderYouTubeEmbed } from "./mediaYouTube";
 import { clearEmbedCaches, focusMessageLink, renderGenericLinkPreview } from "./embeds";
+import { renderServerLinkCard } from "./serverLinkCard";
+import { cardForUrl, cardThumbnailUrl, isImageOnlyCard } from "./serverPreviews";
+import type { LinkPreviewCard } from "@lib/types";
 import type { ExternalContentFailure } from "../../../platform/contracts/externalContent";
 
 // The lightbox lives in attachments.ts, which renders attachment images and
@@ -397,6 +400,28 @@ function renderUrlEmbed(url: string): HTMLElement | null {
   return el;
 }
 
+/** One URL's embed drawn from the card the server built for it, or null when
+ *  it has no card or the viewer turned that kind of embed off. Nothing is
+ *  fetched from the linked site, so no external-content consent applies. A link
+ *  that is itself an image is not a page preview: it keeps the local fetch, its
+ *  consent and its animation, whatever card the server holds. */
+function renderServerEmbed(url: string, card: LinkPreviewCard | undefined): HTMLElement | null {
+  if (isDirectImageUrl(url)) return renderUrlEmbed(url);
+  if (card === undefined || !isSafeUrl(url)) return null;
+  // An image-only card on a link with no image file name: the local fetch, as before.
+  if (isImageOnlyCard(card)) return renderUrlEmbed(url);
+  const ytId = extractYouTubeId(url);
+  if (ytId !== null) {
+    if (!showEmbedsPref) return null;
+    return renderYouTubeEmbed(ytId, url, false, {
+      title: card.title ?? null,
+      thumbUrl: cardThumbnailUrl(card),
+    });
+  }
+  if (!showLinkPreviewsPref) return null;
+  return renderServerLinkCard(card, url);
+}
+
 /** Re-render every embed whose consent changed: load the newly admitted ones
  *  and conceal the revoked ones, keeping focus on the item it was in. */
 function refreshExternalItems(): void {
@@ -428,13 +453,20 @@ function refreshExternalItems(): void {
 /** The most embeds one message draws; further links stay plain text links. */
 export const MAX_EMBEDS_PER_MESSAGE = 5;
 
-/** Render URL embeds (YouTube players, generic link previews). */
-export function renderUrlEmbeds(content: string): DocumentFragment {
+/** Render URL embeds (YouTube players, generic link previews). `cards` are the
+ *  server's cards for the message: a page link or video still in `content` is
+ *  drawn from its card. Null means the server builds none, and each link is
+ *  fetched locally (through the external-content broker, with the viewer's consent). */
+export function renderUrlEmbeds(
+  content: string,
+  cards: readonly LinkPreviewCard[] | null = null,
+): DocumentFragment {
   const fragment = document.createDocumentFragment();
   let drawn = 0;
   for (const url of new Set(extractUrls(content))) {
     if (drawn >= MAX_EMBEDS_PER_MESSAGE) break;
-    const el = renderUrlEmbed(url);
+    const el =
+      cards === null ? renderUrlEmbed(url) : renderServerEmbed(url, cardForUrl(cards, url));
     if (el === null) continue;
     fragment.appendChild(el);
     drawn++;

@@ -15,6 +15,7 @@ type readyCapabilitiesPayload struct {
 	Forums                    bool  `json:"forums"`             // forum_post_create and a forum's posts
 	GameActivity              bool  `json:"game_activity"`      // activity_update, presence.activity and ready.activities; false while an admin has it off
 	IDMentions                bool  `json:"id_mentions"`        // <@id> and <@&id> tokens in content resolve to a user or a role
+	LinkPreviews              bool  `json:"link_previews"`      // message_link_previews frames and link_previews on messages; false while link_previews.enabled is off
 	ListeningActivity         bool  `json:"listening_activity"` // listening_update, presence.listening and ready.listening; follows the same switch as game_activity
 	ManageNicknames           bool  `json:"manage_nicknames"`   // PUT /api/v1/moderation/users/{id}/nickname
 	MessageDeduplication      bool  `json:"message_deduplication"`
@@ -31,13 +32,14 @@ type readyCapabilitiesPayload struct {
 	VoiceMessages             bool  `json:"voice_messages"` // duration_ms and waveform on an upload and its attachment
 }
 
-func readyCapabilities(retryFloorMS int64, threads, forums, gameActivity bool) readyCapabilitiesPayload {
+func readyCapabilities(retryFloorMS int64, threads, forums, gameActivity, linkPreviews bool) readyCapabilitiesPayload {
 	return readyCapabilitiesPayload{
 		ChannelMedia:              true,
 		DMPrivacy:                 true,
 		Forums:                    forums,
 		GameActivity:              gameActivity,
 		IDMentions:                true,
+		LinkPreviews:              linkPreviews,
 		ListeningActivity:         gameActivity,
 		ManageNicknames:           true,
 		MessageDeduplication:      true,

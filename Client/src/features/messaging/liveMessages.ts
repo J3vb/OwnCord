@@ -9,7 +9,7 @@ import type { Attachment, MessageResponse, MessageStickerInfo, MessageUser } fro
 import { MAX_MESSAGES_PER_CHANNEL, messageResponseToMessage } from "./messageModel";
 import type { Message, MessagesState } from "./messageModel";
 import { isUnreconciledEcho } from "./echoReconcile";
-import { mergeMessagePoll } from "../../lib/pollState";
+import { mergeHeldState } from "../../lib/linkPreviewState";
 
 /** addMessage's reducer: reconcile a live chat_message with its optimistic row, or append it. */
 export function reduceAddMessage(prev: MessagesState, message: Message): MessagesState {
@@ -21,7 +21,7 @@ export function reduceAddMessage(prev: MessagesState, message: Message): Message
   if (idIdx !== -1) {
     const pendingSends = new Map(prev.pendingSends);
     // A replayed creation frame (a poll at version 0) must not roll the counts back.
-    const incoming = mergeMessagePoll(existing[idIdx], message);
+    const incoming = mergeHeldState(existing[idIdx], message);
     const replaced = existing.flatMap((m, i) => {
       if (i === idIdx) return [incoming];
       // History may have arrived before the live echo, carrying the real
@@ -282,7 +282,7 @@ export function reduceApplyServerMessage(
   const converted = messageResponseToMessage(response);
   const index = existing.findIndex((m) => m.id !== 0 && m.id === converted.id);
   if (index === -1) return prev;
-  const incoming = mergeMessagePoll(existing[index], converted);
+  const incoming = mergeHeldState(existing[index], converted);
   const updatedMessages = new Map(prev.messagesByChannel);
   updatedMessages.set(
     response.channel_id,

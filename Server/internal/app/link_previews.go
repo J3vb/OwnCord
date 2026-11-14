@@ -59,6 +59,7 @@ func (a *App) startLinkPreviews() error {
 	ctx, cancel := context.WithCancel(a.bgCtx)
 	wait := u.Start(ctx)
 	svc.Messages.SetLinkUnfurler(u)
+	a.hub.SetLinkPreviews(a.cfg.LinkPreviews.Enabled)
 	a.onCloseWithin("link-previews", linkPreviewJoinBudget, func(closeCtx context.Context) error {
 		cancel()
 		if !wait(closeCtx) {

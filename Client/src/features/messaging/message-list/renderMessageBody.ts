@@ -22,6 +22,7 @@ import { resolveDisplayName } from "@lib/ui/avatar";
 import { renderMessageContent } from "../content/contentParser";
 import { readableRoleColor } from "@lib/prefs/themes";
 import { isLoneImageEmbed, renderUrlEmbeds } from "../content/media";
+import { serverCardsFor } from "../content/serverPreviews";
 import {
   isGalleryImage,
   renderAttachment,
@@ -285,7 +286,7 @@ function appendStandardBody(
   appendAttachments(box, msg);
 
   // URL embeds (YouTube players, link previews)
-  const embeds = renderUrlEmbeds(msg.content);
+  const embeds = renderUrlEmbeds(msg.content, serverCardsFor(msg));
   if (embeds.childNodes.length > 0) {
     box.appendChild(embeds);
   }
