@@ -63,7 +63,10 @@ const (
 	CodePluginsDisabled             Code = "PLUGINS_DISABLED"
 	CodePreviewExpired              Code = "PREVIEW_EXPIRED"
 	CodePushDisabled                Code = "PUSH_DISABLED"
-	CodeRateLimited                 Code = "RATE_LIMITED"
+	// The push server a device registered is on a private, loopback or otherwise
+	// non-public address; OwnCord only sends to public push servers.
+	CodePushServerNotPublic Code = "PUSH_SERVER_NOT_PUBLIC"
+	CodeRateLimited         Code = "RATE_LIMITED"
 	// Account recovery set the new password and spent the recovery secret, but no
 	// session could be started; sign in with the new password instead of retrying
 	// the recovery.

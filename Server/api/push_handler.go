@@ -158,6 +158,10 @@ func handleSubscribePush(push *service.PushService) http.HandlerFunc {
 				writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 				return
 			}
+			if errors.Is(err, service.ErrPushServerNotPublic) {
+				writeErr(w, http.StatusBadRequest, httperr.CodePushServerNotPublic, "OwnCord only sends to public push servers")
+				return
+			}
 			writeServiceError(r.Context(), w, err)
 			return
 		}

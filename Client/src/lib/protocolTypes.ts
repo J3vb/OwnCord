@@ -237,6 +237,9 @@ export const RestErrorCode = {
   PLUGINS_DISABLED: "PLUGINS_DISABLED",
   PREVIEW_EXPIRED: "PREVIEW_EXPIRED",
   PUSH_DISABLED: "PUSH_DISABLED",
+  // The push server a device registered is on a private, loopback or otherwise
+  // non-public address; OwnCord only sends to public push servers.
+  PUSH_SERVER_NOT_PUBLIC: "PUSH_SERVER_NOT_PUBLIC",
   RATE_LIMITED: "RATE_LIMITED",
   // Account recovery set the new password and spent the recovery secret, but
   // no session could be started; sign in with the new password instead of

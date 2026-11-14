@@ -1,6 +1,7 @@
 // REST calls for push to this device (GET /push/vapid, POST
 // /push/subscriptions). The server answers 503 PUSH_DISABLED to each while
-// its owner has push off. There is no sign-out call: the server deletes a
+// its owner has push off. A subscribe whose push server is on a private network
+// is refused with 400 PUSH_SERVER_NOT_PUBLIC. There is no sign-out call: the server deletes a
 // subscription with the session that made it.
 
 import type { ApiTransport } from "./apiShared";
@@ -30,7 +31,8 @@ export function createPushApi(t: ApiTransport) {
     },
 
     /** Adds or refreshes this device's subscription; the same endpoint again
-     *  updates the row, so it is sent at every sign-in. */
+     *  updates the row, so it is sent at every sign-in. Rejects with
+     *  PUSH_SERVER_NOT_PUBLIC when the endpoint's host is not a public address. */
     subscribePush(body: PushSubscribeBody, signal?: AbortSignal): Promise<PushSubscribeResponse> {
       return t.request("PushSubscribeResponse", "POST", "/push/subscriptions", body, signal);
     },

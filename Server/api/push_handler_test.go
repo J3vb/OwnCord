@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,10 @@ func buildPushRouter(t *testing.T, database *db.DB, enabled bool) (http.Handler,
 	t.Helper()
 	push := service.NewPushService(database)
 	push.SetVAPIDKey(pushTestKey(t))
+	// No test reaches a real resolver: every host resolves to a public address.
+	push.SetEndpointResolver(func(context.Context, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+	})
 	r := chi.NewRouter()
 	api.MountPushRoutes(r, service.NewSessionService(database), push, enabled)
 	return r, push
@@ -120,6 +125,24 @@ func TestPushSubscriptions_LifecycleCreateListRevoke(t *testing.T) {
 	rr = pushDo(t, router, http.MethodGet, "/api/v1/push/subscriptions", token, nil)
 	if err := json.Unmarshal(rr.Body.Bytes(), &listed); err != nil || len(listed.Subscriptions) != 0 {
 		t.Fatalf("list after delete = %+v, %v; want none", listed, err)
+	}
+}
+
+func TestPushSubscriptions_PrivatePushServerIsRefusedWithItsOwnCode(t *testing.T) {
+	database := openMigratedDB(t)
+	router, _ := buildPushRouter(t, database, true)
+	userID := mintUser(t, database, "push-private")
+	token, _ := mintSession(t, database, userID)
+
+	rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, validSubscribeBody("https://192.168.1.20/up/abc"))
+	requireStatus(t, rr, http.StatusBadRequest)
+	if !strings.Contains(rr.Body.String(), "PUSH_SERVER_NOT_PUBLIC") {
+		t.Fatalf("body = %s, want code PUSH_SERVER_NOT_PUBLIC", rr.Body.String())
+	}
+
+	rr = pushDo(t, router, http.MethodGet, "/api/v1/push/subscriptions", token, nil)
+	if strings.Contains(rr.Body.String(), "192.168.1.20") {
+		t.Fatalf("a refused endpoint was stored: %s", rr.Body.String())
 	}
 }
 

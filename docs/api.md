@@ -355,6 +355,7 @@ renamed once shipped, because clients compare it. The common ones:
 | `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `GIF_FAVORITES_FULL`            | 409         | You have reached the favorite GIF limit (250)                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `PUSH_SERVER_NOT_PUBLIC`        | 400         | The push server in a subscription is on a private, loopback or otherwise non-public address (see POST /api/v1/push/subscriptions)                                                                                                                                                                                                                                                                                                                                          |
 | `PLUGINS_DISABLED`              | 503         | A plugin install, enable, disable or uninstall on a server whose plugin runtime is off                                                                                                                                                                                                                                                                                                                                                                                     |
 | `SERVICE_UNAVAILABLE`           | 503         | The request ran past the server's 15 s request deadline and failed (`Retry-After: 2`; see Request deadline below), or the auth store was unavailable while resolving a token                                                                                                                                                                                                                                                                                               |
 | `UPDATE_CHECK_FAILED`           | 502         | The release lookup or its signature fetch failed (client-update route and admin update check)                                                                                                                                                                                                                                                                                                                                                                              |
@@ -2005,6 +2006,14 @@ to a 65-byte uncompressed P-256 point (`0x04` prefix) that lies on the curve; `a
 characters. A user may hold at most 10 subscriptions; the 11th evicts the
 oldest by `last_seen_at`.
 
+The endpoint's host must be a public push server: an IP literal, or a name
+with any address (loopback, private, link-local, carrier-grade NAT, unique-local),
+that the dispatcher would refuse to send to is refused up front with
+`400 PUSH_SERVER_NOT_PUBLIC` and nothing is stored. The check uses the same
+address classifier as dispatch and looks the name up with a 3 s bound; a failed
+or timed-out lookup is accepted, since dispatch still refuses a non-public
+address when it sends.
+
 #### Response 201 Created
 
 ```json
@@ -2013,10 +2022,11 @@ oldest by `last_seen_at`.
 
 #### Errors
 
-| Status | Code            | When                                                   |
-| ------ | --------------- | ------------------------------------------------------ |
-| 400    | `INVALID_INPUT` | Malformed body, or a credential field fails validation |
-| 503    | `PUSH_DISABLED` | `push.enabled` is false                                |
+| Status | Code                     | When                                                                                          |
+| ------ | ------------------------ | --------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`          | Malformed body, or a credential field fails validation                                        |
+| 400    | `PUSH_SERVER_NOT_PUBLIC` | The endpoint host is an IP literal, or resolves to any address, that is not publicly routable |
+| 503    | `PUSH_DISABLED`          | `push.enabled` is false                                                                       |
 
 ### DELETE /api/v1/push/subscriptions/{id}
 

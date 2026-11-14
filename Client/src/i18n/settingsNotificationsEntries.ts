@@ -26,6 +26,7 @@ export const settingsNotificationsEntries = {
   "notifications.push.state.choose": "Choose a push app",
   "notifications.push.state.serverOff": "Off on this server",
   "notifications.push.state.muted": "Off",
+  "notifications.push.state.refused": "Push server not public",
   "notifications.push.state.failed": "Not working",
   "notifications.push.off": "Set up after you sign in to a server.",
   "notifications.push.checking": "Asking the server and your push app.",
@@ -36,6 +37,8 @@ export const settingsNotificationsEntries = {
   "notifications.push.serverOff": "The owner of this server has push notifications turned off.",
   "notifications.push.muted":
     "Message notifications are off, so nothing reaches this phone while the app is closed.",
+  "notifications.push.refused":
+    "Your push server ({host}) is on a private network. OwnCord only sends to public push servers. Pick a public server in your push app (for example ntfy.sh).",
   "notifications.push.failed":
     "Your push app did not answer. Open it once, then come back to OwnCord.",
   "notifications.push.getNtfy": "Get ntfy",

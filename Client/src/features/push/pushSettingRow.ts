@@ -59,6 +59,11 @@ const VIEW: Readonly<Record<PushSetting, View>> = {
     word: () => t("notifications.push.state.muted"),
     desc: () => t("notifications.push.muted"),
   },
+  refused: {
+    kind: "crit",
+    word: () => t("notifications.push.state.refused"),
+    desc: () => t("notifications.push.refused", { host: pushStore.getState().host }),
+  },
   failed: {
     kind: "crit",
     word: () => t("notifications.push.state.failed"),

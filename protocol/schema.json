@@ -482,6 +482,12 @@
       { "wire": "PLUGINS_DISABLED", "go": "CodePluginsDisabled", "ts": "PLUGINS_DISABLED" },
       { "wire": "PREVIEW_EXPIRED", "go": "CodePreviewExpired", "ts": "PREVIEW_EXPIRED" },
       { "wire": "PUSH_DISABLED", "go": "CodePushDisabled", "ts": "PUSH_DISABLED" },
+      {
+        "wire": "PUSH_SERVER_NOT_PUBLIC",
+        "go": "CodePushServerNotPublic",
+        "ts": "PUSH_SERVER_NOT_PUBLIC",
+        "note": "The push server a device registered is on a private, loopback or otherwise non-public address; OwnCord only sends to public push servers."
+      },
       { "wire": "RATE_LIMITED", "go": "CodeRateLimited", "ts": "RATE_LIMITED" },
       {
         "wire": "RECOVERED_SIGN_IN_REQUIRED",
