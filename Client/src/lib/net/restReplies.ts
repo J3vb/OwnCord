@@ -41,6 +41,7 @@ import type {
   RecoveryCodesResponse,
   ReportActResult,
   TimeoutResult,
+  WarnResult,
   TotpEnrolmentResponse,
   UserUploadsPage,
   BlockedUsersResponse,
@@ -87,6 +88,7 @@ export interface RestReplyShapes {
   ModerationReportDetail: ModerationReportDetail;
   ReportActResultOrNone: ReportActResult | undefined;
   TimeoutResult: TimeoutResult;
+  WarnResult: WarnResult;
   NicknameResult: NicknameResult;
   AppealRowList: ModerationAppealRow[];
   ModerationAppealDetail: ModerationAppealDetail;

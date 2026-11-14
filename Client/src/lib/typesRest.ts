@@ -146,6 +146,11 @@ export interface TimeoutResult {
   readonly voice: "applied" | "skipped";
 }
 
+/** A warning's answer: the id of its moderation record. */
+export interface WarnResult {
+  readonly id: number;
+}
+
 /** A report-linked action's answer; `voice` is set for a timeout only. */
 export interface ReportActResult {
   readonly voice?: string;
