@@ -83,7 +83,7 @@ func userExists(t *testing.T, dbPath, username string) bool {
 	if err != nil {
 		t.Fatalf("OpenShared: %v", err)
 	}
-	defer database.Close() //nolint:errcheck
+	defer database.Close()
 	u, err := database.GetUserByUsername(context.Background(), username)
 	if err != nil || u == nil {
 		return false
@@ -170,7 +170,7 @@ func TestRestoreCLI_RefusesWhileServerRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open holder: %v", err)
 	}
-	defer holder.Close() //nolint:errcheck
+	defer holder.Close()
 
 	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code == 0 {
 		t.Fatal("restore ran while another process held the database lock, want a refusal")
@@ -495,7 +495,7 @@ func sidecarFloor(t *testing.T, dbPath string) (uint64, bool) {
 	if err != nil {
 		t.Fatalf("OpenShared: %v", err)
 	}
-	defer database.Close() //nolint:errcheck
+	defer database.Close()
 	floor, ok, err := database.WSSeqFloorSidecar()
 	if err != nil {
 		t.Fatalf("WSSeqFloorSidecar: %v", err)

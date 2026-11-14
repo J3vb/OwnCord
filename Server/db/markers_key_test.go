@@ -17,7 +17,7 @@ func execOnMarkerFile(t *testing.T, path, stmt string) {
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
-	defer raw.Close() //nolint:errcheck
+	defer raw.Close()
 	if _, err := raw.Exec(stmt); err != nil {
 		t.Fatalf("exec %q: %v", stmt, err)
 	}
@@ -102,7 +102,7 @@ func TestMarkerStore_KeyFingerprintRefusesUnfingerprintedMarkers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("after the acknowledgement, OpenMarkerStore: %v", err)
 	}
-	defer blessed.Close() //nolint:errcheck
+	defer blessed.Close()
 	if markers, err := blessed.Markers(ctx); err != nil || len(markers) != 1 {
 		t.Fatalf("markers after the acknowledgement = %+v, %v; want the one recorded", markers, err)
 	}

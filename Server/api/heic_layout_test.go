@@ -256,7 +256,7 @@ func heicRefused(t *testing.T, content []byte) {
 	if err != nil {
 		t.Fatalf("the refusal was not kept: %v", err)
 	}
-	defer marker.Close() //nolint:errcheck
+	defer marker.Close()
 	if info, err := marker.Stat(); err != nil || info.Size() != 0 {
 		t.Fatalf("kept marker: %v, %v", info, err)
 	}

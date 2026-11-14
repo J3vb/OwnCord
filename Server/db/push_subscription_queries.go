@@ -31,7 +31,7 @@ func (d *DB) UpsertPushSubscription(ctx context.Context, userID int64, sessionID
 	if err != nil {
 		return 0, fmt.Errorf("UpsertPushSubscription begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	id, err := q.UpsertPushSubscription(ctx, dbgen.UpsertPushSubscriptionParams{

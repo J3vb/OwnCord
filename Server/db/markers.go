@@ -235,7 +235,7 @@ func (m *MarkerStore) RecordPendingAccount(ctx context.Context, userID int64, us
 	if err != nil {
 		return "", false, fmt.Errorf("marker store: record pending: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO deletion_markers (subject_token, scope, state) VALUES (?, 'account', 'pending')`, token)
 	if err != nil {
@@ -281,7 +281,7 @@ func (m *MarkerStore) SequenceFloors(ctx context.Context) (map[string]int64, err
 	if err != nil {
 		return nil, fmt.Errorf("marker store: sequence floors: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	floors := make(map[string]int64)
 	for rows.Next() {
 		var name string
@@ -395,7 +395,7 @@ func (d *DB) ListUserIDs(ctx context.Context) ([]int64, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ListUserIDs: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var ids []int64
 	for rows.Next() {
 		var id int64

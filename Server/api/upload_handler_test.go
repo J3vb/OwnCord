@@ -963,7 +963,7 @@ func TestServeThumb_UndecodableJPEGIsDecodedOnce(t *testing.T) {
 		if err != nil {
 			t.Fatalf("the failed decode was not kept: %v", err)
 		}
-		defer f.Close() //nolint:errcheck
+		defer f.Close()
 		if info, err := f.Stat(); err != nil || info.Size() != 0 {
 			t.Fatalf("kept thumbnail of a broken JPEG: %v, %v", info, err)
 		}

@@ -17,7 +17,7 @@ func (d *DB) reportMutation(ctx context.Context, op string, reportID, actorID in
 	if err != nil {
 		return false, fmt.Errorf("%s begin tx: %w", op, err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := dbgen.New(tx)
 	n, err := mutate(q)
 	if err != nil {

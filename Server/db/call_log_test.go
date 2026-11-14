@@ -310,7 +310,7 @@ func TestEraseAccount_RemovesCallParticipation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	defer rows.Close() //nolint:errcheck // test read path
+	defer rows.Close()
 	for rows.Next() {
 		var id int64
 		mustDo(t, "scan", rows.Scan(&id))

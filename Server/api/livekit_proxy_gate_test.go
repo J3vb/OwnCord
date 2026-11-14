@@ -72,7 +72,7 @@ func countingWSBackend(t *testing.T) (url string, dials *atomic.Int32, closed <-
 		if err != nil {
 			return
 		}
-		defer conn.CloseNow() //nolint:errcheck // best-effort
+		defer conn.CloseNow()
 		for {
 			typ, data, err := conn.Read(r.Context())
 			if err != nil {
@@ -129,7 +129,7 @@ func upgradeThroughProxy(t *testing.T, proxyAddr, pathAndQuery string, header ht
 	defer cancel()
 	conn, resp, err := websocket.Dial(ctx, "ws://"+proxyAddr+pathAndQuery, &websocket.DialOptions{HTTPHeader: header})
 	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close() //nolint:errcheck // best-effort close in test
+		defer resp.Body.Close()
 	}
 	if err == nil {
 		_ = conn.CloseNow()
@@ -369,7 +369,7 @@ func rawUpgradeStatus(t *testing.T, addr, pathAndQuery, connection, upgrade stri
 	if err != nil {
 		t.Fatalf("dial proxy: %v", err)
 	}
-	defer conn.Close() //nolint:errcheck // best-effort close in test
+	defer conn.Close()
 	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		t.Fatal(err)
 	}

@@ -308,7 +308,7 @@ func postJSONInto(t *testing.T, client *http.Client, url, token string, body any
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != want {
 		t.Fatalf("POST %s: status = %d, want %d; body = %s", url, resp.StatusCode, want, data)
@@ -328,7 +328,7 @@ func getJSONInto(t *testing.T, client *http.Client, url, token string, into any)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET %s: status = %d; body = %s", url, resp.StatusCode, data)

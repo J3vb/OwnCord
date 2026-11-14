@@ -55,7 +55,7 @@ func TestLiveKitProcess_CompanionJoinsKillOnCloseJob(t *testing.T) {
 	mustDo(t, "liveKitJob", err)
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid)) //nolint:gosec // G115: a Windows PID is a DWORD
 	mustDo(t, "OpenProcess", err)
-	defer windows.CloseHandle(h) //nolint:errcheck // test cleanup
+	defer windows.CloseHandle(h)
 	var inJob int32
 	r, _, callErr := windows.NewLazySystemDLL("kernel32.dll").NewProc("IsProcessInJob").
 		Call(uintptr(h), uintptr(job), uintptr(unsafe.Pointer(&inJob)))

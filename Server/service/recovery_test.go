@@ -113,7 +113,7 @@ func TestRecoveryKit_EnrolRecoverRotate(t *testing.T) {
 	}
 	rows, err := svc.st.(*db.DB).QueryContext(ctx, `SELECT action, detail FROM audit_log WHERE actor_id = ?`, user.ID)
 	mustDo(t, "query audit", err)
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	actions := map[string]bool{}
 	for rows.Next() {
 		var action, detail string

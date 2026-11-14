@@ -217,7 +217,7 @@ func fetchLimited(ctx context.Context, url string, limit int64) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, url)
 	}
@@ -241,7 +241,7 @@ func downloadTo(ctx context.Context, url, destPath string, limit int64) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, url)
 	}

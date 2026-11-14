@@ -268,7 +268,7 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, raw
 		Subprotocols: r.Header.Values("Sec-WebSocket-Protocol"),
 	})
 	if dialResp != nil && dialResp.Body != nil {
-		defer dialResp.Body.Close() //nolint:errcheck // best-effort close
+		defer dialResp.Body.Close()
 	}
 	if err != nil {
 		// websocket.Dial wraps a *url.Error embedding the full request URL, and the admin ring buffer

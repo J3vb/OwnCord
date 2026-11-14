@@ -169,7 +169,7 @@ func TestOpenImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenImage: %v", err)
 	}
-	defer file.Close() //nolint:errcheck
+	defer file.Close()
 	if b, _ := io.ReadAll(file); string(b) != "thumb" {
 		t.Errorf("read %q", b)
 	}

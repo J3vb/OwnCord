@@ -239,7 +239,7 @@ func TestNewRouter_MessageRequest_CreationAndSendDoNotLeakToReplay(t *testing.T)
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v1/ws"
 	bobResume, resumeResp, dialErr := websocket.Dial(bobResumeCtx, wsURL, nil)
 	if resumeResp != nil && resumeResp.Body != nil {
-		defer resumeResp.Body.Close() //nolint:errcheck // test cleanup
+		defer resumeResp.Body.Close()
 	}
 	if dialErr != nil {
 		t.Fatalf("websocket.Dial (resume): %v", dialErr)

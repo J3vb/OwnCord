@@ -241,7 +241,7 @@ func TestBackupLink_SlowDownloadOutlivesWriteTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer res.Body.Close() //nolint:errcheck
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}

@@ -39,12 +39,12 @@ func readTestDB(t *testing.T, path string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close() //nolint:errcheck
+	defer conn.Close()
 	rows, err := conn.Query("SELECT v FROM t ORDER BY rowid")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var out []string
 	for rows.Next() {
 		var v string

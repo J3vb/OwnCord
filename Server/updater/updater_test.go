@@ -974,7 +974,7 @@ func TestOpenVerifiedBinary_CommitHappyPath(t *testing.T) {
 
 	staged, err := OpenVerifiedBinary(stagedPath, hex.EncodeToString(sum[:]))
 	mustDo(t, "OpenVerifiedBinary", err)
-	defer staged.Close() //nolint:errcheck
+	defer staged.Close()
 
 	destPath := filepath.Join(dir, "app")
 	mustDo(t, "Commit", staged.Commit(destPath))
@@ -1013,7 +1013,7 @@ func TestOpenVerifiedBinary_SwapAfterVerifyDetectedAtCommit(t *testing.T) {
 
 	staged, err := OpenVerifiedBinary(stagedPath, hex.EncodeToString(sum[:]))
 	mustDo(t, "OpenVerifiedBinary", err)
-	defer staged.Close() //nolint:errcheck
+	defer staged.Close()
 
 	// Attacker tries to win the race: replace the staged path after
 	// verification but before the rename.

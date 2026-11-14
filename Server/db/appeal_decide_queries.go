@@ -131,7 +131,7 @@ func (d *DB) DecideAppealTx(
 	if err != nil {
 		return AppealWriteConflict, false, false, fmt.Errorf("DecideAppealTx begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := dbgen.New(tx)
 
 	if appealDecideInTxHook != nil {

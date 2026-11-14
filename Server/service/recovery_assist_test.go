@@ -111,7 +111,7 @@ func TestRecoveryAssist_RedeemsOnceWithoutSecondFactor(t *testing.T) {
 	// credential or its verifier.
 	rows, err := database.QueryContext(ctx, `SELECT actor_id, action, target_id, detail FROM audit_log WHERE action LIKE 'recovery_assist_%'`)
 	mustDo(t, "query audit", err)
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	seen := map[string][2]int64{}
 	for rows.Next() {
 		var actor, target int64

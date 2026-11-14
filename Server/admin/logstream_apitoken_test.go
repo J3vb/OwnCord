@@ -57,7 +57,7 @@ func TestAdminAPI_LogStreamTicketFlow_APIToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stream request failed: %v", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("GET /logs/stream?ticket=... with API-token ticket status = %d, want 200; body: %s", resp.StatusCode, string(body))
@@ -89,7 +89,7 @@ func TestAdminAPI_LogStreamTicketFlow_APIToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("revoked-token stream request failed: %v", err)
 	}
-	defer revokedResp.Body.Close() //nolint:errcheck
+	defer revokedResp.Body.Close()
 	if revokedResp.StatusCode != http.StatusUnauthorized {
 		body, _ := io.ReadAll(revokedResp.Body)
 		t.Fatalf("revoked-token ticket status = %d, want 401; body: %s", revokedResp.StatusCode, string(body))

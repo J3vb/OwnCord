@@ -30,7 +30,7 @@ func (d *DB) AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (labe
 	if err != nil {
 		return false, fmt.Errorf("AcknowledgeNSFW begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	var nsfw int64
 	switch scanErr := tx.QueryRowContext(ctx, `SELECT nsfw FROM channels WHERE id = ?`, channelID).Scan(&nsfw); {

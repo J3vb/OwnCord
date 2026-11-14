@@ -27,7 +27,7 @@ func closingWSBackend(t *testing.T, code websocket.StatusCode, reason string) st
 		if _, _, err := conn.Read(r.Context()); err != nil {
 			return
 		}
-		_ = conn.Close(code, reason) //nolint:errcheck // the test reads the code at the client
+		_ = conn.Close(code, reason)
 	}))
 	t.Cleanup(srv.Close)
 	return "ws://" + srv.Listener.Addr().String()
@@ -85,7 +85,7 @@ func TestLiveKitProxy_WebSocket_ForwardsClientCloseCode(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.CloseNow() //nolint:errcheck // best-effort
+		defer conn.CloseNow()
 		_, _, err = conn.Read(r.Context())
 		if ce, ok := errors.AsType[websocket.CloseError](err); ok {
 			got <- ce

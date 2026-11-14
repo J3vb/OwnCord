@@ -53,7 +53,7 @@ func TestOpenCreatesFile(t *testing.T) {
 
 	database, err := db.Open(dbPath)
 	mustDo(t, "Open() error", err)
-	defer database.Close() //nolint:errcheck
+	defer database.Close()
 
 	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
 		t.Error("Open() did not create the database file")
@@ -88,7 +88,7 @@ func TestWALModeEnabledOnFile(t *testing.T) {
 
 	database, err := db.Open(dbPath)
 	mustDo(t, "Open() error", err)
-	defer database.Close() //nolint:errcheck
+	defer database.Close()
 
 	var journalMode string
 	mustDo(t, "PRAGMA journal_mode query error", database.QueryRowContext(context.Background(), "PRAGMA journal_mode;").Scan(&journalMode))
@@ -329,7 +329,7 @@ func TestQuery(t *testing.T) {
 
 	rows, err := database.QueryContext(context.Background(), "SELECT key FROM settings")
 	mustDo(t, "Query() error", err)
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	var count int
 	for rows.Next() {
@@ -488,7 +488,7 @@ func TestMigrateWALAndFKOnFile(t *testing.T) {
 
 	database, err := db.Open(dbPath)
 	mustDo(t, "Open() error", err)
-	defer database.Close() //nolint:errcheck
+	defer database.Close()
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
 
@@ -515,7 +515,7 @@ func captureSlog(t *testing.T, fn func()) string {
 func TestMigrate_LogsAnalyzeThenOptimize(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "boot.db"))
 	mustDo(t, "Open() error", err)
-	defer database.Close() //nolint:errcheck
+	defer database.Close()
 	for i, want := range []string{"db: analyze done", "db: optimize done"} {
 		out := captureSlog(t, func() {
 			if err := db.Migrate(database); err != nil {

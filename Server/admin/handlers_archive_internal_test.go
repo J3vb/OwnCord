@@ -62,7 +62,7 @@ func serveProgressing(t *testing.T, fixedWindow, lifetime time.Duration, onServe
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer res.Body.Close() //nolint:errcheck
+	defer res.Body.Close()
 	body, _ := io.ReadAll(res.Body)
 	return len(body), want
 }

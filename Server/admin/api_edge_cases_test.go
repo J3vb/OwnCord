@@ -439,7 +439,7 @@ func TestAdminAPI_LogStreamTicketFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reuse request failed: %v", err)
 	}
-	defer reuseResp.Body.Close() //nolint:errcheck
+	defer reuseResp.Body.Close()
 	if reuseResp.StatusCode != http.StatusUnauthorized {
 		body, _ := io.ReadAll(reuseResp.Body)
 		t.Fatalf("reused ticket status = %d, want 401; body: %s", reuseResp.StatusCode, string(body))
@@ -449,7 +449,7 @@ func TestAdminAPI_LogStreamTicketFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("legacy request failed: %v", err)
 	}
-	defer legacyResp.Body.Close() //nolint:errcheck
+	defer legacyResp.Body.Close()
 	if legacyResp.StatusCode != http.StatusUnauthorized {
 		body, _ := io.ReadAll(legacyResp.Body)
 		t.Fatalf("legacy token stream status = %d, want 401; body: %s", legacyResp.StatusCode, string(body))
@@ -470,7 +470,7 @@ func TestAdminAPI_LogStreamTicketFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("demoted-role request failed: %v", err)
 	}
-	defer demotedResp.Body.Close() //nolint:errcheck
+	defer demotedResp.Body.Close()
 	if demotedResp.StatusCode != http.StatusForbidden {
 		body, _ := io.ReadAll(demotedResp.Body)
 		t.Fatalf("demoted-role ticket status = %d, want 403; body: %s", demotedResp.StatusCode, string(body))

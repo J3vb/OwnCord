@@ -100,7 +100,7 @@ func (d *DB) LogAuditEntry(ctx context.Context, e AuditEntry) error {
 	if err != nil {
 		return fmt.Errorf("LogAuditEntry begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	e = unlinkEntry(e, d.auditUnlinkRules())
 	if err := dbgen.New(tx).LogAuditEntry(ctx, dbgen.LogAuditEntryParams{
 		ActorID:      e.ActorID,

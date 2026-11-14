@@ -33,7 +33,7 @@ func migratedTo(t *testing.T, dbPath string, fsys fs.FS) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer d.Close() //nolint:errcheck
+	defer d.Close()
 	if fsys == nil {
 		err = db.Migrate(d)
 	} else {
@@ -50,7 +50,7 @@ func recordedVersions(t *testing.T, dbPath string) []string {
 	if err != nil {
 		t.Fatalf("OpenShared: %v", err)
 	}
-	defer d.Close() //nolint:errcheck
+	defer d.Close()
 	var joined string
 	if err := d.SQLDb().QueryRow("SELECT COALESCE(group_concat(version, ','), '') FROM (SELECT version FROM schema_versions ORDER BY version)").Scan(&joined); err != nil {
 		t.Fatalf("query: %v", err)

@@ -14,7 +14,7 @@ func userMessageIDs(t *testing.T, database *db.DB, uid int64) []int64 {
 	t.Helper()
 	rows, err := database.QueryContext(context.Background(), `SELECT id FROM messages WHERE user_id = ? ORDER BY id`, uid)
 	mustDo(t, "select messages", err)
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var ids []int64
 	for rows.Next() {
 		var id int64

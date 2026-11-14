@@ -272,11 +272,11 @@ func TestRemoveVsOwnerLeave_HandOffWins(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_, _ = f.database.RemoveGroupDMMember(ctx, f.group, f.alice, f.bob, "removed") //nolint:errcheck // either order is legal
+			_, _ = f.database.RemoveGroupDMMember(ctx, f.group, f.alice, f.bob, "removed")
 		}()
 		go func() {
 			defer wg.Done()
-			_, _ = f.database.LeaveGroupDM(ctx, f.alice, f.group, "left") //nolint:errcheck // either order is legal
+			_, _ = f.database.LeaveGroupDM(ctx, f.alice, f.group, "left")
 		}()
 		wg.Wait()
 		assertOwnerIsMember(t, f.database, f.group)
@@ -306,15 +306,15 @@ func TestTransferGroupDMOwner_RacingDeparturesKeepAMemberOwner(t *testing.T) {
 		wg.Add(3)
 		go func() {
 			defer wg.Done()
-			_, _ = f.database.TransferGroupDMOwner(ctx, f.group, f.alice, f.bob) //nolint:errcheck // either order is legal
+			_, _ = f.database.TransferGroupDMOwner(ctx, f.group, f.alice, f.bob)
 		}()
 		go func() {
 			defer wg.Done()
-			_, _ = f.database.LeaveGroupDM(ctx, f.bob, f.group, "left") //nolint:errcheck // either order is legal
+			_, _ = f.database.LeaveGroupDM(ctx, f.bob, f.group, "left")
 		}()
 		go func() {
 			defer wg.Done()
-			_, _ = f.database.LeaveGroupDM(ctx, f.alice, f.group, "left") //nolint:errcheck // either order is legal
+			_, _ = f.database.LeaveGroupDM(ctx, f.alice, f.group, "left")
 		}()
 		wg.Wait()
 		if len(memberIDs(t, f.database, f.group)) == 0 {

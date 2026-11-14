@@ -18,7 +18,7 @@ func receiptMessageIDs(t *testing.T, database *db.DB, userID, channelID int64) [
 	if err != nil {
 		t.Fatalf("query mention_receipts: %v", err)
 	}
-	defer rows.Close() //nolint:errcheck // test read path
+	defer rows.Close()
 	var ids []int64
 	for rows.Next() {
 		var id int64
@@ -41,7 +41,7 @@ func TestMigration063_MentionReceiptsSchema(t *testing.T) {
 		mustDo(t, "scan", rows.Scan(&n))
 		pkCols = append(pkCols, n)
 	}
-	rows.Close() //nolint:errcheck // test read path
+	rows.Close()
 	if want := []string{"user_id", "channel_id", "message_id"}; !slices.Equal(pkCols, want) {
 		t.Errorf("primary key = %v, want %v", pkCols, want)
 	}
@@ -200,7 +200,7 @@ func TestEraseAccount_RemovesRecipientReceipts(t *testing.T) {
 		mustDo(t, "scan", rows.Scan(&id))
 		msgs = append(msgs, id)
 	}
-	rows.Close() //nolint:errcheck // test read path
+	rows.Close()
 	for _, uid := range []int64{sub.id, bystander} {
 		for _, id := range msgs {
 			if _, err := database.ExecContext(ctx,

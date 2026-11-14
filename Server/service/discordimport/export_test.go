@@ -247,7 +247,7 @@ func TestOpenFile_PicksReaderByExtension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ex.Close() //nolint:errcheck
+	defer ex.Close()
 	if _, err := ex.OpenMedia("c.json_Files/a.png"); !errors.Is(err, ErrMediaMissing) {
 		t.Errorf("plain json media err = %v, want ErrMediaMissing", err)
 	}

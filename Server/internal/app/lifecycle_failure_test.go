@@ -137,7 +137,7 @@ func TestAppRun_PortInUse_KeepsOldBinary(t *testing.T) {
 
 	held, err := net.Listen("tcp", ":0")
 	mustDo(t, "hold port", err)
-	defer held.Close() //nolint:errcheck
+	defer held.Close()
 	port := held.Addr().(*net.TCPAddr).Port
 
 	a := bootTestApp(t, fmt.Sprint(port), "")

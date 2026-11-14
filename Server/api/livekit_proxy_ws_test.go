@@ -38,8 +38,8 @@ func echoWSBackend(t *testing.T) string {
 		if err != nil {
 			return
 		}
-		defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
-		conn.SetReadLimit(1 << 20)                          // let large-frame tests reach the proxy's own limit
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		conn.SetReadLimit(1 << 20) // let large-frame tests reach the proxy's own limit
 
 		for {
 			typ, data, err := conn.Read(r.Context())
@@ -125,7 +125,7 @@ func TestLiveKitProxy_WebSocket_ForwardsQueryWithoutClientCredential(t *testing.
 			return
 		}
 		_ = conn.Write(r.Context(), websocket.MessageText, []byte("ok"))
-		conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+		conn.Close(websocket.StatusNormalClosure, "")
 	}))
 	t.Cleanup(srv.Close)
 
@@ -158,7 +158,7 @@ func TestLiveKitProxy_WebSocket_HeaderCredential(t *testing.T) {
 			return
 		}
 		_ = conn.Write(r.Context(), websocket.MessageText, []byte("ok"))
-		conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+		conn.Close(websocket.StatusNormalClosure, "")
 	}))
 	t.Cleanup(srv.Close)
 
@@ -170,12 +170,12 @@ func TestLiveKitProxy_WebSocket_HeaderCredential(t *testing.T) {
 		HTTPHeader: http.Header{"Authorization": {"Bearer " + presented}, "Cookie": {"session=secret"}},
 	})
 	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close() //nolint:errcheck // best-effort close in test
+		defer resp.Body.Close()
 	}
 	if err != nil {
 		t.Fatalf("dial through proxy: %v", err)
 	}
-	defer conn.CloseNow() //nolint:errcheck // best-effort close in test
+	defer conn.CloseNow()
 
 	if _, _, err := conn.Read(t.Context()); err != nil {
 		t.Fatalf("read: %v", err)
@@ -206,7 +206,7 @@ func TestLiveKitProxy_WebSocket_BackendUnavailable(t *testing.T) {
 	if resp == nil {
 		t.Fatal("no HTTP response returned for the failed upgrade")
 	}
-	defer resp.Body.Close() //nolint:errcheck // best-effort
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", resp.StatusCode)
 	}
@@ -229,7 +229,7 @@ func TestLiveKitProxy_WebSocket_BlockedPathNotUpgraded(t *testing.T) {
 	if resp == nil {
 		t.Fatal("no HTTP response returned")
 	}
-	defer resp.Body.Close() //nolint:errcheck // best-effort
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", resp.StatusCode)
 	}
@@ -252,7 +252,7 @@ func TestLiveKitProxy_WebSocket_CrossOriginRejected(t *testing.T) {
 	if resp == nil {
 		t.Fatal("no HTTP response returned")
 	}
-	defer resp.Body.Close() //nolint:errcheck // best-effort
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", resp.StatusCode)
 	}
@@ -275,12 +275,12 @@ func TestLiveKitProxy_WebSocket_DefaultPortOriginBehindProxy(t *testing.T) {
 		HTTPHeader: http.Header{"Origin": []string{"https://owncord.example:443"}},
 	})
 	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close() //nolint:errcheck // best-effort close in test
+		defer resp.Body.Close()
 	}
 	if err != nil {
 		t.Fatalf("upgrade with a default-port Origin was refused: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	if err := conn.Write(ctx, websocket.MessageText, []byte("signal")); err != nil {
 		t.Fatalf("write: %v", err)

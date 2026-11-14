@@ -92,7 +92,7 @@ func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int6
 	if err != nil {
 		return nil, fmt.Errorf("GetChannelUnreadCounts: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	result := make(map[int64]ChannelUnread)
 	for rows.Next() {

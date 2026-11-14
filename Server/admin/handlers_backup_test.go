@@ -299,7 +299,7 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("db.Open(pre-restore backup): %v", err)
 	}
-	defer restoredDB.Close() //nolint:errcheck
+	defer restoredDB.Close()
 	audits, err := restoredDB.GetAuditLog(context.Background(), 10, 0)
 	if err != nil {
 		t.Fatalf("GetAuditLog on pre-restore backup: %v", err)

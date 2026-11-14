@@ -24,7 +24,7 @@ func (d *DB) UpdateUserProfileAndIdentityKey(ctx context.Context, userID int64, 
 	if err != nil {
 		return fmt.Errorf("UpdateUserProfileAndIdentityKey begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	if err := updateUserProfile(ctx, q, userID, username, avatar, displayName, about, bannerID, bannerColor); err != nil {
@@ -227,7 +227,7 @@ func (d *DB) SignOutEverywhere(ctx context.Context, userID int64) (sessions, tok
 	if err != nil {
 		return 0, 0, fmt.Errorf("SignOutEverywhere begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	tokRes, err := q.RevokeUserAPITokens(ctx, userID)

@@ -47,7 +47,7 @@ func TestDeleteExpiredSessions_SargableFormat(t *testing.T) {
 	var tokens []string
 	rows, err := database.QueryContext(ctx, `SELECT token FROM sessions ORDER BY token`)
 	mustDo(t, "query sessions", err)
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	for rows.Next() {
 		var tok string
 		mustDo(t, "Scan", rows.Scan(&tok))
