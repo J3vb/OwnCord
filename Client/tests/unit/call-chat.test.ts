@@ -18,7 +18,7 @@ import {
   createCallChat,
   type CallChat,
   type CallChatState,
-} from "../../src/pages/main-page/callChat";
+} from "../../src/features/voice/callChat";
 
 const TEXT = 1;
 const VOICE_A = 10;
