@@ -262,6 +262,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/settings/ConnectionDiagnosticsPanel.ts",
   "src/features/settings/GameActivityGames.ts",
   "src/features/settings/GameActivityRows.ts",
+  "src/features/settings/GlobalKeybinds.ts",
   "src/features/settings/KeybindsGlobalRows.ts",
   "src/features/settings/KeybindsPortal.ts",
   "src/features/settings/KeybindsTab.ts",
