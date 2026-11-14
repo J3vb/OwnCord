@@ -93,7 +93,7 @@ func (d *DB) ListUnfinishedRetentionRuns(ctx context.Context) ([]RetentionRun, e
 	if err != nil {
 		return nil, fmt.Errorf("ListUnfinishedRetentionRuns: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var out []RetentionRun
 	for rows.Next() {
 		var r RetentionRun

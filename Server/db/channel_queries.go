@@ -352,7 +352,7 @@ func (d *DB) ListChannelUserOverrides(ctx context.Context, channelID int64) ([]C
 	if err != nil {
 		return nil, fmt.Errorf("ListChannelUserOverrides: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	result := []ChannelUserOverride{}
 	for rows.Next() {
@@ -394,7 +394,7 @@ func (d *DB) ListChannelRoleOverrides(ctx context.Context, channelID int64) ([]C
 	if err != nil {
 		return nil, fmt.Errorf("ListChannelRoleOverrides: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	var result []ChannelRoleOverride
 	for rows.Next() {

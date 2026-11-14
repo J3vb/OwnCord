@@ -32,6 +32,15 @@ linters:
     - nakedret # a bare `return` in a function with named results hides which value is live
 
   settings:
+    errcheck:
+      # Read-side closes and rollbacks: the error that matters already came back
+      # from Scan, Err, Commit or the read itself, and a Rollback after Commit
+      # is a no-op. Write-side closes (files, archives) stay checked.
+      exclude-functions:
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.Tx).Rollback
+        - (io.ReadCloser).Close
     nakedret:
       # The tool default (30) only flags functions longer than 30 lines. The
       # rule here is "every return names its values", at any length.

@@ -40,11 +40,20 @@ RUN set -eu; \
     rm "/tmp/${f}"
 
 WORKDIR /src
+# BuildKit cache mounts keep the module and build caches between builds on the
+# same builder, so the amd64 and arm64 legs of one run share compiled packages.
+# They never land in an image layer.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
+# -trimpath matches release.yml's build, so the image binary carries no
+# builder paths and matches the release binary.
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    -trimpath \
     -o /chatserver \
     -ldflags "-s -w -X main.version=${VERSION}" \
     .

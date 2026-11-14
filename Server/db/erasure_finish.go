@@ -50,7 +50,7 @@ func eraseFinishTx(ctx context.Context, conn *sql.Conn, userID int64, subjectTok
 	if err != nil {
 		return nil, fmt.Errorf("EraseAccount begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	q := dbgen.New(tx)
 	queued, err := q.GetQueuedErasureJobForUser(ctx, userID)

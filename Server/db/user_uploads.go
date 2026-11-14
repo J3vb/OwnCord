@@ -120,7 +120,7 @@ func (d *DB) ListOwnUploads(ctx context.Context, q OwnUploadQuery) ([]OwnUpload,
 	if err != nil {
 		return nil, fmt.Errorf("ListOwnUploads: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	items := []OwnUpload{}
 	for rows.Next() {

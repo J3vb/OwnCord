@@ -227,7 +227,7 @@ func (u *Updater) downloadFile(parent context.Context, url, destPath string) err
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, url)

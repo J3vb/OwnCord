@@ -21,7 +21,7 @@ func (d *DB) BlockUser(ctx context.Context, blockerID, blockedID int64) error {
 	if err != nil {
 		return fmt.Errorf("BlockUser begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	if err := q.BlockUser(ctx, dbgen.BlockUserParams{
@@ -53,7 +53,7 @@ func (d *DB) UnblockUser(ctx context.Context, blockerID, blockedID int64) error 
 	if err != nil {
 		return fmt.Errorf("UnblockUser begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	removed, err := q.UnblockUser(ctx, dbgen.UnblockUserParams{

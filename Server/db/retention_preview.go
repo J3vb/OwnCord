@@ -61,7 +61,7 @@ func retentionPolicyTx(ctx context.Context, tx *sql.Tx) (*RetentionPolicySnapsho
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	for rows.Next() {
 		var c ChannelRetention
 		if err := rows.Scan(&c.ChannelID, &c.Days, &c.UpdatedBy, &c.UpdatedAt); err != nil {
@@ -77,7 +77,7 @@ func (d *DB) RetentionPolicySnapshot(ctx context.Context) (*RetentionPolicySnaps
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	return retentionPolicyTx(ctx, tx)
 }
 
@@ -87,7 +87,7 @@ func (d *DB) PreviewRetentionChange(ctx context.Context, change RetentionChange,
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	p, err := retentionPolicyTx(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -131,7 +131,7 @@ func proposedRetentionWindows(ctx context.Context, tx *sql.Tx, p *RetentionPolic
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var windows []RetentionWindow
 	for rows.Next() {
 		w := RetentionWindow{Days: p.ServerDays, Source: "server"}
@@ -195,7 +195,7 @@ func (d *DB) ApplyRetentionChange(ctx context.Context, actorID int64, change Ret
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	p, err := retentionPolicyTx(ctx, tx)
 	if err != nil {
 		return "", err

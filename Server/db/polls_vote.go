@@ -74,7 +74,7 @@ func (d *DB) SetPollVote(ctx context.Context, messageID, userID int64, answerIDs
 	if err != nil {
 		return nil, fmt.Errorf("SetPollVote begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	if err := refuseWhileErasing(ctx, tx, userID); err != nil {
 		return nil, fmt.Errorf("SetPollVote: %w", err)
 	}
@@ -183,7 +183,7 @@ func (d *DB) EndPoll(ctx context.Context, messageID int64) (*PollEndResult, erro
 	if err != nil {
 		return nil, fmt.Errorf("EndPoll begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 	poll, err := q.GetPollForVote(ctx, messageID)
 	if errors.Is(err, sql.ErrNoRows) {

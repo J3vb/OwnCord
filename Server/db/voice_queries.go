@@ -221,7 +221,7 @@ func (d *DB) MuteForTimeoutSession(ctx context.Context, userID, channelID, actio
 	if err != nil {
 		return false, false, fmt.Errorf("MuteForTimeoutSession begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := dbgen.New(tx)
 
 	if len(supersededIDs) > 0 {

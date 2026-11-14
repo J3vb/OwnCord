@@ -176,7 +176,7 @@ func holdsAnyRole(ctx context.Context, tx *sql.Tx, userID int64, roleIDs []int64
 	if err != nil {
 		return false, fmt.Errorf("DeleteAccount fetch roles: %w", err)
 	}
-	defer heldRows.Close() //nolint:errcheck
+	defer heldRows.Close()
 	for heldRows.Next() {
 		var rid int64
 		if scanErr := heldRows.Scan(&rid); scanErr != nil {

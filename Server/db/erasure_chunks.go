@@ -108,7 +108,7 @@ func eraseLockTx(ctx context.Context, conn *sql.Conn, userID int64, guard bool) 
 	if err != nil {
 		return nil, fmt.Errorf("EraseAccount begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	var one int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id = ?`, userID).Scan(&one); err != nil {
@@ -205,7 +205,7 @@ func drainChunk(ctx context.Context, conn *sql.Conn, step drainStep, userID, cur
 	if err != nil {
 		return drainResult{}, fmt.Errorf("EraseAccount drain %s begin tx: %w", step.label, err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	res, err := step.run(ctx, tx, userID, cursor)
 	if err != nil {
 		return drainResult{}, fmt.Errorf("EraseAccount drain %s: %w", step.label, err)

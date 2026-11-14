@@ -83,7 +83,7 @@ func (d *DB) RedeemRecoveryAssist(ctx context.Context, userID int64, verifier, n
 	if err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryAssist begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	now := time.Now().UTC().Format(dbtime.ISOLayout)

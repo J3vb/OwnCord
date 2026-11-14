@@ -61,7 +61,7 @@ func (d *DB) GetReferencedMessages(ctx context.Context, channelID int64, ids []i
 	if err != nil {
 		return nil, fmt.Errorf("GetReferencedMessages: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	for rows.Next() {
 		var (
 			r        ReferencedMessage

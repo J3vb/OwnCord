@@ -50,7 +50,7 @@ func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID in
 	if err != nil {
 		return nil, fmt.Errorf("CreateMessageWithMentions begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	if err := refuseWhileErasing(ctx, tx, userID); err != nil {
 		return nil, fmt.Errorf("CreateMessageWithMentions: %w", err)
 	}
@@ -94,7 +94,7 @@ func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentio
 	if err != nil {
 		return 0, fmt.Errorf("ReplaceMessageMentions begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM message_mentions WHERE message_id = ? AND reply_ping = 0`, messageID); err != nil {
 		return 0, fmt.Errorf("ReplaceMessageMentions delete: %w", err)
@@ -165,7 +165,7 @@ func (d *DB) GetMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (map[i
 	if err != nil {
 		return nil, fmt.Errorf("GetMentionsByMessageIDs: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	for rows.Next() {
 		var msgID, userID int64
@@ -235,7 +235,7 @@ func (d *DB) GetUserIDsByUsernames(ctx context.Context, usernames []string) (map
 	if err != nil {
 		return nil, fmt.Errorf("GetUserIDsByUsernames: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	for rows.Next() {
 		var id int64
@@ -294,7 +294,7 @@ func (d *DB) listMentionTargets(ctx context.Context, column mentionTargetColumn,
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", caller, err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	targets := []MentionTarget{}
 	for rows.Next() {
