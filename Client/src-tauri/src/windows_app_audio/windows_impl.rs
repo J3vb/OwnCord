@@ -2,7 +2,7 @@ use std::ffi::c_void;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use windows::core::{Interface as _, PROPVARIANT};
+use windows::core::Interface as _;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
     ActivateAudioInterfaceAsync, IActivateAudioInterfaceCompletionHandler, IAudioCaptureClient,
@@ -13,6 +13,7 @@ use windows::Win32::Media::Audio::{
     PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
     WAVEFORMATEX,
 };
+use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 use windows::Win32::System::Threading::{CreateEventW, SetEvent, WaitForSingleObject};
 use windows::Win32::System::Variant::VT_BLOB;
@@ -221,8 +222,8 @@ impl IActivateCompletion_Impl for CompletionHandler_Impl {
 impl IAgile_Impl for CompletionHandler_Impl {}
 
 /// A PROPVARIANT of type VT_BLOB, laid out as the C struct. Built by hand
-/// because `windows` offers no safe blob constructor, and it must not be
-/// a real `PROPVARIANT` (whose drop would CoTaskMemFree our stack bytes).
+/// because `windows` offers no safe blob constructor, and the blob points at
+/// our own stack bytes, which nothing may hand to PropVariantClear.
 #[repr(C)]
 struct BlobPropVariant {
     vt: u16,

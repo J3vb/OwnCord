@@ -7,7 +7,7 @@
 //! in-window activity.
 //!
 //! - Windows: `GetLastInputInfo`.
-//! - Linux: over D-Bus (the libdbus `keyring` already links), GNOME's
+//! - Linux: over D-Bus (the libdbus the Secret Service store already links), GNOME's
 //!   `org.gnome.Mutter.IdleMonitor`, then `org.freedesktop.ScreenSaver`'s
 //!   `GetSessionIdleTime` (KDE on X11; Plasma refuses it on Wayland). Both
 //!   answer in milliseconds, on X11 and Wayland alike where they exist. Last,
