@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// Copy-pasted setup is what makes tests long, so the share of duplicated
-// lines is held as a shrink-only ratchet for two targets: Client/tests, and
-// the Go test files under Server/. The percentage jscpd reports for a target
+// Copy-pasted code is held as a shrink-only share of duplicated lines per
+// target: Client/tests, the Go test files under Server/, the colocated
+// Client/src tests, and the production code of the client, the server and the
+// Tauri Rust shell (generated files left out). The percentage jscpd reports for a target
 // may not rise above the one stored in its baseline file. A change that
 // removes duplication lowers the stored number with --update, which refuses
-// to raise it. --target client|server limits a run to one target.
+// to raise it. --target <name> limits a run to one target.
 //
 // jscpd is a pinned root devDependency, so `npm ci` at the repository root
 // is all the script needs (the Repository Hygiene job runs it there). It can
@@ -36,6 +37,44 @@ export const TARGETS = {
     extraArgs: ["--pattern", "**/*_test.go"],
     baselinePath: path.join(ROOT, "scripts/checks/server-test-duplication-baseline.json"),
     hint: "Share the repeated setup in a helper in the package's _test.go files instead of copying it.",
+  },
+  "client-colocated": {
+    label: "Client/src colocated tests",
+    scan: "Client/src",
+    extraArgs: ["--pattern", "**/*.test.ts"],
+    baselinePath: path.join(ROOT, "scripts/checks/client-colocated-test-duplication-baseline.json"),
+    hint: "Share the repeated setup in a module-scope helper or Client/tests/helpers instead of copying it.",
+  },
+  "client-src": {
+    label: "Client/src production code",
+    scan: "Client/src",
+    extraArgs: [
+      "--pattern",
+      "**/*.ts",
+      "--ignore",
+      "**/*.test.ts,**/lib/protocolTypes.ts,**/lib/net/wireShapes.ts,**/lib/net/restShapes.ts",
+    ],
+    baselinePath: path.join(ROOT, "scripts/checks/client-src-duplication-baseline.json"),
+    hint: "Call the existing helper, or move the shared part into lib/ (lib/ui for UI) or the owning feature.",
+  },
+  "server-src": {
+    label: "Server production Go",
+    scan: "Server",
+    extraArgs: [
+      "--pattern",
+      "**/*.go",
+      "--ignore",
+      "**/*_test.go,**/db/dbgen/**,**/ws/message_types.go,**/httperr/codes.go",
+    ],
+    baselinePath: path.join(ROOT, "scripts/checks/server-src-duplication-baseline.json"),
+    hint: "Call the existing helper, or move the shared part into one function the callers share.",
+  },
+  rust: {
+    label: "Client/src-tauri Rust",
+    scan: "Client/src-tauri/src",
+    extraArgs: ["--pattern", "**/*.rs", "--ignore", "**/tests.rs,**/tests/**,**/*_tests.rs"],
+    baselinePath: path.join(ROOT, "scripts/checks/rust-duplication-baseline.json"),
+    hint: "Move the shared part into one function or module the callers share.",
   },
 };
 const JSCPD_BIN = path.join(ROOT, "node_modules/jscpd/bin/jscpd");
@@ -160,7 +199,7 @@ function main(argv) {
   const reportAt = argv.includes("--report") ? argv[argv.indexOf("--report") + 1] : null;
   const names = selectTargets(argv);
   if (reportAt && names.length !== 1) {
-    console.error("--report reads one target's report; add --target client|server");
+    console.error("--report reads one target's report; add --target <name>");
     return 2;
   }
   let code = 0;

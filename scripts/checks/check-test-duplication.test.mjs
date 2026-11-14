@@ -35,13 +35,38 @@ test("nextBaseline lowers the baseline and refuses to raise it", () => {
 });
 
 test("selectTargets runs every target unless one is named", () => {
-  assert.deepEqual(selectTargets([]), ["client", "server"]);
+  assert.deepEqual(selectTargets([]), [
+    "client",
+    "server",
+    "client-colocated",
+    "client-src",
+    "server-src",
+    "rust",
+  ]);
   assert.deepEqual(selectTargets(["--target", "server"]), ["server"]);
-  assert.throws(() => selectTargets(["--target", "rust"]), /unknown --target rust/);
+  assert.throws(() => selectTargets(["--target", "python"]), /unknown --target python/);
 });
 
 test("the server target scans only Go test files", () => {
   assert.equal(TARGETS.server.scan, "Server");
   assert.deepEqual(TARGETS.server.extraArgs, ["--pattern", "**/*_test.go"]);
   assert.notEqual(TARGETS.server.baselinePath, TARGETS.client.baselinePath);
+});
+
+test("every target keeps its own baseline file", () => {
+  const paths = Object.values(TARGETS).map((t) => t.baselinePath);
+  assert.equal(new Set(paths).size, paths.length);
+});
+
+test("production targets leave out tests and generated files", () => {
+  const ignored = (name) =>
+    TARGETS[name].extraArgs[TARGETS[name].extraArgs.indexOf("--ignore") + 1];
+  assert.match(ignored("client-src"), /\*\*\/\*\.test\.ts/);
+  assert.match(ignored("client-src"), /protocolTypes\.ts/);
+  assert.match(ignored("client-src"), /wireShapes\.ts/);
+  assert.match(ignored("client-src"), /restShapes\.ts/);
+  assert.match(ignored("server-src"), /_test\.go/);
+  assert.match(ignored("server-src"), /dbgen/);
+  assert.match(ignored("server-src"), /message_types\.go/);
+  assert.match(ignored("server-src"), /codes\.go/);
 });
