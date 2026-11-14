@@ -76,7 +76,7 @@ as a bare badge:
   badge is **advisory**: it never disables Connect, and the WebSocket
   `auth_error` (`protocol_epoch_unsupported`) is the authority.
 - Selecting the row, or a WS refusal, raises the `IncompatibleNotice`
-  (`pages/connect-page/IncompatibleNotice.ts`), which states the requirement in
+  (`features/connection/IncompatibleNotice.ts`), which states the requirement in
   the server's own terms — which side updates, with both epoch numbers. It is
   exitable: "Update client" mounts the existing updater (client-older only; an
   older server needs operator guidance, not a client install) and "Choose
@@ -87,7 +87,7 @@ as a bare badge:
 ### 2.2 Login form — state machine
 
 The form is an explicit FSM: `idle | loading | totp | connecting | error |
-auto-connecting` (the `FormState` type in `pages/connect-page/LoginForm.ts`). This is the model other views should
+auto-connecting` (the `FormState` type in `features/connection/LoginForm.ts`). This is the model other views should
 follow.
 
 | State             | Presentation                                                                                                                      | Exit                                                                |
@@ -113,7 +113,7 @@ stops a double Enter spending a single-use code twice. A refused credential
 the API client's session-expiry sink, as TOTP enrolment's confirm does.
 
 **Account recovery (B7-15b).** "Lost your password or 2FA device? Recover your
-account" opens a recovery overlay (`pages/connect-page/RecoverOverlay.ts`,
+account" opens a recovery overlay (`features/connection/RecoverOverlay.ts`,
 loaded on first use to keep it out of the startup bundle): username (carried over from the form), a
 field for the recovery kit secret or a recovery credential from the server
 owner, and a new password (≥ 8). It calls `POST /auth/recover` with the secret
@@ -343,7 +343,7 @@ not a mismatch. This is correct today; the spec locks it.
 
 `src/main.ts`, `src/app/connectRoute.ts`, `src/app/healthSchedule.ts`,
 `src/app/session.ts`, `src/lib/presence/latency.ts`, `src/pages/ConnectPage.ts`,
-`src/pages/connect-page/LoginForm.ts`, `src/lib/ws.ts`, `src/lib/api.ts`,
+`src/features/connection/LoginForm.ts`, `src/lib/ws.ts`, `src/lib/api.ts`,
 `src/lib/net/httpProxy.ts`, `src/features/connection/ConnectedOverlay.ts`,
 `src/features/server-rail/ServerBanner.ts`, `src/features/connection/CertMismatchModal.ts`,
 `src-tauri/src/ws_proxy.rs`, `src-tauri/src/http_proxy.rs`;

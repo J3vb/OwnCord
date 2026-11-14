@@ -14,8 +14,8 @@ import {
   buildAutoConnectOverlay as buildAutoConnectOverlayDom,
   buildServerWait as buildServerWaitDom,
   buildAuthBusyRetry as buildAuthBusyRetryDom,
-} from "../../../features/connection/loginOverlays";
-import { createOcLogo } from "../../../features/connection/ocLogo";
+} from "../loginOverlays";
+import { createOcLogo } from "../ocLogo";
 import { SAVED_PASSWORD_PLACEHOLDER } from "./loginShared";
 import type { LoginFormState, LoginFormInternals } from "./loginState";
 

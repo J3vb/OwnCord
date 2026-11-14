@@ -246,7 +246,7 @@ sequenceDiagram
 
 **Update required (B7-12).** When the server's `protocol_epoch` is **newer**
 than this build's, the connect page raises the `IncompatibleNotice`
-(`pages/connect-page/IncompatibleNotice.ts`) naming the client as the side to
+(`features/connection/IncompatibleNotice.ts`) naming the client as the side to
 update, with both epoch numbers, and offers "Update client" (mounting this same
 `UpdateNotifier`) plus "Choose another server" to defer. The notice appears for
 the selected/attempted host or a WebSocket `protocol_epoch_unsupported`

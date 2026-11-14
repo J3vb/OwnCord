@@ -374,7 +374,7 @@
       "reason": "Join diagnostics, exempt in the 5.2 design note"
     },
     {
-      "file": "pages/connect-page/RecoverOverlay.ts",
+      "file": "features/connection/RecoverOverlay.ts",
       "binding": "overlays",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the live recover context"

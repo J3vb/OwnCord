@@ -9,9 +9,9 @@ import { openSettings, closeSettings, uiStore, setTransientError } from "@stores
 import type { Compatibility, HealthStatus } from "@lib/presence/profiles";
 import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
 import type { RegistrationMode } from "@lib/types";
-import { createServerPanel } from "./connect-page/ServerPanel";
-import { createLoginForm } from "./connect-page/LoginForm";
-import { createIncompatibleNotice } from "./connect-page/IncompatibleNotice";
+import { createServerPanel } from "../features/connection/ServerPanel";
+import { createLoginForm } from "../features/connection/LoginForm";
+import { createIncompatibleNotice } from "../features/connection/IncompatibleNotice";
 import { loadCredential } from "@lib/net/credentials";
 import { desktop } from "../platform/desktop";
 import { createConnectBranding } from "../features/connection/connectBranding";
@@ -23,9 +23,9 @@ const log = createLogger("ConnectPage");
 // Re-exports (public API must not change)
 // ---------------------------------------------------------------------------
 
-export type { SimpleProfile } from "./connect-page/ServerPanel";
+export type { SimpleProfile } from "../features/connection/ServerPanel";
 
-import type { SimpleProfile } from "./connect-page/ServerPanel";
+import type { SimpleProfile } from "../features/connection/ServerPanel";
 import { connectText } from "../i18n/connect";
 import { portalText } from "../i18n/portal";
 
