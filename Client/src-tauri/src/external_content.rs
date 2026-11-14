@@ -817,6 +817,9 @@ impl ExternalContentState {
         let build = || {
             let mut builder = reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
+                // reqwest's gzip feature is on for the plugin's REST client;
+                // outside sites keep getting plain requests.
+                .no_gzip()
                 .no_proxy()
                 .user_agent(USER_AGENT)
                 .pool_idle_timeout(CLIENT_IDLE)

@@ -47,18 +47,19 @@ type PurgeBroadcaster interface {
 func MountChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.RateLimiter, trustedProxies []string, broadcaster PurgeBroadcaster) {
 	r.Route("/api/v1/channels", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
-		r.Get("/", handleListChannels(svc))
-		r.Get("/{id}/messages", handleGetMessages(svc))
-		r.Get("/{id}/messages/around/{messageId}", handleGetMessagesAround(svc))
+		r.With(compressJSON).Get("/", handleListChannels(svc))
+		r.With(compressJSON).Get("/{id}/messages", handleGetMessages(svc))
+		r.With(compressJSON).Get("/{id}/messages/around/{messageId}", handleGetMessagesAround(svc))
 		r.Post("/{id}/messages/purge", handlePurgeMessages(svc, broadcaster))
-		r.Get("/{id}/messages/{messageId}/reactions/{emoji}/users", handleGetReactionUsers(svc))
-		r.Get("/{id}/pins", handleGetPins(svc))
+		r.With(compressJSON).Get("/{id}/messages/{messageId}/reactions/{emoji}/users", handleGetReactionUsers(svc))
+		r.With(compressJSON).Get("/{id}/pins", handleGetPins(svc))
 		r.Post("/{id}/pins/{messageId}", handleSetPinned(svc, broadcaster, true))
 		r.Delete("/{id}/pins/{messageId}", handleSetPinned(svc, broadcaster, false))
 	})
 	r.With(
 		AuthMiddleware(svc.Sessions),
 		RateLimitMiddleware(limiter, "search:", searchRateLimitPerMinute, time.Minute, trustedProxies),
+		compressJSON,
 	).Get("/api/v1/search", handleSearch(svc))
 }
 

@@ -60,7 +60,7 @@ var allowedStickerMIME = map[string]bool{
 func MountStickerRoutes(r chi.Router, svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster StickerBroadcaster) {
 	r.Route("/api/v1/stickers", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
-		r.Get("/", handleListStickers(svc))
+		r.With(compressJSON).Get("/", handleListStickers(svc))
 		r.Get("/{id}/image", handleServeStickerImage(svc, store))
 		r.With(MaxBodySize(stickerMaxBodySize)).
 			Post("/", handleCreateSticker(svc, store, limiter, broadcaster))

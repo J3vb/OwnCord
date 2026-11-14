@@ -13,7 +13,7 @@ import (
 // /api/v1/channels/{id}/threads. It lives apart from MountChannelRoutes
 // because that file is at its size ceiling.
 func MountThreadRoutes(r chi.Router, svc *service.Services) {
-	r.With(AuthMiddleware(svc.Sessions)).Get("/api/v1/channels/{id}/threads", handleListThreads(svc))
+	r.With(AuthMiddleware(svc.Sessions), compressJSON).Get("/api/v1/channels/{id}/threads", handleListThreads(svc))
 }
 
 // handleListThreads lists a channel's threads, newest activity first.

@@ -20,7 +20,7 @@ import (
 func MountDMRequestRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaster) {
 	r.Route("/api/v1/dm-requests", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
-		r.Get("/", handleListDMRequests(svc))
+		r.With(compressJSON).Get("/", handleListDMRequests(svc))
 		r.Post("/{id}/accept", handleDMRequestTransition(svc, broadcaster, dmRequestActionAccept))
 		r.Post("/{id}/ignore", handleDMRequestTransition(svc, broadcaster, dmRequestActionIgnore))
 		r.Post("/{id}/delete", handleDMRequestTransition(svc, broadcaster, dmRequestActionDelete))
