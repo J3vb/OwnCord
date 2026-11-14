@@ -182,7 +182,7 @@ func handleLogin(svc AuthService, trustedProxies []string) http.HandlerFunc {
 			IP:       clientip.Resolve(r, proxyNets),
 		})
 		if err != nil {
-			writeAuthError(r.Context(), w, err)
+			writeSignInError(r.Context(), w, svc, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, authResponse(res))
@@ -287,6 +287,33 @@ func authResponse(res *service.AuthResult) authSuccessResponse {
 // writeNotAuthenticated refuses a route behind AuthMiddleware that finds no usable principal.
 func writeNotAuthenticated(w http.ResponseWriter) {
 	writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
+}
+
+// appealContactReader is implemented by the auth service; a fake without it just never sends the line.
+type appealContactReader interface {
+	AppealContact(ctx context.Context) (string, error)
+}
+
+// appealContactTimeout bounds the settings read made while answering a banned sign-in.
+const appealContactTimeout = 2 * time.Second
+
+// writeSignInError answers a login or second-factor refusal. A ban refusal carries the owner's appeal contact
+// when one is set; the caller has proven the password (login) or holds the challenge it issued (verify-totp).
+// Every other refusal is writeAuthError unchanged, and an unreadable setting sends the plain refusal.
+func writeSignInError(ctx context.Context, w http.ResponseWriter, svc AuthService, err error) {
+	reader, ok := svc.(appealContactReader)
+	if !ok || !errors.Is(err, service.ErrBanned) {
+		writeAuthError(ctx, w, err)
+		return
+	}
+	readCtx, cancel := context.WithTimeout(ctx, appealContactTimeout)
+	defer cancel()
+	contact, readErr := reader.AppealContact(readCtx)
+	if readErr != nil || contact == "" {
+		writeAuthError(ctx, w, err)
+		return
+	}
+	writeJSON(w, http.StatusForbidden, bannedResponse{Error: string(httperr.CodeForbidden), Message: err.Error(), AppealContact: contact})
 }
 
 // writeAuthError encodes a service.Err* refusal: each value's Error() is the public message, its category

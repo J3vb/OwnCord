@@ -59,7 +59,7 @@ function updateVideoHint(){
   el.textContent=up&&cap?videoViewerHint(/** @type {HTMLInputElement} */(up).value,/** @type {HTMLSelectElement} */(cap).value):'';
 }
 function videoCapChanged(){updateVideoHint();markSettingsChanged()}
-const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',VIDEO_CAP_KEY,UPLOAD_MBPS_KEY,WELCOME_KEY,OWNER_MOVABLE_KEY,GAME_ACTIVITY_KEY,...EXT_KEYS];
+const SETTINGS_KEYS=['server_name','motd','appeal_contact','registration_mode','require_2fa','afk_timeout_seconds',VIDEO_CAP_KEY,UPLOAD_MBPS_KEY,WELCOME_KEY,OWNER_MOVABLE_KEY,GAME_ACTIVITY_KEY,...EXT_KEYS];
 /* An extension list as the server stores it: lower case, no dots, deduped,
    comma-separated; so a respelled but equal list is not a change. */
 function extListNorm(v){return[...new Set(String(v||'').split(/[\s,]+/).map(x=>x.replace(/^\.+/,'').toLowerCase()).filter(Boolean))].join(',')}
@@ -103,7 +103,8 @@ async function renderSettings(){
   let html='<div class="page-title">Settings</div><div class="page-desc">How your server presents itself and who can join.'+(isOwner()?' The backup schedule is on <button class="link-btn" data-action="navigateTo" data-args="'+actArgs('backups')+'">Backups &amp; restore</button>.':'')+'</div>';
   html+=settingsCard('General',
     settingsRow('server_name','Server name','Shown in the client and at the top of this panel','<input class="form-input" id="s-server_name" value="'+esc(v('server_name'))+'" aria-describedby="s-server_name-desc" data-input-action="markSettingsChanged">')
-    +settingsRow('motd','Message of the day','Shown to members when they connect','<input class="form-input" id="s-motd" value="'+esc(v('motd'))+'" aria-describedby="s-motd-desc" data-input-action="markSettingsChanged">'));
+    +settingsRow('motd','Message of the day','Shown to members when they connect','<input class="form-input" id="s-motd" value="'+esc(v('motd'))+'" aria-describedby="s-motd-desc" data-input-action="markSettingsChanged">')
+    +settingsRow('appeal_contact','Appeal contact','Shown to a banned member when they try to sign in, so they know how to reach you. Leave empty to show nothing.','<input class="form-input" id="s-appeal_contact" maxlength="200" value="'+esc(v('appeal_contact'))+'" aria-describedby="s-appeal_contact-desc" data-input-action="markSettingsChanged">'));
   html+=settingsCard('Access & registration',regModeCards(v('registration_mode')||'invite'));
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');

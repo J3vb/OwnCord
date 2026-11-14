@@ -44,6 +44,7 @@ var allowedSettingKeys = map[string]struct{}{
 	"server_name":              {},
 	"server_icon":              {},
 	"motd":                     {},
+	AppealContactKey:           {},
 	"require_2fa":              {},
 	"registration_mode":        {},
 	"backup_schedule":          {},

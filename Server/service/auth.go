@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -151,6 +153,20 @@ func (s *AuthService) UseErasure(e *ErasureService) {
 // UseWelcome makes Register greet each new member through w; nil greets nobody.
 func (s *AuthService) UseWelcome(w *WelcomeService) {
 	s.welcome = w
+}
+
+// AppealContact returns the owner-set contact line for a banned member, or "" when none is set. It is for
+// a caller that has just refused a password-verified sign-in with ErrBanned; nothing else may show it.
+// A missing row is not an error; any other store failure is returned for the caller to drop the line.
+func (s *AuthService) AppealContact(ctx context.Context) (string, error) {
+	contact, err := s.st.GetSetting(ctx, AppealContactKey)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read %s: %w", AppealContactKey, err)
+	}
+	return strings.TrimSpace(contact), nil
 }
 
 // Login runs the lockout gates and constant-time password check, then issues a session or, for an

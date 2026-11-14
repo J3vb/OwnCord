@@ -579,10 +579,16 @@ If the account has TOTP enabled:
 | ------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | 400    | `INVALID_INPUT`  | Missing username or password                                                                                           |
 | 401    | `UNAUTHORIZED`   | Wrong username or password                                                                                             |
-| 403    | `FORBIDDEN`      | Account is banned/suspended                                                                                            |
+| 403    | `FORBIDDEN`      | Account is banned/suspended; the body also carries `appeal_contact` when the owner set one (see below)                 |
 | 429    | `RATE_LIMITED`   | IP locked out after 10 consecutive failures (15 min cooldown)                                                          |
 | 429    | `AUTH_BUSY`      | Too many logins in progress: the queue for password checks is full, or the login waited 10 s in it (`Retry-After` set) |
 | 500    | `INTERNAL_ERROR` | Session creation failure                                                                                               |
+
+The banned-account `403` body is `{"error": "FORBIDDEN", "message": "your account has been suspended"}` plus
+`"appeal_contact": "<owner text>"` when the `appeal_contact` setting is non-empty. It is sent only after the
+password check passed (a wrong password is the ordinary `401`), on no other refusal, and not by
+`GET /api/v1/server-info`. `POST /api/v1/auth/verify-totp` answers a ban the same way. If the setting cannot be
+read, the refusal is sent without the field.
 
 ---
 
@@ -5654,7 +5660,7 @@ audited as `setting_change`.
 #### Request
 
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
-`motd`, `require_2fa`,
+`motd`, `appeal_contact`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
 `upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
 `voice_owner_movable`, `game_activity_enabled`, `welcome_channel_id`,
@@ -5738,6 +5744,11 @@ deleted or archived): registration then writes no row and still succeeds.
 
 `server_name` (1–100 bytes) and `motd` (at most 500 bytes) are trimmed and
 held to the same limits the first-run setup wizard enforces.
+
+`appeal_contact` is one line shown to a banned member who tries to sign in (see
+`POST /api/v1/auth/login`). It is trimmed, at most 200 characters, with no control
+or invisible characters and no more than two stacked combining marks; empty clears
+it. It is plain text and needs no row to exist.
 
 `server_icon` is accepted and stored but has **no runtime effect** (reserved
 for a future release). `max_upload_bytes` and `voice_quality` are refused with

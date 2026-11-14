@@ -37,6 +37,8 @@ export {
   serverErrorCopy,
   serverErrorText,
   errorText,
+  appealLine,
+  signInErrorText,
   channelMediaParams,
 } from "./apiShared";
 export type {
@@ -217,6 +219,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return {
         error: body.error ?? "UNKNOWN",
         message: body.message ?? res.statusText,
+        ...(typeof body.appeal_contact === "string" ? { appeal_contact: body.appeal_contact } : {}),
       };
     } catch {
       return {

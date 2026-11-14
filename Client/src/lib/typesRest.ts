@@ -35,6 +35,8 @@ export interface ApiError {
   /** UNKNOWN: the client's own fallback for a reply with no JSON error body. */
   readonly error: RestErrorCodeValue | "UNKNOWN";
   readonly message: string;
+  /** Only on a banned member's sign-in refusal: the owner's contact line, when one is set. */
+  readonly appeal_contact?: string;
 }
 
 /** Single invite object from GET/POST /api/invites. */

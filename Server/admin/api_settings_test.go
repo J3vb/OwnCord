@@ -361,6 +361,7 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 		"server_name",
 		"server_icon",
 		"motd",
+		"appeal_contact",
 		"require_2fa",
 		"registration_mode",
 		"backup_schedule",
