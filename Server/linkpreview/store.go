@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
@@ -262,7 +263,11 @@ func (s *Store) OpenImage(hash string) (*os.File, error) {
 	if !ValidHash(hash) {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidHash, hash)
 	}
-	f, err := os.Open(filepath.Join(s.shardDir(hash), hash)) //nolint:gosec // hash validated as hex above
+	path := filepath.Clean(filepath.Join(s.shardDir(hash), hash))
+	if !strings.HasPrefix(path, filepath.Clean(s.dir)+string(filepath.Separator)) {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidHash, hash)
+	}
+	f, err := os.Open(path) //nolint:gosec // hash validated as hex and the path kept inside the store
 	if err != nil {
 		return nil, fmt.Errorf("opening thumbnail: %w", err)
 	}
