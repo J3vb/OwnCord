@@ -20,8 +20,8 @@ import (
 func iconUpload(t *testing.T, w, h int) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
+	for y := range h {
+		for x := range w {
 			img.Set(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 90, A: 255})
 		}
 	}
@@ -85,7 +85,7 @@ func TestServerIcon_PutRefusesBadUploads(t *testing.T) {
 	svc.Settings.SetServerIconDir(t.TempDir())
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, svc)
 	token := createAdminUser(t, database)
-	oversize := append(iconUpload(t, 64, 64), bytes.Repeat([]byte{0}, service.ServerIconMaxBytes)...)
+	oversize := append(iconUpload(t, 64, 64), make([]byte, service.ServerIconMaxBytes)...)
 	cases := map[string][]byte{
 		"not a png":  []byte("definitely not an image"),
 		"too big":    oversize,

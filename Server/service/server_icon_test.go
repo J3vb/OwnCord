@@ -21,8 +21,8 @@ import (
 func iconPNG(t testing.TB, w, h int, shade uint8) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
+	for y := range h {
+		for x := range w {
 			img.Set(x, y, color.RGBA{R: shade, G: uint8(x), B: uint8(y), A: 255})
 		}
 	}
@@ -248,7 +248,7 @@ func TestServerIcon_Validation(t *testing.T) {
 	svc, dir := newIconService(t)
 	var big bytes.Buffer
 	big.Write(iconPNG(t, 64, 64, 1))
-	big.Write(bytes.Repeat([]byte{0}, ServerIconMaxBytes))
+	big.Write(make([]byte, ServerIconMaxBytes))
 	truncated := iconPNG(t, 64, 64, 1)
 	truncated = truncated[:len(truncated)/2]
 	cases := map[string][]byte{

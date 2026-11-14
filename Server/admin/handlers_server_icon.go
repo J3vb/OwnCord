@@ -24,8 +24,7 @@ func handlePutServerIcon(settings *service.SettingsService, hub HubBroadcaster) 
 		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, service.ServerIconMaxBytes))
 		if err != nil {
-			var tooLarge *http.MaxBytesError
-			if errors.As(err, &tooLarge) {
+			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "server icon must be at most 64 KiB")
 				return
 			}
