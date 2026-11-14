@@ -7,11 +7,17 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // attentionMinModerators is how many active people must be able to work reports before
 // the moderators signal is healthy.
 const attentionMinModerators = 2
+
+// attentionPeopleTimeout bounds the database reads of one People sample.
+const attentionPeopleTimeout = 5 * time.Second
+
+var errNoOwnerAccount = errors.New("no owner account found")
 
 // AttentionPeople is one sample of who can recover the owner account and work reports.
 // Each half carries its own error so a failed read makes only its signals unknown.
@@ -29,9 +35,11 @@ type AttentionPeople struct {
 }
 
 // PeopleSource reads the owner's recovery kit and the moderation coverage, bounded by the
-// sample context.
+// sample context and a 5 s budget so a stuck database cannot stall the sample.
 func PeopleSource(database *db.DB) func(context.Context) AttentionPeople {
-	return func(ctx context.Context) AttentionPeople {
+	return func(parent context.Context) AttentionPeople {
+		ctx, cancel := context.WithTimeout(parent, attentionPeopleTimeout)
+		defer cancel()
 		var p AttentionPeople
 		p.OwnerHasKit, p.OwnerKitSpent, p.KitErr = readOwnerKit(ctx, database)
 		cov, err := database.ReadModerationCoverage(ctx)
@@ -50,7 +58,16 @@ func readOwnerKit(ctx context.Context, database *db.DB) (has, spent bool, err er
 		return false, false, fmt.Errorf("owner lookup: %w", err)
 	}
 	if owner == nil {
-		return false, false, errors.New("no owner account found")
+		return false, false, errNoOwnerAccount
+	}
+	// GetOwnerUser returns the highest-ranked live account, which is only the owner when
+	// that account holds the owner role.
+	roles, err := database.GetMemberRoles(ctx, owner.ID)
+	if err != nil {
+		return false, false, fmt.Errorf("owner role lookup: %w", err)
+	}
+	if roles == nil || !permissions.IsOwner(roles.Top.ID, roles.Top.Position) {
+		return false, false, errNoOwnerAccount
 	}
 	kit, err := database.GetRecoveryKit(ctx, owner.ID)
 	if err != nil {

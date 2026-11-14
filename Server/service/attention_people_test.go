@@ -198,8 +198,8 @@ func TestAttentionPeople_OnlyActiveAccountsCount(t *testing.T) {
 	}
 }
 
-// A customised Moderator role that lost the bit leaves no role but Owner carrying it,
-// even with Administrators present; giving it back clears the finding.
+// A customised Moderator role that lost the bit leaves no role but Owner carrying it, and a
+// seeded Admin role that lost it no longer counts as a moderator; giving it back clears the finding.
 func TestAttentionPeople_ModerateRoleIgnoresAdministrator(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
@@ -212,14 +212,14 @@ func TestAttentionPeople_ModerateRoleIgnoresAdministrator(t *testing.T) {
 	}())
 
 	p := peopleFromDB(t, database)
-	if p.ModerateRoles != 0 || p.Moderators != 2 {
-		t.Fatalf("people = %+v, want no moderate role and 2 moderators", p)
+	if p.ModerateRoles != 0 || p.Moderators != 1 {
+		t.Fatalf("people = %+v, want no moderate role and 1 moderator (the seeded Admin role lost the bit)", p)
 	}
 	s := peopleService(func(context.Context) AttentionPeople { return peopleFromDB(t, database) })
 	now := time.Now()
 	rep := evalAt(s, now)
 	wantStatus(t, rep, "moderate_role", AttentionStatusWarning)
-	wantStatus(t, rep, "moderators", AttentionStatusOK)
+	wantStatus(t, rep, "moderators", AttentionStatusWarning)
 
 	mustDo(t, "grant bit", func() error {
 		_, err := database.ExecContext(ctx, `UPDATE roles SET permissions = permissions | ? WHERE id = ?`,
@@ -231,6 +231,63 @@ func TestAttentionPeople_ModerateRoleIgnoresAdministrator(t *testing.T) {
 	if w := warning(rep, "moderate_role"); w == nil || w.RecoveredAt == nil {
 		t.Fatalf("moderate_role warning = %+v, want recovered", w)
 	}
+}
+
+// A custom role holding only Administrator lets its holder work reports, as CanModerate does,
+// but is not a role that carries Moderate Members.
+func TestAttentionPeople_AdministratorOnlyRoleCounts(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{ID: 10, Name: "Root", Permissions: permissions.Administrator, Position: 50})
+	seedPerson(t, database, "owner", permissions.OwnerRoleID)
+	seedPerson(t, database, "root", 10)
+	p := peopleFromDB(t, database)
+	if p.Moderators != 2 {
+		t.Fatalf("moderators = %d, want 2 (owner and the Administrator-only role)", p.Moderators)
+	}
+}
+
+// A temporary ban that has lapsed counts again; one still running does not.
+func TestAttentionPeople_ExpiredTempBanCountsAgain(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	seedPerson(t, database, "owner", permissions.OwnerRoleID)
+	lapsed := seedPerson(t, database, "lapsed", permissions.ModeratorRoleID)
+	running := seedPerson(t, database, "running", permissions.ModeratorRoleID)
+	_, err := database.ExecContext(ctx, `UPDATE users SET banned = 1, ban_expires = ? WHERE id = ?`,
+		time.Now().Add(-time.Hour).UTC().Format("2006-01-02T15:04:05Z"), lapsed)
+	mustDo(t, "lapsed ban", err)
+	_, err = database.ExecContext(ctx, `UPDATE users SET banned = 1, ban_expires = ? WHERE id = ?`,
+		time.Now().Add(time.Hour).UTC().Format("2006-01-02T15:04:05Z"), running)
+	mustDo(t, "running ban", err)
+	if p := peopleFromDB(t, database); p.Moderators != 2 {
+		t.Fatalf("moderators = %d, want 2 (owner and the lapsed ban)", p.Moderators)
+	}
+}
+
+// An account whose erasure is queued no longer counts.
+func TestAttentionPeople_QueuedErasureNotCounted(t *testing.T) {
+	database := newTestDB(t)
+	seedPerson(t, database, "owner", permissions.OwnerRoleID)
+	erasing := seedPerson(t, database, "erasing", permissions.ModeratorRoleID)
+	_, err := database.ExecContext(context.Background(),
+		`INSERT INTO erasure_jobs (user_id, state, files) VALUES (?, 'queued', '[]')`, erasing)
+	mustDo(t, "queue erasure", err)
+	if p := peopleFromDB(t, database); p.Moderators != 1 {
+		t.Fatalf("moderators = %d, want 1", p.Moderators)
+	}
+}
+
+// The highest-ranked live account is only the owner when it holds the owner role; otherwise
+// the kit signal is unknown with "no owner account found", never a verdict about someone else.
+func TestAttentionPeople_NonOwnerTopAccountIsUnknown(t *testing.T) {
+	database := newTestDB(t)
+	seedPerson(t, database, "admin", permissions.AdminRoleID)
+	p := peopleFromDB(t, database)
+	if p.KitErr == nil || !strings.Contains(p.KitErr.Error(), "no owner account found") {
+		t.Fatalf("KitErr = %v, want no owner account found", p.KitErr)
+	}
+	rep := evalAt(peopleService(func(context.Context) AttentionPeople { return p }), time.Now())
+	wantStatus(t, rep, "owner_recovery_kit", AttentionStatusUnknown)
 }
 
 // A database that cannot be read yields errors in both halves, not zero counts.
