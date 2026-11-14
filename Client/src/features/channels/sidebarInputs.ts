@@ -63,6 +63,7 @@ function projectVoiceInputs(
     timeout: safety.timeout,
     movable: movable.toSorted((a, b) => a - b),
     localMute,
+    ...(voice.musicSharers === undefined ? {} : { musicSharers: voice.musicSharers }),
   };
 }
 
@@ -79,7 +80,8 @@ export function sameVoiceInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
     a.selfId !== b.selfId ||
     a.connectionStatus !== b.connectionStatus ||
     a.timeout !== b.timeout ||
-    a.localMute !== b.localMute
+    a.localMute !== b.localMute ||
+    a.musicSharers !== b.musicSharers
   ) {
     return false;
   }

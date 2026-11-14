@@ -100,6 +100,13 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Voice
+
+- **Share music in a voice channel.** The new music button in the call controls shares one app's sound, with no screen share needed. Pick the player from the list and everyone in the call hears it beside your voice.
+- **Listeners set the music apart from voices.** Right-click someone who is sharing music for a Music volume slider and Mute music. Deafening yourself silences it too.
+- **Windows and Linux only.** The button says why it is off on a computer or a server that cannot share an app's sound.
+- **A music share ends with the call.** After a dropped connection the app shares the same player again when it can, and says so when it cannot.
+
 ### Messages & files
 
 - **Link previews show up instantly after a restart.** The server fetches each link once, keeps the preview and its picture, and sends both with the message. Your app no longer fetches them again on every launch.

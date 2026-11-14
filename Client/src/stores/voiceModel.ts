@@ -105,6 +105,13 @@ export interface VoiceState {
   readonly phoneCallHold?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
+  /** You are sharing an app's sound as music. Written by the music share;
+   *  optional for the fixture reason above. */
+  readonly localMusic?: boolean;
+  /** Members of the current channel whose music share is published, you
+   *  included while you share. Read from the room's publications, not the
+   *  server, and cleared on leave. Optional for the fixture reason above. */
+  readonly musicSharers?: ReadonlySet<number>;
   /** Bumped when the live camera's capture is replaced without the camera
    *  going off (a device switch): the self tile redraws on the new track. */
   readonly localCameraRev?: number;
@@ -206,6 +213,8 @@ export function createVoiceState(): VoiceState {
     peerKeySlots: new Set(),
     peerBoundOffers: new Set(),
     peerWatching: new Map(),
+    localMusic: false,
+    musicSharers: new Set(),
     localGateSpeaking: null,
   };
 }

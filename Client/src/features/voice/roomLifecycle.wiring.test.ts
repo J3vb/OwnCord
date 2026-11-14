@@ -108,6 +108,7 @@ function setup(initial: SessionState = { type: "idle" }) {
     getEffectiveVolume: () => 1,
     getScreenshareGain: () => 1,
     setScreenshareGainListener: vi.fn(),
+    setMusicGainListener: vi.fn(),
   };
   const deviceManager = {
     setRoom: vi.fn(),

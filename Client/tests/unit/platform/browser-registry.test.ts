@@ -34,6 +34,7 @@ describe("browser platform registry", () => {
         "mediaDetector",
         "meteredNetwork",
         "mobileAudio",
+        "musicAudio",
         "nativeFiles",
         "nativeProxies",
         "nativeVoice",

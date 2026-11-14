@@ -29,6 +29,10 @@ export const nativeVoice: NativeVoice = {
     (await service()).setVolume(session, identity, volume),
   setScreenshareVolume: async (session, identity, volume) =>
     (await service()).setScreenshareVolume(session, identity, volume),
+  setMusicVolume: async (session, identity, volume) =>
+    (await service()).setMusicVolume(session, identity, volume),
+  startMusic: async (session, appId) => (await service()).startMusic(session, appId),
+  stopMusic: async (session) => (await service()).stopMusic(session),
   publishCamera: async (session, capture, options) =>
     (await service()).publishCamera(session, capture, options),
   unpublishCamera: async (session, sid) => (await service()).unpublishCamera(session, sid),
