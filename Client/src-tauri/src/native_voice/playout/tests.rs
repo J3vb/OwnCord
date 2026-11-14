@@ -585,6 +585,51 @@ fn screen_share_audio_follows_its_own_gain_and_other_audio_plays_at_unity() {
 }
 
 #[test]
+fn a_music_track_is_told_from_screen_share_audio_by_its_name() {
+    let of = |source, name| Volume::of(source, name);
+    assert_eq!(
+        of(TrackSource::ScreenshareAudio, "music"),
+        Some(Volume::Music)
+    );
+    assert_eq!(
+        of(TrackSource::ScreenshareAudio, "screen_share_audio"),
+        Some(Volume::ScreenShare)
+    );
+    // The name only matters on the screen-share-audio source.
+    assert_eq!(
+        of(TrackSource::Microphone, "music"),
+        Some(Volume::Microphone)
+    );
+    assert_eq!(of(TrackSource::Camera, "music"), None);
+    assert!(Volume::Music.stereo() && Volume::ScreenShare.stereo());
+    assert!(!Volume::Microphone.stereo());
+}
+
+#[test]
+fn music_follows_its_own_gain_apart_from_screen_share_audio_and_the_mic() {
+    let tone = sine(8000.0, PRIME);
+    let level = |volume: Volume| {
+        let m = Mixer::default();
+        m.add("TR_m", "user-1", Some(volume), 1);
+        m.set_gain("user-1", Volume::Music, 0.5);
+        m.set_gain("user-1", Volume::ScreenShare, 0.0);
+        m.set_gain("user-1", Volume::Microphone, 2.0);
+        m.push("TR_m", &tone);
+        rms(&mixed(&m, PRIME))
+    };
+    let unity = {
+        let m = Mixer::default();
+        m.add("TR_m", "user-1", None, 1);
+        m.push("TR_m", &tone);
+        rms(&mixed(&m, PRIME))
+    };
+    assert!((level(Volume::Music) / unity - 0.5).abs() < 0.01);
+    // Screen-share audio muted does not silence the music, and the reverse.
+    assert_eq!(level(Volume::ScreenShare), 0.0);
+    assert!((level(Volume::Microphone) / unity - 2.0).abs() < 0.01);
+}
+
+#[test]
 fn a_gain_set_before_the_track_arrives_applies_to_it() {
     let m = Mixer::default();
     m.set_gain("user-1", Volume::Microphone, 0.0);

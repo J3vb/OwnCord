@@ -36,6 +36,7 @@ use pulseaudio::protocol::{
     SampleFormat, SampleSpec, ServerInfo, SetClientNameReply, SinkInfoList, SinkInputInfo,
     SinkInputInfoList,
 };
+use serde::Serialize;
 
 use pulseaudio::protocol::stream::{BufferAttr, StreamFlags};
 
@@ -159,15 +160,120 @@ pub(super) fn wanted(
     own: &Own,
     app: Option<&BTreeSet<u32>>,
 ) -> BTreeSet<u32> {
+    wanted_by(inputs, default_sink, clients, own, |i| {
+        app.is_none_or(|app| is_app(i, clients, app))
+    })
+}
+
+/// [`wanted`] with the application chosen by `pick` instead of a pid set.
+fn wanted_by(
+    inputs: &[SinkInputInfo],
+    default_sink: Option<u32>,
+    clients: &[ClientInfo],
+    own: &Own,
+    pick: impl Fn(&SinkInputInfo) -> bool,
+) -> BTreeSet<u32> {
     let Some(default_sink) = default_sink else {
         return BTreeSet::new();
     };
     inputs
         .iter()
         .filter(|i| i.sink_index == default_sink && !i.muted && !is_own(i, clients, own))
-        .filter(|i| app.is_none_or(|app| is_app(i, clients, app)))
+        .filter(|i| pick(i))
         .map(|i| i.index)
         .collect()
+}
+
+// ---- applications, for the music picker ---------------------------------
+
+/// One application with a stream on the default output, as the music picker
+/// lists it. The same shape the Windows host answers `list_audio_apps` with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioApp {
+    /// Opaque id the page hands back to start a music capture.
+    pub id: String,
+    /// Display name ("Spotify", "foobar2000").
+    pub name: String,
+    /// Small PNG data URL (<= 32x32) or None. Always None on Linux.
+    pub icon: Option<String>,
+    /// Sound is playing right now (not only an open session).
+    pub playing: bool,
+}
+
+fn prop_text(props: &Props, key: &CStr) -> Option<String> {
+    let bytes = props.get_bytes(key)?;
+    let text = std::str::from_utf8(bytes).ok()?;
+    let text = text.trim_end_matches('\0').trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// A property of the stream, else of its client.
+fn stream_text(input: &SinkInputInfo, client: Option<&ClientInfo>, key: &CStr) -> Option<String> {
+    prop_text(&input.props, key).or_else(|| client.and_then(|c| prop_text(&c.props, key)))
+}
+
+/// A stable identity for the application behind `input` that does not depend
+/// on a pid (a Flatpak or Snap pid is from another namespace): its binary
+/// (`bin:spotify`), else its application name (`name:Spotify`). `None` for a
+/// stream that names neither.
+fn app_id(input: &SinkInputInfo, client: Option<&ClientInfo>) -> Option<String> {
+    if let Some(bin) = stream_text(input, client, c"application.process.binary") {
+        return Some(format!("bin:{bin}"));
+    }
+    stream_text(input, client, c"application.name").map(|name| format!("name:{name}"))
+}
+
+/// What the picker shows: the application's name, else its binary.
+fn app_label(input: &SinkInputInfo, client: Option<&ClientInfo>) -> Option<String> {
+    stream_text(input, client, c"application.name")
+        .or_else(|| stream_text(input, client, c"application.process.binary"))
+}
+
+/// Whether `id` is a well-formed application id.
+pub fn valid_app_id(id: &str) -> bool {
+    id.strip_prefix("bin:")
+        .or_else(|| id.strip_prefix("name:"))
+        .is_some_and(|rest| !rest.is_empty())
+}
+
+/// The applications with a stream on the default sink, one row per id, not
+/// OwnCord's own: playing ones first, then by name.
+pub(super) fn group_apps(
+    inputs: &[SinkInputInfo],
+    default_sink: Option<u32>,
+    clients: &[ClientInfo],
+    own: &Own,
+) -> Vec<AudioApp> {
+    let Some(default_sink) = default_sink else {
+        return Vec::new();
+    };
+    let mut apps: BTreeMap<String, AudioApp> = BTreeMap::new();
+    for input in inputs
+        .iter()
+        .filter(|i| i.sink_index == default_sink && !is_own(i, clients, own))
+    {
+        let client = client_of(input, clients);
+        let Some(id) = app_id(input, client) else {
+            continue;
+        };
+        let playing = !input.corked && !input.muted;
+        let row = apps.entry(id.clone()).or_insert_with(|| AudioApp {
+            name: app_label(input, client).unwrap_or_else(|| id.clone()),
+            id,
+            icon: None,
+            playing: false,
+        });
+        row.playing |= playing;
+    }
+    let mut apps: Vec<AudioApp> = apps.into_values().collect();
+    apps.sort_by(|a, b| {
+        b.playing
+            .cmp(&a.playing)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    apps
 }
 
 /// `candidates` that are `own_pid` or have it among their ancestors.
@@ -412,10 +518,46 @@ pub fn available() -> bool {
         let stop = AtomicBool::new(false);
         let app = AtomicU32::new(0);
         let mut deliver = |_: &[i16]| {};
-        let mut out = Out::new(&mut deliver, &stop, &app);
+        let mut out = Out::new(&mut deliver, &stop, &app, None);
         Link::open(sock, &mut out).map(drop)
     };
     attempt().is_ok()
+}
+
+/// The applications with a stream on the default output, for the music
+/// picker. Blocking (a socket round trip): run it off the async workers.
+/// `Err("unavailable")` when no sound server answers, `Err("internal")` when
+/// it answers and refuses.
+pub fn list_apps() -> Result<Vec<AudioApp>, String> {
+    let attempt = || -> Result<Vec<AudioApp>, Fail> {
+        let sock = connect_server()?;
+        let stop = AtomicBool::new(false);
+        let app = AtomicU32::new(0);
+        let mut deliver = |_: &[i16]| {};
+        let mut out = Out::new(&mut deliver, &stop, &app, None);
+        let mut link = Link::open(sock, &mut out)?;
+        let Listing {
+            default_sink,
+            inputs,
+            clients,
+        } = link.snapshot(&mut out)?;
+        Ok(group_apps(
+            &inputs,
+            default_sink,
+            &clients,
+            &resolve_own(&inputs, &clients),
+        ))
+    };
+    attempt().map_err(|e| match e {
+        Fail::Io(e) => {
+            log::debug!("[native_voice] list audio apps: {e}");
+            "unavailable".to_string()
+        }
+        Fail::Refused(why) => {
+            log::debug!("[native_voice] list audio apps: {why}");
+            "internal".to_string()
+        }
+    })
 }
 
 // ---- the capture thread --------------------------------------------------
@@ -446,12 +588,20 @@ struct Out<'a> {
     stop: &'a AtomicBool,
     /// The shared window's process, 0 for every application.
     app: &'a AtomicU32,
+    /// The application id of a music capture: only that application's
+    /// streams are recorded, matched again on every listing.
+    music: Option<String>,
     mixed: Vec<f32>,
     pcm: Vec<i16>,
 }
 
 impl<'a> Out<'a> {
-    fn new(deliver: &'a mut dyn FnMut(&[i16]), stop: &'a AtomicBool, app: &'a AtomicU32) -> Self {
+    fn new(
+        deliver: &'a mut dyn FnMut(&[i16]),
+        stop: &'a AtomicBool,
+        app: &'a AtomicU32,
+        music: Option<String>,
+    ) -> Self {
         Self {
             mixer: Mixer::default(),
             ticker: Ticker {
@@ -460,6 +610,7 @@ impl<'a> Out<'a> {
             deliver,
             stop,
             app,
+            music,
             mixed: vec![0.0; FRAME * 2],
             pcm: Vec::with_capacity(FRAME * 2),
         }
@@ -494,6 +645,13 @@ impl Out<'_> {
             thread::sleep(self.ticker.next.min(end).saturating_duration_since(now));
         }
     }
+}
+
+/// One listing of the sound server.
+struct Listing {
+    default_sink: Option<u32>,
+    inputs: SinkInputInfoList,
+    clients: ClientInfoList,
 }
 
 struct Stream {
@@ -667,8 +825,9 @@ impl Link {
         }
     }
 
-    /// List the server and bring the recorded streams in line.
-    fn poll(&mut self, out: &mut Out<'_>) -> Result<(), Fail> {
+    /// The default sink's index, the sink inputs and the clients, as one
+    /// listing.
+    fn snapshot(&mut self, out: &mut Out<'_>) -> Result<Listing, Fail> {
         let server: ServerInfo = self.request(out, &Command::GetServerInfo)?;
         let sinks: SinkInfoList = self.request(out, &Command::GetSinkInfoList)?;
         // The default is a name; sink inputs carry an index.
@@ -679,17 +838,32 @@ impl Link {
             .map(|s| s.index);
         let inputs: SinkInputInfoList = self.request(out, &Command::GetSinkInputInfoList)?;
         let clients: ClientInfoList = self.request(out, &Command::GetClientInfoList)?;
-        let app = match out.app.load(Ordering::Acquire) {
-            0 => None,
-            pid => Some(resolve_tree(pid, &inputs, &clients)),
-        };
-        let want = wanted(
-            &inputs,
+        Ok(Listing {
             default_sink,
-            &clients,
-            &resolve_own(&inputs, &clients),
-            app.as_ref(),
-        );
+            inputs,
+            clients,
+        })
+    }
+
+    /// List the server and bring the recorded streams in line.
+    fn poll(&mut self, out: &mut Out<'_>) -> Result<(), Fail> {
+        let Listing {
+            default_sink,
+            inputs,
+            clients,
+        } = self.snapshot(out)?;
+        let own = resolve_own(&inputs, &clients);
+        let want = if let Some(id) = out.music.as_deref() {
+            wanted_by(&inputs, default_sink, &clients, &own, |i| {
+                app_id(i, client_of(i, &clients)).as_deref() == Some(id)
+            })
+        } else {
+            let app = match out.app.load(Ordering::Acquire) {
+                0 => None,
+                pid => Some(resolve_tree(pid, &inputs, &clients)),
+            };
+            wanted(&inputs, default_sink, &clients, &own, app.as_ref())
+        };
         self.reconcile(out, &want)
     }
 
@@ -812,8 +986,17 @@ fn run(
     stop: Arc<AtomicBool>,
     inputs: Arc<AtomicUsize>,
     app: Arc<AtomicU32>,
+    music: Option<String>,
 ) {
-    run_with(Timing::default(), connect, deliver, stop, inputs, app);
+    run_with(
+        Timing::default(),
+        connect,
+        deliver,
+        stop,
+        inputs,
+        app,
+        music,
+    );
 }
 
 fn run_with(
@@ -823,8 +1006,9 @@ fn run_with(
     stop: Arc<AtomicBool>,
     inputs: Arc<AtomicUsize>,
     app: Arc<AtomicU32>,
+    music: Option<String>,
 ) {
-    let mut out = Out::new(&mut deliver, &stop, &app);
+    let mut out = Out::new(&mut deliver, &stop, &app, music);
     // At most one warning a minute: a server that stays down or keeps sending
     // what we cannot parse must not fill the log every reconnect.
     let mut last_warn: Option<Instant> = None;
@@ -874,6 +1058,18 @@ impl ShareAudio {
     /// once; a missing or restarting sound server is retried on the thread,
     /// and the source gets silence meanwhile.
     pub fn start(source: NativeAudioSource, app: Option<u32>) -> Self {
+        Self::spawn(source, app, None)
+    }
+
+    /// Start capturing application `app_id`'s sound into `source` (the music
+    /// share), whichever process it plays from. The id is matched again on
+    /// every listing, so a new stream of the same application is picked up;
+    /// while it has none, and after it quits, the source gets silence.
+    pub fn start_music(source: NativeAudioSource, app_id: String) -> Self {
+        Self::spawn(source, None, Some(app_id))
+    }
+
+    fn spawn(source: NativeAudioSource, app: Option<u32>, music: Option<String>) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let inputs = Arc::new(AtomicUsize::new(0));
         let app = Arc::new(AtomicU32::new(app.unwrap_or(0)));
@@ -898,7 +1094,7 @@ impl ShareAudio {
         };
         let thread = thread::Builder::new()
             .name("share-audio".into())
-            .spawn(move || run(connect_server, deliver, s, i, a))
+            .spawn(move || run(connect_server, deliver, s, i, a, music))
             .map_err(|e| log::warn!("[native_voice] share audio thread: {e}"))
             .ok();
         Self {

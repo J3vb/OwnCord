@@ -11,6 +11,9 @@ pub struct TrackInfo {
     pub sid: String,
     pub kind: &'static str,
     pub source: &'static str,
+    /// The track's name: the one thing that tells a music share from a
+    /// screen share's sound, which carry the same source.
+    pub name: String,
     pub muted: bool,
     /// Whether the server reports the track end-to-end encrypted. The webview
     /// never subscribes one that is not, and neither does `forward_events`.
@@ -104,6 +107,10 @@ pub enum Event {
     CameraCaptureEnded {
         capture: u64,
     },
+    /// The published music track was withdrawn (the server did not accept
+    /// its end-to-end encryption after a reconnect). The capture stays until
+    /// the webview's stop, as for a screen share that ended on its own.
+    MusicShareEnded,
     Reconnecting,
     Reconnected,
     Disconnected {
@@ -117,11 +124,13 @@ pub(super) fn track_info(
     sid: String,
     kind: TrackKind,
     source: TrackSource,
+    name: String,
     muted: bool,
     encryption: EncryptionType,
 ) -> TrackInfo {
     TrackInfo {
         sid,
+        name,
         kind: match kind {
             TrackKind::Audio => "audio",
             TrackKind::Video => "video",
@@ -149,6 +158,7 @@ pub(super) fn remote_pub_info(p: &RemoteTrackPublication) -> TrackInfo {
         p.sid().to_string(),
         p.kind(),
         p.source(),
+        p.name(),
         p.is_muted(),
         p.encryption_type(),
     )
@@ -162,6 +172,30 @@ pub(super) fn participant_info(
         identity: p.identity().to_string(),
         tracks: tracks.iter().map(remote_pub_info).collect(),
     }
+}
+
+/// Whether a `ScreenshareAudio` track named `name` is the music share.
+pub(crate) fn is_music(name: &str) -> bool {
+    name == MUSIC_TRACK_NAME
+}
+
+/// Which of the published slots a local `ScreenshareAudio` track belongs in:
+/// 3 for the music share, 2 for a screen share's sound.
+pub(super) fn audio_slot(name: &str) -> usize {
+    if is_music(name) {
+        3
+    } else {
+        2
+    }
+}
+
+/// Empty the music slot if its live publication is `sid`; whether it was.
+pub(super) fn release_music_slot(slot: &mut Option<VideoPublication>, sid: &TrackSid) -> bool {
+    if slot.as_ref().is_some_and(|p| p.live == *sid) {
+        *slot = None;
+        return true;
+    }
+    false
 }
 
 /// Map an SDK room event onto the webview vocabulary; `None` drops it.
@@ -256,7 +290,7 @@ pub(super) async fn forward_events(
     on_event: EventSink,
     frames: Observer,
     playout: playout::Listener,
-    published: [VideoSlot; 3],
+    published: [VideoSlot; 4],
     mic_withdrawn: MicWithdrawn,
 ) {
     while let Some(ev) = events.recv().await {
@@ -271,7 +305,7 @@ pub(super) async fn forward_events(
             let slot = match source {
                 TrackSource::Camera => Some(&published[0]),
                 TrackSource::Screenshare => Some(&published[1]),
-                TrackSource::ScreenshareAudio => Some(&published[2]),
+                TrackSource::ScreenshareAudio => Some(&published[audio_slot(&publication.name())]),
                 _ => None,
             };
             let orphan = slot.and_then(|slot| {
@@ -314,6 +348,10 @@ pub(super) async fn forward_events(
                         .map(|capture| Event::CameraCaptureEnded { capture }),
                     TrackSource::Screenshare => release_slot(&mut lock(&published[1]), &sid)
                         .map(|capture| Event::ScreenCaptureEnded { capture }),
+                    TrackSource::ScreenshareAudio if is_music(&publication.name()) => {
+                        release_music_slot(&mut lock(&published[3]), &sid)
+                            .then_some(Event::MusicShareEnded)
+                    }
                     // The share ends the way a stopped capture does; the
                     // webview's stop releases the capture thread.
                     TrackSource::ScreenshareAudio => release_slot(&mut lock(&published[2]), &sid)

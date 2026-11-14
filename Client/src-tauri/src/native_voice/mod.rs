@@ -28,6 +28,7 @@ mod hotplug;
 mod keys;
 pub mod mic_test;
 pub mod page_gone;
+pub mod music;
 pub mod playout;
 mod quick;
 pub mod screen;
@@ -212,6 +213,11 @@ pub struct NativeVoiceState {
     /// The live session's push-to-talk, gain, volume and mute-hold controls
     /// and its close signal, reachable without `inner` (`quick.rs`).
     quick: QuickSlot,
+    /// Bumped by every music start and stop, before anything is awaited. A
+    /// start that finds it moved once it holds the session was superseded by
+    /// a newer start or a stop, and publishes nothing. Not a gate: it is
+    /// read and written without holding anything, and never held.
+    music_ticket: std::sync::atomic::AtomicU64,
 }
 
 impl NativeVoiceState {

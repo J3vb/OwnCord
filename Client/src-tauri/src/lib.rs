@@ -445,6 +445,14 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_screenshare_volume,
             #[cfg(target_os = "linux")]
+            native_voice::music::native_voice_set_music_volume,
+            #[cfg(target_os = "linux")]
+            native_voice::music::native_voice_list_audio_apps,
+            #[cfg(target_os = "linux")]
+            native_voice::music::native_voice_start_music,
+            #[cfg(target_os = "linux")]
+            native_voice::music::native_voice_stop_music,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_debug_info,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_get_stats,
