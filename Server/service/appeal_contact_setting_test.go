@@ -29,7 +29,7 @@ func TestNormalizeAppealContact(t *testing.T) {
 		"newline":        "a\nb",
 		"tab":            "a\tb",
 		"nul":            "a\x00b",
-		"zero width":     "a​b",
+		"zero width":     "a\u200bb",
 		"zalgo":          "é̂̃̄",
 	}
 	for name, in := range bad {
