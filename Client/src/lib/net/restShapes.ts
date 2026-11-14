@@ -27,7 +27,7 @@ export const SHAPES: readonly Shape[] = [
   [2,["status"],[0],["version","uptime","online_users"],[0,1,1]],
   [2,["messages_days"],[1]],
   [2,["transfer_lifetime_seconds"],[1]],
-  [2,["name","protocol_epoch"],[0,1],["browser_client_enabled","registration_mode","retention","upload"],[2,0,6,7]],
+  [2,["name","protocol_epoch"],[0,1],["browser_client_enabled","registration_mode","retention","upload","icon"],[2,0,6,7,0]],
   [2,["requires_2fa"],[2],["token","partial_token"],[0,0]],
   [2,["id","username"],[1,0]],
   [2,[],[],["user","token","status"],[10,0,0]],

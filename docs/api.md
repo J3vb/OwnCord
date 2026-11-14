@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 265 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 268 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -107,6 +107,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/admin/api/roles/reorder`                                           |
 | DELETE  | `/admin/api/roles/{id}`                                              |
 | PATCH   | `/admin/api/roles/{id}`                                              |
+| DELETE  | `/admin/api/server-icon`                                             |
+| PUT     | `/admin/api/server-icon`                                             |
 | GET     | `/admin/api/settings`                                                |
 | PATCH   | `/admin/api/settings`                                                |
 | POST    | `/admin/api/setup`                                                   |
@@ -248,6 +250,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/reports/`                                                   |
 | GET     | `/api/v1/reports/mine`                                               |
 | GET     | `/api/v1/search`                                                     |
+| GET     | `/api/v1/server-icon`                                                |
 | GET     | `/api/v1/server-info`                                                |
 | GET     | `/api/v1/stickers/`                                                  |
 | POST    | `/api/v1/stickers/`                                                  |
@@ -4195,16 +4198,17 @@ sign-in.
 
 **Auth:** None
 
-| Field                              | Type    | Meaning                                                                                                                                                               |
-| ---------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                             | string  | The operator's server name (`server.name`)                                                                                                                            |
-| `protocol_epoch`                   | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect                                                                               |
-| `browser_client_enabled`           | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`)                                                                         |
-| `registration_mode`                | string  | `closed`, `invite`, `approval`, or `open`. A missing setting defaults to `invite`; an invalid value fails closed to `closed`                                          |
-| `retention`                        | object  | Server-default message retention only; channel overrides are not disclosed                                                                                            |
-| `retention.messages_days`          | integer | Server-default message window in days; `0` means kept indefinitely. Attachments are deleted with their messages; there is no separate attachment window               |
-| `upload`                           | object  | Upload limits a client sizes its own bounds from                                                                                                                      |
-| `upload.transfer_lifetime_seconds` | integer | How long an upload may take under the current `upload.max_size_mb` before the server answers `408 TRANSFER_TIMED_OUT`; a client's own transfer bound should be longer |
+| Field                              | Type    | Meaning                                                                                                                                                                                                           |
+| ---------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                             | string  | The operator's server name (`server.name`)                                                                                                                                                                        |
+| `protocol_epoch`                   | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect                                                                                                                           |
+| `browser_client_enabled`           | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`)                                                                                                                     |
+| `registration_mode`                | string  | `closed`, `invite`, `approval`, or `open`. A missing setting defaults to `invite`; an invalid value fails closed to `closed`                                                                                      |
+| `retention`                        | object  | Server-default message retention only; channel overrides are not disclosed                                                                                                                                        |
+| `retention.messages_days`          | integer | Server-default message window in days; `0` means kept indefinitely. Attachments are deleted with their messages; there is no separate attachment window                                                           |
+| `upload`                           | object  | Upload limits a client sizes its own bounds from                                                                                                                                                                  |
+| `upload.transfer_lifetime_seconds` | integer | How long an upload may take under the current `upload.max_size_mb` before the server answers `408 TRANSFER_TIMED_OUT`; a client's own transfer bound should be longer                                             |
+| `icon`                             | string  | Content hash (16 hex characters) of the owner-uploaded server icon, `""` when there is none. When it differs from the one a client holds, the client refetches [`GET /api/v1/server-icon`](#get-apiv1server-icon) |
 
 ```json
 {
@@ -4217,7 +4221,8 @@ sign-in.
   },
   "upload": {
     "transfer_lifetime_seconds": 1600
-  }
+  },
+  "icon": ""
 }
 ```
 
@@ -4239,6 +4244,19 @@ a 404 note even when the flag is on. With the flag off, no route is mounted and
 no asset is served in any build —
 `Server/api/browser_hosting_posture_test.go` proves it by route walk and by
 wire probe.
+
+### GET /api/v1/server-icon
+
+The owner-uploaded server icon. Public, like `server-info`, so a client can show
+it before sign-in.
+
+**Auth:** None
+
+Answers `200` with the PNG, `Content-Type: image/png`,
+`X-Content-Type-Options: nosniff`, `Cache-Control: public, max-age=300` and an
+`ETag` equal to the quoted `icon` hash from `server-info` (`If-None-Match`
+answers `304`). Answers `404 NOT_FOUND` when the server has no icon, or when the
+database holds a hash but the file is gone.
 
 ---
 
@@ -5673,7 +5691,7 @@ audited as `setting_change`.
 
 #### Request
 
-A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
+A flat map of key → string value. Allowed keys: `server_name`,
 `motd`, `appeal_contact`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
 `upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
@@ -5764,8 +5782,10 @@ held to the same limits the first-run setup wizard enforces.
 or invisible characters and no more than two stacked combining marks; empty clears
 it. It is plain text and needs no row to exist.
 
-`server_icon` is accepted and stored but has **no runtime effect** (reserved
-for a future release). `max_upload_bytes` and `voice_quality` are refused with
+`server_icon` is refused with `400` (`server_icon is set with the server icon
+upload, not here`): the row holds the icon's content hash and is written only by
+[`PUT /admin/api/server-icon`](#put-adminapiserver-icon).
+`max_upload_bytes` and `voice_quality` are refused with
 `400` (`<key> is set in config.yaml, not here`): the real settings are
 `upload.max_size_mb` and `voice.quality` in config.yaml. The setup wizard still
 writes both rows and `GET /admin/api/settings` still returns them; the admin
@@ -5784,6 +5804,52 @@ user has TOTP enabled.
 | 400    | `BAD_REQUEST` | Unknown key, a value outside its key's rules above, or `require_2fa` preconditions not met |
 
 ---
+
+### PUT /admin/api/server-icon
+
+Sets the server icon.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Request
+
+The body is the PNG itself (`Content-Type: image/png`), at most 64 KiB, square,
+between 32 and 256 pixels a side. The server decodes it with the standard
+library to validate it. The file is written to `<data_dir>/server-icon.png`
+through a temp file in the same directory, synced and renamed; only after the
+rename succeeds is the content hash (first 16 hex characters of the SHA-256)
+saved to the `server_icon` setting, so a failure leaves the previous icon and
+hash. The change is audit-logged as `setting_change`.
+
+#### Response 200 OK
+
+```json
+{ "icon": "0123456789abcdef" }
+```
+
+#### Errors
+
+`400 BAD_REQUEST` when the body is not a PNG, is over 64 KiB, is not square or
+is outside 32 to 256 pixels; `403 FORBIDDEN` without `MANAGE_SERVER`.
+
+Regular backups are SQLite snapshots only, so a database restored on another
+machine has the hash but not the file, and the server then reports no icon
+(`icon` is `""`, `GET /api/v1/server-icon` answers `404`) until one is
+uploaded again. The full archive includes the data directory and carries the
+icon file.
+
+### DELETE /admin/api/server-icon
+
+Removes the server icon and clears the `server_icon` setting. Succeeds when
+there is none.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 200 OK
+
+```json
+{ "icon": "" }
+```
 
 ### PUT /admin/api/afk-channel
 

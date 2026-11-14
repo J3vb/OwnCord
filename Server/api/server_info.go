@@ -26,6 +26,8 @@ type serverInfoResponse struct {
 	RegistrationMode     string           `json:"registration_mode"`
 	Retention            retentionSummary `json:"retention"`
 	Upload               uploadSummary    `json:"upload"`
+	// Icon is the server icon's content hash, "" when there is none; GET /api/v1/server-icon serves the picture.
+	Icon string `json:"icon"`
 }
 
 type retentionSummary struct {
@@ -108,6 +110,10 @@ func buildServerInfo(ctx context.Context, cfg *config.Config, svc *service.Servi
 	if err != nil {
 		return serverInfoResponse{}, err
 	}
+	icon, err := svc.Settings.ServerIconHash(ctx)
+	if err != nil {
+		return serverInfoResponse{}, err
+	}
 	// No version, build or commit on an unauthenticated endpoint: that lets a scanner match the server to a
 	// CVE list (TestAPIV1ServerInfoOmitsVersion enforces it). ws.ProtocolEpoch is GENERATED from
 	// protocol/schema.json; read the constant, since a literal would go stale on the next bump. Reporting
@@ -119,5 +125,6 @@ func buildServerInfo(ctx context.Context, cfg *config.Config, svc *service.Servi
 		RegistrationMode:     string(mode),
 		Retention:            retentionSummary{MessagesDays: days},
 		Upload:               uploadSummary{TransferLifetimeSeconds: int64(uploadTransferLifetime(svc) / time.Second)},
+		Icon:                 icon,
 	}, nil
 }

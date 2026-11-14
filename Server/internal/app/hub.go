@@ -34,6 +34,7 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 	svc := service.New(database, limiter)
 	// Before NewHub: its first settings-cache fill reads the file-type lists auth_ok carries.
 	svc.Uploads.SetStorageLimits(storageLimits(cfg))
+	svc.Settings.SetServerIconDir(cfg.Server.DataDir)
 	if in.LinkPreviews != nil {
 		svc.Messages.SetLinkPreviews(in.LinkPreviews)
 	}

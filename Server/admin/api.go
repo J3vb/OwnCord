@@ -313,6 +313,8 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			r.Use(requirePerm(permissions.ManageServer))
 			r.Get("/settings", handleGetSettings(settings))
 			r.Patch("/settings", handlePatchSettings(settings, svc.Retention, hub))
+			r.Put("/server-icon", handlePutServerIcon(settings, hub))
+			r.Delete("/server-icon", handleDeleteServerIcon(settings, hub))
 			r.Put("/afk-channel", handlePutAFKChannel(channels, hub))
 			r.Get("/config", handleGetConfigFacts(setupOpts.RunningCfg))
 		})

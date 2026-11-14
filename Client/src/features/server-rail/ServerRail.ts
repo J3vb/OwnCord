@@ -29,6 +29,7 @@ import { authStore } from "@stores/auth.store";
 import { dmStore, type DmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
+import { loadServerIcons, SERVER_ICON_CHANGED } from "@lib/prefs/serverIcons";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
 import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../../i18n/serverRail";
@@ -271,10 +272,19 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
 
   // --- Rendering ----------------------------------------------------------
 
+  let icons: ReturnType<typeof loadServerIcons> = new Map();
+
   function avatar(host: string, mini: boolean): HTMLElement {
     const { name, color } = describe(host);
     const el = createElement("span", { class: mini ? "server-rail-mini" : "server-rail-avatar" });
     el.style.background = color;
+    const icon = icons.get(host);
+    if (icon !== undefined) {
+      el.appendChild(
+        createElement("img", { class: "server-rail-icon", src: icon.dataUrl, alt: name }),
+      );
+      return el;
+    }
     if (!mini && isIpAddressName(name)) el.appendChild(railIcon("server"));
     else setText(el, serverInitials(name));
     return el;
@@ -352,6 +362,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
 
   function render(): void {
     if (list === null) return;
+    icons = loadServerIcons();
     clearChildren(list);
     for (const item of reconciled()) {
       list.appendChild(item.kind === "server" ? serverItem(item.host, false) : folderItem(item));
@@ -450,6 +461,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       () => renderDms?.(),
     );
     window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDms?.(), { signal });
+    window.addEventListener(SERVER_ICON_CHANGED, render, { signal });
     const unsubRequests = options.pendingRequests?.subscribe(() => renderDms?.());
     if (unsubRequests !== undefined) disposable.addCleanup(unsubRequests);
     render();
