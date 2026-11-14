@@ -120,6 +120,23 @@ func removeMaskedLinks(s string) string {
 	return removeMatches(s, matchMasked)
 }
 
+// nestedGroupEnd returns the index just past the "(...)" group opening at s[j], or -1 when the
+// group holds a space or another parenthesis before it closes.
+func nestedGroupEnd(s string, j int) int {
+	k := j + 1
+	for k < len(s) {
+		r, n := utf8.DecodeRuneInString(s[k:])
+		if r == '(' || r == ')' || jsSpace(r) {
+			break
+		}
+		k += n
+	}
+	if k >= len(s) || s[k] != ')' {
+		return -1
+	}
+	return k + 1
+}
+
 func matchMasked(s string, i int) int {
 	if s[i] != '[' {
 		return -1
@@ -141,18 +158,11 @@ func matchMasked(s string, i int) int {
 		r, n := utf8.DecodeRuneInString(s[j:])
 		switch {
 		case r == '(':
-			k := j + 1
-			for k < len(s) {
-				r2, n2 := utf8.DecodeRuneInString(s[k:])
-				if r2 == '(' || r2 == ')' || jsSpace(r2) {
-					break
-				}
-				k += n2
-			}
-			if k >= len(s) || s[k] != ')' {
+			k := nestedGroupEnd(s, j)
+			if k < 0 {
 				return -1
 			}
-			j = k + 1
+			j = k
 		case r == ')' || jsSpace(r):
 			if groups == 0 || r != ')' {
 				return -1
@@ -176,15 +186,16 @@ func removeSpoilers(s string) string {
 		}
 		j, items := i+2, 0
 		for j < len(s) {
-			if s[j] == '\\' {
-				if j+1 >= len(s) {
-					break
-				}
-				j += 2
-			} else if strings.HasPrefix(s[j:], "||") {
+			if strings.HasPrefix(s[j:], "||") {
 				break
-			} else {
+			}
+			switch {
+			case s[j] != '\\':
 				j++
+			case j+1 >= len(s):
+				return -1
+			default:
+				j += 2
 			}
 			items++
 		}

@@ -48,8 +48,8 @@ func text(s *string) *string {
 // Cards returns the wire cards of rows that show something, in row order.
 func Cards(rows []dbgen.ListMessageLinkPreviewsRow) []Card {
 	out := make([]Card, 0, len(rows))
-	for _, r := range rows {
-		if c, ok := FromRow(r); ok {
+	for i := range rows {
+		if c, ok := FromRow(rows[i]); ok {
 			out = append(out, c)
 		}
 	}

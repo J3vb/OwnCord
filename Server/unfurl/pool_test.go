@@ -74,7 +74,7 @@ func TestEnqueue_PerAuthorLinkCap(t *testing.T) {
 
 func TestWorkers_RunLiveBeforeBackfillAndStopOnCancel(t *testing.T) {
 	f := newFixture(t, Options{Enabled: true, Workers: 1})
-	f.src.pages[pageURL] = Page{Title: ptr("T")}
+	f.src.pages[pageURL] = Page{Title: new("T")}
 	old := f.message(pageURL)
 	fresh := f.message("fresh " + pageURL)
 	f.u.EnqueueBackfill([]linkpreview.Job{old})
@@ -120,7 +120,7 @@ func TestWorkers_CancelStopsBusyWorkers(t *testing.T) {
 
 func TestShown_FlushMarksCardsAndImagesUsed(t *testing.T) {
 	f := newFixture(t, Options{Enabled: true, ThumbCapBytes: 1 << 20})
-	f.src.pages[pageURL] = Page{Title: ptr("T"), ImageURL: "https://example.com/i.png"}
+	f.src.pages[pageURL] = Page{Title: new("T"), ImageURL: "https://example.com/i.png"}
 	f.src.images["https://example.com/i.png"] = pngBytes(t, 50, 50)
 	f.u.process(t.Context(), f.message(pageURL))
 	hash := mustHash(t, pageURL)

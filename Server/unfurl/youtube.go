@@ -22,8 +22,8 @@ func youtubeID(raw string) string {
 		return ""
 	}
 	var id string
-	switch host := u.Hostname(); {
-	case host == "youtu.be":
+	switch host := u.Hostname(); host {
+	case "youtu.be":
 		id = strings.TrimPrefix(u.Path, "/")
 	default:
 		if _, ok := youtubeHosts[host]; !ok {

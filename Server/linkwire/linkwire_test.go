@@ -7,8 +7,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-func s(v string) *string { return &v }
-func n(v int64) *int64   { return &v }
+//go:fix inline
+func s(v string) *string { return new(v) }
+
+//go:fix inline
+func n(v int64) *int64 { return new(v) }
 
 func TestFromRow(t *testing.T) {
 	cases := []struct {
@@ -16,12 +19,12 @@ func TestFromRow(t *testing.T) {
 		row  dbgen.ListMessageLinkPreviewsRow
 		ok   bool
 	}{
-		{"text only", dbgen.ListMessageLinkPreviewsRow{Url: "u", Title: s("t")}, true},
-		{"image only", dbgen.ListMessageLinkPreviewsRow{Url: "u", ImageHash: s("h"), ImageWidth: n(5), ImageHeight: n(4)}, true},
-		{"failed fetch", dbgen.ListMessageLinkPreviewsRow{Url: "u", Title: s("t"), Failure: s("oversized")}, false},
+		{"text only", dbgen.ListMessageLinkPreviewsRow{Url: "u", Title: new("t")}, true},
+		{"image only", dbgen.ListMessageLinkPreviewsRow{Url: "u", ImageHash: new("h"), ImageWidth: n(5), ImageHeight: n(4)}, true},
+		{"failed fetch", dbgen.ListMessageLinkPreviewsRow{Url: "u", Title: new("t"), Failure: new("oversized")}, false},
 		{"nothing to show", dbgen.ListMessageLinkPreviewsRow{Url: "u"}, false},
-		{"empty strings are nothing", dbgen.ListMessageLinkPreviewsRow{Url: "u", Title: s(""), SiteName: s("")}, false},
-		{"image row swept away", dbgen.ListMessageLinkPreviewsRow{Url: "u", ImageHash: s("h")}, false},
+		{"empty strings are nothing", dbgen.ListMessageLinkPreviewsRow{Url: "u", Title: new(""), SiteName: new("")}, false},
+		{"image row swept away", dbgen.ListMessageLinkPreviewsRow{Url: "u", ImageHash: new("h")}, false},
 	}
 	for _, tc := range cases {
 		if _, ok := FromRow(tc.row); ok != tc.ok {
@@ -32,9 +35,9 @@ func TestFromRow(t *testing.T) {
 
 func TestCards_KeepOrderAndJSONShape(t *testing.T) {
 	rows := []dbgen.ListMessageLinkPreviewsRow{
-		{Url: "https://a/", Title: s("A"), Description: s("d"), SiteName: s("S"), ImageHash: s("h"), ImageWidth: n(640), ImageHeight: n(320)},
-		{Url: "https://b/", Failure: s("unavailable")},
-		{Url: "https://c/", Title: s("C")},
+		{Url: "https://a/", Title: new("A"), Description: new("d"), SiteName: new("S"), ImageHash: new("h"), ImageWidth: n(640), ImageHeight: n(320)},
+		{Url: "https://b/", Failure: new("unavailable")},
+		{Url: "https://c/", Title: new("C")},
 	}
 	cards := Cards(rows)
 	if len(cards) != 2 || cards[0].URL != "https://a/" || cards[1].URL != "https://c/" {

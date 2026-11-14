@@ -26,14 +26,7 @@ func (b *Broker) Card(ctx context.Context, rawURL string) (Card, error) {
 	if err != nil {
 		return Card{}, err
 	}
-	return Card{
-		Title:       data.Title,
-		Description: data.Description,
-		SiteName:    data.SiteName,
-		ImageURL:    data.ImageURL,
-		ImageWidth:  data.ImageWidth,
-		ImageHeight: data.ImageHeight,
-	}, nil
+	return Card(data), nil
 }
 
 // ImageAt fetches the image at rawURL under the image policy and returns its bytes and media

@@ -13,7 +13,7 @@ const pageURL = "https://example.com/a"
 
 func TestProcess_StoresCardWithThumbnailAndAnnounces(t *testing.T) {
 	f := newFixture(t, Options{Enabled: true, ThumbCapBytes: 1 << 20})
-	f.src.pages[pageURL] = Page{Title: ptr("Title"), Description: ptr("Desc"), SiteName: ptr("Example"), ImageURL: "https://example.com/i.png"}
+	f.src.pages[pageURL] = Page{Title: new("Title"), Description: new("Desc"), SiteName: new("Example"), ImageURL: "https://example.com/i.png"}
 	f.src.images["https://example.com/i.png"] = pngBytes(t, 1280, 720)
 	job := f.message("look " + pageURL)
 
@@ -40,7 +40,7 @@ func TestProcess_StoresCardWithThumbnailAndAnnounces(t *testing.T) {
 
 func TestProcess_CapZeroKeepsTextNotImage(t *testing.T) {
 	f := newFixture(t, Options{Enabled: true, ThumbCapBytes: 0})
-	f.src.pages[pageURL] = Page{Title: ptr("Title"), ImageURL: "https://example.com/i.png"}
+	f.src.pages[pageURL] = Page{Title: new("Title"), ImageURL: "https://example.com/i.png"}
 	f.src.images["https://example.com/i.png"] = pngBytes(t, 100, 100)
 	f.u.process(t.Context(), f.message(pageURL))
 
@@ -56,7 +56,7 @@ func TestProcess_CapZeroKeepsTextNotImage(t *testing.T) {
 // Edge case 2: two messages with one link at once make one fetch, and both get the card.
 func TestProcess_TwoJobsSameURLOneFetch(t *testing.T) {
 	f := newFixture(t, Options{Enabled: true})
-	f.src.pages[pageURL] = Page{Title: ptr("Shared")}
+	f.src.pages[pageURL] = Page{Title: new("Shared")}
 	f.src.gate = make(chan struct{})
 	f.src.entered = make(chan string, 4)
 	a, b := f.message(pageURL), f.message("again "+pageURL)
@@ -89,7 +89,7 @@ func TestProcess_TwoJobsSameURLOneFetch(t *testing.T) {
 // Edge case 1: the message is edited while its fetch runs; the stale result is dropped.
 func TestProcess_EditedDuringFetchDropsResult(t *testing.T) {
 	f := newFixture(t, Options{Enabled: true})
-	f.src.pages[pageURL] = Page{Title: ptr("Old")}
+	f.src.pages[pageURL] = Page{Title: new("Old")}
 	f.src.gate = make(chan struct{})
 	f.src.entered = make(chan string, 1)
 	job := f.message(pageURL)
@@ -111,7 +111,7 @@ func TestProcess_EditedDuringFetchDropsResult(t *testing.T) {
 
 func TestProcess_DeletedDuringFetchDropsResult(t *testing.T) {
 	f := newFixture(t, Options{Enabled: true})
-	f.src.pages[pageURL] = Page{Title: ptr("Gone")}
+	f.src.pages[pageURL] = Page{Title: new("Gone")}
 	f.src.gate = make(chan struct{})
 	f.src.entered = make(chan string, 1)
 	job := f.message(pageURL)
@@ -132,7 +132,7 @@ func TestProcess_DeletedDuringFetchDropsResult(t *testing.T) {
 
 func TestProcess_ReusesFreshCardRefetchesStale(t *testing.T) {
 	f := newFixture(t, Options{Enabled: true})
-	f.src.pages[pageURL] = Page{Title: ptr("T")}
+	f.src.pages[pageURL] = Page{Title: new("T")}
 	f.u.process(t.Context(), f.message(pageURL))
 	f.clock.advance(6 * 24 * time.Hour)
 	f.u.process(t.Context(), f.message(pageURL))
@@ -168,7 +168,7 @@ func TestProcess_FailureRememberedAnHourAndNotShown(t *testing.T) {
 	}
 	f.clock.advance(61 * time.Minute)
 	f.src.errs[pageURL] = nil
-	f.src.pages[pageURL] = Page{Title: ptr("Back")}
+	f.src.pages[pageURL] = Page{Title: new("Back")}
 	f.u.process(t.Context(), f.message(pageURL))
 	if n := f.src.count(pageURL); n != 2 || len(f.ann.all()) != 1 {
 		t.Errorf("after the hour: fetches = %d, announcements = %d; want 2 and 1", n, len(f.ann.all()))
@@ -212,7 +212,7 @@ func TestProcess_LinkThatIsAnImageBecomesImageOnlyCard(t *testing.T) {
 func TestProcess_YouTubeCardUsesOEmbedTitleAndStill(t *testing.T) {
 	f := newFixture(t, Options{Enabled: true, ThumbCapBytes: 1 << 20})
 	const oembed = "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ&format=json"
-	f.src.pages[oembed] = Page{Title: ptr("A video")}
+	f.src.pages[oembed] = Page{Title: new("A video")}
 	f.src.images["https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"] = pngBytes(t, 320, 180)
 	f.u.process(t.Context(), f.message("https://youtu.be/dQw4w9WgXcQ"))
 
@@ -228,7 +228,7 @@ func TestProcess_YouTubeCardUsesOEmbedTitleAndStill(t *testing.T) {
 
 func TestProcess_EditRemovingLinksClearsAndAnnouncesEmpty(t *testing.T) {
 	f := newFixture(t, Options{Enabled: true})
-	f.src.pages[pageURL] = Page{Title: ptr("T")}
+	f.src.pages[pageURL] = Page{Title: new("T")}
 	job := f.message(pageURL)
 	f.u.process(t.Context(), job)
 	if f.cards(job.MessageID) != 1 {

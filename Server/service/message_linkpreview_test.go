@@ -152,7 +152,7 @@ func TestHistory_StaleCardHiddenAfterEditAndRequeued(t *testing.T) {
 
 func TestHistory_BackfillIsCappedPerPageNewestFirst(t *testing.T) {
 	svc, database, _, q := linkPreviewHistory(t)
-	var ids []int64
+	ids := make([]int64, 0, 30)
 	for i := range 30 {
 		ids = append(ids, mustCreateMessage(t, database, 10, 1, "https://s"+strings.Repeat("x", i)+".example/", nil))
 	}

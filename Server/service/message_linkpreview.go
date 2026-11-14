@@ -97,9 +97,10 @@ func (s *messageReads) attachLinkPreviews(ctx context.Context, msgs []db.Message
 		return
 	}
 	byMessage := make(map[int64][]linkpreview.Card, len(ids))
-	for _, r := range rows {
+	for i := range rows {
+		r := &rows[i]
 		if _, ok := wanted[r.MessageID][r.UrlHash]; ok {
-			byMessage[r.MessageID] = append(byMessage[r.MessageID], r)
+			byMessage[r.MessageID] = append(byMessage[r.MessageID], *r)
 		}
 	}
 	var shownCards, shownImages []string
@@ -112,7 +113,8 @@ func (s *messageReads) attachLinkPreviews(ctx context.Context, msgs []db.Message
 		}
 		own := byMessage[m.ID]
 		m.Cards = linkwire.Cards(own)
-		for _, r := range own {
+		for j := range own {
+			r := &own[j]
 			shownCards = append(shownCards, r.UrlHash)
 			if r.ImageHash != nil {
 				shownImages = append(shownImages, *r.ImageHash)
