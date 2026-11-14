@@ -33,14 +33,21 @@ func TestServerIcon_AbsentIs404AndEmptyHash(t *testing.T) {
 }
 
 func TestServerIcon_ServedWithHeadersAndHash(t *testing.T) {
-	data := testIconPNG(t)
+	var data []byte
+	var hash string
 	router := setupRouterWithServices(t, func(svc *service.Services, _ *db.DB) {
 		svc.Settings.SetServerIconDir(t.TempDir())
-		if _, err := svc.Settings.SetServerIcon(t.Context(), 1, data); err != nil {
+		if _, err := svc.Settings.SetServerIcon(t.Context(), 1, testIconPNG(t)); err != nil {
 			t.Fatalf("SetServerIcon: %v", err)
 		}
+		var err error
+		if data, hash, err = svc.Settings.ServerIcon(t.Context()); err != nil {
+			t.Fatalf("ServerIcon: %v", err)
+		}
 	})
-	hash := service.ServerIconHashOf(data)
+	if hash != service.ServerIconHashOf(data) {
+		t.Fatalf("hash %q is not the hash of the stored bytes", hash)
+	}
 
 	rec := serveRequest(router, httptest.NewRequest(http.MethodGet, "/api/v1/server-icon", nil))
 	requireStatus(t, rec, http.StatusOK)

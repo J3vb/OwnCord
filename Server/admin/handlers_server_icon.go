@@ -63,6 +63,6 @@ func writeServerIconErr(w http.ResponseWriter, r *http.Request, err error) {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 		return
 	}
-	slog.ErrorContext(r.Context(), "settings patch failed", "route", "server-icon", "error", err)
+	slog.ErrorContext(r.Context(), "server icon update failed", "error", err)
 	writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to update the server icon")
 }

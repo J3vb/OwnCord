@@ -261,29 +261,5 @@ export function createDmsApi(t: ApiTransport) {
         owner.dispose();
       }
     },
-
-    /**
-     * The server icon bytes of `host`, or null when it has none. Goes through the
-     * same pinned HTTP proxy as `getServerInfo`, never an `<img src>` to the
-     * remote origin.
-     */
-    async getServerIconBytes(
-      host: string,
-      timeoutMs = 5000,
-      signal?: AbortSignal,
-    ): Promise<ArrayBuffer | null> {
-      const owner = new SessionScope({ host, generation: t.generation }, signal ? [signal] : []);
-      const timer = setTimeout(() => owner.dispose(), timeoutMs);
-      try {
-        const origin = await owner.run(ensureHttpProxy(host));
-        const res = await owner.run(
-          desktop.http.fetch(`${origin}/api/v1/server-icon`, { signal: owner.signal }),
-        );
-        return res.ok ? await owner.run(res.arrayBuffer()) : null;
-      } finally {
-        clearTimeout(timer);
-        owner.dispose();
-      }
-    },
   };
 }

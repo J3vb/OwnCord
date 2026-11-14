@@ -132,13 +132,19 @@ async function serverIconBlob(file){
   return blob;
 }
 async function uploadServerIcon(){
-  const file=this.files&&this.files[0];
+  const input=this;
+  const file=input.files&&input.files[0];
   if(!file)return;
   try{
     const blob=await serverIconBlob(file);
     const out=await serverIconRequest('PUT',blob);
     showServerIcon(out.icon);showToast('Server icon updated');
   }catch(e){showToast(e&&e.message?e.message:'Could not use that picture','error')}
+  /* Cleared so choosing the same file again fires a change event; a success has
+     already replaced the row, so this reaches the old input only on failure. */
+  input.value='';
+  const name=document.getElementById('serverIconFileName');
+  if(name)name.textContent='No file chosen';
 }
 async function removeServerIcon(){
   try{await serverIconRequest('DELETE');showServerIcon('');showToast('Server icon removed')}

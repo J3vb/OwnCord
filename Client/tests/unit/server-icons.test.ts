@@ -6,9 +6,12 @@ import {
   SERVER_ICON_DATA_URL_MAX,
   cachedServerIcon,
   dropServerIcon,
+  pngDataUrl,
+  pruneServerIcons,
   storeServerIcon,
   syncServerIcon,
 } from "@lib/prefs/serverIcons";
+import { readCapped } from "../../src/app/serverIconSync";
 import { createServerRail } from "../../src/features/server-rail/ServerRail";
 import { authStore } from "@stores/auth.store";
 import type { ServerProfile } from "@lib/presence/profiles";
@@ -48,6 +51,65 @@ describe("server icon cache", () => {
     expect(cachedServerIcon("a")).toBeUndefined();
     localStorage.setItem(SERVER_ICONS_KEY, JSON.stringify([{ host: "a", hash: 1 }, 7, null]));
     expect(cachedServerIcon("a")).toBeUndefined();
+  });
+});
+
+describe("pruneServerIcons", () => {
+  it("keeps only the listed hosts", () => {
+    storeServerIcon("a", { hash: H1, dataUrl: URL1 });
+    storeServerIcon("b", { hash: H1, dataUrl: URL1 });
+    pruneServerIcons(["b", "c"]);
+    expect(cachedServerIcon("a")).toBeUndefined();
+    expect(cachedServerIcon("b")).toBeDefined();
+  });
+
+  it("does not announce when nothing was removed", () => {
+    storeServerIcon("a", { hash: H1, dataUrl: URL1 });
+    const seen = vi.fn();
+    window.addEventListener(SERVER_ICON_CHANGED, seen, { once: true });
+    pruneServerIcons(["a", "z"]);
+    expect(seen).not.toHaveBeenCalled();
+    window.removeEventListener(SERVER_ICON_CHANGED, seen);
+  });
+});
+
+describe("pngDataUrl", () => {
+  it("accepts a small PNG and refuses anything else", () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    expect(pngDataUrl(png)).toMatch(/^data:image\/png;base64,/);
+    expect(pngDataUrl(Uint8Array.from([0x47, 0x49, 0x46, 0x38]))).toBeNull();
+    expect(pngDataUrl(new Uint8Array(0))).toBeNull();
+    expect(pngDataUrl(new Uint8Array(64 * 1024 + 1).fill(0x89))).toBeNull();
+  });
+});
+
+describe("readCapped", () => {
+  it("returns a body within the cap", async () => {
+    const out = await readCapped(new Response(new Uint8Array([1, 2, 3])), 10);
+    expect(out).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it("refuses a declared length over the cap without reading", async () => {
+    const res = new Response(new Uint8Array(4), { headers: { "content-length": "999999" } });
+    expect(await readCapped(res, 10)).toBeNull();
+    expect(res.bodyUsed).toBe(false);
+  });
+
+  it("stops reading a stream that passes the cap and does not declare a length", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(6));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    expect(await readCapped(new Response(body), 10)).toBeNull();
+    expect(cancelled).toBe(true);
+    expect(pulls).toBeLessThan(5);
   });
 });
 
@@ -137,6 +199,16 @@ describe("server rail icon", () => {
     const btn = document.querySelector('[data-host="b.example"]');
     expect(btn?.querySelector("img")).toBeNull();
     expect(btn?.textContent).toBe("BB");
+  });
+
+  it("drops the icons of servers that are no longer saved, keeping the connected one", async () => {
+    storeServerIcon("gone.example", { hash: H1, dataUrl: URL1 });
+    storeServerIcon("a.example", { hash: H1, dataUrl: URL1 });
+    storeServerIcon("b.example", { hash: H2, dataUrl: URL2 });
+    await mountRail();
+    expect(cachedServerIcon("gone.example")).toBeUndefined();
+    expect(cachedServerIcon("a.example")).toBeDefined();
+    expect(cachedServerIcon("b.example")).toBeDefined();
   });
 
   it("swaps the picture when the cache entry changes while mounted", async () => {

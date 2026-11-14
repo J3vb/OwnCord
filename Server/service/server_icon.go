@@ -8,21 +8,27 @@ import (
 	"errors"
 	"fmt"
 	"image/png"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// The owner-uploaded server icon: one PNG in the data directory plus a short content hash in the server_icon
-// settings row. The hash is what clients compare, so it changes exactly when the picture does.
+// The owner-uploaded server icon is one PNG file in the data directory, and that file is the only source of
+// truth for it: its content hash (what server-info reports and the GET ETag carries) is computed from the bytes
+// on disk, so what clients compare is always what GET serves, whatever the database says. The file is written
+// through a synced temp file and a rename, so a crash or a failed rename leaves the previous icon whole. The
+// server_icon settings row mirrors the hash for the admin Settings page and older tooling; it is written after
+// the rename on a best-effort basis and nothing reads it for decisions, so a failed or stale row (or a database
+// restored next to a different file) cannot make clients and the picture disagree.
 const (
-	// ServerIconKey is the settings row holding the icon's content hash ("" when none).
+	// ServerIconKey is the settings row mirroring the icon's content hash ("" when none).
 	ServerIconKey = "server_icon"
 	// ServerIconFile is the icon's file name inside the data directory.
 	ServerIconFile = "server-icon.png"
-	// ServerIconMaxBytes bounds an upload; 256x256 art fits many times over.
+	// ServerIconMaxBytes bounds an upload and the stored (re-encoded) file; 256x256 art fits many times over.
 	ServerIconMaxBytes = 64 << 10
 	// ServerIconMinPx and ServerIconMaxPx bound the (square) side length.
 	ServerIconMinPx   = 32
@@ -30,16 +36,33 @@ const (
 	serverIconHashLen = 16
 )
 
-// ErrNoServerIcon reports that the server has no icon (none set, or its file is gone).
+// ErrNoServerIcon reports that the server has no icon.
 var ErrNoServerIcon = errors.New("no server icon")
 
 // ErrServerIconUnavailable reports a server built without a data directory for the icon (a test double).
 var ErrServerIconUnavailable = errors.New("server icon storage unavailable")
 
-// SetServerIconDir installs the directory the icon file lives in; the composition root calls it once, before
-// the server takes requests.
+// iconSnapshot is the hash of the file as last read, valid while the file's size and mtime are unchanged.
+type iconSnapshot struct {
+	size  int64
+	mtime time.Time
+	hash  string
+}
+
+// SetServerIconDir installs the directory the icon file lives in and sweeps a temp file a crash left behind;
+// the composition root calls it once, before the server takes requests.
 func (s *SettingsService) SetServerIconDir(dir string) {
 	s.iconDir = dir
+	if dir == "" {
+		return
+	}
+	stale, err := filepath.Glob(filepath.Join(dir, ServerIconFile+".tmp-*"))
+	if err != nil {
+		return
+	}
+	for _, path := range stale {
+		_ = os.Remove(path)
+	}
 }
 
 func (s *SettingsService) iconPath() (string, error) {
@@ -55,37 +78,47 @@ func ServerIconHashOf(pngBytes []byte) string {
 	return hex.EncodeToString(sum[:])[:serverIconHashLen]
 }
 
-// ValidateServerIcon checks an upload: a PNG that decodes, square, between 32 and 256 px a side, at most
-// 64 KiB. Failures wrap ErrBadRequest.
-func ValidateServerIcon(data []byte) error {
+// ValidateServerIcon checks an upload (a PNG that decodes, square, 32 to 256 px a side, at most 64 KiB) and
+// returns the bytes to store: the decoded image encoded afresh, which drops text, EXIF-like and any other
+// ancillary chunks and trailing data. Failures wrap ErrBadRequest.
+func ValidateServerIcon(data []byte) ([]byte, error) {
 	if len(data) == 0 {
-		return fmt.Errorf("server icon is empty%.0w", ErrBadRequest)
+		return nil, fmt.Errorf("server icon is empty%.0w", ErrBadRequest)
 	}
 	if len(data) > ServerIconMaxBytes {
-		return fmt.Errorf("server icon must be at most %d KiB%.0w", ServerIconMaxBytes>>10, ErrBadRequest)
+		return nil, fmt.Errorf("server icon must be at most %d KiB%.0w", ServerIconMaxBytes>>10, ErrBadRequest)
 	}
 	// The header first: a tiny file can declare a huge canvas, and the full decode must never see one.
 	cfg, err := png.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("server icon must be a PNG image%.0w", ErrBadRequest)
+		return nil, fmt.Errorf("server icon must be a PNG image%.0w", ErrBadRequest)
 	}
 	if cfg.Width != cfg.Height {
-		return fmt.Errorf("server icon must be square%.0w", ErrBadRequest)
+		return nil, fmt.Errorf("server icon must be square%.0w", ErrBadRequest)
 	}
 	if cfg.Width < ServerIconMinPx || cfg.Width > ServerIconMaxPx {
-		return fmt.Errorf("server icon must be between %d and %d pixels wide%.0w", ServerIconMinPx, ServerIconMaxPx, ErrBadRequest)
+		return nil, fmt.Errorf("server icon must be between %d and %d pixels wide%.0w", ServerIconMinPx, ServerIconMaxPx, ErrBadRequest)
 	}
-	if _, err := png.Decode(bytes.NewReader(data)); err != nil {
-		return fmt.Errorf("server icon must be a PNG image%.0w", ErrBadRequest)
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("server icon must be a PNG image%.0w", ErrBadRequest)
 	}
-	return nil
+	var out bytes.Buffer
+	enc := png.Encoder{CompressionLevel: png.BestCompression}
+	if err := enc.Encode(&out, img); err != nil {
+		return nil, fmt.Errorf("server icon must be a PNG image%.0w", ErrBadRequest)
+	}
+	if out.Len() > ServerIconMaxBytes {
+		return nil, fmt.Errorf("server icon is too detailed: it must stay under %d KiB%.0w", ServerIconMaxBytes>>10, ErrBadRequest)
+	}
+	return out.Bytes(), nil
 }
 
 // SetServerIcon validates and stores a new icon and returns its hash. The file is written to a temp file in
-// the data directory, synced and renamed into place; the hash row is saved only after the rename succeeds, so
-// a failure at any step leaves the previous icon and hash.
+// the data directory, synced and renamed into place; a failure at any step leaves the previous icon.
 func (s *SettingsService) SetServerIcon(ctx context.Context, actorID int64, data []byte) (string, error) {
-	if err := ValidateServerIcon(data); err != nil {
+	clean, err := ValidateServerIcon(data)
+	if err != nil {
 		return "", err
 	}
 	path, err := s.iconPath()
@@ -94,19 +127,17 @@ func (s *SettingsService) SetServerIcon(ctx context.Context, actorID int64, data
 	}
 	s.iconMu.Lock()
 	defer s.iconMu.Unlock()
-	if err := writeFileAtomic(path, data, s.iconRename); err != nil {
+	if err := writeFileAtomic(path, clean, s.iconRename); err != nil {
 		return "", fmt.Errorf("SetServerIcon: %w", err)
 	}
-	hash := ServerIconHashOf(data)
-	if err := s.st.ApplySettings(ctx, map[string]string{ServerIconKey: hash}); err != nil {
-		return "", fmt.Errorf("SetServerIcon: %w", err)
-	}
+	hash := ServerIconHashOf(clean)
+	s.iconSnap = nil
+	s.mirrorServerIconRow(ctx, hash)
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "setting_change", "setting", 0, ServerIconKey+" updated")
 	return hash, nil
 }
 
-// ClearServerIcon removes the icon. The row is cleared first, so a file that cannot be removed is never
-// served; a missing file is not an error.
+// ClearServerIcon removes the icon file; removing none is not an error.
 func (s *SettingsService) ClearServerIcon(ctx context.Context, actorID int64) error {
 	path, err := s.iconPath()
 	if err != nil {
@@ -114,66 +145,66 @@ func (s *SettingsService) ClearServerIcon(ctx context.Context, actorID int64) er
 	}
 	s.iconMu.Lock()
 	defer s.iconMu.Unlock()
-	if err := s.st.ApplySettings(ctx, map[string]string{ServerIconKey: ""}); err != nil {
-		return fmt.Errorf("ClearServerIcon: %w", err)
-	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("ClearServerIcon: %w", err)
 	}
+	s.iconSnap = nil
+	s.mirrorServerIconRow(ctx, "")
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "setting_change", "setting", 0, ServerIconKey+" removed")
 	return nil
 }
 
-// ServerIconHash is the stored hash, "" when there is no icon or its file is missing (a database restored
-// without its data directory), so a client is never pointed at a picture that is not there.
-func (s *SettingsService) ServerIconHash(ctx context.Context) (string, error) {
-	path, err := s.iconPath()
-	if err != nil {
-		// No icon storage means no icon.
-		return "", nil
+// mirrorServerIconRow writes the hash to the server_icon row. It cannot fail the change: the file already
+// decided the icon, and the row is only a mirror.
+func (s *SettingsService) mirrorServerIconRow(ctx context.Context, hash string) {
+	if err := s.st.ApplySettings(context.WithoutCancel(ctx), map[string]string{ServerIconKey: hash}); err != nil {
+		slog.WarnContext(ctx, "server icon update failed", "stage", "row", "error", err)
 	}
-	hash, err := s.st.GetSetting(ctx, ServerIconKey)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return "", nil
-		}
-		return "", fmt.Errorf("ServerIconHash: %w", err)
-	}
-	hash = strings.TrimSpace(hash)
-	if hash == "" {
-		return "", nil
-	}
-	if _, err := os.Stat(path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", nil
-		}
-		return "", fmt.Errorf("ServerIconHash: %w", err)
-	}
-	return hash, nil
 }
 
-// ServerIcon returns the icon bytes and their hash, or ErrNoServerIcon. The hash is computed from the bytes
-// read, so the pair is consistent even against a concurrent replacement.
-func (s *SettingsService) ServerIcon(ctx context.Context) ([]byte, string, error) {
-	hash, err := s.ServerIconHash(ctx)
-	if err != nil {
-		return nil, "", err
+// ServerIconHash is the hash of the icon file on disk, "" when there is none. It re-reads the file only when
+// its size or modification time changed.
+func (s *SettingsService) ServerIconHash(_ context.Context) (string, error) {
+	_, hash, err := s.readServerIcon(false)
+	if errors.Is(err, ErrNoServerIcon) || errors.Is(err, ErrServerIconUnavailable) {
+		return "", nil
 	}
-	if hash == "" {
-		return nil, "", ErrNoServerIcon
-	}
+	return hash, err
+}
+
+// ServerIcon returns the icon bytes and their hash, or ErrNoServerIcon.
+func (s *SettingsService) ServerIcon(_ context.Context) ([]byte, string, error) {
+	return s.readServerIcon(true)
+}
+
+func (s *SettingsService) readServerIcon(wantBytes bool) ([]byte, string, error) {
 	path, err := s.iconPath()
 	if err != nil {
 		return nil, "", err
+	}
+	s.iconMu.Lock()
+	defer s.iconMu.Unlock()
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			s.iconSnap = nil
+			return nil, "", ErrNoServerIcon
+		}
+		return nil, "", fmt.Errorf("server icon: %w", err)
+	}
+	if snap := s.iconSnap; snap != nil && !wantBytes && snap.size == info.Size() && snap.mtime.Equal(info.ModTime()) {
+		return nil, snap.hash, nil
 	}
 	data, err := os.ReadFile(path) //nolint:gosec // G304: the path is <data_dir>/server-icon.png, not input
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", ErrNoServerIcon
 		}
-		return nil, "", fmt.Errorf("ServerIcon: %w", err)
+		return nil, "", fmt.Errorf("server icon: %w", err)
 	}
-	return data, ServerIconHashOf(data), nil
+	hash := ServerIconHashOf(data)
+	s.iconSnap = &iconSnapshot{size: int64(len(data)), mtime: info.ModTime(), hash: hash}
+	return data, hash, nil
 }
 
 // writeFileAtomic writes data to path through a synced temp file in the same directory and a rename, so a

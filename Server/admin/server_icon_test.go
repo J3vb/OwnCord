@@ -56,8 +56,12 @@ func TestServerIcon_PutAndDelete(t *testing.T) {
 	var reply struct {
 		Icon string `json:"icon"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &reply); err != nil || reply.Icon != service.ServerIconHashOf(data) {
+	if err := json.Unmarshal(rec.Body.Bytes(), &reply); err != nil || len(reply.Icon) != 16 {
 		t.Fatalf("reply = %s (%v), want the icon hash", rec.Body.String(), err)
+	}
+	stored, err := os.ReadFile(filepath.Join(dir, service.ServerIconFile))
+	if err != nil || service.ServerIconHashOf(stored) != reply.Icon {
+		t.Fatalf("reply hash %q does not match the stored file (%v)", reply.Icon, err)
 	}
 	if got, err := database.GetSetting(context.Background(), "server_icon"); err != nil || got != reply.Icon {
 		t.Fatalf("server_icon row = %q (%v), want %q", got, err, reply.Icon)

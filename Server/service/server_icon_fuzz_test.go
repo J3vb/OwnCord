@@ -17,18 +17,19 @@ func FuzzValidateServerIcon(f *testing.F) {
 	f.Add(bytes.Repeat([]byte{0xff}, 1000))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		if err := ValidateServerIcon(data); err != nil {
+		clean, err := ValidateServerIcon(data)
+		if err != nil {
 			return
 		}
-		cfg, err := png.DecodeConfig(bytes.NewReader(data))
+		cfg, err := png.DecodeConfig(bytes.NewReader(clean))
 		if err != nil {
-			t.Fatalf("accepted bytes that do not decode: %v", err)
+			t.Fatalf("accepted bytes whose stored form does not decode: %v", err)
 		}
 		if cfg.Width != cfg.Height || cfg.Width < ServerIconMinPx || cfg.Width > ServerIconMaxPx {
 			t.Fatalf("accepted a %dx%d icon", cfg.Width, cfg.Height)
 		}
-		if len(data) > ServerIconMaxBytes {
-			t.Fatalf("accepted %d bytes", len(data))
+		if len(data) > ServerIconMaxBytes || len(clean) > ServerIconMaxBytes {
+			t.Fatalf("accepted %d bytes, stores %d", len(data), len(clean))
 		}
 	})
 }

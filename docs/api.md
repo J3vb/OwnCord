@@ -4255,8 +4255,7 @@ it before sign-in.
 Answers `200` with the PNG, `Content-Type: image/png`,
 `X-Content-Type-Options: nosniff`, `Cache-Control: public, max-age=300` and an
 `ETag` equal to the quoted `icon` hash from `server-info` (`If-None-Match`
-answers `304`). Answers `404 NOT_FOUND` when the server has no icon, or when the
-database holds a hash but the file is gone.
+answers `304`). Answers `404 NOT_FOUND` when the server has no icon file.
 
 ---
 
@@ -5783,8 +5782,8 @@ or invisible characters and no more than two stacked combining marks; empty clea
 it. It is plain text and needs no row to exist.
 
 `server_icon` is refused with `400` (`server_icon is set with the server icon
-upload, not here`): the row holds the icon's content hash and is written only by
-[`PUT /admin/api/server-icon`](#put-adminapiserver-icon).
+upload, not here`): the row mirrors the icon's content hash and is written only by
+[`PUT /admin/api/server-icon`](#put-adminapiserver-icon) and its `DELETE`.
 `max_upload_bytes` and `voice_quality` are refused with
 `400` (`<key> is set in config.yaml, not here`): the real settings are
 `upload.max_size_mb` and `voice.quality` in config.yaml. The setup wizard still
@@ -5815,11 +5814,17 @@ Sets the server icon.
 
 The body is the PNG itself (`Content-Type: image/png`), at most 64 KiB, square,
 between 32 and 256 pixels a side. The server decodes it with the standard
-library to validate it. The file is written to `<data_dir>/server-icon.png`
-through a temp file in the same directory, synced and renamed; only after the
-rename succeeds is the content hash (first 16 hex characters of the SHA-256)
-saved to the `server_icon` setting, so a failure leaves the previous icon and
-hash. The change is audit-logged as `setting_change`.
+library to validate it, then encodes the decoded image afresh and stores that,
+which drops text and other ancillary chunks and trailing data (an image whose
+re-encoded form passes 64 KiB is refused). The file is written to
+`<data_dir>/server-icon.png` through a temp file in the same directory, synced
+and renamed, so a failure leaves the previous icon whole.
+
+The file is the source of truth: the `icon` hash that `server-info` reports and
+the `GET /api/v1/server-icon` ETag are the first 16 hex characters of the
+SHA-256 of the bytes on disk. The `server_icon` setting mirrors that hash after
+the rename, best effort; nothing reads it for decisions. The change is
+audit-logged as `setting_change`.
 
 #### Response 200 OK
 

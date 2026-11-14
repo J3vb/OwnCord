@@ -29,7 +29,7 @@ import { authStore } from "@stores/auth.store";
 import { dmStore, type DmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
-import { loadServerIcons, SERVER_ICON_CHANGED } from "@lib/prefs/serverIcons";
+import { loadServerIcons, pruneServerIcons, SERVER_ICON_CHANGED } from "@lib/prefs/serverIcons";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
 import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../../i18n/serverRail";
@@ -480,6 +480,8 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
         if (signal.aborted) return;
         profiles = loaded;
         serversKnown = true;
+        // The saved list is known, so a removed server's cached icon can go.
+        pruneServerIcons([options.currentHost, ...loaded.map((p) => p.host)]);
         const pending = pendingLayout;
         pendingLayout = null;
         if (pending !== null) commit(pending);

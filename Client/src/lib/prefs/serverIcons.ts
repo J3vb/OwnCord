@@ -2,8 +2,9 @@
  * The server icons shown in the server rail: one `{hash, dataUrl}` per host,
  * persisted so the rail has a picture before any connection. The hash is the
  * one `server-info` reports; a different one means the owner changed the icon.
- * The store is bounded (entry count and size), oldest entry out first, so a
- * long server list or a hostile server cannot fill localStorage.
+ * The store is bounded (entry count and size), and the rail prunes it to the
+ * servers that are still saved, so a long-lived install or a hostile server
+ * cannot fill localStorage and a saved server is not evicted by churn.
  */
 
 import { loadStoredJson, saveStoredJson } from "./preferences";
@@ -11,7 +12,8 @@ import { loadStoredJson, saveStoredJson } from "./preferences";
 export const SERVER_ICONS_KEY = "owncord:server-icons";
 /** The window event fired when an entry is stored or dropped. */
 export const SERVER_ICON_CHANGED = "owncord:server-icon-changed";
-export const SERVER_ICONS_MAX = 16;
+/** A backstop for a very long server list; the rail also prunes to the saved servers. */
+export const SERVER_ICONS_MAX = 32;
 /** The server caps an icon at 64 KiB; base64 of that is about 88k characters. */
 export const SERVER_ICON_DATA_URL_MAX = 90_000;
 const DATA_URL_PREFIX = "data:image/png;base64,";
@@ -88,6 +90,15 @@ export function dropServerIcon(host: string): void {
   if (saveStoredJson(SERVER_ICONS_KEY, kept)) announce();
 }
 
+/** Forget the icons of every host not in `keep`, so a removed server leaves nothing behind. */
+export function pruneServerIcons(keep: Iterable<string>): void {
+  const hosts = new Set(keep);
+  const all = loadEntries();
+  const kept = all.filter((e) => hosts.has(e.host));
+  if (kept.length === all.length) return;
+  if (saveStoredJson(SERVER_ICONS_KEY, kept)) announce();
+}
+
 /**
  * Bring `host`'s cached icon in line with the hash its `server-info` reported.
  * An empty hash means the owner removed the icon: the entry goes and the rail
@@ -112,7 +123,8 @@ export async function syncServerIcon(
 }
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
-const SERVER_ICON_MAX_BYTES = 64 * 1024;
+/** The server's icon limit; a longer body is not an icon. */
+export const SERVER_ICON_MAX_BYTES = 64 * 1024;
 
 /** A `data:` URL for PNG `bytes`, or null when they are not a PNG within the server's icon limit. */
 export function pngDataUrl(bytes: Uint8Array): string | null {

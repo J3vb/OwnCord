@@ -3,7 +3,9 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
@@ -11,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // iconPNG draws a w x h PNG; shade varies the bytes so two icons hash differently.
@@ -42,21 +46,24 @@ func TestServerIcon_SetStoresFileAndHash(t *testing.T) {
 
 	hash, err := svc.SetServerIcon(ctx, 1, data)
 	mustDo(t, "SetServerIcon", err)
-	if len(hash) != 16 || hash != ServerIconHashOf(data) {
-		t.Fatalf("hash = %q, want the 16-hex prefix of the sha256", hash)
-	}
 	onDisk, err := os.ReadFile(filepath.Join(dir, ServerIconFile))
 	mustDo(t, "read icon file", err)
-	if !bytes.Equal(onDisk, data) {
-		t.Fatal("stored file differs from the upload")
+	if len(hash) != 16 || hash != ServerIconHashOf(onDisk) {
+		t.Fatalf("hash = %q, want the 16-hex prefix of the sha256 of the stored file", hash)
+	}
+	if _, err := png.Decode(bytes.NewReader(onDisk)); err != nil {
+		t.Fatalf("stored file is not a PNG: %v", err)
 	}
 	if got, _ := svc.Setting(ctx, ServerIconKey); got != hash {
 		t.Fatalf("server_icon row = %q, want %q", got, hash)
 	}
 	got, gotHash, err := svc.ServerIcon(ctx)
 	mustDo(t, "ServerIcon", err)
-	if !bytes.Equal(got, data) || gotHash != hash {
+	if !bytes.Equal(got, onDisk) || gotHash != hash {
 		t.Fatal("ServerIcon returned a different picture or hash")
+	}
+	if listed, err := svc.ServerIconHash(ctx); err != nil || listed != hash {
+		t.Fatalf("ServerIconHash = %q, %v; want %q", listed, err, hash)
 	}
 	left, _ := filepath.Glob(filepath.Join(dir, "*.tmp-*"))
 	if len(left) != 0 {
@@ -69,9 +76,10 @@ func TestServerIcon_SetStoresFileAndHash(t *testing.T) {
 func TestServerIcon_FailedRenameKeepsOldIconAndHash(t *testing.T) {
 	svc, dir := newIconService(t)
 	ctx := context.Background()
-	oldData := iconPNG(t, 64, 64, 1)
-	oldHash, err := svc.SetServerIcon(ctx, 1, oldData)
+	oldHash, err := svc.SetServerIcon(ctx, 1, iconPNG(t, 64, 64, 1))
 	mustDo(t, "first SetServerIcon", err)
+	oldData, err := os.ReadFile(filepath.Join(dir, ServerIconFile))
+	mustDo(t, "read old icon", err)
 
 	renameErr := errors.New("disk gone")
 	svc.iconRename = func(string, string) error { return renameErr }
@@ -81,6 +89,9 @@ func TestServerIcon_FailedRenameKeepsOldIconAndHash(t *testing.T) {
 	}
 	if got, _ := svc.Setting(ctx, ServerIconKey); got != oldHash {
 		t.Fatalf("hash row = %q after a failed rename, want the old %q", got, oldHash)
+	}
+	if hash, _ := svc.ServerIconHash(ctx); hash != oldHash {
+		t.Fatalf("served hash = %q after a failed rename, want the old %q", hash, oldHash)
 	}
 	got, gotHash, err := svc.ServerIcon(ctx)
 	mustDo(t, "ServerIcon", err)
@@ -107,6 +118,99 @@ func TestServerIcon_ReplaceChangesHash(t *testing.T) {
 	mustDo(t, "ServerIconHash", err)
 	if hash != second {
 		t.Fatalf("hash = %q, want %q", hash, second)
+	}
+}
+
+// failingRowStore is a store whose settings write fails, as a full disk or a locked database would.
+type failingRowStore struct{ *db.DB }
+
+func (failingRowStore) ApplySettings(context.Context, map[string]string) error {
+	return errors.New("settings write refused")
+}
+
+// The file is the source of truth: a failed row write after the rename changes nothing about what clients see.
+func TestServerIcon_RowWriteFailureStillServesNewIcon(t *testing.T) {
+	database := newTestDB(t)
+	svc := NewSettingsService(failingRowStore{database})
+	svc.SetServerIconDir(t.TempDir())
+	ctx := context.Background()
+	hash, err := svc.SetServerIcon(ctx, 1, iconPNG(t, 64, 64, 4))
+	mustDo(t, "SetServerIcon", err)
+	data, gotHash, err := svc.ServerIcon(ctx)
+	mustDo(t, "ServerIcon", err)
+	if gotHash != hash || ServerIconHashOf(data) != hash {
+		t.Fatalf("served hash %q, stored hash %q", gotHash, hash)
+	}
+	if listed, _ := svc.ServerIconHash(ctx); listed != hash {
+		t.Fatalf("ServerIconHash = %q, want %q", listed, hash)
+	}
+}
+
+// A file swapped under the server (a restore, a manual copy) is what clients see; the row is not consulted.
+func TestServerIcon_HashFollowsTheFileNotTheRow(t *testing.T) {
+	svc, dir := newIconService(t)
+	ctx := context.Background()
+	first, err := svc.SetServerIcon(ctx, 1, iconPNG(t, 64, 64, 1))
+	mustDo(t, "SetServerIcon", err)
+	other := iconPNG(t, 64, 64, 9)
+	mustDo(t, "swap file", os.WriteFile(filepath.Join(dir, ServerIconFile), other, 0o600))
+	hash, err := svc.ServerIconHash(ctx)
+	mustDo(t, "ServerIconHash", err)
+	if hash == first || hash != ServerIconHashOf(other) {
+		t.Fatalf("hash = %q, want the hash of the file on disk %q", hash, ServerIconHashOf(other))
+	}
+	if row, _ := svc.Setting(ctx, ServerIconKey); row != first {
+		t.Fatalf("row = %q, expected the mirror to stay untouched", row)
+	}
+}
+
+// pngWithTextChunk inserts a tEXt chunk after the IHDR of a PNG.
+func pngWithTextChunk(t *testing.T, src []byte) []byte {
+	t.Helper()
+	const ihdrEnd = 8 + 4 + 4 + 13 + 4
+	payload := []byte("Comment\x00secret-metadata")
+	chunk := make([]byte, 0, len(payload)+12)
+	chunk = binary.BigEndian.AppendUint32(chunk, uint32(len(payload)))
+	chunk = append(chunk, "tEXt"...)
+	chunk = append(chunk, payload...)
+	chunk = binary.BigEndian.AppendUint32(chunk, crc32.ChecksumIEEE(chunk[4:]))
+	out := append([]byte{}, src[:ihdrEnd]...)
+	out = append(out, chunk...)
+	return append(out, src[ihdrEnd:]...)
+}
+
+func TestServerIcon_UploadIsReencodedWithoutMetadata(t *testing.T) {
+	svc, dir := newIconService(t)
+	upload := pngWithTextChunk(t, iconPNG(t, 64, 64, 5))
+	upload = append(upload, []byte("trailing garbage")...)
+	if !bytes.Contains(upload, []byte("secret-metadata")) {
+		t.Fatal("test setup: the chunk is missing")
+	}
+	_, err := svc.SetServerIcon(context.Background(), 1, upload)
+	mustDo(t, "SetServerIcon", err)
+	stored, err := os.ReadFile(filepath.Join(dir, ServerIconFile))
+	mustDo(t, "read icon", err)
+	if bytes.Contains(stored, []byte("secret-metadata")) || bytes.Contains(stored, []byte("trailing garbage")) {
+		t.Fatal("metadata or trailing data survived the re-encode")
+	}
+	if len(stored) > ServerIconMaxBytes {
+		t.Fatalf("stored %d bytes", len(stored))
+	}
+}
+
+func TestServerIcon_StartupSweepsStaleTempFiles(t *testing.T) {
+	svc, _ := newSettingsService(t)
+	dir := t.TempDir()
+	stale := filepath.Join(dir, ServerIconFile+".tmp-123")
+	keep := filepath.Join(dir, "other.tmp-1")
+	mustDo(t, "write stale", os.WriteFile(stale, []byte("half"), 0o600))
+	mustDo(t, "write other", os.WriteFile(keep, []byte("x"), 0o600))
+	svc.SetServerIconDir(dir)
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale temp file survived: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("an unrelated file was removed: %v", err)
 	}
 }
 

@@ -36,6 +36,7 @@ type SettingsService struct {
 	iconDir    string
 	iconMu     syncutil.Mutex
 	iconRename func(oldpath, newpath string) error
+	iconSnap   *iconSnapshot // guarded by iconMu
 }
 
 // NewSettingsService creates a SettingsService.

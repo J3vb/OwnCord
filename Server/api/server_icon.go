@@ -21,7 +21,7 @@ func handleServerIcon(svc *service.Services) http.HandlerFunc {
 				writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "no server icon")
 				return
 			}
-			slog.ErrorContext(r.Context(), "failed to read server info", "route", "server-icon", "error", err)
+			slog.ErrorContext(r.Context(), "server icon read failed", "error", err)
 			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "internal server error")
 			return
 		}
