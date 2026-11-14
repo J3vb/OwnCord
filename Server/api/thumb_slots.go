@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -33,6 +34,8 @@ type thumbSlots struct {
 	sem  *semaphore.Weighted
 	size int64
 	wait time.Duration
+	// flights collapses concurrent requests for one thumbnail into one generation.
+	flights singleflight.Group
 }
 
 func makeThumbSlots(n int, wait time.Duration) *thumbSlots {

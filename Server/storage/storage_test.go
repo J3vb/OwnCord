@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -651,6 +652,104 @@ func TestThumb_PathTraversalRejected(t *testing.T) {
 		}
 		if _, err := s.OpenThumb(name); err == nil {
 			t.Errorf("OpenThumb(%q) accepted", name)
+		}
+	}
+}
+
+// ─── small thumbnail sizes ───────────────────────────────────────────────────
+
+// TestThumbSize_RoundTripKeptApartAndOutOfList: each size is its own file, none is mistaken for the
+// default one or for a stranded upload, and an unknown size is refused.
+func TestThumbSize_RoundTripKeptApartAndOutOfList(t *testing.T) {
+	s := newTestStorage(t)
+	if _, err := s.Save("orig", strings.NewReader("original")); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := s.SaveThumb("orig", []byte("default")); err != nil {
+		t.Fatal(err)
+	}
+	for _, size := range storage.ThumbSizes {
+		if err := s.SaveThumbSize("orig", size, []byte("size-"+strconv.Itoa(size))); err != nil {
+			t.Fatalf("SaveThumbSize(%d): %v", size, err)
+		}
+	}
+	read := func(f storage.File, err error) string {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close() //nolint:errcheck
+		b, _ := io.ReadAll(f)
+		return string(b)
+	}
+	if got := read(s.OpenThumb("orig")); got != "default" {
+		t.Errorf("default thumbnail = %q", got)
+	}
+	for _, size := range storage.ThumbSizes {
+		if got := read(s.OpenThumbSize("orig", size)); got != "size-"+strconv.Itoa(size) {
+			t.Errorf("size %d = %q", size, got)
+		}
+	}
+	if entries, err := s.List(); err != nil || len(entries) != 1 || entries[0].Name != "orig" {
+		t.Errorf("List = %+v, %v; want only the original", entries, err)
+	}
+	if err := s.SaveThumbSize("orig", 99, []byte("x")); err == nil {
+		t.Error("an unknown size was accepted")
+	}
+	if _, err := s.OpenThumbSize("orig", 99); err == nil {
+		t.Error("an unknown size was opened")
+	}
+}
+
+// TestDelete_RemovesEverySize: Delete takes the thumbnails of every size with the original, including a
+// marker, and a retried Delete of an already-missing original still removes them.
+func TestDelete_RemovesEverySize(t *testing.T) {
+	dir := t.TempDir()
+	s, err := storage.New(dir, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Save("orig", strings.NewReader("original")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveThumb("orig", []byte("d")); err != nil {
+		t.Fatal(err)
+	}
+	for i, size := range storage.ThumbSizes {
+		data := []byte("x")
+		if i == 0 {
+			data = nil // a marker
+		}
+		if err := s.SaveThumbSize("orig", size, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Remove(filepath.Join(dir, "orig")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete("orig"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Delete = %v, want ErrNotExist for the original", err)
+	}
+	for _, size := range append([]int{0}, storage.ThumbSizes...) {
+		if _, err := s.OpenThumbSize("orig", size); !errors.Is(err, os.ErrNotExist) && size != 0 {
+			t.Errorf("size %d survived Delete: %v", size, err)
+		}
+	}
+	if _, err := s.OpenThumb("orig"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("default thumbnail survived Delete: %v", err)
+	}
+}
+
+// TestSaveThumbSize_OriginalGoneLeavesNothing: a size generated while its original was deleted does not
+// outlive it.
+func TestSaveThumbSize_OriginalGoneLeavesNothing(t *testing.T) {
+	s := newTestStorage(t)
+	for _, size := range storage.ThumbSizes {
+		if err := s.SaveThumbSize("never-saved", size, []byte("x")); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("SaveThumbSize(%d) without an original = %v, want ErrNotExist", size, err)
+		}
+		if _, err := s.OpenThumbSize("never-saved", size); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("size %d outlived its original: %v", size, err)
 		}
 	}
 }

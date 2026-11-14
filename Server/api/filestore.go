@@ -28,6 +28,10 @@ type FileStore interface {
 	// records that the original is served instead.
 	OpenThumb(uuid string) (storage.File, error)
 	SaveThumb(uuid string, data []byte) error
+	// OpenThumbSize and SaveThumbSize are the same for one of storage.ThumbSizes;
+	// Delete removes every size with the original.
+	OpenThumbSize(uuid string, size int) (storage.File, error)
+	SaveThumbSize(uuid string, size int, data []byte) error
 }
 
 var _ FileStore = (*storage.Storage)(nil)

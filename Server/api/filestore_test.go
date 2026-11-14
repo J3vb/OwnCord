@@ -25,6 +25,12 @@ func (failingStore) OpenThumb(string) (storage.File, error) {
 	return nil, errors.New("no file")
 }
 func (failingStore) SaveThumb(string, []byte) error { return errors.New("simulated write failure") }
+func (failingStore) OpenThumbSize(string, int) (storage.File, error) {
+	return nil, errors.New("no file")
+}
+func (failingStore) SaveThumbSize(string, int, []byte) error {
+	return errors.New("simulated write failure")
+}
 
 // TestSaveReserved_ReleasesTheChargeOnAFailedWrite pins saveReserved's own
 // guarantee, independent of the handlers' deferred Settle: a caller that
