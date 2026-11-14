@@ -12,7 +12,7 @@ func testGIF(t *testing.T, frames int) []byte {
 	t.Helper()
 	pal := color.Palette{color.Black, color.White}
 	g := &gif.GIF{}
-	for i := 0; i < frames; i++ {
+	for i := range frames {
 		img := image.NewPaletted(image.Rect(0, 0, 4, 4), pal)
 		img.SetColorIndex(i%4, 0, 1)
 		g.Image = append(g.Image, img)

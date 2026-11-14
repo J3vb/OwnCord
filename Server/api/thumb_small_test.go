@@ -189,14 +189,12 @@ func TestServeThumb_ConcurrentRequestsMakeOneThumbnail(t *testing.T) {
 	bodies := make([][]byte, n)
 	var wg sync.WaitGroup
 	for i := range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			rr := doSizedThumb(t, router, id, token, "?size=128", nil)
 			if rr.Code == http.StatusOK {
 				bodies[i] = rr.Body.Bytes()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if got := store.saves.Load(); got != 1 {
@@ -212,7 +210,7 @@ func TestServeThumb_ConcurrentRequestsMakeOneThumbnail(t *testing.T) {
 // An original deleted while its thumbnail is being saved leaves no thumbnail behind.
 func TestServeThumb_OriginalDeletedWhileSavingLeavesNoVariant(t *testing.T) {
 	router, store, id, token := newCountingRouter(t)
-	store.before = func() { _ = store.Storage.Delete(id) }
+	store.before = func() { _ = store.Delete(id) }
 	rr := doSizedThumb(t, router, id, token, "?size=256", nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status %d", rr.Code)
