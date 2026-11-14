@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoModeControllerMocks";
-import { CALL_CHAT_STACK_BELOW_PX } from "../../../src/pages/main-page/VideoModeController";
+import { CALL_CHAT_STACK_BELOW_PX } from "../../../src/features/voice/VideoModeController";
 import { createVideoGrid } from "../../../src/features/voice/videoGrid/VideoGrid";
 import { viewMenuRow } from "../../helpers/videoGridHarness";
 import {

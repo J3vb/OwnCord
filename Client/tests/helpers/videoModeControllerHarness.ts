@@ -2,7 +2,7 @@ import { beforeEach, vi } from "vitest";
 import {
   createVideoModeController,
   type VideoModeControllerOptions,
-} from "../../src/pages/main-page/VideoModeController";
+} from "../../src/features/voice/VideoModeController";
 import {
   mockGetLocalCameraStream,
   mockGetLocalScreenshareStream,

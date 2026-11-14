@@ -34,10 +34,10 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-import type { LazyVideoGrid } from "../../src/pages/main-page/lazyVideoGrid";
+import type { LazyVideoGrid } from "../../src/features/voice/lazyVideoGrid";
 import type { VideoGridCallbacks, TileConfig } from "../../src/features/voice/videoGrid/VideoGrid";
 
-type LazyModule = typeof import("../../src/pages/main-page/lazyVideoGrid");
+type LazyModule = typeof import("../../src/features/voice/lazyVideoGrid");
 
 function stream(): MediaStream {
   return { getTracks: () => [], getVideoTracks: () => [] } as unknown as MediaStream;
@@ -115,7 +115,7 @@ describe("createLazyVideoGrid", () => {
     h.errors.length = 0;
     h.throwOnce = false;
     vi.doMock("../../src/features/voice/videoGrid/VideoGrid", gatedFactory);
-    lazy = await import("../../src/pages/main-page/lazyVideoGrid");
+    lazy = await import("../../src/features/voice/lazyVideoGrid");
     toast = await import("@lib/ui/toast");
     vi.mocked(toast.showToast).mockClear();
     grid = lazy.createLazyVideoGrid();
@@ -166,7 +166,7 @@ describe("createLazyVideoGrid", () => {
       vi.resetModules();
       vi.doMock("../../src/features/voice/videoGrid/VideoGrid", gatedFactory);
       h.loads.value = 0;
-      const fresh = (await import("../../src/pages/main-page/lazyVideoGrid")).createLazyVideoGrid();
+      const fresh = (await import("../../src/features/voice/lazyVideoGrid")).createLazyVideoGrid();
       trigger(fresh);
       await vi.waitFor(() => expect(h.loads.value).toBe(1));
       fresh.destroy?.();
@@ -502,7 +502,7 @@ describe("parity with the real grid", () => {
     direct.mount(directSlot);
     script(direct);
 
-    const { createLazyVideoGrid } = await import("../../src/pages/main-page/lazyVideoGrid");
+    const { createLazyVideoGrid } = await import("../../src/features/voice/lazyVideoGrid");
     const proxy = createLazyVideoGrid();
     const proxySlot = document.createElement("div");
     document.body.appendChild(proxySlot);
@@ -552,7 +552,7 @@ describe("parity with the real grid", () => {
     direct.mount(directSlot);
     run(direct);
 
-    const { createLazyVideoGrid } = await import("../../src/pages/main-page/lazyVideoGrid");
+    const { createLazyVideoGrid } = await import("../../src/features/voice/lazyVideoGrid");
     const proxy = createLazyVideoGrid();
     const proxySlot = document.createElement("div");
     document.body.appendChild(proxySlot);

@@ -11,10 +11,10 @@ import {
   hasLocalScreenshareAudio,
 } from "@lib/voice/livekitSession";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
-import type { VideoGridComponent } from "../../features/voice/videoGrid/VideoGrid";
+import type { VideoGridComponent } from "./videoGrid/VideoGrid";
 import { shellText } from "../../i18n/shell";
 import { buildCallPeople, type CallAvatarCache } from "./callPeople";
-import { createCallChatResize, type CallChatResize } from "../../features/voice/callChatResize";
+import { createCallChatResize, type CallChatResize } from "./callChatResize";
 
 // ---------------------------------------------------------------------------
 // Types

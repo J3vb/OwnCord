@@ -241,7 +241,7 @@ press that was still on its way does nothing: no second teardown, and no mute
 carried into the next call.
 
 **The voice channel's chat beside the grid** (guild calls): opening the call
-view selects the voice channel you are in (`pages/main-page/callChat.ts`), so
+view selects the voice channel you are in (`features/voice/callChat.ts`), so
 its chat mounts as for any channel, and the grid sits left of it with the chat
 in a column on the right (stacked under the grid at narrow width). The chat
 column is 360px by default; the handle on its left edge resizes it (drag, or
