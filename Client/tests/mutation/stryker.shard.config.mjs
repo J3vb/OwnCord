@@ -666,6 +666,7 @@ export const shards = {
     "src/features/content-consent/concealed.ts",
     "src/features/content-consent/nsfw.ts",
     "src/features/moderation/History.ts",
+    "src/features/moderation/queueCore.ts",
     "src/features/moderation/queueParts.ts",
     "src/features/safety/DmPrivacy.ts",
     "src/features/settings/logoutConfirm.ts",
