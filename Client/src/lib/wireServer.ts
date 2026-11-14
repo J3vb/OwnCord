@@ -332,6 +332,8 @@ export type {
   PollInfo,
   PollView,
   PollUpdatePayload,
+  LinkPreviewCard,
+  MessageLinkPreviewsPayload,
   PollCreateOkPayload,
   PollVoteOkPayload,
   PollEndOkPayload,

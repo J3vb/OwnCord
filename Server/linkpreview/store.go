@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
@@ -18,6 +19,12 @@ import (
 const DirName = "link-previews"
 
 const (
+	// CardReuse is how long a fetched card is reused before its page is fetched again, and the
+	// least time a card nothing names is kept.
+	CardReuse = 7 * 24 * time.Hour
+	// FailureReuse is how long a failed fetch is remembered.
+	FailureReuse = time.Hour
+
 	hashLen = 64
 	// tempPrefix starts the name of a thumbnail being written; Sweep removes one older than tempMaxAge.
 	tempPrefix = ".tmp-"
@@ -67,6 +74,9 @@ type Repo interface {
 	ListLinkPreviewImagesUnusedBefore(ctx context.Context, cutoff string, limit int) ([]ImageRef, error)
 	ListUnreferencedLinkPreviewImages(ctx context.Context, cutoff string, limit int) ([]ImageRef, error)
 	DeleteLinkPreviewImage(ctx context.Context, hash string) (bool, error)
+	TouchLinkPreviews(ctx context.Context, urlHashes []string, lastUsedAt string) error
+	TouchLinkPreviewImages(ctx context.Context, hashes []string, lastUsedAt string) error
+	DeleteUnreferencedLinkPreviews(ctx context.Context, cutoff string) (int64, error)
 }
 
 // Store keeps link cards in the database and thumbnails on disk. Build one per data folder
@@ -259,7 +269,11 @@ func (s *Store) OpenImage(hash string) (*os.File, error) {
 	if !ValidHash(hash) {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidHash, hash)
 	}
-	f, err := os.Open(filepath.Join(s.shardDir(hash), hash)) //nolint:gosec // hash validated as hex above
+	path := filepath.Clean(filepath.Join(s.shardDir(hash), hash))
+	if !strings.HasPrefix(path, filepath.Clean(s.dir)+string(filepath.Separator)) {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidHash, hash)
+	}
+	f, err := os.Open(path) //nolint:gosec // hash validated as hex and the path kept inside the store
 	if err != nil {
 		return nil, fmt.Errorf("opening thumbnail: %w", err)
 	}
@@ -295,6 +309,24 @@ func (s *Store) PutPreview(ctx context.Context, p Preview) error {
 	}
 	if err := s.db.UpsertLinkPreview(ctx, p); err != nil {
 		return fmt.Errorf("storing link preview: %w", err)
+	}
+	return nil
+}
+
+// KeepCard rewrites a card as it is, with its thumbnail reference, to change only when it was
+// fetched. It is how a failed refresh leaves the old card in place.
+func (s *Store) KeepCard(ctx context.Context, p Preview) error {
+	if err := syncutil.LockContext(ctx, &s.mu); err != nil {
+		return fmt.Errorf("waiting for the thumbnail store: %w", err)
+	}
+	defer s.mu.Unlock()
+	if p.ImageHash != nil {
+		if ok, err := s.db.LinkPreviewImageExists(ctx, *p.ImageHash); err != nil || !ok {
+			p.ImageHash = nil
+		}
+	}
+	if err := s.db.UpsertLinkPreview(ctx, p); err != nil {
+		return fmt.Errorf("keeping link preview: %w", err)
 	}
 	return nil
 }
@@ -342,4 +374,29 @@ func (s *Store) ReplaceMessagePreviews(ctx context.Context, messageID int64, con
 		return false, fmt.Errorf("replacing message previews: %w", err)
 	}
 	return applied, nil
+}
+
+// TouchMany records that cards and thumbnails were just shown, one statement for each kind.
+func (s *Store) TouchMany(ctx context.Context, urlHashes, imageHashes []string) error {
+	stamp := FormatTime(s.now())
+	if err := s.db.TouchLinkPreviews(ctx, urlHashes, stamp); err != nil {
+		return fmt.Errorf("touching link previews: %w", err)
+	}
+	if err := s.db.TouchLinkPreviewImages(ctx, imageHashes, stamp); err != nil {
+		return fmt.Errorf("touching thumbnails: %w", err)
+	}
+	return nil
+}
+
+// PruneCards removes the cards no message names that were last used more than unusedFor ago,
+// and returns how many it removed. A card is never removed within CardReuse of its last use,
+// whatever unusedFor says, so a link posted again inside the reuse window still finds its card.
+// A thumbnail they named is left to Sweep.
+func (s *Store) PruneCards(ctx context.Context, unusedFor time.Duration) (int64, error) {
+	unusedFor = max(unusedFor, CardReuse)
+	n, err := s.db.DeleteUnreferencedLinkPreviews(ctx, FormatTime(s.now().Add(-unusedFor)))
+	if err != nil {
+		return 0, fmt.Errorf("pruning link preview cards: %w", err)
+	}
+	return n, nil
 }

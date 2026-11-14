@@ -209,3 +209,35 @@ func (d *DB) DeleteLinkPreviewImage(ctx context.Context, hash string) (bool, err
 	}
 	return n > 0, nil
 }
+
+// TouchLinkPreviews records that the cards under urlHashes were shown at lastUsedAt, in one statement.
+func (d *DB) TouchLinkPreviews(ctx context.Context, urlHashes []string, lastUsedAt string) error {
+	if len(urlHashes) == 0 {
+		return nil
+	}
+	if err := d.q.TouchLinkPreviewsByHash(ctx, dbgen.TouchLinkPreviewsByHashParams{LastUsedAt: lastUsedAt, UrlHashes: urlHashes}); err != nil {
+		return fmt.Errorf("TouchLinkPreviews: %w", err)
+	}
+	return nil
+}
+
+// TouchLinkPreviewImages records that the thumbnails under hashes were shown at lastUsedAt, in one statement.
+func (d *DB) TouchLinkPreviewImages(ctx context.Context, hashes []string, lastUsedAt string) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+	if err := d.q.TouchLinkPreviewImagesByHash(ctx, dbgen.TouchLinkPreviewImagesByHashParams{LastUsedAt: lastUsedAt, Hashes: hashes}); err != nil {
+		return fmt.Errorf("TouchLinkPreviewImages: %w", err)
+	}
+	return nil
+}
+
+// DeleteUnreferencedLinkPreviews removes the cards last used before cutoff that no message names
+// and returns how many it removed.
+func (d *DB) DeleteUnreferencedLinkPreviews(ctx context.Context, cutoff string) (int64, error) {
+	n, err := d.q.DeleteUnreferencedLinkPreviews(ctx, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("DeleteUnreferencedLinkPreviews: %w", err)
+	}
+	return n, nil
+}

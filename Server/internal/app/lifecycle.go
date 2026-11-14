@@ -212,7 +212,7 @@ func pushDispatchEnabled(cfg *config.Config) bool {
 // a supervised livekit-server is never orphaned.
 func (a *App) startHub() error {
 	rt, err := StartRuntime(a.cfg, a.database, a.plugins,
-		RuntimeInputs{Version: a.deps.Version, TOTPKey: a.totpKey, Storage: a.storage})
+		RuntimeInputs{Version: a.deps.Version, TOTPKey: a.totpKey, Storage: a.storage, LinkPreviews: a.linkPreviews})
 	if err != nil {
 		return err
 	}

@@ -114,6 +114,31 @@ export interface PollUpdatePayload {
   readonly answer_ids?: readonly number[];
 }
 
+/** One image of a link preview card: a thumbnail stored by the server, at most 640 px on a side. */
+export interface LinkPreviewImage {
+  readonly hash: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** A link preview card the server built once for a message's link. */
+export interface LinkPreviewCard {
+  readonly url: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly site_name?: string;
+  readonly image?: LinkPreviewImage;
+}
+
+/** The whole set of cards a message now has; an empty list clears them. */
+export interface MessageLinkPreviewsPayload {
+  readonly message_id: number;
+  readonly channel_id: number;
+  /** The message's edited_at, else its timestamp: a frame older than the cards held is dropped. */
+  readonly content_version: string;
+  readonly link_previews: readonly LinkPreviewCard[];
+}
+
 export interface PollCreateOkPayload {
   readonly message_id: number;
   readonly channel_id: number;

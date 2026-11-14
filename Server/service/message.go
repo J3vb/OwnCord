@@ -10,6 +10,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/microcosm-cc/bluemonday"
 )
@@ -71,6 +72,8 @@ type EditMessageResult struct {
 	MentionsEveryone bool
 	MentionsHere     bool
 	PostOpening      bool
+	// LinkJob is the unfurl job for the edited text; see SendMessageResult.LinkJob.
+	LinkJob *linkpreview.Job
 }
 
 // DeleteMessageResult is the output of a successful delete.

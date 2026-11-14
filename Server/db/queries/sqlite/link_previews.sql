@@ -102,3 +102,16 @@ ORDER BY i.last_used_at ASC, i.hash ASC LIMIT ?;
 -- name: DeleteLinkPreviewImage :execrows
 -- A preview that named the image keeps its text and loses its image_hash.
 DELETE FROM link_preview_images WHERE hash = ?;
+
+-- name: TouchLinkPreviewsByHash :exec
+UPDATE link_previews SET last_used_at = sqlc.arg(last_used_at) WHERE url_hash IN (sqlc.slice('url_hashes'));
+
+-- name: TouchLinkPreviewImagesByHash :exec
+UPDATE link_preview_images SET last_used_at = sqlc.arg(last_used_at) WHERE hash IN (sqlc.slice('hashes'));
+
+-- name: DeleteUnreferencedLinkPreviews :execrows
+-- Cards no message names and nothing has stored or shown since the cutoff.
+-- message_link_previews.url_hash has no ON DELETE action, so a referenced card is never removed.
+DELETE FROM link_previews
+WHERE last_used_at < ?
+  AND NOT EXISTS (SELECT 1 FROM message_link_previews m WHERE m.url_hash = link_previews.url_hash);

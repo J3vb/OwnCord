@@ -52,6 +52,14 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 // dm_channel_open, dm_request and the participant-addressed message), so a
 // forward's fan-out is the send path's.
 func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, channelID int64, replyTo *int64, reply []byte, result *service.SendMessageResult) Result {
+	res := sendResultEventsBody(d, info, clientMessageID, channelID, replyTo, reply, result)
+	if job := result.LinkJob; job != nil {
+		res.AfterEmit = func() { d.MessageSvc.QueueLinkPreviews(job) }
+	}
+	return res
+}
+
+func sendResultEventsBody(d ChatDeps, info ClientInfo, clientMessageID string, channelID int64, replyTo *int64, reply []byte, result *service.SendMessageResult) Result {
 	attData := make([]map[string]any, 0, len(result.Attachments))
 	for _, ai := range result.Attachments {
 		attData = append(attData, map[string]any{
@@ -210,7 +218,11 @@ func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return serviceErrorToResult(err)
 	}
 
-	return Result{Events: chatEditedEvents(result)}
+	res := Result{Events: chatEditedEvents(result)}
+	if job := result.LinkJob; job != nil {
+		res.AfterEmit = func() { d.MessageSvc.QueueLinkPreviews(job) }
+	}
+	return res
 }
 
 func chatEditedEvents(result *service.EditMessageResult) []Event {

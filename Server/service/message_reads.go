@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -35,6 +36,10 @@ type messageReads struct {
 	perms *PermissionService
 	// media reads a channel's media gallery; nil disables it.
 	media MediaStore
+	// previews reads the cards attached to history; nil attaches none.
+	previews linkPreviewReader
+	// unfurler takes the messages history finds without cards; nil queues none.
+	unfurler linkpreview.Unfurler
 }
 
 func newMessageReads(st messageReadStore, perms *PermissionService) *messageReads {

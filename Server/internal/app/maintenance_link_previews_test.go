@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/linkpreview"
 )
 
@@ -47,5 +50,30 @@ func TestMaintenance_SweepLinkPreviewsNoStoreIsNoop(t *testing.T) {
 	mustDo(t, "sweepLinkPreviews", m.sweepLinkPreviews(context.Background()))
 	if OpenLinkPreviews(slog.Default(), &config.Config{}, nil) != nil {
 		t.Error("a store was opened without a data dir")
+	}
+}
+
+// A card no message names and nothing has shown for thumbnail_unused_days is removed by the
+// sweep; a recent one stays.
+func TestMaintenance_SweepLinkPreviewsPrunesUnreferencedCards(t *testing.T) {
+	ctx := context.Background()
+	database := newMaintenanceTestDB(t)
+	cfg := &config.Config{Server: config.ServerConfig{DataDir: t.TempDir()}}
+	cfg.LinkPreviews = config.LinkPreviewsConfig{ThumbnailCacheMB: 10, ThumbnailUnusedDays: 30}
+	store := OpenLinkPreviews(slog.Default(), cfg, database)
+	m := newMaintenance(slog.Default(), cfg, database, nil, nil)
+	m.linkPreviews = store
+
+	oldStamp := linkpreview.FormatTime(time.Now().Add(-60 * 24 * time.Hour))
+	newStamp := linkpreview.FormatTime(time.Now())
+	mustDo(t, "old card", store.PutPreview(ctx, linkpreview.Preview{UrlHash: "old", Url: "https://a/", FetchedAt: oldStamp, LastUsedAt: oldStamp}))
+	mustDo(t, "new card", store.PutPreview(ctx, linkpreview.Preview{UrlHash: "new", Url: "https://b/", FetchedAt: newStamp, LastUsedAt: newStamp}))
+
+	mustDo(t, "sweepLinkPreviews", m.sweepLinkPreviews(ctx))
+	if _, err := store.Preview(ctx, "old"); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("old unreferenced card err = %v; want ErrNotFound", err)
+	}
+	if _, err := store.Preview(ctx, "new"); err != nil {
+		t.Errorf("recent card: %v", err)
 	}
 }

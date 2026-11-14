@@ -310,12 +310,20 @@ func (m *maintenance) sweepLinkPreviews(ctx context.Context) error {
 	if m.linkPreviews == nil {
 		return nil
 	}
+	// Unreferenced cards go first, so the thumbnails they named are unreferenced for the trim below.
+	pruned, pruneErr := m.linkPreviews.PruneCards(ctx, m.linkPreviewUnused)
+	if pruned > 0 {
+		m.log.Info("link preview cards pruned", "cards", pruned)
+	}
 	res, err := m.linkPreviews.Sweep(ctx, m.linkPreviewCapBytes, m.linkPreviewUnused)
 	if res.Images+res.Strays+res.Temps > 0 {
 		m.log.Info("link preview thumbnails trimmed", "images", res.Images, "bytes", res.ImageBytes, "strays", res.Strays, "temps", res.Temps)
 	}
 	if err != nil {
 		return fmt.Errorf("sweep link previews: %w", err)
+	}
+	if pruneErr != nil {
+		return fmt.Errorf("prune link previews: %w", pruneErr)
 	}
 	return nil
 }

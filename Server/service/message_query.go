@@ -52,6 +52,7 @@ func (s *messageReads) GetMessages(ctx context.Context, userID, channelID, befor
 		msgs = msgs[:limit]
 	}
 
+	s.attachLinkPreviews(ctx, msgs)
 	return msgs, hasMore, nil
 }
 
@@ -82,6 +83,7 @@ func (s *messageReads) GetMessagesAfter(ctx context.Context, userID, channelID, 
 	if hasMore {
 		msgs = msgs[:limit]
 	}
+	s.attachLinkPreviews(ctx, msgs)
 	return msgs, hasMore, nil
 }
 
@@ -167,6 +169,7 @@ func (s *messageReads) GetMessagesAround(ctx context.Context, userID, channelID,
 		window.HasMoreAfter = true
 		window.Messages = window.Messages[:centreIdx+afterCount+1]
 	}
+	s.attachLinkPreviews(ctx, window.Messages)
 	return window, nil
 }
 
@@ -179,5 +182,6 @@ func (s *messageReads) GetPinnedMessages(ctx context.Context, userID, channelID 
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch pinned messages: %w", ErrInternal, err)
 	}
+	s.attachLinkPreviews(ctx, msgs)
 	return msgs, nil
 }

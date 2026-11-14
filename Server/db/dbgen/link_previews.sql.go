@@ -32,6 +32,22 @@ func (q *Queries) DeleteMessageLinkPreviews(ctx context.Context, messageID int64
 	return err
 }
 
+const deleteUnreferencedLinkPreviews = `-- name: DeleteUnreferencedLinkPreviews :execrows
+DELETE FROM link_previews
+WHERE last_used_at < ?
+  AND NOT EXISTS (SELECT 1 FROM message_link_previews m WHERE m.url_hash = link_previews.url_hash)
+`
+
+// Cards no message names and nothing has stored or shown since the cutoff.
+// message_link_previews.url_hash has no ON DELETE action, so a referenced card is never removed.
+func (q *Queries) DeleteUnreferencedLinkPreviews(ctx context.Context, lastUsedAt string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUnreferencedLinkPreviews, lastUsedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getLinkPreview = `-- name: GetLinkPreview :one
 SELECT url_hash, url, title, description, site_name, image_hash, fetched_at, failure, last_used_at
 FROM link_previews WHERE url_hash = ?
@@ -432,6 +448,56 @@ type TouchLinkPreviewImageParams struct {
 
 func (q *Queries) TouchLinkPreviewImage(ctx context.Context, arg TouchLinkPreviewImageParams) error {
 	_, err := q.db.ExecContext(ctx, touchLinkPreviewImage, arg.LastUsedAt, arg.Hash)
+	return err
+}
+
+const touchLinkPreviewImagesByHash = `-- name: TouchLinkPreviewImagesByHash :exec
+UPDATE link_preview_images SET last_used_at = ?1 WHERE hash IN (/*SLICE:hashes*/?)
+`
+
+type TouchLinkPreviewImagesByHashParams struct {
+	LastUsedAt string   `json:"lastUsedAt"`
+	Hashes     []string `json:"hashes"`
+}
+
+func (q *Queries) TouchLinkPreviewImagesByHash(ctx context.Context, arg TouchLinkPreviewImagesByHashParams) error {
+	query := touchLinkPreviewImagesByHash
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.LastUsedAt)
+	if len(arg.Hashes) > 0 {
+		for _, v := range arg.Hashes {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:hashes*/?", strings.Repeat(",?", len(arg.Hashes))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:hashes*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
+	return err
+}
+
+const touchLinkPreviewsByHash = `-- name: TouchLinkPreviewsByHash :exec
+UPDATE link_previews SET last_used_at = ?1 WHERE url_hash IN (/*SLICE:url_hashes*/?)
+`
+
+type TouchLinkPreviewsByHashParams struct {
+	LastUsedAt string   `json:"lastUsedAt"`
+	UrlHashes  []string `json:"urlHashes"`
+}
+
+func (q *Queries) TouchLinkPreviewsByHash(ctx context.Context, arg TouchLinkPreviewsByHashParams) error {
+	query := touchLinkPreviewsByHash
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.LastUsedAt)
+	if len(arg.UrlHashes) > 0 {
+		for _, v := range arg.UrlHashes {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:url_hashes*/?", strings.Repeat(",?", len(arg.UrlHashes))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:url_hashes*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
 	return err
 }
 

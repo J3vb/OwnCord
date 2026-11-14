@@ -105,6 +105,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		result.Sticker = db.NewMessageStickerInfo(&id, stickerRef.Name)
 	}
 	result.ReferencedMessage = s.replySnippet(ctx, p, msgID)
+	result.LinkJob = newLinkJob(msgID, p.ChannelID, p.UserID, msg.Content, msg.Timestamp, false)
 
 	if isDM && !s.sendMessageDMSideEffects(ctx, p, result) {
 		return result, nil // Message saved, skip DM side effects.
@@ -341,6 +342,9 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		MentionsEveryone: mentions.Everyone,
 		MentionsHere:     mentions.HereOnly,
 		PostOpening:      s.isPostOpening(context.WithoutCancel(ctx), ch, msgID),
+	}
+	if editedAt != "" {
+		result.LinkJob = newLinkJob(msgID, msg.ChannelID, userID, msg.Content, editedAt, true)
 	}
 
 	if isDM {

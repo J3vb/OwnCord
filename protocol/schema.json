@@ -152,6 +152,12 @@
       "ts": "POLL_UPDATE",
       "note": "a poll's full counts and version after a vote or its end (WP 6.9b)"
     },
+    {
+      "wire": "message_link_previews",
+      "go": "MsgTypeMessageLinkPreviews",
+      "ts": "MESSAGE_LINK_PREVIEWS",
+      "note": "the link preview cards the server built for a message after it was sent or edited; an empty list removes them"
+    },
     { "wire": "typing", "go": "MsgTypeTyping", "ts": "TYPING" },
     { "wire": "presence", "go": "MsgTypePresence", "ts": "PRESENCE" },
     {

@@ -270,6 +270,7 @@ var deadlineBound = []string{
 	"GET /api/v1/info",
 	"GET /api/v1/invites/",
 	"GET /api/v1/invites/{code}/redemptions",
+	"GET /api/v1/link-previews/images/{hash}",
 	"GET /api/v1/livekit/health",
 	"GET /api/v1/metrics",
 	"GET /api/v1/metrics/prometheus",

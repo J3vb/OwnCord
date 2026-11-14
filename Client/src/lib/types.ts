@@ -22,6 +22,7 @@ import type {
   ForwardInfo,
   GroupEventInfo,
   ImportedAuthor,
+  LinkPreviewCard,
   PollInfo,
   ReferencedMessage,
   ThreadInfo,
@@ -69,6 +70,7 @@ export type {
   PollInfo,
   PollView,
   PollUpdatePayload,
+  LinkPreviewCard,
   PollCreateOkPayload,
   PollVoteOkPayload,
   PollEndOkPayload,
@@ -286,6 +288,8 @@ export interface MessageResponse {
   readonly group_event?: GroupEventInfo;
   /** Present on a forwarded message only. */
   readonly forward?: ForwardInfo;
+  /** Server-built link cards; absent from older servers or when none. */
+  readonly link_previews?: readonly LinkPreviewCard[];
   /** Present on a poll message only. */
   readonly poll?: PollInfo;
   /** Present on a sticker message only. */

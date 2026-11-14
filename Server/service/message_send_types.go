@@ -1,6 +1,9 @@
 package service
 
-import "github.com/J3vb/OwnCord/Server/db"
+import (
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/linkpreview"
+)
 
 // SendMessageParams is the validated input for sending a message.
 type SendMessageParams struct {
@@ -36,6 +39,10 @@ type ReferencedMessage = db.ReferencedMessage
 // SendMessageResult is the output of a successful send.
 type SendMessageResult struct {
 	Duplicate bool // retry acknowledgment only, no repeated broadcasts or effects
+	// LinkJob is the unfurl job for the message's links, nil when it has none. The caller hands
+	// it to QueueLinkPreviews once the message's own events are out, so a card that is already
+	// cached cannot be sequenced ahead of the message it belongs to.
+	LinkJob *linkpreview.Job
 	// SkippedAttachmentIDs are requested uploads the send did not attach, in request order,
 	// de-duplicated; nil when none.
 	SkippedAttachmentIDs []string

@@ -190,3 +190,44 @@ func TestLinkPreviewQueriesFailOnClosedDB(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkPreviewTouchAndPrune(t *testing.T) {
+	ctx := t.Context()
+	database := openMigratedMemory(t)
+	uid := seedUser(t, database, "lp-prune")
+	cid := seedChannel(t, database, "lp-prune-chan")
+	mid, err := database.CreateMessage(ctx, cid, uid, "hi", nil)
+	mustDo(t, "CreateMessage", err)
+	var version string
+	mustDo(t, "version", database.QueryRowContext(ctx, `SELECT COALESCE(edited_at, timestamp) FROM messages WHERE id = ?`, mid).Scan(&version))
+
+	old := "2000-01-01T00:00:00Z"
+	mustDo(t, "image", database.InsertLinkPreviewImage(ctx, lpImage("img", 5, old)))
+	for _, h := range []string{"kept", "gone", "touched"} {
+		mustDo(t, "card", database.UpsertLinkPreview(ctx, db.LinkPreview{UrlHash: h, Url: "https://x/" + h, FetchedAt: old, LastUsedAt: old}))
+	}
+	ok, err := database.ReplaceMessageLinkPreviews(ctx, mid, version, "hi", old, []string{"kept"})
+	if err != nil || !ok {
+		t.Fatalf("Replace = %v, %v", ok, err)
+	}
+	mustDo(t, "touch cards", database.TouchLinkPreviews(ctx, []string{"touched"}, "2030-01-01T00:00:00Z"))
+	mustDo(t, "touch none", database.TouchLinkPreviews(ctx, nil, "x"))
+	mustDo(t, "touch images", database.TouchLinkPreviewImages(ctx, []string{"img"}, "2030-01-01T00:00:00Z"))
+	mustDo(t, "touch no images", database.TouchLinkPreviewImages(ctx, nil, "x"))
+	if img, err := database.GetLinkPreviewImage(ctx, "img"); err != nil || img.LastUsedAt != "2030-01-01T00:00:00Z" {
+		t.Errorf("image after touch = %+v, %v", img, err)
+	}
+
+	n, err := database.DeleteUnreferencedLinkPreviews(ctx, "2010-01-01T00:00:00Z")
+	if err != nil || n != 1 {
+		t.Fatalf("prune = %d, %v; want 1 (the old unreferenced card)", n, err)
+	}
+	if _, err := database.GetLinkPreview(ctx, "gone"); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("gone card err = %v; want ErrNotFound", err)
+	}
+	for _, h := range []string{"kept", "touched"} {
+		if _, err := database.GetLinkPreview(ctx, h); err != nil {
+			t.Errorf("card %s: %v", h, err)
+		}
+	}
+}
