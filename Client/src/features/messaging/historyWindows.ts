@@ -10,7 +10,7 @@ import { MAX_MESSAGES_PER_CHANNEL, messageResponseToMessage } from "./messageMod
 import type { Message, MessagesState } from "./messageModel";
 import { isUnreconciledEcho } from "./echoReconcile";
 import { sameValue } from "./sameValue";
-import { mergeMessagePoll } from "../../lib/pollState";
+import { mergeHeldState } from "../../lib/linkPreviewState";
 import { endLoadJournal, startLoadJournal } from "./loadJournal";
 export {
   holdLoadJournal as reduceHoldLoadJournal,
@@ -95,7 +95,7 @@ function reuseUnchangedRows(previous: readonly Message[], trimmed: readonly Mess
   // A page fetched before a newer poll update must not roll that poll back.
   return trimmed.map((fetched) => {
     const cached = cachedById.get(fetched.id);
-    const m = mergeMessagePoll(cached, fetched);
+    const m = mergeHeldState(cached, fetched);
     return cached !== undefined && sameValue(cached, m) ? cached : m;
   });
 }
@@ -244,12 +244,12 @@ function aroundRows(
   // A window fetched before a newer poll update must not roll that poll back.
   const loaded = new Map(
     (prev.messagesByChannel.get(channelId) ?? [])
-      .filter((m) => m.poll !== undefined)
+      .filter((m) => m.poll !== undefined || m.linkPreviews !== undefined)
       .map((m) => [m.id, m]),
   );
   const converted = messages
     .map(messageResponseToMessage)
-    .map((m) => mergeMessagePoll(loaded.get(m.id), m));
+    .map((m) => mergeHeldState(loaded.get(m.id), m));
   // Defensive: the server caps a window at 100, so this never fires today.
   // If it ever does, keep the older head — dropping the newest end is what the
   // detached flag below already describes, whereas dropping the head would

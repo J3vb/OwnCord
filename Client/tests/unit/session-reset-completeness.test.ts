@@ -73,6 +73,10 @@ import { expectConsole } from "../helpers/console";
 import { leaveVoiceChannel, voiceStore } from "../../src/stores/voice.store";
 import { promptForChannelPassword } from "../../src/features/voice/passwordPrompt";
 import { messagesStore } from "../../src/stores/messages.store";
+import {
+  noteServerBuildsCards,
+  serverBuildsLinkCards,
+} from "../../src/features/messaging/linkPreviewSession";
 import { channelsStore } from "../../src/stores/channels.store";
 import { blocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
 import {
@@ -229,6 +233,15 @@ const PROBES: readonly Probe[] = [
     name: "messages:store",
     mutate: () => messagesStore.setState((s) => ({ ...s, detachedChannels: new Set([42]) })),
     isInitial: () => messagesStore.getState().detachedChannels.size === 0,
+  },
+  {
+    // Which server builds link cards is learned per session: the next server starts unknown.
+    name: "link-previews:server-cards",
+    mutate: () => {
+      noteServerBuildsCards();
+      expect(serverBuildsLinkCards()).toBe(true);
+    },
+    isInitial: () => !serverBuildsLinkCards(),
   },
   {
     name: "channels:store",

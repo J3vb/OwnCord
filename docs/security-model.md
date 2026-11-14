@@ -231,10 +231,17 @@ documents. Any disagreement is a bug in this page.
   compile-time constant and has a runtime guard. Only `http:` and `https:`
   URLs are allowed. `image/svg+xml` is not a safe data-URI type. YouTube
   embeds are sandboxed.
-- **Content from other websites** is fetched only by the desktop's native
-  broker (`Client/src-tauri/src/external_content.rs`). This covers link
-  previews, YouTube titles and thumbnails, inline external images, GIFs and
-  external avatars. The broker:
+- **Link previews are built by the server** when it supports them: it fetches
+  each link once through `Server/safefetch` and stores the card and a shrunk
+  thumbnail. The desktop shows them from the server (thumbnails over the
+  TOFU-pinned `http_proxy.rs` with the session token), so the viewer's computer
+  never contacts the linked site and no external-content consent applies to
+  them. A server that does not build cards keeps the broker path below for one
+  release.
+- **Other content from other websites** is fetched only by the desktop's native
+  broker (`Client/src-tauri/src/external_content.rs`). This covers GIFs and
+  external avatars, and, on a server that does not build link previews, link
+  previews, YouTube titles and thumbnails and inline external images. The broker:
   - uses `https` on port 443 only
   - checks every resolved address with the same list as `Server/safefetch`,
     and refuses loopback, private, link-local, multicast and other non-public

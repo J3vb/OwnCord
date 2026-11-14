@@ -86,7 +86,7 @@ void registerSessionReset("embeds:caches", clearEmbedCaches, { phase: "cache" })
 
 // -- OG fetch -----------------------------------------------------------------
 
-function nonBlank(text: string | null): string | null {
+export function nonBlank(text: string | null): string | null {
   const trimmed = text?.trim() ?? "";
   return trimmed === "" ? null : trimmed;
 }
@@ -155,17 +155,33 @@ function clearOgEntry(url: string): void {
   ogInFlight.delete(url);
 }
 
-/** Render a link preview card with OG metadata (title, description, image). */
-export function renderGenericLinkPreview(url: string): HTMLDivElement {
-  const deferImages = dataSaverActive();
+/** The host a card names a link by, or the link itself when it does not parse. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
+/** The card's elements, built once for the local fetch and the server's cards alike. */
+export interface LinkCardShell {
+  readonly wrap: HTMLDivElement;
+  readonly hostEl: HTMLDivElement;
+  readonly titleEl: HTMLAnchorElement;
+  readonly descEl: HTMLDivElement;
+  readonly imageWrap: HTMLDivElement;
+  readonly statusEl: HTMLDivElement;
+  readonly retryEl: HTMLButtonElement;
+  readonly displayHost: string;
+  /** Show the card: it stays zero-height until it has something to show. */
+  readonly show: () => void;
+}
+
+export function createLinkCardShell(url: string): LinkCardShell {
   const wrap = createElement("div", { class: "msg-embed msg-embed-link" });
 
-  let displayHost = "";
-  try {
-    displayHost = new URL(url).hostname;
-  } catch {
-    displayHost = url;
-  }
+  const displayHost = hostOf(url);
 
   const content = createElement("div", { class: "msg-embed-link-content" });
 
@@ -216,6 +232,36 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
     wrap.classList.remove("msg-embed-link-pending");
     titleEl.removeAttribute("tabindex");
   };
+  return { wrap, hostEl, titleEl, descEl, imageWrap, statusEl, retryEl, displayHost, show };
+}
+
+/** Show the card once its image settles, or at once without one. An image
+ *  slower than the cap is dropped rather than growing the row a second time
+ *  after the card is shown. */
+export function showWhenImageSettles(
+  shell: LinkCardShell,
+  hasImage: boolean,
+  imageSettled: Promise<void>,
+): void {
+  if (!hasImage) {
+    shell.show();
+    return;
+  }
+  const cap = setTimeout(() => {
+    shell.imageWrap.remove();
+    shell.show();
+  }, OG_IMAGE_REVEAL_CAP_MS);
+  void imageSettled.then(() => {
+    clearTimeout(cap);
+    shell.show();
+  });
+}
+
+/** Render a link preview card with OG metadata (title, description, image). */
+export function renderGenericLinkPreview(url: string): HTMLDivElement {
+  const deferImages = dataSaverActive();
+  const shell = createLinkCardShell(url);
+  const { wrap, hostEl, titleEl, descEl, imageWrap, statusEl, retryEl, displayHost, show } = shell;
 
   const apply = (load: OgLoad): void => {
     wrap.removeAttribute("aria-busy");
@@ -255,16 +301,7 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
         show();
         return;
       }
-      // An image slower than the cap is dropped rather than growing the row
-      // a second time after the card is shown.
-      const cap = setTimeout(() => {
-        imageWrap.remove();
-        show();
-      }, OG_IMAGE_REVEAL_CAP_MS);
-      void imageSettled.then(() => {
-        clearTimeout(cap);
-        show();
-      });
+      showWhenImageSettles(shell, true, imageSettled);
       return;
     }
     wrap.dataset.embedState = "failed";
@@ -321,6 +358,26 @@ export function focusMessageLink(card: HTMLElement, url: string): void {
   row.focus();
 }
 
+/** The text of a preview card: title, host line and a description cut at 200 characters. */
+export function applyCardText(
+  meta: Pick<OgMeta, "title" | "description" | "siteName">,
+  titleEl: HTMLElement,
+  descEl: HTMLElement,
+  hostEl: HTMLElement,
+  displayHost: string,
+): void {
+  setText(titleEl, meta.title ?? displayHost);
+  setText(hostEl, meta.siteName ?? displayHost);
+  if (meta.description !== null) {
+    const desc =
+      meta.description.length > 200 ? meta.description.slice(0, 197) + "..." : meta.description;
+    setText(descEl, desc);
+    descEl.style.display = "";
+  } else {
+    descEl.style.display = "none";
+  }
+}
+
 /** Apply fetched OG metadata to the preview card elements. Resolves once the
  *  preview's image, if any, has loaded or failed. */
 export function applyOgMeta(
@@ -333,16 +390,7 @@ export function applyOgMeta(
   displayHost: string,
   deferImages = dataSaverActive(),
 ): Promise<void> {
-  setText(titleEl, meta.title ?? displayHost);
-  setText(hostEl, meta.siteName ?? displayHost);
-  if (meta.description !== null) {
-    const desc =
-      meta.description.length > 200 ? meta.description.slice(0, 197) + "..." : meta.description;
-    setText(descEl, desc);
-    descEl.style.display = "";
-  } else {
-    descEl.style.display = "none";
-  }
+  applyCardText(meta, titleEl, descEl, hostEl, displayHost);
   if (meta.image === null) return Promise.resolve();
   if (deferImages) {
     const handle = meta.image;

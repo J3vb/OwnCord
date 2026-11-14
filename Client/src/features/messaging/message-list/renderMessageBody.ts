@@ -22,6 +22,7 @@ import { resolveDisplayName } from "@lib/ui/avatar";
 import { renderMessageContent } from "../content/contentParser";
 import { readableRoleColor } from "@lib/prefs/themes";
 import { isLoneImageEmbed, renderUrlEmbeds } from "../content/media";
+import { serverCardsFor } from "../content/serverPreviews";
 import {
   isGalleryImage,
   renderAttachment,
@@ -246,7 +247,7 @@ function appendTextBody(box: HTMLElement, msg: Message, body: Node): void {
     wrap.style.display = "contents";
     wrap.appendChild(body);
     box.appendChild(wrap);
-  } else if (isLoneImageEmbed(msg.content)) {
+  } else if (isLoneImageEmbed(msg.content, serverCardsFor(msg))) {
     // The image stands in for its link; the text comes back if the embed goes.
     const wrap = createElement("div", { "data-lone-image-text": "" });
     wrap.hidden = true;
@@ -285,7 +286,7 @@ function appendStandardBody(
   appendAttachments(box, msg);
 
   // URL embeds (YouTube players, link previews)
-  const embeds = renderUrlEmbeds(msg.content);
+  const embeds = renderUrlEmbeds(msg.content, serverCardsFor(msg));
   if (embeds.childNodes.length > 0) {
     box.appendChild(embeds);
   }

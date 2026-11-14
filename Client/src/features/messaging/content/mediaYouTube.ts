@@ -13,6 +13,7 @@ import { externalConsentText } from "../../../i18n/externalConsent";
 import { contentText } from "../../../i18n/content";
 import { dataSaverActive } from "./dataSaver";
 import { renderDeferredMedia } from "./deferredMedia";
+import { loadCardThumbnail } from "./serverPreviews";
 
 /** Bumped on every cache clear so a title that resolves late is dropped. */
 let mediaCacheGeneration = 0;
@@ -83,15 +84,24 @@ void registerSessionReset("media:caches", clearMediaCaches, { phase: "cache" });
 /** Strict pattern for YouTube video IDs (alphanumeric, hyphens, underscores). */
 const YOUTUBE_ID_RE = /^[\w-]{1,20}$/;
 
-/** Render a YouTube embed player with title header. */
+/** What the server's card holds for a video: its title and the thumbnail it
+ *  stored. With it the embed fetches nothing from YouTube or the broker. */
+export interface ServerVideoCard {
+  readonly title: string | null;
+  readonly thumbUrl: string | null;
+}
+
+/** Render a YouTube embed player with title header. With `server`, the title
+ *  and still come from the server's stored card instead of the local fetch. */
 export function renderYouTubeEmbed(
   videoId: string,
   originalUrl: string,
   tapped = false,
+  server?: ServerVideoCard,
 ): HTMLDivElement {
   if (!tapped && dataSaverActive()) {
     const deferred = renderDeferredMedia(originalUrl, () =>
-      renderYouTubeEmbed(videoId, originalUrl, true),
+      renderYouTubeEmbed(videoId, originalUrl, true, server),
     );
     const link = createElement(
       "a",
@@ -127,7 +137,9 @@ export function renderYouTubeEmbed(
   });
 
   const cached = ytTitleCache.get(videoId);
-  if (cached !== undefined) {
+  if (server !== undefined) {
+    setText(titleLink, server.title ?? contentText("youtube.title.fallback"));
+  } else if (cached !== undefined) {
     setText(titleLink, cached);
   } else {
     setText(titleLink, contentText("youtube.title.loading"));
@@ -157,17 +169,27 @@ export function renderYouTubeEmbed(
 
   // Thumbnail container with play button overlay
   const thumbWrap = createElement("div", { class: "msg-embed-yt-player" });
-  const thumbUrl = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
   const thumb = createElement("img", {
     class: "msg-embed-thumb",
     alt: contentText("youtube.thumbAlt"),
     loading: "lazy",
   });
-  admitDerived(`url:${originalUrl}`, `url:${thumbUrl}`);
-  recoverEvictedImage(thumb, { url: thumbUrl });
-  void fetchExternalImage({ url: thumbUrl }).then((src) => {
-    if (src !== null) thumb.src = src;
-  });
+  if (server !== undefined) {
+    // The server's stored still: memory, then the durable image cache, then the server.
+    if (server.thumbUrl !== null) {
+      recoverEvictedImage(thumb, { url: server.thumbUrl });
+      void loadCardThumbnail(server.thumbUrl).then((src) => {
+        if (src !== null) thumb.src = src;
+      });
+    }
+  } else {
+    const thumbUrl = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
+    admitDerived(`url:${originalUrl}`, `url:${thumbUrl}`);
+    recoverEvictedImage(thumb, { url: thumbUrl });
+    void fetchExternalImage({ url: thumbUrl }).then((src) => {
+      if (src !== null) thumb.src = src;
+    });
+  }
 
   // Playback is a separate deliberate act: the frame talks to YouTube
   // itself, outside the broker's byte-fetch boundary, and the note says so.

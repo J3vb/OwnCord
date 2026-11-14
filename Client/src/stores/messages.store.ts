@@ -18,6 +18,7 @@ import type {
   ReactionUpdatePayload,
   PollUpdatePayload,
   PollVoteOkPayload,
+  MessageLinkPreviewsPayload,
   MessageResponse,
 } from "@lib/types";
 import { createStore } from "@lib/store";
@@ -64,6 +65,7 @@ import {
   reduceUpdateReaction,
 } from "../features/messaging/reactionState";
 import { reducePollUpdate, reducePollVoteOk } from "@lib/pollState";
+import { reduceLinkPreviews } from "@lib/linkPreviewState";
 
 export type { Message, PendingReaction, MessagesState } from "../features/messaging/messageModel";
 /** Facade surface since before the model moved out; no importer names it today. @public */
@@ -416,14 +418,10 @@ export function confirmSend(
 }
 
 /**
- * The channel a tracked send belongs to, resolved the way confirmSend resolves
- * it: the pendingSends registry first, then any not-yet-sent row carrying the
- * correlation id or the logical client id.
- *
- * Callers must resolve BEFORE confirmSend: that call deletes the registry entry
- * and flips the row to "sent", destroying both identities this lookup needs.
- * The predicate is duplicated from confirmSend on purpose -- sharing it would
- * mean rewriting a store function this change has no other reason to touch.
+ * The channel a tracked send belongs to, resolved as confirmSend does (the
+ * pendingSends registry, then a not-yet-sent row with the correlation or client
+ * id). Resolve BEFORE confirmSend, which deletes the entry and flips the row to "sent". The predicate is duplicated from confirmSend on purpose (sharing it
+ * would rewrite a store function with no other reason to change).
  */
 export function channelIdForSend(
   correlationId: string,
@@ -488,6 +486,11 @@ export function updatePoll(payload: PollUpdatePayload, currentUserId: number): v
 /** Apply the sender's poll_vote_ok: their stored selection, ahead of the poll_update that carries the counts. */
 export function applyPollVoteOk(payload: PollVoteOkPayload): void {
   messagesStore.setState((prev) => reducePollVoteOk(prev, payload));
+}
+
+/** Apply a message_link_previews frame: the message's cards, unless it holds newer ones or is not loaded. */
+export function updateLinkPreviews(payload: MessageLinkPreviewsPayload): void {
+  messagesStore.setState((prev) => reduceLinkPreviews(prev, payload));
 }
 
 /** Reset the entire store to its initial (empty) state — e.g. on logout. */
