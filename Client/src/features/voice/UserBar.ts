@@ -31,11 +31,8 @@ import {
   pickAvatarColor,
   setAvatarSource,
 } from "../profiles/avatar";
-import {
-  fetchImageAsObjectUrl,
-  recoverEvictedImage,
-  resolveServerUrl,
-} from "../messaging/content/attachments";
+import { recoverEvictedImage, resolveServerUrl } from "../messaging/content/attachments";
+import { avatarFetchUrl, fetchAvatarObjectUrl } from "../profiles/avatarSource";
 import type { WsClient } from "@lib/ws";
 import type { PresenceSender } from "@lib/presence/presence";
 import { shellText } from "../../i18n/shell";
@@ -197,16 +194,17 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       avatarEl.style.background = letterBackground;
       return;
     }
-    void fetchImageAsObjectUrl(url).then(async (objectUrl) => {
+    void fetchAvatarObjectUrl(url, 128).then(async (objectUrl) => {
       // The URL may have changed again (or the bar been torn down) while the
       // bytes were in flight.
       const current = (): boolean => avatarEl !== null && renderedAvatarUrl === url;
       if (objectUrl === null || !current()) return;
       const img = createElement("img", { class: "avatar-img", alt: subject.username });
-      recoverEvictedImage(img, { url });
+      recoverEvictedImage(img, { url: avatarFetchUrl(url, 128) });
       const el = avatarEl;
       if (el === null) return;
-      if (!(await setAvatarSource(img, objectUrl, () => avatarAnimationMode(el), current))) return;
+      const mode = (): ReturnType<typeof avatarAnimationMode> => avatarAnimationMode(el);
+      if (!(await setAvatarSource(img, objectUrl, mode, current, undefined, url))) return;
       avatarImgEl = img;
       if (avatarTextEl !== null) avatarTextEl.style.display = "none";
       el.style.background = "transparent";

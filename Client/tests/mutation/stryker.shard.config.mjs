@@ -419,6 +419,7 @@ export const shards = {
     "src/features/direct-messages/dmNavRow.ts",
     "src/features/messaging/textPreview.ts",
     "src/features/profiles/avatar.ts",
+    "src/features/profiles/avatarSource.ts",
     "src/features/server-rail/switchConfirmDialog.ts",
     "src/features/whats-new/appVersion.ts",
     "src/lib/diagnostics/eventLog.ts",

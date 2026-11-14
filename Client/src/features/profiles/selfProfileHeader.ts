@@ -43,6 +43,7 @@ export function buildHeader(s: CardSession, identity: OwnIdentity): HeaderPart {
       className: "spc-avatar",
       background: pickAvatarColor(identity.username),
       animate: "always",
+      thumbSize: 256,
     },
   );
   const names = createElement("div", { class: "spc-names" });

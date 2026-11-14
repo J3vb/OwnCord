@@ -5,11 +5,8 @@ import { errorText, ApiClientError } from "@lib/api";
 import { authStore } from "@stores/auth.store";
 import { avatarInitial } from "@lib/ui/avatar";
 import { setAvatarSource, isRenderableAvatar } from "../profiles/avatar";
-import {
-  fetchImageAsObjectUrl,
-  recoverEvictedImage,
-  resolveServerUrl,
-} from "../messaging/content/attachments";
+import { recoverEvictedImage, resolveServerUrl } from "../messaging/content/attachments";
+import { avatarFetchUrl, fetchAvatarObjectUrl } from "../profiles/avatarSource";
 import type { SettingsOverlayOptions } from "./SettingsOverlay";
 import { outcomeEl, showOutcome } from "./helpers";
 import { ACCEPTED_AVATAR_TYPES } from "./accountImageTypes";
@@ -172,12 +169,12 @@ export function paintAvatar(
   }
   // A later paint (a new upload, a user_update) wins over this one.
   target.dataset["avatarSrc"] = url;
-  void fetchImageAsObjectUrl(url).then(async (objectUrl) => {
+  void fetchAvatarObjectUrl(url, 256).then(async (objectUrl) => {
     const current = (): boolean => target.isConnected && target.dataset["avatarSrc"] === url;
     if (objectUrl === null || !current()) return;
     const img = createElement("img", { class: "avatar-img", alt });
-    recoverEvictedImage(img, { url });
-    if (!(await setAvatarSource(img, objectUrl, () => "always", current))) return;
+    recoverEvictedImage(img, { url: avatarFetchUrl(url, 256) });
+    if (!(await setAvatarSource(img, objectUrl, () => "always", current, undefined, url))) return;
     target.replaceChildren(img);
     target.style.background = "transparent";
   });

@@ -114,6 +114,17 @@ function rememberMissingImage(url: string, status: number, generation: number): 
   }
 }
 
+/** What a small preview's blob type carries when the server marked its original animated
+ *  (`X-Image-Animated`). The type survives the IndexedDB round trip, so the mark does too. */
+const ANIMATED_TYPE_PARAM = "x-animated=1";
+
+/** Whether `objectUrl` is a small preview the server marked as the still of an animated image,
+ *  while the image cache still holds it. */
+export function isAnimatedThumb(objectUrl: string): boolean {
+  const blob = imageCache.blobOf(objectUrl);
+  return blob !== undefined && blob !== null && blob.type.includes(ANIMATED_TYPE_PARAM);
+}
+
 async function fetchImageBlob(url: string, generation: number): Promise<Blob | null> {
   try {
     const res = await fetchServerFile(url);
@@ -121,7 +132,10 @@ async function fetchImageBlob(url: string, generation: number): Promise<Blob | n
       rememberMissingImage(url, res.status, generation);
       return null;
     }
-    const type = sanitizeContentType(res.headers.get("content-type") ?? "");
+    let type = sanitizeContentType(res.headers.get("content-type") ?? "");
+    if (res.headers.get("x-image-animated") === "1" && type.startsWith("image/")) {
+      type = `${type.split(";")[0]};${ANIMATED_TYPE_PARAM}`;
+    }
     return new Blob([await res.arrayBuffer()], { type });
   } catch (err) {
     log.error("Failed to fetch attachment image", { url, error: String(err) });

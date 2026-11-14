@@ -99,6 +99,8 @@ import {
   isImageMime,
   isGalleryImage,
   thumbnailUrl,
+  smallThumbnailUrl,
+  isAnimatedThumb,
   isSafeUrl,
   isTrustedServerUrl,
   clearAttachmentCaches,
@@ -670,5 +672,60 @@ describe("renderAttachment — server thumbnails", () => {
       expect(el.classList.contains("msg-file")).toBe(true);
       expect(fetchMock).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("smallThumbnailUrl and the animated mark", () => {
+  const FILE = "https://myserver.local:8443/api/v1/files/abc";
+  const headersOf = (map: Record<string, string>) => ({
+    get: (name: string) => map[name.toLowerCase()] ?? null,
+  });
+  const imageReply = (map: Record<string, string>) => ({
+    ok: true,
+    headers: headersOf(map),
+    arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
+  });
+
+  beforeEach(() => {
+    clearAttachmentCaches();
+    fetchMock.mockReset();
+    setServerHost("myserver.local:8443");
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+  });
+
+  afterEach(() => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: null }));
+  });
+
+  it("names the size on an own-server file URL", () => {
+    expect(smallThumbnailUrl(FILE, 128)).toBe(`${FILE}/thumb?size=128`);
+    expect(smallThumbnailUrl(FILE, 256)).toBe(`${FILE}/thumb?size=256`);
+  });
+
+  it("has no preview for external, data:, other-route or already-sized URLs", () => {
+    expect(smallThumbnailUrl("https://cdn.example/api/v1/files/abc", 128)).toBeNull();
+    expect(smallThumbnailUrl("data:image/png;base64,AAAA", 128)).toBeNull();
+    expect(smallThumbnailUrl("https://myserver.local:8443/api/v1/emoji/abc/image", 128)).toBeNull();
+    expect(smallThumbnailUrl(`${FILE}/thumb`, 128)).toBeNull();
+    expect(smallThumbnailUrl(`${FILE}?x=1`, 128)).toBeNull();
+  });
+
+  it("has none from a server that does not advertise thumbnails", () => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: null }));
+    expect(smallThumbnailUrl(FILE, 128)).toBeNull();
+  });
+
+  it("marks a preview the server says is the still of an animated image", async () => {
+    fetchMock.mockResolvedValueOnce(
+      imageReply({ "content-type": "image/jpeg", "x-image-animated": "1" }),
+    );
+    fetchMock.mockResolvedValueOnce(imageReply({ "content-type": "image/jpeg" }));
+    const animated = await fetchImageAsObjectUrl(`${FILE}/thumb?size=128`);
+    expect(animated).not.toBeNull();
+    expect(isAnimatedThumb(animated as string)).toBe(true);
+    URL.createObjectURL = vi.fn(() => "blob:plain");
+    const plain = await fetchImageAsObjectUrl(`${FILE}/thumb?size=256`);
+    expect(isAnimatedThumb(plain as string)).toBe(false);
+    URL.createObjectURL = vi.fn(() => "blob:test-image");
   });
 });
