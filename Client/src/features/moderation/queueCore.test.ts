@@ -15,6 +15,7 @@ import {
   rows as appealRows,
   teardownHarness,
 } from "../../../tests/helpers/appeal-harness";
+import { reportDetail, reportRow } from "../../../tests/helpers/report-fixtures";
 import { renderReports } from "./ReportsView";
 
 interface Held<T> {
@@ -35,47 +36,12 @@ const api = {
   getModerationReport: (id: string, signal?: AbortSignal) => held(reportDetails, id, signal),
 } as unknown as ApiClient;
 
-function reportRow(id: string): ModerationQueueRow {
-  return {
-    id,
-    reporter_name: "carol",
-    subject_name: "alice",
-    target_type: "message",
-    target_ref: "42",
-    reason: "spam",
-    state: "open",
-    assignee_id: 0,
-    outcome: "",
-    created_at: "2026-09-05 10:00:00",
-    updated_at: "2026-09-05 10:00:00",
-  };
-}
-
-function reportDetail(id: string): ModerationReportDetail {
-  return {
-    id,
-    reporter_id: 3,
-    subject_id: 4,
-    target_type: "message",
-    reason: "spam",
-    detail: "",
-    state: "open",
-    assignee_id: 0,
-    outcome: "",
-    created_at: "2026-09-05 10:00:00",
-    evidence: [],
-    notes: [],
-    events: [],
-    actions: [],
-  };
-}
-
 async function reportsLoaded(ids: string[]): Promise<HTMLElement> {
   const root = document.createElement("div");
   document.body.appendChild(root);
   const ctx: FeatureViewContext = { signal: view.signal, close: () => {}, api };
   renderReports(root, ctx, () => {});
-  reportLists.at(-1)!.resolve(ids.map(reportRow));
+  reportLists.at(-1)!.resolve(ids.map((id) => reportRow(id)));
   await flush();
   return root;
 }
