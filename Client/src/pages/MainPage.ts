@@ -29,7 +29,7 @@ import { markAllRead } from "@lib/readState";
 import { onChannelReselect, stepChannel } from "@lib/nav/channelNavigation";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { setAudioVolumeHost } from "@lib/voice/audioElements";
-import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
+import { attachGlobalKeybinds } from "../features/settings/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
 import { createMessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
