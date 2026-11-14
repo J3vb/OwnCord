@@ -1,22 +1,17 @@
 /** The DM call panel's in-place updates: rings, badges, controls, status and the timer. */
-import { createIcon } from "@lib/icons";
+import { createIcon, swapIcon } from "@lib/icons";
 import { clearChildren, setText } from "@lib/dom";
 import { isSelfMuted, voiceStore, type VoiceState } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import type { DmChannel } from "@stores/dm.store";
-import { formatElapsed, isConnecting, isPhoneCallHold } from "../../voice/voiceStatusText";
+import { isConnecting, isPhoneCallHold } from "../../voice/voiceStatusText";
 import { shareBlockReason } from "../../voice/shareGate";
 import { voiceText as t } from "../../../i18n/voice";
 import { dmCallText as d } from "../../../i18n/dmCall";
-import {
-  currentUserId,
-  resolvePerson,
-  swapIcon,
-  voiceUser,
-  type AvatarRef,
-} from "../DmCallViewModel";
+import { currentUserId, resolvePerson, voiceUser, type AvatarRef } from "../DmCallViewModel";
 import { connectedStatus } from "./dmCallRender";
 import type { DmCallState, DmCallApi } from "./dmCallState";
+import { formatDuration } from "@lib/text/duration";
 
 /** Why camera and share are inert now, if they are. */
 interface MediaLock {
@@ -156,7 +151,8 @@ export function createDmCallRefresh(
   }
 
   function tick(): void {
-    const text = st.answeredAt === null ? "00:00" : formatElapsed(Date.now() - st.answeredAt);
+    const text =
+      st.answeredAt === null ? "00:00" : formatDuration(Date.now() - st.answeredAt, true);
     for (const el of st.timerEls) if (el.textContent !== text) setText(el, text);
   }
 

@@ -237,34 +237,31 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
   });
 }
 
-/**
- * Map a server DM summary (the shape `POST /dms/group`, `PATCH /dms/{id}`,
- * `GET /dms` and `dm_channel_open` all share) into the store's DmChannel.
- *
- * The dispatcher has its own copy of this for the WS path; this one exists so
- * the REST responses land in exactly the same shape without importing the
- * dispatcher's internals into the sidebar. Moved down from SidebarDmHelpers
- * so feature and lib callers can share it without a page import.
- */
-export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
-  const participants: DmUser[] = (p.recipients ?? [p.recipient]).map((u) => ({
+/** Map one DM participant from the wire shape to the store's. */
+function dmUserFromPayload(u: DmChannelPayload["recipient"]): DmUser {
+  return {
     id: u.id,
     username: u.username,
     avatar: u.avatar,
     status: u.status,
     ...(u.mobile === true ? { mobile: true } : {}),
     displayName: u.display_name ?? "",
-  }));
+  };
+}
+
+/**
+ * Map a server DM summary (the shape `POST /dms/group`, `PATCH /dms/{id}`,
+ * `GET /dms`, `ready` and `dm_channel_open` all share) into the store's
+ * DmChannel, so the REST and WebSocket paths land in exactly the same shape.
+ */
+export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
+  // A pre-group server sends only `recipient`, which for it *is* the whole
+  // membership — so the fallback is a one-element list rather than an empty
+  // one, and every group-aware call site keeps working against an old server.
+  const participants = (p.recipients ?? [p.recipient]).map(dmUserFromPayload);
   return {
     channelId: p.channel_id,
-    recipient: participants[0] ?? {
-      id: p.recipient.id,
-      username: p.recipient.username,
-      avatar: p.recipient.avatar,
-      status: p.recipient.status,
-      ...(p.recipient.mobile === true ? { mobile: true } : {}),
-      displayName: p.recipient.display_name ?? "",
-    },
+    recipient: participants[0] ?? dmUserFromPayload(p.recipient),
     participants,
     name: p.name ?? "",
     isGroup: p.is_group ?? false,

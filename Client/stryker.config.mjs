@@ -46,6 +46,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/channels/voiceModOptions.ts",
   "src/features/channels/voiceSidebarRows.ts",
   "src/features/connection/CertMismatchModal.ts",
+  "src/features/connection/trustPrompt.ts",
   "src/features/connection/ConnectedOverlay.ts",
   "src/features/content-consent/MaskedLinkGuard.ts",
   "src/features/content-consent/NsfwGate.ts",

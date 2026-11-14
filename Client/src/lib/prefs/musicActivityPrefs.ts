@@ -15,6 +15,7 @@
 
 import { loadPref, savePref } from "./preferences";
 import type { MediaPrefs } from "../../platform/contracts/mediaDetector";
+import { isRecord } from "../isRecord";
 
 /** The device-local setting "Share the music you're listening to". */
 export const MUSIC_ACTIVITY_PREF_KEY = "shareMusicActivity";
@@ -68,10 +69,6 @@ export function cleanPlayerName(raw: unknown): string | null {
 /** The comparison key for an id: ids match without regard to case. */
 export function playerKey(id: string): string {
   return id.trim().toLowerCase();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** The prefs a stored value holds; anything invalid is dropped, never thrown. */

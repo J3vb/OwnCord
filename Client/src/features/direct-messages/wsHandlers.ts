@@ -13,51 +13,15 @@ import {
   closeDmLocally,
   clearDmUnread,
   dmDisplayName,
+  dmChannelFromPayload,
 } from "../../stores/dm.store";
 import type { DmChannel } from "../../stores/dm.store";
 import { clearChannelVoiceUsers } from "../../stores/voice.store";
 import { blocksStore, setBlockedByMe, clearBlockedByThem } from "../../stores/blocks.store";
-import type { DmChannelPayload } from "../../lib/types";
 import type { DispatchApi, Payload, WsRoute } from "../connection/dispatchContext";
 import { log, route } from "../connection/dispatchContext";
 import { ServerMessageType as S } from "@lib/protocolTypes";
 import { clearRequestPending } from "./pendingRequests";
-
-/** Map one DM participant from the wire shape to the store's. */
-function mapDmUser(u: DmChannelPayload["recipient"]): DmChannel["recipient"] {
-  return {
-    id: u.id,
-    username: u.username,
-    avatar: u.avatar,
-    status: u.status,
-    ...(u.mobile === true ? { mobile: true } : {}),
-    displayName: u.display_name ?? "",
-  };
-}
-
-/** Map a server DM channel payload to the client DmChannel type. */
-function mapDmPayload(p: DmChannelPayload): DmChannel {
-  // A pre-group server sends only `recipient`, which for it *is* the whole
-  // membership — so the fallback is a one-element list rather than an empty
-  // one, and every group-aware call site keeps working against an old server.
-  const participants = (p.recipients ?? [p.recipient]).map(mapDmUser);
-  return {
-    channelId: p.channel_id,
-    recipient: participants[0] ?? mapDmUser(p.recipient),
-    participants,
-    name: p.name ?? "",
-    isGroup: p.is_group ?? false,
-    ...(p.owner_id !== undefined && { ownerId: p.owner_id }),
-    // "" is kept, not dropped: addDmChannel's spread must clear an old icon.
-    ...(p.icon !== undefined && { icon: p.icon }),
-    lastMessageId: p.last_message_id,
-    lastReadMessageId: p.last_read_message_id,
-    lastMessage: p.last_message,
-    lastMessageAt: p.last_message_at,
-    unreadCount: p.unread_count,
-    mentionCount: p.mention_count ?? 0,
-  };
-}
 
 /** The DM slice of `ready`: restate dmStore and reconcile the channels-store mirror rows. */
 export function applyReadyDms(payload: Payload<"ready">): void {
@@ -66,7 +30,7 @@ export function applyReadyDms(payload: Payload<"ready">): void {
   // closed/left on another device) and must clear ghosts from dmStore —
   // skipping it would let a stale DM survive every reconnect.
   const dmPayloads = payload.dm_channels ?? [];
-  setDmChannels(dmPayloads.map(mapDmPayload));
+  setDmChannels(dmPayloads.map(dmChannelFromPayload));
 
   // The channels-store mirror row for a DM (synthesized on open by
   // addDmToChannelsStore) is deliberately carried across setChannels'
@@ -141,7 +105,7 @@ export function applyReadyBlocks(
 
 export function handleDmChannelOpen(payload: Payload<"dm_channel_open">): void {
   log.info("DM channel opened", { channelId: payload.channel_id });
-  const dm = mapDmPayload(payload);
+  const dm = dmChannelFromPayload(payload);
   // A group this client does not list yet is a fresh add or a re-add. Any
   // roster still held for it is from an earlier membership (a call left while
   // in it keeps the others), so it goes before the server's fresh roster,
