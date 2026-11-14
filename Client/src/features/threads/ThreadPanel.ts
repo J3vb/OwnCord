@@ -53,7 +53,7 @@ import {
 } from "../messaging/trackedActions";
 import { createThreadSendQueue } from "./threadSendQueue";
 import { importedName } from "../messaging/importedAuthor";
-import type { MessageController } from "../../pages/main-page/MessageController";
+import type { MessageController } from "../messaging/MessageController";
 import { messagingText } from "../../i18n/messaging";
 import { shellText } from "../../i18n/shell";
 import { threadsText } from "../../i18n/threads";

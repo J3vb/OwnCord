@@ -31,7 +31,7 @@ const {
 
 // The jumper itself is exercised in message-jump.test.ts; here we only care
 // that ChatArea wires every jump affordance into the same one.
-vi.mock("../../src/pages/main-page/MessageJump", () => ({
+vi.mock("../../src/features/messaging/MessageJump", () => ({
   createMessageJumper: vi.fn(() => ({ jumpTo: mockJumpTo })),
 }));
 
@@ -60,7 +60,7 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
 }));
 
 // Mock VideoGrid
-vi.mock("../../src/pages/main-page/MediaGalleryController", () => ({
+vi.mock("../../src/features/messaging/MediaGalleryController", () => ({
   createMediaGalleryController: vi.fn(() => ({
     open: vi.fn(() => Promise.resolve()),
     isOpen: () => false,

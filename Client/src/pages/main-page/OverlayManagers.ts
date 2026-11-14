@@ -21,7 +21,6 @@ import { shellText } from "../../i18n/shell";
 import { dialogOpen } from "@lib/ui/dialogOpen";
 import { holdTypeAhead } from "@lib/ui/typeAhead";
 
-export { createAsyncOverlayController } from "@lib/ui/asyncOverlay";
 export {
   createInviteManagerController,
   mapInviteResponse,

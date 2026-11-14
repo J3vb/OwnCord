@@ -15,8 +15,8 @@ import {
   recoverAfterReattach,
   recoverRefusedTail,
   withLoadJournal,
-} from "../../features/messaging/historyFetch";
-import { createChannelWarmup } from "../../features/messaging/channelWarmup";
+} from "./historyFetch";
+import { createChannelWarmup } from "./channelWarmup";
 import {
   setMessages,
   prependMessages,

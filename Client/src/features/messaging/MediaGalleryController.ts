@@ -8,20 +8,17 @@
 import type { ApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { resolveDisplayName } from "@lib/ui/avatar";
+import { createAsyncOverlayController } from "@lib/ui/asyncOverlay";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
-import type { MediaUploader } from "../../features/messaging/ChannelMediaGallery";
+import type { MediaUploader } from "./ChannelMediaGallery";
 import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import { openSettings } from "@stores/ui.store";
-import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
-import { closeWhenChannelLeft, sidePanelStale } from "../../features/messaging/sidePanelScope";
+import { nsfwContentBlocked } from "../content-consent/nsfw";
+import { closeWhenChannelLeft, sidePanelStale } from "./sidePanelScope";
 import { shellText } from "../../i18n/shell";
-import { createAsyncOverlayController } from "./OverlayManagers";
 
-const mediaGalleryScreen = createLazyScreen(
-  "media-gallery",
-  () => import("../../features/messaging/ChannelMediaGallery"),
-);
+const mediaGalleryScreen = createLazyScreen("media-gallery", () => import("./ChannelMediaGallery"));
 
 /** Deleted messages, as the socket reports them: one id or a purge's ids. */
 export type MessageDeleteSubscriber = (
@@ -63,7 +60,7 @@ export function createMediaGalleryController(opts: {
   let channelId: number | null = null;
 
   const controller = createAsyncOverlayController<{
-    readonly screen: typeof import("../../features/messaging/ChannelMediaGallery");
+    readonly screen: typeof import("./ChannelMediaGallery");
   }>({
     getRoot: opts.getRoot,
     canOpen: () => {

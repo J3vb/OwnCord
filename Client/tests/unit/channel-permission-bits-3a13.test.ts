@@ -14,7 +14,7 @@ import { addChannel, channelsStore, setChannels, setRoles } from "@stores/channe
 import type { Message } from "@stores/messages.store";
 import { messagesStore } from "@stores/messages.store";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
-import { createReactionController } from "../../src/pages/main-page/ReactionController";
+import { createReactionController } from "../../src/features/messaging/ReactionController";
 import { makeListOptions } from "../helpers/messageListHarness";
 import { resetMessagesState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";

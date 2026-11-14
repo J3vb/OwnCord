@@ -13,7 +13,7 @@ vi.mock("../../src/features/messaging/ChannelMediaGallery", () => ({ createChann
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("@lib/logger", () => loggerMock());
 
-import { createMediaGalleryController } from "../../src/pages/main-page/MediaGalleryController";
+import { createMediaGalleryController } from "../../src/features/messaging/MediaGalleryController";
 import type { ChannelMediaGalleryOptions } from "../../src/features/messaging/ChannelMediaGallery";
 import type { ApiClient } from "@lib/api";
 import { closeSettings, uiStore } from "@stores/ui.store";

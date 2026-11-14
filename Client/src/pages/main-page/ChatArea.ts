@@ -16,15 +16,15 @@ import { buildChatHeader } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { createPinnedPanelController, createSearchOverlayController } from "./OverlayManagers";
 import type { SearchOverlayController } from "./OverlayManagers";
-import { createMediaGalleryController } from "./MediaGalleryController";
+import { createMediaGalleryController } from "../../features/messaging/MediaGalleryController";
 import { createThreadListPanelController } from "../../features/threads/threadListPanel";
 import { createSidePanelGroup } from "@lib/ui/sidePanel";
 import type {
   MessageAttachmentsSubscriber,
   MessageDeleteSubscriber,
-} from "./MediaGalleryController";
+} from "../../features/messaging/MediaGalleryController";
 import type { ChannelController } from "./ChannelController";
-import { createMessageJumper } from "./MessageJump";
+import { createMessageJumper } from "../../features/messaging/MessageJump";
 import { setMessageJumpHandler } from "@lib/nav/messageNavigation";
 import { navigateToChannel } from "@lib/nav/channelNavigation";
 import { channelsStore } from "@stores/channels.store";

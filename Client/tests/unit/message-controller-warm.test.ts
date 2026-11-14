@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { loggerMock } from "../helpers/loggerMock";
 vi.mock("@lib/logger", () => loggerMock());
 
-import { createMessageController } from "../../src/pages/main-page/MessageController";
+import { createMessageController } from "../../src/features/messaging/MessageController";
 import { WARM_MAX_AGE_MS } from "../../src/features/messaging/channelWarmup";
 import { getChannelMessages, isChannelLoaded } from "../../src/stores/messages.store";
 import { warmChannel, cancelChannelWarm } from "../../src/lib/nav/channelNavigation";

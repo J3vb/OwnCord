@@ -74,8 +74,8 @@ vi.mock("@stores/emoji.store", () => ({
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { createReactionController } from "../../src/pages/main-page/ReactionController";
-import type { ReactionControllerOptions } from "../../src/pages/main-page/ReactionController";
+import { createReactionController } from "../../src/features/messaging/ReactionController";
+import type { ReactionControllerOptions } from "../../src/features/messaging/ReactionController";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
 
 // Reaction controls lock while the socket is down (3A-3); these tests react online.
