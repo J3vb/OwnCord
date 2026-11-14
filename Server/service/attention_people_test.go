@@ -121,9 +121,9 @@ func TestAttentionPeople_SourceGetsSampleContext(t *testing.T) {
 	}
 }
 
-func peopleFromDB(t *testing.T, database *db.DB) AttentionPeople {
+func peopleFromDB(ctx context.Context, t *testing.T, database *db.DB) AttentionPeople {
 	t.Helper()
-	return PeopleSource(database)(context.Background())
+	return PeopleSource(database)(ctx)
 }
 
 func seedPerson(t *testing.T, database *db.DB, name string, roleID int64) int64 {
@@ -143,7 +143,7 @@ func setStatus(t *testing.T, database *db.DB, id int64, status string) {
 func TestAttentionPeople_FreshServerOnlyOwner(t *testing.T) {
 	database := newTestDB(t)
 	seedPerson(t, database, "owner", permissions.OwnerRoleID)
-	p := peopleFromDB(t, database)
+	p := peopleFromDB(context.Background(), t, database)
 	if p.KitErr != nil || p.CoverageErr != nil {
 		t.Fatalf("errors: %v / %v", p.KitErr, p.CoverageErr)
 	}
@@ -164,7 +164,7 @@ func TestAttentionPeople_OwnerAndModeratorAreCovered(t *testing.T) {
 	seedPerson(t, database, "plain", permissions.MemberRoleID)
 	mustDo(t, "UpsertRecoveryKit", database.UpsertRecoveryKit(ctx, owner, "verifier"))
 
-	p := peopleFromDB(t, database)
+	p := peopleFromDB(context.Background(), t, database)
 	if p.Moderators != 2 || p.ModerateRoles < 1 || !p.OwnerHasKit || p.KitErr != nil || p.CoverageErr != nil {
 		t.Fatalf("people = %+v, want 2 moderators, a moderate role and a kit", p)
 	}
@@ -188,12 +188,12 @@ func TestAttentionPeople_OnlyActiveAccountsCount(t *testing.T) {
 	setStatus(t, database, pending, "pending")
 	setStatus(t, database, system, "system")
 
-	if p := peopleFromDB(t, database); p.Moderators != 1 {
+	if p := peopleFromDB(context.Background(), t, database); p.Moderators != 1 {
 		t.Fatalf("moderators = %d, want 1 (banned, pending and system excluded)", p.Moderators)
 	}
 
 	seedPerson(t, database, "admin", permissions.AdminRoleID)
-	if p := peopleFromDB(t, database); p.Moderators != 2 {
+	if p := peopleFromDB(context.Background(), t, database); p.Moderators != 2 {
 		t.Fatalf("moderators with an Administrator = %d, want 2", p.Moderators)
 	}
 }
@@ -211,11 +211,11 @@ func TestAttentionPeople_ModerateRoleIgnoresAdministrator(t *testing.T) {
 		return err
 	}())
 
-	p := peopleFromDB(t, database)
+	p := peopleFromDB(context.Background(), t, database)
 	if p.ModerateRoles != 0 || p.Moderators != 1 {
 		t.Fatalf("people = %+v, want no moderate role and 1 moderator (the seeded Admin role lost the bit)", p)
 	}
-	s := peopleService(func(context.Context) AttentionPeople { return peopleFromDB(t, database) })
+	s := peopleService(func(ctx context.Context) AttentionPeople { return peopleFromDB(ctx, t, database) })
 	now := time.Now()
 	rep := evalAt(s, now)
 	wantStatus(t, rep, "moderate_role", AttentionStatusWarning)
@@ -240,7 +240,7 @@ func TestAttentionPeople_AdministratorOnlyRoleCounts(t *testing.T) {
 	seedRole(t, database, &db.Role{ID: 10, Name: "Root", Permissions: permissions.Administrator, Position: 50})
 	seedPerson(t, database, "owner", permissions.OwnerRoleID)
 	seedPerson(t, database, "root", 10)
-	p := peopleFromDB(t, database)
+	p := peopleFromDB(context.Background(), t, database)
 	if p.Moderators != 2 {
 		t.Fatalf("moderators = %d, want 2 (owner and the Administrator-only role)", p.Moderators)
 	}
@@ -259,7 +259,7 @@ func TestAttentionPeople_ExpiredTempBanCountsAgain(t *testing.T) {
 	_, err = database.ExecContext(ctx, `UPDATE users SET banned = 1, ban_expires = ? WHERE id = ?`,
 		time.Now().Add(time.Hour).UTC().Format("2006-01-02T15:04:05Z"), running)
 	mustDo(t, "running ban", err)
-	if p := peopleFromDB(t, database); p.Moderators != 2 {
+	if p := peopleFromDB(context.Background(), t, database); p.Moderators != 2 {
 		t.Fatalf("moderators = %d, want 2 (owner and the lapsed ban)", p.Moderators)
 	}
 }
@@ -272,7 +272,7 @@ func TestAttentionPeople_QueuedErasureNotCounted(t *testing.T) {
 	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO erasure_jobs (user_id, state, files) VALUES (?, 'queued', '[]')`, erasing)
 	mustDo(t, "queue erasure", err)
-	if p := peopleFromDB(t, database); p.Moderators != 1 {
+	if p := peopleFromDB(context.Background(), t, database); p.Moderators != 1 {
 		t.Fatalf("moderators = %d, want 1", p.Moderators)
 	}
 }
@@ -282,7 +282,7 @@ func TestAttentionPeople_QueuedErasureNotCounted(t *testing.T) {
 func TestAttentionPeople_NonOwnerTopAccountIsUnknown(t *testing.T) {
 	database := newTestDB(t)
 	seedPerson(t, database, "admin", permissions.AdminRoleID)
-	p := peopleFromDB(t, database)
+	p := peopleFromDB(context.Background(), t, database)
 	if p.KitErr == nil || !strings.Contains(p.KitErr.Error(), "no owner account found") {
 		t.Fatalf("KitErr = %v, want no owner account found", p.KitErr)
 	}
@@ -294,7 +294,7 @@ func TestAttentionPeople_NonOwnerTopAccountIsUnknown(t *testing.T) {
 func TestAttentionPeople_ClosedDatabaseIsUnknown(t *testing.T) {
 	database := newTestDB(t)
 	mustDo(t, "Close", database.Close())
-	p := peopleFromDB(t, database)
+	p := peopleFromDB(context.Background(), t, database)
 	if p.KitErr == nil || p.CoverageErr == nil {
 		t.Fatalf("people = %+v, want both errors", p)
 	}

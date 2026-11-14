@@ -8,9 +8,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-func execModerationSQL(t *testing.T, database *db.DB, query string, args ...any) {
+func execModerationSQL(ctx context.Context, t *testing.T, database *db.DB, query string, args ...any) {
 	t.Helper()
-	if _, err := database.ExecContext(context.Background(), query, args...); err != nil {
+	if _, err := database.ExecContext(ctx, query, args...); err != nil {
 		t.Fatalf("exec %q: %v", query, err)
 	}
 }
@@ -22,7 +22,7 @@ func TestModerationCoverage_MatchesCanModerate(t *testing.T) {
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 
-	execModerationSQL(t, database,
+	execModerationSQL(ctx, t, database,
 		`INSERT INTO roles (id, name, color, permissions, position, is_default) VALUES (10, 'Root', NULL, ?, 50, 0), (11, 'Plain', NULL, ?, 30, 0), (12, 'Mod', NULL, ?, 20, 0)`,
 		permissions.Administrator, permissions.SendMessages, permissions.ModerateMembers)
 
@@ -54,9 +54,9 @@ func TestModerationCoverage_MatchesCanModerate(t *testing.T) {
 			if permissions.CanModerate(permissions.Subject{RolePerms: roles.Perms}) == nil {
 				want = 1
 			}
-			execModerationSQL(t, database, `UPDATE users SET banned = 1 WHERE id <> ?`, id)
+			execModerationSQL(ctx, t, database, `UPDATE users SET banned = 1 WHERE id <> ?`, id)
 			cov, err := database.ReadModerationCoverage(ctx)
-			execModerationSQL(t, database, `UPDATE users SET banned = 0`)
+			execModerationSQL(ctx, t, database, `UPDATE users SET banned = 0`)
 			if err != nil {
 				t.Fatalf("%s: ReadModerationCoverage: %v", label, err)
 			}
@@ -69,11 +69,11 @@ func TestModerationCoverage_MatchesCanModerate(t *testing.T) {
 	check("defaults")
 
 	// An operator strips Moderate Members from the seeded Admin and Moderator roles.
-	execModerationSQL(t, database, `UPDATE roles SET permissions = permissions & ~? WHERE id IN (2, 3)`, permissions.ModerateMembers)
+	execModerationSQL(ctx, t, database, `UPDATE roles SET permissions = permissions & ~? WHERE id IN (2, 3)`, permissions.ModerateMembers)
 	check("seeded roles stripped")
 
 	// The owner role loses nothing here, but a hand-edited Owner without either bit would not count.
-	execModerationSQL(t, database, `UPDATE roles SET permissions = permissions & ~? WHERE id = 1`,
+	execModerationSQL(ctx, t, database, `UPDATE roles SET permissions = permissions & ~? WHERE id = 1`,
 		permissions.ModerateMembers|permissions.Administrator)
 	check("owner stripped")
 }
