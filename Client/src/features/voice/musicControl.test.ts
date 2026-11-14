@@ -96,6 +96,46 @@ describe("getMusicSupport", () => {
     }
   });
 
+  it("waits longer between probes while the answer stays the same, and starts over after success", async () => {
+    vi.useFakeTimers();
+    try {
+      const watcher = new AbortController();
+      mocks.support.mockResolvedValue({ ok: false, reason: "noSoundServer" });
+      watchMusicSupport(vi.fn(), watcher.signal);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.support).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mocks.support).toHaveBeenCalledTimes(2);
+      // The next pause is 30 s, then 60 s, and stays 60 s.
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(mocks.support).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(mocks.support).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(mocks.support).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(mocks.support).toHaveBeenCalledTimes(4);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mocks.support).toHaveBeenCalledTimes(5);
+      mocks.support.mockResolvedValue(OK);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(cachedMusicSupport()).toEqual(OK);
+      watcher.abort();
+      // A new probe cycle after a reset begins at 5 s again.
+      resetMusicSupport();
+      const again = new AbortController();
+      mocks.support.mockResolvedValue({ ok: false, reason: "noSoundServer" });
+      watchMusicSupport(vi.fn(), again.signal);
+      await vi.advanceTimersByTimeAsync(0);
+      const before = mocks.support.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mocks.support.mock.calls.length).toBe(before + 1);
+      again.abort();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops probing once nobody watches", async () => {
     vi.useFakeTimers();
     try {

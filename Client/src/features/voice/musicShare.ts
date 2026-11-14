@@ -132,6 +132,9 @@ export class MusicShare {
    *  and supersedes a start still waiting on the host. */
   stop(): void {
     this.epoch++;
+    // A start waiting on the host is superseded: a drop right after must not
+    // bring its app back.
+    this.pending = null;
     const hadActive = this.release(false);
     // A start still awaiting the host owns a capture nothing here holds yet.
     if (!hadActive && this.starting > 0) this.stopHostCapture(this.host.getRoom());
@@ -217,9 +220,15 @@ export class MusicShare {
       return this.refused(ctx, "internal");
     }
     // The SFU grant can be withdrawn mid-share: the track is unpublished
-    // without a stop from here.
+    // without a stop from here. A dropped connection unpublishes the local
+    // tracks first and only then announces the disconnect, whose teardown
+    // stops this share and notes the app for the reconnect: look again after
+    // that, and leave a dropped room to it.
     const onUnpublished = (pub: { trackName?: string }): void => {
-      if (pub.trackName === MUSIC_TRACK_NAME) ctx.ended();
+      if (pub.trackName !== MUSIC_TRACK_NAME) return;
+      queueMicrotask(() => {
+        if (this.host.getRoom() === ctx.room && ctx.room.state === "connected") ctx.ended();
+      });
     };
     ctx.room.on(RoomEvent.LocalTrackUnpublished, onUnpublished);
     const unpublish = (): void => {

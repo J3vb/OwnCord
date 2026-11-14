@@ -27,8 +27,10 @@ const REASON_KEYS = {
   noSoundServer: "reason.noSoundServer",
 } as const satisfies Record<MusicUnsupportedReason, string>;
 
-/** How long a failed or "no sound server" answer waits before the next probe. */
-const RETRY_MS = 5000;
+/** How long a failed or "no sound server" answer waits before the next probe:
+ *  5 s, then 30 s, then 60 s, and 60 s from there while it stays that way. */
+const RETRY_STEPS_MS = [5000, 30_000, 60_000];
+let retryStep = 0;
 
 /** The probe's lasting answer, once it has one. A missing sound server may be
  *  started later and a failed probe may work next time, so those are not kept:
@@ -48,10 +50,12 @@ function cancelRetry(): void {
  *  not a lasting one. */
 function scheduleRetry(): void {
   if (settled !== null || retryTimer !== null || watchers.size === 0) return;
+  const delay = RETRY_STEPS_MS[Math.min(retryStep, RETRY_STEPS_MS.length - 1)] ?? 60_000;
+  retryStep++;
   retryTimer = setTimeout(() => {
     retryTimer = null;
     void getMusicSupport();
-  }, RETRY_MS);
+  }, delay);
 }
 
 function probe(): Promise<MusicSupport> {
@@ -65,7 +69,10 @@ function probe(): Promise<MusicSupport> {
     .then(({ answer, lasting }) => {
       probing = null;
       last = answer;
-      if (lasting) settled = answer;
+      if (lasting) {
+        settled = answer;
+        retryStep = 0;
+      }
       for (const watcher of watchers) watcher();
       scheduleRetry();
       return answer;
@@ -110,6 +117,7 @@ export function resetMusicSupport(): void {
   settled = null;
   last = null;
   probing = null;
+  retryStep = 0;
   cancelRetry();
 }
 

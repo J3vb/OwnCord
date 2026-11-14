@@ -46,6 +46,7 @@ function pageRoom() {
   const handlers = new Map<string, (pub: { trackName?: string }) => void>();
   return {
     handlers,
+    state: "connected",
     on: vi.fn((event: string, cb: (pub: { trackName?: string }) => void) =>
       handlers.set(event, cb),
     ),
@@ -203,12 +204,40 @@ describe("MusicShare on the page path", () => {
     const share = shareIn(room);
     await share.start("app-1");
     room.handlers.get("localTrackUnpublished")!({ trackName: "camera" });
+    await Promise.resolve();
     expect(share.appId).toBe("app-1");
     room.handlers.get("localTrackUnpublished")!({ trackName: "music" });
+    await Promise.resolve();
     expect(share.appId).toBeNull();
     expect(mocks.setLocalMusic).toHaveBeenLastCalledWith(false);
     expect(mocks.showToast).toHaveBeenCalledTimes(1);
     expect(room.handlers.size).toBe(0);
+  });
+
+  it("leaves a share to the connection teardown when the room drops it first", async () => {
+    mocks.start.mockResolvedValue({ ok: true, url: "ws://x" });
+    mocks.openAppAudio.mockResolvedValue(handle());
+    const room = pageRoom();
+    const share = shareIn(room);
+    await share.start("app-1");
+    room.handlers.get("localTrackUnpublished")!({ trackName: "music" });
+    // The disconnect lands before the check runs: its teardown stops the share.
+    (room as { state: string }).state = "disconnected";
+    await Promise.resolve();
+    expect(share.appId).toBe("app-1");
+    expect(mocks.showToast).not.toHaveBeenCalled();
+  });
+
+  it("forgets the app of a pending start once it is stopped", async () => {
+    const { room } = nativeRoom();
+    const answer = createDeferred<string>();
+    room.startMusic.mockReturnValue(answer.promise);
+    const share = shareIn(room);
+    const pending = share.start("app-1");
+    share.stop();
+    expect(share.pendingAppId).toBeNull();
+    answer.resolve("sid");
+    await pending;
   });
 
   it("replacing a share leaves the host capture to the host", async () => {

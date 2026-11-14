@@ -110,6 +110,7 @@ export function livekitClientMock() {
       AudioPlaybackStatusChanged: "audioPlaybackStatusChanged",
       EncryptionError: "encryptionError",
       LocalTrackPublished: "localTrackPublished",
+      LocalTrackUnpublished: "localTrackUnpublished",
       ParticipantPermissionsChanged: "participantPermissionsChanged",
     },
     Track: {
@@ -134,6 +135,7 @@ export function livekitClientMock() {
       h1080fps30: { resolution: { width: 1920, height: 1080 } },
     },
     VideoPreset: vi.fn(),
+    LocalAudioTrack: vi.fn(),
     DisconnectReason: { CLIENT_INITIATED: 0 },
     // vitest 4 mocks honor construct semantics — `new` needs a real function, not an arrow.
     ExternalE2EEKeyProvider: vi.fn(function () {

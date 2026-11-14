@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import { createLocalVideoTrack } from "livekit-client";
 import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
+import { desktop } from "../../../src/platform/desktop";
+import { showToast } from "@lib/ui/toast";
 import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";
 import { keepDmForCall, resetKeptCallDms } from "../../../src/features/direct-messages/keptCallDms";
@@ -18,6 +20,9 @@ vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@lib/prefs/preferences", (importOriginal) => mocks.prefsPreferencesMock(importOriginal));
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
+vi.mock("@lib/voice/appAudioTrack", () => ({
+  openAppAudio: vi.fn(async () => ({ track: {}, close: vi.fn() })),
+}));
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
 vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
@@ -279,6 +284,55 @@ describe("LiveKitSession", () => {
       expect(mockShowActionToast.mock.calls[0]![0]).toBe(
         "Your screen share stopped when the connection dropped",
       );
+    });
+
+    it("shares the same music again after a drop that unpublishes it first, with no notice", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn(), getState: () => wsState, ping: async () => {} } as any);
+      const handlers = new Map<string, (arg?: unknown) => void>();
+      mockRoom.on.mockImplementation((event: string, registered: (arg?: unknown) => void) => {
+        handlers.set(event, registered);
+        return mockRoom;
+      });
+      const start = vi
+        .spyOn(desktop.musicAudio, "start")
+        .mockResolvedValue({ ok: true, url: "ws://127.0.0.1:1/m" });
+      vi.spyOn(desktop.musicAudio, "stop").mockResolvedValue();
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      expect(await session.startMusic("app-1")).toBe("started");
+
+      // livekit-client unpublishes the local tracks, then announces the drop.
+      handlers.get("localTrackUnpublished")!({ trackName: "music" });
+      handlers.get("disconnected")!(/* SERVER_SHUTDOWN */ 1);
+      await Promise.resolve();
+      expect(showToast).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(3100);
+      expect((session as any)._state.type).toBe("connected");
+      expect(start.mock.calls.map((c) => c[0])).toEqual(["app-1", "app-1"]);
+      expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it("does not bring back music the user stopped just before a drop", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn(), getState: () => wsState, ping: async () => {} } as any);
+      const disconnected = captureDisconnectedHandler();
+      let answer!: (v: { ok: true; url: string }) => void;
+      const start = vi
+        .spyOn(desktop.musicAudio, "start")
+        .mockReturnValue(new Promise((resolve) => (answer = resolve)));
+      vi.spyOn(desktop.musicAudio, "stop").mockResolvedValue();
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      const started = session.startMusic("app-1");
+      await vi.advanceTimersByTimeAsync(0);
+      // Stopped and dropped before the host has answered the start.
+      session.stopMusic();
+      disconnected()!(1);
+      answer({ ok: true, url: "ws://127.0.0.1:1/m" });
+      await started;
+
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(start).toHaveBeenCalledOnce();
     });
 
     it("leaves a camera the user already turned back on alone", async () => {

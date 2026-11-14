@@ -276,8 +276,13 @@ export class LiveKitSession extends SessionReconnect {
 
   /** Share app `appId`'s sound as music (see MusicShare). */
   async startMusic(appId: string, options?: MusicStartOptions): Promise<MusicStartOutcome> {
-    const { MusicShare } = await import("./musicShare");
-    this._music ??= new MusicShare({ getRoom: () => this._room });
+    try {
+      const { MusicShare } = await import("./musicShare");
+      this._music ??= new MusicShare({ getRoom: () => this._room });
+    } catch (err) {
+      log.warn("Loading the music share failed", err);
+      return "failed";
+    }
     return this._music.start(appId, options);
   }
 
