@@ -23,13 +23,9 @@ import {
   isWindowDetached,
   getChannelMessages,
 } from "@stores/messages.store";
-import {
-  newestSentId,
-  recoverRefusedTail,
-  withLoadJournal,
-} from "../../features/messaging/historyFetch";
-import { NSFW_ACKNOWLEDGEMENT_REQUIRED } from "../../features/content-consent/nsfw";
-import type { ChannelController } from "./ChannelController";
+import { newestSentId, recoverRefusedTail, withLoadJournal } from "./historyFetch";
+import { NSFW_ACKNOWLEDGEMENT_REQUIRED } from "../content-consent/nsfw";
+import type { MessageListComponent } from "./MessageList";
 import { messagingText } from "../../i18n/messaging";
 
 const log = createLogger("message-jump");
@@ -37,9 +33,15 @@ const log = createLogger("message-jump");
 /** Window size requested when a jump target is not in the loaded page. */
 const AROUND_WINDOW = 50;
 
+/** The slice of the page's channel controller a jump reads. */
+export interface JumpChannelController {
+  readonly currentChannelId: number | null;
+  readonly messageList: Pick<MessageListComponent, "scrollToMessage"> | null;
+}
+
 export interface MessageJumpOptions {
   readonly api: ApiClient;
-  readonly getChannelCtrl: () => ChannelController | null;
+  readonly getChannelCtrl: () => JumpChannelController | null;
   /**
    * Wait for the channel switch / re-render to hit the DOM. Defaults to a
    * requestAnimationFrame; tests inject a resolved promise instead.

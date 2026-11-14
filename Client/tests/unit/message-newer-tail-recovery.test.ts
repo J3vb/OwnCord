@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { loggerMock } from "../helpers/loggerMock";
 vi.mock("@lib/logger", () => loggerMock());
 
-import { createMessageController } from "../../src/pages/main-page/MessageController";
+import { createMessageController } from "../../src/features/messaging/MessageController";
 import {
   messagesStore,
   setAroundMessages,

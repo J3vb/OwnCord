@@ -53,8 +53,8 @@ vi.mock("@stores/messages.store", () => ({
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { createMessageController } from "../../src/pages/main-page/MessageController";
-import type { MessageControllerOptions } from "../../src/pages/main-page/MessageController";
+import { createMessageController } from "../../src/features/messaging/MessageController";
+import type { MessageControllerOptions } from "../../src/features/messaging/MessageController";
 
 // ---------------------------------------------------------------------------
 // Helpers

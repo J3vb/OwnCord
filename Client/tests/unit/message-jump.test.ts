@@ -22,8 +22,8 @@ vi.mock("@lib/ui/toast", () => ({
   initToast: vi.fn(),
 }));
 
-import { createMessageJumper } from "../../src/pages/main-page/MessageJump";
-import { createMessageController } from "../../src/pages/main-page/MessageController";
+import { createMessageJumper } from "../../src/features/messaging/MessageJump";
+import { createMessageController } from "../../src/features/messaging/MessageController";
 import { createMessageList } from "../../src/features/messaging/MessageList";
 import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import { renderMessage } from "../../src/features/messaging/message-list/renderers";

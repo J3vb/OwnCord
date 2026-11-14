@@ -10,8 +10,8 @@ import { useMountContainer } from "../helpers/mountContainer";
 
 vi.mock("@lib/logger", () => loggerMock());
 
-import { createMessageController } from "../../src/pages/main-page/MessageController";
-import type { MessageControllerOptions } from "../../src/pages/main-page/MessageController";
+import { createMessageController } from "../../src/features/messaging/MessageController";
+import type { MessageControllerOptions } from "../../src/features/messaging/MessageController";
 import { createDeferred } from "../helpers/deferred";
 import { createMessageList } from "../../src/features/messaging/MessageList";
 import { makeListOptions } from "../helpers/messageListHarness";

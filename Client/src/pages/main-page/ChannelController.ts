@@ -18,8 +18,8 @@ import {
 import { mountForumView } from "../../features/messaging/forumView";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 import { invalidateChannelMessageWindow, clearChannelContent } from "@stores/messages.store";
-import type { MessageController } from "./MessageController";
-import type { ReactionController } from "./ReactionController";
+import type { MessageController } from "../../features/messaging/MessageController";
+import type { ReactionController } from "../../features/messaging/ReactionController";
 import { type ChatHeaderRefs } from "./ChatHeader";
 import { createThreadPanelHost, type ThreadPanelHost } from "./ThreadPanelHost";
 import {

@@ -6,12 +6,8 @@
 import { createElement } from "@lib/dom";
 import { isPhoneLayout, openBottomSheet } from "@lib/ui/bottomSheet";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
-import {
-  atReactionLimit,
-  channelCanReact,
-  reactionLockReason,
-} from "../../features/messaging/message-list/reactions";
-import { ensureActionsBar } from "../../features/messaging/message-list/messageActionBar";
+import { atReactionLimit, channelCanReact, reactionLockReason } from "./message-list/reactions";
+import { ensureActionsBar } from "./message-list/messageActionBar";
 import { addOptimisticReaction, getChannelMessages } from "@stores/messages.store";
 import { listCustomEmoji } from "@stores/emoji.store";
 import type { WsClient } from "@lib/ws";
@@ -20,10 +16,7 @@ import { connectText } from "../../i18n/connect";
 import { messagingText } from "../../i18n/messaging";
 
 // The picker loads on its first open, so its code stays out of the main-page chunk.
-const emojiPickerScreen = createLazyScreen(
-  "emoji-picker",
-  () => import("../../features/messaging/EmojiPicker"),
-);
+const emojiPickerScreen = createLazyScreen("emoji-picker", () => import("./EmojiPicker"));
 
 /** The React button of a message's hover bar, building the bar first if it is still a shell. */
 function reactButtonOf(msgId: number): Element | null {
@@ -141,10 +134,7 @@ export function createReactionController(opts: ReactionControllerOptions): React
       });
   }
 
-  function mountPickerSheet(
-    screen: typeof import("../../features/messaging/EmojiPicker"),
-    msgId: number,
-  ): void {
+  function mountPickerSheet(screen: typeof import("./EmojiPicker"), msgId: number): void {
     const picker = screen.createEmojiPicker({
       customEmoji: listCustomEmoji(),
       onSelect: (selectedEmoji: string, select) => {
@@ -173,10 +163,7 @@ export function createReactionController(opts: ReactionControllerOptions): React
     activeSheetClose = sheet.close;
   }
 
-  function mountPicker(
-    screen: typeof import("../../features/messaging/EmojiPicker"),
-    msgId: number,
-  ): void {
+  function mountPicker(screen: typeof import("./EmojiPicker"), msgId: number): void {
     if (isPhoneLayout()) {
       mountPickerSheet(screen, msgId);
       return;
