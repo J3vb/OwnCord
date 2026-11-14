@@ -294,6 +294,8 @@ type appealContactReader interface {
 	AppealContact(ctx context.Context) (string, error)
 }
 
+var _ appealContactReader = (*service.AuthService)(nil)
+
 // appealContactTimeout bounds the settings read made while answering a banned sign-in.
 const appealContactTimeout = 2 * time.Second
 
@@ -302,7 +304,7 @@ const appealContactTimeout = 2 * time.Second
 // Every other refusal is writeAuthError unchanged, and an unreadable setting sends the plain refusal.
 func writeSignInError(ctx context.Context, w http.ResponseWriter, svc AuthService, err error) {
 	reader, ok := svc.(appealContactReader)
-	if !ok || !errors.Is(err, service.ErrBanned) {
+	if !ok || !errors.Is(err, service.ErrBanned) || errors.Is(err, service.ErrBannedErasing) {
 		writeAuthError(ctx, w, err)
 		return
 	}

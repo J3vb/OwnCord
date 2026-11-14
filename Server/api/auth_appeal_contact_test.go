@@ -113,6 +113,25 @@ func TestLoginRefusals_CarryNoAppealContact(t *testing.T) {
 	}
 }
 
+// An account whose deletion is in progress gets the same 403 as a ban but never the appeal contact: there is
+// nothing left to appeal.
+func TestLoginErasingAccount_NoAppealContact(t *testing.T) {
+	database := openMigratedDB(t)
+	router := buildAuthRouter(database, auth.NewRateLimiter())
+	seedUser(t, database, "keeper", "correctPass1", 1)
+	id := seedUser(t, database, "leaving", "correctPass1", 4)
+	setSetting(t, database, service.AppealContactKey, appealContactLine)
+	if _, err := database.EraseAccountLock(context.Background(), id, true); err != nil {
+		t.Fatalf("EraseAccountLock: %v", err)
+	}
+
+	rr := postLogin(t, router, "leaving", "correctPass1")
+	requireStatus(t, rr, http.StatusForbidden)
+	if got := strings.TrimSpace(rr.Body.String()); got != plainBanRefusal {
+		t.Fatalf("body = %s, want %s", got, plainBanRefusal)
+	}
+}
+
 func TestVerifyTOTPBanned_AppealContact(t *testing.T) {
 	database, _, router := newAuthEnv(t)
 	partial := loginAwaitingTOTP(t, database, router, "totpbanned", "JBSWY3DPEHPK3PXP")

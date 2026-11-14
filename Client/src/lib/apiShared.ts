@@ -258,9 +258,6 @@ export function errorText(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-/** The most of an owner's appeal contact shown (the server holds it to the same cap). */
-const MAX_APPEAL_CONTACT_CHARS = 200;
-
 /**
  * The second line of a banned sign-in refusal: where to appeal, from the owner's
  * contact setting. Null unless the error is the ban refusal and carried a contact.
@@ -273,7 +270,7 @@ export function appealLine(err: unknown): string | null {
   }
   const contact = err.appealContact?.trim();
   if (contact === undefined || contact === "") return null;
-  return connectText("error.bannedAppeal", { contact: contact.slice(0, MAX_APPEAL_CONTACT_CHARS) });
+  return connectText("error.bannedAppeal", { contact });
 }
 
 /** `errorText`, plus the appeal line on a ban refusal, on its own line. */
