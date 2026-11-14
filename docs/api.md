@@ -4806,8 +4806,20 @@ Nothing here is exported off the host.
   both `0`).
   It is never reported as healthy and neither raises nor clears a warning.
 - `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `voice`,
-  `certificate`, `last_exit`, `last_restore`, `backup`, and `job:<name>` for each maintenance
-  step.
+  `certificate`, `last_exit`, `last_restore`, `backup`, `owner_recovery_kit`, `moderators`,
+  `moderate_role`, and `job:<name>` for each maintenance step.
+- `owner_recovery_kit` is a `warning` when the owner account has no unspent
+  recovery kit (none issued, or the only one was used): a lost owner password
+  then means restoring a backup and running setup again. The owner makes one in
+  Settings > Account > Recovery kit.
+- `moderators` is a `warning` when fewer than two active people can work
+  reports: approved, not banned, non-system accounts that are the owner or hold
+  a role with Administrator or Moderate Members. `value` is the count.
+- `moderate_role` is a `warning` when no role other than Owner carries Moderate
+  Members itself (Administrator does not count). These three are levels read
+  from the database each sample, so a fix clears them on the next sample. A
+  failed read is `unknown` with the reason in `detail` and leaves any existing
+  warning as it is.
 - `certificate` reports the served TLS certificate's expiry. A `self_signed`
   or `manual` certificate is `ok` with 21 days or more left, `warning` inside
   21 days and `critical` inside 7 days or once expired. An `acme` certificate

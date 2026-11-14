@@ -87,6 +87,9 @@ type AttentionSources struct {
 	VoiceHealth func(context.Context) VoiceHealth
 	// Certificate reports tls.mode and the served leaf, zero when none is known.
 	Certificate func() (mode string, cert auth.ServedCert)
+	// People reads the owner's recovery kit and moderator coverage once per sample, bounded
+	// by the sample context. Nil reports both unknown.
+	People func(context.Context) AttentionPeople
 }
 
 // BootStatus is what the previous run left in the boot marker.
@@ -278,6 +281,7 @@ type attentionReadings struct {
 	certMode      string
 	cert          auth.ServedCert
 	certMeasured  bool
+	people        *AttentionPeople
 }
 
 func (s *AttentionService) read(ctx context.Context) attentionReadings {
@@ -308,6 +312,10 @@ func (s *AttentionService) read(ctx context.Context) attentionReadings {
 	if s.src.Certificate != nil {
 		r.certMode, r.cert = s.src.Certificate()
 		r.certMeasured = true
+	}
+	if s.src.People != nil {
+		p := s.src.People(ctx)
+		r.people = &p
 	}
 	// Last, after the voice probe that can block: a concurrent 'Backup now' refresh must not
 	// be overwritten by an older reading.
@@ -343,6 +351,7 @@ func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 	s.evalBackup(r, now)
 	s.evalVoice(r, now)
 	s.evalCertificate(r, now)
+	s.evalPeople(r, now)
 	s.evalBootStatus(now)
 	s.evalRestoreOutcome(now)
 	s.evalJobs(now)
