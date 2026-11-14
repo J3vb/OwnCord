@@ -222,8 +222,8 @@ impl IActivateCompletion_Impl for CompletionHandler_Impl {
 impl IAgile_Impl for CompletionHandler_Impl {}
 
 /// A PROPVARIANT of type VT_BLOB, laid out as the C struct. Built by hand
-/// because `windows` offers no safe blob constructor, and it must not be
-/// a real `PROPVARIANT` (whose drop would CoTaskMemFree our stack bytes).
+/// because `windows` offers no safe blob constructor, and the blob points at
+/// our own stack bytes, which nothing may hand to PropVariantClear.
 #[repr(C)]
 struct BlobPropVariant {
     vt: u16,
