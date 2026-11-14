@@ -118,6 +118,7 @@ release changes the database, and anything an operator must do first.)
 
 ### Accounts & admin
 
+- **One switch turns push on.** `push.enabled` now lets phones register and sends them notifications; the second switch, `push.dispatch_enabled`, is retired. **Upgrade note:** a server that had push on but sending off starts sending after the upgrade (to the push service each phone named, such as ntfy.sh); set `push.enabled: false` before upgrading if you do not want that. A `config.yaml` or admin-panel setting that still names `push.dispatch_enabled` loads fine and is ignored, and the server logs one line at start-up saying so. The admin Settings row "Send push notifications" is gone; "Enable push notifications" covers both.
 - **Moderators can warn a member from the member list.** Right-click a member and choose Warn; until now a warning could only come from a report.
 
 ### Under the hood

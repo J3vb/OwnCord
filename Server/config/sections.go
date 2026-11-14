@@ -41,19 +41,19 @@ type GIFConfig struct {
 	APIKey string `yaml:"api_key"`
 }
 
-// PushConfig is the owner gate for Web Push subscription storage and dispatch. While Enabled is false (the
+// PushConfig is the owner gate for Web Push device registration and sending. While Enabled is false (the
 // default) every /api/v1/push route answers 503 PUSH_DISABLED after authentication. Turning it off later
 // keeps existing rows and the staleness sweep still runs.
 type PushConfig struct {
-	// Enabled: The owner opt-in for subscription storage; routes are always mounted.
+	// Enabled: The single owner opt-in: devices may register and the server sends to them. Sending opens
+	// outbound HTTPS to each subscription's push service (see docs/architecture/diagnostics.md's egress
+	// table). Routes are always mounted.
 	Enabled bool `yaml:"enabled"`
 	// SubscriptionTTLDays: A subscription whose last_seen_at is older than this is removed by the maintenance
 	// sweep; clients keep a row alive by re-POSTing. Default 90, bounded to [1, 3650] in boundedKeys.
 	SubscriptionTTLDays int `yaml:"subscription_ttl_days"`
-	// DispatchEnabled: A SECOND owner opt-in on top of Enabled, so an operator who enabled storage before
-	// dispatch existed does not acquire dispatch on upgrade. It opens outbound HTTPS to each subscription's
-	// push service (see docs/architecture/diagnostics.md's egress table). Dispatch runs only when both are
-	// true.
+	// DispatchEnabled: Deprecated and ignored; Enabled alone turns sending on. The field stays so a
+	// config file or environment that still names the key loads without an unknown-key warning.
 	DispatchEnabled bool `yaml:"dispatch_enabled"`
 	// Contact: The operator contact a VAPID JWT's "sub" claim names (RFC 8292), sent as "mailto:"+Contact;
 	// empty omits the claim, which some push services refuse.

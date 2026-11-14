@@ -48,7 +48,6 @@ var panelEditableKeys = []string{
 	"plugins.http_allowlist",
 	"plugins.max_memory_mb",
 	"push.contact",
-	"push.dispatch_enabled",
 	"push.enabled",
 	"push.subscription_ttl_days",
 	"security.auth_rate_limit_multiplier",
@@ -108,6 +107,9 @@ var panelExcludedKeys = []string{
 	// A voice grant rule the person running the server sets in config.yaml
 	// or the environment, read once at start-up.
 	"voice.restrict_data_publishing",
+	// Retired: push.enabled alone turns on sending. A stored override is
+	// kept in the file for a downgrade but never applied.
+	"push.dispatch_enabled",
 }
 
 func TestEditableKeys_ExactInventory(t *testing.T) {
