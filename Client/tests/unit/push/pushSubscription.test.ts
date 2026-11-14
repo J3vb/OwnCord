@@ -49,6 +49,15 @@ function makeApi(scope = new SessionScope({ host: "chat.example:8443", generatio
   return { api: api as unknown as PushApi & typeof api, scope };
 }
 
+/** A promise the test rejects when it chooses. */
+function deferredRejection(): { promise: Promise<never>; reject: (e: Error) => void } {
+  let reject: (e: Error) => void = () => undefined;
+  const promise = new Promise<never>((_, rej) => {
+    reject = rej;
+  });
+  return { promise, reject };
+}
+
 /** Let the attempt's awaits run. */
 async function settle(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -145,14 +154,32 @@ describe("push subscription", () => {
     expect(pushStore.getState().host).toBe("");
   });
 
+  it("a push server on a non-standard port is shown with its host and port", async () => {
+    const { api } = makeApi();
+    host.register.mockResolvedValue({
+      ok: true,
+      keys: { ...KEYS, endpoint: "https://ntfy.example:8443/up1" },
+    });
+    api.subscribePush.mockRejectedValueOnce(
+      new ApiClientError(400, "PUSH_SERVER_PORT_NOT_SUPPORTED", "port"),
+    );
+    onReady(api);
+    await settle();
+    expect(pushStore.getState()).toMatchObject({
+      setting: "port-refused",
+      host: "ntfy.example",
+      port: "8443",
+    });
+  });
+
   it("a refusal that arrives after the session ended changes nothing", async () => {
     const { api } = makeApi();
-    let refuse: (e: Error) => void = () => undefined;
-    api.subscribePush.mockImplementationOnce(() => new Promise((_, reject) => (refuse = reject)));
+    const refusal = deferredRejection();
+    api.subscribePush.mockImplementationOnce(() => refusal.promise);
     onReady(api);
     await settle();
     runSessionResets("user");
-    refuse(new ApiClientError(400, "PUSH_SERVER_NOT_PUBLIC", "not public"));
+    refusal.reject(new ApiClientError(400, "PUSH_SERVER_NOT_PUBLIC", "not public"));
     await settle();
     expect(pushStore.getState().setting).toBe("off");
   });
@@ -183,6 +210,7 @@ describe("push subscription", () => {
         { id: "org.example.up", name: "Other" },
       ],
       host: "",
+      port: "",
     });
 
     await chooseDistributor("io.heckel.ntfy");

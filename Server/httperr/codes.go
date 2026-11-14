@@ -66,7 +66,10 @@ const (
 	// The push server a device registered is on a private, loopback or otherwise
 	// non-public address; OwnCord only sends to public push servers.
 	CodePushServerNotPublic Code = "PUSH_SERVER_NOT_PUBLIC"
-	CodeRateLimited         Code = "RATE_LIMITED"
+	// The push server a device registered uses a port other than 443; OwnCord
+	// only sends to push servers on the standard HTTPS port.
+	CodePushServerPortNotSupported Code = "PUSH_SERVER_PORT_NOT_SUPPORTED"
+	CodeRateLimited                Code = "RATE_LIMITED"
 	// Account recovery set the new password and spent the recovery secret, but no
 	// session could be started; sign in with the new password instead of retrying
 	// the recovery.

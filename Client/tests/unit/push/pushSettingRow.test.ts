@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../src/platform/desktop", () => ({
   desktop: { urlOpener: { open: vi.fn() }, pushRegistration: { supported: true } },
@@ -23,6 +23,17 @@ describe("push setting row", () => {
     expect(row.querySelector("[data-testid=push-status]")?.textContent).toBe(
       "Push server not public",
     );
+  });
+
+  it("names the port of a push server that is not on 443", () => {
+    setPushSetting("port-refused", [], "ntfy.example", "8443");
+    const row = buildPushRow(controller.signal);
+    expect(row.querySelector("[data-testid=push-desc]")?.textContent).toBe(
+      "Your push server (ntfy.example) uses port 8443. OwnCord only sends to push servers on the standard HTTPS port (443).",
+    );
+  });
+
+  afterAll(() => {
     controller.abort();
   });
 });

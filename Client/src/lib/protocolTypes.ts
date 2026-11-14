@@ -240,6 +240,9 @@ export const RestErrorCode = {
   // The push server a device registered is on a private, loopback or otherwise
   // non-public address; OwnCord only sends to public push servers.
   PUSH_SERVER_NOT_PUBLIC: "PUSH_SERVER_NOT_PUBLIC",
+  // The push server a device registered uses a port other than 443; OwnCord
+  // only sends to push servers on the standard HTTPS port.
+  PUSH_SERVER_PORT_NOT_SUPPORTED: "PUSH_SERVER_PORT_NOT_SUPPORTED",
   RATE_LIMITED: "RATE_LIMITED",
   // Account recovery set the new password and spent the recovery secret, but
   // no session could be started; sign in with the new password instead of

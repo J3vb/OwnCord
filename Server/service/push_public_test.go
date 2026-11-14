@@ -60,6 +60,11 @@ func TestSubscribe_PushServerAddressChecks(t *testing.T) {
 		{"loopback IPv6 literal", "https://[::1]/up", resolvesTo("8.8.8.8"), true},
 		{"public IPv4 literal", "https://1.1.1.1/up", resolvesTo("10.0.0.1"), false},
 		{"public and private answers", "https://mixed.example/up", resolvesTo("8.8.8.8", "10.1.2.3"), true},
+		{"IPv4-mapped private literal", "https://[::ffff:10.0.0.1]/up", resolvesTo("8.8.8.8"), true},
+		{"NAT64 private literal", "https://[64:ff9b::a00:1]/up", resolvesTo("8.8.8.8"), true},
+		{"unspecified literal", "https://0.0.0.0/up", resolvesTo("8.8.8.8"), true},
+		{"explicit 443", "https://ntfy.example:443/up", resolvesTo("8.8.8.8"), false},
+		{"empty answer: fail open", "https://empty.example/up", resolvesTo(), false},
 		{"cgnat answer", "https://ts.example/up", resolvesTo("100.64.1.2"), true},
 		{"lookup fails: fail open", "https://flaky.example/up", func(context.Context, string) ([]netip.Addr, error) {
 			return nil, errors.New("servfail")
@@ -93,5 +98,18 @@ func TestSubscribe_PushServerAddressChecks(t *testing.T) {
 				t.Fatalf("Subscribe took %s, the lookup must be bounded", d)
 			}
 		})
+	}
+}
+
+func TestSubscribe_RefusesAPortDispatchDoesNotSendTo(t *testing.T) {
+	svc := newPushPublicSvc(t, resolvesTo("8.8.8.8"))
+	err := pushSubscribeTo(t, svc, "https://ntfy.example:8443/up")
+	if !errors.Is(err, ErrPushServerPortNotSupported) {
+		t.Fatalf("Subscribe = %v, want ErrPushServerPortNotSupported", err)
+	}
+	rows, lerr := svc.List(context.Background(), 1)
+	mustDo(t, "List", lerr)
+	if len(rows) != 0 {
+		t.Fatalf("a refused endpoint was stored: %+v", rows)
 	}
 }

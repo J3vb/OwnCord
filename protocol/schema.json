@@ -488,6 +488,12 @@
         "ts": "PUSH_SERVER_NOT_PUBLIC",
         "note": "The push server a device registered is on a private, loopback or otherwise non-public address; OwnCord only sends to public push servers."
       },
+      {
+        "wire": "PUSH_SERVER_PORT_NOT_SUPPORTED",
+        "go": "CodePushServerPortNotSupported",
+        "ts": "PUSH_SERVER_PORT_NOT_SUPPORTED",
+        "note": "The push server a device registered uses a port other than 443; OwnCord only sends to push servers on the standard HTTPS port."
+      },
       { "wire": "RATE_LIMITED", "go": "CodeRateLimited", "ts": "RATE_LIMITED" },
       {
         "wire": "RECOVERED_SIGN_IN_REQUIRED",

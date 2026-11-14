@@ -13,6 +13,8 @@
  *   registration is dropped until they are back on
  * - refused: the server will not send to the push server this phone uses
  *   because it is on a private network; `host` names it
+ * - port-refused: the push server uses a port other than 443; `host` and `port`
+ *   name it
  * - failed: the push app or the server did not answer; tried again when the
  *   app comes back into view
  */
@@ -21,7 +23,16 @@ import { createStore } from "@lib/store";
 import type { PushDistributor } from "../../platform/contracts/pushRegistration";
 
 export type PushSetting =
-  "off" | "checking" | "on" | "install" | "choose" | "server-off" | "muted" | "refused" | "failed";
+  | "off"
+  | "checking"
+  | "on"
+  | "install"
+  | "choose"
+  | "server-off"
+  | "muted"
+  | "refused"
+  | "port-refused"
+  | "failed";
 
 export interface PushState {
   readonly setting: PushSetting;
@@ -29,9 +40,16 @@ export interface PushState {
   readonly distributors: readonly PushDistributor[];
   /** The push server's host, while `setting` is "refused". */
   readonly host: string;
+  /** The push server's port, while `setting` is "port-refused". */
+  readonly port: string;
 }
 
-export const INITIAL_PUSH_STATE: PushState = { setting: "off", distributors: [], host: "" };
+export const INITIAL_PUSH_STATE: PushState = {
+  setting: "off",
+  distributors: [],
+  host: "",
+  port: "",
+};
 
 export const pushStore = createStore<PushState>(INITIAL_PUSH_STATE);
 
@@ -39,6 +57,7 @@ export function setPushSetting(
   setting: PushSetting,
   distributors: readonly PushDistributor[] = [],
   host = "",
+  port = "",
 ): void {
-  pushStore.setState(() => ({ setting, distributors, host }));
+  pushStore.setState(() => ({ setting, distributors, host, port }));
 }

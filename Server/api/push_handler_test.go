@@ -146,6 +146,19 @@ func TestPushSubscriptions_PrivatePushServerIsRefusedWithItsOwnCode(t *testing.T
 	}
 }
 
+func TestPushSubscriptions_NonStandardPortIsRefusedWithItsOwnCode(t *testing.T) {
+	database := openMigratedDB(t)
+	router, _ := buildPushRouter(t, database, true)
+	userID := mintUser(t, database, "push-port")
+	token, _ := mintSession(t, database, userID)
+
+	rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, validSubscribeBody("https://ntfy.example.com:8443/up/abc"))
+	requireStatus(t, rr, http.StatusBadRequest)
+	if !strings.Contains(rr.Body.String(), "PUSH_SERVER_PORT_NOT_SUPPORTED") {
+		t.Fatalf("body = %s, want code PUSH_SERVER_PORT_NOT_SUPPORTED", rr.Body.String())
+	}
+}
+
 func TestPushSubscriptions_VisibleOnlyToOwner(t *testing.T) {
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)

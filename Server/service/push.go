@@ -48,6 +48,10 @@ var ErrInvalidSubscription = errors.New("invalid push subscription")
 // would only ever fail silently; handlers answer 400 PUSH_SERVER_NOT_PUBLIC.
 var ErrPushServerNotPublic = errors.New("push server is not on a public address")
 
+// ErrPushServerPortNotSupported is returned by Subscribe when the endpoint names a port other than 443, the only
+// one dispatch sends to; handlers answer 400 PUSH_SERVER_PORT_NOT_SUPPORTED.
+var ErrPushServerPortNotSupported = errors.New("push server port is not supported")
+
 // pushResolveTimeout bounds the sign-up DNS lookup so a slow resolver cannot hold a request open.
 const pushResolveTimeout = 3 * time.Second
 
@@ -117,13 +121,16 @@ func (s *PushService) currentResolver() PushResolver {
 	return s.resolve
 }
 
-// checkEndpointPublic refuses an endpoint whose host is, or resolves to, any address safefetch would refuse to
+// checkEndpointPublic refuses an endpoint on a port dispatch does not send to, and one whose host is, or resolves to, any address safefetch would refuse to
 // dial, using the same classifier so sign-up and sending never disagree. A failed or timed-out lookup passes:
 // a flaky resolver must not block a phone, and safefetch still guards every send.
 func (s *PushService) checkEndpointPublic(ctx context.Context, endpoint string) error {
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return fmt.Errorf("%w: endpoint must be an https URL with a host", ErrInvalidSubscription)
+	}
+	if port := u.Port(); port != "" && port != "443" {
+		return fmt.Errorf("%w: %s", ErrPushServerPortNotSupported, port)
 	}
 	host := u.Hostname()
 	if literal, perr := netip.ParseAddr(host); perr == nil {
@@ -138,6 +145,8 @@ func (s *PushService) checkEndpointPublic(ctx context.Context, endpoint string) 
 	if lerr != nil {
 		return nil
 	}
+	// An empty answer with no error is accepted on purpose, like a failed lookup: sign-up fails open and
+	// send time refuses a host with no addresses.
 	for _, a := range addrs {
 		if cerr := safefetch.ClassifyAddr(a); cerr != nil {
 			return fmt.Errorf("%w: %s", ErrPushServerNotPublic, host)
