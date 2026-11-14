@@ -91,7 +91,7 @@ func (s *AttentionService) evalPeople(r attentionReadings, now time.Time) {
 func (s *AttentionService) evalOwnerKit(p *AttentionPeople, now time.Time) {
 	sig := AttentionSignal{ID: "owner_recovery_kit", Label: "Owner recovery kit", ObservedAt: now}
 	const title = "The owner has no recovery kit"
-	const action = "Sign in as the owner and open Settings > Account > Recovery kit, choose Create recovery kit, and keep the secret offline. Without one, a lost owner password means restoring a backup and running setup again."
+	const ownerKitAction = "Sign in as the owner and open Settings > Account > Recovery kit, choose Create recovery kit, and keep the secret offline. Without one, a lost owner password means restoring a backup and running setup again."
 	switch {
 	case p == nil:
 		sig.Status, sig.Detail = AttentionStatusUnknown, "not measured on this server"
@@ -104,7 +104,7 @@ func (s *AttentionService) evalOwnerKit(p *AttentionPeople, now time.Time) {
 	default:
 		sig.Status, sig.Value = AttentionStatusWarning, "none issued"
 	}
-	s.settle(sig, title, action)
+	s.settle(sig, title, ownerKitAction)
 }
 
 func attentionPeopleCount(n int) string {
@@ -117,7 +117,7 @@ func attentionPeopleCount(n int) string {
 func (s *AttentionService) evalModerators(p *AttentionPeople, now time.Time) {
 	sig := AttentionSignal{ID: "moderators", Label: "Moderator coverage", ObservedAt: now}
 	const title = "Fewer than two people can work reports"
-	const action = "Give a trusted member a role with Moderate Members (or Administrator) so reports are covered when someone is away: edit the role in Roles & permissions, then assign it in Members."
+	const moderatorsAction = "Give a trusted member a role with Moderate Members (or Administrator) so reports are covered when someone is away: edit the role in Roles & permissions, then assign it in Members."
 	switch {
 	case p == nil:
 		sig.Status, sig.Detail = AttentionStatusUnknown, "not measured on this server"
@@ -131,13 +131,13 @@ func (s *AttentionService) evalModerators(p *AttentionPeople, now time.Time) {
 			sig.Status = AttentionStatusWarning
 		}
 	}
-	s.settle(sig, title, action)
+	s.settle(sig, title, moderatorsAction)
 }
 
 func (s *AttentionService) evalModerateRole(p *AttentionPeople, now time.Time) {
 	sig := AttentionSignal{ID: "moderate_role", Label: "Moderate Members role", ObservedAt: now}
 	const title = "No role besides Owner can moderate members"
-	const action = "Give your moderator role Moderate Members in Roles & permissions. A customised Moderator role did not receive it automatically, and Administrator does not count here."
+	const moderateRoleAction = "Give your moderator role Moderate Members in Roles & permissions. A customised Moderator role did not receive it automatically, and Administrator does not count here."
 	switch {
 	case p == nil:
 		sig.Status, sig.Detail = AttentionStatusUnknown, "not measured on this server"
@@ -148,5 +148,5 @@ func (s *AttentionService) evalModerateRole(p *AttentionPeople, now time.Time) {
 	default:
 		sig.Status, sig.Value = AttentionStatusOK, fmt.Sprintf("%d role(s)", p.ModerateRoles)
 	}
-	s.settle(sig, title, action)
+	s.settle(sig, title, moderateRoleAction)
 }
