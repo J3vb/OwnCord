@@ -153,3 +153,12 @@ func TestChannelPasswordStaysBcrypt(t *testing.T) {
 		t.Fatal("CheckChannelPassword accepted a hash that is not bcrypt")
 	}
 }
+
+func TestHashPassword_RefusesOver72Bytes(t *testing.T) {
+	if _, err := auth.HashPassword(strings.Repeat("p", 73)); err == nil || !strings.Contains(err.Error(), "72 bytes") {
+		t.Fatalf("HashPassword(73 bytes) error = %v, want the 72-byte refusal", err)
+	}
+	if _, err := auth.HashPassword(strings.Repeat("p", 72)); err != nil {
+		t.Fatalf("HashPassword(72 bytes) error = %v", err)
+	}
+}

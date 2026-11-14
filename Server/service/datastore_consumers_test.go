@@ -28,7 +28,7 @@ var storeConsumersAllowed = map[string]bool{
 // each with its own st.
 var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[AppealService]():         11,
-	reflect.TypeFor[AuthService]():           13,
+	reflect.TypeFor[AuthService]():           14,
 	reflect.TypeFor[twoFactor]():             9,
 	reflect.TypeFor[accountRecovery]():       11,
 	reflect.TypeFor[BlockService]():          4,

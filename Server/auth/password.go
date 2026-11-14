@@ -88,8 +88,16 @@ const argon2Prefix = "$argon2id$"
 
 var b64 = base64.RawStdEncoding
 
+// errHashTooLong keeps the 72-byte ceiling bcrypt enforced at hash time, so a
+// path that hashes without validating first still refuses a longer password.
+var errHashTooLong = errors.New("password length exceeds 72 bytes")
+
 // HashPassword returns an argon2id hash of password in the PHC string format.
+// A password over 72 bytes is refused.
 func HashPassword(password string) (string, error) {
+	if len(password) > maxPassLen {
+		return "", fmt.Errorf("hash password: %w", errHashTooLong)
+	}
 	hash, err := hashArgon2(password, argon2Cur)
 	if err != nil {
 		return "", fmt.Errorf("hash password: %w", err)
