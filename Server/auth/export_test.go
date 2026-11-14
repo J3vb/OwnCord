@@ -89,3 +89,20 @@ func (b *AdmissionBudget) AbandonHandedSlotForTest(release func()) {
 // ProductionBcryptCostForTest is bcryptCost as the package initialised it,
 // captured before any TestMain lowers it. Exported for auth_test only.
 var ProductionBcryptCostForTest = bcryptCost
+
+// ProductionArgon2ForTest is the argon2id memory (KiB), passes and threads new
+// hashes use in production. Exported for auth_test only.
+var ProductionArgon2ForTest = [3]uint32{productionArgon2.memoryKiB, productionArgon2.time, uint32(productionArgon2.threads)}
+
+// HashArgon2ForTest hashes password with the given memory (KiB), passes and threads.
+func HashArgon2ForTest(password string, memoryKiB, passes uint32, threads uint8) (string, error) {
+	return hashArgon2(password, argon2Params{memoryKiB: memoryKiB, time: passes, threads: threads, saltLen: 16, keyLen: 32})
+}
+
+// Argon2MemoryBudgetKiBForTest is the process-wide argon2id memory budget.
+const Argon2MemoryBudgetKiBForTest = argon2MemoryBudgetKiB
+
+// NewMemorySemaphoreForTest exposes the argon2id memory budget's type.
+func NewMemorySemaphoreForTest(total uint32) func(n uint32) (release func()) {
+	return newMemorySemaphore(total).acquire
+}

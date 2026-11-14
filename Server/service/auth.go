@@ -89,6 +89,7 @@ type authCoreStore interface {
 	CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error)
 	CreatePendingUser(ctx context.Context, username, passwordHash string, roleID, maxPending int) (int64, error)
 	CountPendingUsers(ctx context.Context) (int64, error)
+	UpgradeUserPasswordHash(ctx context.Context, userID int64, oldHash, newHash string) (bool, error)
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
 	DeleteSession(ctx context.Context, tokenHash string) error
 	GetInvite(ctx context.Context, code string) (*db.Invite, error)
@@ -263,7 +264,11 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	if user != nil {
 		storedHash = user.PasswordHash
 	}
-	matched := auth.CheckPassword(storedHash, in.Password)
+	matched, needsRehash := auth.VerifyPassword(storedHash, in.Password)
+	if matched && needsRehash {
+		// Still inside the admitted slot: the new hash is the same deliberate cost.
+		s.upgradePasswordHash(ctx, user, in.Password)
+	}
 	release()
 	if !matched {
 		// The attempt was reserved up-front; Check is read-only, so only the lockouts are decided here.
@@ -281,6 +286,27 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	s.limiter.Reset(ctx, userFailKey)
 	s.recordLoginVouch(ctx, successKey)
 	return user, nil
+}
+
+// upgradePasswordHash stores an argon2id hash in place of an older one after a correct
+// password. It writes only while the stored hash is still the one just checked, so a
+// password changed meanwhile is never overwritten. Any failure leaves the old hash, which
+// still signs in; the sign-in itself never fails on it.
+func (s *AuthService) upgradePasswordHash(ctx context.Context, user *db.User, password string) {
+	newHash, err := auth.HashPassword(password)
+	if err != nil {
+		slog.Warn("login: password hash upgrade failed", "err", err, "user_id", user.ID)
+		return
+	}
+	upgraded, err := s.st.UpgradeUserPasswordHash(context.WithoutCancel(ctx), user.ID, user.PasswordHash, newHash)
+	if err != nil {
+		slog.Warn("login: storing upgraded password hash failed", "err", err, "user_id", user.ID)
+		return
+	}
+	if upgraded {
+		user.PasswordHash = newHash
+		slog.Info("login: password hash upgraded", "user_id", user.ID)
+	}
 }
 
 // Logout revokes p.Session and clears the custom status. p.Session must be non-nil: the

@@ -96,7 +96,7 @@ func (h *Hub) voiceJoinPasswordGate(ctx context.Context, c *Client, sub permissi
 	if !found || hash == "" {
 		return true
 	}
-	if !auth.CheckPassword(hash, password) {
+	if !auth.CheckChannelPassword(hash, password) {
 		slog.Warn("ws voice_join: wrong channel password", "user_id", c.userID, "channel_id", channelID)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeWrongPassword, "wrong password", reqID))
 		return false

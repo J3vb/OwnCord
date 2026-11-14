@@ -333,3 +333,35 @@ func TestUpdateUserProfileAndIdentityKey_AllOrNothing(t *testing.T) {
 		t.Fatalf("missing user err = %v, want ErrNotFound", err)
 	}
 }
+
+// ─── UpgradeUserPasswordHash tests ───────────────────────────────────────────
+
+func TestUpgradeUserPasswordHash_SwapsOnlyTheCheckedHash(t *testing.T) {
+	ctx := context.Background()
+	database := newSchemaTestDB(t, testSchema)
+	id, _ := database.CreateUser(ctx, "upgradeuser", "oldhash", 4)
+
+	ok, err := database.UpgradeUserPasswordHash(ctx, id, "stalehash", "newhash")
+	mustDo(t, "UpgradeUserPasswordHash stale", err)
+	if ok {
+		t.Fatal("upgrade from a hash that is no longer stored reported success")
+	}
+	if user, _ := database.GetUserByID(ctx, id); user.PasswordHash != "oldhash" {
+		t.Fatalf("PasswordHash = %q after a stale upgrade, want it unchanged", user.PasswordHash)
+	}
+
+	ok, err = database.UpgradeUserPasswordHash(ctx, id, "oldhash", "newhash")
+	mustDo(t, "UpgradeUserPasswordHash", err)
+	if !ok {
+		t.Fatal("upgrade from the stored hash reported no change")
+	}
+	if user, _ := database.GetUserByID(ctx, id); user.PasswordHash != "newhash" {
+		t.Fatalf("PasswordHash = %q, want %q", user.PasswordHash, "newhash")
+	}
+
+	ok, err = database.UpgradeUserPasswordHash(ctx, id+1000, "oldhash", "x")
+	mustDo(t, "UpgradeUserPasswordHash missing user", err)
+	if ok {
+		t.Fatal("upgrade of a missing user reported success")
+	}
+}

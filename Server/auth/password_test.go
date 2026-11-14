@@ -17,13 +17,20 @@ func TestHashPassword_DiffersFromPlaintext(t *testing.T) {
 	}
 }
 
-func TestHashPassword_BcryptPrefix(t *testing.T) {
+func TestHashPassword_Argon2idFormat(t *testing.T) {
 	hash, err := auth.HashPassword("mypassword")
 	if err != nil {
 		t.Fatalf("HashPassword() error = %v", err)
 	}
-	if !strings.HasPrefix(hash, "$2") {
-		t.Errorf("HashPassword() = %q, want bcrypt prefix $2*", hash)
+	if !strings.HasPrefix(hash, "$argon2id$v=19$m=") || strings.Count(hash, "$") != 5 {
+		t.Errorf("HashPassword() = %q, want a PHC argon2id string", hash)
+	}
+	again, err := auth.HashPassword("mypassword")
+	if err != nil {
+		t.Fatalf("HashPassword() error = %v", err)
+	}
+	if again == hash {
+		t.Error("two hashes of one password are equal: the salt is not random")
 	}
 }
 

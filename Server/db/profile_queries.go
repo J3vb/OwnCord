@@ -175,6 +175,20 @@ func (d *DB) UpdateUserPassword(ctx context.Context, userID int64, newPasswordHa
 	return nil
 }
 
+// UpgradeUserPasswordHash replaces the user's password hash with newHash only while it
+// still equals oldHash; upgraded is false when it had changed or the user is gone.
+func (d *DB) UpgradeUserPasswordHash(ctx context.Context, userID int64, oldHash, newHash string) (upgraded bool, err error) {
+	n, err := d.q.UpgradeUserPasswordHash(ctx, dbgen.UpgradeUserPasswordHashParams{
+		NewHash: newHash,
+		ID:      userID,
+		OldHash: oldHash,
+	})
+	if err != nil {
+		return false, fmt.Errorf("UpgradeUserPasswordHash: %w", err)
+	}
+	return n == 1, nil
+}
+
 // ListUserSessions returns all sessions for the user, newest first.
 func (d *DB) ListUserSessions(ctx context.Context, userID int64) ([]Session, error) {
 	rows, err := d.q.ListUserSessions(ctx, userID)
