@@ -116,6 +116,10 @@ release changes the database, and anything an operator must do first.)
 - **Pictures and GIFs linked in chat work as before.** A link that is itself an image is still loaded by your app, still animates and still asks first; only page previews and YouTube cards come from your server.
 - **Settings > Text & Images says which content still needs your say-so.** Link previews built by your server no longer do.
 
+### Accounts & admin
+
+- **Moderators can warn a member from the member list.** Right-click a member and choose Warn; until now a warning could only come from a report.
+
 ### Under the hood
 
 - **Groundwork for server-side link previews.** Nothing changes for members yet. It adds the storage a later release will use:

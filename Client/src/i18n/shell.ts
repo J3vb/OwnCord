@@ -29,6 +29,8 @@ export const shellText = defineCatalog("shell", {
   "member.mentionUnavailable": "Open a text channel to mention someone",
   "member.message": "Message",
   "member.call": "Call",
+  "member.warn": "Warn",
+  "member.warnFailed": "Could not load the warning form. Try again.",
   "member.timeout": "Timeout",
   "member.timeout.60s": "60 Seconds",
   "member.timeout.5m": "5 Minutes",

@@ -683,6 +683,8 @@ export const shards = {
   "safety-moderation-5": [
     "src/features/moderation/NicknameDialog.ts",
     "src/features/moderation/ReportsView.ts",
+    "src/features/moderation/WarnDialog.ts",
+    "src/features/moderation/formModal.ts",
     "src/features/moderation/Workflow.ts",
     "src/features/reports/safetyPane.ts",
     "src/features/settings/status.ts",

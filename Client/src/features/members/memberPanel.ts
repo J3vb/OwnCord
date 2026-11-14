@@ -18,7 +18,7 @@ import { membersStore, memberDisplayName } from "@stores/members.store";
 import { currentUserRoleHasPermission, topPositionFor } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
 import { type ApiClient, ApiClientError, errorText } from "@lib/api";
-import type { ToastContainer } from "@lib/ui/toastContainer";
+import type { ToastContainer, ToastType } from "@lib/ui/toastContainer";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
 import type { BlockDeps } from "../blocks/blockActions";
@@ -208,6 +208,13 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
   }
 
   // --- Member list component ---
+  // What every member dialog shares: toasts, this panel's lifetime, and focus
+  // back on the member's row when it closes.
+  const dialogHost = (userId: number) => ({
+    notify: (msg: string, type: ToastType) => getToast()?.show(msg, type),
+    signal: owner.signal,
+    fallbackFocus: () => memberList.focusMember(userId),
+  });
   const memberList = ui.createMemberList({
     currentUserRole: authStore.getState().user?.role ?? "member",
     ...(onMessageUser !== undefined ? { onMessageUser } : {}),
@@ -262,9 +269,7 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
             // The row is about to vanish from the roster; the ban has to appear
             // somewhere or it cannot be undone from here.
             onBanned: () => void refreshBanned(),
-            notify: (msg, type) => getToast()?.show(msg, type),
-            signal: owner.signal,
-            fallbackFocus: () => memberList.focusMember(userId),
+            ...dialogHost(userId),
           });
         },
         () => getToast()?.show(shellText("members.banFailed"), "error"),
@@ -283,12 +288,25 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
             username,
             current,
             submit: (displayName) => api.setMemberNickname(userId, displayName),
-            notify: (msg, type) => getToast()?.show(msg, type),
-            signal: owner.signal,
-            fallbackFocus: () => memberList.focusMember(userId),
+            ...dialogHost(userId),
           });
         },
         () => getToast()?.show(shellText("member.nicknameFailed"), "error"),
+      );
+    },
+    // Loaded on first use, like the Ban dialog.
+    onWarnMember: (userId, username, name) => {
+      import("../../features/moderation/WarnDialog").then(
+        ({ openWarnDialog }) => {
+          if (owner.signal.aborted) return;
+          openWarnDialog({
+            name,
+            username,
+            submit: (reason) => api.warnMember(userId, reason),
+            ...dialogHost(userId),
+          });
+        },
+        () => getToast()?.show(shellText("member.warnFailed"), "error"),
       );
     },
     // Loaded on first use: the dialog and request code stay out of MainPage.
