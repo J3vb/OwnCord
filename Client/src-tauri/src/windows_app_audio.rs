@@ -507,7 +507,7 @@ impl<T> Slot<T> {
     }
 }
 
-/// Tauri state: at most one capture at a time.
+/// Tauri state: at most one screen-share capture at a time.
 #[derive(Default)]
 pub struct AppAudioState(Mutex<Slot<Capture>>);
 
@@ -516,8 +516,8 @@ impl AppAudioState {
         Self::default()
     }
 
-    fn slot(&self) -> std::sync::MutexGuard<'_, Slot<Capture>> {
-        crate::sync::lock(&self.0)
+    fn slot(&self) -> &Mutex<Slot<Capture>> {
+        &self.0
     }
 }
 
@@ -559,14 +559,33 @@ pub async fn start_app_audio(
     if !platform::available() {
         return Err("unavailable".into());
     }
-    // A fast change of source: the old capture and its socket go first, and
-    // any start still in flight is superseded.
-    let (epoch, old) = state.slot().begin();
+    let url = start_in_slot(state.slot(), move || platform::resolve_pid(&label)).await?;
+    Ok(StartedAppAudio { url })
+}
+
+/// Stop the running capture, if any.
+#[tauri::command]
+pub async fn stop_app_audio(state: State<'_, AppAudioState>) -> Result<(), String> {
+    let old = crate::sync::lock(state.slot()).cancel();
     stop_capture(old).await;
-    let pid = tauri::async_runtime::spawn_blocking(move || platform::resolve_pid(&label))
+    Ok(())
+}
+
+/// Start a capture in `slot` for the pid `resolve` finds, and return the
+/// loopback socket URL. The slot's running capture is stopped first, and any
+/// start still in flight on the same slot is superseded. Other slots are not
+/// touched.
+async fn start_in_slot(
+    slot: &Mutex<Slot<Capture>>,
+    resolve: impl FnOnce() -> Result<u32, String> + Send + 'static,
+) -> Result<String, String> {
+    // A fast change of source: the old capture and its socket go first.
+    let (epoch, old) = crate::sync::lock(slot).begin();
+    stop_capture(old).await;
+    let pid = tauri::async_runtime::spawn_blocking(resolve)
         .await
         .map_err(|_| "internal".to_string())??;
-    if !state.slot().is_current(epoch) {
+    if !crate::sync::lock(slot).is_current(epoch) {
         return Err("superseded".into());
     }
     let shared = Shared::new();
@@ -596,11 +615,11 @@ pub async fn start_app_audio(
     };
     // Install only if no newer start or stop overtook this one; either way the
     // capture that loses is dropped outside the lock.
-    let installed = state.slot().install(epoch, capture);
+    let installed = crate::sync::lock(slot).install(epoch, capture);
     match installed {
         Ok(previous) => {
             stop_capture(previous).await;
-            Ok(StartedAppAudio { url })
+            Ok(url)
         }
         Err(superseded) => {
             stop_capture(Some(superseded)).await;
@@ -609,10 +628,359 @@ pub async fn start_app_audio(
     }
 }
 
-/// Stop the running capture, if any.
+// ---------------------------------------------------------------------------
+// Music share: list the apps with sound, capture one by process
+// ---------------------------------------------------------------------------
+
+/// One app with an audio session on the default output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioApp {
+    /// Opaque id the page hands back to start a music capture.
+    pub id: String,
+    /// Display name ("Spotify", "foobar2000").
+    pub name: String,
+    /// Small PNG data URL (<= 32x32) or None.
+    pub icon: Option<String>,
+    /// Sound is playing right now (not only an open session).
+    pub playing: bool,
+}
+
+/// The id of the app whose topmost process is `pid`.
+pub fn app_id(pid: u32) -> String {
+    format!("pid:{pid}")
+}
+
+/// `pid:<n>` -> `n`. Only the canonical spelling [`app_id`] writes is
+/// accepted: no sign, spaces, leading zeros or pid 0.
+pub fn parse_app_id(id: &str) -> Option<u32> {
+    let pid: u32 = id.strip_prefix("pid:")?.parse().ok()?;
+    (pid != 0 && app_id(pid) == id).then_some(pid)
+}
+
+/// One audio session on the default output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AudioSession {
+    pub pid: u32,
+    pub playing: bool,
+}
+
+/// One app: the topmost process of its tree that has sessions below it, and
+/// whether any of them is playing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppGroup {
+    pub root_pid: u32,
+    pub playing: bool,
+}
+
+/// The executable's file name, lowercased, from a Windows or POSIX path.
+pub fn exe_file_name(path: &str) -> Option<String> {
+    let name = path.rsplit(['\\', '/']).next()?;
+    (!name.is_empty()).then(|| name.to_lowercase())
+}
+
+/// The file name without its extension, as written.
+pub fn exe_stem(path: &str) -> Option<String> {
+    let name = path.rsplit(['\\', '/']).next()?;
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    (!stem.is_empty()).then(|| stem.to_string())
+}
+
+/// Group sessions into apps, one per process tree.
+///
+/// A session's app root is its topmost ancestor that runs the same
+/// executable (Spotify, Chrome and every Electron app play from a child of
+/// their main process). The climb stops at a parent that runs something else,
+/// that is gone, or that is OwnCord's own tree or one OwnCord descends from.
+/// System sounds (pid 0), OwnCord's own processes and its ancestors (a
+/// capture of those would contain this app) are left out. `exe_of` gives a
+/// pid's lowercased executable name; a process it cannot name is never
+/// climbed from.
+pub fn group_sessions(
+    sessions: &[AudioSession],
+    parent_of: &HashMap<u32, u32>,
+    exe_of: impl Fn(u32) -> Option<String>,
+    own: &HashSet<u32>,
+    ancestors: &HashSet<u32>,
+) -> Vec<AppGroup> {
+    let mut groups: Vec<AppGroup> = Vec::new();
+    for session in sessions {
+        let pid = session.pid;
+        if pid == 0 || own.contains(&pid) || ancestors.contains(&pid) {
+            continue;
+        }
+        let mut root = pid;
+        let exe = exe_of(pid);
+        for _ in 0..64 {
+            let Some(&parent) = parent_of.get(&root) else {
+                break;
+            };
+            let same_family = exe.is_some() && exe_of(parent) == exe;
+            if parent == 0
+                || parent == root
+                || own.contains(&parent)
+                || ancestors.contains(&parent)
+                || !same_family
+            {
+                break;
+            }
+            root = parent;
+        }
+        match groups.iter_mut().find(|g| g.root_pid == root) {
+            Some(group) => group.playing |= session.playing,
+            None => groups.push(AppGroup {
+                root_pid: root,
+                playing: session.playing,
+            }),
+        }
+    }
+    groups
+}
+
+/// Playing apps first, then by name (case-insensitive), then by id.
+pub fn sort_apps(apps: &mut [AudioApp]) {
+    apps.sort_by(|a, b| {
+        b.playing
+            .cmp(&a.playing)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+}
+
+/// Turn groups into the rows the page shows. `describe` gives a root
+/// process's display name and icon.
+pub fn assemble_apps(
+    groups: &[AppGroup],
+    describe: impl Fn(u32) -> (String, Option<String>),
+) -> Vec<AudioApp> {
+    let mut apps: Vec<AudioApp> = groups
+        .iter()
+        .map(|group| {
+            let (name, icon) = describe(group.root_pid);
+            AudioApp {
+                id: app_id(group.root_pid),
+                name,
+                icon,
+                playing: group.playing,
+            }
+        })
+        .collect();
+    sort_apps(&mut apps);
+    apps
+}
+
+/// Whether `pid` may be captured as music: a live process outside OwnCord's
+/// own tree and outside the processes OwnCord descends from (their trees
+/// contain this app, so the capture would carry the call back to viewers).
+/// The error is the `start_music_audio` code.
+pub fn check_music_target(
+    pid: u32,
+    parent_of: &HashMap<u32, u32>,
+    own: &HashSet<u32>,
+    ancestors: &HashSet<u32>,
+) -> Result<u32, &'static str> {
+    if pid == 0 || !parent_of.contains_key(&pid) || own.contains(&pid) || ancestors.contains(&pid) {
+        return Err("not_found");
+    }
+    Ok(pid)
+}
+
+/// The side of the icon a row shows.
+const ICON_SIDE: usize = 32;
+
+/// Turn the top-down BGRA pixels of an icon's colour bitmap into RGBA. Icons
+/// without an alpha channel come back with all alpha zero; then the AND mask
+/// (`mask_bgra`, same size, a set pixel is transparent) decides, so the icon
+/// is not drawn invisible. `None` when a buffer does not match `w * h`.
+pub fn icon_rgba(w: usize, h: usize, bgra: &[u8], mask_bgra: Option<&[u8]>) -> Option<Vec<u8>> {
+    let len = w.checked_mul(h)?.checked_mul(4)?;
+    if len == 0 || bgra.len() != len || mask_bgra.is_some_and(|m| m.len() != len) {
+        return None;
+    }
+    let has_alpha = bgra.as_chunks::<4>().0.iter().any(|px| px[3] != 0);
+    let mut out = Vec::with_capacity(len);
+    for (i, px) in bgra.as_chunks::<4>().0.iter().enumerate() {
+        let alpha = if has_alpha {
+            px[3]
+        } else if mask_bgra.is_some_and(|m| m[i * 4] != 0 || m[i * 4 + 1] != 0) {
+            0
+        } else {
+            255
+        };
+        out.extend_from_slice(&[px[2], px[1], px[0], alpha]);
+    }
+    Some(out)
+}
+
+/// `rgba` (`w` x `h`) as a `ICON_SIDE` square by nearest-neighbour sampling,
+/// so an icon the system hands back larger than 32x32 (high DPI) still fits.
+pub fn fit_icon(w: usize, h: usize, rgba: &[u8]) -> Option<Vec<u8>> {
+    if w == 0 || h == 0 || rgba.len() != w.checked_mul(h)?.checked_mul(4)? {
+        return None;
+    }
+    if w == ICON_SIDE && h == ICON_SIDE {
+        return Some(rgba.to_vec());
+    }
+    let mut out = Vec::with_capacity(ICON_SIDE * ICON_SIDE * 4);
+    for y in 0..ICON_SIDE {
+        let sy = y * h / ICON_SIDE;
+        for x in 0..ICON_SIDE {
+            let sx = x * w / ICON_SIDE;
+            let at = (sy * w + sx) * 4;
+            out.extend_from_slice(&rgba[at..at + 4]);
+        }
+    }
+    Some(out)
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+fn adler32(bytes: &[u8]) -> u32 {
+    let (mut a, mut b) = (1u32, 0u32);
+    for &byte in bytes {
+        a = (a + u32::from(byte)) % 65_521;
+        b = (b + a) % 65_521;
+    }
+    (b << 16) | a
+}
+
+fn png_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    let start = out.len();
+    out.extend_from_slice(kind);
+    out.extend_from_slice(data);
+    let crc = crc32(&out[start..]);
+    out.extend_from_slice(&crc.to_be_bytes());
+}
+
+/// An 8-bit RGBA PNG of `w` x `h` pixels, deflate "stored" (uncompressed):
+/// an icon is a few KB and this needs no compression crate. `None` when
+/// `rgba` is not `w * h * 4` bytes or the image is empty.
+pub fn encode_png(w: u32, h: u32, rgba: &[u8]) -> Option<Vec<u8>> {
+    let row = (w as usize).checked_mul(4)?;
+    if w == 0 || h == 0 || rgba.len() != row.checked_mul(h as usize)? {
+        return None;
+    }
+    // Each scanline is a filter byte (0, none) and the pixels.
+    let mut raw = Vec::with_capacity((row + 1) * h as usize);
+    for line in rgba.chunks_exact(row) {
+        raw.push(0);
+        raw.extend_from_slice(line);
+    }
+    // zlib: header, stored blocks of at most 65535 bytes, Adler-32.
+    let mut z = vec![0x78, 0x01];
+    let mut blocks = raw.chunks(65_535).peekable();
+    while let Some(block) = blocks.next() {
+        z.push(u8::from(blocks.peek().is_none()));
+        z.extend_from_slice(&(block.len() as u16).to_le_bytes());
+        z.extend_from_slice(&(!(block.len() as u16)).to_le_bytes());
+        z.extend_from_slice(block);
+    }
+    z.extend_from_slice(&adler32(&raw).to_be_bytes());
+
+    let mut ihdr = Vec::with_capacity(13);
+    ihdr.extend_from_slice(&w.to_be_bytes());
+    ihdr.extend_from_slice(&h.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]); // 8-bit RGBA, no interlace
+    let mut out = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    png_chunk(&mut out, b"IHDR", &ihdr);
+    png_chunk(&mut out, b"IDAT", &z);
+    png_chunk(&mut out, b"IEND", &[]);
+    Some(out)
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        out.push(ABC[(n >> 18) as usize & 63] as char);
+        out.push(ABC[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            ABC[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ABC[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// A 32x32 PNG data URL for an icon's colour pixels (top-down BGRA, `w` x
+/// `h`) and optional AND mask, or `None` when they do not describe an image.
+pub fn icon_data_url(w: usize, h: usize, bgra: &[u8], mask_bgra: Option<&[u8]>) -> Option<String> {
+    let rgba = fit_icon(w, h, &icon_rgba(w, h, bgra, mask_bgra)?)?;
+    let png = encode_png(ICON_SIDE as u32, ICON_SIDE as u32, &rgba)?;
+    Some(format!("data:image/png;base64,{}", base64(&png)))
+}
+
+/// Tauri state: the music capture, a slot of its own so it never touches a
+/// running screen-share audio capture, nor the other way round.
+#[derive(Default)]
+pub struct MusicAudioState(Mutex<Slot<Capture>>);
+
+impl MusicAudioState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn slot(&self) -> &Mutex<Slot<Capture>> {
+        &self.0
+    }
+}
+
+/// List the apps with an audio session on the default output, one row per
+/// app, playing ones first. OwnCord itself is left out.
 #[tauri::command]
-pub async fn stop_app_audio(state: State<'_, AppAudioState>) -> Result<(), String> {
-    let old = state.slot().cancel();
+pub async fn list_audio_apps() -> Result<Vec<AudioApp>, String> {
+    if !platform::available() {
+        return Err("unavailable".into());
+    }
+    tauri::async_runtime::spawn_blocking(platform::list_apps)
+        .await
+        .map_err(|_| "internal".to_string())?
+}
+
+/// Start capturing the app `app_id` (from `list_audio_apps`) as music and
+/// return the loopback socket URL, same frame format as `start_app_audio`.
+/// A running music capture is replaced; a screen-share capture is not touched.
+/// Codes: `unavailable`, `not_found`, `activation_failed`, `superseded`,
+/// `internal`.
+#[tauri::command]
+pub async fn start_music_audio(
+    state: State<'_, MusicAudioState>,
+    app_id: String,
+) -> Result<String, String> {
+    if !platform::available() {
+        return Err("unavailable".into());
+    }
+    let pid = parse_app_id(&app_id).ok_or_else(|| "not_found".to_string())?;
+    start_in_slot(state.slot(), move || platform::resolve_music_pid(pid)).await
+}
+
+/// Stop the music capture, if any. The screen-share capture keeps running.
+#[tauri::command]
+pub async fn stop_music_audio(state: State<'_, MusicAudioState>) -> Result<(), String> {
+    let old = crate::sync::lock(state.slot()).cancel();
     stop_capture(old).await;
     Ok(())
 }
@@ -630,6 +998,14 @@ mod platform {
     }
 
     pub fn resolve_pid(_label: &str) -> Result<u32, String> {
+        Err("unavailable".into())
+    }
+
+    pub fn resolve_music_pid(_pid: u32) -> Result<u32, String> {
+        Err("unavailable".into())
+    }
+
+    pub fn list_apps() -> Result<Vec<AudioApp>, String> {
         Err("unavailable".into())
     }
 
@@ -656,6 +1032,10 @@ mod windows_impl {
     use windows::core::{Interface as _, PROPVARIANT};
     use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
     use windows::Win32::Media::Audio::{
+        eMultimedia, eRender, AudioSessionStateActive, AudioSessionStateExpired,
+        IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator,
+    };
+    use windows::Win32::Media::Audio::{
         ActivateAudioInterfaceAsync, IActivateAudioInterfaceCompletionHandler, IAudioCaptureClient,
         IAudioClient, AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED,
         AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
@@ -664,19 +1044,32 @@ mod windows_impl {
         AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
         VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
     };
-    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
+    };
     use windows::Win32::System::Threading::{CreateEventW, SetEvent, WaitForSingleObject};
     use windows::Win32::System::Variant::VT_BLOB;
     use windows_sys::Wdk::System::SystemServices::RtlGetVersion;
     use windows_sys::Win32::Foundation::{INVALID_HANDLE_VALUE, LPARAM};
+    use windows_sys::Win32::Graphics::Gdi::{
+        DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+    };
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
         TH32CS_SNAPPROCESS,
     };
     use windows_sys::Win32::System::SystemInformation::OSVERSIONINFOW;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows_sys::Win32::UI::Shell::ExtractIconExW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindow,
-        IsWindowVisible,
+        DestroyIcon, EnumWindows, GetIconInfo, GetWindowTextLengthW, GetWindowTextW,
+        GetWindowThreadProcessId, IsWindow, IsWindowVisible, HICON, ICONINFO,
     };
 
     use super::*;
@@ -785,6 +1178,291 @@ mod windows_impl {
         let ancestors = own_process_ancestors(me, &parents);
         pick_target_pid(label, hwnd_pid, &enumerate_windows(), &own, &ancestors)
             .map_err(|e| e.code().to_string())
+    }
+
+    // -- music share: sessions, names, icons ----------------------------------
+
+    /// Balances a successful `CoInitializeEx` on this thread. A thread that
+    /// already has a different apartment (`RPC_E_CHANGED_MODE`) still has
+    /// COM, so that case is not an error and is not uninitialised.
+    struct ComGuard(bool);
+
+    impl ComGuard {
+        fn init() -> Self {
+            // SAFETY: balanced by CoUninitialize in Drop when it succeeded.
+            let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+            Self(hr.is_ok())
+        }
+    }
+
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                // SAFETY: matches the successful CoInitializeEx in `init`.
+                unsafe { CoUninitialize() };
+            }
+        }
+    }
+
+    /// Every live session on the default render endpoint. Expired sessions
+    /// (no stream left) and system sounds are left out.
+    fn enumerate_sessions() -> windows::core::Result<Vec<AudioSession>> {
+        // SAFETY: COM calls on interfaces this thread created; each result
+        // is checked and every interface is released on drop.
+        unsafe {
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let device = enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia)?;
+            let manager: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None)?;
+            let sessions = manager.GetSessionEnumerator()?;
+            let count = sessions.GetCount()?;
+            let mut out = Vec::new();
+            for index in 0..count {
+                // One session that fails to answer must not hide the rest.
+                let Ok(control) = sessions.GetSession(index) else {
+                    continue;
+                };
+                let Ok(state) = control.GetState() else {
+                    continue;
+                };
+                if state == AudioSessionStateExpired {
+                    continue;
+                }
+                let Ok(control2) = control.cast::<IAudioSessionControl2>() else {
+                    continue;
+                };
+                let Ok(pid) = control2.GetProcessId() else {
+                    continue;
+                };
+                out.push(AudioSession {
+                    pid,
+                    playing: state == AudioSessionStateActive,
+                });
+            }
+            Ok(out)
+        }
+    }
+
+    fn to_wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    /// The full image path of a process, if it can be opened for query.
+    fn exe_path(pid: u32) -> Option<String> {
+        // SAFETY: the handle is checked, used for one query with a buffer
+        // whose length is passed, and closed.
+        unsafe {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if process.is_null() {
+                return None;
+            }
+            let mut buf = vec![0u16; 32_768];
+            let mut len = buf.len() as u32;
+            let named = QueryFullProcessImageNameW(process, 0, buf.as_mut_ptr(), &mut len) != 0;
+            windows_sys::Win32::Foundation::CloseHandle(process);
+            named.then(|| String::from_utf16_lossy(&buf[..len as usize]))
+        }
+    }
+
+    /// One string of the version resource, e.g. `FileDescription`.
+    fn version_string(block: &[u8], lang: u16, codepage: u16, key: &str) -> Option<String> {
+        let sub = to_wide(&format!(
+            "\\StringFileInfo\\{lang:04x}{codepage:04x}\\{key}"
+        ));
+        let mut value: *mut c_void = std::ptr::null_mut();
+        let mut chars = 0u32;
+        // SAFETY: `block` is a version block filled by GetFileVersionInfoW;
+        // the returned pointer, when set, points into it for `chars` UTF-16
+        // units and is copied before `block` goes away.
+        let found = unsafe {
+            VerQueryValueW(block.as_ptr().cast(), sub.as_ptr(), &mut value, &mut chars) != 0
+        };
+        if !found || value.is_null() || chars == 0 {
+            return None;
+        }
+        // SAFETY: see above; the unit count includes the terminator.
+        let units = unsafe { std::slice::from_raw_parts(value as *const u16, chars as usize) };
+        let end = units.iter().position(|&c| c == 0).unwrap_or(units.len());
+        let text = String::from_utf16_lossy(&units[..end]).trim().to_string();
+        (!text.is_empty()).then_some(text)
+    }
+
+    /// The exe's `FileDescription`, if it has one.
+    fn file_description(path: &str) -> Option<String> {
+        let wide = to_wide(path);
+        let mut handle = 0u32;
+        // SAFETY: plain queries on a NUL-terminated path; the buffer is sized
+        // by the first call and passed with its length to the second.
+        let block = unsafe {
+            let size = GetFileVersionInfoSizeW(wide.as_ptr(), &mut handle);
+            if size == 0 || size > 4 * 1024 * 1024 {
+                return None;
+            }
+            let mut block = vec![0u8; size as usize];
+            if GetFileVersionInfoW(wide.as_ptr(), 0, size, block.as_mut_ptr().cast()) == 0 {
+                return None;
+            }
+            block
+        };
+        // The file's own (language, codepage) pairs first, then the two the
+        // common toolchains write.
+        let mut pairs: Vec<(u16, u16)> = Vec::new();
+        let sub = to_wide("\\VarFileInfo\\Translation");
+        let mut value: *mut c_void = std::ptr::null_mut();
+        let mut bytes = 0u32;
+        // SAFETY: as in `version_string`; the translation table is `bytes`
+        // bytes of (u16, u16) pairs, read unaligned.
+        unsafe {
+            if VerQueryValueW(block.as_ptr().cast(), sub.as_ptr(), &mut value, &mut bytes) != 0
+                && !value.is_null()
+            {
+                let raw = std::slice::from_raw_parts(value as *const u8, bytes as usize);
+                for pair in raw.as_chunks::<4>().0 {
+                    pairs.push((
+                        u16::from_le_bytes([pair[0], pair[1]]),
+                        u16::from_le_bytes([pair[2], pair[3]]),
+                    ));
+                }
+            }
+        }
+        pairs.extend([(0x0409, 0x04B0), (0x0409, 0x04E4)]);
+        pairs
+            .into_iter()
+            .find_map(|(lang, cp)| version_string(&block, lang, cp, "FileDescription"))
+    }
+
+    /// Pixels of one bitmap as top-down 32-bit BGRA.
+    ///
+    /// # Safety
+    /// `hdc` and `bitmap` must be live GDI handles.
+    unsafe fn bitmap_bgra(hdc: HDC, bitmap: HBITMAP, w: usize, h: usize) -> Option<Vec<u8>> {
+        let mut info: BITMAPINFO = unsafe { std::mem::zeroed() };
+        info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        info.bmiHeader.biWidth = w as i32;
+        info.bmiHeader.biHeight = -(h as i32);
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        let mut buf = vec![0u8; w * h * 4];
+        // SAFETY: `buf` holds w*h 32-bit pixels, the size `info` describes.
+        let lines = unsafe {
+            GetDIBits(
+                hdc,
+                bitmap,
+                0,
+                h as u32,
+                buf.as_mut_ptr().cast(),
+                &mut info,
+                DIB_RGB_COLORS,
+            )
+        };
+        (lines == h as i32).then_some(buf)
+    }
+
+    /// The exe's first icon at the system's large size (32x32, more at high
+    /// DPI), as a 32x32 PNG data URL. Best effort: `None` on any failure.
+    fn icon_url(path: &str) -> Option<String> {
+        let wide = to_wide(path);
+        let mut large: HICON = std::ptr::null_mut();
+        // SAFETY: `wide` is NUL-terminated; `large` is a valid out pointer
+        // for the one icon asked for; the icon is destroyed below.
+        let got = unsafe { ExtractIconExW(wide.as_ptr(), 0, &mut large, std::ptr::null_mut(), 1) };
+        if got == 0 || large.is_null() {
+            return None;
+        }
+        let url = icon_pixels(large)
+            .and_then(|(w, h, color, mask)| icon_data_url(w, h, &color, mask.as_deref()));
+        // SAFETY: destroying the icon ExtractIconExW created, once.
+        unsafe {
+            DestroyIcon(large);
+        }
+        url
+    }
+
+    /// Width, height, colour pixels and, when present, mask pixels of an icon.
+    type IconPixels = (usize, usize, Vec<u8>, Option<Vec<u8>>);
+
+    fn icon_pixels(icon: HICON) -> Option<IconPixels> {
+        // SAFETY: GDI calls on handles GetIconInfo gave us, all released
+        // before returning; the screen DC is released too.
+        unsafe {
+            let mut info: ICONINFO = std::mem::zeroed();
+            if GetIconInfo(icon, &mut info) == 0 {
+                return None;
+            }
+            let result = (|| {
+                if info.hbmColor.is_null() {
+                    return None;
+                }
+                let mut bmp: BITMAP = std::mem::zeroed();
+                let size = std::mem::size_of::<BITMAP>() as i32;
+                if GetObjectW(info.hbmColor, size, (&mut bmp as *mut BITMAP).cast()) == 0 {
+                    return None;
+                }
+                let (w, h) = (bmp.bmWidth as usize, bmp.bmHeight as usize);
+                if w == 0 || h == 0 || w > 256 || h > 256 {
+                    return None;
+                }
+                let hdc = GetDC(std::ptr::null_mut());
+                if hdc.is_null() {
+                    return None;
+                }
+                let color = bitmap_bgra(hdc, info.hbmColor, w, h);
+                let mask = if info.hbmMask.is_null() {
+                    None
+                } else {
+                    bitmap_bgra(hdc, info.hbmMask, w, h)
+                };
+                ReleaseDC(std::ptr::null_mut(), hdc);
+                Some((w, h, color?, mask))
+            })();
+            DeleteObject(info.hbmColor);
+            if !info.hbmMask.is_null() {
+                DeleteObject(info.hbmMask);
+            }
+            result
+        }
+    }
+
+    /// A root process's display name and icon.
+    fn describe(pid: u32) -> (String, Option<String>) {
+        let path = exe_path(pid);
+        let name = path
+            .as_deref()
+            .and_then(file_description)
+            .or_else(|| path.as_deref().and_then(exe_stem))
+            .unwrap_or_else(|| format!("Process {pid}"));
+        (name, path.as_deref().and_then(icon_url))
+    }
+
+    /// The apps with a session on the default output, one row per app.
+    pub fn list_apps() -> Result<Vec<AudioApp>, String> {
+        let _com = ComGuard::init();
+        let sessions = enumerate_sessions().map_err(|e| {
+            log::warn!("[app_audio] listing audio sessions: {e}");
+            "internal".to_string()
+        })?;
+        let parents = parent_map()?;
+        let me = std::process::id();
+        let own = own_process_tree(me, &parents);
+        let ancestors = own_process_ancestors(me, &parents);
+        let groups = group_sessions(
+            &sessions,
+            &parents,
+            |pid| exe_path(pid).as_deref().and_then(exe_file_name),
+            &own,
+            &ancestors,
+        );
+        Ok(assemble_apps(&groups, describe))
+    }
+
+    /// Check a picked app's root pid is still there and is not OwnCord.
+    pub fn resolve_music_pid(pid: u32) -> Result<u32, String> {
+        let parents = parent_map()?;
+        let me = std::process::id();
+        let own = own_process_tree(me, &parents);
+        let ancestors = own_process_ancestors(me, &parents);
+        check_music_target(pid, &parents, &own, &ancestors).map_err(str::to_string)
     }
 
     // -- process loopback activation -----------------------------------------
@@ -1488,6 +2166,324 @@ mod tests {
         tokio::time::sleep(CONNECT_TIMEOUT + Duration::from_secs(1)).await;
         let _ = task.await;
         assert!(shared.stopped());
+    }
+
+    // -- music share -------------------------------------------------------
+
+    #[test]
+    fn parses_app_ids() {
+        assert_eq!(parse_app_id("pid:4242"), Some(4242));
+        assert_eq!(app_id(7), "pid:7");
+        for bad in [
+            "",
+            "pid:",
+            "pid:0",
+            "pid:-1",
+            "pid:+5",
+            "pid:007",
+            "pid: 5",
+            "pid:5 ",
+            "PID:5",
+            "pid:5:6",
+            "5",
+            "window:5:0",
+            "pid:99999999999999999999",
+        ] {
+            assert_eq!(parse_app_id(bad), None, "{bad:?}");
+        }
+    }
+
+    fn exes(map: &[(u32, &str)]) -> impl Fn(u32) -> Option<String> {
+        let map: HashMap<u32, String> = map.iter().map(|(p, e)| (*p, e.to_lowercase())).collect();
+        move |pid| map.get(&pid).cloned()
+    }
+
+    fn session(pid: u32, playing: bool) -> AudioSession {
+        AudioSession { pid, playing }
+    }
+
+    #[test]
+    fn child_sessions_group_under_the_topmost_same_exe_ancestor() {
+        // explorer(1) > spotify(10) > spotify(11) > spotify(12); chrome(20) > chrome(21)
+        let parents = HashMap::from([(10, 1), (11, 10), (12, 11), (20, 1), (21, 20), (1, 0)]);
+        let exe = exes(&[
+            (1, "explorer.exe"),
+            (10, "spotify.exe"),
+            (11, "Spotify.exe"),
+            (12, "spotify.exe"),
+            (20, "chrome.exe"),
+            (21, "chrome.exe"),
+        ]);
+        let groups = group_sessions(
+            &[
+                session(12, false),
+                session(11, true),
+                session(21, false),
+                session(20, false),
+            ],
+            &parents,
+            exe,
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+        assert_eq!(
+            groups,
+            vec![
+                AppGroup {
+                    root_pid: 10,
+                    playing: true
+                },
+                AppGroup {
+                    root_pid: 20,
+                    playing: false
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn grouping_skips_system_sounds_own_tree_and_ancestors() {
+        let parents = HashMap::from([(5, 1), (6, 5), (7, 6), (30, 5), (1, 0)]);
+        let exe = exes(&[
+            (5, "x.exe"),
+            (6, "owncord.exe"),
+            (7, "owncord.exe"),
+            (30, "app.exe"),
+        ]);
+        let own = HashSet::from([6, 7]);
+        let ancestors = HashSet::from([5]);
+        let groups = group_sessions(
+            &[
+                session(0, true),
+                session(7, true),
+                session(5, true),
+                session(30, true),
+            ],
+            &parents,
+            exe,
+            &own,
+            &ancestors,
+        );
+        assert_eq!(
+            groups,
+            vec![AppGroup {
+                root_pid: 30,
+                playing: true
+            }]
+        );
+    }
+
+    #[test]
+    fn grouping_does_not_climb_into_other_exes_or_unknown_or_cycles() {
+        let parents = HashMap::from([(2, 1), (3, 2), (8, 9), (9, 8)]);
+        // 3 -> 2 differs; 8 and 9 are the same exe but a stale cycle.
+        let exe = exes(&[
+            (2, "launcher.exe"),
+            (3, "game.exe"),
+            (8, "a.exe"),
+            (9, "a.exe"),
+        ]);
+        let groups = group_sessions(
+            &[session(3, true), session(42, false), session(8, false)],
+            &parents,
+            exe,
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+        let roots: HashSet<u32> = groups.iter().map(|g| g.root_pid).collect();
+        assert!(roots.contains(&3) && roots.contains(&42));
+        assert_eq!(groups.len(), 3);
+        assert!(groups.iter().all(|g| g.root_pid != 2));
+    }
+
+    #[test]
+    fn rows_sort_playing_first_then_name() {
+        let groups = [
+            AppGroup {
+                root_pid: 1,
+                playing: false,
+            },
+            AppGroup {
+                root_pid: 2,
+                playing: true,
+            },
+            AppGroup {
+                root_pid: 3,
+                playing: false,
+            },
+            AppGroup {
+                root_pid: 4,
+                playing: true,
+            },
+        ];
+        let rows = assemble_apps(&groups, |pid| {
+            let name = match pid {
+                1 => "Zed",
+                2 => "spotify",
+                3 => "Audacity",
+                _ => "Foobar2000",
+            };
+            (name.to_string(), None)
+        });
+        let order: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(order, ["Foobar2000", "spotify", "Audacity", "Zed"]);
+        assert_eq!(rows[0].id, "pid:4");
+        assert!(rows[0].playing && !rows[3].playing);
+    }
+
+    #[test]
+    fn rows_serialize_camel_case() {
+        let row = AudioApp {
+            id: "pid:1".into(),
+            name: "A".into(),
+            icon: None,
+            playing: true,
+        };
+        let json = serde_json::to_value(&row).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"id": "pid:1", "name": "A", "icon": null, "playing": true})
+        );
+    }
+
+    #[test]
+    fn exe_names_from_paths() {
+        assert_eq!(
+            exe_file_name(r"C:\Users\a\Spotify.EXE").as_deref(),
+            Some("spotify.exe")
+        );
+        assert_eq!(
+            exe_stem(r"C:\Program Files\foobar2000\foobar2000.exe").as_deref(),
+            Some("foobar2000")
+        );
+        assert_eq!(exe_stem("noext").as_deref(), Some("noext"));
+        assert_eq!(exe_file_name(r"C:\dir\"), None);
+    }
+
+    #[test]
+    fn music_target_refuses_own_ancestors_and_dead() {
+        let parents = HashMap::from([(10, 1), (11, 10), (50, 1), (1, 0)]);
+        let own = HashSet::from([10, 11]);
+        let ancestors = HashSet::from([1]);
+        assert_eq!(check_music_target(50, &parents, &own, &ancestors), Ok(50));
+        for pid in [0, 10, 11, 1, 99] {
+            assert_eq!(
+                check_music_target(pid, &parents, &own, &ancestors),
+                Err("not_found")
+            );
+        }
+    }
+
+    #[test]
+    fn icon_alpha_comes_from_the_mask_when_the_bitmap_has_none() {
+        // two pixels, BGRA, no alpha; the second is masked out
+        let bgra = [1, 2, 3, 0, 4, 5, 6, 0];
+        let mask = [0, 0, 0, 0, 255, 255, 255, 0];
+        assert_eq!(
+            icon_rgba(2, 1, &bgra, Some(&mask)),
+            Some(vec![3, 2, 1, 255, 6, 5, 4, 0])
+        );
+        // with real alpha the mask is ignored
+        let bgra = [1, 2, 3, 128, 4, 5, 6, 0];
+        assert_eq!(
+            icon_rgba(2, 1, &bgra, Some(&mask)),
+            Some(vec![3, 2, 1, 128, 6, 5, 4, 0])
+        );
+        assert_eq!(icon_rgba(2, 1, &bgra[..7], None), None);
+        assert_eq!(icon_rgba(0, 0, &[], None), None);
+    }
+
+    #[test]
+    fn icons_are_fitted_to_32_square() {
+        let big = vec![7u8; 64 * 64 * 4];
+        assert_eq!(fit_icon(64, 64, &big).map(|v| v.len()), Some(32 * 32 * 4));
+        let small = vec![9u8; 16 * 16 * 4];
+        assert_eq!(fit_icon(16, 16, &small).map(|v| v.len()), Some(32 * 32 * 4));
+        assert_eq!(fit_icon(2, 2, &[0; 3]), None);
+    }
+
+    #[test]
+    fn base64_matches_the_rfc_vectors() {
+        for (raw, want) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64(raw.as_bytes()), want);
+        }
+    }
+
+    #[test]
+    fn checksums_match_known_values() {
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+        assert_eq!(adler32(b"Wikipedia"), 0x11E6_0398);
+    }
+
+    #[test]
+    fn png_has_the_right_structure() {
+        let rgba: Vec<u8> = (0..32 * 32 * 4).map(|i| (i % 251) as u8).collect();
+        let png = encode_png(32, 32, &rgba).unwrap();
+        assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+        assert_eq!(&png[12..16], b"IHDR");
+        assert_eq!(&png[png.len() - 8..png.len() - 4], b"IEND");
+        // IEND's CRC is the well-known constant
+        assert_eq!(&png[png.len() - 4..], &[0xAE, 0x42, 0x60, 0x82]);
+        assert_eq!(encode_png(2, 2, &[0; 15]), None);
+        assert_eq!(encode_png(0, 2, &[]), None);
+        let url = icon_data_url(32, 32, &vec![255u8; 32 * 32 * 4], None).unwrap();
+        assert!(url.starts_with("data:image/png;base64,"));
+    }
+
+    // The two slots are independent: a stop or start of one never touches
+    // the other's running capture or its in-flight starts.
+    #[test]
+    fn music_and_screen_slots_interleave_independently() {
+        let mut screen: Slot<&str> = Slot::default();
+        let mut music: Slot<&str> = Slot::default();
+        let (s1, _) = screen.begin();
+        assert!(screen.install(s1, "screen-1").is_ok());
+        let (m1, _) = music.begin();
+        assert!(music.install(m1, "music-1").is_ok());
+
+        // a screen stop takes the screen capture only
+        assert_eq!(screen.cancel(), Some("screen-1"));
+        assert!(music.is_current(m1));
+
+        // a music restart replaces music; screen is not involved
+        let (m2, old) = music.begin();
+        assert_eq!(old, Some("music-1"));
+        let (s2, _) = screen.begin();
+        // a music stop while a screen start is in flight leaves that start valid
+        assert_eq!(music.cancel(), None);
+        assert!(screen.is_current(s2));
+        // the music start the stop overtook is rejected, the screen one lands
+        assert_eq!(music.install(m2, "music-2"), Err("music-2"));
+        assert_eq!(screen.install(s2, "screen-2"), Ok(None));
+        assert_eq!(screen.cancel(), Some("screen-2"));
+    }
+
+    #[test]
+    fn a_new_music_start_supersedes_the_one_in_flight() {
+        let mut music: Slot<&str> = Slot::default();
+        let (first, _) = music.begin();
+        let (second, _) = music.begin();
+        assert_eq!(music.install(first, "a"), Err("a"));
+        assert_eq!(music.install(second, "b"), Ok(None));
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn off_windows_the_music_commands_are_unavailable() {
+        assert_eq!(list_audio_apps().await, Err("unavailable".to_string()));
+        assert_eq!(platform::list_apps(), Err("unavailable".to_string()));
+        assert_eq!(
+            platform::resolve_music_pid(1),
+            Err("unavailable".to_string())
+        );
     }
 
     #[cfg(not(windows))]
