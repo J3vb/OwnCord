@@ -131,6 +131,7 @@ async function serverIconBlob(file){
   if(!blob)throw new Error('Could not turn the picture into a PNG');
   return blob;
 }
+/** @this {HTMLInputElement} */
 async function uploadServerIcon(){
   const input=this;
   const file=input.files&&input.files[0];
