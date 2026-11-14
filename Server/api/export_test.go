@@ -345,3 +345,10 @@ const (
 	DMGroupCreateMinuteKey = dmGroupCreateMinuteKey
 	DMGroupCreateDayKey    = dmGroupCreateDayKey
 )
+
+// CompressJSONForTest is the REST compression middleware, for identifying it
+// in a chi.Walk.
+var CompressJSONForTest = compressJSON
+
+// CompressedRESTRoutesForTest returns the reviewed REST compression allow-list.
+func CompressedRESTRoutesForTest() map[string]string { return compressedRESTRoutes }

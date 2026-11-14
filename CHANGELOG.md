@@ -128,6 +128,7 @@ release changes the database, and anything an operator must do first.)
 
 ### Under the hood
 
+- **Message history, search and other big lists download smaller.** The server gzips them (about a fifth of the size) for the browser client, and the desktop and Android app now ask for it too. Sign-in, tokens, invites, voice and files are sent as before.
 - **The browser client loads faster.** With `server.browser_client_enabled` on, the server sends the browser client's files brotli- or gzip-compressed (about a third of the download). It builds the compressed copies in the background for a few seconds after start and keeps them in memory beside the originals, a few extra MB.
 - **Groundwork for server-side link previews.** Nothing changes for members yet. It adds the storage a later release will use:
   - Database migration 094 adds four tables for link cards and their thumbnails. The server migrates on start, so take a backup first as usual.

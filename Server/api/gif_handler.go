@@ -94,14 +94,14 @@ func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *aut
 
 		r.Group(func(r chi.Router) {
 			r.Use(RateLimitMiddleware(limiter, "gif:", gifRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies))
-			r.Get("/search", handleGIFProxy(cfg.GIF.APIKey, "/search", true))
-			r.Get("/trending", handleGIFProxy(cfg.GIF.APIKey, "/featured", false))
+			r.With(compressJSON).Get("/search", handleGIFProxy(cfg.GIF.APIKey, "/search", true))
+			r.With(compressJSON).Get("/trending", handleGIFProxy(cfg.GIF.APIKey, "/featured", false))
 		})
 
 		// Saved GIFs are stored URLs with no upstream call, so they get their own, looser bucket.
 		r.Group(func(r chi.Router) {
 			r.Use(RateLimitMiddleware(limiter, "giffav:", gifFavoritesRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies))
-			r.Get("/favorites", handleListGIFFavorites(favorites))
+			r.With(compressJSON).Get("/favorites", handleListGIFFavorites(favorites))
 			r.Put("/favorites", handleAddGIFFavorite(favorites))
 			r.Delete("/favorites", handleRemoveGIFFavorite(favorites))
 		})

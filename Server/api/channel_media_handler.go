@@ -19,7 +19,7 @@ func MountChannelMediaRoutes(r chi.Router, svc *service.Services, limiter *auth.
 		AuthMiddleware(svc.Sessions),
 		RateLimitMiddleware(limiter, "media:", mediaRateLimitPerMinute, time.Minute, trustedProxies),
 	)
-	gated.Get("/api/v1/channels/{id}/media", handleListChannelMedia(svc))
+	gated.With(compressJSON).Get("/api/v1/channels/{id}/media", handleListChannelMedia(svc))
 	gated.Get("/api/v1/channels/{id}/media/months", handleChannelMediaMonths(svc))
 }
 
