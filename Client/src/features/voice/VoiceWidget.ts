@@ -7,7 +7,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { createIcon } from "@lib/icons";
+import { createIcon, swapIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { voiceStore, type VoiceState } from "@stores/voice.store";
@@ -23,7 +23,7 @@ import { enhancedNoiseSuppressionEnabled } from "@lib/voice/audioPipeline";
 import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "@lib/voice/livekitSession";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../../i18n/voice";
-import { callStatusText, formatElapsed, isConnecting, isPhoneCallHold } from "./voiceStatusText";
+import { callStatusText, isConnecting, isPhoneCallHold } from "./voiceStatusText";
 import { shareBlockReason } from "./shareGate";
 import { canPublishScreen } from "./native/platform";
 import { createSecuredBadge, type SecuredBadge } from "./securedBadge";
@@ -37,6 +37,7 @@ import {
 import { subscribeVoiceWidget } from "./widget/subscriptions";
 import { isShareLive } from "./widget/liveShare";
 import { createListenOnlyUi, type ListenOnlyUi } from "./widget/listenOnly";
+import { formatDuration } from "@lib/text/duration";
 
 export interface VoiceWidgetOptions {
   onDisconnect(): void;
@@ -45,13 +46,6 @@ export interface VoiceWidgetOptions {
   /** Open the call's channel: the DM for a DM call, the call view for a guild
    *  voice channel. Without it the call name is plain text. */
   onOpenCall?(channelId: number): void;
-}
-
-function swapIcon(btn: HTMLButtonElement, name: IconName): void {
-  const existing = btn.querySelector("svg");
-  if (existing?.getAttribute("data-icon") === name) return;
-  existing?.remove();
-  btn.appendChild(createIcon(name, 18));
 }
 
 /** The moderator-imposed state as a sentence, or "" when there is none. */
@@ -132,7 +126,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   function updateElapsedTimer(): void {
     const joinedAt = voiceStore.getState().joinedAt;
     if (timerEl === null || joinedAt === null) return;
-    setText(timerEl, formatElapsed(Date.now() - joinedAt));
+    setText(timerEl, formatDuration(Date.now() - joinedAt, true));
   }
 
   function startElapsedTimer(): void {

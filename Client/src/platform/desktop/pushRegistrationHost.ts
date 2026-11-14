@@ -14,6 +14,7 @@ import type {
   PushRegisterResult,
   PushStatus,
 } from "../contracts/pushRegistration";
+import { isRecord } from "@lib/isRecord";
 
 const log = createLogger("push");
 
@@ -21,10 +22,6 @@ const PLUGIN = "owncord-push";
 
 /** Bumped by each `follow`: the newest follower gets the events. */
 let generation = 0;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 function readStatus(value: unknown): PushStatus | null {
   if (!isRecord(value) || !Array.isArray(value.distributors)) return null;

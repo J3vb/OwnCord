@@ -4,7 +4,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { createIcon, type IconName } from "@lib/icons";
+import { createIcon, swapIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
@@ -97,11 +97,6 @@ const STATUS_TEXT = {
   invisible: "status.invisible",
   offline: "status.offline",
 } as const satisfies Readonly<Record<UserStatus, string>>;
-
-function swapIcon(btn: HTMLButtonElement, name: IconName): void {
-  btn.querySelector("svg")?.remove();
-  btn.appendChild(createIcon(name, 18));
-}
 
 /** Paint the mic and headphone buttons from the voice store. A moderator's
  *  mute or deafen is not ours to lift (the server refuses it), so its button

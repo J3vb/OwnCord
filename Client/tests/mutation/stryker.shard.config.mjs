@@ -363,6 +363,7 @@ export const shards = {
     "src/features/whats-new/whatsNewPrompt.ts",
     "src/lib/presence/autoIdle.ts",
     "src/lib/text/discordTimestamp.ts",
+    "src/lib/text/duration.ts",
     "src/lib/text/markdown.ts",
   ],
   "lib-rest-3": [
@@ -387,6 +388,7 @@ export const shards = {
     "src/lib/disposable.ts",
     "src/lib/dmUnread.ts",
     "src/lib/dom.ts",
+    "src/lib/isRecord.ts",
     "src/lib/nav/channelNavigation.ts",
     "src/lib/notificationDelivery.ts",
     "src/lib/prefs/themes.ts",
@@ -422,6 +424,7 @@ export const shards = {
   "lib-rest-7": [
     "src/features/forums/forumViewModel.ts",
     "src/features/messaging/pickerScroll.ts",
+    "src/features/messaging/pickerKeys.ts",
     "src/features/server-rail/switchConfirmPref.ts",
     "src/features/whats-new/WhatsNewDialog.ts",
     "src/lib/prefs/channelMutes.ts",

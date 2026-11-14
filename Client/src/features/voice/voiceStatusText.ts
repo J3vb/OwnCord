@@ -20,17 +20,6 @@ export function isConnecting(status: VoiceStatus): boolean {
   return status === "joining" || status === "securing";
 }
 
-/** Format milliseconds elapsed into HH:MM:SS or MM:SS. */
-export function formatElapsed(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  const mm = String(m).padStart(2, "0");
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${String(h).padStart(2, "0")}:${mm}:${ss}` : `${mm}:${ss}`;
-}
-
 /** A phone call holds the call you are in (the Android app): the mic is closed
  *  and the sound silenced until the phone call ends. */
 export function isPhoneCallHold(voice: VoiceState): boolean {

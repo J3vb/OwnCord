@@ -3,7 +3,6 @@
 // picks it; the owner sends it at once. Uses @lib/dom helpers exclusively and
 // never sets innerHTML.
 
-import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, clearChildren } from "@lib/dom";
@@ -12,6 +11,7 @@ import { stickersStore, type Sticker } from "@stores/stickers.store";
 import { loadStickerImage } from "./message-list/sticker";
 import { stickersText } from "../../i18n/stickers";
 import { addRecentSticker, getRecentStickerIds } from "./stickerRecent";
+import { wirePickerKeys } from "./pickerKeys";
 
 export interface StickerPickerOptions {
   /** Whether the viewer holds MANAGE_SERVER, so the empty state can say where to add stickers. */
@@ -173,16 +173,7 @@ export function createStickerPicker(options: StickerPickerOptions): {
     },
     { signal },
   );
-  root.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.key === "Escape" && !isImeCommit(e)) {
-        e.preventDefault();
-        options.onClose();
-      }
-    },
-    { signal },
-  );
+  wirePickerKeys(root, searchInput, options.onClose, signal);
 
   // A sticker_update while the picker is open redraws the grid in place.
   disposable.onStoreChange(
@@ -191,11 +182,6 @@ export function createStickerPicker(options: StickerPickerOptions): {
     () => render(),
   );
   render();
-
-  // On a phone the keyboard would cover half the sheet before anyone asked to search.
-  requestAnimationFrame(() => {
-    if (!isPhoneLayout()) searchInput.focus();
-  });
 
   function destroy(): void {
     cellsOwner.destroy();

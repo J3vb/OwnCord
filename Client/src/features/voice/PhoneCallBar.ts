@@ -27,7 +27,6 @@ import { membersStore } from "@stores/members.store";
 import { voiceText as t } from "../../i18n/voice";
 import { createTalkSlot } from "./talkSlot";
 import {
-  formatElapsed,
   headerStatusText,
   isConnecting,
   isPhoneCallHold,
@@ -35,6 +34,7 @@ import {
   micControlState,
 } from "./voiceStatusText";
 import { callParticipants, participantAvatar, participantKey } from "./callParticipants";
+import { formatDuration } from "@lib/text/duration";
 
 export interface PhoneCallBarOptions {
   /** The call view's grid is up in this window. */
@@ -58,12 +58,12 @@ function detailText(count: number): string {
   const voice = voiceStore.getState();
   const status = voice.voiceStatus;
   const elapsed = voice.joinedAt === null ? 0 : Math.max(0, Date.now() - voice.joinedAt);
-  if (isPhoneCallHold(voice)) return t("callBar.paused", { time: formatElapsed(elapsed) });
+  if (isPhoneCallHold(voice)) return t("callBar.paused", { time: formatDuration(elapsed, true) });
   if (isConnecting(status) || status === "reconnecting") return headerStatusText(status);
   return t("callBar.detail", {
     // You are in it, even before your own voice_state has landed.
     people: t("callBar.people", { count: Math.max(1, count) }),
-    time: formatElapsed(elapsed),
+    time: formatDuration(elapsed, true),
   });
 }
 

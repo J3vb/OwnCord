@@ -16,7 +16,8 @@ import {
   rowActivity,
   type ListeningSong,
 } from "../../src/features/members/listeningLine";
-import { formatClock, listeningProgress } from "../../src/features/members/listeningCard";
+import { listeningProgress } from "../../src/features/members/listeningCard";
+import { formatDuration as formatClock } from "../../src/lib/text/duration";
 import {
   applyGameActivityPolicy,
   applyReadyCapabilities,

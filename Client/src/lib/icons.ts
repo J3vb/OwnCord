@@ -380,6 +380,16 @@ export function createIcon(name: IconName, size = 24): SVGSVGElement {
   return svg;
 }
 
+/** Shows icon `name` on `btn`: replaces its current icon in place (kept when it is
+ *  already `name`), or puts one first when it has none. */
+export function swapIcon(btn: Element, name: IconName, size = 18): void {
+  const current = btn.querySelector("svg");
+  if (current?.getAttribute("data-icon") === name) return;
+  const next = createIcon(name, size);
+  if (current) current.replaceWith(next);
+  else btn.insertBefore(next, btn.firstChild);
+}
+
 /** Whether `name` is one of the defined icon names (an icon read back from the DOM). */
 export function isIconName(name: string): name is IconName {
   return Object.hasOwn(ICON_PATHS, name);

@@ -18,6 +18,7 @@ import type {
   ExternalPreview,
 } from "../contracts/externalContent";
 import { sessionToken } from "./session";
+import { isRecord } from "@lib/isRecord";
 
 const BASE = "/api/v1/external";
 
@@ -31,10 +32,6 @@ const FAILURES: ReadonlySet<string> = new Set<ExternalContentFailure>([
 ]);
 
 const UNAVAILABLE = { ok: false, failure: "unavailable" } as const;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 function text(value: unknown): string | null {
   return typeof value === "string" ? value : null;
