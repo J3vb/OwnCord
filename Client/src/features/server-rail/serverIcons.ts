@@ -7,7 +7,7 @@
  * cannot fill localStorage and a saved server is not evicted by churn.
  */
 
-import { loadStoredJson, saveStoredJson } from "./preferences";
+import { loadStoredJson, saveStoredJson } from "@lib/prefs/preferences";
 
 export const SERVER_ICONS_KEY = "owncord:server-icons";
 /** The window event fired when an entry is stored or dropped. */

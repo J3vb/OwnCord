@@ -27,7 +27,7 @@ import { authStore } from "@stores/auth.store";
 import { dmStore, type DmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
-import { loadServerIcons, pruneServerIcons, SERVER_ICON_CHANGED } from "@lib/prefs/serverIcons";
+import { loadServerIcons, pruneServerIcons, SERVER_ICON_CHANGED } from "./serverIcons";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
 import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../../i18n/serverRail";

@@ -73,7 +73,7 @@ export async function probeServerInfo(
     serverInfoByHost.set(host, info);
     // Lazy: the icon cache is not needed to start, so it stays out of the startup closure.
     void import("./serverIconSync")
-      .then((m) => m.refreshServerIcon(api, host, info, owner))
+      .then((m) => m.refreshServerIcon(api, host, info))
       .catch((err: unknown) =>
         log.debug("server icon sync unavailable", { host, error: String(err) }),
       );
