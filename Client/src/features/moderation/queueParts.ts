@@ -16,8 +16,7 @@ import { buildActionForms, emptyActionDraft, type ActionWrite } from "./ActionFo
 import { buildWorkflow, type WorkflowWrite } from "./Workflow";
 import { dateText, nameText, reportTitle, stateText } from "./Evidence";
 import { modQueueStore } from "./store";
-import { nextViewSeq } from "./queueModel";
-import { FILTERS, NO_DRAFT, type ReportDrafts } from "./queueModel";
+import { FILTERS, NO_DRAFT, nextViewSeq, type ReportDrafts } from "./queueModel";
 
 export type TextKey = Parameters<typeof t>[0];
 
@@ -112,8 +111,8 @@ export interface QueueListView {
   readonly syncCurrent: (selected: string | null) => void;
 }
 
-/** The row list: rows, the current mark and focus recovery. */
-/** `idAttr` is the data attribute that names a row's item, such as `data-report-id`. */
+/** The row list: rows, the current mark and focus recovery. `idAttr` is the data
+ *  attribute that names a row's item, such as `data-report-id`. */
 export function createQueueListView<Item extends { readonly id: string }>(args: {
   readonly list: HTMLElement;
   readonly select: HTMLElement;

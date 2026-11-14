@@ -233,6 +233,7 @@ export function createQueueCore<Row, Wire, Shown, Filter extends string>(
         detailSlot.removeAttribute("aria-busy");
         // Only move focus if the reader is still where they asked from.
         const stayed = focusStayed(listView.rowFor(id), detailSlot);
+        if (takeFocus) setText(detailStatus, "");
         args.onDetail(id, wire, takeFocus && stayed);
       },
       (err: unknown) => {

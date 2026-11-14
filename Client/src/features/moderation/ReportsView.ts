@@ -182,7 +182,6 @@ export function renderReports(
       core.clearDetail(t("detail.gone"));
       return;
     }
-    if (takeFocus) setText(detailStatus, "");
     showDetail(item, mapDetail(wire), takeFocus);
   }
 

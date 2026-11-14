@@ -84,6 +84,8 @@ const reportRows = (root: HTMLElement) => [
   ...root.querySelectorAll<HTMLButtonElement>("[data-testid=mod-queue-row]"),
 ];
 const slotOf = (root: HTMLElement) => root.querySelector<HTMLElement>("div.mod-report-slot")!;
+const detailStatusOf = (root: HTMLElement) =>
+  root.querySelector<HTMLElement>("ul.mod-queue ~ p.mod-center-status")!;
 
 beforeEach(() => {
   reportLists = [];
@@ -169,8 +171,10 @@ describe.each(tabs)("the $name tab's detail read", (tab) => {
     tab.rows(root)[0]!.click();
     const filter = root.querySelector<HTMLSelectElement>("select")!;
     filter.focus();
+    expect(detailStatusOf(root).textContent).not.toBe("");
     await tab.answer(0);
     expect(slotOf(root).querySelector("h3")).not.toBeNull();
     expect(document.activeElement).toBe(filter);
+    expect(detailStatusOf(root).textContent).toBe("");
   });
 });

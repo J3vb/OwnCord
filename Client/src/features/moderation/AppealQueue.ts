@@ -145,7 +145,6 @@ export function renderAppeals(
       };
     },
     onDetail: (_id, wire, takeFocus) => {
-      if (takeFocus) setText(dom.detailStatus, "");
       showDetail(mapAppealDetail(wire), takeFocus);
     },
     onDetailError: (err) => {
