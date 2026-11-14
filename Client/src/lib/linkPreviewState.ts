@@ -33,19 +33,16 @@ export function contentVersionOf(row: { editedAt: string | null; timestamp: stri
   return row.editedAt ?? row.timestamp;
 }
 
-/** `next` with the cards `prev` already holds kept when they are newer. The
- *  incoming copy wins on the same version; a copy that carries no cards at all
- *  (the server omits an empty array) loses only to cards of its own version or
- *  later. */
+/** `next` with the cards `prev` already holds kept when they are as new or
+ *  newer. A copy that carries no cards at all (the server omits an empty array)
+ *  is treated the same, at its row's own content version. */
 export function mergeMessageLinkPreviews(prev: Message | undefined, next: Message): Message {
   if (prev?.linkPreviews === undefined || prev.linkPreviewsVersion === undefined) return next;
   const heldVersion = prev.linkPreviewsVersion;
   const nextVersion = next.linkPreviewsVersion ?? contentVersionOf(next);
-  const keepHeld =
-    next.linkPreviews === undefined
-      ? compareContentVersion(heldVersion, nextVersion) >= 0
-      : compareContentVersion(heldVersion, nextVersion) > 0;
-  if (!keepHeld) return next;
+  // On the same version the held cards win: they came from a frame, which is
+  // complete, and a page read a moment earlier may carry fewer.
+  if (compareContentVersion(heldVersion, nextVersion) < 0) return next;
   return { ...next, linkPreviews: prev.linkPreviews, linkPreviewsVersion: heldVersion };
 }
 
@@ -66,12 +63,9 @@ export function reduceLinkPreviews(
   const index = list?.findIndex((m) => m.id !== 0 && m.id === payload.message_id) ?? -1;
   if (list === undefined || index === -1) return prev;
   const row = list[index]!;
-  if (
-    row.linkPreviewsVersion !== undefined &&
-    compareContentVersion(payload.content_version, row.linkPreviewsVersion) < 0
-  ) {
-    return prev;
-  }
+  // A frame older than the cards held, or than the row's own text, is stale.
+  const heldVersion = row.linkPreviewsVersion ?? contentVersionOf(row);
+  if (compareContentVersion(payload.content_version, heldVersion) < 0) return prev;
   const messagesByChannel = new Map(prev.messagesByChannel);
   messagesByChannel.set(
     payload.channel_id,

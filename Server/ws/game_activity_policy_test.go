@@ -568,3 +568,22 @@ func TestGameActivityPolicy_StalePresenceAfterOffThenOnCarriesNoActivity(t *test
 		t.Fatalf("invisible self saw %v, want one frame with null activity", names)
 	}
 }
+
+// SetLinkPreviews is what the app calls once the unfurl workers run; the ready a client reads
+// must follow it, off until it is called.
+func TestReadyAdvertisesLinkPreviewsOnceTheHubIsTold(t *testing.T) {
+	h, database, connect := presenceBatchHub(t)
+	viewer := connect("lpready", true)
+	settle(t, h)
+	if caps, _ := readyPolicyView(t, h, database, viewer.userID); caps["link_previews"] != false {
+		t.Fatalf("before SetLinkPreviews: capabilities.link_previews = %v, want false", caps["link_previews"])
+	}
+	h.SetLinkPreviews(true)
+	if caps, _ := readyPolicyView(t, h, database, viewer.userID); caps["link_previews"] != true {
+		t.Errorf("after SetLinkPreviews(true): capabilities.link_previews = %v, want true", caps["link_previews"])
+	}
+	h.SetLinkPreviews(false)
+	if caps, _ := readyPolicyView(t, h, database, viewer.userID); caps["link_previews"] != false {
+		t.Errorf("after SetLinkPreviews(false): capabilities.link_previews = %v, want false", caps["link_previews"])
+	}
+}

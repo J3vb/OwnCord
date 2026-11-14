@@ -30,10 +30,10 @@ between two native owners:
   fetches the connected server's own files: attachments, avatars and custom
   emoji. It carries the session token and trusts only the pinned certificate.
 
-For everything that still goes through the broker (the GIF picker, and the
-link previews, YouTube titles, inline images and external avatars of a server
-that does not build previews itself), no broker call and no GIF-proxy query
-happens until the viewer has chosen,
+For everything that still goes through the broker (the GIF picker, every link
+that is itself an image, external avatars, and the link previews and YouTube
+titles of a server that does not build previews itself), no broker call and no
+GIF-proxy query happens until the viewer has chosen,
 once per server, "Load automatically on this server" or "Ask each time"
 (`Client/src/features/content-consent/external.ts`). The YouTube player is
 the one deliberate exception to brokering: it is an iframe loaded on click,
@@ -66,7 +66,9 @@ keeps the legacy path for one release: the broker fetch behind the consent gate
 described above. Once advertised, a message with no card yet shows none and
 never falls back to a local fetch. Only page previews and YouTube cards use the
 cards: a link that is itself an image (any host, GIFs included) keeps the broker
-path and its consent on every server, because the stored thumbnail is a still.
+path and its consent on every server, because the stored thumbnail is a still;
+so does an image-only card on a link with no image file name. Pressing Play on a
+YouTube card connects to YouTube and asks for the same consent.
 
 ## Why the rest stays client-side
 

@@ -7,11 +7,13 @@ import type {
   ChatEditedPayload,
   ChatDeletedPayload,
   ChatBulkDeletedPayload,
+  MessageLinkPreviewsPayload,
 } from "../../lib/types";
 import type { ReferencedMessage } from "../../lib/types";
 import { isPinRowKind } from "../../lib/text/messageKind";
 import type { Message, MessagesState } from "./messageModel";
 import { recordLoadJournal } from "./loadJournal";
+import { reduceLinkPreviews } from "../../lib/linkPreviewState";
 
 /** A parent that is deleted, purged or erased: no author, no text. */
 function redactSnippet(id: number): ReferencedMessage {
@@ -53,6 +55,18 @@ function refreshReplies(
       ? { ...m, referencedMessage: { ...m.referencedMessage, content: snippet } }
       : m,
   );
+}
+
+/** updateLinkPreviews' reducer: apply a `message_link_previews` frame, and journal it so a
+ *  page still in flight (whose rows are not loaded yet) gets it when it installs. */
+export function reduceLinkPreviewsFrame(
+  prev: MessagesState,
+  payload: MessageLinkPreviewsPayload,
+): MessagesState {
+  return recordLoadJournal(reduceLinkPreviews(prev, payload), payload.channel_id, {
+    kind: "linkPreviews",
+    payload,
+  });
 }
 
 /** editMessage's reducer. */

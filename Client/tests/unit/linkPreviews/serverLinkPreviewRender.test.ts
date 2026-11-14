@@ -218,13 +218,14 @@ describe("rendering from the server's cards", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("draws nothing for an image-only card on a link that is not an image file", async () => {
+  it("an image-only card on a link with no image file name takes the local fetch, as before", async () => {
     const url = "https://img.example/render?id=7";
     const host = mount(url, [{ url, image: { hash: HASH, width: 10, height: 10 } }]);
     await settle();
-    expect(host.children).toHaveLength(0);
+    expect(host.querySelector("[data-external-url]")?.getAttribute("data-external-loaded")).toBe(
+      "false",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(previewFetches()).toEqual([]);
   });
 
   it("draws a YouTube card's title and still from the server, with no oEmbed or broker call", async () => {
@@ -241,6 +242,59 @@ describe("rendering from the server's cards", () => {
     expect(host.querySelector<HTMLImageElement>("img.msg-embed-thumb")?.src).toMatch(/^blob:/);
     expect(previewFetches()).toEqual([]);
     expect(imageMock).not.toHaveBeenCalled();
+  });
+
+  describe("pressing Play on a server-drawn YouTube card", () => {
+    const url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+    const card: LinkPreviewCard = {
+      url,
+      title: "A video",
+      site_name: "YouTube",
+      image: { hash: HASH, width: 320, height: 180 },
+    };
+
+    it("loads the player straight away when the server's choice is auto", async () => {
+      setExternalConsentChoice("auto");
+      const host = mount(url, [card]);
+      await settle();
+      host.querySelector<HTMLElement>(".msg-embed-yt-player")!.click();
+      expect(host.querySelector("iframe.msg-embed-iframe")).not.toBeNull();
+    });
+
+    async function pressPlayWithNoChoice(): Promise<HTMLElement> {
+      const host = mount(url, [card]);
+      await settle();
+      host.querySelector<HTMLElement>(".msg-embed-yt-player")!.click();
+      await vi.dynamicImportSettled();
+      await settle();
+      return host;
+    }
+
+    it("asks first when there is no choice, and loads nothing if declined", async () => {
+      const host = await pressPlayWithNoChoice();
+      expect(document.querySelector("[data-testid=external-consent-dialog]")).not.toBeNull();
+      expect(host.querySelector("iframe")).toBeNull();
+      document.querySelector<HTMLButtonElement>(".btn-modal-cancel")!.click();
+      await settle();
+      expect(host.querySelector("iframe")).toBeNull();
+    });
+
+    it("plays once the viewer answers the prompt", async () => {
+      const host = await pressPlayWithNoChoice();
+      document.querySelector<HTMLButtonElement>(".btn-modal-save")!.click();
+      await settle();
+      expect(host.querySelector("iframe.msg-embed-iframe")).not.toBeNull();
+    });
+
+    it("on 'ask' the press itself admits the item", async () => {
+      setExternalConsentChoice("ask");
+      const host = mount(url, [card]);
+      await settle();
+      host.querySelector<HTMLElement>(".msg-embed-yt-player")!.click();
+      await settle();
+      expect(document.querySelector("[data-testid=external-consent-dialog]")).toBeNull();
+      expect(host.querySelector("iframe.msg-embed-iframe")).not.toBeNull();
+    });
   });
 
   it("waits for the tap under data saver, and a tap fetches only the thumbnail", async () => {

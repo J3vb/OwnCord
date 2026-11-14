@@ -10,6 +10,7 @@ import type {
   ChatBulkDeletedPayload,
   ChatDeletedPayload,
   ChatEditedPayload,
+  MessageLinkPreviewsPayload,
 } from "../../lib/types";
 import type { MessagesState } from "./messageModel";
 
@@ -22,6 +23,7 @@ export type JournalEntry =
   | { readonly kind: "edit"; readonly payload: ChatEditedPayload }
   | { readonly kind: "delete"; readonly payload: ChatDeletedPayload }
   | { readonly kind: "bulkDelete"; readonly payload: ChatBulkDeletedPayload }
+  | { readonly kind: "linkPreviews"; readonly payload: MessageLinkPreviewsPayload }
   | {
       readonly kind: "pin";
       readonly messageId: number;

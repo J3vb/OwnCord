@@ -58,6 +58,7 @@ import {
   reduceBulkDeleteMessages,
   reduceSetMessagePinned,
   reduceMarkStickersDeleted,
+  reduceLinkPreviewsFrame,
 } from "../features/messaging/messageEdits";
 import {
   reduceAddOptimisticReaction,
@@ -65,7 +66,6 @@ import {
   reduceUpdateReaction,
 } from "../features/messaging/reactionState";
 import { reducePollUpdate, reducePollVoteOk } from "@lib/pollState";
-import { reduceLinkPreviews } from "@lib/linkPreviewState";
 
 export type { Message, PendingReaction, MessagesState } from "../features/messaging/messageModel";
 /** Facade surface since before the model moved out; no importer names it today. @public */
@@ -490,7 +490,7 @@ export function applyPollVoteOk(payload: PollVoteOkPayload): void {
 
 /** Apply a message_link_previews frame: the message's cards, unless it holds newer ones or is not loaded. */
 export function updateLinkPreviews(payload: MessageLinkPreviewsPayload): void {
-  messagesStore.setState((prev) => reduceLinkPreviews(prev, payload));
+  messagesStore.setState((prev) => reduceLinkPreviewsFrame(prev, payload));
 }
 
 /** Reset the entire store to its initial (empty) state — e.g. on logout. */

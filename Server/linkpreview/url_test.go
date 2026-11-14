@@ -3,7 +3,9 @@ package linkpreview
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 )
 
@@ -87,5 +89,40 @@ func TestURLHash(t *testing.T) {
 	}
 	if _, _, err := URLHash("ftp://x/"); !errors.Is(err, ErrInvalidURL) {
 		t.Errorf("URLHash(ftp) err = %v, want ErrInvalidURL", err)
+	}
+}
+
+// The client matches a card to a link with its own copy of NormalizeURL; both read this file.
+func TestNormalizeURLSharedFixture(t *testing.T) {
+	raw, err := os.ReadFile("../../protocol/fixtures/link-url-normalisation.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var doc struct {
+		Cases []struct {
+			Name string  `json:"name"`
+			In   string  `json:"in"`
+			Want *string `json:"want"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	if len(doc.Cases) == 0 {
+		t.Fatal("fixture has no cases")
+	}
+	for _, tc := range doc.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			got, err := NormalizeURL(tc.In)
+			if tc.Want == nil {
+				if !errors.Is(err, ErrInvalidURL) {
+					t.Errorf("NormalizeURL(%q) = %q, %v; want ErrInvalidURL", tc.In, got, err)
+				}
+				return
+			}
+			if err != nil || got != *tc.Want {
+				t.Errorf("NormalizeURL(%q) = %q, %v; want %q", tc.In, got, err, *tc.Want)
+			}
+		})
 	}
 }

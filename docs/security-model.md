@@ -236,12 +236,15 @@ documents. Any disagreement is a bug in this page.
   thumbnail. The desktop shows them from the server (thumbnails over the
   TOFU-pinned `http_proxy.rs` with the session token), so the viewer's computer
   never contacts the linked site and no external-content consent applies to
-  them. A server that does not build cards keeps the broker path below for one
-  release.
+  them. Two things still reach outside: a link that is itself an image (any
+  host, GIFs included) always uses the broker path below, also on such a
+  server, and pressing Play on a YouTube card connects to YouTube, so it asks
+  for the same consent. A server that does not build cards keeps the broker
+  path below for every link for one release.
 - **Other content from other websites** is fetched only by the desktop's native
   broker (`Client/src-tauri/src/external_content.rs`). This covers GIFs and
-  external avatars, and, on a server that does not build link previews, link
-  previews, YouTube titles and thumbnails and inline external images. The broker:
+  external avatars, every link that is itself an image, and, on a server that does
+  not build link previews, link previews and YouTube titles and thumbnails. The broker:
   - uses `https` on port 443 only
   - checks every resolved address with the same list as `Server/safefetch`,
     and refuses loopback, private, link-local, multicast and other non-public

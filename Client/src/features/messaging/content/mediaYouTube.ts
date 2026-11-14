@@ -8,7 +8,7 @@ import { createIcon } from "@lib/icons";
 import { fetchExternalImage, previewExternal, recoverEvictedImage } from "./attachments";
 import { clearImageSizes } from "./imageSizes";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
-import { admitDerived } from "../../content-consent/external";
+import { admitDerived, externalAllowed, requestExternalItem } from "../../content-consent/external";
 import { externalConsentText } from "../../../i18n/externalConsent";
 import { contentText } from "../../../i18n/content";
 import { dataSaverActive } from "./dataSaver";
@@ -210,26 +210,44 @@ export function renderYouTubeEmbed(
   appendChildren(thumbWrap, thumb, playBtn);
   wrap.appendChild(thumbWrap);
 
-  // On click (or Enter/Space on the play button), replace with the player
-  thumbWrap.addEventListener(
-    "click",
-    () => {
-      const iframe = document.createElement("iframe");
-      iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-      iframe.setAttribute("allowfullscreen", "");
-      iframe.setAttribute("allow", "autoplay; encrypted-media");
-      iframe.setAttribute(
-        "sandbox",
-        "allow-scripts allow-same-origin allow-presentation allow-popups",
-      );
-      iframe.className = "msg-embed-iframe";
-      iframe.title = externalConsentText("youtube.frame");
-      const hadFocus = thumbWrap.contains(document.activeElement);
-      thumbWrap.replaceChildren(iframe);
-      if (hadFocus) iframe.focus();
-    },
-    { once: true },
-  );
+  const startPlayer = (): void => {
+    const iframe = document.createElement("iframe");
+    iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+    iframe.setAttribute("allowfullscreen", "");
+    iframe.setAttribute("allow", "autoplay; encrypted-media");
+    iframe.setAttribute(
+      "sandbox",
+      "allow-scripts allow-same-origin allow-presentation allow-popups",
+    );
+    iframe.className = "msg-embed-iframe";
+    iframe.title = externalConsentText("youtube.frame");
+    const hadFocus = thumbWrap.contains(document.activeElement);
+    thumbWrap.replaceChildren(iframe);
+    if (hadFocus) iframe.focus();
+  };
+
+  // On click (or Enter/Space on the play button), replace with the player.
+  // Playing contacts YouTube, so on a server whose card drew the title and still
+  // (nothing was fetched yet) it asks for the same external-content consent the
+  // local fetch asks for: direct on "auto", a prompt when there is no choice or "ask".
+  let started = false;
+  let asking = false;
+  thumbWrap.addEventListener("click", () => {
+    if (started || asking) return;
+    const key = `url:${originalUrl}`;
+    if (server === undefined || externalAllowed(key)) {
+      started = true;
+      startPlayer();
+      return;
+    }
+    asking = true;
+    void requestExternalItem(key).then((ok) => {
+      asking = false;
+      if (!ok || started) return;
+      started = true;
+      startPlayer();
+    });
+  });
 
   return wrap;
 }

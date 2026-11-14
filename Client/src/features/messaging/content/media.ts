@@ -407,7 +407,9 @@ function renderUrlEmbed(url: string): HTMLElement | null {
  *  consent and its animation, whatever card the server holds. */
 function renderServerEmbed(url: string, card: LinkPreviewCard | undefined): HTMLElement | null {
   if (isDirectImageUrl(url)) return renderUrlEmbed(url);
-  if (card === undefined || !isSafeUrl(url) || isImageOnlyCard(card)) return null;
+  if (card === undefined || !isSafeUrl(url)) return null;
+  // An image-only card on a link with no image file name: the local fetch, as before.
+  if (isImageOnlyCard(card)) return renderUrlEmbed(url);
   const ytId = extractYouTubeId(url);
   if (ytId !== null) {
     if (!showEmbedsPref) return null;

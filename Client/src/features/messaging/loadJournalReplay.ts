@@ -1,5 +1,6 @@
 // Re-applies the changes journaled while a history page was in flight (see
 // loadJournal.ts) to the rows that page brought in.
+import { reduceLinkPreviews } from "../../lib/linkPreviewState";
 import type { ChatEditedPayload } from "../../lib/types";
 import type { Message, MessagesState } from "./messageModel";
 import { firstPageReplayStart, type JournalEntry } from "./loadJournal";
@@ -41,6 +42,8 @@ function applyEntry(state: MessagesState, channelId: number, entry: JournalEntry
       return reduceDeleteMessage(state, entry.payload);
     case "bulkDelete":
       return reduceBulkDeleteMessages(state, entry.payload);
+    case "linkPreviews":
+      return reduceLinkPreviews(state, entry.payload);
     case "pin":
       return reduceSetMessagePinned(state, channelId, entry.messageId, entry.pinned);
     default:

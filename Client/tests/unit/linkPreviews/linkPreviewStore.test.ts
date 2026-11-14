@@ -14,6 +14,7 @@ import {
   getChannelMessages,
   messagesStore,
   resetMessagesStore,
+  setChannelLoading,
   setMessages,
 } from "../../../src/stores/messages.store";
 import { handleMessageLinkPreviews } from "../../../src/features/messaging/wsHandlers";
@@ -128,6 +129,41 @@ describe("history rows and held cards", () => {
     const edited = { ...bare, editedAt: "2026-11-13T10:20:00Z" };
     expect(mergeMessageLinkPreviews(held, edited).linkPreviews).toBeUndefined();
     expect(mergeMessageLinkPreviews(held, bare).linkPreviews).toEqual([CARD_A]);
+  });
+});
+
+describe("frames that arrive before the page that holds their row", () => {
+  it("a frame between setChannelLoading and the install shows on the installed row", () => {
+    setChannelLoading(1);
+    // The backfill frame beats the in-flight history page: the row is not loaded yet.
+    handleMessageLinkPreviews(frame(7, "2026-11-13T10:15:30Z", [CARD_A]));
+    expect(row(7)).toBeUndefined();
+    setMessages(1, [historyRow(7)], false);
+    expect(row(7)?.linkPreviews).toEqual([CARD_A]);
+  });
+
+  it("an older frame replayed onto a page that already has newer cards changes nothing", () => {
+    setChannelLoading(1);
+    handleMessageLinkPreviews(frame(7, "2026-11-13 10:15:30", [CARD_A]));
+    setMessages(
+      1,
+      [historyRow(7, { link_previews: [CARD_B, CARD_A], edited_at: "2026-11-13T10:16:00Z" })],
+      false,
+    );
+    expect(row(7)?.linkPreviews).toEqual([CARD_B, CARD_A]);
+  });
+
+  it("on the same version a page with fewer cards does not replace a frame's fuller list", () => {
+    setMessages(1, [historyRow(7)], false);
+    handleMessageLinkPreviews(frame(7, "2026-11-13 10:15:30", [CARD_A, CARD_B]));
+    setMessages(1, [historyRow(7, { link_previews: [CARD_A] })], false);
+    expect(row(7)?.linkPreviews).toEqual([CARD_A, CARD_B]);
+  });
+
+  it("a frame older than the row's own edit is dropped even when the row holds no cards", () => {
+    setMessages(1, [historyRow(7, { edited_at: "2026-11-13T10:20:00Z" })], false);
+    handleMessageLinkPreviews(frame(7, "2026-11-13 10:15:30", [CARD_A]));
+    expect(row(7)?.linkPreviews).toBeUndefined();
   });
 });
 

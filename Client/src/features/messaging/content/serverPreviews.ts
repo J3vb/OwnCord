@@ -38,7 +38,7 @@ function splitAuthority(authority: string): { host: string; port: string } | nul
   const hasPort = portAt > authority.lastIndexOf("]");
   const rawHost = (hasPort ? authority.slice(0, portAt) : authority).toLowerCase();
   const host = rawHost.replace(/\.$/, "");
-  if (host === "") return null;
+  if (host === "" || host.includes("%")) return null;
   const port = hasPort ? authority.slice(portAt + 1) : "";
   if (!/[^ -~]/.test(host)) return { host, port };
   try {
@@ -48,9 +48,58 @@ function splitAuthority(authority: string): { host: string; port: string } | nul
   }
 }
 
+// -- Path spelling: Go's url.URL.EscapedPath, which the server stores ----------
+
+/** Bytes Go's shouldEscape leaves alone in a path (encodePath mode). */
+const PATH_PLAIN = /^[A-Za-z0-9\-_.~$&+=:@/;,]$/;
+/** Characters a path may already hold for Go to keep it as written (validEncoded). */
+const PATH_VALID = /^[A-Za-z0-9\-_.~$&+=:@/;,!'()*[\]%]$/;
+
+/** The bytes a path's %XX escapes stand for, or null for a bad escape (Go refuses the link). */
+function unescapePath(raw: string): number[] | null {
+  const out: number[] = [];
+  const bytes = new TextEncoder().encode(raw);
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] !== 0x25) {
+      out.push(bytes[i]!);
+      continue;
+    }
+    const hex = String.fromCharCode(bytes[i + 1] ?? 0, bytes[i + 2] ?? 0);
+    if (!/^[0-9A-Fa-f]{2}$/.test(hex)) return null;
+    out.push(Number.parseInt(hex, 16));
+    i += 2;
+  }
+  return out;
+}
+
+/** Go's escape(s, encodePath): every byte outside the plain set as upper-case %XX. */
+function escapePath(bytes: readonly number[]): string {
+  return bytes
+    .map((b) => {
+      const ch = String.fromCharCode(b);
+      return b < 0x80 && PATH_PLAIN.test(ch)
+        ? ch
+        : `%${b.toString(16).toUpperCase().padStart(2, "0")}`;
+    })
+    .join("");
+}
+
+/** The path as the server writes it: as given when it is validly encoded, else
+ *  decoded and encoded again (so a space, `|`, `{`, or a non-ASCII letter becomes %XX
+ *  and %2f decodes to /). Null when the path holds a bad %-escape. */
+function normalizePath(raw: string): string | null {
+  const unescaped = unescapePath(raw);
+  if (unescaped === null) return null;
+  const valid = [...raw].every((ch) => PATH_VALID.test(ch));
+  const path = valid ? raw : escapePath(unescaped);
+  return path === "" ? "/" : path;
+}
+
 /** A link spelled the way the server stores it (Server/linkpreview/url.go): scheme and host
- *  lower-cased, trailing host dot and default port dropped, empty path "/", fragment dropped,
- *  path and query as written. Null for a link the server never previews (credentials, no host). */
+ *  lower-cased, trailing host dot and default port dropped, path as Go's EscapedPath writes it
+ *  ("/" when empty), fragment dropped, query as written. Null for a link the server never
+ *  previews (credentials, no host, a bad escape). The cases both sides must agree on are in
+ *  protocol/fixtures/link-url-normalisation.json. */
 export function normalizeLinkUrl(raw: string): string | null {
   const parts = LINK_PARTS.exec(raw.trim());
   if (parts === null) return null;
@@ -58,11 +107,11 @@ export function normalizeLinkUrl(raw: string): string | null {
   const authority = parts[2] ?? "";
   if (authority.includes("@")) return null;
   const split = splitAuthority(authority);
-  if (split === null) return null;
+  const path = normalizePath(parts[3] ?? "");
+  if (split === null || path === null) return null;
   const defaultPort =
     (scheme === "http" && split.port === "80") || (scheme === "https" && split.port === "443");
   const hostPort = split.port !== "" && !defaultPort ? `${split.host}:${split.port}` : split.host;
-  const path = parts[3] === undefined || parts[3] === "" ? "/" : parts[3];
   return `${scheme}://${hostPort}${path}${parts[4] ?? ""}`;
 }
 
