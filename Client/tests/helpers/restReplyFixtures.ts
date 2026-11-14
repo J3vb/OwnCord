@@ -93,6 +93,7 @@ export const REST_REPLY_FIXTURES: { readonly [K in keyof RestReplyShapes]: RestR
   ModerationReportDetail: reportDetail,
   ReportActResultOrNone: { voice: "applied" },
   TimeoutResult: { id: 4, voice: "applied" },
+  WarnResult: { id: 5 },
   NicknameResult: { user_id: 2, display_name: null },
   AppealRowList: [],
   ModerationAppealDetail: {

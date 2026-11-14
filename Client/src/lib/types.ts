@@ -405,6 +405,7 @@ export type {
   TotpEnrolmentResponse,
   RecoveryCodesResponse,
   TimeoutResult,
+  WarnResult,
   ReportActResult,
   NicknameResult,
 } from "./typesRest";

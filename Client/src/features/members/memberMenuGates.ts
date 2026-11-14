@@ -17,6 +17,7 @@ export interface ModerationGates {
   readonly canBan: boolean;
   readonly canManageRoles: boolean;
   readonly canTimeout: boolean;
+  readonly canWarn: boolean;
   readonly canManageNicknames: boolean;
 }
 
@@ -31,6 +32,7 @@ function applyOutrank(
     canBan: base.canBan && outranks,
     canManageRoles: base.canManageRoles && outranks && hasAssignableRoles,
     canTimeout: base.canTimeout && outranks,
+    canWarn: base.canWarn && outranks,
     canManageNicknames: base.canManageNicknames && outranks,
   };
 }
@@ -41,6 +43,7 @@ function anyGate(gates: ModerationGates): boolean {
     gates.canBan ||
     gates.canManageRoles ||
     gates.canTimeout ||
+    gates.canWarn ||
     gates.canManageNicknames
   );
 }
@@ -63,6 +66,7 @@ function moderationGates(
     canBan: has(Permission.BAN_MEMBERS),
     canManageRoles: has(Permission.MANAGE_ROLES),
     canTimeout: has(Permission.MODERATE_MEMBERS),
+    canWarn: has(Permission.MODERATE_MEMBERS),
     // The bit alone is not enough: an older server can hold it without the route.
     canManageNicknames: manageNicknamesEnabled() && has(Permission.MANAGE_NICKNAMES),
   };

@@ -20,7 +20,7 @@
 import { errorText } from "@lib/api";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText } from "@lib/dom";
-import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import {
   attachLimitHint,
   collapseSpaces,
@@ -31,6 +31,7 @@ import {
 import type { ToastType } from "@lib/ui/toastContainer";
 import { shellText } from "../../i18n/shell";
 import { moderationText as t } from "../../i18n/moderation";
+import { createFormStatus, openFormModal } from "./formModal";
 
 export interface NicknameDialogOptions {
   /** Display name, for the title. */
@@ -83,12 +84,7 @@ export function openNicknameDialog(options: NicknameDialogOptions): ModalInstanc
     hint.el,
   );
 
-  const status = createElement("div", {
-    class: "form-group",
-    role: "alert",
-    style: "color: var(--text-danger); font-size: 13px; display: none;",
-    "data-testid": "nickname-status",
-  });
+  const status = createFormStatus("nickname-status");
   body.append(createElement("p", {}, t("nicknameDialog.body")), group, status);
 
   const footer = createElement("div", { class: "modal-footer" });
@@ -110,26 +106,18 @@ export function openNicknameDialog(options: NicknameDialogOptions): ModalInstanc
   footer.append(reset, cancel, save);
   content.append(header, body, footer);
 
-  let closed = false;
   let inFlight = false;
 
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "nickname-dialog" },
-    // A stray backdrop click must not drop a typed name.
-    closeOnBackdrop: false,
-    onClose: () => {
-      closed = true;
+  const { modal, isClosed, showStatus, hideStatus } = openFormModal(
+    {
+      content,
+      titleId,
+      testId: "nickname-dialog",
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(options.fallbackFocus === undefined ? {} : { fallbackFocus: options.fallbackFocus }),
     },
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-    ...(options.fallbackFocus === undefined ? {} : { fallbackFocus: options.fallbackFocus }),
-  });
-
-  function showStatus(text: string): void {
-    status.style.display = "block";
-    setText(status, text);
-  }
+    status,
+  );
 
   function setBusy(busy: boolean): void {
     inFlight = busy;
@@ -141,14 +129,14 @@ export function openNicknameDialog(options: NicknameDialogOptions): ModalInstanc
 
   async function send(displayName: string | null): Promise<void> {
     if (inFlight) return;
-    status.style.display = "none";
+    hideStatus();
     setBusy(true);
     try {
       await options.submit(displayName);
     } catch (err) {
       // The server may have committed before the reply was lost; the dialog
       // stays open and the same request can be sent again.
-      if (closed) {
+      if (isClosed()) {
         notify(failureText(err), "error");
         return;
       }
