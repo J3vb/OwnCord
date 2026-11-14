@@ -103,7 +103,7 @@ func TestEraseAccount_MemberSucceeds(t *testing.T) {
 func TestEraseAccount_RemovesTheUserRow(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "alice")
-	database.ExecContext(context.Background(), "UPDATE users SET avatar = 'pic.png', totp_secret = 'SECRET', display_name = 'A', about = 'bio', custom_status = 'busy', identity_public_key = 'key' WHERE id = ?", userID)
+	database.ExecContext(context.Background(), "UPDATE users SET avatar = 'pic.png', totp_secret = 'SECRET', display_name = 'A', about = 'bio', custom_status = 'busy', identity_public_key = 'key' WHERE id = ?", userID) //nolint:errcheck
 
 	job, err := database.EraseAccount(context.Background(), userID, "")
 	mustDo(t, "EraseAccount", err)
@@ -131,12 +131,12 @@ func TestEraseAccount_DeletesSessions(t *testing.T) {
 	database.ExecContext(context.Background(),
 		"INSERT INTO sessions (user_id, token, expires_at) VALUES (?, 'tok123', datetime('now', '+1 day'))",
 		userID,
-	)
+	) //nolint:errcheck
 
-	eraseAccount(context.Background(), database, userID)
+	eraseAccount(context.Background(), database, userID) //nolint:errcheck
 
 	var count int
-	database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM sessions WHERE user_id = ?", userID).Scan(&count)
+	database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM sessions WHERE user_id = ?", userID).Scan(&count) //nolint:errcheck
 	if count != 0 {
 		t.Errorf("sessions count = %d, want 0", count)
 	}

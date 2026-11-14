@@ -245,7 +245,7 @@ func TestLiveKitProxy_ForwardsSignalPathWithIssuedCredential(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuthz, gotQuery = r.Header.Get("Authorization"), r.URL.RawQuery
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		w.Write([]byte("OK")) //nolint:errcheck
 	}))
 	defer backend.Close()
 

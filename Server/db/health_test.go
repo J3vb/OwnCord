@@ -13,7 +13,7 @@ func TestHealthStats_FileBackedDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer d.Close()
+	defer d.Close() //nolint:errcheck
 	if err := Migrate(d); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestHealthStats_HonoursDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer d.Close()
+	defer d.Close() //nolint:errcheck
 	if err := Migrate(d); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}

@@ -261,7 +261,7 @@ func hasUser(t *testing.T, path, username string) bool {
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 	var n int
 	if err := conn.QueryRow(`SELECT COUNT(*) FROM users WHERE username = ?`, username).Scan(&n); err != nil {
 		t.Fatalf("count users in %s: %v", path, err)
@@ -336,7 +336,7 @@ func hasVersion(t *testing.T, path, version string) bool {
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 	var n int
 	if err := conn.QueryRow(`SELECT COUNT(*) FROM schema_versions WHERE version = ?`, version).Scan(&n); err != nil {
 		t.Fatalf("count schema_versions in %s: %v", path, err)

@@ -13,7 +13,7 @@ func TestDecode_FixtureHeaderAndMessagesInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	var header Header
 	var ids []string
@@ -43,7 +43,7 @@ func TestDecode_FixtureHeaderAndMessagesInOrder(t *testing.T) {
 
 func TestDecode_ReadsFieldsTheImporterUses(t *testing.T) {
 	f, _ := os.Open("testdata/channel.json")
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 	got := map[string]Message{}
 	if _, err := Decode(context.Background(), f, Visitor{Message: func(m Message) error { got[m.ID] = m; return nil }}); err != nil {
 		t.Fatal(err)

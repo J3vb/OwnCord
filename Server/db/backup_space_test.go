@@ -64,7 +64,7 @@ func TestBackupToSafe_SpaceCheckDefaultsAndMemory(t *testing.T) {
 
 	mem, err := db.Open(":memory:")
 	mustDo(t, "Open", err)
-	defer mem.Close()
+	defer mem.Close() //nolint:errcheck
 	mem.SetBackupFreeBytesForTest(1<<40, func(string) (uint64, error) { return 0, nil })
 	mustDo(t, "in-memory BackupToSafe", mem.BackupToSafe(context.Background(), filepath.Join(backupDir, "mem.db"), backupDir))
 }

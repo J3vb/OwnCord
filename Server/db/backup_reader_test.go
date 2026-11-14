@@ -36,7 +36,7 @@ func TestBackupToSafe_RunsWhileTheWriterIsBusy(t *testing.T) {
 	// connection, so nothing else can write until it ends.
 	tx, err := database.BeginTx(context.Background(), nil)
 	mustDo(t, "BeginTx", err)
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 	if _, err := tx.ExecContext(context.Background(),
 		`INSERT INTO roles (name, permissions, position, is_default) VALUES ('busy', 0, 0, 0)`); err != nil {
 		t.Fatalf("seed inside the write transaction: %v", err)

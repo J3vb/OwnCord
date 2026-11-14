@@ -93,7 +93,7 @@ func TestSeedHubSeqFloor_RestoredBackupDoesNotReuseTheOldBlock(t *testing.T) {
 	removeWALSidecars(t, path)
 	copyFile(t, filepath.Join(filepath.Dir(path), "backup.db"), path)
 	again, floor2 := openAndBoot(t, path)
-	defer again.Close()
+	defer again.Close() //nolint:errcheck
 	if floor2 < floor+wsSeqFloorReserve {
 		t.Fatalf("second restore of the same backup reused a block: %d < %d + reserve", floor2, floor)
 	}
@@ -113,7 +113,7 @@ func TestSeedHubSeqFloor_RestoreCarriesTheLiveFloorWithoutASidecar(t *testing.T)
 	mustDo(t, "Remove", os.Remove(path+".ws-seq-floor"))
 	restoreOver(t, live, path, backup)
 	booted, floor := openAndBoot(t, path)
-	defer booted.Close()
+	defer booted.Close() //nolint:errcheck
 	if floor < liveFloor+wsSeqFloorReserve {
 		t.Fatalf("floor %d did not clear the live floor %d", floor, liveFloor)
 	}
@@ -139,7 +139,7 @@ func TestSeedHubSeqFloor_OutOfRangeValuesSaturate(t *testing.T) {
 			}
 			mustDo(t, "Close", booted.Close())
 			again, floor2 := openAndBoot(t, path)
-			defer again.Close()
+			defer again.Close() //nolint:errcheck
 			if floor2 != db.MaxWSSeqFloor {
 				t.Fatalf("next boot moved the floor to %d, want the limit %d", floor2, db.MaxWSSeqFloor)
 			}
@@ -156,7 +156,7 @@ func TestSeedHubSeqFloor_FailedSidecarWriteStillBoots(t *testing.T) {
 	mustDo(t, "Remove", os.Remove(path+".ws-seq-floor"))
 	mustDo(t, "Mkdir", os.Mkdir(path+".ws-seq-floor", 0o700))
 	booted, floor := openAndBoot(t, path) // asserts the hub seq equals floor
-	defer booted.Close()
+	defer booted.Close()                  //nolint:errcheck
 	if want := firstFloor + wsSeqFloorReserve; floor != want {
 		t.Fatalf("settings floor = %d, want %d", floor, want)
 	}
@@ -167,7 +167,7 @@ func TestSeedHubSeqFloor_FailedSidecarWriteStillBoots(t *testing.T) {
 func TestSeedHubSeqFloor_FailedSettingsWriteStillSeedsTheHub(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "chat.db")
 	first, firstFloor := openAndBoot(t, path)
-	defer first.Close()
+	defer first.Close() //nolint:errcheck
 	if _, err := first.ExecContext(context.Background(),
 		`CREATE TRIGGER block_floor_update BEFORE UPDATE ON settings WHEN NEW.key = 'ws_seq_floor'
 		 BEGIN SELECT RAISE(ABORT, 'blocked'); END`); err != nil {
@@ -217,7 +217,7 @@ func TestSeedHubSeqFloor_MissingOrCorruptSidecarFallsBack(t *testing.T) {
 				t.Fatal(err)
 			}
 			booted, floor := openAndBoot(t, path)
-			defer booted.Close()
+			defer booted.Close() //nolint:errcheck
 			// Restored settings hold the first boot's floor, so one block up.
 			if want := 2 * uint64(wsSeqFloorReserve); floor != want {
 				t.Fatalf("fallback floor = %d, want %d", floor, want)

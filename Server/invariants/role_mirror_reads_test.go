@@ -99,7 +99,7 @@ func TestRoleMirrorReads(t *testing.T) {
 		if err != nil {
 			t.Fatalf("OpenRoot: %v", err)
 		}
-		defer root.Close()
+		defer root.Close() //nolint:errcheck
 		if vs := roleMirrorReads.Tree(root.FS()); len(vs) != 0 {
 			for _, v := range vs {
 				t.Error(v)

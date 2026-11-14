@@ -72,7 +72,7 @@ func TestExpiredSelfSignedCertIsServedAsIs(t *testing.T) {
 			return
 		}
 		server := tls.Server(raw, result.TLSConfig)
-		server.Handshake()
+		server.Handshake() //nolint:errcheck // test server; errors surface on the client side
 	}()
 
 	dialer := &tls.Dialer{NetDialer: &net.Dialer{}, Config: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec // the test pins nothing on purpose

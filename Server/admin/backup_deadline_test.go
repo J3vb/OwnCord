@@ -35,7 +35,7 @@ func postWithToken(t *testing.T, url, token string) (int, string) {
 	if err != nil {
 		t.Fatalf("POST %s: %v (the connection was cut before the response)", url, err)
 	}
-	defer res.Body.Close()
+	defer res.Body.Close() //nolint:errcheck
 	var sb strings.Builder
 	buf := make([]byte, 512)
 	for {

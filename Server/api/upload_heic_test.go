@@ -179,7 +179,7 @@ func TestServeThumb_HEICIsAJPEGEvenInsideTheBox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the preview was not kept: %v", err)
 	}
-	defer kept.Close()
+	defer kept.Close() //nolint:errcheck
 	if info, err := kept.Stat(); err != nil || info.Size() == 0 {
 		t.Fatalf("kept preview: %v, %v", info, err)
 	}

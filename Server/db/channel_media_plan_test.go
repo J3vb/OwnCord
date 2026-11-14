@@ -20,7 +20,7 @@ func explainMediaPage(t *testing.T, d *DB, q ChannelMediaQuery) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	var plan []string
 	for rows.Next() {
 		var id, parent, notUsed int

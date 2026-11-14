@@ -54,7 +54,7 @@ func TestMatchLiveOwner_NoLiveDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer out.Close()
+	defer out.Close() //nolint:errcheck
 	if err := matchLiveOwner(dir+"/missing.db", out); err != nil {
 		t.Fatalf("matchLiveOwner with no live database = %v, want nil", err)
 	}

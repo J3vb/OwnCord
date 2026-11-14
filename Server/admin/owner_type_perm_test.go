@@ -293,7 +293,7 @@ func TestViewDiagnostics_LogStreamRevalidated(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stream request: %v", err)
 		}
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck
 		return resp.StatusCode
 	}
 	t.Run("live holder streams", func(t *testing.T) {

@@ -529,7 +529,7 @@ func postApplyProto(t *testing.T, srv *httptest.Server, token string) (int, int,
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	var body map[string]string
 	_ = json.NewDecoder(resp.Body).Decode(&body)
 	_, _ = io.Copy(io.Discard, resp.Body) // drain so the stream ends cleanly

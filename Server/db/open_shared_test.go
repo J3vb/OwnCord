@@ -21,7 +21,7 @@ func TestOpenShared_WorksWhileServerHoldsLock(t *testing.T) {
 
 	cli, err := db.OpenShared(path) // must not block on or steal the lock
 	mustDo(t, "OpenShared while lock held", err)
-	defer cli.Close()
+	defer cli.Close() //nolint:errcheck
 
 	mustDo(t, "PingRead on shared handle", cli.PingRead(context.Background()))
 }

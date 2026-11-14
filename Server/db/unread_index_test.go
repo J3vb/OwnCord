@@ -45,7 +45,7 @@ func queryPlan(t *testing.T, database *db.DB, query string, args ...any) []strin
 	t.Helper()
 	rows, err := database.SQLReaderDB().QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
 	mustDo(t, "EXPLAIN QUERY PLAN", err)
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	var plan []string
 	for rows.Next() {
 		var id, parent, notUsed int

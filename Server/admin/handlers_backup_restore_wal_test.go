@@ -210,7 +210,7 @@ func TestHandleRestoreBackup_StagesInsteadOfOverwriting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer reopened.Close()
+	defer reopened.Close() //nolint:errcheck
 	if n := countRestoreRows(t, reopened); n != restoreFixtureRows {
 		t.Errorf("rows after the boot-time apply = %d, want the backup's %d", n, restoreFixtureRows)
 	}

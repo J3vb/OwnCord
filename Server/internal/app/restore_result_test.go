@@ -45,7 +45,7 @@ func TestInitDatabase_RecordsRestoreResult(t *testing.T) {
 
 	database, err := db.Open(path) // the next boot: applies the staged copy
 	mustDo(t, "Open", err)
-	defer database.Close()
+	defer database.Close() //nolint:errcheck
 	mustDo(t, "Migrate", db.Migrate(database))
 
 	outcome := recordRestoreResult(log, path, database)
@@ -82,7 +82,7 @@ func TestRecordRestoreResult_NoRestorePending(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	database, err := db.Open(":memory:")
 	mustDo(t, "Open", err)
-	defer database.Close()
+	defer database.Close() //nolint:errcheck
 	if out := recordRestoreResult(log, ":memory:", database); out.Recorded {
 		t.Fatalf("outcome = %+v, want none", out)
 	}

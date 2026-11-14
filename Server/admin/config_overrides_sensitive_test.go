@@ -351,7 +351,7 @@ func TestConfigOverridesSensitive_PortGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer busy.Close()
+	defer busy.Close() //nolint:errcheck
 	busyPort := busy.Addr().(*net.TCPAddr).Port
 	w := patchConfig(t, f.handler, token, map[string]any{"server.port": busyPort}, portKey, "")
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "server.port") {

@@ -67,7 +67,7 @@ func jobRows(t *testing.T, database *db.DB, userID int64) (n int, state string) 
 	t.Helper()
 	rows, err := database.QueryContext(context.Background(), `SELECT state FROM erasure_jobs WHERE user_id = ?`, userID)
 	mustDo(t, "erasure_jobs", err)
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	for rows.Next() {
 		n++
 		mustDo(t, "scan", rows.Scan(&state))

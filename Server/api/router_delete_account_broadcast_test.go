@@ -45,7 +45,7 @@ func dialAndAuthWS(t *testing.T, srv *httptest.Server, token string) *websocket.
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v1/ws"
 	conn, dialResp, dialErr := websocket.Dial(dialCtx, wsURL, nil)
 	if dialResp != nil && dialResp.Body != nil {
-		defer dialResp.Body.Close()
+		defer dialResp.Body.Close() //nolint:errcheck // test cleanup
 	}
 	if dialErr != nil {
 		t.Fatalf("websocket.Dial: %v", dialErr)

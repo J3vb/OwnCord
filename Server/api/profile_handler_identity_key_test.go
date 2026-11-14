@@ -25,7 +25,7 @@ func (s *identityKeyFailStore) UpdateUserProfileAndIdentityKey(ctx context.Conte
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET username = ? WHERE id = ?`, username, userID); err != nil {
 		return err
 	}
