@@ -49,15 +49,6 @@ function makeApi(scope = new SessionScope({ host: "chat.example:8443", generatio
   return { api: api as unknown as PushApi & typeof api, scope };
 }
 
-/** A promise the test rejects when it chooses. */
-function deferredRejection(): { promise: Promise<never>; reject: (e: Error) => void } {
-  let reject: (e: Error) => void = () => undefined;
-  const promise = new Promise<never>((_, rej) => {
-    reject = rej;
-  });
-  return { promise, reject };
-}
-
 /** Let the attempt's awaits run. */
 async function settle(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -174,12 +165,17 @@ describe("push subscription", () => {
 
   it("a refusal that arrives after the session ended changes nothing", async () => {
     const { api } = makeApi();
-    const refusal = deferredRejection();
-    api.subscribePush.mockImplementationOnce(() => refusal.promise);
+    const refusal: { reject?: (e: Error) => void } = {};
+    api.subscribePush.mockImplementationOnce(
+      () =>
+        new Promise<never>((_, rej) => {
+          refusal.reject = rej;
+        }),
+    );
     onReady(api);
     await settle();
     runSessionResets("user");
-    refusal.reject(new ApiClientError(400, "PUSH_SERVER_NOT_PUBLIC", "not public"));
+    refusal.reject?.(new ApiClientError(400, "PUSH_SERVER_NOT_PUBLIC", "not public"));
     await settle();
     expect(pushStore.getState().setting).toBe("off");
   });
