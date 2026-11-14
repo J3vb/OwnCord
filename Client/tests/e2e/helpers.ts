@@ -1080,6 +1080,9 @@ export function buildTauriMockScript(opts: {
         if (cmd === "ptt_polling_supported") return false;
         // Windows per-app share audio (6.7): no WASAPI host, no picker switch.
         if (cmd === "app_audio_available") return false;
+        // Music share host: no apps to list, nothing to capture.
+        if (cmd === "list_audio_apps") return [];
+        if (cmd === "stop_music_audio") return null;
         if (cmd === "voice_shortcuts_supported") return false;
         // Global keys backend (LP-9b): matches the two probes above, nothing delivers a key.
         if (cmd === "global_keys_status")

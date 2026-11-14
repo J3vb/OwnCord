@@ -19,10 +19,24 @@
 //! `own_window`, `ancestor`, `not_found`, `ambiguous`, `activation_failed`,
 //! `superseded` (a newer start or a stop overtook this one), `internal`.
 //!
+//! Music share adds `list_audio_apps`, `start_music_audio` and
+//! `stop_music_audio` (see `music.rs`, with the same codes minus the window
+//! ones): the same capture and socket, picked by app instead of by window, in
+//! a second slot (`MusicAudioState`), so starting or stopping one never
+//! touches the other. They exist on every target and answer "unavailable" off
+//! Windows.
+//!
 //! Unverified on real hardware (no Windows machine in the build environment):
 //! which label WebView2 gives a window, and process-loopback activation on
 //! every Windows build. See docs/plans/design/6.7-design.md.
 #![cfg_attr(not(windows), allow(dead_code))]
+
+mod icon_png;
+pub mod music;
+#[cfg(windows)]
+mod windows_music;
+
+pub use music::MusicAudioState;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -507,7 +521,7 @@ impl<T> Slot<T> {
     }
 }
 
-/// Tauri state: at most one capture at a time.
+/// Tauri state: at most one screen-share capture at a time.
 #[derive(Default)]
 pub struct AppAudioState(Mutex<Slot<Capture>>);
 
@@ -516,8 +530,8 @@ impl AppAudioState {
         Self::default()
     }
 
-    fn slot(&self) -> std::sync::MutexGuard<'_, Slot<Capture>> {
-        crate::sync::lock(&self.0)
+    fn slot(&self) -> &Mutex<Slot<Capture>> {
+        &self.0
     }
 }
 
@@ -559,14 +573,44 @@ pub async fn start_app_audio(
     if !platform::available() {
         return Err("unavailable".into());
     }
-    // A fast change of source: the old capture and its socket go first, and
-    // any start still in flight is superseded.
-    let (epoch, old) = state.slot().begin();
+    let url = start_in_slot(
+        state.slot(),
+        move || platform::resolve_pid(&label),
+        platform::spawn_capture,
+    )
+    .await?;
+    Ok(StartedAppAudio { url })
+}
+
+/// Stop the running capture, if any.
+#[tauri::command]
+pub async fn stop_app_audio(state: State<'_, AppAudioState>) -> Result<(), String> {
+    stop_in_slot(state.slot()).await;
+    Ok(())
+}
+
+/// Stop the capture in `slot`, if any, and supersede a start in flight on it.
+async fn stop_in_slot(slot: &Mutex<Slot<Capture>>) {
+    let old = crate::sync::lock(slot).cancel();
     stop_capture(old).await;
-    let pid = tauri::async_runtime::spawn_blocking(move || platform::resolve_pid(&label))
+}
+
+/// Start a capture in `slot` for the pid `resolve` finds, and return the
+/// loopback socket URL. The slot's running capture is stopped first, and any
+/// start still in flight on the same slot is superseded. Other slots are not
+/// touched.
+async fn start_in_slot(
+    slot: &Mutex<Slot<Capture>>,
+    resolve: impl FnOnce() -> Result<u32, String> + Send + 'static,
+    spawn: impl FnOnce(u32, Arc<Shared>) -> Result<std::thread::JoinHandle<()>, String> + Send + 'static,
+) -> Result<String, String> {
+    // A fast change of source: the old capture and its socket go first.
+    let (epoch, old) = crate::sync::lock(slot).begin();
+    stop_capture(old).await;
+    let pid = tauri::async_runtime::spawn_blocking(resolve)
         .await
         .map_err(|_| "internal".to_string())??;
-    if !state.slot().is_current(epoch) {
+    if !crate::sync::lock(slot).is_current(epoch) {
         return Err("superseded".into());
     }
     let shared = Shared::new();
@@ -576,7 +620,7 @@ pub async fn start_app_audio(
     })?;
     let thread = {
         let shared = shared.clone();
-        tauri::async_runtime::spawn_blocking(move || platform::spawn_capture(pid, shared))
+        tauri::async_runtime::spawn_blocking(move || spawn(pid, shared))
             .await
             .map_err(|_| "internal".to_string())
             .and_then(|started| started)
@@ -596,25 +640,17 @@ pub async fn start_app_audio(
     };
     // Install only if no newer start or stop overtook this one; either way the
     // capture that loses is dropped outside the lock.
-    let installed = state.slot().install(epoch, capture);
+    let installed = crate::sync::lock(slot).install(epoch, capture);
     match installed {
         Ok(previous) => {
             stop_capture(previous).await;
-            Ok(StartedAppAudio { url })
+            Ok(url)
         }
         Err(superseded) => {
             stop_capture(Some(superseded)).await;
             Err("superseded".into())
         }
     }
-}
-
-/// Stop the running capture, if any.
-#[tauri::command]
-pub async fn stop_app_audio(state: State<'_, AppAudioState>) -> Result<(), String> {
-    let old = state.slot().cancel();
-    stop_capture(old).await;
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -633,6 +669,14 @@ mod platform {
         Err("unavailable".into())
     }
 
+    pub fn resolve_music_pid(_pid: u32, _listed: Option<String>) -> Result<u32, String> {
+        Err("unavailable".into())
+    }
+
+    pub fn list_apps() -> Result<super::music::Listing, String> {
+        Err("unavailable".into())
+    }
+
     pub fn spawn_capture(
         _pid: u32,
         _shared: Arc<Shared>,
@@ -648,472 +692,7 @@ use windows_impl as platform;
 // attributes of its own).
 #[cfg(windows)]
 #[allow(non_snake_case)]
-mod windows_impl {
-    use std::ffi::c_void;
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    use windows::core::{Interface as _, PROPVARIANT};
-    use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
-    use windows::Win32::Media::Audio::{
-        ActivateAudioInterfaceAsync, IActivateAudioInterfaceCompletionHandler, IAudioCaptureClient,
-        IAudioClient, AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED,
-        AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-        AUDCLNT_STREAMFLAGS_LOOPBACK, AUDIOCLIENT_ACTIVATION_PARAMS,
-        AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
-        AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
-        VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
-    };
-    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
-    use windows::Win32::System::Threading::{CreateEventW, SetEvent, WaitForSingleObject};
-    use windows::Win32::System::Variant::VT_BLOB;
-    use windows_sys::Wdk::System::SystemServices::RtlGetVersion;
-    use windows_sys::Win32::Foundation::{INVALID_HANDLE_VALUE, LPARAM};
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
-    };
-    use windows_sys::Win32::System::SystemInformation::OSVERSIONINFOW;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindow,
-        IsWindowVisible,
-    };
-
-    use super::*;
-
-    /// How long COM may take to activate the process loopback client.
-    const ACTIVATION_TIMEOUT_MS: u32 = 5_000;
-
-    // -- availability and window resolution ---------------------------------
-
-    pub fn available() -> bool {
-        // SAFETY: OSVERSIONINFOW is plain data; RtlGetVersion fills it when
-        // dwOSVersionInfoSize is set and never fails for this structure.
-        let build = unsafe {
-            let mut info: OSVERSIONINFOW = std::mem::zeroed();
-            info.dwOSVersionInfoSize = std::mem::size_of::<OSVERSIONINFOW>() as u32;
-            if RtlGetVersion(&mut info) != 0 {
-                return false;
-            }
-            info.dwBuildNumber
-        };
-        build_supports_process_loopback(build)
-    }
-
-    /// The owner process of a live window handle.
-    fn hwnd_pid(hwnd: u64) -> Option<u32> {
-        let handle = usize::try_from(hwnd).ok()? as *mut c_void;
-        let mut pid = 0u32;
-        // SAFETY: IsWindow and GetWindowThreadProcessId accept any handle
-        // value and report a dead one as 0; `pid` is a valid out pointer.
-        unsafe {
-            if IsWindow(handle) == 0 {
-                return None;
-            }
-            GetWindowThreadProcessId(handle, &mut pid);
-        }
-        (pid != 0).then_some(pid)
-    }
-
-    unsafe extern "system" fn collect_window(
-        hwnd: *mut c_void,
-        lparam: LPARAM,
-    ) -> windows_sys::core::BOOL {
-        // SAFETY: lparam is the &mut Vec that enumerate_windows passes for the
-        // duration of its EnumWindows call.
-        let windows = unsafe { &mut *(lparam as *mut Vec<WindowInfo>) };
-        let mut pid = 0u32;
-        // SAFETY: plain Win32 queries on a handle EnumWindows just gave us.
-        // The buffer is sized from the title length plus the terminator and
-        // its length is passed alongside it, so a long title is not cut.
-        let (visible, buf, len) = unsafe {
-            GetWindowThreadProcessId(hwnd, &mut pid);
-            let want = GetWindowTextLengthW(hwnd).clamp(0, 32_768) as usize;
-            let mut buf = vec![0u16; want + 1];
-            let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
-            (IsWindowVisible(hwnd) != 0, buf, len)
-        };
-        windows.push(WindowInfo {
-            hwnd: hwnd as usize as u64,
-            pid,
-            title: String::from_utf16_lossy(&buf[..len.max(0) as usize]),
-            visible,
-        });
-        1
-    }
-
-    fn enumerate_windows() -> Vec<WindowInfo> {
-        let mut windows = Vec::new();
-        // SAFETY: `collect_window` uses `windows` only through lparam while
-        // EnumWindows runs.
-        unsafe {
-            EnumWindows(
-                Some(collect_window),
-                &mut windows as *mut Vec<WindowInfo> as LPARAM,
-            );
-        }
-        windows
-    }
-
-    /// pid -> parent pid for every process, from a Toolhelp snapshot.
-    fn parent_map() -> Result<HashMap<u32, u32>, String> {
-        // SAFETY: the snapshot handle is checked, used only by the two
-        // Process32 calls below with a correctly sized entry, and closed.
-        unsafe {
-            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if snapshot == INVALID_HANDLE_VALUE || snapshot.is_null() {
-                return Err("internal".into());
-            }
-            let mut parents = HashMap::new();
-            let mut entry: PROCESSENTRY32W = std::mem::zeroed();
-            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-            let mut more = Process32FirstW(snapshot, &mut entry) != 0;
-            while more {
-                parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
-                more = Process32NextW(snapshot, &mut entry) != 0;
-            }
-            windows_sys::Win32::Foundation::CloseHandle(snapshot);
-            Ok(parents)
-        }
-    }
-
-    /// The process to capture for a shared window's label.
-    pub fn resolve_pid(label: &str) -> Result<u32, String> {
-        let parents = parent_map()?;
-        let me = std::process::id();
-        let own = own_process_tree(me, &parents);
-        let ancestors = own_process_ancestors(me, &parents);
-        pick_target_pid(label, hwnd_pid, &enumerate_windows(), &own, &ancestors)
-            .map_err(|e| e.code().to_string())
-    }
-
-    // -- process loopback activation -----------------------------------------
-
-    #[derive(Debug, PartialEq, Eq)]
-    enum Wait {
-        Signalled,
-        TimedOut,
-        Failed,
-    }
-
-    /// A Win32 event handle, closed on drop. Event handles are usable from any
-    /// thread.
-    struct OwnedEvent(HANDLE);
-
-    // SAFETY: a kernel event handle carries no thread affinity.
-    unsafe impl Send for OwnedEvent {}
-    // SAFETY: as above; Set/Wait on it are thread-safe.
-    unsafe impl Sync for OwnedEvent {}
-
-    impl OwnedEvent {
-        fn new() -> Result<Self, String> {
-            // SAFETY: an unnamed, auto-reset, initially unsignalled event.
-            unsafe { CreateEventW(None, false, false, None) }
-                .map(Self)
-                .map_err(|e| format!("CreateEventW: {e}"))
-        }
-
-        /// Wait up to `ms`.
-        fn wait(&self, ms: u32) -> Wait {
-            // SAFETY: the handle is a live event owned by `self`.
-            let result = unsafe { WaitForSingleObject(self.0, ms) };
-            if result == WAIT_OBJECT_0 {
-                Wait::Signalled
-            } else if result == WAIT_TIMEOUT {
-                Wait::TimedOut
-            } else {
-                Wait::Failed
-            }
-        }
-    }
-
-    impl Drop for OwnedEvent {
-        fn drop(&mut self) {
-            // SAFETY: closing the handle this value owns, once.
-            unsafe {
-                let _ = CloseHandle(self.0);
-            }
-        }
-    }
-
-    // `windows` 0.58 has no `_Impl` trait for the activation completion
-    // handler, and its `implement` macro would bind to this crate's `windows-core`
-    // (0.62) anyway. So the handler is declared with `windows-core` 0.62's own
-    // `interface` and `implement`, then handed over as a raw COM pointer: the
-    // IID and vtable layout are the Windows ones, so the call below cannot
-    // tell the difference.
-    #[windows_core::interface("41d949ab-9862-444a-80f6-c261334da5eb")]
-    unsafe trait IActivateCompletion: windows_core::IUnknown {
-        unsafe fn ActivateCompleted(&self, operation: *mut c_void) -> windows_core::HRESULT;
-    }
-
-    // ActivateAudioInterfaceAsync calls the handler on an MTA thread and
-    // refuses one that does not answer QueryInterface(IAgileObject).
-    #[windows_core::interface("94ea2b94-e9cc-49e0-c0ff-ee64ca8f5b90")]
-    unsafe trait IAgile: windows_core::IUnknown {}
-
-    #[windows_core::implement(IActivateCompletion, IAgile)]
-    struct CompletionHandler {
-        event: Arc<OwnedEvent>,
-    }
-
-    impl IActivateCompletion_Impl for CompletionHandler_Impl {
-        unsafe fn ActivateCompleted(&self, _operation: *mut c_void) -> windows_core::HRESULT {
-            // SAFETY: the event outlives the activation: the waiter holds the
-            // other Arc until it has read the result.
-            match unsafe { SetEvent(self.event.0) } {
-                Ok(()) => windows_core::HRESULT(0),
-                Err(e) => windows_core::HRESULT(e.code().0),
-            }
-        }
-    }
-
-    impl IAgile_Impl for CompletionHandler_Impl {}
-
-    /// A PROPVARIANT of type VT_BLOB, laid out as the C struct. Built by hand
-    /// because `windows` offers no safe blob constructor, and it must not be
-    /// a real `PROPVARIANT` (whose drop would CoTaskMemFree our stack bytes).
-    #[repr(C)]
-    struct BlobPropVariant {
-        vt: u16,
-        reserved: [u16; 3],
-        cb_size: u32,
-        blob: *mut u8,
-    }
-
-    // The hand-built blob must be exactly the size of the real PROPVARIANT.
-    const _: () =
-        assert!(std::mem::size_of::<BlobPropVariant>() == std::mem::size_of::<PROPVARIANT>());
-
-    struct Client {
-        audio: IAudioClient,
-        capture: IAudioCaptureClient,
-        ready: OwnedEvent,
-    }
-
-    fn wave_format() -> WAVEFORMATEX {
-        WAVEFORMATEX {
-            wFormatTag: 3, // WAVE_FORMAT_IEEE_FLOAT
-            nChannels: CHANNELS as u16,
-            nSamplesPerSec: SAMPLE_RATE,
-            nAvgBytesPerSec: SAMPLE_RATE * CHANNELS as u32 * 4,
-            nBlockAlign: CHANNELS as u16 * 4,
-            wBitsPerSample: 32,
-            cbSize: 0,
-        }
-    }
-
-    /// Activate the process loopback client for `pid`'s process tree and
-    /// start it. Must run on an MTA thread.
-    fn open_client(pid: u32) -> Result<Client, String> {
-        let done = Arc::new(OwnedEvent::new()?);
-        let handler: IActivateCompletion = CompletionHandler {
-            event: done.clone(),
-        }
-        .into();
-        // SAFETY: `into_raw` hands over one reference, which the windows-typed
-        // wrapper now owns and releases; the interface is the same COM one.
-        let handler = unsafe {
-            IActivateAudioInterfaceCompletionHandler::from_raw(windows_core::Interface::into_raw(
-                handler,
-            ))
-        };
-        let mut params = AUDIOCLIENT_ACTIVATION_PARAMS {
-            ActivationType: AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
-            Anonymous: AUDIOCLIENT_ACTIVATION_PARAMS_0 {
-                ProcessLoopbackParams: AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
-                    TargetProcessId: pid,
-                    ProcessLoopbackMode: PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
-                },
-            },
-        };
-        let blob = BlobPropVariant {
-            vt: VT_BLOB.0,
-            reserved: [0; 3],
-            cb_size: std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32,
-            blob: &mut params as *mut AUDIOCLIENT_ACTIVATION_PARAMS as *mut u8,
-        };
-        // SAFETY: `blob` has the PROPVARIANT layout and, with `params`, lives
-        // past the call; the handler is a live agile COM object.
-        let operation = unsafe {
-            ActivateAudioInterfaceAsync(
-                VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
-                &IAudioClient::IID,
-                Some(&blob as *const BlobPropVariant as *const PROPVARIANT),
-                &handler,
-            )
-        }
-        .map_err(|e| activation_failed("ActivateAudioInterfaceAsync", &e))?;
-        // A completion that arrives after this timeout is expected and
-        // harmless: the handler only sets `done`, which it keeps alive through
-        // its own Arc, and nothing reads the operation any more.
-        let waited = done.wait(ACTIVATION_TIMEOUT_MS);
-        if waited != Wait::Signalled {
-            log::warn!("[app_audio] activation did not complete: {waited:?}");
-            return Err("activation_failed".into());
-        }
-        let mut result = windows::core::HRESULT(0);
-        let mut unknown = None;
-        // SAFETY: the operation completed (the event fired), and both out
-        // pointers are valid for the call.
-        unsafe { operation.GetActivateResult(&mut result, &mut unknown) }
-            .map_err(|e| activation_failed("GetActivateResult", &e))?;
-        result
-            .ok()
-            .map_err(|e| activation_failed("activation result", &e))?;
-        let audio: IAudioClient = unknown
-            .ok_or_else(|| "activation_failed".to_string())?
-            .cast()
-            .map_err(|e| activation_failed("IAudioClient cast", &e))?;
-
-        let format = wave_format();
-        // SAFETY: `format` is a valid WAVEFORMATEX for the call. The client is
-        // new and un-initialised. GetMixFormat is not implemented for a
-        // process loopback client, hence the explicit format.
-        unsafe {
-            audio.Initialize(
-                AUDCLNT_SHAREMODE_SHARED,
-                AUDCLNT_STREAMFLAGS_LOOPBACK
-                    | AUDCLNT_STREAMFLAGS_EVENTCALLBACK
-                    | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-                1_000_000, // 100 ms in 100 ns units
-                0,
-                &format,
-                None,
-            )
-        }
-        .map_err(|e| activation_failed("Initialize", &e))?;
-        let ready = OwnedEvent::new()?;
-        // SAFETY: the event is live and outlives the client (both in `Client`).
-        unsafe { audio.SetEventHandle(ready.0) }
-            .map_err(|e| activation_failed("SetEventHandle", &e))?;
-        // SAFETY: the client is initialised.
-        let capture: IAudioCaptureClient =
-            unsafe { audio.GetService() }.map_err(|e| activation_failed("GetService", &e))?;
-        // SAFETY: the client is initialised and has its event.
-        unsafe { audio.Start() }.map_err(|e| activation_failed("Start", &e))?;
-        Ok(Client {
-            audio,
-            capture,
-            ready,
-        })
-    }
-
-    fn activation_failed(step: &str, error: &windows::core::Error) -> String {
-        log::warn!("[app_audio] {step}: {error}");
-        "activation_failed".into()
-    }
-
-    // -- capture thread ---------------------------------------------------------
-
-    /// Start the capture thread and wait until its client is running (or has
-    /// failed). The thread is MTA: COM objects never leave it.
-    pub fn spawn_capture(
-        pid: u32,
-        shared: Arc<Shared>,
-    ) -> Result<std::thread::JoinHandle<()>, String> {
-        let (ready_tx, ready_rx) = mpsc::channel();
-        let thread = std::thread::Builder::new()
-            .name("app-audio-capture".into())
-            .spawn(move || capture_main(pid, &shared, ready_tx))
-            .map_err(|e| {
-                log::warn!("[app_audio] spawn capture thread: {e}");
-                "internal".to_string()
-            })?;
-        // The activation is bounded, so this wait is too.
-        match ready_rx.recv_timeout(Duration::from_millis(
-            u64::from(ACTIVATION_TIMEOUT_MS) + 2_000,
-        )) {
-            Ok(Ok(())) => Ok(thread),
-            Ok(Err(code)) => {
-                let _ = thread.join();
-                Err(code)
-            }
-            Err(_) => Err("activation_failed".into()),
-        }
-    }
-
-    fn capture_main(pid: u32, shared: &Shared, ready: mpsc::Sender<Result<(), String>>) {
-        // SAFETY: balanced with CoUninitialize below when it succeeded.
-        let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-        if com.is_err() {
-            log::warn!("[app_audio] CoInitializeEx failed: {com:?}");
-            let _ = ready.send(Err("internal".into()));
-            return;
-        }
-        match open_client(pid) {
-            Ok(client) => {
-                let _ = ready.send(Ok(()));
-                capture_loop(&client, shared);
-                // SAFETY: the client was started above.
-                if let Err(e) = unsafe { client.audio.Stop() } {
-                    log::debug!("[app_audio] Stop: {e}");
-                }
-            }
-            Err(code) => {
-                let _ = ready.send(Err(code));
-            }
-        }
-        // SAFETY: matches the successful CoInitializeEx above; every COM
-        // object of this thread has been dropped with `client`.
-        unsafe { CoUninitialize() };
-    }
-
-    /// Drain the client into 10 ms frames until told to stop. Wakes at least
-    /// every STOP_POLL, so the stop flag is seen within 100 ms.
-    fn capture_loop(client: &Client, shared: &Shared) {
-        let mut framer = Framer::default();
-        while !shared.stopped() {
-            match client.ready.wait(STOP_POLL.as_millis() as u32) {
-                Wait::Signalled => {}
-                Wait::TimedOut => continue,
-                Wait::Failed => {
-                    log::warn!("[app_audio] waiting for audio failed, stopping");
-                    break;
-                }
-            }
-            if let Err(e) = drain(client, &mut framer, shared) {
-                log::warn!("[app_audio] capture ended: {e}");
-                break;
-            }
-        }
-        shared.request_stop();
-    }
-
-    fn drain(client: &Client, framer: &mut Framer, shared: &Shared) -> windows::core::Result<()> {
-        loop {
-            // SAFETY: the capture client belongs to this thread and is started.
-            let pending = unsafe { client.capture.GetNextPacketSize() }?;
-            if pending == 0 {
-                return Ok(());
-            }
-            let mut data: *mut u8 = std::ptr::null_mut();
-            let mut frames = 0u32;
-            let mut flags = 0u32;
-            // SAFETY: all out pointers are valid for the call.
-            unsafe {
-                client
-                    .capture
-                    .GetBuffer(&mut data, &mut frames, &mut flags, None, None)
-            }?;
-            let emit = |frame| shared.push_frame(frame);
-            if flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0 || data.is_null() {
-                framer.push_silence(frames as usize, emit);
-            } else {
-                // SAFETY: GetBuffer returned `frames` frames of the 2-channel
-                // f32 format we initialised with; the slice is used before
-                // ReleaseBuffer and copied out by `push`. WASAPI buffers for
-                // 32-bit float are 4-byte aligned.
-                let samples = unsafe {
-                    std::slice::from_raw_parts(data as *const f32, frames as usize * CHANNELS)
-                };
-                framer.push(samples, emit);
-            }
-            // SAFETY: releases exactly the frames GetBuffer returned.
-            unsafe { client.capture.ReleaseBuffer(frames) }?;
-        }
-    }
-}
+mod windows_impl;
 
 #[cfg(test)]
 mod tests {
@@ -1488,6 +1067,128 @@ mod tests {
         tokio::time::sleep(CONNECT_TIMEOUT + Duration::from_secs(1)).await;
         let _ = task.await;
         assert!(shared.stopped());
+    }
+
+    // The two slots are independent: a stop or start of one never touches
+    // the other's running capture or its in-flight starts.
+    #[test]
+    fn music_and_screen_slots_interleave_independently() {
+        let mut screen: Slot<&str> = Slot::default();
+        let mut music: Slot<&str> = Slot::default();
+        let (s1, _) = screen.begin();
+        assert!(screen.install(s1, "screen-1").is_ok());
+        let (m1, _) = music.begin();
+        assert!(music.install(m1, "music-1").is_ok());
+
+        // a screen stop takes the screen capture only
+        assert_eq!(screen.cancel(), Some("screen-1"));
+        assert!(music.is_current(m1));
+
+        // a music restart replaces music; screen is not involved
+        let (m2, old) = music.begin();
+        assert_eq!(old, Some("music-1"));
+        let (s2, _) = screen.begin();
+        // a music stop while a screen start is in flight leaves that start valid
+        assert_eq!(music.cancel(), None);
+        assert!(screen.is_current(s2));
+        // the music start the stop overtook is rejected, the screen one lands
+        assert_eq!(music.install(m2, "music-2"), Err("music-2"));
+        assert_eq!(screen.install(s2, "screen-2"), Ok(None));
+        assert_eq!(screen.cancel(), Some("screen-2"));
+    }
+
+    #[test]
+    fn a_new_music_start_supersedes_the_one_in_flight() {
+        let mut music: Slot<&str> = Slot::default();
+        let (first, _) = music.begin();
+        let (second, _) = music.begin();
+        assert_eq!(music.install(first, "a"), Err("a"));
+        assert_eq!(music.install(second, "b"), Ok(None));
+    }
+
+    /// A capture that runs until its stop flag is raised, standing in for the
+    /// WASAPI thread.
+    fn fake_spawn(_pid: u32, shared: Arc<Shared>) -> Result<std::thread::JoinHandle<()>, String> {
+        Ok(std::thread::spawn(move || {
+            while !shared.stopped() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }))
+    }
+
+    /// The shared state of the capture running in `slot`.
+    fn running(slot: &Mutex<Slot<Capture>>) -> Arc<Shared> {
+        let guard = crate::sync::lock(slot);
+        let capture = guard.current.as_ref().expect("a running capture");
+        capture.shared.clone()
+    }
+
+    #[tokio::test]
+    async fn stopping_one_slot_leaves_the_other_capture_running() {
+        let screen = AppAudioState::new();
+        let music = MusicAudioState::new();
+        let screen_url = start_in_slot(screen.slot(), || Ok(10), fake_spawn)
+            .await
+            .unwrap();
+        let music_url = start_in_slot(music.slot(), || Ok(20), fake_spawn)
+            .await
+            .unwrap();
+        assert!(screen_url.starts_with("ws://127.0.0.1:") && screen_url != music_url);
+        let (screen_shared, music_shared) = (running(screen.slot()), running(music.slot()));
+
+        // stopping music does not stop the screen-share capture
+        stop_in_slot(music.slot()).await;
+        assert!(music_shared.stopped());
+        assert!(!screen_shared.stopped());
+
+        // and the other way round
+        start_in_slot(music.slot(), || Ok(21), fake_spawn)
+            .await
+            .unwrap();
+        let music_again = running(music.slot());
+        stop_in_slot(screen.slot()).await;
+        assert!(screen_shared.stopped());
+        assert!(!music_again.stopped());
+
+        // a new music start replaces the running music capture, not the screen slot
+        start_in_slot(screen.slot(), || Ok(11), fake_spawn)
+            .await
+            .unwrap();
+        let screen_again = running(screen.slot());
+        start_in_slot(music.slot(), || Ok(22), fake_spawn)
+            .await
+            .unwrap();
+        assert!(music_again.stopped());
+        assert!(!screen_again.stopped());
+
+        stop_in_slot(screen.slot()).await;
+        stop_in_slot(music.slot()).await;
+        assert!(screen_again.stopped() && running_is_none(music.slot()));
+    }
+
+    fn running_is_none(slot: &Mutex<Slot<Capture>>) -> bool {
+        crate::sync::lock(slot).current.is_none()
+    }
+
+    #[tokio::test]
+    async fn a_failed_resolve_or_spawn_leaves_the_other_slot_alone() {
+        let screen = AppAudioState::new();
+        let music = MusicAudioState::new();
+        start_in_slot(screen.slot(), || Ok(10), fake_spawn)
+            .await
+            .unwrap();
+        let screen_shared = running(screen.slot());
+        let gone = start_in_slot(music.slot(), || Err("not_found".into()), fake_spawn).await;
+        assert_eq!(gone, Err("not_found".to_string()));
+        let refused = start_in_slot(
+            music.slot(),
+            || Ok(20),
+            |_, _| Err("activation_failed".to_string()),
+        )
+        .await;
+        assert_eq!(refused, Err("activation_failed".to_string()));
+        assert!(!screen_shared.stopped());
+        stop_in_slot(screen.slot()).await;
     }
 
     #[cfg(not(windows))]

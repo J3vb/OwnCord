@@ -135,6 +135,7 @@ const commandPassThrough: Record<string, string> = {
   push_register: "instance and VAPID key handed to the push app, notification text shown as-is",
   push_unregister: "instance used as a lookup key",
   start_app_audio: "window label and surface name used as lookup keys",
+  start_music_audio: "app id parsed as pid:<n> and used as a lookup key",
   native_voice_play_sound: "device id used as a lookup key",
   native_voice_set_device: "device id used as a lookup key",
   native_voice_start_camera: "camera id used as a lookup key",

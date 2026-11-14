@@ -104,7 +104,7 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 32    |
 | Distinct `invoke` command names called from `Client/src/`  | 124   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 127   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 130   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
@@ -215,6 +215,8 @@ get_window_prefs
 global_keys_portal_bind
 global_keys_portal_configure
 global_keys_status
+is_metered
+list_audio_apps
 list_running_programs
 load_credential
 load_identity_key
@@ -289,7 +291,6 @@ save_identity_key
 save_pending_messages
 save_settings
 set_call_service
-is_metered
 set_gpu_adapter
 set_unread_badge
 set_window_pref
@@ -300,9 +301,11 @@ show_next_launch
 start_app_audio
 start_http_proxy
 start_livekit_proxy
+start_music_audio
 stop_app_audio
 stop_http_proxy
 stop_livekit_proxy
+stop_music_audio
 store_identity_pin
 system_idle_follow
 system_idle_ms
@@ -340,7 +343,10 @@ web build reads nothing and hides the setting. The three Windows per-app share a
 half: they exist on every target and answer "unavailable" off Windows) have their
 caller since WP 6.7b: `src/platform/desktop/appAudio.ts`, behind the `AppAudio`
 contract, a twenty-seventh importer. They still belong in the registration
-inventory. `set_call_service` (Android only, `src-tauri/src/call_service.rs`)
+inventory. The music share host half adds three more beside them,
+`list_audio_apps`, `start_music_audio` and `stop_music_audio`: the same
+"unavailable" answer off Windows, a second independent capture slot so music
+and a window share's audio run together, and no TypeScript caller yet. `set_call_service` (Android only, `src-tauri/src/call_service.rs`)
 starts, updates and stops the foreground service that keeps a call's mic and
 camera running while the app is in the background, and keeps the screen on
 while the call has a camera or a stream on screen (a window flag, set and

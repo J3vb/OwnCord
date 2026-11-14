@@ -207,6 +207,10 @@ windows-sys = { version = "0.60", features = [
     "Wdk_System_SystemServices",
     "Win32_System_SystemInformation",
     "Win32_System_Diagnostics_ToolHelp",
+    # Music share icons (windows_app_audio.rs): the exe's icon (Shell), its
+    # pixels (Gdi) and its FileDescription (Storage_FileSystem, below).
+    "Win32_UI_Shell",
+    "Win32_Graphics_Gdi",
     # game_activity.rs: the process list (Toolhelp, above), each process's
     # image path and start time (OpenProcess, QueryFullProcessImageNameW,
     # GetProcessTimes) and Steam's install folder (HKCU\Software\Valve\Steam).
