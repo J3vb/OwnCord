@@ -100,6 +100,10 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Push notifications
+
+- **Settings > Notifications says when push cannot work.** Members now see it when their push server is on a private network or a non-standard port, instead of silently getting nothing.
+
 ### Voice
 
 - **Share music in a voice channel.** The new music button in the call controls shares one app's sound, with no screen share needed. Pick the player from the list and everyone in the call hears it beside your voice.

@@ -7,8 +7,15 @@
  * Each attempt belongs to the API session it started in: a sign-out, server
  * switch or newer attempt supersedes it, and a superseded attempt writes
  * nothing. A server with push off (503 PUSH_DISABLED) is not asked again until
- * the next sign-in. Coming back into view tries again when the last attempt
- * found no push app or failed, so installing ntfy needs no second tap.
+ * the next sign-in.
+ *
+ * A push server on a private network (400 PUSH_SERVER_NOT_PUBLIC) or on a port
+ * other than 443 (400 PUSH_SERVER_PORT_NOT_SUPPORTED) is shown with its host,
+ * since the server will never send to it.
+ *
+ * Coming back into view tries again when the last attempt found no push app,
+ * was refused as above, or failed: installing ntfy, or pointing the push app
+ * at another server, needs no second tap.
  */
 
 import { ApiClientError, type ApiClient } from "@lib/api";
@@ -80,7 +87,13 @@ const FAILURE_SETTING: Readonly<Record<PushRegisterFailure, PushSetting>> = {
 };
 
 /** Settings that a later look should retry; "on" and "server-off" hold for the session. */
-const RETRY_ON_RESUME: ReadonlySet<PushSetting> = new Set(["install", "choose", "failed"]);
+const RETRY_ON_RESUME: ReadonlySet<PushSetting> = new Set([
+  "install",
+  "choose",
+  "refused",
+  "port-refused",
+  "failed",
+]);
 
 /** The account push is set up for, or null; for the session-reset check. */
 export function pushSessionInstance(): string | null {
@@ -147,6 +160,7 @@ async function registerPush(current: Session): Promise<void> {
     return;
   }
   setPushSetting("checking");
+  let endpoint = "";
   try {
     const vapid = await current.api.getPushVapid(current.scope.signal);
     if (!owns()) return;
@@ -165,7 +179,8 @@ async function registerPush(current: Session): Promise<void> {
       await showFailure(result.reason, owns);
       return;
     }
-    const { endpoint, p256dh, auth } = result.keys;
+    const { p256dh, auth } = result.keys;
+    endpoint = result.keys.endpoint;
     await current.api.subscribePush(
       { endpoint, keys: { p256dh, auth }, device_name: deviceLabel(navigator.userAgent) },
       current.scope.signal,
@@ -174,12 +189,46 @@ async function registerPush(current: Session): Promise<void> {
     setPushSetting("on");
   } catch (err) {
     if (!owns()) return;
-    if (err instanceof ApiClientError && err.code === RestErrorCode.PUSH_DISABLED) {
-      setPushSetting("server-off");
-      return;
-    }
+    if (showRefusal(err, endpoint)) return;
     log.warn("Push registration failed", { error: String(err) });
     setPushSetting("failed");
+  }
+}
+
+/** Shows the setting a server's refusal of the subscription stands for; false for any other error. */
+function showRefusal(err: unknown, endpoint: string): boolean {
+  if (!(err instanceof ApiClientError)) return false;
+  if (err.code === RestErrorCode.PUSH_DISABLED) {
+    setPushSetting("server-off");
+    return true;
+  }
+  if (err.code === RestErrorCode.PUSH_SERVER_NOT_PUBLIC) {
+    setPushSetting("refused", [], endpointHost(endpoint));
+    return true;
+  }
+  if (err.code === RestErrorCode.PUSH_SERVER_PORT_NOT_SUPPORTED) {
+    const parsed = parseEndpoint(endpoint);
+    setPushSetting("port-refused", [], parsed.hostname, parsed.port);
+    return true;
+  }
+  return false;
+}
+
+function parseEndpoint(endpoint: string): { hostname: string; port: string } {
+  try {
+    const url = new URL(endpoint);
+    return { hostname: url.hostname, port: url.port };
+  } catch {
+    return { hostname: "", port: "" };
+  }
+}
+
+/** The host of a push endpoint, for the refusal text; empty when it does not parse. */
+function endpointHost(endpoint: string): string {
+  try {
+    return new URL(endpoint).host;
+  } catch {
+    return "";
   }
 }
 
