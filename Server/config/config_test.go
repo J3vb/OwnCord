@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -560,18 +561,15 @@ func TestLoadPushDisabledByDefault(t *testing.T) {
 	}
 }
 
-// TestLoadPushDispatchDisabledByDefault pins B5-11's own gate: dispatch is
-// off on a fresh install even independently of push.enabled (HP-5 scorecard
-// Question 6, decision 1 — an operator who enabled storage in the B5-4 era
-// must not acquire dispatch by upgrade), and the shipped template keeps both
-// new keys commented so the compiled defaults win.
-func TestLoadPushDispatchDisabledByDefault(t *testing.T) {
+// TestLoadPushDefaultsAndTemplate pins the fresh-install push state: off, no contact, and a shipped
+// template that keeps the push keys commented so the compiled defaults win.
+func TestLoadPushDefaultsAndTemplate(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 
 	cfg, err := config.Load(cfgPath)
 	mustDo(t, "Load() returned error", err)
-	if cfg.Push.DispatchEnabled {
-		t.Error("push.dispatch_enabled is true on a fresh install; dispatch must be its own owner opt-in")
+	if cfg.Push.Enabled {
+		t.Error("push.enabled is true on a fresh install; push must be an owner opt-in")
 	}
 	if cfg.Push.Contact != "" {
 		t.Errorf("push.contact = %q, want empty by default", cfg.Push.Contact)
@@ -585,19 +583,84 @@ func TestLoadPushDispatchDisabledByDefault(t *testing.T) {
 			t.Errorf("the shipped template sets %q live — keep it commented so the compiled default wins", trimmed)
 		}
 	}
+	if strings.Contains(string(written), "dispatch_enabled") {
+		t.Error("the shipped template still mentions the retired push.dispatch_enabled key")
+	}
 }
 
-// TestLoadPushDispatchEnvOverride proves OWNCORD_PUSH_DISPATCH_ENABLED and
-// OWNCORD_PUSH_CONTACT reach config.Push — run, not read.
-func TestLoadPushDispatchEnvOverride(t *testing.T) {
+// TestLoadPushDeprecatedDispatchKey proves an existing config file or environment that still names
+// push.dispatch_enabled loads without error and without an unknown-key warning, the value changes
+// nothing, and one Info line says the key is deprecated.
+func TestLoadPushDeprecatedDispatchKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		yaml string
+		env  bool
+	}{
+		{name: "file false", yaml: "push:\n  enabled: true\n  dispatch_enabled: false\n"},
+		{name: "file true", yaml: "push:\n  enabled: true\n  dispatch_enabled: true\n"},
+		{name: "environment", yaml: "push:\n  enabled: true\n", env: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+			mustDo(t, "write config", os.WriteFile(cfgPath, []byte(tc.yaml), 0o600))
+			if tc.env {
+				t.Setenv("OWNCORD_PUSH_DISPATCH_ENABLED", "false")
+			}
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			defer slog.SetDefault(prev)
+
+			cfg, err := config.Load(cfgPath)
+			mustDo(t, "Load() returned error", err)
+			if !cfg.Push.Enabled {
+				t.Error("push.enabled = false, want true")
+			}
+			out := buf.String()
+			if got := strings.Count(out, "push.dispatch_enabled is deprecated"); got != 1 {
+				t.Errorf("deprecation Info lines = %d, want 1; log:\n%s", got, out)
+			}
+			if strings.Contains(out, "unknown key") {
+				t.Errorf("deprecated key reported as unknown; log:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestLoadPushDeprecatedDispatchOverride proves a stored settings override for push.dispatch_enabled
+// loads without error, is ignored, and stays in the file so a downgrade still reads it, even after an
+// unrelated save.
+func TestLoadPushDeprecatedDispatchOverride(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	mustDo(t, "write config", os.WriteFile(cfgPath, []byte("server:\n  data_dir: "+filepath.ToSlash(dir)+"\npush:\n  enabled: true\n"), 0o600))
+	ovPath := config.OverridesPath(dir)
+	mustDo(t, "write overrides", os.WriteFile(ovPath, []byte(`{"push.dispatch_enabled": true}`), 0o600))
+
+	cfg, err := config.Load(cfgPath)
+	mustDo(t, "Load() returned error", err)
+	if !cfg.Push.Enabled {
+		t.Error("push.enabled = false, want true")
+	}
+	if cfg.Push.DispatchEnabled {
+		t.Error("the stored push.dispatch_enabled override was applied; it must be ignored")
+	}
+
+	mustDo(t, "SaveOverrides", config.SaveOverrides(ovPath, map[string]any{"push.contact": "ops@example.invalid"}))
+	stored, err := config.ReadOverrides(ovPath)
+	mustDo(t, "ReadOverrides", err)
+	if v, ok := stored["push.dispatch_enabled"]; !ok || v != true {
+		t.Errorf("stored override push.dispatch_enabled = %v (present %v), want kept as true", v, ok)
+	}
+}
+
+// TestLoadPushContactEnvOverride proves OWNCORD_PUSH_CONTACT reaches config.Push.
+func TestLoadPushContactEnvOverride(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	t.Setenv("OWNCORD_PUSH_DISPATCH_ENABLED", "true")
 	t.Setenv("OWNCORD_PUSH_CONTACT", "ops@example.invalid")
 	cfg, err := config.Load(cfgPath)
 	mustDo(t, "Load() returned error", err)
-	if !cfg.Push.DispatchEnabled {
-		t.Error("push.dispatch_enabled = false, want true from OWNCORD_PUSH_DISPATCH_ENABLED")
-	}
 	if cfg.Push.Contact != "ops@example.invalid" {
 		t.Errorf("push.contact = %q, want the environment value", cfg.Push.Contact)
 	}

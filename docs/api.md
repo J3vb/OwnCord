@@ -1896,18 +1896,17 @@ Removes a favorite. The GIF is named by the `url` query parameter. Responds
 
 ## Web Push
 
-Server-side storage of Web Push subscriptions, plus dispatch behind its own,
-second opt-in: `push.dispatch_enabled` (default **off**, independent of
-`push.enabled`). See [Server Configuration](server-configuration.md#web-push-push)
-for both keys, the staleness window, and the rotation procedure below.
+Server-side storage of Web Push subscriptions, plus sending to them, both
+behind the one `push.enabled` switch (default **off**). See
+[Server Configuration](server-configuration.md#web-push-push) for the key,
+the staleness window, and the rotation procedure below.
 
 **Default-off contract:** with `push.enabled` false, every endpoint below
 answers `503 PUSH_DISABLED` after authenticating the caller. A disabled
-server writes nothing. With `push.enabled` true but `push.dispatch_enabled`
-false — the state an install upgraded from an earlier release starts in —
-subscriptions are stored but nothing is ever sent to one.
+server writes nothing and sends nothing. The older `push.dispatch_enabled`
+key is deprecated and ignored.
 
-**Call rings.** With both keys true, a DM `call_ring` also sends
+**Call rings.** With `push.enabled` true, a DM `call_ring` also sends
 `{"t":"ring","c":<channel id>}` to every subscription of the users it rings,
 connected or not, unless their status is Do Not Disturb or they are already in the call; declining (`call_decline`),
 joining the call on any device, or the caller leaving it sends

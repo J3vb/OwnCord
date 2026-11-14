@@ -58,7 +58,6 @@ var editableRules = map[string]func(any) (any, error){
 	"event_persistence.enabled":          boolRule,
 	"link_previews.enabled":              boolRule,
 	"plugins.enabled":                    boolRule,
-	"push.dispatch_enabled":              boolRule,
 	"push.enabled":                       boolRule,
 	"server.browser_client_enabled":      boolRule,
 	"server.reachability_report_enabled": boolRule,

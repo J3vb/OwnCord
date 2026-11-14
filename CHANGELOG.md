@@ -116,6 +116,10 @@ release changes the database, and anything an operator must do first.)
 - **Pictures and GIFs linked in chat work as before.** A link that is itself an image is still loaded by your app, still animates and still asks first; only page previews and YouTube cards come from your server.
 - **Settings > Text & Images says which content still needs your say-so.** Link previews built by your server no longer do.
 
+### Accounts & admin
+
+- **One switch turns push on.** `push.enabled` now lets phones register and sends them notifications; the second switch, `push.dispatch_enabled`, is retired. **Upgrade note:** a server that had push on but sending off starts sending after the upgrade (to the push service each phone named, such as ntfy.sh); set `push.enabled: false` before upgrading if you do not want that. A `config.yaml` or admin-panel setting that still names `push.dispatch_enabled` loads fine and is ignored, and the server logs one line at start-up saying so. The admin Settings row "Send push notifications" is gone; "Enable push notifications" covers both.
+
 ### Under the hood
 
 - **Groundwork for server-side link previews.** Nothing changes for members yet. It adds the storage a later release will use:
