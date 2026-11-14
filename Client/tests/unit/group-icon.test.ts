@@ -5,6 +5,9 @@ const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
 vi.mock("../../src/features/messaging/content/attachments", () => ({
   fetchImageAsObjectUrl,
+  // These avatars have no small preview: they are fetched as they are.
+  smallThumbnailUrl: () => null,
+  isAnimatedThumb: () => false,
   recoverEvictedImage: () => {},
   isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
   resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),

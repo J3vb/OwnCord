@@ -26,6 +26,7 @@ export {
   fetchImageAsObjectUrl,
   hasCachedImage,
   cachedImageBytes,
+  isAnimatedThumb,
   recoverEvictedImage,
 } from "./attachmentImages";
 export { fetchMediaAsObjectUrl, getFileLink } from "./attachmentMedia";
@@ -33,6 +34,7 @@ export {
   isServerUrl,
   isExternalUrl,
   thumbnailUrl,
+  smallThumbnailUrl,
   shownImageUrl,
   isTrustedServerUrl,
   fetchServerFile,

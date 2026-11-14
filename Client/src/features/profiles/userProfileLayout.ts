@@ -67,6 +67,7 @@ export function buildAvatar(user: UserProfileData): HTMLDivElement {
     {
       className: "upp-avatar",
       animate: "always",
+      thumbSize: 256,
       background: user.isDeleted === true ? "#4e5058" : pickAvatarColor(user.username),
     },
   );

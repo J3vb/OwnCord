@@ -113,6 +113,8 @@ release changes the database, and anything an operator must do first.)
 
 ### Messages & files
 
+- **Avatars and group icons load faster.** Lists and messages now fetch a small 128 px preview, and profile cards a 256 px one, instead of the full-size picture. An animated GIF avatar shows a still and plays when you hover it.
+- **Servers make the small previews once.** `GET /api/v1/files/{id}/thumb` takes an optional `size` of `128` or `256`, and a GIF with more than one frame is answered with an `X-Image-Animated: 1` header. Avatars and group icons get both sizes when uploaded; older ones get them the first time they are shown.
 - **Link previews show up instantly after a restart.** The server fetches each link once, keeps the preview and its picture, and sends both with the message. Your app no longer fetches them again on every launch.
 - **Your computer no longer contacts the sites people link to.** Page previews and YouTube titles and stills now come from your server, so the linked site never sees your IP address and the "Load external content" prompt does not appear for them.
 - **A message with a link can show its preview a moment after it appears.** The server builds it right after sending; an older message you scroll to gets its preview shortly after it loads.

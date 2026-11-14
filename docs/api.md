@@ -3049,6 +3049,20 @@ a plain file. The original stays at
 `GET /api/v1/files/{id}`. A file uploaded before the server knew these formats
 was stored as `application/octet-stream` and stays a plain file.
 
+**Query:** `size` (optional) selects a small preview for avatar-sized slots:
+`128` or `256` (any other value is a `400`). Without it the route answers as
+described above. A small size scales the image to fit a `size`×`size` box
+(never enlarged), upright, as a JPEG, or a PNG when it has transparent pixels
+(`Content-Type` says which), and it applies to a GIF too, which becomes a still
+of its first frame. A GIF of more than one frame is answered with
+`X-Image-Animated: 1` (exposed to cross-origin callers), so a client showing the
+still knows the full original at `GET /api/v1/files/{id}` is the animated one.
+An animated WebP, a type with no decoder, an image that does not decode or one
+too large to read is served as the original bytes, as above. HEIC, HEIF and TIFF
+ignore `size`. Each size is made once, on its first request or, for an avatar or
+group icon, when it is uploaded, and kept as its own file under
+`upload.storage_dir/thumbs/`; it is removed with the original.
+
 A thumbnail is made on the first request, kept beside the original under
 `upload.storage_dir/thumbs/`, and removed with it; an image that fails to
 decode is remembered there too and not tried again. Previews are made a few

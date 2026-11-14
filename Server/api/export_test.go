@@ -317,13 +317,14 @@ func UseThumbSlotsForTest(n int, wait time.Duration) (hold func() (release func(
 	slots := makeThumbSlots(n, wait)
 	prev := newThumbSlots
 	newThumbSlots = func() *thumbSlots { return slots }
+	resetSharedThumbSlots()
 	hold = func() func() {
 		if err := slots.sem.Acquire(context.Background(), slots.size); err != nil {
 			panic(err)
 		}
 		return func() { slots.sem.Release(slots.size) }
 	}
-	return hold, func() { newThumbSlots = prev }
+	return hold, func() { newThumbSlots = prev; resetSharedThumbSlots() }
 }
 
 // IssuedCredentialForTest is the credential AdmitAllVoiceSessionsForTest hands the proxy.
