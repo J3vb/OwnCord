@@ -42,20 +42,22 @@ export function fetchAvatarObjectUrl(
  * Play `originalUrl` over `still` (a preview already on `img`) as `mode` says:
  * the original is fetched the first time its row is hovered or focused, or at
  * once for an avatar that always plays (never under reduced motion, where the
- * still is all that shows). A failed fetch leaves the still.
+ * still is all that shows). A failed fetch leaves the still, and so does an avatar that `current`
+ * says was replaced while the original was on its way.
  */
 export function playOriginalOnEngage(
   img: HTMLImageElement,
   still: string,
   originalUrl: string,
   mode: AnimationMode,
+  current: () => boolean = () => true,
 ): void {
   let started = false;
   const start = (): void => {
     if (started) return;
     started = true;
     void fetchImageAsObjectUrl(originalUrl).then((original) => {
-      if (original !== null) bindAnimatedImage(img, original, still, mode);
+      if (original !== null && current()) bindAnimatedImage(img, original, still, mode);
     });
   };
   if (mode === "always") {

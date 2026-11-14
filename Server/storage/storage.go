@@ -191,12 +191,69 @@ func (s *Storage) Delete(uuid string) error {
 	for _, size := range ThumbSizes {
 		thumbs = append(thumbs, filepath.Join(base, strconv.Itoa(size), uuid))
 	}
+	for _, size := range ThumbSizes {
+		thumbs = append(thumbs, filepath.Join(base, strconv.Itoa(size), uuid+animatedSuffix))
+	}
 	for _, thumb := range thumbs {
 		if thumbErr := os.Remove(thumb); thumbErr != nil && !errors.Is(thumbErr, fs.ErrNotExist) {
 			return fmt.Errorf("removing thumbnail: %w: %w", ErrIO, thumbErr)
 		}
 	}
 	return err
+}
+
+// animatedSuffix names the sidecar of a small thumbnail that records whether its GIF original is animated.
+// It lives beside the thumbnail, so List never sees it and Delete removes it with the rest.
+const animatedSuffix = ".animated"
+
+// ThumbAnimation reports whether the original behind uuid's thumbnail of the given size was recorded as
+// animated; known is false when nothing was recorded.
+func (s *Storage) ThumbAnimation(uuid string, size int) (animated, known bool) {
+	p, _, err := s.thumbPath(uuid, size)
+	if err != nil {
+		return false, false
+	}
+	b, err := os.ReadFile(p + animatedSuffix)
+	if err != nil || len(b) == 0 {
+		return false, false
+	}
+	return b[0] == '1', true
+}
+
+// SetThumbAnimation records whether the original is animated, next to uuid's thumbnail of the given size.
+// If the original is gone afterwards the record is removed and fs.ErrNotExist returned.
+func (s *Storage) SetThumbAnimation(uuid string, size int, animated bool) error {
+	p, original, err := s.thumbPath(uuid, size)
+	if err != nil {
+		return err
+	}
+	value := []byte("0")
+	if animated {
+		value = []byte("1")
+	}
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("creating thumbnail dir: %w: %w", ErrIO, err)
+	}
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("creating thumbnail record: %w: %w", ErrIO, err)
+	}
+	_, writeErr := tmp.Write(value)
+	closeErr := tmp.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("writing thumbnail record: %w: %w", ErrIO, err)
+	}
+	if err := os.Rename(tmp.Name(), p+animatedSuffix); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("storing thumbnail record: %w: %w", ErrIO, err)
+	}
+	if _, err := os.Stat(original); errors.Is(err, fs.ErrNotExist) {
+		_ = os.Remove(p + animatedSuffix)
+		return fmt.Errorf("thumbnail record of a removed original: %w", fs.ErrNotExist)
+	}
+	return nil
 }
 
 // thumbPath is where uuid's thumbnail of the given size lives (0 is the default size) and where its

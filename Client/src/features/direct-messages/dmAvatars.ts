@@ -100,8 +100,10 @@ export function buildGroupAvatarStack(
     });
     recoverEvictedImage(img, { url: avatarFetchUrl(resolved, 128) });
     // The preview of an animated icon is its still; the icon plays on hover.
-    if (isAnimatedThumb(objectUrl))
-      playOriginalOnEngage(img, objectUrl, resolved, { hover: stack });
+    if (isAnimatedThumb(objectUrl)) {
+      const shown = (): boolean => img.parentNode === stack;
+      playOriginalOnEngage(img, objectUrl, resolved, { hover: stack }, shown);
+    }
     img.addEventListener(
       "error",
       () => {

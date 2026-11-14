@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/syncutil"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/sync/singleflight"
 )
@@ -59,4 +60,26 @@ func (s *thumbSlots) acquire(ctx context.Context, weight int64) (release func(),
 		return nil, false
 	}
 	return func() { s.sem.Release(weight) }, true
+}
+
+var (
+	sharedSlotsMu syncutil.Mutex
+	sharedSlots   *thumbSlots
+)
+
+// sharedThumbSlots is the one set of slots every thumbnail generation in the process takes: the thumbnail
+// routes and the avatar uploads that make their small sizes up front.
+func sharedThumbSlots() *thumbSlots {
+	sharedSlotsMu.Lock()
+	defer sharedSlotsMu.Unlock()
+	if sharedSlots == nil {
+		sharedSlots = newThumbSlots()
+	}
+	return sharedSlots
+}
+
+func resetSharedThumbSlots() {
+	sharedSlotsMu.Lock()
+	defer sharedSlotsMu.Unlock()
+	sharedSlots = nil
 }

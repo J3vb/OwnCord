@@ -117,7 +117,7 @@ export async function setAvatarSource(
   if (originalUrl !== undefined && isAnimatedThumb(objectUrl)) {
     if (!stillCurrent()) return false;
     img.src = objectUrl;
-    playOriginalOnEngage(img, objectUrl, originalUrl, mode());
+    playOriginalOnEngage(img, objectUrl, originalUrl, mode(), stillCurrent);
     return true;
   }
   const still = await avatarStill(objectUrl, maxSide);
@@ -350,8 +350,9 @@ export function createAvatarElement(
   // fetched, when its row is pointed at, to play over it.
   const showStillOfAnimated = (img: HTMLImageElement, objectUrl: string): void => {
     img.src = objectUrl;
-    if (wrapper.isConnected) playOriginalOnEngage(img, objectUrl, resolved, mode());
-    else bindOnFirstUse(() => playOriginalOnEngage(img, objectUrl, resolved, mode()));
+    const shown = (): boolean => img.parentNode === wrapper;
+    if (wrapper.isConnected) playOriginalOnEngage(img, objectUrl, resolved, mode(), shown);
+    else bindOnFirstUse(() => playOriginalOnEngage(img, objectUrl, resolved, mode(), shown));
   };
 
   const swapInImage = (objectUrl: string | null): Promise<void> | undefined => {

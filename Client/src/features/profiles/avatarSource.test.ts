@@ -88,4 +88,13 @@ describe("playOriginalOnEngage", () => {
     await vi.waitFor(() => expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1));
     expect(img.src).toBe(still);
   });
+
+  it("does not bind the original once the avatar was replaced meanwhile", async () => {
+    let replaced = false;
+    playOriginalOnEngage(img, still, "https://s/f", "always", () => !replaced);
+    replaced = true;
+    await vi.waitFor(() => expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(img.src).toBe(still);
+  });
 });

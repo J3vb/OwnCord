@@ -252,3 +252,65 @@ func gifOneFrame(t *testing.T, w, h int) []byte {
 	}
 	return buf.Bytes()
 }
+
+// openCountingStore counts the opens of originals.
+type openCountingStore struct {
+	*storage.Storage
+	opens atomic.Int32
+}
+
+func (o *openCountingStore) Open(uuid string) (storage.File, error) {
+	o.opens.Add(1)
+	return o.Storage.Open(uuid)
+}
+
+// The animated answer is decided when the thumbnail is made and kept beside it, so a kept reply (and a
+// revalidation) never reads the original GIF again.
+func TestServeThumb_AnimatedAnswerIsKeptNotRescanned(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := &openCountingStore{Storage: newUploadTestStorage(t)}
+	r := chi.NewRouter()
+	api.MountUploadRoutes(r, service.NewSessionService(database), store, auth.NewRateLimiter(), nil, testUploadSvc(database))
+	token := uploadCreateToken(t, database, "thumbgifkept", 4)
+	id := uploadForThumb(t, r, token, "anim.gif", makeAnimatedGIFBytes(t, 400, 400, 0))
+
+	first := doSizedThumb(t, r, id, token, "?size=128", nil)
+	if first.Header().Get("X-Image-Animated") != "1" {
+		t.Fatal("first reply not marked animated")
+	}
+	if animated, known := store.ThumbAnimation(id, 128); !animated || !known {
+		t.Fatalf("record = %v, %v; want animated and known", animated, known)
+	}
+	before := store.opens.Load()
+	for range 3 {
+		rr := doSizedThumb(t, r, id, token, "?size=128", nil)
+		if rr.Header().Get("X-Image-Animated") != "1" {
+			t.Fatal("kept reply lost the mark")
+		}
+	}
+	if got := store.opens.Load(); got != before {
+		t.Errorf("kept replies opened the original %d times", got-before)
+	}
+}
+
+// A thumbnail kept before records existed is scanned once, and the answer recorded.
+func TestServeThumb_ThumbnailWithoutARecordIsScannedOnce(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := &openCountingStore{Storage: newUploadTestStorage(t)}
+	r := chi.NewRouter()
+	api.MountUploadRoutes(r, service.NewSessionService(database), store, auth.NewRateLimiter(), nil, testUploadSvc(database))
+	token := uploadCreateToken(t, database, "thumbgifold", 4)
+	id := uploadForThumb(t, r, token, "anim.gif", makeAnimatedGIFBytes(t, 400, 400, 0))
+	if err := store.SaveThumbSize(id, 128, encodePNG(t, solidImage(128, 128))); err != nil {
+		t.Fatal(err)
+	}
+	before := store.opens.Load()
+	for range 3 {
+		if rr := doSizedThumb(t, r, id, token, "?size=128", nil); rr.Header().Get("X-Image-Animated") != "1" {
+			t.Fatal("not marked animated")
+		}
+	}
+	if got := store.opens.Load() - before; got != 1 {
+		t.Errorf("original opened %d times, want once", got)
+	}
+}

@@ -46,7 +46,7 @@ func handleServeFile(uploads *service.UploadService, store FileStore, allowedOri
 // original without keeping anything. A non-image is a 404. HEIC, HEIF and TIFF previews are always a JPEG
 // and a failed conversion is a 404 (serveConvertedPreview).
 func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOrigins []string) http.HandlerFunc {
-	slots := newThumbSlots()
+	slots := sharedThumbSlots()
 	return func(w http.ResponseWriter, r *http.Request) {
 		aa, ok := authorizeFileRead(w, r, uploads)
 		if !ok {
@@ -257,12 +257,12 @@ func serveSmallThumb(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAc
 	}
 	t, found := keptThumbSize(store, aa.StoredAs, size)
 	if t == nil && !found {
-		fresh, ok := generateSmallThumb(r, uploads, store, slots, aa.StoredAs, size)
+		fresh, ok := generateSmallThumb(r, uploads, store, slots, aa.StoredAs, aa.MimeType, size)
 		if !ok {
 			return
 		}
 		if t, _ = keptThumbSize(store, aa.StoredAs, size); t == nil && fresh != nil {
-			serveSmallBytes(w, r, aa, store, fresh, allowedOrigins)
+			serveSmallBytes(w, r, aa, store, size, fresh, allowedOrigins)
 			return
 		}
 	}
@@ -277,7 +277,7 @@ func serveSmallThumb(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAc
 		http.NotFound(w, r)
 		return
 	}
-	if !markAnimated(w, aa, store) {
+	if !markAnimated(w, aa, store, size) {
 		http.NotFound(w, r)
 		return
 	}
@@ -285,8 +285,8 @@ func serveSmallThumb(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAc
 }
 
 // serveSmallBytes serves a thumbnail that could not be kept (no disk headroom).
-func serveSmallBytes(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, store FileStore, thumb []byte, allowedOrigins []string) {
-	if !markAnimated(w, aa, store) {
+func serveSmallBytes(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, store FileStore, size int, thumb []byte, allowedOrigins []string) {
+	if !markAnimated(w, aa, store, size) {
 		http.NotFound(w, r)
 		return
 	}
@@ -304,18 +304,24 @@ func serveStoredOriginal(w http.ResponseWriter, r *http.Request, aa *db.Attachme
 	serveFileContent(w, r, aa, aa.MimeType, fileModTime(f), f, allowedOrigins)
 }
 
-// markAnimated sets animatedHeader when the original is an animated GIF. It reports false when the
-// original is gone.
-func markAnimated(w http.ResponseWriter, aa *db.AttachmentAccess, store FileStore) bool {
+// markAnimated sets animatedHeader when the original is an animated GIF. The answer was recorded beside
+// the thumbnail when it was made; a thumbnail with no record (made before records existed) scans the
+// original once and records it. It reports false when the original is gone.
+func markAnimated(w http.ResponseWriter, aa *db.AttachmentAccess, store FileStore, size int) bool {
 	if aa.MimeType != "image/gif" {
 		return true
 	}
-	f, err := store.Open(aa.StoredAs)
-	if err != nil {
-		return false
+	animated, known := store.ThumbAnimation(aa.StoredAs, size)
+	if !known {
+		f, err := store.Open(aa.StoredAs)
+		if err != nil {
+			return false
+		}
+		defer f.Close() //nolint:errcheck
+		animated = imgthumb.GIFAnimated(f)
+		_ = store.SetThumbAnimation(aa.StoredAs, size, animated)
 	}
-	defer f.Close() //nolint:errcheck
-	if imgthumb.GIFAnimated(f) {
+	if animated {
 		w.Header().Set(animatedHeader, "1")
 	}
 	return true

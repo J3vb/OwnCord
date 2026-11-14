@@ -32,6 +32,10 @@ type FileStore interface {
 	// Delete removes every size with the original.
 	OpenThumbSize(uuid string, size int) (storage.File, error)
 	SaveThumbSize(uuid string, size int, data []byte) error
+	// ThumbAnimation and SetThumbAnimation keep, beside a small thumbnail, whether its GIF original is
+	// animated; known is false when nothing was recorded.
+	ThumbAnimation(uuid string, size int) (animated, known bool)
+	SetThumbAnimation(uuid string, size int, animated bool) error
 }
 
 var _ FileStore = (*storage.Storage)(nil)

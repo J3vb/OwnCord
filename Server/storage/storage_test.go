@@ -753,3 +753,41 @@ func TestSaveThumbSize_OriginalGoneLeavesNothing(t *testing.T) {
 		}
 	}
 }
+
+// TestThumbAnimation_RecordLifecycle: the record is unknown until set, stays out of List, is refused for a
+// removed original, and goes with the original on Delete.
+func TestThumbAnimation_RecordLifecycle(t *testing.T) {
+	s := newTestStorage(t)
+	if _, err := s.Save("orig", strings.NewReader("original")); err != nil {
+		t.Fatal(err)
+	}
+	if _, known := s.ThumbAnimation("orig", 128); known {
+		t.Fatal("a record existed before it was set")
+	}
+	if err := s.SaveThumbSize("orig", 128, []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []bool{true, false} {
+		if err := s.SetThumbAnimation("orig", 128, want); err != nil {
+			t.Fatal(err)
+		}
+		if got, known := s.ThumbAnimation("orig", 128); !known || got != want {
+			t.Errorf("record = %v, %v; want %v", got, known, want)
+		}
+	}
+	if entries, _ := s.List(); len(entries) != 1 {
+		t.Errorf("List = %+v", entries)
+	}
+	if err := s.Delete("orig"); err != nil {
+		t.Fatal(err)
+	}
+	if _, known := s.ThumbAnimation("orig", 128); known {
+		t.Error("the record survived Delete")
+	}
+	if err := s.SetThumbAnimation("gone", 128, true); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("SetThumbAnimation without an original = %v", err)
+	}
+	if _, known := s.ThumbAnimation("gone", 128); known {
+		t.Error("a record outlived its original")
+	}
+}

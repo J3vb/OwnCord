@@ -28,6 +28,10 @@ func (failingStore) SaveThumb(string, []byte) error { return errors.New("simulat
 func (failingStore) OpenThumbSize(string, int) (storage.File, error) {
 	return nil, errors.New("no file")
 }
+func (failingStore) ThumbAnimation(string, int) (bool, bool) { return false, false }
+func (failingStore) SetThumbAnimation(string, int, bool) error {
+	return errors.New("simulated write failure")
+}
 func (failingStore) SaveThumbSize(string, int, []byte) error {
 	return errors.New("simulated write failure")
 }
