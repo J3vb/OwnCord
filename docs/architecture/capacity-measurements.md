@@ -949,7 +949,7 @@ fills in this table.
 
 `go build` reads `Server/default.pgo`, when it is there, as a CPU profile and
 optimises the hot paths it names (profile-guided optimisation). Every build of
-the server package picks it up with no flag: the release, the Docker image, CI
+the server package would pick it up with no flag: the release, the Docker image, CI
 and the load runs. The profile comes from the scale profile, so it describes
 the server under the load this page measures.
 
@@ -971,6 +971,14 @@ gh workflow run load-baseline.yml -f profile=scale-pgo -f scale_connections=1000
   layer), or when the measured gain below shrinks.
 - **Turning it off.** `go build -pgo=off` builds without it; deleting the file
   turns it off everywhere.
+
+**No profile is committed yet.** The first `scale-pgo` run (1,000 online,
+2026-11-14) spent half of the server's CPU in bcrypt during the login burst,
+a leaf loop that profile-guided optimisation cannot speed up, and 15% in
+socket write syscalls. Outside the login window the server used 0.12-0.19 of
+its 2 cores. A profile would cost build time for no gain a user could see, so
+the option is kept for a later look, first at a valid 2,000-online run, where
+fan-out may matter more.
 
 ### Measured
 
