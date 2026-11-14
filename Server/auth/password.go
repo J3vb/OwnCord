@@ -122,44 +122,55 @@ func parseArgon2(encoded string) (p argon2Params, salt, key []byte, ok bool) {
 	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" || parts[2] != "v="+strconv.Itoa(argon2.Version) {
 		return argon2Params{}, nil, nil, false
 	}
-	var m, t, th uint64
-	var err error
-	fields := strings.Split(parts[3], ",")
-	if len(fields) != 3 {
+	p, ok = parseArgon2Settings(parts[3])
+	if !ok {
 		return argon2Params{}, nil, nil, false
 	}
-	for i, want := range []string{"m=", "t=", "p="} {
-		v, found := strings.CutPrefix(fields[i], want)
-		if !found {
-			return argon2Params{}, nil, nil, false
-		}
-		n, perr := strconv.ParseUint(v, 10, 32)
-		if perr != nil {
-			return argon2Params{}, nil, nil, false
-		}
-		switch i {
-		case 0:
-			m = n
-		case 1:
-			t = n
-		default:
-			th = n
-		}
+	salt, okSalt := decodeBounded(parts[4], minStoredArgon2SaltLen, maxStoredArgon2SaltLen)
+	key, okKey := decodeBounded(parts[5], minStoredArgon2KeyLen, maxStoredArgon2KeyLen)
+	if !okSalt || !okKey {
+		return argon2Params{}, nil, nil, false
 	}
+	p.saltLen = len(salt)
+	p.keyLen = uint32(len(key)) //nolint:gosec // G115: bounded by maxStoredArgon2KeyLen
+	return p, salt, key, true
+}
+
+// parseArgon2Settings reads "m=<KiB>,t=<passes>,p=<threads>" in that order,
+// within the stored-hash bounds.
+func parseArgon2Settings(field string) (p argon2Params, ok bool) {
+	fields := strings.Split(field, ",")
+	if len(fields) != 3 {
+		return argon2Params{}, false
+	}
+	var v [3]uint64
+	for i, name := range []string{"m=", "t=", "p="} {
+		digits, found := strings.CutPrefix(fields[i], name)
+		if !found {
+			return argon2Params{}, false
+		}
+		n, err := strconv.ParseUint(digits, 10, 32)
+		if err != nil {
+			return argon2Params{}, false
+		}
+		v[i] = n
+	}
+	m, t, th := v[0], v[1], v[2]
 	if th < 1 || th > maxStoredArgon2Threads || t < 1 || t > maxStoredArgon2Time ||
 		m < 8*th || m > maxStoredArgon2MemoryKiB {
-		return argon2Params{}, nil, nil, false
+		return argon2Params{}, false
 	}
-	if salt, err = b64.Strict().DecodeString(parts[4]); err != nil ||
-		len(salt) < minStoredArgon2SaltLen || len(salt) > maxStoredArgon2SaltLen {
-		return argon2Params{}, nil, nil, false
+	//nolint:gosec // G115: each value is bounded just above
+	return argon2Params{memoryKiB: uint32(m), time: uint32(t), threads: uint8(th)}, true
+}
+
+// decodeBounded decodes unpadded standard base64 of minLen to maxLen bytes.
+func decodeBounded(s string, minLen, maxLen int) ([]byte, bool) {
+	b, err := b64.Strict().DecodeString(s)
+	if err != nil || len(b) < minLen || len(b) > maxLen {
+		return nil, false
 	}
-	if key, err = b64.Strict().DecodeString(parts[5]); err != nil ||
-		len(key) < minStoredArgon2KeyLen || len(key) > maxStoredArgon2KeyLen {
-		return argon2Params{}, nil, nil, false
-	}
-	p = argon2Params{memoryKiB: uint32(m), time: uint32(t), threads: uint8(th), saltLen: len(salt), keyLen: uint32(len(key))}
-	return p, salt, key, true
+	return b, true
 }
 
 // dummyHash is a lazily computed argon2id hash so CheckPassword takes roughly
