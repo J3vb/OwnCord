@@ -14,50 +14,103 @@ import { createLogger } from "@lib/logger";
 import { desktop } from "../../platform/desktop";
 import type { MusicSupport, MusicUnsupportedReason } from "../../platform/contracts/musicAudio";
 import { voiceText } from "../../i18n/voice";
+import { musicText } from "../../i18n/music";
 import { showMusicPicker } from "./MusicPicker";
 
 const log = createLogger("musicControl");
 
 const REASON_KEYS = {
-  browser: "music.reason.browser",
-  android: "music.reason.android",
-  platform: "music.reason.platform",
-  windowsOld: "music.reason.windowsOld",
-  noSoundServer: "music.reason.noSoundServer",
+  browser: "reason.browser",
+  android: "reason.android",
+  platform: "reason.platform",
+  windowsOld: "reason.windowsOld",
+  noSoundServer: "reason.noSoundServer",
 } as const satisfies Record<MusicUnsupportedReason, string>;
 
-/** The probe's answer once it is settled, and the probe while it runs. A
- *  missing sound server may be started later, so that answer is not kept. */
-let settled: MusicSupport | null = null;
-let probing: Promise<MusicSupport> | null = null;
+/** How long a failed or "no sound server" answer waits before the next probe. */
+const RETRY_MS = 5000;
 
-/** Whether this machine can share music; one probe at a time, cached once
- *  it is a lasting answer. */
-export function getMusicSupport(): Promise<MusicSupport> {
-  if (settled !== null) return Promise.resolve(settled);
+/** The probe's lasting answer, once it has one. A missing sound server may be
+ *  started later and a failed probe may work next time, so those are not kept:
+ *  `last` shows them while the probe goes again. */
+let settled: MusicSupport | null = null;
+let last: MusicSupport | null = null;
+let probing: Promise<MusicSupport> | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+const watchers = new Set<() => void>();
+
+function cancelRetry(): void {
+  if (retryTimer !== null) clearTimeout(retryTimer);
+  retryTimer = null;
+}
+
+/** Probe again after a pause while someone shows the button and the answer is
+ *  not a lasting one. */
+function scheduleRetry(): void {
+  if (settled !== null || retryTimer !== null || watchers.size === 0) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    void getMusicSupport();
+  }, RETRY_MS);
+}
+
+function probe(): Promise<MusicSupport> {
   probing ??= desktop.musicAudio
     .support()
-    .catch((err: unknown): MusicSupport => {
+    .then((answer) => ({ answer, lasting: answer.ok || answer.reason !== "noSoundServer" }))
+    .catch((err: unknown) => {
       log.debug("music support probe failed", err);
-      return { ok: false, reason: "platform" };
+      return { answer: { ok: false, reason: "platform" } as MusicSupport, lasting: false };
     })
-    .then((answer) => {
+    .then(({ answer, lasting }) => {
       probing = null;
-      if (answer.ok || answer.reason !== "noSoundServer") settled = answer;
+      last = answer;
+      if (lasting) settled = answer;
+      for (const watcher of watchers) watcher();
+      scheduleRetry();
       return answer;
     });
   return probing;
 }
 
-/** The cached answer, or null before the probe has settled. */
+/** Whether this machine can share music; one probe at a time, cached once
+ *  it is a lasting answer. */
+export function getMusicSupport(): Promise<MusicSupport> {
+  return settled !== null ? Promise.resolve(settled) : probe();
+}
+
+/** The latest answer (lasting or not), or null before the first probe has
+ *  settled. */
 export function cachedMusicSupport(): MusicSupport | null {
-  return settled;
+  return settled ?? last;
+}
+
+/** Call `listener` whenever a probe settles, until `signal` aborts; starts the
+ *  probe if none has run. A last answer that is not lasting is probed again
+ *  every few seconds while anyone watches. */
+export function watchMusicSupport(listener: () => void, signal: AbortSignal): void {
+  if (signal.aborted) return;
+  watchers.add(listener);
+  signal.addEventListener(
+    "abort",
+    () => {
+      watchers.delete(listener);
+      if (watchers.size === 0) cancelRetry();
+    },
+    { once: true },
+  );
+  if (settled === null && probing === null) {
+    if (last === null) void getMusicSupport();
+    else scheduleRetry();
+  }
 }
 
 /** Forget the cached probe (a test, or a retry after the host changed). */
 export function resetMusicSupport(): void {
   settled = null;
+  last = null;
   probing = null;
+  cancelRetry();
 }
 
 export interface MusicButtonState {
@@ -79,10 +132,10 @@ export function musicButtonState(
   const sharing = voice.localMusic === true;
   if (sharing) return { sharing, disabled: false, title: voiceText("music.stop") };
   if (support === null) {
-    return { sharing, disabled: true, title: voiceText("music.checking") };
+    return { sharing, disabled: true, title: musicText("checking") };
   }
   if (!support.ok) {
-    return { sharing, disabled: true, title: voiceText(REASON_KEYS[support.reason]) };
+    return { sharing, disabled: true, title: musicText(REASON_KEYS[support.reason]) };
   }
   if (lockReason !== null) return { sharing, disabled: true, title: lockReason };
   if (voice.shareDenied === true) {

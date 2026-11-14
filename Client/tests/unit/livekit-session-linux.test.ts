@@ -104,6 +104,8 @@ const host = vi.hoisted(() => ({
   handlers: new Set<(e: NativeVoiceEnvelope) => void>(),
   nextSession: 1,
   connectFails: false,
+  /** Holds the next music starts until the test resolves it. */
+  musicGate: null as Promise<string> | null,
   screens: { portal: true, sources: [] } as { portal: boolean; sources: Array<{ id: string }> },
   screenQuality: (): Promise<unknown> =>
     Promise.resolve({ ok: true, sid: "TR_screen2", width: 1920, height: 1080 }),
@@ -170,7 +172,7 @@ vi.mock("../../src/platform/desktop", () => ({
       },
       startMusic: (...args: unknown[]) => {
         host.commands.push(["startMusic", args]);
-        return Promise.resolve("sid");
+        return host.musicGate ?? Promise.resolve("sid");
       },
       stopMusic: (...args: unknown[]) => {
         host.commands.push(["stopMusic", args]);
@@ -291,6 +293,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     host.handlers.clear();
     host.nextSession = 1;
     host.connectFails = false;
+    host.musicGate = null;
     host.screens = { portal: true, sources: [] };
     prefs.clear();
     mockVoiceState.localMuted = false;
@@ -635,6 +638,111 @@ describe("LiveKitSession on the Linux native backend", () => {
         Infinity,
         expect.objectContaining({ label: "Share again" }),
       );
+    });
+  });
+
+  describe("a music share running when the connection drops", () => {
+    const toasts = { show: vi.fn(() => () => {}) };
+    const wsSend = vi.fn((_message: { type: string }) => "req-1");
+    const startedFor = () => host.commands.filter(([n]) => n === "startMusic");
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      toasts.show.mockClear();
+      wsSend.mockClear();
+      initToast(toasts as unknown as ToastContainer);
+      session.setWsClient({
+        send: wsSend,
+        on: vi.fn(),
+        getState: () => "connected",
+        ping: async () => {},
+      } as never);
+    });
+    afterEach(() => {
+      teardownToast();
+      vi.useRealTimers();
+      mockVoiceState.voiceUsers = { get: () => ({ has: () => true, keys: () => [].values() }) };
+    });
+
+    /** Run the reconnect loop until it has dialled `session` onto a new room. */
+    async function untilReconnected(): Promise<void> {
+      for (let i = 0; i < 30 && !names().includes("setMicrophone"); i++) {
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      await flush();
+    }
+
+    async function shareThenDrop(): Promise<void> {
+      await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+      expect(await session.startMusic("app-1")).toBe("started");
+      expect(startedFor()).toEqual([["startMusic", [1, "app-1"]]]);
+      host.commands.length = 0;
+      emit({ session: 1, event: { type: "disconnected", reason: "ServerShutdown" } });
+    }
+
+    it("shares the same app again once the reconnect lands, without a notice", async () => {
+      await shareThenDrop();
+      await untilReconnected();
+      expect(startedFor()).toEqual([["startMusic", [2, "app-1"]]]);
+      expect(toasts.show).not.toHaveBeenCalled();
+    });
+
+    it("says so when the app can no longer be shared", async () => {
+      await shareThenDrop();
+      host.musicGate = Promise.reject(new Error("gone"));
+      host.musicGate.catch(() => undefined);
+      await untilReconnected();
+      expect(toasts.show).toHaveBeenCalledWith(
+        "Music sharing stopped when the connection dropped",
+        "warning",
+        undefined,
+      );
+    });
+
+    it("keeps the app through a rejoin the server forced", async () => {
+      await shareThenDrop();
+      // The server dropped our membership: the loop joins afresh.
+      mockVoiceState.voiceUsers = {
+        get: () => ({ has: () => false, keys: () => [].values() }),
+      } as never;
+      await vi.advanceTimersByTimeAsync(1000);
+      for (
+        let i = 0;
+        i < 30 && !wsSend.mock.calls.some(([m]) => (m as { type: string }).type === "voice_join");
+        i++
+      ) {
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      host.commands.length = 0;
+      mockVoiceState.voiceUsers = { get: () => ({ has: () => true, keys: () => [].values() }) };
+      await session.handleVoiceToken("tok2", "/livekit", 1, undefined, true);
+      await flush();
+      expect(startedFor()).toEqual([["startMusic", [2, "app-1"]]]);
+    });
+
+    it("keeps the app when the connection drops again while it is being shared again", async () => {
+      await shareThenDrop();
+      let finish: (sid: string) => void = () => undefined;
+      host.musicGate = new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+      await untilReconnected();
+      expect(startedFor()).toEqual([["startMusic", [2, "app-1"]]]);
+      // The second drop lands while the host has not answered the restore.
+      host.commands.length = 0;
+      emit({ session: 2, event: { type: "disconnected", reason: "ServerShutdown" } });
+      host.musicGate = null;
+      await untilReconnected();
+      finish("sid");
+      await flush();
+      expect(startedFor()).toEqual([["startMusic", [3, "app-1"]]]);
+    });
+
+    it("forgets the app when the user leaves", async () => {
+      await shareThenDrop();
+      await session.leaveVoice(false);
+      await untilReconnected();
+      expect(startedFor()).toEqual([]);
     });
   });
 

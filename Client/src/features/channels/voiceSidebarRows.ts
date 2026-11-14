@@ -15,6 +15,8 @@ import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createLazyScreen } from "../../lib/ui/lazyScreen";
 import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
+import { loadPref } from "@lib/prefs/preferences";
+import { userMusicMuteKey } from "@lib/voice/audioVolumePrefs";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import type { Channel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -157,6 +159,7 @@ export function createVoiceRows(
     // Muted for this client only (the volume menu's Mute, a tile mute, or an
     // older build's volume of 0); the select reruns on USER_LOCAL_MUTE_CHANGED.
     localSilenced: (userId) => getUserLocalMute(userId) || getUserVolume(userId) === 0,
+    musicMuted: (userId) => loadPref<boolean>(userMusicMuteKey(userId), false) === true,
     moderation: onVoiceModerate !== undefined,
   };
 

@@ -64,6 +64,8 @@ export type VoiceUserRowModel = {
   readonly live: boolean;
   /** Shares music: a music note beside the name. Absent reads as false. */
   readonly music?: boolean;
+  /** Mute music is on for a member who shares: the note is dimmed. */
+  readonly musicMuted?: boolean;
   readonly audio: VoiceAudioModel | null;
   /** Muted for this client only. */
   readonly localMuted: boolean;
@@ -126,6 +128,14 @@ function iconSpan(cls: string, icon: IconName): HTMLSpanElement {
  * the patch's toggle lands where a fresh draw puts it, and a patch keeps any
  * class another module set on the live row (dragMove's `dragging`).
  */
+/** The note beside a member who shares music, dimmed while you muted it. */
+function musicNote(muted: boolean): HTMLElement {
+  const note = iconSpan("vu-status vu-music", "music");
+  note.title = shellText(muted ? "channel.sharingMusicMuted" : "channel.sharingMusic");
+  note.classList.toggle("vu-music--muted", muted);
+  return note;
+}
+
 export function drawVoiceUserRow(
   model: VoiceUserRowModel,
   createAvatar: CreateAvatar,
@@ -150,11 +160,7 @@ export function drawVoiceUserRow(
   row.appendChild(avatar);
   row.appendChild(createElement("span", { class: "vu-name" }, model.name));
 
-  if (model.music === true) {
-    const note = iconSpan("vu-status vu-music", "music");
-    note.title = shellText("channel.sharingMusic");
-    row.appendChild(note);
-  }
+  if (model.music === true) row.appendChild(musicNote(model.musicMuted === true));
   if (model.camera) row.appendChild(iconSpan("vu-status", "camera"));
   if (model.live) {
     row.appendChild(iconSpan("vu-status", "monitor"));

@@ -33,7 +33,7 @@ import { nativeCounters } from "./native/counters";
 import { speechDetectionOf } from "./sileroDetection";
 import { desktop } from "../../platform/desktop";
 import { SessionReconnect } from "./sessionReconnect";
-import { MusicShare, type MusicStartOutcome } from "./musicShare";
+import type { MusicShare, MusicStartOptions, MusicStartOutcome } from "./musicShare";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("livekitSession");
@@ -128,6 +128,7 @@ export class LiveKitSession extends SessionReconnect {
       this.pendingMicrophoneRoom = room;
     },
     configuredAudioOptions: (channelId) => this.configuredAudioOptions(channelId),
+    stopMusic: () => this._music?.stop(),
   });
   protected _audioPipeline = new AudioPipeline(isPttPollingLive, speechDetectionOf);
   protected _audioElements = new AudioElements();
@@ -135,7 +136,8 @@ export class LiveKitSession extends SessionReconnect {
   protected _eventHandlers: RoomEventHandlers;
 
   /** Manually published local tracks (camera/screenshare) for explicit cleanup. */
-  protected readonly _music = new MusicShare({ getRoom: () => this._room });
+  /** Built on the first Share music, so the share code loads with the first use. */
+  protected _music: MusicShare | null = null;
   protected _cameraState: CameraTrackState = { manualCameraTrack: null };
   protected _screenState: ScreenTrackState = { manualScreenTracks: [] };
 
@@ -220,7 +222,10 @@ export class LiveKitSession extends SessionReconnect {
     if (!rejoin) return;
     const s = this._state;
     if (s.type === "connected" && s.channelId === channelId) this.restoreLostMedia();
-    else this._lostOnReconnect = null;
+    else {
+      this._lostOnReconnect = null;
+      this._lostMusicApp = null;
+    }
   }
 
   protected sweepPublications(room: VoiceRoom): void {
@@ -236,7 +241,7 @@ export class LiveKitSession extends SessionReconnect {
     this.clearYield();
     this._lostOnReconnect = null;
     this._lostMusicApp = null;
-    this._music.stop();
+    this._music?.stop();
     if (this._watchRetry !== null) clearTimeout(this._watchRetry);
     this._watchRetry = null;
     dismissMediaLostNotice();
@@ -270,13 +275,15 @@ export class LiveKitSession extends SessionReconnect {
   }
 
   /** Share app `appId`'s sound as music (see MusicShare). */
-  startMusic(appId: string): Promise<MusicStartOutcome> {
-    return this._music.start(appId);
+  async startMusic(appId: string, options?: MusicStartOptions): Promise<MusicStartOutcome> {
+    const { MusicShare } = await import("./musicShare");
+    this._music ??= new MusicShare({ getRoom: () => this._room });
+    return this._music.start(appId, options);
   }
 
   /** Stop the music share. */
   stopMusic(): void {
-    this._music.stop();
+    this._music?.stop();
   }
 
   /** Stays on the facade: past leaveVoice(false) it only clears the session's

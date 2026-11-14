@@ -54,6 +54,7 @@ export function syncGridCallState(
     listenOnly: state.listenOnly,
     camera: state.localCamera,
     screenshare: state.localScreenshare,
+    ...(state.localMusic === true ? { music: true } : {}),
     connecting: isConnecting(state.voiceStatus),
     serverMuted: state.localServerMuted === true,
     serverDeafened: state.localServerDeafened === true,

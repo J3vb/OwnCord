@@ -54,6 +54,8 @@ export interface VoiceUserContext {
   readonly avatarColor: (username: string) => string;
   /** Muted for this client only: the local Mute, or a volume of 0. */
   readonly localSilenced: (userId: number) => boolean;
+  /** Mute music is on for this member (their music is silent for you). */
+  readonly musicMuted?: (userId: number) => boolean;
   /** The page wired voice moderation (drag to move needs it). */
   readonly moderation: boolean;
 }
@@ -116,6 +118,7 @@ export function voiceUserModel(
     camera: user.camera,
     live: user.screenshare,
     music: inputs.musicSharers?.has(user.userId) === true,
+    musicMuted: !self && ctx.musicMuted?.(user.userId) === true,
     audio: audioModel(user),
     localMuted: !self && ctx.localSilenced(user.userId),
     ownFingerprintTitle: self

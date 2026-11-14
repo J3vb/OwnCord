@@ -14,7 +14,7 @@ import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { desktop } from "../../platform/desktop";
 import type { AudioApp } from "../../platform/contracts/musicAudio";
-import { voiceText as t } from "../../i18n/voice";
+import { musicText as t } from "../../i18n/music";
 
 /** Playing apps first, then by name; the host sorts too, but the page does
  *  not rely on it. */
@@ -37,15 +37,15 @@ export function showMusicPicker(): Promise<AudioApp | null> {
 
     const content = createElement("div", { class: "screen-share-picker music-picker" });
     const header = createElement("div", { class: "modal-header" });
-    header.appendChild(createElement("h3", { id: "music-picker-title" }, t("music.picker.title")));
+    header.appendChild(createElement("h3", { id: "music-picker-title" }, t("picker.title")));
     content.appendChild(header);
 
     const body = createElement("div", { class: "modal-body" });
-    body.appendChild(createElement("p", { class: "ssp-hint" }, t("music.picker.hint")));
+    body.appendChild(createElement("p", { class: "ssp-hint" }, t("picker.hint")));
     const list = createElement("div", {
       class: "music-picker__list",
       role: "radiogroup",
-      "aria-label": t("music.picker.listLabel"),
+      "aria-label": t("picker.listLabel"),
       "aria-busy": "true",
     });
     const status = createElement("p", {
@@ -60,12 +60,12 @@ export function showMusicPicker(): Promise<AudioApp | null> {
     const refresh = createElement(
       "button",
       { class: "btn-modal-cancel", type: "button", "data-testid": "music-picker-refresh" },
-      t("music.picker.refresh"),
+      t("picker.refresh"),
     );
     const cancel = createElement(
       "button",
       { class: "btn-modal-cancel", type: "button" },
-      t("music.picker.cancel"),
+      t("picker.cancel"),
     );
     const share = createElement("button", {
       class: "btn-modal-save",
@@ -73,7 +73,7 @@ export function showMusicPicker(): Promise<AudioApp | null> {
       "data-testid": "music-picker-share",
     });
     share.appendChild(createIcon("music", 16));
-    share.appendChild(document.createTextNode(t("music.picker.share")));
+    share.appendChild(document.createTextNode(t("picker.share")));
     share.disabled = true;
     appendChildren(footer, refresh, cancel, share);
     content.appendChild(footer);
@@ -96,7 +96,7 @@ export function showMusicPicker(): Promise<AudioApp | null> {
         "aria-checked": "false",
         tabindex: "-1",
         "data-app-id": app.id,
-        "aria-label": t("music.picker.appLabel", { name: app.name }),
+        "aria-label": t("picker.appLabel", { name: app.name }),
       });
       const icon = createElement("span", { class: "music-picker__icon", "aria-hidden": "true" });
       if (app.icon !== null) icon.appendChild(createElement("img", { src: app.icon, alt: "" }));
@@ -108,7 +108,7 @@ export function showMusicPicker(): Promise<AudioApp | null> {
             ? "music-picker__state music-picker__state--on"
             : "music-picker__state",
         },
-        t(app.playing ? "music.picker.playing" : "music.picker.quiet"),
+        t(app.playing ? "picker.playing" : "picker.quiet"),
       );
       appendChildren(row, icon, createElement("span", { class: "ssp-title" }, app.name), badge);
       row.addEventListener("click", () => select(app));
@@ -123,19 +123,19 @@ export function showMusicPicker(): Promise<AudioApp | null> {
       share.disabled = true;
       if (keep !== null) select(keep);
       else if (apps[0] !== undefined) select(apps[0]);
-      setText(status, apps.length === 0 ? t("music.picker.empty") : "");
+      setText(status, apps.length === 0 ? t("picker.empty") : "");
     }
 
     function load(): void {
       const mine = ++request;
       list.setAttribute("aria-busy", "true");
-      setText(status, t("music.picker.loading"));
+      setText(status, t("picker.loading"));
       void desktop.musicAudio.listApps().then((answer) => {
         if (mine !== request) return;
         if (!answer.ok) {
           apps = [];
           draw();
-          setText(status, t("music.picker.loadFailed"));
+          setText(status, t("picker.loadFailed"));
           return;
         }
         apps = sortAudioApps(answer.apps);

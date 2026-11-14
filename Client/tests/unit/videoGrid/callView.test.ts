@@ -382,6 +382,19 @@ describe("VideoGrid", () => {
       expect(tile(3).hidden).toBe(false);
     });
 
+    it("reads Stop music on the bar while you share music, and Share music after", () => {
+      document.body.appendChild(container);
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      const base = { muted: false, deafened: false, listenOnly: false };
+      grid.setCallState({ ...base, music: true });
+      expect(barButton("music").getAttribute("aria-pressed")).toBe("true");
+      expect(barButton("music").getAttribute("aria-label")).toBe("Stop music");
+      grid.setCallState({ ...base, music: false });
+      expect(barButton("music").getAttribute("aria-pressed")).toBe("false");
+      expect(barButton("music").getAttribute("aria-label")).toBe("Share music");
+    });
+
     it("keeps keyboard focus on a bar button or toggle while focus view redraws", () => {
       document.body.appendChild(container);
       grid.setCallbacks({ callControls: controls() });

@@ -6,7 +6,7 @@ const host = vi.hoisted(() => ({ android: false, tryInvoke: vi.fn() }));
 vi.mock("@lib/hostPlatform", () => ({ isAndroidHost: () => host.android }));
 vi.mock("../../../../src/platform/desktop/nativeInvoke", () => ({ tryInvoke: host.tryInvoke }));
 
-import { musicAudio } from "../../../../src/platform/desktop/musicAudio";
+import { musicAudio } from "../../../../src/platform/desktop/musicAudioService";
 
 const WINDOWS = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
 const LINUX = "Mozilla/5.0 (X11; Linux x86_64)";

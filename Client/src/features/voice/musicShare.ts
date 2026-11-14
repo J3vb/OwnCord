@@ -14,16 +14,17 @@
  * the host capture only while no newer start owns it.
  */
 
-import { LocalAudioTrack } from "livekit-client";
+import { LocalAudioTrack, RoomEvent } from "livekit-client";
 import { setLocalMusic } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/ui/toast";
 import { openAppAudio } from "@lib/voice/appAudioTrack";
 import { MUSIC_PUBLISH } from "@lib/voice/musicPublish";
+import { MUSIC_TRACK_NAME } from "@lib/voice/musicTrack";
 import { nativeMusicOf, type NativeMusicRoom, type VoiceRoom } from "@lib/voice/voiceRoom";
 import { desktop } from "../../platform/desktop";
 import type { MusicErrorCode } from "../../platform/contracts/musicAudio";
-import { voiceText } from "../../i18n/voice";
+import { musicText } from "../../i18n/music";
 
 const log = createLogger("musicShare");
 
@@ -40,8 +41,10 @@ export interface MusicStartOptions {
 
 interface ActiveMusic {
   readonly appId: string;
-  /** Release the page side, the published track and the host capture. */
-  close(): void;
+  /** Release the page side and the published track, and the host capture
+   *  unless `keepHost`: a replacing start leaves it to the host, which
+   *  swaps a running capture itself. */
+  close(keepHost: boolean): void;
 }
 
 const CODES: readonly MusicErrorCode[] = [
@@ -64,7 +67,7 @@ export function musicErrorCode(err: unknown): MusicErrorCode {
 /** The toast for a refusal, or null when the refusal is the expected answer. */
 function refusalText(code: MusicErrorCode): string | null {
   if (code === "superseded") return null;
-  return voiceText(code === "not_found" ? "music.notFound" : "music.failed");
+  return musicText(code === "not_found" ? "notFound" : "failed");
 }
 
 export class MusicShare {
@@ -73,8 +76,15 @@ export class MusicShare {
   private starts = 0;
   /** Starts waiting on the host; a stop acts on the host only for these. */
   private starting = 0;
+  /** The app of the start waiting on the host, if any. */
+  private pending: string | null = null;
 
   constructor(private readonly host: MusicShareHost) {}
+
+  /** The app of a start still waiting on the host, or null. */
+  get pendingAppId(): string | null {
+    return this.pending;
+  }
 
   /** The app being shared, or null. */
   get appId(): string | null {
@@ -87,9 +97,9 @@ export class MusicShare {
   async start(appId: string, options: MusicStartOptions = {}): Promise<MusicStartOutcome> {
     const room = this.host.getRoom();
     if (room === null) return "failed";
-    this.release();
-    const myStart = ++this.starts;
     const mine = ++this.epoch;
+    this.release(true);
+    const myStart = ++this.starts;
     const ctx: StartContext = {
       room,
       appId,
@@ -103,11 +113,13 @@ export class MusicShare {
     };
     const native = nativeMusicOf(room);
     this.starting++;
+    this.pending = appId;
     let active: ActiveMusic | "failed" | "stale";
     try {
       active = native !== null ? await this.startNative(ctx, native) : await this.startPage(ctx);
     } finally {
       this.starting--;
+      if (this.starts === myStart) this.pending = null;
     }
     if (active === "failed") return ctx.stale() ? "stale" : "failed";
     if (active === "stale") return "stale";
@@ -120,18 +132,18 @@ export class MusicShare {
    *  and supersedes a start still waiting on the host. */
   stop(): void {
     this.epoch++;
-    const hadActive = this.release();
+    const hadActive = this.release(false);
     // A start still awaiting the host owns a capture nothing here holds yet.
     if (!hadActive && this.starting > 0) this.stopHostCapture(this.host.getRoom());
   }
 
-  private release(): boolean {
+  private release(keepHost: boolean): boolean {
     const active = this.active;
     this.active = null;
     if (active === null) return false;
     setLocalMusic(false);
     try {
-      active.close();
+      active.close(keepHost);
     } catch (err) {
       log.warn("Closing the music share failed", err);
     }
@@ -149,7 +161,7 @@ export class MusicShare {
   private endedBy(epoch: number): void {
     if (this.epoch !== epoch) return;
     this.stop();
-    showToast(voiceText("music.ended"), "warning");
+    showToast(musicText("ended"), "warning");
   }
 
   private async startNative(
@@ -170,9 +182,9 @@ export class MusicShare {
     }
     return {
       appId: ctx.appId,
-      close: () => {
+      close: (keepHost) => {
         unsubscribe();
-        this.stopHostCapture(ctx.room);
+        if (!keepHost) this.stopHostCapture(ctx.room);
       },
     };
   }
@@ -204,7 +216,14 @@ export class MusicShare {
       handle.close();
       return this.refused(ctx, "internal");
     }
+    // The SFU grant can be withdrawn mid-share: the track is unpublished
+    // without a stop from here.
+    const onUnpublished = (pub: { trackName?: string }): void => {
+      if (pub.trackName === MUSIC_TRACK_NAME) ctx.ended();
+    };
+    ctx.room.on(RoomEvent.LocalTrackUnpublished, onUnpublished);
     const unpublish = (): void => {
+      ctx.room.off(RoomEvent.LocalTrackUnpublished, onUnpublished);
       ctx.room.localParticipant.unpublishTrack(track, true).catch((err: unknown) => {
         log.warn("Failed to unpublish the music (non-fatal)", err);
       });
@@ -217,10 +236,10 @@ export class MusicShare {
     }
     return {
       appId: ctx.appId,
-      close: () => {
+      close: (keepHost) => {
         handle.close();
         unpublish();
-        this.stopHostCapture(ctx.room);
+        if (!keepHost) this.stopHostCapture(ctx.room);
       },
     };
   }

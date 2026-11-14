@@ -630,6 +630,18 @@
       "binding": "pttPollingListeners",
       "category": "app-lifetime",
       "reason": "Listeners of the push-to-talk poller's live flag, which runs for the whole app and is not per server; moved out of voice.store.ts unchanged."
+    },
+    {
+      "file": "features/voice/musicControl.ts",
+      "binding": "watchers",
+      "category": "app-lifetime",
+      "reason": "The music support probe asks this machine, not a server: its watchers are the mounted call controls (each removes itself when its component is destroyed) and the retry timer stops with the last one."
+    },
+    {
+      "file": "features/voice/musicControl.ts",
+      "binding": "retryTimer",
+      "category": "app-lifetime",
+      "reason": "The music support probe asks this machine, not a server: its watchers are the mounted call controls (each removes itself when its component is destroyed) and the retry timer stops with the last one."
     }
   ]
 }

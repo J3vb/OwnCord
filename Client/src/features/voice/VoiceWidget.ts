@@ -26,7 +26,7 @@ import { voiceText as t } from "../../i18n/voice";
 import { callStatusText, formatElapsed, isConnecting, isPhoneCallHold } from "./voiceStatusText";
 import { shareBlockReason } from "./shareGate";
 import { canPublishScreen } from "./native/platform";
-import { createMusicButton, getMusicSupport, syncMusicButton } from "./musicControl";
+import { createMusicButton, syncMusicButton, watchMusicSupport } from "./musicControl";
 import { createSecuredBadge, type SecuredBadge } from "./securedBadge";
 import type { StreamCard } from "./voiceWidget/streamCard";
 import {
@@ -455,7 +455,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     );
 
     render();
-    void getMusicSupport().then(render);
+    watchMusicSupport(render, disposable.signal);
     unsubs.push(...subscribeVoiceWidget(render));
     container.appendChild(root);
   }

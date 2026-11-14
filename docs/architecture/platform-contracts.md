@@ -351,7 +351,7 @@ inventory. The music share host half adds three more beside them,
 `list_audio_apps`, `start_music_audio` and `stop_music_audio`: the same
 "unavailable" answer off Windows, a second independent capture slot so music
 and a window share's audio run together. They have their caller in
-`src/platform/desktop/musicAudio.ts`, behind the `MusicAudio` contract
+`src/platform/desktop/musicAudioService.ts` (loaded lazily by the facade `musicAudio.ts`), behind the `MusicAudio` contract
 (`src/platform/contracts/musicAudio.ts`): it picks the Windows commands or the
 Linux host's `native_voice_list_audio_apps` by OS, and every call goes through
 `tryInvoke`, so a refusal becomes a typed answer. The Linux room starts and

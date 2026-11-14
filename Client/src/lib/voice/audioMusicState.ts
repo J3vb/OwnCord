@@ -6,7 +6,12 @@
 import type { RemoteTrack } from "livekit-client";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
-import { clampPercent, userMusicMuteKey, userMusicVolumeKey } from "./audioVolumePrefs";
+import {
+  announceLocalMute,
+  clampPercent,
+  userMusicMuteKey,
+  userMusicVolumeKey,
+} from "./audioVolumePrefs";
 import { ScreenshareAudioState } from "./audioScreenshareState";
 import {
   applySavedOutput,
@@ -107,6 +112,8 @@ export abstract class MusicAudioState extends ScreenshareAudioState {
 
   setMusicMuted(userId: number, muted: boolean): void {
     savePref(userMusicMuteKey(userId), muted);
+    // The sidebar row dims its music note for a muted sharer.
+    announceLocalMute(userId);
     this.applyMusicElements(userId);
     this.musicGainListener?.();
     this.syncScreenshareDelivery(userId);

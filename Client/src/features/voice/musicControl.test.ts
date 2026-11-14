@@ -11,6 +11,7 @@ import {
   getMusicSupport,
   musicButtonState,
   resetMusicSupport,
+  watchMusicSupport,
 } from "./musicControl";
 import type { VoiceState } from "@stores/voice.store";
 
@@ -66,14 +67,55 @@ describe("getMusicSupport", () => {
   it("asks again after a missing sound server, which may start later", async () => {
     mocks.support.mockResolvedValue({ ok: false, reason: "noSoundServer" });
     await getMusicSupport();
-    expect(cachedMusicSupport()).toBeNull();
+    // The answer shows meanwhile, so the button says why it is off.
+    expect(cachedMusicSupport()).toEqual({ ok: false, reason: "noSoundServer" });
     mocks.support.mockResolvedValue(OK);
     expect(await getMusicSupport()).toEqual(OK);
     expect(mocks.support).toHaveBeenCalledTimes(2);
+    expect(cachedMusicSupport()).toEqual(OK);
+  });
+
+  it("probes again by itself while a watcher shows a non-lasting answer", async () => {
+    vi.useFakeTimers();
+    try {
+      const watcher = new AbortController();
+      const changed = vi.fn();
+      mocks.support.mockResolvedValue({ ok: false, reason: "noSoundServer" });
+      watchMusicSupport(changed, watcher.signal);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(changed).toHaveBeenCalledTimes(1);
+      mocks.support.mockResolvedValue(OK);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(cachedMusicSupport()).toEqual(OK);
+      expect(changed).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(mocks.support).toHaveBeenCalledTimes(2);
+      watcher.abort();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops probing once nobody watches", async () => {
+    vi.useFakeTimers();
+    try {
+      const watcher = new AbortController();
+      mocks.support.mockResolvedValue({ ok: false, reason: "noSoundServer" });
+      watchMusicSupport(vi.fn(), watcher.signal);
+      await vi.advanceTimersByTimeAsync(0);
+      watcher.abort();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(mocks.support).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("treats a failing probe as unsupported rather than throwing", async () => {
     mocks.support.mockRejectedValue(new Error("boom"));
     expect(await getMusicSupport()).toEqual({ ok: false, reason: "platform" });
+    // A failed probe is not kept: the next call asks again.
+    mocks.support.mockResolvedValue(OK);
+    expect(await getMusicSupport()).toEqual(OK);
   });
 });

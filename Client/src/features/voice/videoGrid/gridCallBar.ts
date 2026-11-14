@@ -13,7 +13,7 @@ import { createRouteSlot } from "../routeSlot";
 import { voiceStore } from "@stores/voice.store";
 import {
   cachedMusicSupport,
-  getMusicSupport,
+  watchMusicSupport,
   musicButtonState,
   toggleMusicShare,
 } from "../musicControl";
@@ -42,8 +42,8 @@ export function createGridCallBar(st: GridState, api: GridApi) {
   /** The call view's sound route button (Android app only). */
   const routeSlot = createRouteSlot("call");
   const viewMenu = createGridViewMenu(st, api);
-  // The probe settles once; the bars draw again then.
-  void getMusicSupport().then(() => redrawCallBars());
+  // The bars draw again whenever the support probe settles.
+  watchMusicSupport(redrawCallBars, st.gridListeners.signal);
   st.gridListeners.addCleanup(() => {
     talkSlot.clear();
     fullscreenTalkSlot.clear();
@@ -242,11 +242,22 @@ export function createGridCallBar(st: GridState, api: GridApi) {
   function drawMusicControl(bar: Element): void {
     const music = bar.querySelector<HTMLButtonElement>("[data-call-control='music']");
     if (music === null) return;
-    const state = musicButtonState(voiceStore.getState(), cachedMusicSupport(), mediaLockReason());
+    const state = musicButtonState(
+      { ...voiceStore.getState(), localMusic: st.callState.music === true },
+      cachedMusicSupport(),
+      mediaLockReason(),
+    );
     music.setAttribute("aria-pressed", String(state.sharing));
     music.setAttribute("aria-label", voiceText(state.sharing ? "music.stop" : "music.share"));
     music.title = state.title;
     music.disabled = state.disabled;
+    // Where sharing music can never work (a phone, the browser) the button
+    // takes no room; it shows once the probe says it can work or may later.
+    const support = cachedMusicSupport();
+    const maybe =
+      support !== null &&
+      (support.ok || support.reason === "windowsOld" || support.reason === "noSoundServer");
+    music.hidden = !state.sharing && !maybe;
   }
 
   function drawCallState(bar: Element): void {

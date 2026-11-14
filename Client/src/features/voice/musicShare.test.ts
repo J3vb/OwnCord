@@ -17,7 +17,10 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("@lib/voice/appAudioTrack", () => ({ openAppAudio: mocks.openAppAudio }));
-vi.mock("livekit-client", () => ({ LocalAudioTrack: vi.fn() }));
+vi.mock("livekit-client", () => ({
+  LocalAudioTrack: vi.fn(),
+  RoomEvent: { LocalTrackUnpublished: "localTrackUnpublished" },
+}));
 vi.mock("@lib/voice/musicPublish", () => ({ MUSIC_PUBLISH: { name: "music" } }));
 vi.mock("../../platform/desktop", () => ({
   desktop: { musicAudio: { start: mocks.start, stop: mocks.stop } },
@@ -40,7 +43,13 @@ function nativeRoom() {
 }
 
 function pageRoom() {
+  const handlers = new Map<string, (pub: { trackName?: string }) => void>();
   return {
+    handlers,
+    on: vi.fn((event: string, cb: (pub: { trackName?: string }) => void) =>
+      handlers.set(event, cb),
+    ),
+    off: vi.fn((event: string) => handlers.delete(event)),
     localParticipant: {
       publishTrack: vi.fn(() => Promise.resolve()),
       unpublishTrack: vi.fn(() => Promise.resolve()),
@@ -119,6 +128,28 @@ describe("MusicShare on a native room", () => {
     expect(room.stopMusic).not.toHaveBeenCalled();
   });
 
+  it("replacing a share does not stop the host capture, and a stop does", async () => {
+    const { room } = nativeRoom();
+    const share = shareIn(room);
+    await share.start("one");
+    await share.start("two");
+    expect(room.stopMusic).not.toHaveBeenCalled();
+    share.stop();
+    expect(room.stopMusic).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the app of a start waiting on the host", async () => {
+    const { room } = nativeRoom();
+    const answer = createDeferred<string>();
+    room.startMusic.mockReturnValue(answer.promise);
+    const share = shareIn(room);
+    const pending = share.start("app-1");
+    expect(share.pendingAppId).toBe("app-1");
+    answer.resolve("sid");
+    await pending;
+    expect(share.pendingAppId).toBeNull();
+  });
+
   it("a room replaced during the start makes the start stale", async () => {
     const { room } = nativeRoom();
     const answer = createDeferred<string>();
@@ -162,6 +193,33 @@ describe("MusicShare on the page path", () => {
     share.stop();
     expect(h.close).toHaveBeenCalled();
     expect(room.localParticipant.unpublishTrack).toHaveBeenCalledTimes(1);
+    expect(mocks.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops with a notice when the SFU unpublishes the music track", async () => {
+    mocks.start.mockResolvedValue({ ok: true, url: "ws://x" });
+    mocks.openAppAudio.mockResolvedValue(handle());
+    const room = pageRoom();
+    const share = shareIn(room);
+    await share.start("app-1");
+    room.handlers.get("localTrackUnpublished")!({ trackName: "camera" });
+    expect(share.appId).toBe("app-1");
+    room.handlers.get("localTrackUnpublished")!({ trackName: "music" });
+    expect(share.appId).toBeNull();
+    expect(mocks.setLocalMusic).toHaveBeenLastCalledWith(false);
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    expect(room.handlers.size).toBe(0);
+  });
+
+  it("replacing a share leaves the host capture to the host", async () => {
+    mocks.start.mockResolvedValue({ ok: true, url: "ws://x" });
+    mocks.openAppAudio.mockImplementation(async () => handle());
+    const share = shareIn(pageRoom());
+    await share.start("app-1");
+    expect(await share.start("app-2")).toBe("started");
+    expect(share.appId).toBe("app-2");
+    expect(mocks.stop).not.toHaveBeenCalled();
+    share.stop();
     expect(mocks.stop).toHaveBeenCalledTimes(1);
   });
 
