@@ -35,6 +35,7 @@ func decodeBlockedIDs(t *testing.T, rr *httptest.ResponseRecorder) []int64 {
 // ─── PUT /api/v1/blocks/{userId} (handleBlockUser) ──────────────────────────
 
 func TestBlockUser_Success(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 	alice := dmCreateToken(t, database, "alice", 4)
@@ -53,6 +54,7 @@ func TestBlockUser_Success(t *testing.T) {
 }
 
 func TestBlockUser_SelfBlockRejected(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 	alice := dmCreateToken(t, database, "alice", 4)
@@ -62,6 +64,7 @@ func TestBlockUser_SelfBlockRejected(t *testing.T) {
 }
 
 func TestBlockUser_UnknownTarget(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 	alice := dmCreateToken(t, database, "alice", 4)
@@ -71,6 +74,7 @@ func TestBlockUser_UnknownTarget(t *testing.T) {
 }
 
 func TestBlockUser_InvalidUserID(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 	alice := dmCreateToken(t, database, "alice", 4)
@@ -80,6 +84,7 @@ func TestBlockUser_InvalidUserID(t *testing.T) {
 }
 
 func TestBlockUser_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 	dmCreateToken(t, database, "bob", 4)
@@ -91,6 +96,7 @@ func TestBlockUser_Unauthorized(t *testing.T) {
 // ─── DELETE /api/v1/blocks/{userId} (handleUnblockUser) ─────────────────────
 
 func TestUnblockUser_Success(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 	alice := dmCreateToken(t, database, "alice", 4)
@@ -113,6 +119,7 @@ func TestUnblockUser_Success(t *testing.T) {
 }
 
 func TestUnblockUser_NotBlockedStillSucceeds(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 	alice := dmCreateToken(t, database, "alice", 4)
@@ -124,6 +131,7 @@ func TestUnblockUser_NotBlockedStillSucceeds(t *testing.T) {
 }
 
 func TestUnblockUser_InvalidUserID(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 	alice := dmCreateToken(t, database, "alice", 4)
@@ -133,6 +141,7 @@ func TestUnblockUser_InvalidUserID(t *testing.T) {
 }
 
 func TestUnblockUser_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 
@@ -143,6 +152,7 @@ func TestUnblockUser_Unauthorized(t *testing.T) {
 // ─── GET /api/v1/blocks (handleListBlocks) ──────────────────────────────────
 
 func TestListBlocks_EmptyArray(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 	alice := dmCreateToken(t, database, "alice", 4)
@@ -161,6 +171,7 @@ func TestListBlocks_EmptyArray(t *testing.T) {
 }
 
 func TestListBlocks_ReturnsBlockedIDs(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 	alice := dmCreateToken(t, database, "alice", 4)
@@ -189,6 +200,7 @@ func TestListBlocks_ReturnsBlockedIDs(t *testing.T) {
 }
 
 func TestListBlocks_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, &mockBroadcaster{})
 

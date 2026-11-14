@@ -42,6 +42,7 @@ func seedRequest(t *testing.T, database *db.DB, sender, recipient int64, state s
 }
 
 func TestAddGroupMembers_TargetDMsOffUntrustedRefused(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	setAllowDMs(t, f.database, fixtureOwner, false)
@@ -58,6 +59,7 @@ func TestAddGroupMembers_TargetDMsOffUntrustedRefused(t *testing.T) {
 }
 
 func TestAddGroupMembers_TargetTrustsAdderAllowed(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	setAllowDMs(t, f.database, fixtureOwner, false)
@@ -75,6 +77,7 @@ func TestAddGroupMembers_TargetTrustsAdderAllowed(t *testing.T) {
 
 // Other members' trust does not help: only the actor's counts.
 func TestAddGroupMembers_OtherMembersTrustDoesNotCount(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	setAllowDMs(t, f.database, fixtureOwner, false)
@@ -86,6 +89,7 @@ func TestAddGroupMembers_OtherMembersTrustDoesNotCount(t *testing.T) {
 }
 
 func TestAddGroupMembers_StaffDoNotBypass(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	setAllowDMs(t, f.database, fixtureMember2, false)
 	// fixtureOwner is an administrator; fixtureMod is a moderator in the group.
@@ -97,6 +101,7 @@ func TestAddGroupMembers_StaffDoNotBypass(t *testing.T) {
 }
 
 func TestAddGroupMembers_RequestHolderRefusedIdenticallyForEveryState(t *testing.T) {
+	t.Parallel()
 	var bodies []string
 	for _, state := range []string{"pending", "ignored", "deleted"} {
 		t.Run(state, func(t *testing.T) {
@@ -119,6 +124,7 @@ func TestAddGroupMembers_RequestHolderRefusedIdenticallyForEveryState(t *testing
 }
 
 func TestAddGroupMembers_AcceptedRequestAllowed(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	seedRequest(t, f.database, fixtureMember, fixtureOwner, "accepted")
@@ -130,6 +136,7 @@ func TestAddGroupMembers_AcceptedRequestAllowed(t *testing.T) {
 
 // One refused target in a multi-target add refuses the whole call.
 func TestAddGroupMembers_OneRefusedTargetAddsNobody(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	setAllowDMs(t, f.database, fixturePeerMod, false)
 	before := f.members(t)
@@ -144,6 +151,7 @@ func TestAddGroupMembers_OneRefusedTargetAddsNobody(t *testing.T) {
 }
 
 func TestCreateGroupDM_TargetDMsOffUntrustedRefused(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	dms := NewDMService(f.database, f.mod.perms)
@@ -170,6 +178,7 @@ func TestCreateGroupDM_TargetDMsOffUntrustedRefused(t *testing.T) {
 }
 
 func TestCreateGroupDM_RequestHolderRefused(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"pending", "ignored", "deleted"} {
 		t.Run(state, func(t *testing.T) {
 			f := newModerationActionsFixture(t)
@@ -184,6 +193,7 @@ func TestCreateGroupDM_RequestHolderRefused(t *testing.T) {
 // A member who turns DMs off later stays in the group, keeps sending and can
 // leave: the check is on create and add only.
 func TestGroupDM_MemberTurnsDMsOffStaysSendsAndLeaves(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	setAllowDMs(t, f.database, fixtureMember2, false)
@@ -213,6 +223,7 @@ func TestGroupDM_MemberTurnsDMsOffStaysSendsAndLeaves(t *testing.T) {
 // Between the service's check and the add transaction the target turns DMs
 // off: the transaction refuses, with no participant and no group_add row.
 func TestAddGroupMembers_TargetFlipsDMsOffBeforeTransaction(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	flip := &flipBeforeAddStore{DB: f.database, flipUser: fixtureOwner}
 	dms := NewDMService(flip, f.mod.perms)
@@ -250,6 +261,7 @@ func (s *flipBeforeAddStore) AddGroupDMMembers(ctx context.Context, channelID, a
 // The refusal reads the same whether a block, DMs-off or an unaccepted request
 // caused it, and never names the target.
 func TestAddGroupMembers_RefusalBodyIdentical(t *testing.T) {
+	t.Parallel()
 	causes := map[string]func(t *testing.T, f *groupMembershipFixture){
 		"privacy": func(t *testing.T, f *groupMembershipFixture) { setAllowDMs(t, f.database, fixtureOwner, false) },
 		"block": func(t *testing.T, f *groupMembershipFixture) {
@@ -276,6 +288,7 @@ func TestAddGroupMembers_RefusalBodyIdentical(t *testing.T) {
 // A failed reachability read refuses the add as an internal error and adds
 // nobody.
 func TestAddGroupMembers_ReachabilityReadErrorFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	dms := NewDMService(&failingReachabilityStore{DB: f.database}, f.mod.perms)
 

@@ -10,6 +10,7 @@ import (
 // ─── channel_user_overrides ──────────────────────────────────────────────────
 
 func TestChannelUserOverride_UpsertGetDelete(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -55,6 +56,7 @@ func TestChannelUserOverride_UpsertGetDelete(t *testing.T) {
 // It must carry BOTH layers, and a channel with only one layer set must keep
 // the other at zero.
 func TestGetMemberGrants_MergesBothLayers(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -101,6 +103,7 @@ func TestGetMemberGrants_MergesBothLayers(t *testing.T) {
 // carry ON DELETE CASCADE precisely so a stale row cannot grant access to a
 // channel id that has been reused.
 func TestChannelUserOverride_CascadesOnChannelDelete(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -117,6 +120,7 @@ func TestChannelUserOverride_CascadesOnChannelDelete(t *testing.T) {
 }
 
 func TestGetChannelUserOverrides_ByChannel(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 

@@ -105,6 +105,7 @@ func profileDelete(t *testing.T, router http.Handler, path, token string) *httpt
 // ─── PATCH /api/v1/users/me ──────────────────────────────────────────────────
 
 func TestUpdateProfile_Success(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "patchuser", 4)
@@ -128,6 +129,7 @@ func TestUpdateProfile_Success(t *testing.T) {
 // Only the attachment route is a legitimate same-host avatar, so a same-host
 // URL that is not /api/v1/files/<uuid> must be refused.
 func TestUpdateProfile_RejectsSameHostNonAttachmentAvatar(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	cfg := &config.Config{}
 	cfg.TLS.Domain = "example.com"
@@ -163,6 +165,7 @@ func TestUpdateProfile_RejectsSameHostNonAttachmentAvatar(t *testing.T) {
 // must not change the verdict: the avatar still names the real server and is
 // still refused.
 func TestUpdateProfile_RejectsSameHostAvatarDespiteSpoofedHost(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	cfg := &config.Config{}
 	cfg.TLS.Domain = "chat.example.com"
@@ -190,6 +193,7 @@ func TestUpdateProfile_RejectsSameHostAvatarDespiteSpoofedHost(t *testing.T) {
 // server host with that port, so the URL that would receive the bearer token is
 // https://<domain>:8443/... — the guard must match it.
 func TestUpdateProfile_RejectsSameHostAvatarOnNonDefaultPort(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	cfg := &config.Config{}
 	cfg.TLS.Domain = "chat.example.com"
@@ -214,6 +218,7 @@ func TestUpdateProfile_RejectsSameHostAvatarOnNonDefaultPort(t *testing.T) {
 // proxy) has no configured candidate naming that host; the request's Host is
 // the extra candidate that keeps the guard from being inert.
 func TestUpdateProfile_RejectsSameHostAvatarWithoutTLSDomain(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	cfg := &config.Config{}
 	cfg.Server.Port = 8443
@@ -234,6 +239,7 @@ func TestUpdateProfile_RejectsSameHostAvatarWithoutTLSDomain(t *testing.T) {
 }
 
 func TestUpdateProfile_EmptyUsername(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "emptyuser", 4)
@@ -255,6 +261,7 @@ func TestUpdateProfile_EmptyUsername(t *testing.T) {
 // chosen, so a rename to "O'Brien" is refused. What remains pinned is that
 // the refusal leaves the old name in place and stores no escaped form.
 func TestUpdateProfile_UsernameWithApostropheIsNotEscaped(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "apostropheuser", 4)
@@ -359,6 +366,7 @@ func TestUpdateProfile_OversizedAvatarRejectedBeforeSanitizing(t *testing.T) {
 // is to sanitize display_name before validating it, the same order the
 // username field above already uses.
 func TestUpdateProfile_RejectsEntityEncodedBidiOverrideInDisplayName(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "dnentity", 4)
@@ -389,6 +397,7 @@ func TestUpdateProfile_RejectsEntityEncodedBidiOverrideInDisplayName(t *testing.
 // parameter gets its "&" separators rewritten to "&amp;" and is persisted
 // (and later served to every client) as a broken URL.
 func TestUpdateProfile_AvatarQueryStringIsNotEscaped(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "avatarqsuser", 4)
@@ -416,6 +425,7 @@ func TestUpdateProfile_AvatarQueryStringIsNotEscaped(t *testing.T) {
 }
 
 func TestUpdateProfile_UsernameTaken(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	profileCreateToken(t, database, "takenname", 4)
@@ -429,6 +439,7 @@ func TestUpdateProfile_UsernameTaken(t *testing.T) {
 }
 
 func TestUpdateProfile_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 
@@ -442,6 +453,7 @@ func TestUpdateProfile_Unauthorized(t *testing.T) {
 // ─── PUT /api/v1/users/me/password ──────────────────────────────────────────
 
 func TestChangePassword_Success(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "pwuser", 4)
@@ -456,6 +468,7 @@ func TestChangePassword_Success(t *testing.T) {
 
 // BUG-108: Password change must revoke other sessions.
 func TestChangePassword_RevokesOtherSessions(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 
@@ -492,6 +505,7 @@ func TestChangePassword_RevokesOtherSessions(t *testing.T) {
 }
 
 func TestChangePassword_WrongOldPassword(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "wrongpw", 4)
@@ -505,6 +519,7 @@ func TestChangePassword_WrongOldPassword(t *testing.T) {
 }
 
 func TestChangePassword_WeakNewPassword(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "weakpw", 4)
@@ -518,6 +533,7 @@ func TestChangePassword_WeakNewPassword(t *testing.T) {
 }
 
 func TestChangePassword_SamePassword(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "samepw", 4)
@@ -533,6 +549,7 @@ func TestChangePassword_SamePassword(t *testing.T) {
 // ─── GET /api/v1/users/me/sessions ──────────────────────────────────────────
 
 func TestListSessions_Success(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "sessuser", 4)
@@ -561,6 +578,7 @@ func TestListSessions_Success(t *testing.T) {
 }
 
 func TestListSessions_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 
@@ -572,6 +590,7 @@ func TestListSessions_Unauthorized(t *testing.T) {
 // ─── DELETE /api/v1/users/me/sessions/:id ───────────────────────────────────
 
 func TestRevokeSession_Success(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "revoke", 4)
@@ -586,6 +605,7 @@ func TestRevokeSession_Success(t *testing.T) {
 }
 
 func TestRevokeSession_NotFound(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "revokenf", 4)
@@ -596,6 +616,7 @@ func TestRevokeSession_NotFound(t *testing.T) {
 }
 
 func TestRevokeSession_OtherUsersSession(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "revokeother", 4)
@@ -610,6 +631,7 @@ func TestRevokeSession_OtherUsersSession(t *testing.T) {
 }
 
 func TestRevokeSession_CurrentSession(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "revokeself", 4)
@@ -634,6 +656,7 @@ func TestRevokeSession_CurrentSession(t *testing.T) {
 // none of another account's, with the two accounts' sessions interleaved in
 // creation order.
 func TestRevokeAllSessions_OnlyTheCallersAccount(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	ctx := context.Background()
@@ -677,6 +700,7 @@ func TestRevokeAllSessions_OnlyTheCallersAccount(t *testing.T) {
 }
 
 func TestRevokeAllSessions_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	if rr := profileDelete(t, router, "/api/v1/users/me/sessions", "badtoken"); rr.Code != http.StatusUnauthorized {
@@ -687,6 +711,7 @@ func TestRevokeAllSessions_Unauthorized(t *testing.T) {
 // ─── PATCH /api/v1/users/me — identity_public_key (F3 voice E2EE TOFU) ───────
 
 func TestUpdateProfile_PublishIdentityKey(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "idkeyuser", 4)
@@ -708,6 +733,7 @@ func TestUpdateProfile_PublishIdentityKey(t *testing.T) {
 }
 
 func TestUpdateProfile_IdentityKeyOmitted_Unchanged(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "idkeykeep", 4)
@@ -736,6 +762,7 @@ func TestUpdateProfile_IdentityKeyOmitted_Unchanged(t *testing.T) {
 }
 
 func TestUpdateProfile_IdentityKeyInvalid(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 
@@ -763,6 +790,7 @@ func TestUpdateProfile_IdentityKeyInvalid(t *testing.T) {
 // ─── GET /api/v1/users/me/sessions with an API-token principal ────────────────
 
 func TestListSessions_APITokenPrincipalIsRefused(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 
@@ -789,6 +817,7 @@ func TestListSessions_APITokenPrincipalIsRefused(t *testing.T) {
 // ─── Rate-limit bucket isolation ─────────────────────────────────────────────
 
 func TestRateLimit_ProfileUpdatesDoNotConsumePasswordBudget(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "bucketuser", 4)
@@ -824,6 +853,7 @@ func TestRateLimit_ProfileUpdatesDoNotConsumePasswordBudget(t *testing.T) {
 // device, and that listing is the acknowledgement — except for the caller's
 // own row, so the device that just signed in never acknowledges itself.
 func TestListSessions_NewLoginIsUnseenUntilAnotherDeviceLists(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	ctx := context.Background()

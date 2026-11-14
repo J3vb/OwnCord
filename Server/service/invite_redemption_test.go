@@ -8,6 +8,7 @@ import (
 // ListInviteRedemptions resolves an invite by code and returns its redemption
 // history so an owner can trace a leaked invite to its redeemer (O1).
 func TestInviteService_ListInviteRedemptions(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	svc := NewInviteService(database)
@@ -34,6 +35,7 @@ func TestInviteService_ListInviteRedemptions(t *testing.T) {
 // An unknown code is a not-found, not an empty list: the caller asked about an
 // invite that does not exist.
 func TestInviteService_ListInviteRedemptions_UnknownCode(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := NewInviteService(database)
 

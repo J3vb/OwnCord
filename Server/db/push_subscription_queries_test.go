@@ -28,6 +28,7 @@ func seedPushUser(t *testing.T, database *db.DB, id int64) {
 // ─── UpsertPushSubscription ─────────────────────────────────────────────────
 
 func TestUpsertPushSubscription_InsertsARow(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -52,6 +53,7 @@ func TestUpsertPushSubscription_InsertsARow(t *testing.T) {
 // the same (user, endpoint) is an upsert, not a second row, and its
 // credential/device_name/last_seen_at are replaced.
 func TestUpsertPushSubscription_RefreshBumpsLastSeenAtSameRow(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -94,6 +96,7 @@ func TestUpsertPushSubscription_RefreshBumpsLastSeenAtSameRow(t *testing.T) {
 // keeps the newest `keep` rows by last_seen_at and evicts the rest, in the
 // same call that performs the upsert.
 func TestUpsertPushSubscription_TrimEvictsPastKeep(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -135,6 +138,7 @@ func TestUpsertPushSubscription_TrimEvictsPastKeep(t *testing.T) {
 // TestUpsertPushSubscription_NegativeKeepClampsToZero: keep < 0 clamps to 0,
 // which evicts every row for the user, including the one just written.
 func TestUpsertPushSubscription_NegativeKeepClampsToZero(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -159,6 +163,7 @@ func TestUpsertPushSubscription_NegativeKeepClampsToZero(t *testing.T) {
 // is already done makes BeginTx refuse, so the call reports an error and
 // writes nothing — the atomicity property the transaction exists for.
 func TestUpsertPushSubscription_CancelledContextFailsAtomically(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	seedPushUser(t, database, 1)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -179,6 +184,7 @@ func TestUpsertPushSubscription_CancelledContextFailsAtomically(t *testing.T) {
 // statement's own error-wrap branch (distinct from the trim loop's, proved
 // above) via a trigger that blocks the write outright.
 func TestUpsertPushSubscription_InsertFailureIsReported(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -206,6 +212,7 @@ func TestUpsertPushSubscription_InsertFailureIsReported(t *testing.T) {
 // only the commit fails (user 999 does not exist) — proving the insert is
 // rolled back with it.
 func TestUpsertPushSubscription_CommitFailureIsReported(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, `PRAGMA defer_foreign_keys = ON`); err != nil {
@@ -227,6 +234,7 @@ func TestUpsertPushSubscription_CommitFailureIsReported(t *testing.T) {
 // new row and the loop has already deleted another eviction victim, and all
 // of that is undone together — not just the failing statement.
 func TestUpsertPushSubscription_RollbackOnFailingTrimDelete(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -283,6 +291,7 @@ func TestUpsertPushSubscription_RollbackOnFailingTrimDelete(t *testing.T) {
 // ─── ListPushSubscriptions ───────────────────────────────────────────────────
 
 func TestListPushSubscriptions_KeyScopedNoCredentialsOrdering(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -320,6 +329,7 @@ func TestListPushSubscriptions_KeyScopedNoCredentialsOrdering(t *testing.T) {
 }
 
 func TestListPushSubscriptions_EmptyForUnknownUser(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	rows, err := database.ListPushSubscriptions(context.Background(), 999, "any-key")
 	if err != nil || len(rows) != 0 {
@@ -330,6 +340,7 @@ func TestListPushSubscriptions_EmptyForUnknownUser(t *testing.T) {
 // ─── DeletePushSubscription ──────────────────────────────────────────────────
 
 func TestDeletePushSubscription_ScopedAndReportsRows(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -351,6 +362,7 @@ func TestDeletePushSubscription_ScopedAndReportsRows(t *testing.T) {
 // ─── SweepPushSubscriptions ──────────────────────────────────────────────────
 
 func TestSweepPushSubscriptions_CutoffFormatting(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -384,6 +396,7 @@ func TestSweepPushSubscriptions_CutoffFormatting(t *testing.T) {
 // vapid_key_id mismatch alone must not sweep a fresh row — decision 2's
 // rotation clause is skipped when no key is installed.
 func TestSweepPushSubscriptions_EmptyKeyIsTimeOnly(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -403,6 +416,7 @@ func TestSweepPushSubscriptions_EmptyKeyIsTimeOnly(t *testing.T) {
 // ─── CountPushSubscriptions ──────────────────────────────────────────────────
 
 func TestCountPushSubscriptions(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	if n, err := database.CountPushSubscriptions(ctx); err != nil || n != 0 {
@@ -426,6 +440,7 @@ func TestCountPushSubscriptions(t *testing.T) {
 // every one of the remaining query methods must return the driver's error
 // rather than panic or silently succeed.
 func TestPushSubscriptionWrappers_ReportClosedDatabaseErrors(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	mustDo(t, "Close", database.Close())
 	ctx := context.Background()
@@ -458,6 +473,7 @@ func TestPushSubscriptionWrappers_ReportClosedDatabaseErrors(t *testing.T) {
 // credential fields are present (unlike ListPushSubscriptions), and a row
 // under a different VAPID key is excluded.
 func TestListPushSubscriptionsForDispatch_ScopesToTheGivenUsersAndKey(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -489,6 +505,7 @@ func TestListPushSubscriptionsForDispatch_ScopesToTheGivenUsersAndKey(t *testing
 // TestListPushSubscriptionsForDispatch_EmptyUserIDsReturnsNothing proves the
 // short-circuit: no query round-trip, no rows, no error.
 func TestListPushSubscriptionsForDispatch_EmptyUserIDsReturnsNothing(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	rows, err := database.ListPushSubscriptionsForDispatch(context.Background(), nil, "key1")
 	if err != nil || len(rows) != 0 {
@@ -502,6 +519,7 @@ func TestListPushSubscriptionsForDispatch_EmptyUserIDsReturnsNothing(t *testing.
 // deliberate difference from the user-scoped DeletePushSubscription: an id
 // alone is enough, because a push service's 404/410 never names the owner.
 func TestDeletePushSubscriptionByID_UnscopedDeletesRegardlessOfOwner(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -521,6 +539,7 @@ func TestDeletePushSubscriptionByID_UnscopedDeletesRegardlessOfOwner(t *testing.
 // TestDeletePushSubscriptionByID_UnknownIDIsAFalseNotAnError mirrors
 // DeletePushSubscription's contract for an id that does not exist.
 func TestDeletePushSubscriptionByID_UnknownIDIsAFalseNotAnError(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ok, err := database.DeletePushSubscriptionByID(context.Background(), 999)
 	if err != nil || ok {

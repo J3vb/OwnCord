@@ -34,6 +34,7 @@ func seedPingRole(t *testing.T, database *db.DB, mentionable bool, holders ...in
 }
 
 func TestParseMentionTokens_IDForms(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		content   string
@@ -73,6 +74,7 @@ func TestParseMentionTokens_IDForms(t *testing.T) {
 }
 
 func TestParseMentionTokens_IDFormsCountInCandidateCap(t *testing.T) {
+	t.Parallel()
 	var content string
 	for i := 1; i <= maxMentionCandidates+10; i++ {
 		content += fmt.Sprintf("<@%d> <@&%d> @u%d ", i, i, i)
@@ -84,6 +86,7 @@ func TestParseMentionTokens_IDFormsCountInCandidateCap(t *testing.T) {
 }
 
 func TestSendMessage_IDMentionResolves(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	res := sendAs(t, svc, 1, "hello <@2> and <@999> and @carol")
@@ -99,6 +102,7 @@ func TestSendMessage_IDMentionResolves(t *testing.T) {
 }
 
 func TestRoleMention_RaisesHoldersBadge(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedPingRole(t, database, true, 2, 3) // bob, carol
 
@@ -133,6 +137,7 @@ func TestRoleMention_RaisesHoldersBadge(t *testing.T) {
 }
 
 func TestRoleMention_UnmentionableNeedsMentionEveryone(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedPingRole(t, database, false, 2)
 
@@ -159,6 +164,7 @@ func TestRoleMention_UnmentionableNeedsMentionEveryone(t *testing.T) {
 }
 
 func TestRoleMention_UnknownRoleAndDMStayText(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedPingRole(t, database, true, 2)
 
@@ -181,6 +187,7 @@ func TestRoleMention_UnknownRoleAndDMStayText(t *testing.T) {
 }
 
 func TestRoleMention_BlockerSkipped(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedPingRole(t, database, true, 2, 3)
 	seedBlock(t, database, 2, 1) // bob blocked alice
@@ -195,6 +202,7 @@ func TestRoleMention_BlockerSkipped(t *testing.T) {
 }
 
 func TestRoleMention_EditRaisesNothing(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedPingRole(t, database, true, 2, 3)
 
@@ -227,6 +235,7 @@ func TestRoleMention_EditRaisesNothing(t *testing.T) {
 // The cap of 20 is shared by users and roles: the role keeps its slot and the
 // users fill the rest.
 func TestRoleMention_CountsInTheCap(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedPingRole(t, database, true, 2)
 
@@ -245,6 +254,7 @@ func TestRoleMention_CountsInTheCap(t *testing.T) {
 }
 
 func TestRoleMention_DeletedRoleDoesNotFailTheSend(t *testing.T) {
+	t.Parallel()
 	_, _, database := newMentionFixture(t)
 	ctx := context.Background()
 	msg, err := database.CreateMessageWithMentions(ctx, 10, 1, "x", nil, nil, 0, false, []int64{devsRoleID, 4})
@@ -257,6 +267,7 @@ func TestRoleMention_DeletedRoleDoesNotFailTheSend(t *testing.T) {
 
 // A role holder and a <@id> target who cannot read the channel get no badge.
 func TestRoleMention_UnreadableChannelRaisesNoBadge(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedPingRole(t, database, true, 2, 3) // bob, carol hold devs
 	// Members (and devs) cannot read channel 10; the mod can.
@@ -272,6 +283,7 @@ func TestRoleMention_UnreadableChannelRaisesNoBadge(t *testing.T) {
 }
 
 func TestSanitize_KeepsIDTokens(t *testing.T) {
+	t.Parallel()
 	for _, in := range []string{"<@7>", "hi <@&3> there", "<@7><@&3>", "a<@1>b", "<@&3> <b>x</b>"} {
 		out, err := sanitizeContent(in, false)
 		if err != nil {

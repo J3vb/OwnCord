@@ -15,6 +15,7 @@ import (
 // An admin and the member removing the same file at once: exactly one gets the
 // row, the other reads "already gone", and the member's bytes come back once.
 func TestRemoveUploadAsAdmin_RaceWithOwnRemovalOneWins(t *testing.T) {
+	t.Parallel()
 	for range 20 {
 		f := newForwardFixture(t, nil)
 		msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "mine", "0123456789")
@@ -56,6 +57,7 @@ func TestRemoveUploadAsAdmin_RaceWithOwnRemovalOneWins(t *testing.T) {
 }
 
 func TestRemoveUploadAsAdmin_RefusesInUseAndAudits(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	if _, err := f.uploads.RemoveUploadAsAdmin(ctx, fwdAlice, "no-such-file"); !errors.Is(err, ErrNotFound) {
@@ -84,6 +86,7 @@ func TestRemoveUploadAsAdmin_RefusesInUseAndAudits(t *testing.T) {
 }
 
 func TestSetMemberQuota_ReplacesTheServerLimit(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	f.uploads.SetStorageLimits(StorageLimits{UserQuotaBytes: 10 << 20, Dir: f.dir})
@@ -133,6 +136,7 @@ func TestSetMemberQuota_ReplacesTheServerLimit(t *testing.T) {
 }
 
 func TestListAllUploads_FiltersAndPaging(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	_, bobFile := f.sendWithFile(t, fwdBob, fwdDstChan, "", "0123456789")
@@ -174,6 +178,7 @@ type fakeLister []storage.Entry
 func (l fakeLister) List() ([]storage.Entry, error) { return l, nil }
 
 func TestScanLeftovers_CountsOnlyOldUnnamedFiles(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	now := time.Now()
 	old := now.Add(-48 * time.Hour)
@@ -205,6 +210,7 @@ func (l *fakeLeftovers) Delete(name string) error {
 }
 
 func TestCleanLeftovers_RemovesOnlyOldUnnamedFilesUpToTheLimit(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	now := time.Now()
@@ -247,6 +253,7 @@ func TestCleanLeftovers_RemovesOnlyOldUnnamedFilesUpToTheLimit(t *testing.T) {
 }
 
 func TestUploadTotals_AndMemberStorageCap(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	totals, err := f.uploads.UploadTotals(ctx)

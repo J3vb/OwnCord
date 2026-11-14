@@ -17,6 +17,7 @@ import (
 // attachment whose uploader has no users row (uploader_id predates its
 // foreign key) is skipped rather than failing the migration.
 func TestMigration044_SeedsCountersFromAttachmentsAndSkipsLegacyOrphans(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 	// Apply everything up to 043, build the pre-044 world, then apply 044.
@@ -57,6 +58,7 @@ func TestMigration044_SeedsCountersFromAttachmentsAndSkipsLegacyOrphans(t *testi
 // TestChargeUserStorage_GuardIsExactAtTheBoundary: at quota admits, one byte
 // over refuses, a zero quota is unlimited, and a release floors at zero.
 func TestChargeUserStorage_GuardIsExactAtTheBoundary(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`); err != nil {
@@ -85,6 +87,7 @@ func TestChargeUserStorage_GuardIsExactAtTheBoundary(t *testing.T) {
 // attachment leaves a zero row (the user still exists, the counter is still
 // theirs), and erasing the account takes the row with it.
 func TestUserStorage_RowSurvivesRetentionAtZeroAndDiesWithTheAccount(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	exec := func(q string, args ...any) {
@@ -122,6 +125,7 @@ func TestUserStorage_RowSurvivesRetentionAtZeroAndDiesWithTheAccount(t *testing.
 // outside UploadService: seed, restore) starts from those rows, so the quota
 // guard sees them on the first charge.
 func TestChargeUserStorage_NewCounterStartsFromExistingAttachments(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	for _, q := range []string{

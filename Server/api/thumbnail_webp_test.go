@@ -28,6 +28,7 @@ func readWebP(t *testing.T, name string) []byte {
 // thumbnail inside the box instead of passing its original through, and the
 // upload records its size.
 func TestServeThumb_WebPFitsTheBox(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -73,6 +74,7 @@ func TestServeThumb_WebPFitsTheBox(t *testing.T) {
 // A WebP with transparent pixels keeps them: its thumbnail is a PNG, from
 // the first request and from the kept file.
 func TestServeThumb_TransparentWebPIsAPNG(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	token := uploadCreateToken(t, database, "thumbwebpalpha", 4)
@@ -107,6 +109,7 @@ func TestServeThumb_TransparentWebPIsAPNG(t *testing.T) {
 // The decoder here reads stills only: an animated WebP keeps its frames by
 // passing through, and nothing is kept for it.
 func TestServeThumb_AnimatedWebPPassesThrough(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -142,6 +145,7 @@ func webpBomb(t *testing.T) []byte {
 }
 
 func TestServeThumb_WebPBombIsNotDecoded(t *testing.T) {
+	t.Parallel()
 	bomb := webpBomb(t)
 	if cfg, format, err := image.DecodeConfig(bytes.NewReader(bomb)); err != nil || format != "webp" || cfg.Width != 16384 || cfg.Height != 16384 {
 		t.Fatalf("bomb header = %dx%d %s (%v), want a 16384x16384 webp", cfg.Width, cfg.Height, format, err)

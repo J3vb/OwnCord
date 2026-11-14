@@ -27,6 +27,7 @@ import (
 const authBusyMessage = "too many authentication attempts in progress, try again later"
 
 func TestLogin_RefusedWhenAuthBudgetExhausted(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	seedUser(t, database, "budgeted", "securePass1", 4)
 	limiter := auth.NewRateLimiter()
@@ -59,6 +60,7 @@ func TestLogin_RefusedWhenAuthBudgetExhausted(t *testing.T) {
 }
 
 func TestChangePassword_RefusedWhenAuthBudgetExhausted(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	limiter.SetAdmissionBudget(1)
@@ -91,6 +93,7 @@ func putPasswordFrom(router http.Handler, token, addr, oldPassword string) *http
 }
 
 func TestChangePassword_BurstOfWrongPasswordsIsCapped(t *testing.T) {
+	t.Parallel()
 	const attempts = 12
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
@@ -126,6 +129,7 @@ func TestChangePassword_BurstOfWrongPasswordsIsCapped(t *testing.T) {
 // A request refused because the budget is full ran no compare, so it must not use up the
 // account's attempts: after many such refusals the right password still goes through.
 func TestChangePassword_BusyRefusalsDoNotCountAsAttempts(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	limiter.SetAdmissionBudget(1)

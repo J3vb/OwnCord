@@ -17,6 +17,7 @@ func gifFavUser(t *testing.T, d *db.DB, name string) int64 {
 }
 
 func TestGIFFavorites_AddListRemoveNewestFirst(t *testing.T) {
+	t.Parallel()
 	d := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := gifFavUser(t, d, "alice")
@@ -41,6 +42,7 @@ func TestGIFFavorites_AddListRemoveNewestFirst(t *testing.T) {
 }
 
 func TestGIFFavorites_AddIsIdempotentAndPerUser(t *testing.T) {
+	t.Parallel()
 	d := openMigratedMemory(t)
 	ctx := context.Background()
 	a, b := gifFavUser(t, d, "alice"), gifFavUser(t, d, "bob")
@@ -59,6 +61,7 @@ func TestGIFFavorites_AddIsIdempotentAndPerUser(t *testing.T) {
 }
 
 func TestGIFFavorites_CapRefusesNewButAllowsExisting(t *testing.T) {
+	t.Parallel()
 	d := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := gifFavUser(t, d, "alice")

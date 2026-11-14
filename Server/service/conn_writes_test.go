@@ -54,6 +54,7 @@ func newBatchedServices(t *testing.T) (*db.DB, *connWriteSpy, *ConnWrites, *Sess
 // statement, not 1,000: the touch is recorded in memory and flushed as a
 // batch (P5-S07, B6).
 func TestConnWrites_ThousandTouchesAreOneWriterStatement(t *testing.T) {
+	t.Parallel()
 	_, spy, w, sessions, _ := newBatchedServices(t)
 	ctx := context.Background()
 
@@ -77,6 +78,7 @@ func TestConnWrites_ThousandTouchesAreOneWriterStatement(t *testing.T) {
 // last ping, and its expiry has slid (DP-05's sliding expiry, lagging by at
 // most one window).
 func TestConnWrites_FlushedTouchSlidesTheSession(t *testing.T) {
+	t.Parallel()
 	database, _, w, sessions, _ := newBatchedServices(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "pinger"})
@@ -116,6 +118,7 @@ func TestConnWrites_FlushedTouchSlidesTheSession(t *testing.T) {
 // touch while live, whose expires_at passes before the flush, stays lapsed
 // after it. A batched touch never revives a lapsed row (P5-S07 decision).
 func TestConnWrites_TouchQueuedBeforeExpiryNeverRevives(t *testing.T) {
+	t.Parallel()
 	database, _, w, sessions, _ := newBatchedServices(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "edge"})
@@ -142,6 +145,7 @@ func TestConnWrites_TouchQueuedBeforeExpiryNeverRevives(t *testing.T) {
 // The latest stamp per user wins inside a window, and each flush is one
 // writer call however many users it covers.
 func TestConnWrites_StampsCoalescePerUser(t *testing.T) {
+	t.Parallel()
 	database, spy, w, _, users := newBatchedServices(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "flapper", Status: db.StatusOffline})
@@ -181,6 +185,7 @@ func TestConnWrites_StampsCoalescePerUser(t *testing.T) {
 // A presence_update written while the user's connect stamp is still pending
 // is a newer choice: the flush must not overwrite it with online.
 func TestConnWrites_PendingConnectKeepsANewerChoice(t *testing.T) {
+	t.Parallel()
 	database, _, w, _, users := newBatchedServices(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "quick", Status: db.StatusOffline})
@@ -198,6 +203,7 @@ func TestConnWrites_PendingConnectKeepsANewerChoice(t *testing.T) {
 // for someone no longer connected, which the boot-time ResetAllUserStatuses
 // corrects, while a chosen status survives.
 func TestConnWrites_CrashLeftoversAreResetOnBoot(t *testing.T) {
+	t.Parallel()
 	database, _, w, _, users := newBatchedServices(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "plain", Status: db.StatusOffline})
@@ -224,6 +230,7 @@ func TestConnWrites_CrashLeftoversAreResetOnBoot(t *testing.T) {
 // A failed flush keeps its entries for the next one, without overwriting a
 // stamp that was queued in the meantime.
 func TestConnWrites_FailedFlushRetriesAndKeepsNewerStamps(t *testing.T) {
+	t.Parallel()
 	database, spy, w, sessions, users := newBatchedServices(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "retry", Status: db.StatusOffline})
@@ -257,6 +264,7 @@ func TestConnWrites_FailedFlushRetriesAndKeepsNewerStamps(t *testing.T) {
 // Run flushes on its own: a stamp lands within a few StampFlushInterval ticks
 // without anyone calling Flush.
 func TestConnWrites_RunFlushesOnTheInterval(t *testing.T) {
+	t.Parallel()
 	database, _, w, _, users := newBatchedServices(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "ticker", Status: db.StatusOffline})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -279,6 +287,7 @@ func TestConnWrites_RunFlushesOnTheInterval(t *testing.T) {
 // stamp is still pending, is a choice the stamp's SQL would turn back into
 // online; the committed presence_update drops the pending stamp instead.
 func TestConnWrites_PresenceUpdateDropsPendingConnect(t *testing.T) {
+	t.Parallel()
 	database, spy, w, _, users := newBatchedServices(t)
 	channels := NewChannelService(spy, nil)
 	channels.SetConnWrites(w)

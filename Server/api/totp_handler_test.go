@@ -14,6 +14,7 @@ import (
 // ─── POST /api/v1/auth/verify-totp ──────────────────────────────────────────
 
 func TestVerifyTOTP_Success(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	// Create user with TOTP enabled.
@@ -52,6 +53,7 @@ func TestVerifyTOTP_Success(t *testing.T) {
 }
 
 func TestVerifyTOTP_InvalidCode(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	secret, _ := auth.GenerateTOTPSecret()
@@ -71,6 +73,7 @@ func TestVerifyTOTP_InvalidCode(t *testing.T) {
 }
 
 func TestVerifyTOTP_MissingToken(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := postJSON(t, router, "/api/v1/auth/verify-totp",
@@ -79,6 +82,7 @@ func TestVerifyTOTP_MissingToken(t *testing.T) {
 }
 
 func TestVerifyTOTP_InvalidPartialToken(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := postJSONWithToken(t, router, "/api/v1/auth/verify-totp", "bogus-token",
@@ -87,6 +91,7 @@ func TestVerifyTOTP_InvalidPartialToken(t *testing.T) {
 }
 
 func TestVerifyTOTP_MalformedBody(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	// Need a valid partial token to get past the token check.
@@ -106,6 +111,7 @@ func TestVerifyTOTP_MalformedBody(t *testing.T) {
 }
 
 func TestVerifyTOTP_ReplayProtection(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	secret, _ := auth.GenerateTOTPSecret()
@@ -138,6 +144,7 @@ func TestVerifyTOTP_ReplayProtection(t *testing.T) {
 // ─── POST /api/v1/users/me/totp/enable ──────────────────────────────────────
 
 func TestEnableTOTP_Success(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "enableuser", 4)
@@ -153,6 +160,7 @@ func TestEnableTOTP_Success(t *testing.T) {
 }
 
 func TestEnableTOTP_WrongPassword(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "enableuser2", 4)
@@ -163,6 +171,7 @@ func TestEnableTOTP_WrongPassword(t *testing.T) {
 }
 
 func TestEnableTOTP_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", "badtoken",
@@ -173,6 +182,7 @@ func TestEnableTOTP_Unauthenticated(t *testing.T) {
 // ─── POST /api/v1/users/me/totp/confirm ─────────────────────────────────────
 
 func TestConfirmTOTP_Success(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmuser", 4)
@@ -205,6 +215,7 @@ func TestConfirmTOTP_Success(t *testing.T) {
 }
 
 func TestConfirmTOTP_InvalidCode_Handler(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmuser2", 4)
@@ -220,6 +231,7 @@ func TestConfirmTOTP_InvalidCode_Handler(t *testing.T) {
 }
 
 func TestConfirmTOTP_NoPendingEnrollment(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmuser3", 4)
@@ -231,6 +243,7 @@ func TestConfirmTOTP_NoPendingEnrollment(t *testing.T) {
 }
 
 func TestConfirmTOTP_WrongPassword_Handler(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmuser4", 4)
@@ -246,6 +259,7 @@ func TestConfirmTOTP_WrongPassword_Handler(t *testing.T) {
 // ─── DELETE /api/v1/users/me/totp ────────────────────────────────────────────
 
 func TestDisableTOTP_Success(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "disableuser", 4)
@@ -266,6 +280,7 @@ func TestDisableTOTP_Success(t *testing.T) {
 }
 
 func TestDisableTOTP_WrongPassword_Handler(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "disableuser2", 4)
@@ -276,6 +291,7 @@ func TestDisableTOTP_WrongPassword_Handler(t *testing.T) {
 }
 
 func TestDisableTOTP_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := deleteWithToken(t, router, "/api/v1/users/me/totp", "badtoken",
@@ -284,6 +300,7 @@ func TestDisableTOTP_Unauthenticated(t *testing.T) {
 }
 
 func TestDisableTOTP_BlockedByServerPolicy(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "disableuser3", 4)
@@ -299,6 +316,7 @@ func TestDisableTOTP_BlockedByServerPolicy(t *testing.T) {
 // ─── API-token principals (nil session) and post-password bans ───────────────
 
 func TestVerifyTOTP_BannedAfterPasswordStep(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	secret, _ := auth.GenerateTOTPSecret()
@@ -333,6 +351,7 @@ func TestVerifyTOTP_BannedAfterPasswordStep(t *testing.T) {
 // two-factor all take a login session; an API token changes nothing and the
 // account's login session survives.
 func TestTOTP_APITokenPrincipalIsRefused(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	sessionToken := loginAndGetToken(t, router, database, "apitotp1", 4)
@@ -383,6 +402,7 @@ func TestTOTP_APITokenPrincipalIsRefused(t *testing.T) {
 // (service/user.go:262-274 / api/profile_handler.go:377) and report a 200
 // with an explicit warning, not a silent 204.
 func TestConfirmTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmrevokefail", 4)
@@ -446,6 +466,7 @@ func TestConfirmTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
 // TestDisableTOTP_RevokeFailureSurfacesWarning is the handleDisableTOTP
 // sibling of TestConfirmTOTP_RevokeFailureSurfacesWarning.
 func TestDisableTOTP_RevokeFailureSurfacesWarning(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "disablerevokefail", 4)
@@ -526,6 +547,7 @@ func extractSecretFromURI(t *testing.T, uri string) string {
 // wrong-code 401, and charges nothing, so once the row is sealed the same
 // challenge still completes.
 func TestVerifyTOTP_UnsealedStoredSecretIsAStoreFailure(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	secret, _ := auth.GenerateTOTPSecret()

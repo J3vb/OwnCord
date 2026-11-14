@@ -11,6 +11,7 @@ import (
 // sessions.identity_public_key, a session that existed before it keeps NULL,
 // and SetSessionIdentityKey stores the key on exactly the named session.
 func TestMigration085_SessionIdentityKey(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 	mustDo(t, "MigrateFS up to 084", db.MigrateFS(database, migrationsUpTo(t, "085_")))

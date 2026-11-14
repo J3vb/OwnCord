@@ -118,6 +118,7 @@ func itoa(n int64) string {
 // and then tries to act on it themselves must see 403 SELF_REVIEW, not a
 // successful warning.
 func TestModerationQueueAct_SelfReviewRefused(t *testing.T) {
+	t.Parallel()
 	h, database, _ := buildModQueueActRouter(t)
 	modID := mintModerator(t, database, "act-selfreview-mod", 80, permissions.ModerateMembers)
 	modToken, _ := mintSession(t, database, modID)
@@ -143,6 +144,7 @@ func TestModerationQueueAct_SelfReviewRefused(t *testing.T) {
 // through the queue must send the same member_ban broadcast the direct admin
 // ban route sends, which this used to drop entirely.
 func TestModerationQueueAct_BanBroadcastsMemberBan(t *testing.T) {
+	t.Parallel()
 	h, database, broadcaster := buildModQueueActRouter(t)
 	modID := mintModerator(t, database, "act-ban-mod", 90, permissions.ModerateMembers|permissions.BanMembers)
 	modToken, _ := mintSession(t, database, modID)
@@ -176,6 +178,7 @@ func TestModerationQueueAct_BanBroadcastsMemberBan(t *testing.T) {
 // lacking BAN_MEMBERS, so banUser's own permission check refuses before any
 // write is attempted.
 func TestModerationQueueAct_NoBroadcastWhenActionFails(t *testing.T) {
+	t.Parallel()
 	h, database, broadcaster := buildModQueueActRouter(t)
 	modID := mintModerator(t, database, "act-nobroadcast-mod", 90, permissions.ModerateMembers) // no BanMembers
 	modToken, _ := mintSession(t, database, modID)
@@ -211,6 +214,7 @@ func TestModerationQueueAct_NoBroadcastWhenActionFails(t *testing.T) {
 // one transaction covering both the ban and its ledger row) forces the
 // write itself to fail with an actor who otherwise holds BAN_MEMBERS.
 func TestModerationQueueAct_NoBroadcastWhenBanWriteFails(t *testing.T) {
+	t.Parallel()
 	h, database, broadcaster := buildModQueueActRouter(t)
 	modID := mintModerator(t, database, "act-banwritefail-mod", 90, permissions.ModerateMembers|permissions.BanMembers)
 	modToken, _ := mintSession(t, database, modID)
@@ -246,6 +250,7 @@ func TestModerationQueueAct_NoBroadcastWhenBanWriteFails(t *testing.T) {
 // dropped ledger table (recordLedgerRow's own write target), an actor who
 // otherwise holds MANAGE_MESSAGES.
 func TestModerationQueueAct_NoBroadcastWhenRemovalWriteFails(t *testing.T) {
+	t.Parallel()
 	h, database, broadcaster := buildModQueueActRouter(t)
 	modID := mintModerator(t, database, "act-removalwritefail-mod", 90, permissions.ModerateMembers|permissions.ManageMessages)
 	modToken, _ := mintSession(t, database, modID)
@@ -294,6 +299,7 @@ func TestModerationQueueAct_NoBroadcastWhenRemovalWriteFails(t *testing.T) {
 // the removed message — the direct purge route's own broadcast, reused
 // rather than reimplemented — which this used to drop entirely.
 func TestModerationQueueAct_RemovalBroadcastsChatBulkDeleted(t *testing.T) {
+	t.Parallel()
 	h, database, broadcaster := buildModQueueActRouter(t)
 	modID := mintModerator(t, database, "act-removal-mod", 90, permissions.ModerateMembers|permissions.ManageMessages)
 	modToken, _ := mintSession(t, database, modID)
@@ -342,6 +348,7 @@ func TestModerationQueueAct_RemovalBroadcastsChatBulkDeleted(t *testing.T) {
 // clean, typed refusal — 409 ALREADY_DELETED, never 404 (the client clears the
 // report on 404) — and broadcast nothing.
 func TestModerationQueueAct_RemovalOfDeletedMessageIsConflict(t *testing.T) {
+	t.Parallel()
 	h, database, broadcaster := buildModQueueActRouter(t)
 	modID := mintModerator(t, database, "act-alreadydeleted-mod", 90, permissions.ModerateMembers|permissions.ManageMessages)
 	modToken, _ := mintSession(t, database, modID)
@@ -391,6 +398,7 @@ func TestModerationQueueAct_RemovalOfDeletedMessageIsConflict(t *testing.T) {
 // the act route's response must expose the voice outcome exactly like the
 // direct timeout route does, rather than a bare 204 that drops it.
 func TestModerationQueueAct_TimeoutExposesVoiceOutcome(t *testing.T) {
+	t.Parallel()
 	h, database, _ := buildModQueueActRouter(t)
 	modID := mintModerator(t, database, "act-timeout-mod", 90, permissions.ModerateMembers)
 	modToken, _ := mintSession(t, database, modID)
@@ -425,6 +433,7 @@ func TestModerationQueueAct_TimeoutExposesVoiceOutcome(t *testing.T) {
 // that report's id just by holding MODERATE_MEMBERS. The id must be omitted
 // for them while a different moderator (not the subject) still sees it.
 func TestModerationLedger_ReportIDHiddenForConfidentialSubject(t *testing.T) {
+	t.Parallel()
 	h, database, _ := buildModQueueActRouter(t)
 	// modA outranks modB and issues the warning; modB is both the ledger
 	// owner AND the report's confidential subject.

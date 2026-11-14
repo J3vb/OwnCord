@@ -13,6 +13,7 @@ import (
 // run against the raw seconds, before the multiply, so an out-of-range value
 // is refused rather than silently shrunk.
 func TestTimeoutDurationFromSeconds_RejectsOverflow(t *testing.T) {
+	t.Parallel()
 	if _, err := TimeoutDurationFromSeconds(36028797018967568); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("overflowing seconds must be refused as bad input, got %v", err)
 	}
@@ -35,6 +36,7 @@ func TestTimeoutDurationFromSeconds_RejectsOverflow(t *testing.T) {
 // TestTimeoutDurationFromSeconds_AcceptsTheWindow pins the boundary values the
 // API promises (60..2419200) so the bounds check cannot be tightened wrongly.
 func TestTimeoutDurationFromSeconds_AcceptsTheWindow(t *testing.T) {
+	t.Parallel()
 	for _, s := range []int64{60, 3600, 2419200} {
 		d, err := TimeoutDurationFromSeconds(s)
 		if err != nil {

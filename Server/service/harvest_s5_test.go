@@ -35,6 +35,7 @@ func (s *rendezvousListStore) ListRoles(ctx context.Context) ([]*db.Role, error)
 // tied positions read as equal rank in every >=/<= hierarchy comparison, so
 // CreateRole's read-check-write has to be serialized.
 func TestCreateRole_ConcurrentCreatesCannotCollideOnPosition(t *testing.T) {
+	t.Parallel()
 	_, database := newRoleCRUDService(t)
 	svc := NewRoleService(
 		&rendezvousListStore{Store: database, meet: make(chan struct{})},
@@ -73,6 +74,7 @@ func (erroringMembersStore) ListUserIDsByRole(context.Context, int64) ([]int64, 
 // A failed member lookup must be distinguishable from "role has no members":
 // the caller decides between per-user eviction and a blanket invalidation on it.
 func TestAffectedUserIDs_LookupFailureReportsNotOK(t *testing.T) {
+	t.Parallel()
 	_, database := newRoleCRUDService(t)
 	svc := NewRoleService(erroringMembersStore{Store: database},
 		NewPermissionService(database, permissions.NewChecker(database)))
@@ -86,6 +88,7 @@ func TestAffectedUserIDs_LookupFailureReportsNotOK(t *testing.T) {
 // channel has been soft-deleted (GetLatestMessageID returns 0) — the badge is
 // otherwise stuck and reasserted by every ready payload.
 func TestHandleChannelFocus_ClearsMentionBadgeWhenAllMessagesDeleted(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.ReadMessages|permissions.SendMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})

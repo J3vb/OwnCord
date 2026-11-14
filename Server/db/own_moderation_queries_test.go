@@ -8,6 +8,7 @@ import (
 // TestListOwnModerationActions: only the caller's own non-kick rows, newest
 // first, each with the appeal filed against it (or none).
 func TestListOwnModerationActions(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 

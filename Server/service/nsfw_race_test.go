@@ -128,6 +128,7 @@ func TestNSFWAcknowledge_DuplicatePUTRacingARevokeNeverReportsNotLabelled(t *tes
 // label off clears the acknowledgements on the RESULTING flag, even when the
 // snapshot's read was taken before a concurrent relabel and acknowledgement.
 func TestAdminUpdateChannel_StaleUnlabelledSnapshotKeepsAConcurrentLabelAndItsAcks(t *testing.T) {
+	t.Parallel()
 	ctx, database, nsfwSvc, channels := newNSFWRaceFixture(t)
 
 	existing, err := database.GetChannel(ctx, 10)
@@ -186,6 +187,7 @@ func assertEditLeavesNoAcks(t *testing.T, req AdminChannelUpdate, interleave fun
 }
 
 func TestAdminUpdateChannel_ClearsAcksWhenTheEditTurnsTheLabelOff(t *testing.T) {
+	t.Parallel()
 	assertEditLeavesNoAcks(t, AdminChannelUpdate{Name: "general", NSFW: false},
 		func(*db.DB, *NSFWService) {})
 }
@@ -193,6 +195,7 @@ func TestAdminUpdateChannel_ClearsAcksWhenTheEditTurnsTheLabelOff(t *testing.T) 
 // The snapshot was read while labelled, then another admin unlabelled and
 // relabelled the channel and a member acknowledged the new labelling.
 func TestAdminUpdateChannel_StaleLabelledSnapshotClearsAcksFromALaterLabelling(t *testing.T) {
+	t.Parallel()
 	assertEditLeavesNoAcks(t, AdminChannelUpdate{Name: "general", NSFW: false},
 		func(database *db.DB, nsfwSvc *NSFWService) {
 			labelChannel(t, database, 10, false)
@@ -206,6 +209,7 @@ func TestAdminUpdateChannel_StaleLabelledSnapshotClearsAcksFromALaterLabelling(t
 // rule does not depend on which way the edit reached the flag. A raw unlabel
 // leaves the acknowledgement behind for it to find.
 func TestAdminUpdateChannel_PositionOnlyEditClearsAcksLeftOnAnUnlabelledRow(t *testing.T) {
+	t.Parallel()
 	assertEditLeavesNoAcks(t, AdminChannelUpdate{Name: "general", NSFW: true, Position: 3},
 		func(database *db.DB, _ *NSFWService) {
 			labelChannel(t, database, 10, false)

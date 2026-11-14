@@ -99,6 +99,7 @@ func race(t *testing.T, n int, reserve func() (*StorageReservation, error), onAd
 // proof: with room for exactly three files, eight racers get three
 // admissions and five ErrQuotaExceeded, and the counter holds three files.
 func TestReserve_ConcurrentUploadsRacingTheLastByte(t *testing.T) {
+	t.Parallel()
 	const size = int64(1000)
 	svc, _ := newQuotaFixture(t, 3*size, 0, nil)
 	admitted, refused := race(t, 8, func() (*StorageReservation, error) {
@@ -117,6 +118,7 @@ func TestReserve_ConcurrentUploadsRacingTheLastByte(t *testing.T) {
 // TestReserve_ExactlyAtQuotaAdmitsOnePastRefuses pins the boundary the guard
 // clause states: bytes_used + n <= quota admits, one byte more refuses.
 func TestReserve_ExactlyAtQuotaAdmitsOnePastRefuses(t *testing.T) {
+	t.Parallel()
 	svc, _ := newQuotaFixture(t, 100, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 100)
@@ -134,6 +136,7 @@ func TestReserve_ExactlyAtQuotaAdmitsOnePastRefuses(t *testing.T) {
 // quota refuses nothing, but the counter is maintained so a quota set later
 // starts from a live number.
 func TestReserve_UnlimitedQuotaStillCountsBytes(t *testing.T) {
+	t.Parallel()
 	svc, _ := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	for i := range 5 {
@@ -153,6 +156,7 @@ func TestReserve_UnlimitedQuotaStillCountsBytes(t *testing.T) {
 // four. Eight racers reserve and hold, so the in-flight sum is the only
 // arbiter: exactly four admissions and four ErrLowDisk, every run.
 func TestReserve_HeadroomRacersAdmitExactlyWhatFits(t *testing.T) {
+	t.Parallel()
 	const size = int64(10 << 20)
 	svc, _ := newQuotaFixture(t, 0, 256<<20, func(string) (uint64, error) { return 300 << 20, nil })
 	var held []*StorageReservation
@@ -184,6 +188,7 @@ func TestReserve_HeadroomRacersAdmitExactlyWhatFits(t *testing.T) {
 // but the floor is never crossed: the volume never drops under 256 MiB, so
 // never more than four are admitted.
 func TestReserve_HeadroomRacersNeverOverAdmitWhileBytesLand(t *testing.T) {
+	t.Parallel()
 	const size = int64(10 << 20)
 	var onDisk atomic.Uint64
 	svc, _ := newQuotaFixture(t, 0, 256<<20, func(string) (uint64, error) { return 300<<20 - onDisk.Load(), nil })
@@ -206,6 +211,7 @@ func TestReserve_HeadroomRacersNeverOverAdmitWhileBytesLand(t *testing.T) {
 // unsigned subtraction gets backwards: 100 MiB free, a 256 MiB floor and 200
 // MiB already in flight must refuse the next byte, not wrap and admit it.
 func TestReserve_FreeBelowFloorWithReservationOutstandingRefuses(t *testing.T) {
+	t.Parallel()
 	free := atomic.Uint64{}
 	free.Store(600 << 20)
 	svc, _ := newQuotaFixture(t, 0, 256<<20, func(string) (uint64, error) { return free.Load(), nil })
@@ -225,6 +231,7 @@ func TestReserve_FreeBelowFloorWithReservationOutstandingRefuses(t *testing.T) {
 // TestReserve_UnknownFreeSpaceIsNotFull locks the repository rule the health
 // check and the banner already follow: a probe error admits.
 func TestReserve_UnknownFreeSpaceIsNotFull(t *testing.T) {
+	t.Parallel()
 	svc, _ := newQuotaFixture(t, 0, 256<<20, nil)
 	if _, err := svc.Reserve(context.Background(), quotaTestUser, 1<<30); err != nil {
 		t.Fatalf("a failed probe refused an upload: %v", err)
@@ -239,6 +246,7 @@ func TestReserve_UnknownFreeSpaceIsNotFull(t *testing.T) {
 // TestReserve_ReleaseReturnsTheCharge: a failed write gives the bytes back,
 // and Release is idempotent.
 func TestReserve_ReleaseReturnsTheCharge(t *testing.T) {
+	t.Parallel()
 	svc, _ := newQuotaFixture(t, 100, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 60)
@@ -258,6 +266,7 @@ func TestReserve_ReleaseReturnsTheCharge(t *testing.T) {
 // service over the same database (no in-flight memory) recounts it to the
 // rows — zero.
 func TestRecount_RepairsAChargeWithNoFileAfterRestart(t *testing.T) {
+	t.Parallel()
 	svc, database := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	if _, err := svc.Reserve(ctx, quotaTestUser, 4096); err != nil {
@@ -281,6 +290,7 @@ func TestRecount_RepairsAChargeWithNoFileAfterRestart(t *testing.T) {
 // between its charge and its row must not wipe the charge (that would be an
 // under-count the moment the row lands). After Release the recount drops it.
 func TestRecount_KeepsInFlightBytes(t *testing.T) {
+	t.Parallel()
 	svc, _ := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 500)
@@ -305,6 +315,7 @@ func TestRecount_KeepsInFlightBytes(t *testing.T) {
 // off for that user. The counter may over-count by the leak, never under, and
 // deletions are still returned.
 func TestRecount_ALeakedReservationDoesNotDisableRepair(t *testing.T) {
+	t.Parallel()
 	svc, database := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	if _, err := svc.Reserve(ctx, quotaTestUser, 100); err != nil { // never settled
@@ -332,6 +343,7 @@ func TestRecount_ALeakedReservationDoesNotDisableRepair(t *testing.T) {
 // counter row with the account (class 12a), so an erased subject holds
 // nothing and a recount over the survivors is unaffected.
 func TestRecount_ReturnsBytesAfterErasure(t *testing.T) {
+	t.Parallel()
 	svc, database := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 300)
@@ -353,6 +365,7 @@ func TestRecount_ReturnsBytesAfterErasure(t *testing.T) {
 // TestRecount_ReturnsBytesAfterRetention: rows the retention sweep deletes
 // leave the counter high until the tick's recount lowers it to the rows.
 func TestRecount_ReturnsBytesAfterRetention(t *testing.T) {
+	t.Parallel()
 	svc, database := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	keep, err := svc.Reserve(ctx, quotaTestUser, 200)
@@ -380,6 +393,7 @@ func TestRecount_ReturnsBytesAfterRetention(t *testing.T) {
 // were just deleted (a sweep ran, the tick's recount has not) is not made to
 // wait for the tick — a refused reserve recounts that one user and retries.
 func TestReserve_ARefusalRecountsBeforeAnswering(t *testing.T) {
+	t.Parallel()
 	svc, database := newQuotaFixture(t, 1000, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 1000)
@@ -403,6 +417,7 @@ func TestReserve_ARefusalRecountsBeforeAnswering(t *testing.T) {
 // between users leaves every finished user exact and the rest stale; the next
 // sweep finishes them. Nothing half-applied, nothing lost.
 func TestRecount_RestartMidSweepLeavesFinishedUsersExact(t *testing.T) {
+	t.Parallel()
 	svc, database := newQuotaFixture(t, 0, 0, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -438,6 +453,7 @@ func TestRecount_RestartMidSweepLeavesFinishedUsersExact(t *testing.T) {
 // (service.MaxEmojiCount, api.maxEmojiFileBytes, MANAGE_SERVER in
 // EmojiService.RequireManage) rather than by good behaviour.
 func TestReserveHeadroom_EmojiIsBoundedAndFloorOnly(t *testing.T) {
+	t.Parallel()
 	svc, _ := newQuotaFixture(t, 10, 256<<20, func(string) (uint64, error) { return 100 << 20, nil })
 	if _, err := svc.ReserveHeadroom(context.Background(), 11); !errors.Is(err, ErrLowDisk) {
 		t.Fatalf("emoji bytes skipped the floor: %v", err)
@@ -459,6 +475,7 @@ func TestReserveHeadroom_EmojiIsBoundedAndFloorOnly(t *testing.T) {
 // TestReserve_NegativeSizeIsRefused: a negative size would be a free
 // uncharge; it is a bad request, not a charge of -n.
 func TestReserve_NegativeSizeIsRefused(t *testing.T) {
+	t.Parallel()
 	svc, _ := newQuotaFixture(t, 0, 0, nil)
 	if _, err := svc.Reserve(context.Background(), quotaTestUser, -1); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("Reserve(-1) = %v, want ErrBadRequest", err)
@@ -472,6 +489,7 @@ func TestReserve_NegativeSizeIsRefused(t *testing.T) {
 // contract in one place: nothing in memory survives, every charge does, and
 // the first recount (the maintenance loop's start) settles them.
 func TestReserve_RestartForgetsInFlightButKeepsCharges(t *testing.T) {
+	t.Parallel()
 	svc, database := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	for i := range 3 {
@@ -497,6 +515,7 @@ func TestReserve_RestartForgetsInFlightButKeepsCharges(t *testing.T) {
 // not the envelope, and the correction is stable under a repeat call and a
 // subsequent Commit.
 func TestResize_LowersTheChargeToTheBytesWritten(t *testing.T) {
+	t.Parallel()
 	svc, _ := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 1<<20) // the envelope
@@ -525,6 +544,7 @@ func TestResize_LowersTheChargeToTheBytesWritten(t *testing.T) {
 // admitted against the quota or the floor — and a headroom-only reservation
 // (charge == false) never touches a counter at all.
 func TestResize_NeverRaisesACharge(t *testing.T) {
+	t.Parallel()
 	svc, _ := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 1024)
@@ -560,6 +580,7 @@ func TestResize_NeverRaisesACharge(t *testing.T) {
 // that itself failed) is lowered to the row total by the next recount, the
 // same maintenance path that already repairs every other stale charge.
 func TestRecount_RepairsAnEnvelopeSizedChargeAfterRestart(t *testing.T) {
+	t.Parallel()
 	svc, database := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 1<<20) // the envelope
@@ -579,6 +600,7 @@ func TestRecount_RepairsAnEnvelopeSizedChargeAfterRestart(t *testing.T) {
 }
 
 func TestUploadUnrecord_RemovesUnlinkedRowAndRecountsCounter(t *testing.T) {
+	t.Parallel()
 	svc, database := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	seedCountedAttachment(t, database, "kept", quotaTestUser, 30)

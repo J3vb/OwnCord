@@ -23,6 +23,7 @@ func seedMessageRequestPair(t *testing.T, database *db.DB, senderName, recipient
 }
 
 func TestIsTrustedSender_TrustSender(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, _, _ := seedMessageRequestPair(t, database, "mrq-trust-sender", "mrq-trust-recipient")
@@ -49,6 +50,7 @@ func TestIsTrustedSender_TrustSender(t *testing.T) {
 }
 
 func TestCreateMessageRequest_OneRowPerPairEver(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-create-sender", "mrq-create-recipient")
@@ -86,6 +88,7 @@ func TestCreateMessageRequest_OneRowPerPairEver(t *testing.T) {
 // already committed the trust row — there is no window where one exists
 // without the other.
 func TestCreateMessageRequest_AlsoWritesSentFirstTrustAtomically(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-atomic-sender", "mrq-atomic-recipient")
@@ -111,6 +114,7 @@ func TestCreateMessageRequest_AlsoWritesSentFirstTrustAtomically(t *testing.T) {
 }
 
 func TestGetMessageRequest_ScopedToRecipient(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-get-sender", "mrq-get-recipient")
@@ -141,6 +145,7 @@ func TestGetMessageRequest_ScopedToRecipient(t *testing.T) {
 }
 
 func TestListPendingMessageRequests_JoinsSenderAndPreview(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, channelID, _ := seedMessageRequestPair(t, database, "mrq-list-sender", "mrq-list-recipient")
@@ -185,6 +190,7 @@ func TestListPendingMessageRequests_JoinsSenderAndPreview(t *testing.T) {
 // content untouched — DeleteMessage never clears it) must report no preview
 // at all, never the deleted content.
 func TestListPendingMessageRequests_DeletedOriginalHasNoPreview(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-delpreview-sender", "mrq-delpreview-recipient")
@@ -212,6 +218,7 @@ func TestListPendingMessageRequests_DeletedOriginalHasNoPreview(t *testing.T) {
 }
 
 func TestTransitionMessageRequest_GuardedUpdate(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-transition-sender", "mrq-transition-recipient")
@@ -252,6 +259,7 @@ func TestTransitionMessageRequest_GuardedUpdate(t *testing.T) {
 // remove the message_requests row and every trusted_senders row naming
 // them, in both directions.
 func TestMessageRequest_ErasingEitherPartyRemovesRequestAndTrust(t *testing.T) {
+	t.Parallel()
 	for _, eraseWho := range []string{"sender", "recipient"} {
 		t.Run(eraseWho, func(t *testing.T) {
 			database := openMigratedMemory(t)
@@ -290,6 +298,7 @@ func countRowsMR(t *testing.T, database *db.DB, query string, args ...any) int {
 }
 
 func TestAcceptMessageRequest(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-accept-sender", "mrq-accept-recipient")
@@ -337,6 +346,7 @@ func TestAcceptMessageRequest(t *testing.T) {
 // a real driver error (sql.ErrConnDone) without a fault-injection seam, and
 // proves none of these mistake it for ErrNotFound/ErrConflict.
 func TestMessageRequestQueries_GenericDBErrorsAreWrappedNotMistakenForNotFound(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-closed-sender", "mrq-closed-recipient")

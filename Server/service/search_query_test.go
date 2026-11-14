@@ -9,6 +9,7 @@ import (
 )
 
 func TestParseSearch_TextOnlyUnchanged(t *testing.T) {
+	t.Parallel()
 	for _, q := range []string{"hello world", "  spaced   out ", "http://x 12:30 note:x", "a\"b c", "has link", "embed:x"} {
 		p, err := ParseSearch(q, "")
 		if err != nil {
@@ -21,6 +22,7 @@ func TestParseSearch_TextOnlyUnchanged(t *testing.T) {
 }
 
 func TestParseSearch_KeysCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	p, err := ParseSearch("FROM:Bob In:General word", "")
 	mustDo(t, "ParseSearch", err)
 	if !slices.Equal(p.From, []string{"Bob"}) || !slices.Equal(p.In, []string{"General"}) || p.Text != "word" {
@@ -29,6 +31,7 @@ func TestParseSearch_KeysCaseInsensitive(t *testing.T) {
 }
 
 func TestParseSearch_QuotedValue(t *testing.T) {
+	t.Parallel()
 	p, err := ParseSearch(`from:"ann lee" in:"dev chat" hi`, "")
 	mustDo(t, "ParseSearch", err)
 	if !slices.Equal(p.From, []string{"ann lee"}) || !slices.Equal(p.In, []string{"dev chat"}) || p.Text != "hi" {
@@ -37,6 +40,7 @@ func TestParseSearch_QuotedValue(t *testing.T) {
 }
 
 func TestParseSearch_UnterminatedQuoteRunsToEnd(t *testing.T) {
+	t.Parallel()
 	p, err := ParseSearch(`hi from:"ann lee  and more`, "")
 	mustDo(t, "ParseSearch", err)
 	if !slices.Equal(p.From, []string{"ann lee  and more"}) || p.Text != "hi" {
@@ -45,6 +49,7 @@ func TestParseSearch_UnterminatedQuoteRunsToEnd(t *testing.T) {
 }
 
 func TestParseSearch_UnknownKeyStaysText(t *testing.T) {
+	t.Parallel()
 	p, err := ParseSearch("http://x 12:30 note:x embed:link sticker:x from:bob", "")
 	mustDo(t, "ParseSearch", err)
 	if p.Text != "http://x 12:30 note:x embed:link sticker:x" || !slices.Equal(p.From, []string{"bob"}) {
@@ -53,6 +58,7 @@ func TestParseSearch_UnknownKeyStaysText(t *testing.T) {
 }
 
 func TestParseSearch_EmptyValueDropped(t *testing.T) {
+	t.Parallel()
 	for _, q := range []string{"from: word", `from:"" word`, "from:@ word", "in:# word"} {
 		p, err := ParseSearch(q, "")
 		if err != nil {
@@ -65,6 +71,7 @@ func TestParseSearch_EmptyValueDropped(t *testing.T) {
 }
 
 func TestParseSearch_LeadingAtAndHashTrimmed(t *testing.T) {
+	t.Parallel()
 	p, err := ParseSearch("from:@bob in:#general", "")
 	mustDo(t, "ParseSearch", err)
 	if !slices.Equal(p.From, []string{"bob"}) || !slices.Equal(p.In, []string{"general"}) || p.Text != "" {
@@ -73,6 +80,7 @@ func TestParseSearch_LeadingAtAndHashTrimmed(t *testing.T) {
 }
 
 func TestParseSearch_DateSemantics(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		q, after, before string
 		empty            bool
@@ -96,6 +104,7 @@ func TestParseSearch_DateSemantics(t *testing.T) {
 }
 
 func TestParseSearch_TZ(t *testing.T) {
+	t.Parallel()
 	// Amsterdam is UTC+1 in winter, UTC+2 in summer.
 	p, err := ParseSearch("during:2026-01-15", "Europe/Amsterdam")
 	mustDo(t, "ParseSearch", err)
@@ -122,6 +131,7 @@ func TestParseSearch_TZ(t *testing.T) {
 }
 
 func TestParseSearch_BadInputIsBadRequest(t *testing.T) {
+	t.Parallel()
 	tests := []struct{ q, tz, mention string }{
 		{"before:2026-02-30", "", "before:"},
 		{"after:yesterday", "", "after:"},
@@ -144,6 +154,7 @@ func TestParseSearch_BadInputIsBadRequest(t *testing.T) {
 }
 
 func TestParseSearch_Limits(t *testing.T) {
+	t.Parallel()
 	ok := strings.Repeat("in:a ", 10) + strings.Repeat("from:b ", 10) + strings.Repeat("before:2026-01-01 ", 5)
 	if _, err := ParseSearch(ok, ""); err != nil {
 		t.Fatalf("25 tokens: %v", err)
@@ -209,6 +220,7 @@ func FuzzParseSearch(f *testing.F) {
 }
 
 func TestParseSearch_HasValues(t *testing.T) {
+	t.Parallel()
 	p, err := ParseSearch("HAS:Link has:image has:AUDIO has:sound has:file has:video x", "")
 	mustDo(t, "ParseSearch", err)
 	if want := []string{"link", "image", "sound", "file", "video"}; !slices.Equal(p.Has, want) {
@@ -220,6 +232,7 @@ func TestParseSearch_HasValues(t *testing.T) {
 }
 
 func TestParseSearch_MentionsAndPinned(t *testing.T) {
+	t.Parallel()
 	p, err := ParseSearch(`mentions:@Bob mentions:"ann lee" pinned:TRUE hi`, "")
 	mustDo(t, "ParseSearch", err)
 	if want := []string{"Bob", "ann lee"}; !slices.Equal(p.Mentions, want) {
@@ -245,6 +258,7 @@ func TestParseSearch_MentionsAndPinned(t *testing.T) {
 }
 
 func TestParseSearch_BadHasAndPinnedValues(t *testing.T) {
+	t.Parallel()
 	tests := []struct{ q, mention string }{
 		{"has:embed", "has:"},
 		{"has:sticker", "has:"},
@@ -262,6 +276,7 @@ func TestParseSearch_BadHasAndPinnedValues(t *testing.T) {
 }
 
 func TestParseSearch_HasMentionsLimits(t *testing.T) {
+	t.Parallel()
 	if _, err := ParseSearch(strings.Repeat("mentions:a ", 10)+strings.Repeat("has:link ", 10), ""); err != nil {
 		t.Fatalf("10+10 values: %v", err)
 	}

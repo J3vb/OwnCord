@@ -13,6 +13,7 @@ import (
 // holder stalled on a long-lived context must not park the caller past its
 // deadline, and the abandoned wait must not leave the lock taken.
 func TestMoveReadPointer_LockWaitHonoursContext(t *testing.T) {
+	t.Parallel()
 	svc, _, _ := newMentionFixture(t)
 
 	// Held from another goroutine, as the mention worker holds it (the deadlock

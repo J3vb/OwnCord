@@ -201,6 +201,7 @@ func recvName(e ast.Expr) string {
 }
 
 func TestStoreConsumers(t *testing.T) {
+	t.Parallel()
 	sources := serviceSources(t)
 	got, err := findStoreConsumers(sources)
 	mustDo(t, "find consumers", err)
@@ -219,6 +220,7 @@ func TestStoreConsumers(t *testing.T) {
 }
 
 func TestServiceStoreSizes(t *testing.T) {
+	t.Parallel()
 	services := make([]reflect.Type, 0, len(serviceStoreBaselines))
 	for svc := range serviceStoreBaselines {
 		services = append(services, svc)
@@ -240,6 +242,7 @@ func TestServiceStoreSizes(t *testing.T) {
 }
 
 func TestFindStoreConsumers(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		src  string

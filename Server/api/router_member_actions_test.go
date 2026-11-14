@@ -81,6 +81,7 @@ func (e *memberActionsEnv) path(name string) string {
 }
 
 func TestMemberActions_ChangeRole_RankChecksEnforced(t *testing.T) {
+	t.Parallel()
 	e := newMemberActionsEnv(t)
 	cases := []struct {
 		name      string
@@ -116,6 +117,7 @@ func TestMemberActions_ChangeRole_RankChecksEnforced(t *testing.T) {
 }
 
 func TestMemberActions_BanAndForceLogout_RankChecksEnforced(t *testing.T) {
+	t.Parallel()
 	e := newMemberActionsEnv(t)
 
 	if rr := e.do(t, http.MethodPatch, e.path("member"), "mod", `{"banned":true}`); rr.Code != http.StatusOK {
@@ -139,6 +141,7 @@ func TestMemberActions_BanAndForceLogout_RankChecksEnforced(t *testing.T) {
 }
 
 func TestMemberActions_List_ReachableByModerator(t *testing.T) {
+	t.Parallel()
 	e := newMemberActionsEnv(t)
 	rr := e.do(t, http.MethodGet, "/api/v1/moderation/members", "mod", "")
 	requireStatus(t, rr, http.StatusOK)
@@ -152,6 +155,7 @@ func TestMemberActions_List_ReachableByModerator(t *testing.T) {
 }
 
 func TestMemberActions_ForeignOrMissingToken_Unauthorised(t *testing.T) {
+	t.Parallel()
 	e := newMemberActionsEnv(t)
 	foreign, err := auth.GenerateToken()
 	if err != nil {

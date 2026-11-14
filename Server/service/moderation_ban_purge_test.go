@@ -81,6 +81,7 @@ func banPurgeRows(t *testing.T, database *db.DB) (removals, audits int) {
 }
 
 func TestAuthorizeBanPurge_RequiresBanMembers(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	if err := f.mod.AuthorizeBanPurge(context.Background(), fixtureManageOnly, fixtureMember2); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("AuthorizeBanPurge without BAN_MEMBERS = %v, want ErrForbidden", err)
@@ -91,6 +92,7 @@ func TestAuthorizeBanPurge_RequiresBanMembers(t *testing.T) {
 }
 
 func TestAuthorizeBanPurge_RequiresManageMessages(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	if err := f.mod.AuthorizeBanPurge(context.Background(), fixtureBanOnlyMod, fixtureMember2); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("AuthorizeBanPurge without MANAGE_MESSAGES = %v, want ErrForbidden", err)
@@ -111,6 +113,7 @@ func TestAuthorizeBanPurge_RequiresManageMessages(t *testing.T) {
 }
 
 func TestAuthorizeBanPurge_EqualRankRefused(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	for _, target := range []int64{fixturePeerMod, fixtureOwner} {
 		if err := f.mod.AuthorizeBanPurge(context.Background(), fixtureMod, target); !errors.Is(err, ErrForbidden) {
@@ -120,6 +123,7 @@ func TestAuthorizeBanPurge_EqualRankRefused(t *testing.T) {
 }
 
 func TestAuthorizeBanPurge_RateLimited(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	f.mod.limiter = auth.NewRateLimiter()
 	ctx := context.Background()
@@ -136,6 +140,7 @@ func TestAuthorizeBanPurge_RateLimited(t *testing.T) {
 }
 
 func TestPurgeAfterBan_RequiresTargetBanned(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	id := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, time.Minute)
 
@@ -149,6 +154,7 @@ func TestPurgeAfterBan_RequiresTargetBanned(t *testing.T) {
 }
 
 func TestPurgeAfterBan_RejectsNonHumanActor(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	id := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, time.Minute)
@@ -165,6 +171,7 @@ func TestPurgeAfterBan_RejectsNonHumanActor(t *testing.T) {
 }
 
 func TestPurgeAfterBan_RechecksAuthority(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	id := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, time.Minute)
@@ -187,6 +194,7 @@ func TestPurgeAfterBan_RechecksAuthority(t *testing.T) {
 }
 
 func TestPurgeAfterBan_PermissionLookupErrorSkipsChannel(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	id := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, time.Minute)
@@ -212,6 +220,7 @@ func (overrideFailStore) GetMemberGrants(context.Context, int64) (permissions.Me
 }
 
 func TestPurgeAfterBan_ChannelWithoutManageMessagesUntouched(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	ctx := context.Background()
@@ -243,6 +252,7 @@ func seedChannelID(t *testing.T, database *db.DB, id int64, name string) int64 {
 }
 
 func TestPurgeAfterBan_AdministratorCoversAllChannels(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	other := seedChannelID(t, f.database, 101, "second")
@@ -260,6 +270,7 @@ func TestPurgeAfterBan_AdministratorCoversAllChannels(t *testing.T) {
 }
 
 func TestPurgeAfterBan_DMsUntouched(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	dm := seedChannelID(t, f.database, 101, "dm-one")
@@ -281,6 +292,7 @@ func TestPurgeAfterBan_DMsUntouched(t *testing.T) {
 }
 
 func TestPurgeAfterBan_WindowBoundary(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	// Seeded in ascending timestamp order: the floor search needs ids
@@ -302,6 +314,7 @@ func TestPurgeAfterBan_WindowBoundary(t *testing.T) {
 }
 
 func TestPurgeAfterBan_CapReportsIncomplete(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	f.mod.banPurgeRowCap = 3
@@ -334,6 +347,7 @@ func (s *cancelAfterFirstBatchStore) PurgeUserChannelMessagesSince(ctx context.C
 }
 
 func TestPurgeAfterBan_ContextCancelReturnsCommittedBatches(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	for range 150 {
@@ -362,6 +376,7 @@ func TestPurgeAfterBan_ContextCancelReturnsCommittedBatches(t *testing.T) {
 }
 
 func TestPurgeAfterBan_ReversesMentionBadges(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	ctx := context.Background()
@@ -411,6 +426,7 @@ func (s *failSecondBatchStore) PurgeUserChannelMessagesSince(ctx context.Context
 }
 
 func TestPurgeAfterBan_StoreErrorAfterFirstBatch(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	for range 150 {
@@ -436,6 +452,7 @@ func TestPurgeAfterBan_StoreErrorAfterFirstBatch(t *testing.T) {
 }
 
 func TestPurgeAfterBan_OneLedgerRowAndOneAuditRow(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	other := seedChannelID(t, f.database, 101, "second")
@@ -471,6 +488,7 @@ func TestPurgeAfterBan_OneLedgerRowAndOneAuditRow(t *testing.T) {
 }
 
 func TestPurgeAfterBan_NothingDeletedWritesNeither(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, 48*time.Hour)
@@ -485,6 +503,7 @@ func TestPurgeAfterBan_NothingDeletedWritesNeither(t *testing.T) {
 }
 
 func TestPurgeAfterBan_ConcurrentPurgesDoNotDoubleCount(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	const rows = 250
@@ -522,6 +541,7 @@ func TestPurgeAfterBan_ConcurrentPurgesDoNotDoubleCount(t *testing.T) {
 }
 
 func TestPurgeAfterBan_SemaphoreWaitHonoursContext(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	f.mod.banPurgeSem <- struct{}{}
@@ -536,6 +556,7 @@ func TestPurgeAfterBan_SemaphoreWaitHonoursContext(t *testing.T) {
 }
 
 func TestPurgeAfterBan_ChecksAfterSemaphoreWait(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	id := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, time.Minute)

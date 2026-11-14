@@ -11,6 +11,7 @@ import (
 )
 
 func TestProposedRetentionSnapshotAndAtomicApply(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	uid, _ := database.CreateUser(ctx, "policy-owner", "hash", 1)
@@ -93,6 +94,7 @@ func TestProposedRetentionSnapshotAndAtomicApply(t *testing.T) {
 }
 
 func TestProposedRetentionFailsSafeForMalformedWindows(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	uid, _ := database.CreateUser(ctx, "malformed-owner", "hash", 1)

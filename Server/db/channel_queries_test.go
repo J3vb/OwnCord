@@ -22,6 +22,7 @@ func openMigratedMemory(t *testing.T) *db.DB {
 // ─── ListChannels ─────────────────────────────────────────────────────────────
 
 func TestListChannels_Empty(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	channels, err := database.ListChannels(context.Background())
@@ -32,6 +33,7 @@ func TestListChannels_Empty(t *testing.T) {
 }
 
 func TestListChannels_ReturnsAll(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	mustCreateChannel(t, database, "general", "text", "", "General chat", 0)
@@ -47,6 +49,7 @@ func TestListChannels_ReturnsAll(t *testing.T) {
 // ─── GetChannel ───────────────────────────────────────────────────────────────
 
 func TestGetChannel_NotFound(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	ch := mustGetChannel(t, database, 9999)
@@ -56,6 +59,7 @@ func TestGetChannel_NotFound(t *testing.T) {
 }
 
 func TestGetChannel_Found(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	id := mustCreateChannel(t, database, "general", "text", "Public", "hello", 0)
@@ -84,6 +88,7 @@ func TestGetChannel_Found(t *testing.T) {
 // ─── CreateChannel ────────────────────────────────────────────────────────────
 
 func TestCreateChannel_ReturnsID(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	id := mustCreateChannel(t, database, "test", "text", "", "", 0)
@@ -93,6 +98,7 @@ func TestCreateChannel_ReturnsID(t *testing.T) {
 }
 
 func TestCreateChannel_UniqueIDs(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	id1, _ := database.CreateChannel(context.Background(), "ch1", "text", "", "", 0)
@@ -103,6 +109,7 @@ func TestCreateChannel_UniqueIDs(t *testing.T) {
 }
 
 func TestCreateChannel_EmptyCategory(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	id := mustCreateChannel(t, database, "nocategory", "text", "", "", 0)
@@ -115,6 +122,7 @@ func TestCreateChannel_EmptyCategory(t *testing.T) {
 // ─── UpdateChannel ────────────────────────────────────────────────────────────
 
 func TestUpdateChannel_ChangesNameAndTopic(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	id, _ := database.CreateChannel(context.Background(), "old", "text", "", "old topic", 0)
@@ -134,6 +142,7 @@ func TestUpdateChannel_ChangesNameAndTopic(t *testing.T) {
 }
 
 func TestUpdateChannel_NonExistent(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	// Should not error even for non-existent row (0 rows affected is still ok).
 	err := database.UpdateChannel(context.Background(), 9999, "x", "y", 0)
@@ -145,6 +154,7 @@ func TestUpdateChannel_NonExistent(t *testing.T) {
 // ─── DeleteChannel ────────────────────────────────────────────────────────────
 
 func TestDeleteChannel_RemovesChannel(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	id, _ := database.CreateChannel(context.Background(), "todelete", "text", "", "", 0)
@@ -158,6 +168,7 @@ func TestDeleteChannel_RemovesChannel(t *testing.T) {
 }
 
 func TestDeleteChannel_NonExistent(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	err := database.DeleteChannel(context.Background(), 9999)
 	if err != nil {
@@ -168,6 +179,7 @@ func TestDeleteChannel_NonExistent(t *testing.T) {
 // ─── GetChannelPermissions ────────────────────────────────────────────────────
 
 func TestGetChannelPermissions_Default(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	chID, _ := database.CreateChannel(context.Background(), "perms", "text", "", "", 0)
@@ -181,6 +193,7 @@ func TestGetChannelPermissions_Default(t *testing.T) {
 }
 
 func TestGetChannelPermissions_WithOverride(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	chID, _ := database.CreateChannel(context.Background(), "perms2", "text", "", "", 0)
@@ -206,6 +219,7 @@ func TestGetChannelPermissions_WithOverride(t *testing.T) {
 // ─── Channel override write path ─────────────────────────────────────────────
 
 func TestUpsertChannelOverride_InsertAndUpdate(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID, _ := database.CreateChannel(context.Background(), "private", "text", "", "", 0)
 
@@ -226,6 +240,7 @@ func TestUpsertChannelOverride_InsertAndUpdate(t *testing.T) {
 }
 
 func TestDeleteChannelOverride(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID, _ := database.CreateChannel(context.Background(), "private2", "text", "", "", 0)
 
@@ -244,6 +259,7 @@ func TestDeleteChannelOverride(t *testing.T) {
 }
 
 func TestListChannelRoleOverrides(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID, _ := database.CreateChannel(context.Background(), "private3", "text", "", "", 0)
 
@@ -278,6 +294,7 @@ func TestListChannelRoleOverrides(t *testing.T) {
 // ─── SetChannelSlowMode ─────────────────────────────────────────────────────
 
 func TestSetChannelSlowMode(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID, _ := database.CreateChannel(context.Background(), "slowch", "text", "", "", 0)
 
@@ -290,6 +307,7 @@ func TestSetChannelSlowMode(t *testing.T) {
 }
 
 func TestSetChannelSlowMode_Zero(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID, _ := database.CreateChannel(context.Background(), "slowch2", "text", "", "", 0)
 
@@ -305,6 +323,7 @@ func TestSetChannelSlowMode_Zero(t *testing.T) {
 // ─── SetChannelVoiceMaxUsers ────────────────────────────────────────────────
 
 func TestSetChannelVoiceMaxUsers(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID, _ := database.CreateChannel(context.Background(), "voicech", "voice", "", "", 0)
 
@@ -317,6 +336,7 @@ func TestSetChannelVoiceMaxUsers(t *testing.T) {
 }
 
 func TestSetChannelVoiceMaxUsers_Unlimited(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID, _ := database.CreateChannel(context.Background(), "voicech2", "voice", "", "", 0)
 

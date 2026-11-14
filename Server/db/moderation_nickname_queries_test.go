@@ -10,6 +10,7 @@ import (
 )
 
 func TestManageNicknamesMaskMatchesPermissions(t *testing.T) {
+	t.Parallel()
 	// db cannot import permissions, so SetDisplayNameAsModerator carries the
 	// literal; a drift here would silently change who may rename members.
 	if want := permissions.ManageNicknames | permissions.Administrator; db.ManageNicknamesOrAdminForTest != want {
@@ -29,6 +30,7 @@ func nicknameFixtureDB(t *testing.T) (database *db.DB, mod, member int64) {
 }
 
 func TestSetDisplayNameAsModerator_WritesAndReturnsOld(t *testing.T) {
+	t.Parallel()
 	database, mod, member := nicknameFixtureDB(t)
 	ctx := context.Background()
 	a, b := "Alpha", "Beta"
@@ -51,6 +53,7 @@ func TestSetDisplayNameAsModerator_WritesAndReturnsOld(t *testing.T) {
 }
 
 func TestSetDisplayNameAsModerator_Refusals(t *testing.T) {
+	t.Parallel()
 	database, mod, member := nicknameFixtureDB(t)
 	ctx := context.Background()
 	x := "x"

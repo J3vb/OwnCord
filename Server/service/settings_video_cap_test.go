@@ -9,6 +9,7 @@ import (
 )
 
 func TestSettings_PatchVoiceMaxVideoKbps(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	ctx := context.Background()
 	for _, tc := range []struct{ in, stored string }{
@@ -36,6 +37,7 @@ func TestSettings_PatchVoiceMaxVideoKbps(t *testing.T) {
 }
 
 func TestVoiceMaxVideoBitrate(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		stored string
 		want   int
@@ -56,6 +58,7 @@ func TestVoiceMaxVideoBitrate(t *testing.T) {
 }
 
 func TestSettings_PatchServerUploadMbps(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	ctx := context.Background()
 	for _, tc := range []struct{ in, stored string }{

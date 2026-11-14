@@ -9,6 +9,7 @@ import (
 // sweep) or erasing the parent's author must remove the reply's replay frame
 // too, or the snippet stays replayable.
 func TestReplayPurge_NamesTheReferencedParent(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	persistFrame(t, database, 1, 7, "chat_message", map[string]any{

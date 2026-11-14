@@ -108,6 +108,7 @@ func getWithToken(t *testing.T, router http.Handler, path, token string) *httpte
 // ─── Register tests ───────────────────────────────────────────────────────────
 
 func TestRegister_Success(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	// Create an invite first.
@@ -132,6 +133,7 @@ func TestRegister_Success(t *testing.T) {
 }
 
 func TestRegister_RegistrationClosed(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	if _, err := database.ExecContext(context.Background(), `INSERT OR REPLACE INTO settings (key, value) VALUES ('registration_mode', 'closed')`); err != nil {
@@ -151,6 +153,7 @@ func TestRegister_RegistrationClosed(t *testing.T) {
 }
 
 func TestRegister_InvalidInvite(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{
@@ -163,6 +166,7 @@ func TestRegister_InvalidInvite(t *testing.T) {
 }
 
 func TestRegister_WeakPassword(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	ownerID := mustCreateUser(t, database, "owner2", "hash", 1)
@@ -178,6 +182,7 @@ func TestRegister_WeakPassword(t *testing.T) {
 }
 
 func TestRegister_InviteUsedUp(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	ownerID := mustCreateUser(t, database, "owner3", "hash", 1)
@@ -201,6 +206,7 @@ func TestRegister_InviteUsedUp(t *testing.T) {
 }
 
 func TestRegister_DuplicateUsername_DoesNotConsumeInvite(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	ownerID := mustCreateUser(t, database, "owner4", "hash", 1)
@@ -223,6 +229,7 @@ func TestRegister_DuplicateUsername_DoesNotConsumeInvite(t *testing.T) {
 }
 
 func TestRegister_MissingFields(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{})
@@ -230,6 +237,7 @@ func TestRegister_MissingFields(t *testing.T) {
 }
 
 func TestRegister_ErrorNeverRevealUsername(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{
@@ -248,6 +256,7 @@ func TestRegister_ErrorNeverRevealUsername(t *testing.T) {
 // ─── Login tests ──────────────────────────────────────────────────────────────
 
 func TestLogin_Success(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	_ = seedUser(t, database, "loginuser", "correctPass1", 4)
@@ -263,6 +272,7 @@ func TestLogin_Success(t *testing.T) {
 }
 
 func TestLogin_WrongPassword(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	_ = seedUser(t, database, "loginuser2", "correctPass1", 4)
@@ -273,6 +283,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 }
 
 func TestLogin_UnknownUser(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := postLogin(t, router, "nobody", "anypass123")
@@ -281,6 +292,7 @@ func TestLogin_UnknownUser(t *testing.T) {
 }
 
 func TestLogin_LockoutUsesTrustedForwardedIP(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouterWithProxies(database, limiter, []string{"127.0.0.0/8"})
@@ -302,6 +314,7 @@ func TestLogin_LockoutUsesTrustedForwardedIP(t *testing.T) {
 }
 
 func TestLogin_UsernameLockoutAcrossDifferentIPs(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	_ = seedUser(t, database, "lockoutuser", "correctPass1", 4)
@@ -318,6 +331,7 @@ func TestLogin_UsernameLockoutAcrossDifferentIPs(t *testing.T) {
 }
 
 func TestLogin_UsernameLockoutBlocksCorrectPasswordFromFreshIP(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	_ = seedUser(t, database, "lockoutcorrect", "correctPass1", 4)
@@ -333,6 +347,7 @@ func TestLogin_UsernameLockoutBlocksCorrectPasswordFromFreshIP(t *testing.T) {
 // Otherwise an attacker splits the 9-attempt lockout budget across case variants
 // of one account (admin, Admin, ADMIN, …), all of which authenticate the same row.
 func TestLogin_UsernameLockoutIgnoresCasing(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	_ = seedUser(t, database, "casehunt", "correctPass1", 4)
@@ -354,6 +369,7 @@ func TestLogin_UsernameLockoutIgnoresCasing(t *testing.T) {
 // burst must now land at most the same 10-attempt budget a sequential
 // attacker gets.
 func TestLogin_ConcurrentBurstCannotExceedUsernameBudget(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	_ = seedUser(t, database, "bursttarget", "correctPass1", 4)
@@ -406,6 +422,7 @@ func TestLogin_ConcurrentBurstCannotExceedUsernameBudget(t *testing.T) {
 // original threshold would return 429 here and hand attackers a 9-request
 // victim lockout.
 func TestLogin_NineFailuresThenCorrectPasswordSucceeds(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	_ = seedUser(t, database, "boundaryuser", "correctPass1", 4)
@@ -417,6 +434,7 @@ func TestLogin_NineFailuresThenCorrectPasswordSucceeds(t *testing.T) {
 }
 
 func TestLogin_SuccessResetsUsernameFailureCounter(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	_ = seedUser(t, database, "resetuser", "correctPass1", 4)
@@ -435,6 +453,7 @@ func TestLogin_SuccessResetsUsernameFailureCounter(t *testing.T) {
 }
 
 func TestLogin_GenericErrorOnBadCredentials(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := postLogin(t, router, "nobody", "anypass123")
@@ -447,6 +466,7 @@ func TestLogin_GenericErrorOnBadCredentials(t *testing.T) {
 }
 
 func TestLogin_RequiresTOTPChallenge(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	userID := seedUser(t, database, "totpuser", "correctPass1", 4)
@@ -471,6 +491,7 @@ func TestLogin_RequiresTOTPChallenge(t *testing.T) {
 }
 
 func TestLogin_UsernameLockoutBlocksTOTPChallenge(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	userID := seedUser(t, database, "totplocked", "correctPass1", 4)
@@ -490,6 +511,7 @@ func TestLogin_UsernameLockoutBlocksTOTPChallenge(t *testing.T) {
 }
 
 func TestVerifyTotp_Success(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	secret := "JBSWY3DPEHPK3PXP"
@@ -512,6 +534,7 @@ func TestVerifyTotp_Success(t *testing.T) {
 }
 
 func TestEnableConfirmDisableTotp(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	userID := seedUser(t, database, "enrolltotp", "correctPass1", 4)
@@ -582,6 +605,7 @@ func TestEnableConfirmDisableTotp(t *testing.T) {
 }
 
 func TestTOTPManagement_RequiresPasswordConfirmation(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	userID := seedUser(t, database, "totppassword", "correctPass1", 4)
@@ -614,6 +638,7 @@ func TestTOTPManagement_RequiresPasswordConfirmation(t *testing.T) {
 }
 
 func TestVerifyTotp_ConsumesChallengeAfterRepeatedFailures(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	secret := "JBSWY3DPEHPK3PXP"
@@ -635,6 +660,7 @@ func TestVerifyTotp_ConsumesChallengeAfterRepeatedFailures(t *testing.T) {
 }
 
 func TestLogin_Require2FASettingRejectsUsersWithoutEnrollment(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	if _, err := database.ExecContext(context.Background(), `UPDATE settings SET value = 'true' WHERE key = 'require_2fa'`); err != nil {
@@ -652,6 +678,7 @@ func TestLogin_Require2FASettingRejectsUsersWithoutEnrollment(t *testing.T) {
 }
 
 func TestLogin_BannedUser(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	id := seedUser(t, database, "banned", "correctPass1", 4)
@@ -663,6 +690,7 @@ func TestLogin_BannedUser(t *testing.T) {
 }
 
 func TestLogin_MissingFields(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{})
@@ -672,6 +700,7 @@ func TestLogin_MissingFields(t *testing.T) {
 // ─── Logout tests ─────────────────────────────────────────────────────────────
 
 func TestLogout_Success(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "logoutuser", "correctPass1", 4)
@@ -691,6 +720,7 @@ func TestLogout_Success(t *testing.T) {
 }
 
 func TestLogout_NoAuth(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
@@ -702,6 +732,7 @@ func TestLogout_NoAuth(t *testing.T) {
 // ─── Me tests ─────────────────────────────────────────────────────────────────
 
 func TestMe_Success(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "meuser", "correctPass1", 4)
@@ -722,6 +753,7 @@ func TestMe_Success(t *testing.T) {
 }
 
 func TestMe_NoAuth(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
@@ -736,6 +768,7 @@ func TestMe_NoAuth(t *testing.T) {
 // leading whitespace is NOT trimmed, so a user who set " securePass1" can log
 // in with " securePass1" and NOT with "securePass1".
 func TestLogin_PasswordWithLeadingSpaceIsPreserved(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	// Hash the password WITH the leading space — this is what was registered.
@@ -751,6 +784,7 @@ func TestLogin_PasswordWithLeadingSpaceIsPreserved(t *testing.T) {
 // TestLogin_PasswordWithLeadingSpaceTrimmedFails verifies that logging in with
 // the trimmed version of a space-prefixed password correctly fails.
 func TestLogin_PasswordWithLeadingSpaceTrimmedFails(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	// Register with password that has a leading space.
@@ -766,6 +800,7 @@ func TestLogin_PasswordWithLeadingSpaceTrimmedFails(t *testing.T) {
 // TestLogin_PasswordWithTrailingSpaceIsPreserved verifies that a password with
 // trailing whitespace is NOT trimmed.
 func TestLogin_PasswordWithTrailingSpaceIsPreserved(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	hash, _ := auth.HashPassword("securePass1 ")
@@ -779,6 +814,7 @@ func TestLogin_PasswordWithTrailingSpaceIsPreserved(t *testing.T) {
 // TestLogin_UsernameIsStillTrimmed verifies that the username IS still trimmed
 // (only the password trim was removed).
 func TestLogin_UsernameIsStillTrimmed(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	_ = seedUser(t, database, "trimuser", "correctPass1", 4)
@@ -799,6 +835,7 @@ func TestLogin_UsernameIsStillTrimmed(t *testing.T) {
 // chosen, so register now refuses "O'Brien" outright. The OC-0099 invariant
 // that remains is that nothing is stored for it, escaped or not.
 func TestRegister_UsernameNotHTMLEscaped(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	ownerID := mustCreateUser(t, database, "owner2", "hash", 1)
@@ -828,6 +865,7 @@ func TestRegister_UsernameNotHTMLEscaped(t *testing.T) {
 // the strict rules still hold one (login keeps the loose check), so the row is
 // inserted directly.
 func TestLogin_UsernameWithApostropheSucceeds(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	seedUser(t, database, "O'Brien", "securePass1", 4)
@@ -849,6 +887,7 @@ func TestLogin_UsernameWithApostropheSucceeds(t *testing.T) {
 // key is ever recorded, mirroring the same 32-rune cap register enforces via
 // auth.ValidateUsername before touching anything.
 func TestLogin_OversizedUsernameRejectedBeforeRateLimiterKey(t *testing.T) {
+	t.Parallel()
 	_, limiter, router := newAuthEnv(t)
 
 	hugeUsername := strings.Repeat("a", 1<<20) // 1 MiB, as in the repro
@@ -909,6 +948,7 @@ func TestRegister_OversizedUsernameRejectedBeforeSanitizing(t *testing.T) {
 // ─── Rate limiting integration test ──────────────────────────────────────────
 
 func TestRegister_RateLimit(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	ownerID := mustCreateUser(t, database, "rl_owner", "hash", 1)
@@ -947,6 +987,7 @@ func newMigratedAuthTestDB(t *testing.T) *db.DB {
 }
 
 func TestDeleteAccount_Success(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
@@ -977,6 +1018,7 @@ func TestDeleteAccount_Success(t *testing.T) {
 }
 
 func TestDeleteAccount_MissingPassword(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "delnopass", "correctPass1", 4)
@@ -989,6 +1031,7 @@ func TestDeleteAccount_MissingPassword(t *testing.T) {
 }
 
 func TestDeleteAccount_WrongPassword(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "delwrong", "correctPass1", 4)
@@ -1009,6 +1052,7 @@ func TestDeleteAccount_WrongPassword(t *testing.T) {
 }
 
 func TestDeleteAccount_LastAdmin(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
@@ -1030,6 +1074,7 @@ func TestDeleteAccount_LastAdmin(t *testing.T) {
 }
 
 func TestDeleteAccount_NoAuth(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/account", bytes.NewReader([]byte(`{"password":"x"}`)))
@@ -1040,6 +1085,7 @@ func TestDeleteAccount_NoAuth(t *testing.T) {
 }
 
 func TestDeleteAccount_LockoutAfterRepeatedFailures(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "dellockout", "correctPass1", 4)
@@ -1064,6 +1110,7 @@ func TestDeleteAccount_LockoutAfterRepeatedFailures(t *testing.T) {
 // ─── ConfirmTOTP additional tests ────────────────────────────────────────────
 
 func TestConfirmTOTP_InvalidCode(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "totpbadcode", "correctPass1", 4)
@@ -1090,6 +1137,7 @@ func TestConfirmTOTP_InvalidCode(t *testing.T) {
 }
 
 func TestConfirmTOTP_NoPendingSecret(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "totpnopending", "correctPass1", 4)
@@ -1106,6 +1154,7 @@ func TestConfirmTOTP_NoPendingSecret(t *testing.T) {
 }
 
 func TestConfirmTOTP_MissingPassword(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "totpnoconfirmpass", "correctPass1", 4)
@@ -1124,6 +1173,7 @@ func TestConfirmTOTP_MissingPassword(t *testing.T) {
 }
 
 func TestConfirmTOTP_WrongPassword(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "totpwrongconfirm", "correctPass1", 4)
@@ -1143,6 +1193,7 @@ func TestConfirmTOTP_WrongPassword(t *testing.T) {
 }
 
 func TestConfirmTOTP_NoAuth(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/totp/confirm", bytes.NewReader([]byte(`{"password":"x","code":"123456"}`)))
@@ -1155,6 +1206,7 @@ func TestConfirmTOTP_NoAuth(t *testing.T) {
 // ─── DisableTOTP additional tests ────────────────────────────────────────────
 
 func TestDisableTOTP_WrongPassword(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "disabletotpwrong", "correctPass1", 4)
@@ -1182,6 +1234,7 @@ func TestDisableTOTP_WrongPassword(t *testing.T) {
 }
 
 func TestDisableTOTP_Require2FABlocksDisable(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	// Enable require_2fa setting.
@@ -1214,6 +1267,7 @@ func TestDisableTOTP_Require2FABlocksDisable(t *testing.T) {
 }
 
 func TestDisableTOTP_NoAuth(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/me/totp", bytes.NewReader([]byte(`{"password":"x"}`)))
@@ -1226,6 +1280,7 @@ func TestDisableTOTP_NoAuth(t *testing.T) {
 // ─── Logout additional tests ─────────────────────────────────────────────────
 
 func TestLogout_InvalidToken(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := postJSONWithToken(t, router, "/api/v1/auth/logout", "invalid-token-value", nil)
@@ -1234,6 +1289,7 @@ func TestLogout_InvalidToken(t *testing.T) {
 }
 
 func TestLogout_SessionGoneAfterLogout(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "logoutsess", "correctPass1", 4)
@@ -1253,6 +1309,7 @@ func TestLogout_SessionGoneAfterLogout(t *testing.T) {
 // ─── Me additional tests ─────────────────────────────────────────────────────
 
 func TestMe_ReturnsCorrectUserFields(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	uid := seedUser(t, database, "medetailed", "correctPass1", 4)
@@ -1280,6 +1337,7 @@ func TestMe_ReturnsCorrectUserFields(t *testing.T) {
 }
 
 func TestMe_InvalidToken(t *testing.T) {
+	t.Parallel()
 	_, _, router := newAuthEnv(t)
 
 	rr := getWithToken(t, router, "/api/v1/auth/me", "not-a-real-token")
@@ -1313,6 +1371,7 @@ func expiredInviteDB(t *testing.T) (*db.DB, string) {
 }
 
 func TestRegister_ExpiredInvite(t *testing.T) {
+	t.Parallel()
 	database, code := expiredInviteDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
@@ -1334,6 +1393,7 @@ func TestRegister_ExpiredInvite(t *testing.T) {
 // IPs on the "active sessions" screen depending on whether they registered
 // or logged in.
 func TestRegister_UsesTrustedForwardedIP(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouterWithProxies(database, limiter, []string{"127.0.0.0/8"})

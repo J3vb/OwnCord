@@ -73,6 +73,7 @@ func columnExists(t *testing.T, database *db.DB, table, column string) bool {
 // added across phases 2-6 exists, and that the MENTION_EVERYONE permission
 // bit landed on exactly the privileged seeded roles.
 func TestMigrate_FullChainSchemaIsCoherent(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	mustDo(t, "Migrate() error", db.Migrate(database))
 
@@ -119,6 +120,7 @@ func TestMigrate_FullChainSchemaIsCoherent(t *testing.T) {
 //     migration that destroys and recreates a table holding user data, so it
 //     is the only one whose data copy can silently lose or reorder columns.
 func TestMigrate_UpgradeFromMigration019PreservesData(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 

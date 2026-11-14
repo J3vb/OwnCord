@@ -8,6 +8,7 @@ import (
 )
 
 func TestUpdateProfile_DisplayNameWhileTimedOutIs403(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "timedout", 4)

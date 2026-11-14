@@ -69,6 +69,7 @@ func createGroupDM(t *testing.T, router http.Handler, token string) db.DMChannel
 // ─── creation ───────────────────────────────────────────────────────────────
 
 func TestCreateGroupDM_CreatesChannelWithAllParticipants(t *testing.T) {
+	t.Parallel()
 	_, router, bc, tokens := groupFixture(t)
 
 	rr := dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
@@ -113,6 +114,7 @@ func TestCreateGroupDM_CreatesChannelWithAllParticipants(t *testing.T) {
 }
 
 func TestCreateGroupDM_RequiresTwoOtherUsers(t *testing.T) {
+	t.Parallel()
 	_, router, _, tokens := groupFixture(t)
 
 	rr := dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
@@ -122,6 +124,7 @@ func TestCreateGroupDM_RequiresTwoOtherUsers(t *testing.T) {
 }
 
 func TestCreateGroupDM_DeduplicatesAndDropsSelf(t *testing.T) {
+	t.Parallel()
 	_, router, _, tokens := groupFixture(t)
 
 	// Naming the creator and repeating bob leaves only bob + carol.
@@ -136,6 +139,7 @@ func TestCreateGroupDM_DeduplicatesAndDropsSelf(t *testing.T) {
 }
 
 func TestCreateGroupDM_RejectsOverCap(t *testing.T) {
+	t.Parallel()
 	database, router, _, tokens := groupFixture(t)
 	ids := make([]int64, 0, 2+db.MaxGroupDMParticipants)
 	ids = append(ids, 2, 3)
@@ -152,6 +156,7 @@ func TestCreateGroupDM_RejectsOverCap(t *testing.T) {
 }
 
 func TestCreateGroupDM_RejectsUnknownRecipient(t *testing.T) {
+	t.Parallel()
 	_, router, _, tokens := groupFixture(t)
 
 	rr := dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
@@ -163,17 +168,20 @@ func TestCreateGroupDM_RejectsUnknownRecipient(t *testing.T) {
 // ─── blocks ─────────────────────────────────────────────────────────────────
 
 func TestCreateGroupDM_BlockerCannotAddBlocked(t *testing.T) {
+	t.Parallel()
 	database, router, _, tokens := groupFixture(t)
 	requireGroupCreateForbiddenWhenBlocked(t, database, router, tokens[0], 1, 3)
 }
 
 func TestCreateGroupDM_BlockedCannotAddBlocker(t *testing.T) {
+	t.Parallel()
 	database, router, _, tokens := groupFixture(t)
 	// carol blocks alice; alice must not be able to pull carol in either.
 	requireGroupCreateForbiddenWhenBlocked(t, database, router, tokens[0], 3, 1)
 }
 
 func TestCreateGroupDM_RejectsMutuallyBlockedRecipients(t *testing.T) {
+	t.Parallel()
 	database, router, _, tokens := groupFixture(t)
 	// carol blocks bob; neither blocked alice, so alice (an uninvolved third
 	// party) must not be able to force them into a shared group DM.
@@ -183,6 +191,7 @@ func TestCreateGroupDM_RejectsMutuallyBlockedRecipients(t *testing.T) {
 // ─── listing ────────────────────────────────────────────────────────────────
 
 func TestListDMs_ReturnsGroupWithParticipants(t *testing.T) {
+	t.Parallel()
 	_, router, _, tokens := groupFixture(t)
 
 	if rr := dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
@@ -217,6 +226,7 @@ func TestListDMs_ReturnsGroupWithParticipants(t *testing.T) {
 // A 1:1 DM must keep listing exactly one recipient and is_group=false, so an
 // older client's `recipient`-only rendering is unaffected by group support.
 func TestListDMs_OneToOneStaysUngrouped(t *testing.T) {
+	t.Parallel()
 	_, router, _, tokens := groupFixture(t)
 
 	if rr := dmPost(t, router, "/api/v1/dms", tokens[0], map[string]any{"recipient_id": 2}); rr.Code != http.StatusCreated {
@@ -242,6 +252,7 @@ func TestListDMs_OneToOneStaysUngrouped(t *testing.T) {
 // A group DM containing both users must never be handed back as "the DM
 // between alice and bob" — that would deliver a private message to the group.
 func TestCreateDM_DoesNotReuseGroupChannel(t *testing.T) {
+	t.Parallel()
 	_, router, _, tokens := groupFixture(t)
 
 	groupRR := dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
@@ -262,6 +273,7 @@ func TestCreateDM_DoesNotReuseGroupChannel(t *testing.T) {
 // ─── rename ─────────────────────────────────────────────────────────────────
 
 func TestRenameGroupDM_ParticipantMayRename(t *testing.T) {
+	t.Parallel()
 	_, router, bc, tokens := groupFixture(t)
 	group := createGroupDM(t, router, tokens[0])
 	bc.sent = nil
@@ -278,6 +290,7 @@ func TestRenameGroupDM_ParticipantMayRename(t *testing.T) {
 }
 
 func TestRenameGroupDM_NonParticipantRefused(t *testing.T) {
+	t.Parallel()
 	database, router, _, tokens := groupFixture(t)
 	group := createGroupDM(t, router, tokens[0])
 	outsider := dmCreateToken(t, database, "dave", 4)
@@ -288,6 +301,7 @@ func TestRenameGroupDM_NonParticipantRefused(t *testing.T) {
 }
 
 func TestRenameGroupDM_RefusesOneToOne(t *testing.T) {
+	t.Parallel()
 	_, router, _, tokens := groupFixture(t)
 	rr := dmPost(t, router, "/api/v1/dms", tokens[0], map[string]any{"recipient_id": 2})
 	created := decodeBody[struct {
@@ -300,6 +314,7 @@ func TestRenameGroupDM_RefusesOneToOne(t *testing.T) {
 }
 
 func TestRenameGroupDM_RejectsOverlongName(t *testing.T) {
+	t.Parallel()
 	_, router, _, tokens := groupFixture(t)
 	group := createGroupDM(t, router, tokens[0])
 
@@ -315,6 +330,7 @@ func TestRenameGroupDM_RejectsOverlongName(t *testing.T) {
 // A rename body past the 16 KiB group cap is refused as too large before any
 // name check, the same cap add-members and owner transfer read under.
 func TestRenameGroupDM_BodyOverGroupCapIs413(t *testing.T) {
+	t.Parallel()
 	_, router, _, tokens := groupFixture(t)
 	group := createGroupDM(t, router, tokens[0])
 
@@ -326,6 +342,7 @@ func TestRenameGroupDM_BodyOverGroupCapIs413(t *testing.T) {
 // ─── leaving ────────────────────────────────────────────────────────────────
 
 func TestLeaveGroupDM_RemovesParticipantAndNotifiesSurvivors(t *testing.T) {
+	t.Parallel()
 	database, router, bc, tokens := groupFixture(t)
 	group := createGroupDM(t, router, tokens[0])
 	bc.sent = nil
@@ -370,6 +387,7 @@ func TestLeaveGroupDM_RemovesParticipantAndNotifiesSurvivors(t *testing.T) {
 }
 
 func TestLeaveGroupDM_LastParticipantDeletesChannel(t *testing.T) {
+	t.Parallel()
 	database, router, _, tokens := groupFixture(t)
 	group := createGroupDM(t, router, tokens[0])
 
@@ -391,6 +409,7 @@ func TestLeaveGroupDM_LastParticipantDeletesChannel(t *testing.T) {
 // Closing a 1:1 DM must stay a hide, not a leave: the closer remains a
 // participant so the next message from either side reopens the conversation.
 func TestCloseDM_OneToOneKeepsParticipation(t *testing.T) {
+	t.Parallel()
 	database, router, _, tokens := groupFixture(t)
 	rr := dmPost(t, router, "/api/v1/dms", tokens[0], map[string]any{"recipient_id": 2})
 	created := decodeBody[struct {
@@ -411,6 +430,7 @@ func TestCloseDM_OneToOneKeepsParticipation(t *testing.T) {
 }
 
 func TestLeaveGroupDM_NonParticipantRefused(t *testing.T) {
+	t.Parallel()
 	database, router, _, tokens := groupFixture(t)
 	group := createGroupDM(t, router, tokens[0])
 	outsider := dmCreateToken(t, database, "erin", 4)
@@ -423,6 +443,7 @@ func TestLeaveGroupDM_NonParticipantRefused(t *testing.T) {
 // dm_channel_open agree: the creator at first, then the lowest remaining member
 // once the owner has left.
 func TestGroupDM_OwnerIDInListAndAfterOwnerLeaves(t *testing.T) {
+	t.Parallel()
 	_, router, _, tokens := groupFixture(t)
 	rr := dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{"recipient_ids": []int64{2, 3}})
 	requireStatus(t, rr, http.StatusCreated)

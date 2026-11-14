@@ -137,6 +137,7 @@ func dmDelete(t *testing.T, router http.Handler, path, token string) *httptest.R
 // ─── POST /api/v1/dms (handleCreateDM) ─────────────────────────────────────
 
 func TestCreateDM_Success_NewDM(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	broadcaster := &mockBroadcaster{}
 	router := buildDMRouter(database, broadcaster)
@@ -165,6 +166,7 @@ func TestCreateDM_Success_NewDM(t *testing.T) {
 }
 
 func TestCreateDM_Success_ExistingDM(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	broadcaster := &mockBroadcaster{}
 	router := buildDMRouter(database, broadcaster)
@@ -192,6 +194,7 @@ func TestCreateDM_Success_ExistingDM(t *testing.T) {
 }
 
 func TestCreateDM_BadRequest_EmptyBody(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 	token := dmCreateToken(t, database, "empty_body_user", 4)
@@ -202,6 +205,7 @@ func TestCreateDM_BadRequest_EmptyBody(t *testing.T) {
 }
 
 func TestCreateDM_BadRequest_NegativeRecipientID(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 	token := dmCreateToken(t, database, "neg_user", 4)
@@ -213,6 +217,7 @@ func TestCreateDM_BadRequest_NegativeRecipientID(t *testing.T) {
 }
 
 func TestCreateDM_BadRequest_ZeroRecipientID(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 	token := dmCreateToken(t, database, "zero_user", 4)
@@ -224,6 +229,7 @@ func TestCreateDM_BadRequest_ZeroRecipientID(t *testing.T) {
 }
 
 func TestCreateDM_BadRequest_SelfDM(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 	token := dmCreateToken(t, database, "selfuser", 4)
@@ -236,6 +242,7 @@ func TestCreateDM_BadRequest_SelfDM(t *testing.T) {
 }
 
 func TestCreateDM_NotFound_RecipientMissing(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 	token := dmCreateToken(t, database, "lonely_user", 4)
@@ -247,6 +254,7 @@ func TestCreateDM_NotFound_RecipientMissing(t *testing.T) {
 }
 
 func TestCreateDM_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 
@@ -259,6 +267,7 @@ func TestCreateDM_Unauthorized(t *testing.T) {
 // ─── GET /api/v1/dms (handleListDMs) ────────────────────────────────────────
 
 func TestListDMs_ReturnsOpenDMs(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	broadcaster := &mockBroadcaster{}
 	router := buildDMRouter(database, broadcaster)
@@ -288,6 +297,7 @@ func TestListDMs_ReturnsOpenDMs(t *testing.T) {
 }
 
 func TestListDMs_EmptyArray(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 	token := dmCreateToken(t, database, "no_dms_user", 4)
@@ -303,6 +313,7 @@ func TestListDMs_EmptyArray(t *testing.T) {
 }
 
 func TestListDMs_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 
@@ -313,6 +324,7 @@ func TestListDMs_Unauthorized(t *testing.T) {
 // ─── DELETE /api/v1/dms/{channelId} (handleCloseDM) ────────────────────────
 
 func TestCloseDM_Success(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	broadcaster := &mockBroadcaster{}
 	router := buildDMRouter(database, broadcaster)
@@ -340,6 +352,7 @@ func TestCloseDM_Success(t *testing.T) {
 }
 
 func TestCloseDM_Success_VerifyRemovedFromList(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	broadcaster := &mockBroadcaster{}
 	router := buildDMRouter(database, broadcaster)
@@ -369,6 +382,7 @@ func TestCloseDM_Success_VerifyRemovedFromList(t *testing.T) {
 }
 
 func TestCloseDM_Forbidden_NotParticipant(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	broadcaster := &mockBroadcaster{}
 	router := buildDMRouter(database, broadcaster)
@@ -392,6 +406,7 @@ func TestCloseDM_Forbidden_NotParticipant(t *testing.T) {
 }
 
 func TestCloseDM_BadRequest_InvalidChannelID(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 	token := dmCreateToken(t, database, "badid_user", 4)
@@ -401,6 +416,7 @@ func TestCloseDM_BadRequest_InvalidChannelID(t *testing.T) {
 }
 
 func TestCloseDM_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 
@@ -409,6 +425,7 @@ func TestCloseDM_Unauthorized(t *testing.T) {
 }
 
 func TestCloseDM_NilBroadcaster(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil) // nil broadcaster
 

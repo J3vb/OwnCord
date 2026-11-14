@@ -521,58 +521,43 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
 
+      # Windows runs db, service and api without -race. Those packages spend
+      # most of their race time instrumenting the SQLite driver, which is C
+      # translated to Go, so on Windows the detector mostly re-checks SQLite
+      # itself. The Linux leg still runs every package under -race, so our own
+      # code keeps its race coverage. The two runs go side by side so the
+      # plain one finishes inside the race one's time.
       - name: Run tests with race detection
         if: matrix.os != 'ubuntu-latest' && env.RUN_SERVER != 'false'
-        run: go test -race -timeout 20m ./...
-
-      # Real-SFU proof for single-port UDP (O1). Single-port mode is untested
-      # upstream, so a YAML-only assertion cannot tell whether livekit-server
-      # accepts it — this runs OwnCord's generated livekit.yaml through a real
-      # binary and requires a real WebRTC client to receive RTP, once in range
-      # mode (the shipped default) and once with voice.udp_port. One leg, no
-      # -race: the concern is whether media flows, not new concurrency.
-      - name: Cache livekit-server archive
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: Client/tests/e2e/.bin/livekit-cache
-          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Client/tests/e2e/scripts/install-livekit.mjs') }}
-
-      - name: Install livekit-server for the generated-config proof
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
-        working-directory: Client/
-        run: node tests/e2e/scripts/install-livekit.mjs
-
-      - name: Run the real-SFU proofs
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
-        env:
-          # Relative to each test's working directory, which is its package
-          # directory (Server/livekitproc, Server/ws), not Server/.
-          OWNCORD_LIVEKIT_TEST_BINARY: ../../Client/tests/e2e/.bin/livekit-server
-        # A pattern that matches no test still exits 0, so the count is
-        # checked first: a proof that moves package must fail this step, not
-        # drop out of it. -p 1 because both packages start livekit-server on
-        # its fixed ports.
+        shell: bash
         run: |
-          found="$(go test -list '^TestRealLiveKit_' ./livekitproc/ ./ws/ | grep -c '^TestRealLiveKit_' || true)"
-          if [ "$found" -ne 3 ]; then
-            echo "::error::expected 3 real-SFU proofs in livekitproc and ws, found $found"
+          set -uo pipefail
+          mapfile -t race_pkgs < <(go list ./... | grep -vE '/Server/(db|service|api)$')
+          if [ "${#race_pkgs[@]}" -lt 10 ]; then
+            echo "::error::go list returned ${#race_pkgs[@]} packages for the race run"
             exit 1
           fi
-          go test -count=1 -p 1 ./livekitproc/ ./ws/ -run '^TestRealLiveKit_'
-
-      # One leg is enough: -tags deadlock swaps syncutil's lock types and
-      # reports lock-order inversions, which do not depend on the OS, and no
-      # Windows-only file takes a syncutil lock. The race step above still runs
-      # every test on both legs.
-      - name: Run tests with deadlock detection
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
-        run: go test -tags deadlock -count=1 ./...
+          logs="$RUNNER_TEMP"
+          go test -race -timeout 20m "${race_pkgs[@]}" > "$logs/race.log" 2>&1 &
+          race=$!
+          go test -timeout 20m ./db/ ./service/ ./api/ > "$logs/plain.log" 2>&1 &
+          plain=$!
+          wait "$race"; race_rc=$?
+          wait "$plain"; plain_rc=$?
+          echo "::group::go test -race (all packages but db, service, api)"
+          cat "$logs/race.log"
+          echo "::endgroup::"
+          echo "::group::go test (db, service, api, no -race)"
+          cat "$logs/plain.log"
+          echo "::endgroup::"
+          grep -E '^(--- FAIL|FAIL|panic:)' "$logs/race.log" "$logs/plain.log" || true
+          exit $(( race_rc != 0 || plain_rc != 0 ))
 
       # Document gates. Both read a Markdown file OUTSIDE the Server module, so
       # Go's test cache does not record it as an input and the -race run above
-      # answers a doc-only edit from cache. The ubuntu deadlock step happens to
-      # run them with -count=1 today; this step says so on purpose, on both legs,
+      # answers a doc-only edit from cache. The deadlock step in Server Deadlock
+      # & Tag Tests happens to run them with -count=1 today; this step says so
+      # on purpose, on both legs,
       # so narrowing that step's package set cannot silently drop the gates.
       #   cmd/dbinventory  -> docs/architecture/server-boundaries.md (B3-0)
       #   migrations       -> docs/architecture/community-services.md (B5-0)
@@ -582,42 +567,6 @@ jobs:
         run: |
           go test -count=1 ./cmd/dbinventory/ ./migrations/
           go test -count=1 -run TestBundledChangelog ./admin/
-
-      # Tag-gated tests (DC-06 / T-2026-07-25-16). The build-tag matrix above
-      # only COMPILES the otel/wazero variants; the tests behind those tags
-      # (plugin/sandbox_wazero_test.go, telemetry/telemetry_otel_test.go,
-      # api/recoverer_otel_test.go — the OC-0346 panic-log test, which this
-      # step never executed until ./api/... was added) ran nowhere until this
-      # step. Scoped to the packages that carry tagged files — every other
-      # package is tag-invariant and already covered by the race run above.
-      # One leg is enough; no -race (the runtime under the tag is the concern,
-      # not new concurrency).
-      #
-      # admin/logstream_alloc_test.go (OC-0398) carries the INVERSE tag
-      # `!race && !deadlock`: it needs a leg where NEITHER is set, which is
-      # neither of the two universal legs above (each sets exactly one of
-      # the two) nor this step's own -tags lines — so it gets its own plain
-      # line here. Server/ci_tags_test.go guards this class going forward:
-      # it fails if any tagged Server test file has no `go test` leg above
-      # that both sets its tag and runs its package.
-      #
-      # `-run` narrows this leg to the tests that need a plain build, because
-      # running the whole package here re-ran everything the two universal legs
-      # already cover. Measured: the package is 62.6s, of which
-      # TestSetupLimiter_ReapsStaleEntries is 60.00s and is UNTAGGED — it is in
-      # the -race and deadlock legs already. This leg exists only for the
-      # `!race && !deadlock` tests, so it runs only those (0.088s).
-      # ci_tags_test.go now also requires the -run pattern to match every test
-      # in every constrained file it claims to cover, so adding a second
-      # `!race && !deadlock` test fails the guard instead of being silently
-      # left out of the only leg that could run it.
-      - name: Run tag-gated tests (-tags wazero, -tags otel)
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
-        run: |
-          go test -tags wazero -count=1 ./plugin/...
-          go test -tags otel -count=1 ./telemetry/... ./api/...
-          go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/
-          go test -count=1 -run '^TestWriteReady_AllocatesAFifthOfTheRoster$' ./ws/
 
       # Coverage ratchet (B3-6 item 1). Reads the profile the race step wrote,
       # but placed after the other test steps so a floor miss does not hide
@@ -650,6 +599,111 @@ jobs:
           version: v2.14.0
           working-directory: Server/
           verify: false
+
+  # The Linux-only test passes that used to run after the race step inside
+  # Server Build & Test (ubuntu-latest): the deadlock pass, the tag-gated tests
+  # and the real-SFU proofs. They share no state with the race run, so as their
+  # own job they run beside it instead of adding ~6 minutes after it. Gated
+  # like Server Lint & Invariants: a plain job (no matrix), so a job-level
+  # `if:` reports one `skipped` context, which a required check accepts.
+  server-deadlock-tags:
+    name: Server Deadlock & Tag Tests
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: Server/
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache-dependency-path: Server/go.sum
+
+      # install-livekit.mjs below is a node script.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+
+      # Real-SFU proof for single-port UDP (O1). Single-port mode is untested
+      # upstream, so a YAML-only assertion cannot tell whether livekit-server
+      # accepts it — this runs OwnCord's generated livekit.yaml through a real
+      # binary and requires a real WebRTC client to receive RTP, once in range
+      # mode (the shipped default) and once with voice.udp_port. One leg, no
+      # -race: the concern is whether media flows, not new concurrency.
+      - name: Cache livekit-server archive
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: Client/tests/e2e/.bin/livekit-cache
+          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Client/tests/e2e/scripts/install-livekit.mjs') }}
+
+      - name: Install livekit-server for the generated-config proof
+        working-directory: Client/
+        run: node tests/e2e/scripts/install-livekit.mjs
+
+      - name: Run the real-SFU proofs
+        env:
+          # Relative to each test's working directory, which is its package
+          # directory (Server/livekitproc, Server/ws), not Server/.
+          OWNCORD_LIVEKIT_TEST_BINARY: ../../Client/tests/e2e/.bin/livekit-server
+        # A pattern that matches no test still exits 0, so the count is
+        # checked first: a proof that moves package must fail this step, not
+        # drop out of it. -p 1 because both packages start livekit-server on
+        # its fixed ports.
+        run: |
+          found="$(go test -list '^TestRealLiveKit_' ./livekitproc/ ./ws/ | grep -c '^TestRealLiveKit_' || true)"
+          if [ "$found" -ne 3 ]; then
+            echo "::error::expected 3 real-SFU proofs in livekitproc and ws, found $found"
+            exit 1
+          fi
+          go test -count=1 -p 1 ./livekitproc/ ./ws/ -run '^TestRealLiveKit_'
+
+      # One leg is enough: -tags deadlock swaps syncutil's lock types and
+      # reports lock-order inversions, which do not depend on the OS, and no
+      # Windows-only file takes a syncutil lock. The race step above still runs
+      # every test on both legs, in Server Build & Test.
+      - name: Run tests with deadlock detection
+        run: go test -tags deadlock -count=1 ./...
+
+      # Tag-gated tests (DC-06 / T-2026-07-25-16). The build-tag matrix above
+      # only COMPILES the otel/wazero variants; the tests behind those tags
+      # (plugin/sandbox_wazero_test.go, telemetry/telemetry_otel_test.go,
+      # api/recoverer_otel_test.go — the OC-0346 panic-log test, which this
+      # step never executed until ./api/... was added) ran nowhere until this
+      # step. Scoped to the packages that carry tagged files — every other
+      # package is tag-invariant and already covered by the race run above.
+      # One leg is enough; no -race (the runtime under the tag is the concern,
+      # not new concurrency).
+      #
+      # admin/logstream_alloc_test.go (OC-0398) carries the INVERSE tag
+      # `!race && !deadlock`: it needs a leg where NEITHER is set, which is
+      # neither of the two universal legs (each sets exactly one of
+      # the two) nor this step's own -tags lines — so it gets its own plain
+      # line here. Server/ci_tags_test.go guards this class going forward:
+      # it fails if any tagged Server test file has no `go test` leg above
+      # that both sets its tag and runs its package.
+      #
+      # `-run` narrows this leg to the tests that need a plain build, because
+      # running the whole package here re-ran everything the two universal legs
+      # already cover. Measured: the package is 62.6s, of which
+      # TestSetupLimiter_ReapsStaleEntries is 60.00s and is UNTAGGED — it is in
+      # the -race and deadlock legs already. This leg exists only for the
+      # `!race && !deadlock` tests, so it runs only those (0.088s).
+      # ci_tags_test.go now also requires the -run pattern to match every test
+      # in every constrained file it claims to cover, so adding a second
+      # `!race && !deadlock` test fails the guard instead of being silently
+      # left out of the only leg that could run it.
+      - name: Run tag-gated tests (-tags wazero, -tags otel)
+        run: |
+          go test -tags wazero -count=1 ./plugin/...
+          go test -tags otel -count=1 ./telemetry/... ./api/...
+          go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/
+          go test -count=1 -run '^TestWriteReady_AllocatesAFifthOfTheRoster$' ./ws/
 
   # ubuntu-latest deliberately: the client TS code has zero win32-conditional
   # paths (no process.platform / path.sep branches in src or the unit suites),

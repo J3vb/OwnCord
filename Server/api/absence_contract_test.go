@@ -76,6 +76,7 @@ func fullRouterWithConfig(t *testing.T, mutate func(*config.Config)) (http.Handl
 // fails on the first one whose path names federation, a directory, discovery
 // or a listing. BPR-040/082/083.
 func TestAbsenceContract_NoFederationDirectoryOrListingRoutes(t *testing.T) {
+	t.Parallel()
 	handler := fullRouter(t)
 	routes, ok := handler.(chi.Routes)
 	if !ok {
@@ -119,6 +120,7 @@ func TestAbsenceContract_NoFederationDirectoryOrListingRoutes(t *testing.T) {
 // matches the pattern. A federation or directory feature carried entirely by
 // new frames would otherwise pass the route test above.
 func TestAbsenceContract_NoFederationDirectoryOrListingWireTypes(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "protocol", "schema.json"))
 	if err != nil {
 		t.Fatalf("read protocol/schema.json: %v", err)
@@ -161,6 +163,7 @@ func TestAbsenceContract_NoFederationDirectoryOrListingWireTypes(t *testing.T) {
 // pattern. A feature that needs a peer list, a directory URL or a discovery
 // toggle has to surface here, so this is the third boundary.
 func TestAbsenceContract_NoFederationDirectoryOrListingConfigKeys(t *testing.T) {
+	t.Parallel()
 	// On-disk paths that happen to contain a pattern word. Each entry names
 	// a filesystem location, never a network one; adding to this list needs
 	// the same justification as a route hit.

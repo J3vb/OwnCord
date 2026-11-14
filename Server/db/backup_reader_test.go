@@ -30,6 +30,7 @@ import (
 // what satisfies PERF-10; its service-level proof lives beside the quota
 // code (TestReserve_NotBlockedByAConcurrentBackup, service/storage_quota_test.go).
 func TestBackupToSafe_RunsWhileTheWriterIsBusy(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	// Hold the writer: BeginTx issues BEGIN IMMEDIATE on the single writer
@@ -135,6 +136,7 @@ func TestBackupToSafe_ConcurrentWriteIsNotDelayed(t *testing.T) {
 // the directory — another backup started the same second, or one a killed
 // process left — is neither published nor removed by this one.
 func TestBackupToSafe_FailedBackupLeavesNoCandidateFile(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")

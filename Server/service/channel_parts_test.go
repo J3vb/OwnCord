@@ -10,6 +10,7 @@ import (
 // asserts the category slices on it at construction, and a part handed a
 // narrower wrapper would quietly lose them.
 func TestChannelServicePartsShareStore(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := New(database, auth.NewRateLimiter()).Channels
 	for name, st := range map[string]any{
@@ -29,6 +30,7 @@ func TestChannelServicePartsShareStore(t *testing.T) {
 // The permission notifier is installed on ChannelService after construction; it
 // must land on the override part, the only code that fans out audience changes.
 func TestServicesNotifierReachesOverridePart(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svcs := New(database, auth.NewRateLimiter())
 	if svcs.Channels.channelOverrides == nil || svcs.Channels.readFocus == nil {

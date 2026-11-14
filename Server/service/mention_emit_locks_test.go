@@ -13,6 +13,7 @@ import (
 // worker holds it across a write), a read-pointer move and a delete reversal on
 // another channel go through, and the same channel still waits.
 func TestMentionEmitLocks_OtherChannelDoesNotWait(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedChannel(t, database, &db.Channel{ID: 11, Name: "other", Type: "text"})
 	if svc.mentionEmitLocks.forChannel(10) == svc.mentionEmitLocks.forChannel(11) {
@@ -53,6 +54,7 @@ func TestMentionEmitLocks_OtherChannelDoesNotWait(t *testing.T) {
 // A negative or large id picks a valid stripe (no out-of-range panic), and ids
 // a stripe count apart share one.
 func TestMentionEmitLocks_ForChannelStaysInRange(t *testing.T) {
+	t.Parallel()
 	var l mentionEmitLocks
 	for _, id := range []int64{0, 1, 63, 64, -1, -64, 1 << 62, -(1 << 62), -1 << 63} {
 		if l.forChannel(id) == nil {

@@ -56,6 +56,7 @@ func fakeGitHubReleaseWithManifest(t *testing.T, tag string, manifest, sig []byt
 }
 
 func TestClientUpdate_UnverifiableManifestIsNotAdvertised(t *testing.T) {
+	t.Parallel()
 	// The manifest claims epoch 1 (compatible) but its signature is garbage:
 	// the claim is untrusted, so the release is withheld.
 	manifest := []byte(`{"version":"v2.0.0","asset":"chatserver.exe","sha256":"00","protocol_epoch":1}`)

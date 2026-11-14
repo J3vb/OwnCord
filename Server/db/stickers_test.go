@@ -8,6 +8,7 @@ import (
 )
 
 func TestStickerCRUDRoundTrip(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "sticker-uploader")
@@ -56,6 +57,7 @@ func TestStickerCRUDRoundTrip(t *testing.T) {
 // A sticker message keeps its name when the sticker is deleted, loses the link,
 // and goes with its message.
 func TestMessageStickerSurvivesStickerDeleteAndCascadesWithMessage(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "sticker-author")

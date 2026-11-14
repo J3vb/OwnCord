@@ -19,6 +19,7 @@ type importedRow struct {
 }
 
 func TestImportedAuthor_RESTPayloads(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "reader", 1)
 	user, _ := database.GetUserByUsername(context.Background(), "reader")

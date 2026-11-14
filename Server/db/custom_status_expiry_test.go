@@ -12,6 +12,7 @@ import (
 // A status set in the same instant the old one expires carries a different
 // expiry, so the expirer's compare-and-clear for the old instant must leave it.
 func TestClearCustomStatusIfExpiry_TagMismatchNoop(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := mustCreateUser(t, database, "alice", "hash", 4)
@@ -39,6 +40,7 @@ func TestClearCustomStatusIfExpiry_TagMismatchNoop(t *testing.T) {
 }
 
 func TestCustomStatusExpiry_NextAndListExpired(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	if _, ok, err := database.NextCustomStatusExpiry(ctx); err != nil || ok {
@@ -74,6 +76,7 @@ func TestCustomStatusExpiry_NextAndListExpired(t *testing.T) {
 }
 
 func TestDenyPendingUser_ClearsCustomStatusExpiry(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	pid, err := database.CreatePendingUser(ctx, "applicant", "hash", 4, 100)

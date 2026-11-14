@@ -12,6 +12,7 @@ import (
 // TestOrient_EveryEXIFOrientation checks where each EXIF orientation puts the
 // stored image's first pixel, and that 5–8 swap the sides (EXIF 2.32, 4.6.4).
 func TestOrient_EveryEXIFOrientation(t *testing.T) {
+	t.Parallel()
 	src := image.NewRGBA(image.Rect(0, 0, 3, 2))
 	marker := color.RGBA{R: 255, A: 255}
 	src.SetRGBA(0, 0, marker)

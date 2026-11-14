@@ -27,6 +27,7 @@ func (s *eligibilityCountingStore) HasNSFWAcknowledgement(ctx context.Context, u
 // subscription, 5 are connected and 4 sit in a coalescing window; eligibility
 // is read only for the remaining subscribed ones, after one listing.
 func TestPushDispatch_EligibilityOnlyForSubscribedUsers(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "adults", Type: "text", NSFW: true})
 	if _, err := f.database.ExecContext(context.Background(), `UPDATE channels SET nsfw = 1 WHERE id = 10`); err != nil {
@@ -65,6 +66,7 @@ func TestPushDispatch_EligibilityOnlyForSubscribedUsers(t *testing.T) {
 
 // A subscribed role holder who cannot read the channel is never pushed.
 func TestPushDispatch_RoleHolderWhoCannotReadGetsNoPush(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "staff", Type: "text"})
 	seedUserRole(t, f.database, 1, 4)
@@ -91,6 +93,7 @@ func TestPushDispatch_RoleHolderWhoCannotReadGetsNoPush(t *testing.T) {
 // subscriber who cannot read the channel gets nothing and no window, so once
 // granted access the next Notify delivers exactly once.
 func TestPushDispatch_IneligibleSubscriberReservesNoWindow(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "staff", Type: "text"})
 	seedUserRole(t, f.database, 1, 4)

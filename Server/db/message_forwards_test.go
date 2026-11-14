@@ -5,13 +5,14 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-var forwardSeq int
+var forwardSeq atomic.Int64
 
 // forwardFixture is a source message with one file in a source channel, and a
 // forwarder with an unlinked clone of that file waiting for the target.
@@ -44,10 +45,10 @@ func newForwardFixture(t *testing.T) forwardFixture {
 
 // params builds a forward send with a fresh logical id and the clone attached.
 func (f forwardFixture) params(content string, attachments ...string) db.MessageDeliveryParams {
-	forwardSeq++
-	hash := sha256.Sum256([]byte(fmt.Sprintf("forward %d", forwardSeq)))
+	seq := forwardSeq.Add(1)
+	hash := sha256.Sum256([]byte(fmt.Sprintf("forward %d", seq)))
 	return db.MessageDeliveryParams{
-		UserID: f.forwarder, ChannelID: f.target, ClientMessageID: fmt.Sprintf("fwd-%d", forwardSeq),
+		UserID: f.forwarder, ChannelID: f.target, ClientMessageID: fmt.Sprintf("fwd-%d", seq),
 		PayloadHash: hash[:], Content: content, AttachmentIDs: attachments,
 		ExpiresAtMS: time.Now().Add(time.Hour).UnixMilli(),
 		Forward: &db.ForwardRow{
@@ -67,6 +68,7 @@ func (f forwardFixture) count(t *testing.T, q string, args ...any) int {
 }
 
 func TestCreateMessageDelivery_ForwardAtomic(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t)
 	ctx := context.Background()
 
@@ -125,6 +127,7 @@ func TestCreateMessageDelivery_ForwardAtomic(t *testing.T) {
 }
 
 func TestCreateMessageDelivery_ForwardSourceDeletedInTx(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t)
 	ctx := context.Background()
 	// A delete that commits before the forward's transaction wins.
@@ -152,6 +155,7 @@ func TestCreateMessageDelivery_ForwardSourceDeletedInTx(t *testing.T) {
 }
 
 func TestForward_SourcePurgedNullsLink(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t)
 	ctx := context.Background()
 	saved, err := f.database.CreateMessageDelivery(ctx, f.params("the original", f.cloneID))
@@ -183,6 +187,7 @@ func TestForward_SourcePurgedNullsLink(t *testing.T) {
 }
 
 func TestEditMessageContent_RefusesForward(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t)
 	ctx := context.Background()
 	saved, err := f.database.CreateMessageDelivery(ctx, f.params("the original", f.cloneID))
@@ -203,6 +208,7 @@ func TestEditMessageContent_RefusesForward(t *testing.T) {
 }
 
 func TestAttachForwards_DeletedSourceHidesLink(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t)
 	ctx := context.Background()
 	saved, err := f.database.CreateMessageDelivery(ctx, f.params("the original", f.cloneID))

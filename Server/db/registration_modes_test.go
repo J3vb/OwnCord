@@ -38,6 +38,7 @@ func migrationsBefore(t *testing.T, stop string) fstest.MapFS {
 // closed and never to open, a fresh install defaults to invite-only, and the
 // old row is removed.
 func TestMigration034_MapsRegistrationOpenWithoutOpening(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		users    bool
@@ -87,6 +88,7 @@ func TestMigration034_MapsRegistrationOpenWithoutOpening(t *testing.T) {
 // absent from the member roster and from the require_2fa enrolment count,
 // and only a still-pending row can be approved or denied.
 func TestPendingUsers_HeldOutsideTheRosterUntilDecided(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	mustCreateUser(t, database, "member", "hash", 4)
@@ -157,6 +159,7 @@ func TestPendingUsers_HeldOutsideTheRosterUntilDecided(t *testing.T) {
 
 // Open-mode registration commits the account and its first session together.
 func TestCreateUserWithSession_CommitsBothOrNeither(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, err := database.CreateUserWithSession(ctx, "opened", "hash", 4, "sess-opened", "test", "127.0.0.1")
@@ -182,6 +185,7 @@ func TestCreateUserWithSession_CommitsBothOrNeither(t *testing.T) {
 // admits exactly that many, because the count and the insert are one
 // statement, not a check followed by a write.
 func TestCreatePendingUser_CapIsEnforcedByTheInsert(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	for i := range 2 {
@@ -232,6 +236,7 @@ func TestCreatePendingUser_CapIsEnforcedByTheInsert(t *testing.T) {
 // denial falls back to a suffixed name instead of failing and leaving the
 // application pending.
 func TestDenyPendingUser_FallsBackWhenTheDeniedNameIsTaken(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	id, err := database.CreatePendingUser(ctx, "applicant", "hash", 4, 100)

@@ -63,6 +63,7 @@ func otherMessageID(t *testing.T, database *db.DB, sub eraseSubject) int64 {
 // An edit frame names its message and not its author, so the erasure matches it
 // through the messages table; another user's edit and thread frames survive.
 func TestEraseAccount_RemovesEditEventsOfErasedMessages(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
@@ -126,6 +127,7 @@ func TestEraseAccountDrain_ResumedAfterCrashRemovesEditEvents(t *testing.T) {
 // nothing from the drain, so it works after a restart. Frames of messages that still
 // exist, and frames from before the lock, are left to their own rules.
 func TestDeleteOrphanMessageEvents_SweepsOnlyFramesOfGoneMessages(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)

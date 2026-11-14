@@ -162,6 +162,7 @@ func (f *membersFixture) groupRowCount(t *testing.T) int {
 // ─── add ────────────────────────────────────────────────────────────────────
 
 func TestAddMembers_AddedUserGetsOpenBeforeRow(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 	rr := f.add(t, 1, 4) // bob, not the owner, adds dave
 	requireStatus(t, rr, http.StatusOK)
@@ -192,6 +193,7 @@ func TestAddMembers_AddedUserGetsOpenBeforeRow(t *testing.T) {
 }
 
 func TestAddMembers_ExistingMembersGetRefreshAndRow(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 	if rr := f.add(t, 0, 4, 5); rr.Code != http.StatusOK {
 		t.Fatalf("add: %d %s", rr.Code, rr.Body.String())
@@ -215,6 +217,7 @@ func TestAddMembers_ExistingMembersGetRefreshAndRow(t *testing.T) {
 }
 
 func TestAddMembers_Errors(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 
 	if rr := f.add(t, 3, 5); rr.Code != http.StatusNotFound {
@@ -260,6 +263,7 @@ func decodeCreateDM(t *testing.T, rr *httptest.ResponseRecorder) int64 {
 }
 
 func TestGroupFull_Returns409GroupDMFull(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 	extra := make([]int64, 0, 7)
 	for i := range 7 {
@@ -287,6 +291,7 @@ func TestGroupFull_Returns409GroupDMFull(t *testing.T) {
 // ─── remove ─────────────────────────────────────────────────────────────────
 
 func TestRemoveMember_RemovedGetsCloseAndNoRow(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 	rr := dmDo(t, f.router, http.MethodDelete, f.path("/members/3"), f.tokens[0], nil)
 	requireStatus(t, rr, http.StatusNoContent)
@@ -316,6 +321,7 @@ func TestRemoveMember_RemovedGetsCloseAndNoRow(t *testing.T) {
 }
 
 func TestRemoveMember_EvictsFromGroupCall(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 	if rr := dmDo(t, f.router, http.MethodDelete, f.path("/members/3"), f.tokens[0], nil); rr.Code != http.StatusNoContent {
 		t.Fatalf("remove: %d", rr.Code)
@@ -327,6 +333,7 @@ func TestRemoveMember_EvictsFromGroupCall(t *testing.T) {
 }
 
 func TestRemoveMember_Errors(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 	del := func(tokenIdx int, target int) int {
 		return dmDo(t, f.router, http.MethodDelete, f.path(fmt.Sprintf("/members/%d", target)), f.tokens[tokenIdx], nil).Code
@@ -354,6 +361,7 @@ func TestRemoveMember_Errors(t *testing.T) {
 // ─── owner ──────────────────────────────────────────────────────────────────
 
 func TestTransferOwner_RefreshesMembersWithoutARow(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 	rr := dmDo(t, f.router, http.MethodPut, f.path("/owner"), f.tokens[0], map[string]any{"user_id": 3})
 	requireStatus(t, rr, http.StatusOK)
@@ -387,6 +395,7 @@ func TestTransferOwner_RefreshesMembersWithoutARow(t *testing.T) {
 // ─── leave and rename ───────────────────────────────────────────────────────
 
 func TestLeave_SurvivorsGetNewOwnerAndRow(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 	if rr := dmDelete(t, f.router, f.path(""), f.tokens[0]); rr.Code != http.StatusNoContent {
 		t.Fatalf("leave: %d %s", rr.Code, rr.Body.String())
@@ -415,6 +424,7 @@ func TestLeave_SurvivorsGetNewOwnerAndRow(t *testing.T) {
 }
 
 func TestLeave_LastMemberWritesNoRow(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 	for i := range 3 {
 		if rr := dmDelete(t, f.router, f.path(""), f.tokens[i]); rr.Code != http.StatusNoContent {
@@ -433,6 +443,7 @@ func TestLeave_LastMemberWritesNoRow(t *testing.T) {
 }
 
 func TestRename_WritesRowAndUnchangedSendsNothing(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 	rr := dmPatch(t, f.router, f.path(""), f.tokens[1], map[string]any{"name": "Raid night"})
 	requireStatus(t, rr, http.StatusOK)
@@ -457,6 +468,7 @@ func TestRename_WritesRowAndUnchangedSendsNothing(t *testing.T) {
 // ─── rate limit ─────────────────────────────────────────────────────────────
 
 func TestGroupRoutes_RateLimitedPerUser(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	bc := &recordingBroadcaster{}
 	limiter := auth.NewRateLimiter()
@@ -516,6 +528,7 @@ func (s *cancelAfterAddStore) AddGroupDMMembers(ctx context.Context, channelID, 
 }
 
 func TestFanOut_SurvivesRequestCancelAfterCommit(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t)
 	reqCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()

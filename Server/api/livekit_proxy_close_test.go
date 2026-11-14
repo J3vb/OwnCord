@@ -51,6 +51,7 @@ func dialProxy(t *testing.T, ctx context.Context, backend string) *websocket.Con
 // The SFU's close code and reason reach the client unchanged, up to the longest
 // reason a close frame holds.
 func TestLiveKitProxy_WebSocket_ForwardsBackendCloseCode(t *testing.T) {
+	t.Parallel()
 	longest := strings.Repeat("r", 123)
 	for _, tc := range []struct {
 		name, reason, want string
@@ -79,6 +80,7 @@ func TestLiveKitProxy_WebSocket_ForwardsBackendCloseCode(t *testing.T) {
 
 // The client's close code reaches the SFU.
 func TestLiveKitProxy_WebSocket_ForwardsClientCloseCode(t *testing.T) {
+	t.Parallel()
 	got := make(chan websocket.CloseError, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
@@ -147,6 +149,7 @@ func TestLiveKitProxy_WebSocket_DialTimeout(t *testing.T) {
 }
 
 func TestTruncateCloseReason(t *testing.T) {
+	t.Parallel()
 	if got := api.TruncateCloseReasonForTest(strings.Repeat("é", 100)); got != strings.Repeat("é", 61) {
 		t.Fatalf("truncated to %d bytes %q, want 61 whole runes (122 bytes)", len(got), got)
 	}
@@ -156,6 +159,7 @@ func TestTruncateCloseReason(t *testing.T) {
 }
 
 func TestSendableCloseCode(t *testing.T) {
+	t.Parallel()
 	for code, want := range map[websocket.StatusCode]bool{
 		websocket.StatusNormalClosure: true, websocket.StatusGoingAway: true, websocket.StatusBadGateway: true,
 		3000: true, 4999: true, 1004: false, websocket.StatusNoStatusRcvd: false,

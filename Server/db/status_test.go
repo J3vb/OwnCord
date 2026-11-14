@@ -13,6 +13,7 @@ import (
 // rather than of each individual call site.
 
 func TestBroadcastStatus_MapsOnlyInvisible(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		db.StatusOnline:    db.StatusOnline,
 		db.StatusIdle:      db.StatusIdle,
@@ -28,6 +29,7 @@ func TestBroadcastStatus_MapsOnlyInvisible(t *testing.T) {
 }
 
 func TestStatusForViewer_OwnerSeesTruthOthersSeeOffline(t *testing.T) {
+	t.Parallel()
 	const subject int64 = 7
 	if got := db.StatusForViewer(db.StatusInvisible, subject, subject); got != db.StatusInvisible {
 		t.Errorf("owner view = %q, want invisible", got)
@@ -42,6 +44,7 @@ func TestStatusForViewer_OwnerSeesTruthOthersSeeOffline(t *testing.T) {
 }
 
 func TestConnectStatus_HonoursChoicesAndDefaultsOnline(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		db.StatusIdle:      db.StatusIdle,
 		db.StatusDND:       db.StatusDND,
@@ -61,6 +64,7 @@ func TestConnectStatus_HonoursChoicesAndDefaultsOnline(t *testing.T) {
 }
 
 func TestValidStatuses_AcceptsInvisible(t *testing.T) {
+	t.Parallel()
 	if !db.ValidStatuses[db.StatusInvisible] {
 		t.Error("invisible must be a settable status")
 	}
@@ -70,6 +74,7 @@ func TestValidStatuses_AcceptsInvisible(t *testing.T) {
 }
 
 func TestMemberSummary_ForViewer(t *testing.T) {
+	t.Parallel()
 	m := db.MemberSummary{ID: 3, Username: "ghost", Status: db.StatusInvisible}
 	if got := m.ForViewer(3).Status; got != db.StatusInvisible {
 		t.Errorf("self view = %q, want invisible", got)
@@ -85,6 +90,7 @@ func TestMemberSummary_ForViewer(t *testing.T) {
 }
 
 func TestStampConnections_DisconnectPreservesChosenStatus(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 
@@ -122,6 +128,7 @@ func TestStampConnections_DisconnectPreservesChosenStatus(t *testing.T) {
 }
 
 func TestUpdateUserCustomStatus_RoundTripAndClear(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 	id := mustCreateUser(t, database, "statusy", "hash", 4)
@@ -141,6 +148,7 @@ func TestUpdateUserCustomStatus_RoundTripAndClear(t *testing.T) {
 }
 
 func TestIsAvatarFileURL(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 	id := mustCreateUser(t, database, "pfp", "hash", 4)
@@ -165,6 +173,7 @@ func TestIsAvatarFileURL(t *testing.T) {
 }
 
 func TestEffectiveDisplayName(t *testing.T) {
+	t.Parallel()
 	name := "Ada L."
 	empty := ""
 	cases := []struct {
@@ -184,6 +193,7 @@ func TestEffectiveDisplayName(t *testing.T) {
 }
 
 func TestUpdateUserProfile_WritesDisplayNameAndAbout(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 	id := mustCreateUser(t, database, "bio", "hash", 4)

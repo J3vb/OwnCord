@@ -18,6 +18,7 @@ func timeOutNickFixture(t *testing.T, f *nicknameFixture, target int64, expires 
 }
 
 func TestUpdateProfile_DisplayNameRefusedWhileTimedOut(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	f.setRaw(ctx, t, nickMember, "Reset")
@@ -37,6 +38,7 @@ func TestUpdateProfile_DisplayNameRefusedWhileTimedOut(t *testing.T) {
 }
 
 func TestUpdateProfile_SameDisplayNameAllowedWhileTimedOut(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	f.setRaw(ctx, t, nickMember, "Reset")
@@ -52,6 +54,7 @@ func TestUpdateProfile_SameDisplayNameAllowedWhileTimedOut(t *testing.T) {
 }
 
 func TestUpdateProfile_OtherAvatarAboutAllowedWhileTimedOut(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	timeOutNickFixture(t, f, nickMember, time.Now().Add(time.Hour))
@@ -74,6 +77,7 @@ func TestUpdateProfile_OtherAvatarAboutAllowedWhileTimedOut(t *testing.T) {
 
 // With the nickname reset the username is the shown name, so it is held too.
 func TestUpdateProfile_UsernameRefusedWhileTimedOut(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	timeOutNickFixture(t, f, nickMember, time.Now().Add(time.Hour))
@@ -89,6 +93,7 @@ func TestUpdateProfile_UsernameRefusedWhileTimedOut(t *testing.T) {
 }
 
 func TestUpdateProfile_DisplayNameAllowedAfterTimeoutLifted(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	timeOutNickFixture(t, f, nickMember, time.Now().Add(time.Hour))
@@ -102,6 +107,7 @@ func TestUpdateProfile_DisplayNameAllowedAfterTimeoutLifted(t *testing.T) {
 }
 
 func TestUpdateProfile_DisplayNameAllowedAfterTimeoutExpired(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	timeOutNickFixture(t, f, nickMember, time.Now().Add(-time.Hour))
@@ -115,6 +121,7 @@ func TestUpdateProfile_DisplayNameAllowedAfterTimeoutExpired(t *testing.T) {
 }
 
 func TestDisplayName_EqualsOtherUsernameRefused(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	for _, name := range []string{"u4", "U4", "u4 "} {
@@ -135,6 +142,7 @@ func TestDisplayName_EqualsOtherUsernameRefused(t *testing.T) {
 }
 
 func TestDisplayName_OwnUsernameAllowed(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	if _, err := f.users.UpdateProfile(ctx, nickMember, ProfilePatch{DisplayName: new("U3")}); err != nil {
@@ -146,6 +154,7 @@ func TestDisplayName_OwnUsernameAllowed(t *testing.T) {
 }
 
 func TestUpdateProfile_AuditRecordsDisplayNameChange(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	rec := audittest.Install(t, f.database)
 	ctx := context.Background()

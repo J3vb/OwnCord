@@ -136,6 +136,7 @@ func copySidecar(t *testing.T, src, dst string) {
 // migration that does spill shows up in the drill's output rather than
 // silently changing what was proven.
 func TestB611_InterruptedMigrationRollsBack(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, dbPath := drillCopy(t)
 	migration, reversal := newestMigration(t)
@@ -242,6 +243,7 @@ func TestB611_InterruptedMigrationRollsBack(t *testing.T) {
 // to prove the interrupted file was the real reversal of a real migration
 // rather than a fixture that could not have changed anything.
 func TestB611_InterruptedRollbackLeavesSchema(t *testing.T) {
+	t.Parallel()
 	// The snapshot's own schema, as the round trip at the end must land on it.
 	fresh := openSnapshotCopy(t)
 	baseSchema := schemaFingerprint(t, fresh)
@@ -522,6 +524,7 @@ func b611IntegrityReport(t *testing.T, path string) string {
 // TestCheckBackupIntegrity_ValidAndCorrupt (backup_test.go) covers the gate
 // itself, corrupt and missing.
 func TestB611_CorruptFilesFailClosed(t *testing.T) {
+	t.Parallel()
 	t.Run("main database, flipped page", func(t *testing.T) {
 		dir, path := b611HeadCopy(t)
 		t.Logf("page 7 of the HEAD copy is %s; the boot sequence's read is over that table", b611PageOwner(t, path, 7))

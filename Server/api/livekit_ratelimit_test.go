@@ -18,6 +18,7 @@ func okHandler(w http.ResponseWriter, r *http.Request) {
 // endpoints (verify-totp, password change) that ride the empty-prefix
 // bucket for the same IP.
 func TestRateLimitMiddlewareWithPrefix_SeparatesClientUpdateBucket(t *testing.T) {
+	t.Parallel()
 	limiter := auth.NewRateLimiter()
 	trustedProxies := []string{"127.0.0.0/8"}
 
@@ -52,6 +53,7 @@ func TestRateLimitMiddlewareWithPrefix_SeparatesClientUpdateBucket(t *testing.T)
 }
 
 func TestRateLimitMiddlewareWithPrefix_SeparatesLiveKitBucket(t *testing.T) {
+	t.Parallel()
 	limiter := auth.NewRateLimiter()
 	trustedProxies := []string{"127.0.0.0/8"}
 

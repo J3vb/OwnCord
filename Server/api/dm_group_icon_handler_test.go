@@ -176,6 +176,7 @@ func iconID(t *testing.T, info db.DMChannelInfo) string {
 }
 
 func TestUploadGroupIcon_SetsIconRowAndRefresh(t *testing.T) {
+	t.Parallel()
 	f := newIconFixture(t)
 	rr := f.upload(t, "bob", makePNGBytes(t, 64, 64)) // a member who is not the owner
 	requireStatus(t, rr, http.StatusOK)
@@ -225,6 +226,7 @@ func TestUploadGroupIcon_SetsIconRowAndRefresh(t *testing.T) {
 }
 
 func TestUploadGroupIcon_RejectsOversizeWrongTypeAndBadTargets(t *testing.T) {
+	t.Parallel()
 	f := newIconFixture(t)
 	if rr := f.upload(t, "bob", []byte("this is plain text, not a PNG")); rr.Code != http.StatusBadRequest {
 		t.Errorf("non-image = %d, want 400", rr.Code)
@@ -261,6 +263,7 @@ func TestUploadGroupIcon_RejectsOversizeWrongTypeAndBadTargets(t *testing.T) {
 }
 
 func TestUploadGroupIcon_IsRateLimitedOnItsOwnKey(t *testing.T) {
+	t.Parallel()
 	f := newIconFixture(t)
 	for i := range 5 {
 		if rr := f.upload(t, "bob", []byte("not an image")); rr.Code != http.StatusBadRequest {
@@ -277,6 +280,7 @@ func TestUploadGroupIcon_IsRateLimitedOnItsOwnKey(t *testing.T) {
 }
 
 func TestUploadGroupIcon_RouteNotMountedWithoutStore(t *testing.T) {
+	t.Parallel()
 	f := newIconFixture(t)
 	r := chi.NewRouter()
 	api.MountDMRoutes(r, service.New(f.database, auth.NewRateLimiter()), f.bc, nil, nil)
@@ -297,6 +301,7 @@ func TestUploadGroupIcon_RouteNotMountedWithoutStore(t *testing.T) {
 // Edge case 2: the uploader stops being a member between the upload and the
 // transaction. The file and its record are deleted and nothing is written.
 func TestUploadGroupIcon_FailedCommitUnrecordsFile(t *testing.T) {
+	t.Parallel()
 	f := newIconFixture(t)
 	f.store.onSave = func(string) {
 		if _, err := f.database.LeaveGroupDM(context.Background(), f.ids["bob"], f.group, "bob left the group."); err != nil {
@@ -335,6 +340,7 @@ func TestUploadGroupIcon_FailedCommitUnrecordsFile(t *testing.T) {
 // members and is reclaimed by the orphan sweep, and each committed change wrote
 // exactly one row.
 func TestUploadGroupIcon_ReplacedWhileUploadInFlight(t *testing.T) {
+	t.Parallel()
 	f := newIconFixture(t)
 	gate, entered := make(chan struct{}), make(chan struct{})
 	f.store.mu.Lock()
@@ -392,6 +398,7 @@ func TestUploadGroupIcon_ReplacedWhileUploadInFlight(t *testing.T) {
 }
 
 func TestServeFile_GroupIconReadableByMembersOnly(t *testing.T) {
+	t.Parallel()
 	f := newIconFixture(t)
 	id := iconID(t, decodeDMInfo(t, f.upload(t, "bob", makePNGBytes(t, 32, 32))))
 
@@ -432,6 +439,7 @@ func TestServeFile_GroupIconReadableByMembersOnly(t *testing.T) {
 }
 
 func TestDeleteGroupIcon_NoIconNoRow(t *testing.T) {
+	t.Parallel()
 	f := newIconFixture(t)
 	rr := f.clear(t, "bob")
 	requireStatus(t, rr, http.StatusOK)
@@ -447,6 +455,7 @@ func TestDeleteGroupIcon_NoIconNoRow(t *testing.T) {
 }
 
 func TestDeleteGroupIcon_ClearsAndFansOut(t *testing.T) {
+	t.Parallel()
 	f := newIconFixture(t)
 	if rr := f.upload(t, "bob", makePNGBytes(t, 16, 16)); rr.Code != http.StatusOK {
 		t.Fatalf("upload = %d", rr.Code)

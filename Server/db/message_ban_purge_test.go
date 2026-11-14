@@ -17,6 +17,7 @@ func banPurgeStamp(d time.Duration) string {
 }
 
 func TestPurgeUserChannelMessagesSince_OnlyAuthorAndWindow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	target, other := seedUser(t, database, "bp-target"), seedUser(t, database, "bp-other")
@@ -41,6 +42,7 @@ func TestPurgeUserChannelMessagesSince_OnlyAuthorAndWindow(t *testing.T) {
 }
 
 func TestPurgeUserChannelMessagesSince_SkipsAlreadyDeleted(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	target := seedUser(t, database, "bp-target")
@@ -64,6 +66,7 @@ func TestPurgeUserChannelMessagesSince_SkipsAlreadyDeleted(t *testing.T) {
 }
 
 func TestPurgeUserChannelMessagesSince_LimitBatches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	target := seedUser(t, database, "bp-target")
@@ -92,6 +95,7 @@ func TestPurgeUserChannelMessagesSince_LimitBatches(t *testing.T) {
 }
 
 func TestListUserMessageChannelsSince_ExcludesDMGroupDMArchived(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	target := seedUser(t, database, "bp-target")
@@ -123,6 +127,7 @@ func TestListUserMessageChannelsSince_ExcludesDMGroupDMArchived(t *testing.T) {
 }
 
 func TestBanPurge_HiddenFromSearchPinsAndUnread(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	target, reader := seedUser(t, database, "bp-target"), seedUser(t, database, "bp-reader")
@@ -170,6 +175,7 @@ func TestBanPurge_HiddenFromSearchPinsAndUnread(t *testing.T) {
 }
 
 func TestRecordRemovalAction_WritesOneRowTargetingTheAuthor(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -181,6 +187,7 @@ func TestRecordRemovalAction_WritesOneRowTargetingTheAuthor(t *testing.T) {
 }
 
 func TestRecordRemovalAction_RefusesAnErasedActor(t *testing.T) {
+	t.Parallel()
 	database, _, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 

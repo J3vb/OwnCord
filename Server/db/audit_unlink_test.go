@@ -13,6 +13,7 @@ import (
 // away; a writer that never started, or a cancelled barrier, reports so
 // without touching the queue.
 func TestAuditWriter_FlushIsABarrier(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := &fakeAuditStore{}
 	w := db.NewAuditWriter(store, 64, 50, time.Hour)
@@ -61,6 +62,7 @@ func TestAuditWriter_FlushIsABarrier(t *testing.T) {
 // entry about anyone else, or a message target with a colliding id, is
 // untouched; without a writer the store writes as told.
 func TestPersistAudits_AppliesTheUnlinkRulesAtInsert(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	w := db.NewAuditWriter(database, 64, 50, time.Hour)

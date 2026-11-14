@@ -84,6 +84,7 @@ func derefOr(p *string, none string) string {
 }
 
 func TestSetNickname_Authorization(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	unknown := int64(999)
@@ -131,6 +132,7 @@ func TestSetNickname_Authorization(t *testing.T) {
 }
 
 func TestSetNickname_PendingTargetIsNotFound(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	if _, err := f.database.ExecContext(context.Background(), `UPDATE users SET registration_status = 'pending' WHERE id = ?`, nickMember); err != nil {
 		t.Fatalf("make pending: %v", err)
@@ -145,6 +147,7 @@ func TestSetNickname_PendingTargetIsNotFound(t *testing.T) {
 }
 
 func TestSetNickname_ValidationMatchesSelfEdit(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	refused := map[string]string{
@@ -215,6 +218,7 @@ func (f *nicknameFixture) warm(t *testing.T, ids ...int64) {
 }
 
 func TestSetNickname_RankChangedBeforeWrite(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	f.setRaw(ctx, t, nickMember, "before")
@@ -236,6 +240,7 @@ func TestSetNickname_RankChangedBeforeWrite(t *testing.T) {
 }
 
 func TestSetNickname_BitRemovedBeforeWrite(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	f.setRaw(ctx, t, nickMember, "before")
@@ -255,6 +260,7 @@ func TestSetNickname_BitRemovedBeforeWrite(t *testing.T) {
 }
 
 func TestSetNickname_MultiRole_BitFromLowerHeldRole(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	// User 7's top role (senior, 70) has no bit; the lower held role (nick, 20)
@@ -282,6 +288,7 @@ func TestSetNickname_MultiRole_BitFromLowerHeldRole(t *testing.T) {
 // lost: the later writer wins on display_name, and the member's other column
 // (about) survives the moderator's write.
 func TestSetNickname_RacesSelfEdit(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	ctx := context.Background()
 	f.setRaw(ctx, t, nickMember, "before")
@@ -348,6 +355,7 @@ func TestSetNickname_RacesSelfEdit(t *testing.T) {
 }
 
 func TestSetNickname_AuditRowOldAndNew(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	rec := audittest.Install(t, f.database)
 	ctx := context.Background()
@@ -388,6 +396,7 @@ func TestSetNickname_AuditRowOldAndNew(t *testing.T) {
 }
 
 func TestSetNickname_RateLimitedAfterAuthorization(t *testing.T) {
+	t.Parallel()
 	f := newNicknameFixture(t)
 	f.mod.limiter = auth.NewRateLimiter()
 	ctx := context.Background()
@@ -415,6 +424,7 @@ func TestSetNickname_RateLimitedAfterAuthorization(t *testing.T) {
 // The nickname write serializes with the member's own profile edit only when
 // both go through one UserService, and so one profileLocks.
 func TestSetNickname_SharesUserServiceWithSelfEdit(t *testing.T) {
+	t.Parallel()
 	svcs := New(newTestDB(t), nil)
 	if svcs.Moderation.users != svcs.Users {
 		t.Fatal("Moderation.users must be the same UserService as Services.Users")

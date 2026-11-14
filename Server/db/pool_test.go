@@ -53,6 +53,7 @@ func seedChannelAndUser(t *testing.T, database *db.DB) (channelID, userID int64)
 // regression this catches is the DSN `_pragma=` parameters being dropped,
 // which would leave fresh pooled connections with foreign_keys=OFF.
 func TestFilePool_ForeignKeysOnReaderConnections(t *testing.T) {
+	t.Parallel()
 	database := openFileDB(t)
 	ctx := context.Background()
 
@@ -108,6 +109,7 @@ func TestFilePool_ForeignKeysOnReaderConnections(t *testing.T) {
 // path) against 8 reader goroutines, then asserts nothing errored and every
 // row landed.
 func TestFilePool_ConcurrentReadsAndWrites(t *testing.T) {
+	t.Parallel()
 	database := openFileDB(t)
 	ctx := context.Background()
 	channelID, userID := seedChannelAndUser(t, database)
@@ -173,6 +175,7 @@ func TestFilePool_ConcurrentReadsAndWrites(t *testing.T) {
 // live on the writer connection of a file-backed database, through both the
 // sqlc RETURNING write path and a raw ExecContext insert.
 func TestFilePool_FKViolationRejectedOnFile(t *testing.T) {
+	t.Parallel()
 	database := openFileDB(t)
 	ctx := context.Background()
 	channelID, userID := seedChannelAndUser(t, database)
@@ -201,6 +204,7 @@ func TestFilePool_FKViolationRejectedOnFile(t *testing.T) {
 // open (BEGIN IMMEDIATE) write transaction, seeing the pre-transaction
 // snapshot, and sees the new data once the transaction commits.
 func TestFilePool_ReadDuringOpenWriteTx(t *testing.T) {
+	t.Parallel()
 	database := openFileDB(t)
 	ctx := context.Background()
 	channelID, userID := seedChannelAndUser(t, database)
@@ -247,6 +251,7 @@ func TestFilePool_ReadDuringOpenWriteTx(t *testing.T) {
 // activity sort is a CTE) to the reader pool: it must finish while the single
 // writer connection is held by an open write transaction.
 func TestFilePool_ThreadListDuringOpenWriteTx(t *testing.T) {
+	t.Parallel()
 	database := openFileDB(t)
 	ctx := context.Background()
 	channelID, userID := seedChannelAndUser(t, database)

@@ -311,6 +311,7 @@ func requireStorageErrorHidesPath(t *testing.T, rr *httptest.ResponseRecorder, d
 // failure (disk full, permission change, read-only mount) learns the
 // server's absolute storage directory layout.
 func TestUpload_StorageErrorDoesNotLeakPath(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	dir := t.TempDir()
 	store, err := storage.New(dir, 10)
@@ -328,6 +329,7 @@ func TestUpload_StorageErrorDoesNotLeakPath(t *testing.T) {
 }
 
 func TestUpload_DBCreateAttachmentFailureDeletesStoredFile(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	dir := t.TempDir()
 	store, err := storage.New(dir, 10)
@@ -360,6 +362,7 @@ func TestUpload_DBCreateAttachmentFailureDeletesStoredFile(t *testing.T) {
 }
 
 func TestUpload_SanitizesReservedFilenameToUnnamed(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -395,6 +398,7 @@ func TestUpload_SanitizesReservedFilenameToUnnamed(t *testing.T) {
 // backslash survived on a Linux server and is a path separator on the victim's
 // Windows client.
 func TestUpload_StripsBidiOverrideAndForeignSeparator(t *testing.T) {
+	t.Parallel()
 	// Escaped rather than embedded: a literal U+202E would reorder this source
 	// file in every editor and terminal that renders it — which is the whole
 	// primitive under test.
@@ -453,6 +457,7 @@ func TestUpload_StripsBidiOverrideAndForeignSeparator(t *testing.T) {
 }
 
 func TestUpload_SuccessfulUploadCreatesDBRecord(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -486,6 +491,7 @@ func TestUpload_SuccessfulUploadCreatesDBRecord(t *testing.T) {
 }
 
 func TestUpload_ResponseFields(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -526,6 +532,7 @@ func TestUpload_ResponseFields(t *testing.T) {
 // ─── Table-driven tests for blocked file types ──────────────────────────────
 
 func TestUpload_BlockedFileTypes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		filename string
@@ -556,6 +563,7 @@ func TestUpload_BlockedFileTypes(t *testing.T) {
 // ─── End-to-end upload then serve round-trip ────────────────────────────────
 
 func TestUpload_ThenServe_RoundTrip(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -584,6 +592,7 @@ func TestUpload_ThenServe_RoundTrip(t *testing.T) {
 }
 
 func TestUpload_ThenServe_PNG_RoundTrip(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -694,6 +703,7 @@ func pngBomb(t *testing.T, width, height uint32) []byte {
 }
 
 func TestServeThumb_PNGFitsTheBox(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -726,6 +736,7 @@ func TestServeThumb_PNGFitsTheBox(t *testing.T) {
 }
 
 func TestServeThumb_JPEGFitsTheBox(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -747,6 +758,7 @@ func TestServeThumb_JPEGFitsTheBox(t *testing.T) {
 // A phone photo stores its pixels sideways with an EXIF Orientation tag the
 // webview honours for the original; the thumbnail must come out upright too.
 func TestServeThumb_JPEGHonoursEXIFOrientation(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	token := uploadCreateToken(t, database, "thumbexif", 4)
@@ -771,6 +783,7 @@ func TestServeThumb_JPEGHonoursEXIFOrientation(t *testing.T) {
 // A sideways-stored phone photo records its upright size, so clients
 // reserve a portrait box for it.
 func TestUpload_JPEGDimensionsHonourEXIFOrientation(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	token := uploadCreateToken(t, database, "dimsexif", 4)
@@ -798,6 +811,7 @@ func TestUpload_JPEGDimensionsHonourEXIFOrientation(t *testing.T) {
 // Anything the server does not thumbnail — an image already inside the box,
 // an animated GIF — is passed through as the original bytes.
 func TestServeThumb_PassesThroughSmallImagesAndGIFs(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -822,6 +836,7 @@ func TestServeThumb_PassesThroughSmallImagesAndGIFs(t *testing.T) {
 }
 
 func TestServeThumb_NonImageIsNotFound(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	token := uploadCreateToken(t, database, "thumbtxt", 4)
@@ -835,6 +850,7 @@ func TestServeThumb_NonImageIsNotFound(t *testing.T) {
 // refused before a full decode, which would try to allocate the declared
 // 10 gigapixels; the original is passed through untouched instead.
 func TestServeThumb_DecompressionBombIsNotDecoded(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -855,6 +871,7 @@ func TestServeThumb_DecompressionBombIsNotDecoded(t *testing.T) {
 // at fewer pixels than an 8-bit image: this 25-megapixel 16-bit PNG, a few KB
 // on disk, is over the cap and is passed through without a decode.
 func TestServeThumb_Large16BitPNGIsNotDecoded(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -874,6 +891,7 @@ func TestServeThumb_Large16BitPNGIsNotDecoded(t *testing.T) {
 // A 4500x4500 16-bit PNG, about 160 KB on disk, would take over 150 MiB to
 // decode and more again to scale: it is over the cap and passed through.
 func TestServeThumb_16BitPNG4500IsNotDecoded(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -893,6 +911,7 @@ func TestServeThumb_16BitPNG4500IsNotDecoded(t *testing.T) {
 // A baseline JPEG is counted at its decoded image alone, so a 24-megapixel
 // camera photo gets a real thumbnail.
 func TestServeThumb_LargeBaselineJPEGFitsTheBox(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -915,6 +934,7 @@ func TestServeThumb_LargeBaselineJPEGFitsTheBox(t *testing.T) {
 // a progressive one, and is passed through without a decode. Go encodes only
 // baseline, so its SOF0 marker is patched to SOF2; the body is never decoded.
 func TestServeThumb_LargeProgressiveJPEGIsNotDecoded(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -941,6 +961,7 @@ func TestServeThumb_LargeProgressiveJPEGIsNotDecoded(t *testing.T) {
 // without decoding it again. The original is swapped for a decodable one
 // after the first request to show the second never decodes.
 func TestServeThumb_UndecodableJPEGIsDecodedOnce(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	dir := t.TempDir()
 	store, err := storage.New(dir, 10)
@@ -996,6 +1017,7 @@ func TestServeThumb_UndecodableJPEGIsDecodedOnce(t *testing.T) {
 }
 
 func TestServeThumb_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	token := uploadCreateToken(t, database, "thumbanon", 4)
@@ -1008,6 +1030,7 @@ func TestServeThumb_Unauthenticated(t *testing.T) {
 // The thumbnail is the same content as the file, so it answers to the same
 // access rule: a member without READ_MESSAGES on the channel gets 403.
 func TestServeThumb_MemberWithoutReadForbidden(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	uploaderToken := uploadCreateToken(t, database, "thumbowner", 1)
@@ -1058,6 +1081,7 @@ func attachmentCount(t *testing.T, h *quotaHarness) int {
 // A part after the file is still request body: bytes past the body cap are
 // refused with 413 and nothing is recorded or kept.
 func TestUpload_TrailingPartBeyondBodyCapIs413(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("streams a 100 MiB tail")
 	}
@@ -1096,6 +1120,7 @@ func TestUpload_TrailingPartBeyondBodyCapIs413(t *testing.T) {
 
 // A tail that stops mid-part is a malformed body, not a finished upload.
 func TestUpload_MalformedTailIs400(t *testing.T) {
+	t.Parallel()
 	h := cappedHarness(t, 10)
 	body := "--B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\n\r\n" +
 		"hello world this is a text file\r\n" +
@@ -1122,6 +1147,7 @@ func quickTimeHeader() []byte {
 }
 
 func TestUpload_SniffsQuickTimeAsVideo(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -1138,6 +1164,7 @@ func TestUpload_SniffsQuickTimeAsVideo(t *testing.T) {
 // A <video> element seeks with Range requests; the served video must answer
 // one with 206, the requested slice and its real Content-Type.
 func TestServeFile_VideoHonoursRangeWithItsContentType(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)

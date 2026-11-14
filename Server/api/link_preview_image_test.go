@@ -13,6 +13,7 @@ import (
 )
 
 func TestLinkPreviewImageRoute(t *testing.T) {
+	t.Parallel()
 	var dataDir string
 	router, database := fullRouterWithConfig(t, func(c *config.Config) { dataDir = c.Server.DataDir })
 	token := createUserToken(t, database, "lp-img-token-", "viewer", 4)

@@ -50,6 +50,7 @@ func assertGroupRowUnchanged(t *testing.T, f *moderationActionsFixture, msgID in
 }
 
 func TestEditMessage_GroupRowForbidden(t *testing.T) {
+	t.Parallel()
 	for _, kind := range groupKinds {
 		f, _, msgID := groupRowFixture(t, kind)
 		if _, err := f.messages.EditMessage(context.Background(), fixtureMember, msgID, "rewritten"); !errors.Is(err, ErrForbidden) {
@@ -60,6 +61,7 @@ func TestEditMessage_GroupRowForbidden(t *testing.T) {
 }
 
 func TestDeleteMessage_GroupRowForbidden(t *testing.T) {
+	t.Parallel()
 	for _, kind := range groupKinds {
 		f, _, msgID := groupRowFixture(t, kind)
 		ctx := context.Background()
@@ -76,6 +78,7 @@ func TestDeleteMessage_GroupRowForbidden(t *testing.T) {
 }
 
 func TestReaction_GroupRowRefused(t *testing.T) {
+	t.Parallel()
 	for _, kind := range groupKinds {
 		f, _, msgID := groupRowFixture(t, kind)
 		ctx := context.Background()
@@ -90,6 +93,7 @@ func TestReaction_GroupRowRefused(t *testing.T) {
 }
 
 func TestPin_GroupRowRefused(t *testing.T) {
+	t.Parallel()
 	for _, kind := range groupKinds {
 		f, dmID, msgID := groupRowFixture(t, kind)
 		if _, err := f.messages.SetMessagePinned(context.Background(), fixtureMember, dmID, msgID, true); !errors.Is(err, ErrBadRequest) {
@@ -100,6 +104,7 @@ func TestPin_GroupRowRefused(t *testing.T) {
 }
 
 func TestSend_ReplyToGroupRowRefused(t *testing.T) {
+	t.Parallel()
 	for _, kind := range groupKinds {
 		f, dmID, msgID := groupRowFixture(t, kind)
 		_, err := f.messages.SendMessage(context.Background(), SendMessageParams{
@@ -114,6 +119,7 @@ func TestSend_ReplyToGroupRowRefused(t *testing.T) {
 // ─── Owner in the summary ───────────────────────────────────────────────────
 
 func TestCreateGroupDM_CreatorOwnsAndSummaryCarriesOwner(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	svc := NewDMService(f.database, f.mod.perms)
@@ -137,6 +143,7 @@ func TestCreateGroupDM_CreatorOwnsAndSummaryCarriesOwner(t *testing.T) {
 }
 
 func TestCloseDM_OwnerLeaveHandsOffAndSummaryFollows(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	svc := NewDMService(f.database, f.mod.perms)

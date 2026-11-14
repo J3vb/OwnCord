@@ -64,6 +64,7 @@ func seedMessage(t *testing.T, database *db.DB, channelID, userID int64, deleted
 }
 
 func TestUploadResolve_MissingAttachmentIsNotFound(t *testing.T) {
+	t.Parallel()
 	uploads, _ := newUploadFixture(t)
 
 	_, err := uploads.Resolve(context.Background(), "nope")
@@ -76,6 +77,7 @@ func TestUploadResolve_MissingAttachmentIsNotFound(t *testing.T) {
 // is why the check lives in Resolve rather than in Authorize: an administrator
 // gets the same 404, because the tombstone applies to everyone.
 func TestUploadResolve_TombstonedMessageHidesItsAttachments(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	seedUser(t, database, &db.User{ID: 1})
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general"})
@@ -101,6 +103,7 @@ func TestUploadResolve_TombstonedMessageHidesItsAttachments(t *testing.T) {
 // A row whose message is gone entirely is unlinked-shaped, not tombstoned:
 // Resolve hands it on and the ownership rules in Authorize decide.
 func TestUploadResolve_MissingMessageRowFallsThroughToTheACL(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	uploader := int64(1)
 	seedUser(t, database, &db.User{ID: 1})
@@ -118,6 +121,7 @@ func TestUploadResolve_MissingMessageRowFallsThroughToTheACL(t *testing.T) {
 }
 
 func TestUploadAuthorize_UnlinkedIsPrivateToItsUploader(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	seedUser(t, database, &db.User{ID: 1})
 	seedUser(t, database, &db.User{ID: 2})
@@ -144,6 +148,7 @@ func TestUploadAuthorize_UnlinkedIsPrivateToItsUploader(t *testing.T) {
 // the column holds, so replacing the avatar takes the file private again in the
 // same instant.
 func TestUploadAuthorize_AvatarIsPublicOnlyWhileInUse(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	url := AvatarFileURL("face")
 	seedUser(t, database, &db.User{ID: 1, Avatar: &url})
@@ -167,6 +172,7 @@ func TestUploadAuthorize_AvatarIsPublicOnlyWhileInUse(t *testing.T) {
 // M-2: a legacy row with no uploader is denied rather than served to any
 // authenticated caller.
 func TestUploadAuthorize_LegacyRowWithNoUploaderIsDenied(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	seedUser(t, database, &db.User{ID: 1})
 	seedAttachment(t, database, "legacy", nil, nil)
@@ -181,6 +187,7 @@ func TestUploadAuthorize_LegacyRowWithNoUploaderIsDenied(t *testing.T) {
 // OC-0112: DM participation is required of everyone, administrators included —
 // the admin bypass must not reach a DM the administrator is not in.
 func TestUploadAuthorize_DMParticipationBindsAdministratorsToo(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	admin := &db.Role{ID: 1, Name: "admin", Permissions: permissions.AllPerms, Position: 100}
 	seedRole(t, database, admin)
@@ -207,6 +214,7 @@ func TestUploadAuthorize_DMParticipationBindsAdministratorsToo(t *testing.T) {
 // A linked attachment in a guild channel needs READ_MESSAGES there, and an
 // administrator reads it without one.
 func TestUploadAuthorize_GuildChannelNeedsReadMessages(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	admin := &db.Role{ID: 1, Name: "admin", Permissions: permissions.AllPerms, Position: 100}
 	reader := &db.Role{ID: 5, Name: "reader", Permissions: permissions.ReadMessages, Position: 10}
@@ -241,6 +249,7 @@ func TestUploadAuthorize_GuildChannelNeedsReadMessages(t *testing.T) {
 // Every refusal answers with the same message, so a caller cannot tell a file
 // it may not read from one that does not exist.
 func TestUploadAuthorize_RefusalsAreIndistinguishable(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	seedUser(t, database, &db.User{ID: 1})
 	seedUser(t, database, &db.User{ID: 2})
@@ -268,6 +277,7 @@ func TestUploadAuthorize_RefusalsAreIndistinguishable(t *testing.T) {
 }
 
 func TestUploadRecord_WritesAnUnlinkedRowOwnedByItsUploader(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	seedUser(t, database, &db.User{ID: 7})
 	w, h := 16, 32
@@ -301,6 +311,7 @@ func TestUploadRecord_WritesAnUnlinkedRowOwnedByItsUploader(t *testing.T) {
 // back — ordinary visibility is checked before NSFW consent, so both cases
 // answer with the same ErrForbidden.
 func TestUploadAuthorize_NonMemberGetsTheSameRefusalLabelledOrNot(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	seedUser(t, database, &db.User{ID: 1})
 	nonMember := &db.Role{ID: 6, Name: "non-member", Permissions: 0, Position: 5}
@@ -347,6 +358,7 @@ func TestUploadAuthorize_NonMemberGetsTheSameRefusalLabelledOrNot(t *testing.T) 
 // check too — an admin is exempt from ordinary visibility but not from
 // consent.
 func TestUploadAuthorize_AdministratorStillNeedsConsentForALabelledChannel(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	admin := &db.Role{ID: 1, Name: "admin", Permissions: permissions.AllPerms, Position: 100}
 	seedRole(t, database, admin)
@@ -394,6 +406,7 @@ func (failingBannerStore) IsBannerFile(context.Context, string) (bool, error) {
 // errors, an unlinked attachment that IS a live banner is still refused to a
 // non-uploader and still readable by its uploader.
 func TestUploadAuthorize_BannerLookupFailsClosed(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		banners func(Store) BannerFileStore

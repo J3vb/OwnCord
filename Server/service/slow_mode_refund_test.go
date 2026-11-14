@@ -55,6 +55,7 @@ func newSlowModeSendService(t *testing.T) (*MessageService, *deliveryFaultStore)
 // A send whose uploads are all unavailable posts nothing, so the member can send
 // again at once, with and without a client message id.
 func TestSendMessage_SlowModeTokenReturnedWhenAllAttachmentsUnavailable(t *testing.T) {
+	t.Parallel()
 	for _, keyed := range []bool{true, false} {
 		svc, _ := newSlowModeSendService(t)
 		p := slowSendParams(1, 10)
@@ -74,6 +75,7 @@ func TestSendMessage_SlowModeTokenReturnedWhenAllAttachmentsUnavailable(t *testi
 // A write that fails after the gate returns the token; a write that succeeds keeps
 // it, so the next send is refused.
 func TestSendMessage_SlowModeRefundedOnWriteFailureOnly(t *testing.T) {
+	t.Parallel()
 	svc, st := newSlowModeSendService(t)
 	st.fail = errors.New("writer busy")
 	p := slowSendParams(1, 10)
@@ -92,6 +94,7 @@ func TestSendMessage_SlowModeRefundedOnWriteFailureOnly(t *testing.T) {
 // An identical attempt that won the write holds its own token; the duplicate must
 // not leave a second charge behind.
 func TestSendMessage_SlowModeNotChargedTwiceForDuplicate(t *testing.T) {
+	t.Parallel()
 	svc, st := newSlowModeSendService(t)
 	st.commitFirst = true
 	res, err := svc.SendMessage(context.Background(), slowSendParams(1, 10))
@@ -137,6 +140,7 @@ func slowModeForwardFixture(t *testing.T) (*forwardFixture, *deliveryFaultStore,
 }
 
 func TestCreatePoll_SlowModeRefundedOnWriteFailureAndDuplicate(t *testing.T) {
+	t.Parallel()
 	f, st, reset := slowModeForwardFixture(t)
 	eachRefundCase(t, st, func(string) (bool, error) {
 		res, err := f.svc.CreatePoll(context.Background(), f.pollParams(fwdBob, fwdDstChan))
@@ -145,6 +149,7 @@ func TestCreatePoll_SlowModeRefundedOnWriteFailureAndDuplicate(t *testing.T) {
 }
 
 func TestForwardMessage_SlowModeRefundedOnWriteFailureAndDuplicate(t *testing.T) {
+	t.Parallel()
 	f, st, reset := slowModeForwardFixture(t)
 	eachRefundCase(t, st, func(string) (bool, error) {
 		res, err := f.svc.ForwardMessage(context.Background(), ForwardParams{
@@ -156,6 +161,7 @@ func TestForwardMessage_SlowModeRefundedOnWriteFailureAndDuplicate(t *testing.T)
 }
 
 func TestCreateForumPost_SlowModeRefundedOnWriteFailureAndDuplicate(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	mustDo(t, "SetChannelSlowMode", f.database.SetChannelSlowMode(context.Background(), frmForum, slowModeSeconds))
 	st := &deliveryFaultStore{Store: f.database}

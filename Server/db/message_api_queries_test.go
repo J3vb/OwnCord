@@ -12,6 +12,7 @@ import (
 // ─── GetMessagesForAPI ──────────────────────────────────────────────────────
 
 func TestGetMessagesForAPI_Empty(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID := seedChannel(t, database, "apichan")
 	userID := seedUser(t, database, "apiuser")
@@ -24,6 +25,7 @@ func TestGetMessagesForAPI_Empty(t *testing.T) {
 }
 
 func TestGetMessagesForAPI_ReturnsUserObject(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "apiuser2")
 	chID := seedChannel(t, database, "apichan2")
@@ -47,6 +49,7 @@ func TestGetMessagesForAPI_ReturnsUserObject(t *testing.T) {
 }
 
 func TestGetMessagesForAPI_BeforePagination(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "apipage")
 	chID := seedChannel(t, database, "apich")
@@ -65,6 +68,7 @@ func TestGetMessagesForAPI_BeforePagination(t *testing.T) {
 }
 
 func TestGetMessagesForAPI_WithReactions(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	u1 := seedUser(t, database, "reactuser1")
 	u2 := seedUser(t, database, "reactuser2")
@@ -91,6 +95,7 @@ func TestGetMessagesForAPI_WithReactions(t *testing.T) {
 }
 
 func TestGetMessagesForAPI_ExcludesDeleted(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "apidel")
 	chID := seedChannel(t, database, "apidelchan")
@@ -124,6 +129,7 @@ func seedAroundMessages(t *testing.T, database *db.DB, chID, userID int64, n int
 }
 
 func TestGetMessagesAroundForAPI_CentersAndOrdersAscending(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "aroundu1")
 	chID := seedChannel(t, database, "aroundc1")
@@ -143,6 +149,7 @@ func TestGetMessagesAroundForAPI_CentersAndOrdersAscending(t *testing.T) {
 }
 
 func TestGetMessagesAroundForAPI_ClampsAtChannelEdges(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "aroundu2")
 	chID := seedChannel(t, database, "aroundc2")
@@ -164,6 +171,7 @@ func TestGetMessagesAroundForAPI_ClampsAtChannelEdges(t *testing.T) {
 }
 
 func TestGetMessagesAroundForAPI_ExcludesDeleted(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "aroundu3")
 	chID := seedChannel(t, database, "aroundc3")
@@ -183,6 +191,7 @@ func TestGetMessagesAroundForAPI_ExcludesDeleted(t *testing.T) {
 }
 
 func TestGetMessagesAroundForAPI_ScopedToChannel(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "aroundu4")
 	chA := seedChannel(t, database, "aroundc4a")
@@ -203,6 +212,7 @@ func TestGetMessagesAroundForAPI_ScopedToChannel(t *testing.T) {
 }
 
 func TestGetMessagesAroundForAPI_NegativeCountsClampToZero(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "aroundu5")
 	chID := seedChannel(t, database, "aroundc5")
@@ -218,6 +228,7 @@ func TestGetMessagesAroundForAPI_NegativeCountsClampToZero(t *testing.T) {
 }
 
 func TestGetMessagesAroundForAPI_UnknownCentreIsEmpty(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "aroundu6")
 	chID := seedChannel(t, database, "aroundc6")
@@ -234,6 +245,7 @@ func TestGetMessagesAroundForAPI_UnknownCentreIsEmpty(t *testing.T) {
 // ─── GetMessagesAfterForAPI ─────────────────────────────────────────────────
 
 func TestGetMessagesAfterForAPI_AscendingAfterCursor(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "afteru1")
 	chID := seedChannel(t, database, "afterc1")

@@ -24,6 +24,7 @@ func privacyBody(t *testing.T, body string) map[string]any {
 }
 
 func TestPrivacy_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	router := buildUserNoteRouter(newMigratedAuthTestDB(t))
 	for _, m := range []string{http.MethodGet, http.MethodPut} {
 		rr := noteDo(t, router, m, privacyPath, "", `{"allow_member_dms":true,"message_requests":true}`)
@@ -34,6 +35,7 @@ func TestPrivacy_Unauthenticated(t *testing.T) {
 }
 
 func TestPrivacy_DefaultsRoundTripAndReplace(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	router := buildUserNoteRouter(database)
 	token := profileCreateToken(t, database, "privacy-user", 4)
@@ -63,6 +65,7 @@ func TestPrivacy_DefaultsRoundTripAndReplace(t *testing.T) {
 }
 
 func TestPrivacy_OwnerOnly(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	router := buildUserNoteRouter(database)
 	a := profileCreateToken(t, database, "privacy-a", 4)
@@ -76,6 +79,7 @@ func TestPrivacy_OwnerOnly(t *testing.T) {
 }
 
 func TestPrivacy_RejectsBadBodies(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	router := buildUserNoteRouter(database)
 	token := profileCreateToken(t, database, "privacy-bad", 4)
@@ -105,6 +109,7 @@ func TestPrivacy_RejectsBadBodies(t *testing.T) {
 }
 
 func TestPrivacy_RateLimited(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
@@ -121,6 +126,7 @@ func TestPrivacy_RateLimited(t *testing.T) {
 }
 
 func TestPrivacy_NotInProfileResponse(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "privacy-profile", 4)

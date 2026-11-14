@@ -163,6 +163,7 @@ func walkAnonymousPosture(t *testing.T, h http.Handler) (total int, seen map[str
 // a 404 that would say whether the resource exists, never a 400 from a body
 // parser that ran ahead of authentication.
 func TestAuthPosture_EveryRouteOffThePublicSurfaceAnswers401(t *testing.T) {
+	t.Parallel()
 	handler := fullRouter(t)
 	total, seen, violations := walkAnonymousPosture(t, handler)
 
@@ -204,6 +205,7 @@ func TestAuthPosture_EveryRouteOffThePublicSurfaceAnswers401(t *testing.T) {
 // and nothing else may be. Without this, a green posture walk would prove
 // only that the walk ran.
 func TestAuthPosture_NegativeControl(t *testing.T) {
+	t.Parallel()
 	prod := fullRouter(t)
 	r := chi.NewRouter()
 	r.Get("/api/v1/zz-posture-probe/{id}", func(w http.ResponseWriter, _ *http.Request) {

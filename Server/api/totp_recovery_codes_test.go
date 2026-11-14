@@ -94,6 +94,7 @@ func verifyWith(t *testing.T, router http.Handler, partial, code string) (status
 }
 
 func TestRecoveryCodes_EndToEnd(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	token := loginAndGetToken(t, router, database, "recovery-user", 4)
@@ -166,6 +167,7 @@ func TestRecoveryCodes_EndToEnd(t *testing.T) {
 }
 
 func TestRecoveryCodes_RegenerateRequiresTOTP(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	token := loginAndGetToken(t, router, database, "no-totp-yet", 4)
@@ -181,6 +183,7 @@ func TestRecoveryCodes_RegenerateRequiresTOTP(t *testing.T) {
 
 // The stored form is a bcrypt hash: a database dump holds no usable code.
 func TestRecoveryCodes_StoredHashedOnly(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	token := loginAndGetToken(t, router, database, "hashed-user", 4)
@@ -218,6 +221,7 @@ func TestRecoveryCodes_StoredHashedOnly(t *testing.T) {
 // read, a TOTP code is a store failure but a recovery code still signs in, so
 // the user can turn two-factor off and enrol again.
 func TestRecoveryCodes_WorkWhenTheStoredSecretIsUnreadable(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	token := loginAndGetToken(t, router, database, "unreadable-user", 4)

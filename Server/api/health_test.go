@@ -12,6 +12,7 @@ import (
 )
 
 func TestRunHealthChecks_AllHealthy(t *testing.T) {
+	t.Parallel()
 	status, reason := runHealthChecks(context.Background(), healthDeps{
 		dbPing:        func(context.Context) error { return nil },
 		dispatchAlive: func() bool { return true },
@@ -23,6 +24,7 @@ func TestRunHealthChecks_AllHealthy(t *testing.T) {
 }
 
 func TestRunHealthChecks_HubDeadWinsFirst(t *testing.T) {
+	t.Parallel()
 	status, reason := runHealthChecks(context.Background(), healthDeps{
 		dbPing:        func(context.Context) error { return errors.New("also down") },
 		dispatchAlive: func() bool { return false },
@@ -33,6 +35,7 @@ func TestRunHealthChecks_HubDeadWinsFirst(t *testing.T) {
 }
 
 func TestRunHealthChecks_DBError(t *testing.T) {
+	t.Parallel()
 	status, reason := runHealthChecks(context.Background(), healthDeps{
 		dbPing:        func(context.Context) error { return errors.New("locked") },
 		dispatchAlive: func() bool { return true },
@@ -43,6 +46,7 @@ func TestRunHealthChecks_DBError(t *testing.T) {
 }
 
 func TestRunHealthChecks_LowDisk(t *testing.T) {
+	t.Parallel()
 	status, reason := runHealthChecks(context.Background(), healthDeps{
 		freeDiskBytes:    func() (uint64, error) { return 1 << 20, nil }, // 1 MiB
 		minFreeDiskBytes: 256 << 20,
@@ -57,6 +61,7 @@ func TestRunHealthChecks_LowDisk(t *testing.T) {
 // above the old 256 MiB degrades at that higher number, and 0 disables the
 // check entirely.
 func TestRunHealthChecks_FloorIsTheConfiguredOne(t *testing.T) {
+	t.Parallel()
 	const free = 300 << 20
 	status, reason := runHealthChecks(context.Background(), healthDeps{
 		freeDiskBytes:    func() (uint64, error) { return free, nil },
@@ -83,6 +88,7 @@ func TestRunHealthChecks_FloorIsTheConfiguredOne(t *testing.T) {
 // TestRunHealthChecks_UnknownProbesCountHealthy locks the "unknown ≠ full"
 // rule: a probe error (unsupported platform, missing dir) must not degrade.
 func TestRunHealthChecks_UnknownProbesCountHealthy(t *testing.T) {
+	t.Parallel()
 	status, _ := runHealthChecks(context.Background(), healthDeps{
 		freeDiskBytes: func() (uint64, error) { return 0, errors.New("no statfs here") },
 	})
@@ -92,6 +98,7 @@ func TestRunHealthChecks_UnknownProbesCountHealthy(t *testing.T) {
 }
 
 func TestHandleHealth_DegradedReturns503WithReason(t *testing.T) {
+	t.Parallel()
 	h := handleHealth(healthDeps{
 		onlineUsers:   func() int { return 3 },
 		dispatchAlive: func() bool { return false },
@@ -118,6 +125,7 @@ func TestHandleHealth_DegradedReturns503WithReason(t *testing.T) {
 // guard: a probe that disconnects mid-request must not stamp a false
 // "degraded/database" verdict into the shared 5s cache.
 func TestHandleHealth_CanceledRequestDoesNotPoisonCache(t *testing.T) {
+	t.Parallel()
 	h := handleHealth(healthDeps{
 		dbPing: func(ctx context.Context) error { return ctx.Err() },
 	})
@@ -134,6 +142,7 @@ func TestHandleHealth_CanceledRequestDoesNotPoisonCache(t *testing.T) {
 // is unauthenticated and rate-limit-exempt, so the real checks must run at
 // most once per healthCacheTTL, not per request.
 func TestHandleHealth_ChecksAreCached(t *testing.T) {
+	t.Parallel()
 	pings := 0
 	h := handleHealth(healthDeps{
 		dbPing: func(context.Context) error { pings++; return nil },

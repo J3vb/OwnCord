@@ -61,6 +61,7 @@ func newStoreErrorFixture(t *testing.T) (*MessageService, *db.DB, *PermissionSer
 }
 
 func TestEditMessage_StoreFailureIsInternalNotForbidden(t *testing.T) {
+	t.Parallel()
 	plain, database, permSvc := newStoreErrorFixture(t)
 	ctx := context.Background()
 	sent, err := plain.SendMessage(ctx, SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: "hi bob"})
@@ -88,6 +89,7 @@ func TestEditMessage_StoreFailureIsInternalNotForbidden(t *testing.T) {
 }
 
 func TestDeleteMessage_StoreFailureIsInternalNotForbidden(t *testing.T) {
+	t.Parallel()
 	plain, database, permSvc := newStoreErrorFixture(t)
 	ctx := context.Background()
 	sent, err := plain.SendMessage(ctx, SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: "hi bob"})
@@ -114,6 +116,7 @@ func TestDeleteMessage_StoreFailureIsInternalNotForbidden(t *testing.T) {
 }
 
 func TestSoftDeleteRow_StoreRefusalStaysForbidden(t *testing.T) {
+	t.Parallel()
 	plain, _, _ := newStoreErrorFixture(t)
 	ctx := context.Background()
 	sent, err := plain.SendMessage(ctx, SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: "hi bob"})

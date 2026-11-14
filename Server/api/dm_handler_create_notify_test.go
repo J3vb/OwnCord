@@ -25,6 +25,7 @@ import (
 // this test explicitly trusts the pair first, the same way seedDMChannel
 // (ws) and journeyDMSend (the protocol fixture) do.
 func TestCreateDM_Success_NotifiesRecipient(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	broadcaster := &mockBroadcaster{}
 	router := buildDMRouter(database, broadcaster)
@@ -75,6 +76,7 @@ func TestCreateDM_Success_NotifiesRecipient(t *testing.T) {
 // (and its first-contact gate) exists — GetOrCreateDMChannel's unconditional
 // both-sides open is undone for the untrusted recipient.
 func TestCreateDM_Untrusted_DoesNotNotifyRecipientOrOpenTheirSide(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	broadcaster := &mockBroadcaster{}
 	router := buildDMRouter(database, broadcaster)

@@ -13,6 +13,7 @@ import (
 // leave it valid, because a revoked session a queued touch could bring back
 // would defeat the revoke.
 func TestConnWrites_QueuedTouchDoesNotReviveARevokedSession(t *testing.T) {
+	t.Parallel()
 	database, spy, w, sessions, _ := newBatchedServices(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "revoked"})

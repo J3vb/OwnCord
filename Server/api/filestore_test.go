@@ -32,6 +32,7 @@ func (failingStore) SaveThumb(string, []byte) error { return errors.New("simulat
 // bytes. The handler-level tests cannot see this — their Settle would
 // release it anyway — which is exactly why it has its own test.
 func TestSaveReserved_ReleasesTheChargeOnAFailedWrite(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`); err != nil {
@@ -59,6 +60,7 @@ func TestSaveReserved_ReleasesTheChargeOnAFailedWrite(t *testing.T) {
 // write with no reservation and hand a reservation back on a failed write, just
 // as saveReserved does for the handlers.
 func TestReservedStore_RefusesAnUnreservedWriteAndReleasesOnFailure(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	ctx := context.Background()
 	uploads := service.NewUploadService(database, nil)

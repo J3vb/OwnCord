@@ -23,6 +23,7 @@ func (f *failCountTOTPStore) CountUsersWithoutTOTP(context.Context) (int, error)
 // caller's: it must surface as ErrInternal (HTTP 500) with the cause still on
 // the chain, never as the 400 an operator reads as "your request was wrong".
 func TestSettings_Patch2FAEnrollmentCountFailureIsInternalWithCause(t *testing.T) {
+	t.Parallel()
 	cause := errors.New("database is locked")
 	svc := NewSettingsService(&failCountTOTPStore{DB: newTestDB(t), err: cause})
 
@@ -59,6 +60,7 @@ func (f *failGetSettingStore) GetSetting(ctx context.Context, key string) (strin
 // mode; a database fault there is the same server-side failure, not a 400
 // whose body would carry the raw driver text.
 func TestSettings_PatchRegistrationModeReadFailureIsInternalWithCause(t *testing.T) {
+	t.Parallel()
 	cause := errors.New("database is locked")
 	svc := NewSettingsService(&failGetSettingStore{DB: newTestDB(t), key: registrationModeKey, err: cause})
 

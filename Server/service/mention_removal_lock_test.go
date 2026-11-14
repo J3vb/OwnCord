@@ -87,6 +87,7 @@ func gapFixture(t *testing.T) (*MessageService, *removalGapStore, *db.DB) {
 // A reader's mark_unread that lands between a delete and its badge reversal must
 // not make the reversal take the deleted mention's badge a second time.
 func TestDeleteMessage_MarkUnreadInGapKeepsMentionBadge(t *testing.T) {
+	t.Parallel()
 	svc, gap, database := gapFixture(t)
 	ctx := context.Background()
 	m1 := sendAs(t, svc, 1, "@bob one").MessageID
@@ -106,6 +107,7 @@ func TestDeleteMessage_MarkUnreadInGapKeepsMentionBadge(t *testing.T) {
 }
 
 func TestDeleteMessage_PartialReadInGapKeepsMentionBadge(t *testing.T) {
+	t.Parallel()
 	svc, gap, database := gapFixture(t)
 	plain := sendAs(t, svc, 1, "plain").MessageID
 	sendAs(t, svc, 1, "@bob one")
@@ -123,6 +125,7 @@ func TestDeleteMessage_PartialReadInGapKeepsMentionBadge(t *testing.T) {
 }
 
 func TestPurgeMessages_MarkUnreadInGapKeepsMentionBadge(t *testing.T) {
+	t.Parallel()
 	svc, gap, database := gapFixture(t)
 	ctx := context.Background()
 	m1 := sendAs(t, svc, 1, "@bob one").MessageID
@@ -142,6 +145,7 @@ func TestPurgeMessages_MarkUnreadInGapKeepsMentionBadge(t *testing.T) {
 }
 
 func TestPurgeAfterBan_MarkUnreadInGapKeepsMentionBadge(t *testing.T) {
+	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	ctx := context.Background()
@@ -173,6 +177,7 @@ func TestPurgeAfterBan_MarkUnreadInGapKeepsMentionBadge(t *testing.T) {
 // A delete waits for the channel's emit lock only until its context ends, and
 // writes nothing when it gives up.
 func TestDeleteMessage_LockWaitHonoursContextAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	svc, _, database := gapFixture(t)
 	m1 := sendAs(t, svc, 1, "@bob one").MessageID
 

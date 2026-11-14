@@ -49,6 +49,12 @@
 #       gate sees them run. Names read off ci.yml's non-matrix `name:` keys and
 #       confirmed against PR #2309's check runs.
 #
+#       Server Deadlock & Tag Tests added 2026-11-14. The deadlock pass, the
+#       tag-gated tests and the real-SFU proofs moved out of Server Build & Test
+#       (ubuntu-latest) into this job so they run beside the race step. Job-level
+#       gated like Workflow Security Lint: `skipped` on a dev PR with no server
+#       change, a full run on main.
+#
 #       Deliberately NOT pinned, and why:
 #         Server Docker Build (verify)  reports "skipping" on a dev PR
 #                                       (if: ref_name=='main' || base_ref=='main')
@@ -75,6 +81,7 @@ gh api -X PUT "repos/${REPO}/branches/dev/protection" --input - <<'JSON'
     "contexts": [
       "Server Build & Test (ubuntu-latest)",
       "Server Build & Test (windows-latest)",
+      "Server Deadlock & Tag Tests",
       "Client Static Checks",
       "Client Unit Tests",
       "Rust Unit Tests",

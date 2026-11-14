@@ -27,6 +27,7 @@ func deadlineMW(d time.Duration) func(http.Handler) http.Handler {
 // context expires; the client must see a retryable 503 and none of the
 // handler's body.
 func TestRequestDeadline_WriterStallReturns503(t *testing.T) {
+	t.Parallel()
 	h := deadlineMW(50 * time.Millisecond)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done() // the held writer: nothing returns before the deadline
 		w.Header().Set("Content-Type", "text/plain")
@@ -66,6 +67,7 @@ func TestRequestDeadline_WriterStallReturns503(t *testing.T) {
 // A success, a 4xx, or a 5xx written BEFORE the deadline is the handler's own
 // answer and is delivered as written.
 func TestRequestDeadline_SuccessAfterDeadlineNotRewritten(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		code  int
@@ -114,6 +116,7 @@ func TestRequestDeadline_SuccessAfterDeadlineNotRewritten(t *testing.T) {
 // A 5xx after a client hang-up (context cancelled, not expired) is not the
 // deadline's failure and is not rewritten.
 func TestRequestDeadline_ClientCancelNotRewritten(t *testing.T) {
+	t.Parallel()
 	h := deadlineMW(time.Minute)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 		w.WriteHeader(http.StatusInternalServerError)
@@ -131,6 +134,7 @@ func TestRequestDeadline_ClientCancelNotRewritten(t *testing.T) {
 // The wrapper must stay transparent to http.ResponseController: flushing and
 // the write-deadline controls reach the real connection.
 func TestRequestDeadline_ResponseControllerReachesConnection(t *testing.T) {
+	t.Parallel()
 	errs := make(chan error, 3)
 	srv := httptest.NewServer(deadlineMW(time.Minute)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		rc := http.NewResponseController(w)
@@ -433,6 +437,7 @@ var deadlineOptionalExempt = map[string]string{
 // agrees with the exempt list for each route, and nothing listed or in the
 // table is stale. A new route fails here until it is classified.
 func TestRequestDeadline_EveryRouteClassified(t *testing.T) {
+	t.Parallel()
 	routes, ok := fullRouter(t).(chi.Routes)
 	if !ok {
 		t.Fatal("router is not a chi.Routes")
@@ -529,6 +534,7 @@ func optionalExemptPattern(pattern string) bool {
 // The exempt routes must carry no deadline (a WebSocket killed at 15 s, an
 // upload cut mid-body); a bound route must carry one.
 func TestRequestDeadline_ExemptRoutesHaveNoDeadline(t *testing.T) {
+	t.Parallel()
 	var gotDeadline bool
 	h := deadlineMW(time.Minute)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		_, gotDeadline = r.Context().Deadline()

@@ -44,6 +44,7 @@ func (f *forwardFixture) addFile(t *testing.T, user, msgID int64, id, body strin
 }
 
 func TestRemoveOwnUpload_SecondRemovalIsNotFoundAndNothingIsReleasedTwice(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "mine", "0123456789")
@@ -72,6 +73,7 @@ func TestRemoveOwnUpload_SecondRemovalIsNotFoundAndNothingIsReleasedTwice(t *tes
 }
 
 func TestRemoveOwnUpload_ConcurrentCallersOneWins(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	_, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "mine", "0123456789")
 	f.chargeCounter(t, fwdBob)
@@ -104,6 +106,7 @@ func TestRemoveOwnUpload_ConcurrentCallersOneWins(t *testing.T) {
 }
 
 func TestRemoveOwnUpload_RefusesOthersInUseAndUnknown(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	if _, err := f.uploads.RemoveOwnUpload(ctx, f.srcFile, fwdBob); !errors.Is(err, ErrNotFound) {
@@ -144,6 +147,7 @@ func (f *forwardFixture) afterRemovalChanged(ctx context.Context, t *testing.T, 
 }
 
 func TestAfterAttachmentRemoved_MessageDeletedMeanwhileAnnouncesNothing(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "going away", "0123456789")
@@ -161,6 +165,7 @@ func TestAfterAttachmentRemoved_MessageDeletedMeanwhileAnnouncesNothing(t *testi
 }
 
 func TestAfterAttachmentRemoved_LastFileOfBlankMessageDeletesIt(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "", "0123456789")
@@ -181,6 +186,7 @@ func TestAfterAttachmentRemoved_LastFileOfBlankMessageDeletesIt(t *testing.T) {
 }
 
 func TestAfterAttachmentRemoved_LastFileWithTextAnnouncesEmptyListAndKeepsMentions(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "hi @carol", "0123456789")
@@ -207,6 +213,7 @@ func TestAfterAttachmentRemoved_LastFileWithTextAnnouncesEmptyListAndKeepsMentio
 }
 
 func TestAfterAttachmentRemoved_RenamedMentionIsStillAnnouncedAndStored(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "hi @carol", "0123456789")
@@ -224,6 +231,7 @@ func TestAfterAttachmentRemoved_RenamedMentionIsStillAnnouncedAndStored(t *testi
 }
 
 func TestAfterAttachmentRemoved_TextAddedBeforeTheDeleteKeepsTheMessage(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "", "0123456789")
@@ -244,6 +252,7 @@ func TestAfterAttachmentRemoved_TextAddedBeforeTheDeleteKeepsTheMessage(t *testi
 }
 
 func TestAfterAttachmentRemoved_KeepsTheOtherFiles(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "", "0123456789")
@@ -256,6 +265,7 @@ func TestAfterAttachmentRemoved_KeepsTheOtherFiles(t *testing.T) {
 }
 
 func TestAfterAttachmentRemoved_ArchivedChannelFallsBackToChanged(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "", "0123456789")
@@ -273,6 +283,7 @@ func TestAfterAttachmentRemoved_ArchivedChannelFallsBackToChanged(t *testing.T) 
 }
 
 func TestAfterAttachmentRemoved_ForwardIsNeverDeletedNorGainsMentions(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	res := mustForward(t, f, fwdDstChan, f.srcID)
@@ -289,6 +300,7 @@ func TestAfterAttachmentRemoved_ForwardIsNeverDeletedNorGainsMentions(t *testing
 }
 
 func TestAfterAttachmentRemoved_DMAudienceIsTheParticipants(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDM, "private", "0123456789")
@@ -303,6 +315,7 @@ func TestAfterAttachmentRemoved_DMAudienceIsTheParticipants(t *testing.T) {
 }
 
 func TestStorageSummary(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	got, err := f.uploads.StorageSummary(ctx, fwdCarol)
@@ -320,6 +333,7 @@ func TestStorageSummary(t *testing.T) {
 }
 
 func TestListOwnUploads_PagingCursorAndValidation(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	for i := range 3 {

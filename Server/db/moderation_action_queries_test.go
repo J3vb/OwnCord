@@ -23,6 +23,7 @@ func newModerationActionsTestDB(t *testing.T) (database *db.DB, ownerID, memberI
 }
 
 func TestWarnUser_WritesRowAndRejectsPeer(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -43,6 +44,7 @@ func TestWarnUser_WritesRowAndRejectsPeer(t *testing.T) {
 }
 
 func TestTimeoutUser_HasActiveTimeout_LiftTimeout(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -85,6 +87,7 @@ func TestTimeoutUser_HasActiveTimeout_LiftTimeout(t *testing.T) {
 // re-check (P2-8, Codex review: LiftTimeout previously had no rank check at
 // all) rather than silently reporting "nothing lifted".
 func TestLiftTimeout_NonexistentLifterRefused(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -107,6 +110,7 @@ func TestLiftTimeout_NonexistentLifterRefused(t *testing.T) {
 // demoted to the target's rank or below is refused AT THE WRITE, not merely
 // by a caller's earlier (possibly stale) check.
 func TestLiftTimeout_DemotedActorRefused(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -134,6 +138,7 @@ func TestLiftTimeout_DemotedActorRefused(t *testing.T) {
 // the SAME transaction, so LiftTimeout is never left choosing between
 // overlapping active rows.
 func TestTimeoutUser_SupersedesEarlierActiveTimeout(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -175,6 +180,7 @@ func TestTimeoutUser_SupersedesEarlierActiveTimeout(t *testing.T) {
 // supersede, as a raw insert below does to model a pre-existing overlap),
 // LiftTimeout lifts ALL of them in one call, not only the newest.
 func TestLiftTimeout_LiftsEveryActiveRow(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -208,6 +214,7 @@ func TestLiftTimeout_LiftsEveryActiveRow(t *testing.T) {
 // B is left for a later LiftTimeout to act on — proved end to end: lift B,
 // clear whichever row LiftTimeout's own ids now own, and see it unmuted.
 func TestTimeoutUser_TransfersVoiceMuteOwnershipOnSupersede(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 	chanID := mustCreateChannel(t, database, "vc-supersede", "voice", "", "", 0)
@@ -268,6 +275,7 @@ func TestTimeoutUser_TransfersVoiceMuteOwnershipOnSupersede(t *testing.T) {
 // session-bound ownership, not a ledger flag that could be misread across
 // sessions.
 func TestLiftTimeout_LeaveAndRejoinIsolatesTheNewSession(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 	chanID := mustCreateChannel(t, database, "vc-rejoin", "voice", "", "", 0)
@@ -307,6 +315,7 @@ func TestLiftTimeout_LeaveAndRejoinIsolatesTheNewSession(t *testing.T) {
 }
 
 func TestAcknowledgeWarning_OwnRowsOnly(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -339,6 +348,7 @@ func TestAcknowledgeWarning_OwnRowsOnly(t *testing.T) {
 }
 
 func TestListModerationActionsForReport(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -357,6 +367,7 @@ func TestListModerationActionsForReport(t *testing.T) {
 }
 
 func TestBanUserWithAction_WritesLedgerRowAndRejectsPeer(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -389,6 +400,7 @@ func TestBanUserWithAction_WritesLedgerRowAndRejectsPeer(t *testing.T) {
 }
 
 func TestForceLogoutWithAction_WritesLedgerRowAndRevokesSessions(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -415,6 +427,7 @@ func TestForceLogoutWithAction_WritesLedgerRowAndRevokesSessions(t *testing.T) {
 }
 
 func TestDeleteMessageWithRemoval(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -449,6 +462,7 @@ func TestDeleteMessageWithRemoval(t *testing.T) {
 // authorization and this write must not land as the actor of a ledger row,
 // and the message delete itself must roll back with it.
 func TestDeleteMessageWithRemoval_ErasedActorRefused(t *testing.T) {
+	t.Parallel()
 	database, _, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 	chID := seedTestChannel(t, database)
@@ -466,6 +480,7 @@ func TestDeleteMessageWithRemoval_ErasedActorRefused(t *testing.T) {
 }
 
 func TestPurgeChannelMessagesWithAction(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 	chID := seedTestChannel(t, database)
@@ -494,6 +509,7 @@ func TestPurgeChannelMessagesWithAction(t *testing.T) {
 }
 
 func TestModerationRetention_RetiresWarningsAndTimeoutsOnly(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -571,6 +587,7 @@ func TestModerationRetention_RetiresWarningsAndTimeoutsOnly(t *testing.T) {
 // its action away would silently reopen the door to a second appeal
 // against the same action just as surely as sweeping an open one would.
 func TestModerationRetention_SkipsAppealedActions(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
@@ -640,6 +657,7 @@ func seedTestChannel(t *testing.T, database *db.DB) int64 {
 // owner row would NULL voice_states.server_muted_by (ON DELETE SET NULL) and
 // strand the mute where reconciliation can no longer find it.
 func TestRetireModerationActions_KeepsActionThatOwnsAVoiceMute(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 	chanID := mustCreateChannel(t, database, "vc-retire", "voice", "", "", 0)
@@ -687,6 +705,7 @@ func TestRetireModerationActions_KeepsActionThatOwnsAVoiceMute(t *testing.T) {
 // TestRetireModerationActions_BareSchemaFallback: with no appeals table the
 // documented fallback query runs, and it must not need voice_states either.
 func TestRetireModerationActions_BareSchemaFallback(t *testing.T) {
+	t.Parallel()
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 	if _, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "old", time.Now().Add(-100*24*time.Hour)); err != nil {

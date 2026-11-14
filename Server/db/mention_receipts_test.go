@@ -30,6 +30,7 @@ func receiptMessageIDs(t *testing.T, database *db.DB, userID, channelID int64) [
 }
 
 func TestMigration063_MentionReceiptsSchema(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -83,6 +84,7 @@ func TestMigration063_MentionReceiptsSchema(t *testing.T) {
 }
 
 func TestMigration063_BackfillOnlyBadgedRows(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	mustDo(t, "migrate to 062", db.MigrateFS(database, migrationsBefore(t, "063")))
 	ctx := context.Background()
@@ -132,6 +134,7 @@ func TestMigration063_BackfillOnlyBadgedRows(t *testing.T) {
 }
 
 func TestIncrementMentionCountsBatch_ReceiptOnlyForAdmitted(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	author := seedUser(t, database, "author")
@@ -169,6 +172,7 @@ func TestIncrementMentionCountsBatch_ReceiptOnlyForAdmitted(t *testing.T) {
 }
 
 func TestMentionReceipts_CascadeOnMessageHardDelete(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	author := seedUser(t, database, "author")
@@ -188,6 +192,7 @@ func TestMentionReceipts_CascadeOnMessageHardDelete(t *testing.T) {
 }
 
 func TestEraseAccount_RemovesRecipientReceipts(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)

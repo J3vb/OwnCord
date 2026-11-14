@@ -132,6 +132,7 @@ func (h *uploadsHarness) list(t *testing.T, query, token string) ownUploadsBody 
 }
 
 func TestOwnStorage_ShapeAndUnlimitedQuota(t *testing.T) {
+	t.Parallel()
 	h := newUploadsHarness(t)
 	token, uid := h.user(t, "storer")
 
@@ -152,6 +153,7 @@ func TestOwnStorage_ShapeAndUnlimitedQuota(t *testing.T) {
 }
 
 func TestOwnUploadRoutes_RequireAuth(t *testing.T) {
+	t.Parallel()
 	h := newUploadsHarness(t)
 	for _, path := range []string{"/api/v1/users/me/storage", "/api/v1/users/me/uploads"} {
 		if rr := chGet(t, h.router, path, ""); rr.Code != http.StatusUnauthorized {
@@ -164,6 +166,7 @@ func TestOwnUploadRoutes_RequireAuth(t *testing.T) {
 }
 
 func TestListOwnUploads_OnlyMineWithStatesAndPaging(t *testing.T) {
+	t.Parallel()
 	h := newUploadsHarness(t)
 	token, uid := h.user(t, "lister")
 	_, otherID := h.user(t, "someone")
@@ -199,6 +202,7 @@ func TestListOwnUploads_OnlyMineWithStatesAndPaging(t *testing.T) {
 }
 
 func TestListOwnUploads_BadParametersAre400(t *testing.T) {
+	t.Parallel()
 	h := newUploadsHarness(t)
 	token, _ := h.user(t, "badparams")
 	for _, q := range []string{"?sort=oldest", "?limit=0", "?limit=abc", "?cursor=nonsense!", "?q=" + strings.Repeat("x", 101)} {
@@ -209,6 +213,7 @@ func TestListOwnUploads_BadParametersAre400(t *testing.T) {
 }
 
 func TestRemoveOwnUpload_204RemovesRowBytesAndAnnounces(t *testing.T) {
+	t.Parallel()
 	h := newUploadsHarness(t)
 	token, uid := h.user(t, "remover")
 	msgID := h.upload(t, uid, "gone-soon", "a.txt", "keep this text")
@@ -236,6 +241,7 @@ func TestRemoveOwnUpload_204RemovesRowBytesAndAnnounces(t *testing.T) {
 }
 
 func TestRemoveOwnUpload_LastFileOfBlankMessageDeletesIt(t *testing.T) {
+	t.Parallel()
 	h := newUploadsHarness(t)
 	token, uid := h.user(t, "blanker")
 	msgID := h.upload(t, uid, "only-file", "a.txt", "")
@@ -248,6 +254,7 @@ func TestRemoveOwnUpload_LastFileOfBlankMessageDeletesIt(t *testing.T) {
 }
 
 func TestRemoveOwnUpload_PendingFileAnnouncesNothing(t *testing.T) {
+	t.Parallel()
 	h := newUploadsHarness(t)
 	token, uid := h.user(t, "unsent")
 	h.upload(t, uid, "never-sent", "a.txt", "-")
@@ -260,6 +267,7 @@ func TestRemoveOwnUpload_PendingFileAnnouncesNothing(t *testing.T) {
 }
 
 func TestRemoveOwnUpload_NotFoundCases(t *testing.T) {
+	t.Parallel()
 	h := newUploadsHarness(t)
 	token, uid := h.user(t, "mine404")
 	otherToken, otherID := h.user(t, "theirs404")
@@ -287,6 +295,7 @@ func TestRemoveOwnUpload_NotFoundCases(t *testing.T) {
 }
 
 func TestRemoveOwnUpload_InUseIs409AndKeepsEverything(t *testing.T) {
+	t.Parallel()
 	h := newUploadsHarness(t)
 	token, uid := h.user(t, "inuse")
 	h.upload(t, uid, "my-avatar", "a.png", "-")
@@ -307,6 +316,7 @@ func TestRemoveOwnUpload_InUseIs409AndKeepsEverything(t *testing.T) {
 }
 
 func TestRemoveOwnUpload_BytesStayWhileAnotherRowNamesThem(t *testing.T) {
+	t.Parallel()
 	h := newUploadsHarness(t)
 	token, uid := h.user(t, "sharer")
 	h.upload(t, uid, "shared-a", "a.txt", "-")

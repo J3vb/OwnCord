@@ -11,6 +11,7 @@ import (
 // (a restart between the drain and the purge) still removes an edit frame written for
 // an erased message after the drain, and leaves another user's.
 func TestErasureService_PurgeReplayAfterRestartRemovesLateEditFrames(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()

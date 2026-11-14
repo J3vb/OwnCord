@@ -26,6 +26,7 @@ func requireRingPush(t *testing.T, got RingPush, end bool, channelID int64, user
 }
 
 func TestRingPush_RingAndEndCarryOnlyTheChannelAndWakeThePhone(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedDirectMessage(t)
 	const endpoint = "https://push.example.net/ring"
@@ -57,6 +58,7 @@ func TestRingPush_RingAndEndCarryOnlyTheChannelAndWakeThePhone(t *testing.T) {
 }
 
 func TestRingPush_BookFollowsAnswersAndTheCaller(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	d := f.ringDispatcher(newRecordingPushFetcher())
 
@@ -72,6 +74,7 @@ func TestRingPush_BookFollowsAnswersAndTheCaller(t *testing.T) {
 }
 
 func TestRingPush_RungOutRingSendsNoEnd(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	d := f.ringDispatcher(newRecordingPushFetcher())
 	now := time.Unix(1_000_000, 0)
@@ -86,6 +89,7 @@ func TestRingPush_RungOutRingSendsNoEnd(t *testing.T) {
 }
 
 func TestRingPush_FullBookStillRingsButRemembersNothingNew(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	d := f.ringDispatcher(newRecordingPushFetcher())
 	for ch := range int64(pushRingMapCap) {
@@ -98,6 +102,7 @@ func TestRingPush_FullBookStillRingsButRemembersNothingNew(t *testing.T) {
 }
 
 func TestRingPush_DoNotDisturbGetsNoRingButItsEnd(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedDirectMessage(t)
 	const endpoint = "https://push.example.net/dnd"
@@ -117,6 +122,7 @@ func TestRingPush_DoNotDisturbGetsNoRingButItsEnd(t *testing.T) {
 }
 
 func TestRingPush_RetryStopsOnceAnswered(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedDirectMessage(t)
 	const endpoint = "https://push.example.net/answered"
@@ -132,6 +138,7 @@ func TestRingPush_RetryStopsOnceAnswered(t *testing.T) {
 }
 
 func TestRingPush_RetryStopsOnceCallerBlocked(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedDirectMessage(t)
 	const endpoint = "https://push.example.net/blocked"
@@ -147,6 +154,7 @@ func TestRingPush_RetryStopsOnceCallerBlocked(t *testing.T) {
 }
 
 func TestRingPush_LastFailedAttemptIsCounted(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedDirectMessage(t)
 	const endpoint = "https://push.example.net/down"
@@ -163,6 +171,7 @@ func TestRingPush_LastFailedAttemptIsCounted(t *testing.T) {
 }
 
 func TestRingPush_EndWaitsForItsRingToBeSent(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedDirectMessage(t)
 	const endpoint = "https://push.example.net/order"

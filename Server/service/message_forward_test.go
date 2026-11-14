@@ -161,6 +161,7 @@ func mustForward(t *testing.T, f *forwardFixture, target, source int64) *SendMes
 }
 
 func TestForward_CopiesSnapshotAndFilesToTheForwarder(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	res := mustForward(t, f, fwdDstChan, f.srcID)
@@ -215,6 +216,7 @@ func TestForward_CopiesSnapshotAndFilesToTheForwarder(t *testing.T) {
 // A forwarded voice message keeps its length and waveform, so the copy still
 // draws the voice player (WP 8.9).
 func TestForward_VoiceMessageKeepsDurationAndWaveform(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	fileID := uuid.NewString()
@@ -249,6 +251,7 @@ func TestForward_VoiceMessageKeepsDurationAndWaveform(t *testing.T) {
 // is answered from the receipt: one message, one clone, and it still works
 // after the world changed (the original deleted, the forwarder locked out).
 func TestForward_RetryNoSecondClone(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	cmid := newClientMessageID()
 	first, err := f.forwardAs(fwdBob, cmid, fwdDstChan, f.srcID)
@@ -287,6 +290,7 @@ func TestForward_RetryNoSecondClone(t *testing.T) {
 // were made. The transaction re-reads it and refuses; the clones go back out
 // and the quota is released.
 func TestForward_SourceDeletedMidFlightIsRefusedAndReleased(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	files := f.storedFiles(t)
 	f.svc.forward.afterClone = func() {
@@ -303,6 +307,7 @@ func TestForward_SourceDeletedMidFlightIsRefusedAndReleased(t *testing.T) {
 
 // Edge case 2b: read access to the source is lost in the same window.
 func TestForward_ReadLostMidFlightIsRefusedAndReleased(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	files := f.storedFiles(t)
 	f.svc.forward.afterClone = func() {
@@ -338,6 +343,7 @@ func (f *forwardFixture) assertNothingForwarded(t *testing.T, filesBefore int) {
 }
 
 func TestForward_GateTable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	tests := []struct {
 		name   string
@@ -432,6 +438,7 @@ func (f *forwardFixture) nsfwSource(t *testing.T) int64 {
 }
 
 func TestForward_LabelledSourceGoesToAnotherLabelledChannel(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	src := f.nsfwSource(t)
 	res, err := f.forward(fwdNSFWDst, src)
@@ -442,6 +449,7 @@ func TestForward_LabelledSourceGoesToAnotherLabelledChannel(t *testing.T) {
 }
 
 func TestForward_TextOnlySourceNeedsNoAttachPermission(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	res, err := f.svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: fwdSrcChan, UserID: fwdAlice, Username: "alice", Content: "just text",
@@ -474,6 +482,7 @@ func (p *countingPush) n() int {
 }
 
 func TestForward_NoMentionsNoChannelPush(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	push := &countingPush{}
 	f.svc.SetPushNotifier(push)
@@ -512,6 +521,7 @@ func TestForward_NoMentionsNoChannelPush(t *testing.T) {
 }
 
 func TestForward_OfForwardKeepsOrigin(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	src, _ := f.database.GetMessage(context.Background(), f.srcID)
 	first := mustForward(t, f, fwdDstChan, f.srcID)
@@ -531,6 +541,7 @@ func TestForward_OfForwardKeepsOrigin(t *testing.T) {
 }
 
 func TestForward_OfForwardWithDeletedOriginalHasNoJumpLink(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	first := mustForward(t, f, fwdDstChan, f.srcID)
 	mustDo(t, "DeleteMessage", f.database.DeleteMessage(context.Background(), f.srcID, fwdAlice, false))
@@ -541,6 +552,7 @@ func TestForward_OfForwardWithDeletedOriginalHasNoJumpLink(t *testing.T) {
 }
 
 func TestForward_EditOfForwardRefused(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	res := mustForward(t, f, fwdDstChan, f.srcID)
 	if _, err := f.svc.EditMessage(context.Background(), fwdBob, res.MessageID, "rewritten"); err == nil {
@@ -553,6 +565,7 @@ func TestForward_EditOfForwardRefused(t *testing.T) {
 }
 
 func TestForward_RateLimit(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, auth.NewRateLimiter())
 	cmid := newClientMessageID()
 	if _, err := f.forwardAs(fwdBob, cmid, fwdDstChan, f.srcID); err != nil {
@@ -577,6 +590,7 @@ func TestForward_RateLimit(t *testing.T) {
 }
 
 func TestForward_QuotaRefusal(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	f.uploads.SetStorageLimits(StorageLimits{UserQuotaBytes: f.fileSize - 1, Dir: f.dir, FreeBytes: func(string) (uint64, error) { return 0, errors.New("unknown") }})
 	files := f.storedFiles(t)
@@ -588,6 +602,7 @@ func TestForward_QuotaRefusal(t *testing.T) {
 }
 
 func TestForward_MissingFileIsSkippedLikeAnUpload(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	mustDo(t, "Delete", f.files.Delete(f.srcFile))
 	res := mustForward(t, f, fwdDstChan, f.srcID)
@@ -603,6 +618,7 @@ func TestForward_MissingFileIsSkippedLikeAnUpload(t *testing.T) {
 }
 
 func TestForward_RequiresAValidClientMessageID(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	for _, cmid := range []string{"", "not-a-valid-id"} {
 		if _, err := f.forwardAs(fwdBob, cmid, fwdDstChan, f.srcID); !errors.Is(err, ErrBadRequest) {
@@ -620,6 +636,7 @@ func TestForward_RequiresAValidClientMessageID(t *testing.T) {
 // An untrusted one-to-one DM recipient is not delivered to: the first-contact
 // gate stages a message request, exactly as it does for a send.
 func TestForward_UntrustedDMIsStagedAsARequest(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	f.svc.SetMessageRequests(NewMessageRequestService(f.database, NewBlockService(f.database)))
 	res := mustForward(t, f, fwdDM, f.srcID)

@@ -46,6 +46,7 @@ func doProfileImageUpload(t *testing.T, router http.Handler, path, token, filena
 }
 
 func TestUploadBanner_LimitsAndTypes(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildBannerRouter(database, store, &userUpdateSpy{})
@@ -90,6 +91,7 @@ func TestUploadBanner_LimitsAndTypes(t *testing.T) {
 }
 
 func TestUploadBanner_StoresAndSetsBannerID(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	spy := &userUpdateSpy{}
@@ -115,6 +117,7 @@ func TestUploadBanner_StoresAndSetsBannerID(t *testing.T) {
 }
 
 func TestUploadBanner_QuotaCharged(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildBannerRouter(database, store, &userUpdateSpy{})
@@ -133,6 +136,7 @@ func TestUploadBanner_QuotaCharged(t *testing.T) {
 }
 
 func TestUploadBanner_ProfileWriteFailsUnrecords(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildBannerRouter(database, store, &userUpdateSpy{})
@@ -159,6 +163,7 @@ func TestUploadBanner_ProfileWriteFailsUnrecords(t *testing.T) {
 // A rename that landed after this request authenticated must survive: the
 // upload sends no username snapshot.
 func TestUploadBanner_KeepsConcurrentRename(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildBannerRouter(database, store, &userUpdateSpy{})
@@ -185,6 +190,7 @@ func TestUploadBanner_KeepsConcurrentRename(t *testing.T) {
 }
 
 func TestDeleteBanner_ClearsAndBroadcastsNull(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	spy := &userUpdateSpy{}
@@ -219,6 +225,7 @@ func TestDeleteBanner_ClearsAndBroadcastsNull(t *testing.T) {
 }
 
 func TestPatchBannerColor_ValidatesAndClears(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
@@ -269,6 +276,7 @@ func TestPatchBannerColor_ValidatesAndClears(t *testing.T) {
 // PATCH /users/me has no banner id or URL field: an image can only be set by
 // uploading it to this server, so there is nothing for the server to fetch.
 func TestPatchProfile_IgnoresBannerURL(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
@@ -293,6 +301,7 @@ func TestPatchProfile_IgnoresBannerURL(t *testing.T) {
 }
 
 func TestServeFile_BannerReadableWhileLive(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildBannerRouter(database, store, &userUpdateSpy{})
@@ -311,6 +320,7 @@ func TestServeFile_BannerReadableWhileLive(t *testing.T) {
 }
 
 func TestServeFile_ReplacedBannerRefused(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildBannerRouter(database, store, &userUpdateSpy{})
@@ -336,6 +346,7 @@ func TestServeFile_ReplacedBannerRefused(t *testing.T) {
 // Denying a pending application clears banner_id (DenyPendingUser), so the
 // file stops being anyone's live banner and a peer is refused it.
 func TestServeFile_DeniedOwnersBannerRefused(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildBannerRouter(database, store, &userUpdateSpy{})
@@ -366,6 +377,7 @@ func TestServeFile_DeniedOwnersBannerRefused(t *testing.T) {
 // The avatar limits: 2 MiB (WP 8.7), at most 1024x1024, PNG/JPEG/WebP/GIF,
 // and the refusal wording.
 func TestAvatarUpload_Limits(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildAvatarRouter(database, store)

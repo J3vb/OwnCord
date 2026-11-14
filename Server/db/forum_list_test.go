@@ -58,6 +58,7 @@ func idsOf(rows []db.ThreadListRow) []int64 {
 }
 
 func TestListThreadsBy_SortOrders(t *testing.T) {
+	t.Parallel()
 	f := newListFixture(t)
 	ctx := context.Background()
 	p := f.posts
@@ -80,6 +81,7 @@ func TestListThreadsBy_SortOrders(t *testing.T) {
 }
 
 func TestListThreadsBy_TagFilterAnyOfAndForeignTag(t *testing.T) {
+	t.Parallel()
 	f := newListFixture(t)
 	ctx := context.Background()
 	p := f.posts
@@ -112,6 +114,7 @@ func TestListThreadsBy_TagFilterAnyOfAndForeignTag(t *testing.T) {
 // Edge case 1: posts whose activity falls in the same second page without a
 // gap or a repeat, because id breaks the tie, in either sort and with a filter.
 func TestListThreadsBy_PagingAcrossIdenticalActivitySeconds(t *testing.T) {
+	t.Parallel()
 	f := newListFixture(t)
 	ctx := context.Background()
 	const same = "2026-05-05T05:05:05Z"
@@ -142,6 +145,7 @@ func TestListThreadsBy_PagingAcrossIdenticalActivitySeconds(t *testing.T) {
 }
 
 func TestListThreadsBy_ArchivedStateAndEmptyTagResult(t *testing.T) {
+	t.Parallel()
 	f := newListFixture(t)
 	ctx := context.Background()
 	f.tagPost(t, f.posts[1], f.bug)
@@ -158,6 +162,7 @@ func TestListThreadsBy_ArchivedStateAndEmptyTagResult(t *testing.T) {
 
 // A text channel's threads list as before, in both sorts.
 func TestListThreadsBy_TextParentUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newListFixture(t)
 	ctx := context.Background()
 	for _, sort := range []string{"", db.ThreadSortCreated} {

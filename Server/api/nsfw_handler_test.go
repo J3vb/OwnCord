@@ -54,6 +54,7 @@ func nsfwPath(channelID int64) string {
 }
 
 func TestNSFW_AcknowledgeRequiresVisibilityAndALabel(t *testing.T) {
+	t.Parallel()
 	database := newNSFWTestDB(t)
 	router := buildNSFWRouter(database, &mockBroadcaster{})
 	userID := mintUser(t, database, "acker")
@@ -94,6 +95,7 @@ func TestNSFW_AcknowledgeRequiresVisibilityAndALabel(t *testing.T) {
 }
 
 func TestNSFW_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	database := newNSFWTestDB(t)
 	router := buildNSFWRouter(database, &mockBroadcaster{})
 	chID := mustCreateChannel(t, database, "any", "text")
@@ -107,6 +109,7 @@ func TestNSFW_Unauthenticated(t *testing.T) {
 // TestNSFW_RevokeTakesEffectOnTheNextRead: no restart, no reconnect — the
 // very next HasNSFWAcknowledgement read after DELETE sees it gone.
 func TestNSFW_RevokeTakesEffectOnTheNextRead(t *testing.T) {
+	t.Parallel()
 	database := newNSFWTestDB(t)
 	router := buildNSFWRouter(database, &mockBroadcaster{})
 	userID := mintUser(t, database, "revoker")
@@ -138,6 +141,7 @@ func TestNSFW_RevokeTakesEffectOnTheNextRead(t *testing.T) {
 // TestNSFW_SecondDeviceGetsTheSignal proves acknowledge/revoke send the
 // caller's OTHER live sockets an nsfw_ack frame carrying the new state.
 func TestNSFW_SecondDeviceGetsTheSignal(t *testing.T) {
+	t.Parallel()
 	database := newNSFWTestDB(t)
 	bc := &mockBroadcaster{}
 	router := buildNSFWRouter(database, bc)
@@ -189,6 +193,7 @@ func TestNSFW_SecondDeviceGetsTheSignal(t *testing.T) {
 // full-ready path and comes back with the authoritative nsfw_acknowledged
 // state even when the frame itself was missed entirely.
 func TestNSFW_AcknowledgeAndRevokeBumpVisibilityWatermark(t *testing.T) {
+	t.Parallel()
 	database := newNSFWTestDB(t)
 	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
 	router := buildNSFWRouter(database, bc)

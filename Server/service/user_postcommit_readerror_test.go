@@ -40,6 +40,7 @@ func (f *failGetUserByIDAfterStore) GetUserByID(ctx context.Context, id int64) (
 }
 
 func TestUpdateProfile_SurvivesPostCommitReReadError(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice", PasswordHash: "h"})
 

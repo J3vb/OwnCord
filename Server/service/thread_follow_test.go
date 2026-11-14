@@ -18,6 +18,7 @@ func (f *threadFixture) followersOf(t *testing.T, threadID int64) []int64 {
 }
 
 func TestThreadFollow_CreateJoinsTheOwner(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "plans")
 	if got := f.followersOf(t, th.ID); !slices.Equal(got, []int64{thrOwner}) {
@@ -26,6 +27,7 @@ func TestThreadFollow_CreateJoinsTheOwner(t *testing.T) {
 }
 
 func TestThreadFollow_PostAndMentionJoinAndReportTheNewOnes(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	th := f.start(t, thrOwner, "plans")
@@ -54,6 +56,7 @@ func TestThreadFollow_PostAndMentionJoinAndReportTheNewOnes(t *testing.T) {
 }
 
 func TestThreadSetFollow_GateIdempotenceAndStorage(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	th := f.start(t, thrOwner, "plans")
@@ -103,6 +106,7 @@ func TestThreadSetFollow_GateIdempotenceAndStorage(t *testing.T) {
 }
 
 func TestThreadFollowed_FiltersByReadableParentAndSkipsArchived(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	open := f.start(t, thrOwner, "open")
@@ -122,6 +126,7 @@ func TestThreadFollowed_FiltersByReadableParentAndSkipsArchived(t *testing.T) {
 }
 
 func TestThreadDeleteNotifying_ReturnsTheFollowersItTook(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	th := f.start(t, thrOwner, "plans")
@@ -142,6 +147,7 @@ func TestThreadDeleteNotifying_ReturnsTheFollowersItTook(t *testing.T) {
 }
 
 func TestThreadFollow_StoreWithoutFollowSliceIsInternal(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	// struct{ Store } exposes only Store's methods, so the follow slice is absent.
 	svc := &ThreadService{st: struct{ Store }{f.database}, ts: f.database, perms: f.perms}
@@ -163,6 +169,7 @@ var _ ThreadFollowStore = (*db.DB)(nil)
 // access (WP 6.9c): the panel and the sidebar row mark a thread read, while
 // channel_focus still refuses a thread id (TestThreadNotFocusable).
 func TestMoveReadPointer_ThreadAdmittedThroughParent(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	th := f.start(t, thrOwner, "read")

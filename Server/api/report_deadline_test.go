@@ -25,6 +25,7 @@ type cancelOnAnnounce struct {
 func (b *cancelOnAnnounce) BroadcastModQueue(context.Context, int64, string) { b.cancel() }
 
 func TestFileReport_StoredReportAnswersCreatedAfterTheDeadline(t *testing.T) {
+	t.Parallel()
 	database := newModQueueActTestDB(t)
 	reporterToken, _ := mintSession(t, database, mintUser(t, database, "reporter"))
 	targetID := mintUser(t, database, "target")

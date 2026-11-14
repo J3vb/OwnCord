@@ -15,6 +15,7 @@ import (
 // the lapsed-ban arm already used by ListMembers (users.sql) and the API token
 // not-banned clause (apitokens.sql).
 func TestCountUsersWithoutTOTP_LapsedTempBanStillCounts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 
@@ -37,6 +38,7 @@ func TestCountUsersWithoutTOTP_LapsedTempBanStillCounts(t *testing.T) {
 // so they must stay excluded from the count — enabling require_2fa should not
 // be blocked by someone who cannot authenticate anyway.
 func TestCountUsersWithoutTOTP_ActiveTempBanExcluded(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 

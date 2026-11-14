@@ -87,6 +87,7 @@ func (f *welcomeFixture) register(t *testing.T, name, invite string) *AuthResult
 }
 
 func TestWelcome_OpenRegistrationWritesRowAndNotifies(t *testing.T) {
+	t.Parallel()
 	f := newWelcomeFixture(t, RegistrationOpen)
 	f.pick(t, f.channel)
 	res := f.register(t, "alice", "")
@@ -116,6 +117,7 @@ func TestWelcome_OpenRegistrationWritesRowAndNotifies(t *testing.T) {
 }
 
 func TestWelcome_InviteRegistrationWritesRow(t *testing.T) {
+	t.Parallel()
 	f := newWelcomeFixture(t, RegistrationInvite)
 	f.pick(t, f.channel)
 	owner, err := f.database.CreateUser(f.ctx, "owner", "hash", 1)
@@ -129,6 +131,7 @@ func TestWelcome_InviteRegistrationWritesRow(t *testing.T) {
 }
 
 func TestWelcome_OffWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newWelcomeFixture(t, RegistrationOpen)
 	f.register(t, "carol", "") // never picked
 	mustDo(t, "SetSetting", f.database.SetSetting(f.ctx, WelcomeChannelKey, ""))
@@ -139,6 +142,7 @@ func TestWelcome_OffWritesNothing(t *testing.T) {
 }
 
 func TestWelcome_ApprovalModeWritesOnlyOnApprove(t *testing.T) {
+	t.Parallel()
 	f := newWelcomeFixture(t, RegistrationApproval)
 	f.pick(t, f.channel)
 	res := f.register(t, "erin", "")
@@ -158,6 +162,7 @@ func TestWelcome_ApprovalModeWritesOnlyOnApprove(t *testing.T) {
 
 // Edge 1: the pointer dangles once the channel is deleted or archived.
 func TestWelcome_DanglingChannelWritesNothingAndRegistrationSucceeds(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"deleted":  `DELETE FROM channels WHERE id = 50`,
 		"archived": `UPDATE channels SET archived = 1 WHERE id = 50`,
@@ -180,6 +185,7 @@ func TestWelcome_DanglingChannelWritesNothingAndRegistrationSucceeds(t *testing.
 
 // Edge 2a: the client drops after the account committed; the row is still written.
 func TestWelcome_RequestContextCancelledAfterCommitStillWrites(t *testing.T) {
+	t.Parallel()
 	f := newWelcomeFixture(t, RegistrationOpen)
 	f.pick(t, f.channel)
 	ctx, cancel := context.WithCancel(f.ctx)
@@ -201,6 +207,7 @@ func TestWelcome_RequestContextCancelledAfterCommitStillWrites(t *testing.T) {
 
 // Edge 2b: a failing row insert is logged and never fails the registration.
 func TestWelcome_FailedInsertDoesNotFailRegistration(t *testing.T) {
+	t.Parallel()
 	f := newWelcomeFixture(t, RegistrationOpen)
 	f.pick(t, f.channel)
 	fault := &failingWelcomeStore{}
@@ -217,12 +224,14 @@ func TestWelcome_FailedInsertDoesNotFailRegistration(t *testing.T) {
 }
 
 func TestWelcome_NilServiceGreetsNobody(t *testing.T) {
+	t.Parallel()
 	var w *WelcomeService
 	w.Greet(context.Background(), 1)
 	w.SetNotifier(&recordingWelcomeNotifier{})
 }
 
 func TestSettingsPatch_WelcomeChannel(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	uid, _ := database.CreateUser(ctx, "settings-owner", "hash", 1)
@@ -257,6 +266,7 @@ func TestSettingsPatch_WelcomeChannel(t *testing.T) {
 }
 
 func TestDeleteMessage_WelcomeRowIsDeletable(t *testing.T) {
+	t.Parallel()
 	f := newWelcomeFixture(t, RegistrationOpen)
 	f.pick(t, f.channel)
 	res := f.register(t, "ivy", "")
@@ -271,6 +281,7 @@ func TestDeleteMessage_WelcomeRowIsDeletable(t *testing.T) {
 // A welcome row deletes like a message (its author or a moderator, never a
 // plain member) and is the one system row a member may reply to: the wave.
 func TestWelcomeRow_DeleteAndReplyRules(t *testing.T) {
+	t.Parallel()
 	svc, _, database, _ := pinFixture(t)
 	ctx := context.Background()
 	row, err := database.InsertWelcomeRow(ctx, 10, 2, "mod_bob joined the server.")

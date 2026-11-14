@@ -76,6 +76,7 @@ func (s *groupRowStore) EditMessage(_ context.Context, _, _ int64, _ string) (*d
 }
 
 func TestEditMessage_GroupRowRefusedByServiceCheck(t *testing.T) {
+	t.Parallel()
 	for _, kind := range groupKinds {
 		svc := NewMessageService(&groupRowStore{t: t, kind: kind}, nil, nil)
 		_, err := svc.EditMessage(context.Background(), 3, 1, "rewritten")
@@ -88,6 +89,7 @@ func TestEditMessage_GroupRowRefusedByServiceCheck(t *testing.T) {
 // ─── Add ────────────────────────────────────────────────────────────────────
 
 func TestAddGroupMembers_AnyMemberAddsAndRowsNameTheTarget(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	// fixtureMember2 is not the owner: any member may add.
@@ -113,6 +115,7 @@ func TestAddGroupMembers_AnyMemberAddsAndRowsNameTheTarget(t *testing.T) {
 }
 
 func TestAddGroupMembers_Validation(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	cases := []struct {
@@ -136,6 +139,7 @@ func TestAddGroupMembers_Validation(t *testing.T) {
 }
 
 func TestAddGroupMembers_ExistingMembersAreSkipped(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	res, err := f.dms.AddGroupMembers(context.Background(), fixtureMember, f.dm, []int64{fixtureMember2, fixtureOwner})
 	mustDo(t, "AddGroupMembers", err)
@@ -145,6 +149,7 @@ func TestAddGroupMembers_ExistingMembersAreSkipped(t *testing.T) {
 }
 
 func TestAddGroupMembers_RefusalsForCallerAndChannel(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	if _, err := f.dms.AddGroupMembers(ctx, fixtureOwner, f.dm, []int64{fixturePeerMod}); !errors.Is(err, ErrNotFound) {
@@ -167,6 +172,7 @@ func TestAddGroupMembers_RefusalsForCallerAndChannel(t *testing.T) {
 }
 
 func TestAddGroupMembers_BannedTargetNotFound(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	mustDo(t, "BanUser", f.database.BanUser(ctx, fixtureOwner, "x", nil))
@@ -176,6 +182,7 @@ func TestAddGroupMembers_BannedTargetNotFound(t *testing.T) {
 }
 
 func TestAddGroupMembers_NonActiveNotFound(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{db.RegistrationPending, db.RegistrationDenied} {
 		t.Run(status, func(t *testing.T) {
 			f := newGroupMembershipFixture(t)
@@ -202,6 +209,7 @@ func TestAddGroupMembers_NonActiveNotFound(t *testing.T) {
 }
 
 func TestCreateGroupDM_NonActiveRecipientNotFound(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{db.RegistrationPending, db.RegistrationDenied} {
 		t.Run(status, func(t *testing.T) {
 			f := newGroupMembershipFixture(t)
@@ -226,6 +234,7 @@ func TestCreateGroupDM_NonActiveRecipientNotFound(t *testing.T) {
 }
 
 func TestAddGroupMembers_BlockedPairForbidden(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	// A non-actor member blocked the target.
@@ -247,6 +256,7 @@ func TestAddGroupMembers_BlockedPairForbidden(t *testing.T) {
 // Members who blocked each other after the group formed do not stop a third
 // person being added.
 func TestAddGroupMembers_BlockBetweenExistingMembersDoesNotRefuse(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	mustDo(t, "BlockUser", f.database.BlockUser(ctx, fixtureMember2, fixtureMod))
@@ -256,6 +266,7 @@ func TestAddGroupMembers_BlockBetweenExistingMembersDoesNotRefuse(t *testing.T) 
 }
 
 func TestAddGroupMembers_NoTrustGate(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	// fixtureOwner has never accepted fixtureMember: a 1:1 send would be a
@@ -266,6 +277,7 @@ func TestAddGroupMembers_NoTrustGate(t *testing.T) {
 }
 
 func TestAddGroupMembers_FullGroupIsGroupDMFull(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	extra := make([]int64, 0, 8)
@@ -293,6 +305,7 @@ func TestAddGroupMembers_FullGroupIsGroupDMFull(t *testing.T) {
 // ─── Remove ─────────────────────────────────────────────────────────────────
 
 func TestRemoveGroupMember_OwnerOnlyAndRules(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 
@@ -328,6 +341,7 @@ func TestRemoveGroupMember_OwnerOnlyAndRules(t *testing.T) {
 }
 
 func TestRemoveGroupMember_TimedOutRefused(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	if _, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil); err != nil {
@@ -341,6 +355,7 @@ func TestRemoveGroupMember_TimedOutRefused(t *testing.T) {
 // ─── Transfer ───────────────────────────────────────────────────────────────
 
 func TestTransferGroupOwner_OwnerOnlyAndTargetMustBeMember(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 
@@ -373,6 +388,7 @@ func TestTransferGroupOwner_OwnerOnlyAndTargetMustBeMember(t *testing.T) {
 // ─── Rename and leave rows ──────────────────────────────────────────────────
 
 func TestRenameGroupDM_WritesRowAndUnchangedWritesNone(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 
@@ -402,6 +418,7 @@ func TestRenameGroupDM_WritesRowAndUnchangedWritesNone(t *testing.T) {
 }
 
 func TestCloseDM_GroupLeaveWritesRowForSurvivors(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	res, err := f.dms.CloseDM(context.Background(), fixtureMember2, f.dm)
 	mustDo(t, "CloseDM", err)
@@ -417,6 +434,7 @@ func TestCloseDM_GroupLeaveWritesRowForSurvivors(t *testing.T) {
 }
 
 func TestCreateAndAdd_ShareRecipientValidation(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	mustDo(t, "BanUser", f.database.BanUser(ctx, fixtureOwner, "x", nil))

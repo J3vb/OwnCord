@@ -37,6 +37,7 @@ func userRoleIDs(t *testing.T, database *db.DB, userID int64) []int64 {
 }
 
 func TestMigration067_BackfillsOneRowPerUser(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	mustDo(t, "pre-067 schema", db.MigrateFS(database, migrationsUpTo(t, "067_")))
 	execAll(t, database,
@@ -63,6 +64,7 @@ func TestMigration067_BackfillsOneRowPerUser(t *testing.T) {
 }
 
 func TestMigration067_DanglingRoleSkipped(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	mustDo(t, "pre-067 schema", db.MigrateFS(database, migrationsUpTo(t, "067_")))
 	// Historical databases ran with foreign keys off. The memory pool holds a
@@ -81,6 +83,7 @@ func TestMigration067_DanglingRoleSkipped(t *testing.T) {
 }
 
 func TestUserInsertTriggerAddsRole(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	execAll(t, database, `INSERT INTO users (id, username, password, role_id) VALUES (7, 'raw', 'h', 3)`)
 	if got := userRoleIDs(t, database, 7); !slices.Equal(got, []int64{3}) {
@@ -89,6 +92,7 @@ func TestUserInsertTriggerAddsRole(t *testing.T) {
 }
 
 func TestSyncTopRole_PicksHighestPositionThenLowestID(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	execAll(t, database,
@@ -129,6 +133,7 @@ func TestSyncTopRole_PicksHighestPositionThenLowestID(t *testing.T) {
 }
 
 func TestMemberGeneration_BumpsOnUserRolesWrite(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	execAll(t, database,
@@ -169,6 +174,7 @@ func TestMemberGeneration_BumpsOnUserRolesWrite(t *testing.T) {
 }
 
 func TestRemoveUserRole_NotHeldIsNoOp(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	execAll(t, database,
@@ -184,6 +190,7 @@ func TestRemoveUserRole_NotHeldIsNoOp(t *testing.T) {
 }
 
 func TestGrantAndRevokeUserRole_ReportRowsChanged(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	execAll(t, database,

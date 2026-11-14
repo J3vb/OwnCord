@@ -75,6 +75,7 @@ func pinFixture(t *testing.T) (svc *MessageService, permSvc *PermissionService, 
 // MANAGE_MESSAGES refuses a role moderator, and a user-level allow lets a plain
 // member pin. The same predicate feeds the can_pin affordance.
 func TestSetMessagePinned_FollowsChannelOverride(t *testing.T) {
+	t.Parallel()
 	svc, permSvc, database, msgID := pinFixture(t)
 	ctx := context.Background()
 
@@ -102,6 +103,7 @@ func TestSetMessagePinned_FollowsChannelOverride(t *testing.T) {
 // non-participant is ErrNotFound, a block and a timeout keep their own kinds,
 // and a refusal in a text channel is ErrForbidden.
 func TestSetMessagePinned_ErrorsUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	direct, dmSent := f.dmWithMessage(ctx, t, fixtureMember2, "u5")
@@ -136,6 +138,7 @@ func TestSetMessagePinned_ErrorsUnchanged(t *testing.T) {
 // A pin in a text channel returns the pin row with its author and no
 // participants; a re-pin and an unpin return none (WP 6.12).
 func TestSetMessagePinned_ChannelReturnsRowOnce(t *testing.T) {
+	t.Parallel()
 	svc, _, database, msgID := pinFixture(t)
 	ctx := context.Background()
 
@@ -162,6 +165,7 @@ func TestSetMessagePinned_ChannelReturnsRowOnce(t *testing.T) {
 }
 
 func TestSetMessagePinned_DMReturnsParticipants(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	direct, sent := f.dmWithMessage(ctx, t, fixtureMember2, "u5")
@@ -183,6 +187,7 @@ func TestSetMessagePinned_DMReturnsParticipants(t *testing.T) {
 // A pin row is deletable by its author in a channel like an ordinary message
 // and by no one once deleted; a pin of a pin row is refused.
 func TestPinRow_DeleteAndPinRules(t *testing.T) {
+	t.Parallel()
 	svc, _, _, msgID := pinFixture(t)
 	ctx := context.Background()
 	res := mustPin(ctx, t, svc, "pin", 2, 10, msgID, true)
@@ -203,6 +208,7 @@ func TestPinRow_DeleteAndPinRules(t *testing.T) {
 // recipient has not accepted the sender's request it reaches only the pinner,
 // and once they trust the pinner it reaches both.
 func TestSetMessagePinned_DMPendingRequestAudience(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	f.messages.SetMessageRequests(NewMessageRequestService(f.database, NewBlockService(f.database)))
@@ -230,6 +236,7 @@ func TestSetMessagePinned_DMPendingRequestAudience(t *testing.T) {
 }
 
 func TestSetMessagePinned_GroupDMReachesEveryMember(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	f.messages.SetMessageRequests(NewMessageRequestService(f.database, NewBlockService(f.database)))
@@ -246,6 +253,7 @@ func TestSetMessagePinned_GroupDMReachesEveryMember(t *testing.T) {
 // A deleted pin row still holds its window, so a pin that follows its deletion
 // inside the window writes no new row.
 func TestSetMessagePinned_DeletedRowHoldsWindow(t *testing.T) {
+	t.Parallel()
 	svc, _, database, msgID := pinFixture(t)
 	ctx := context.Background()
 	res := mustPin(ctx, t, svc, "pin", 2, 10, msgID, true)
@@ -266,6 +274,7 @@ func TestSetMessagePinned_DeletedRowHoldsWindow(t *testing.T) {
 }
 
 func TestSetMessagePinned_RateLimited(t *testing.T) {
+	t.Parallel()
 	svc, perms, database, msgID := pinFixture(t)
 	limited := NewMessageService(database, perms, auth.NewRateLimiter())
 	ctx := context.Background()
@@ -297,6 +306,7 @@ func (s *failingDMIDsStore) GetDMParticipantIDs(ctx context.Context, channelID i
 // A DM pin row whose audience lookup fails goes to the pinner only, as edit and
 // delete do, never to the channel-topic fallback.
 func TestPinEventResult_AudienceLookupFailureFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	svc := NewMessageService(&failingDMIDsStore{DB: f.database}, nil, nil)
 	author := &db.User{ID: fixtureMember}

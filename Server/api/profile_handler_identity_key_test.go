@@ -36,6 +36,7 @@ func (s *identityKeyFailStore) UpdateUserProfileAndIdentityKey(ctx context.Conte
 // fails, the profile change rolls back with it, the request reports the
 // failure, and nothing is broadcast, so no client sees a half-saved profile.
 func TestUpdateProfile_IdentityKeyFailureLeavesProfileUnchanged(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	svc := service.New(&identityKeyFailStore{database}, limiter)
@@ -65,6 +66,7 @@ func TestUpdateProfile_IdentityKeyFailureLeavesProfileUnchanged(t *testing.T) {
 // The happy path commits both halves and broadcasts the profile once, key
 // included.
 func TestUpdateProfile_IdentityKeyCommitsWithProfile(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)

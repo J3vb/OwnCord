@@ -73,6 +73,7 @@ func persistedAbout(t *testing.T, database *db.DB, ids []int64) int {
 // when one is installed, the persisted rows alone without one — and the
 // run's purge journal is clear afterwards (B4-11, Codex's review of #1521).
 func TestRetention_SweepPurgesTheReplayTiers(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -129,6 +130,7 @@ func TestRetention_SweepPurgesTheReplayTiers(t *testing.T) {
 // tick; the ids are written before the purge, so a crash between the
 // sweep's commit and the purge leaves them for the next tick too.
 func TestRetention_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -196,6 +198,7 @@ func TestRetention_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
 // restored database. It resumes a deletion that committed before the prior
 // process died even when there are no marker rows left to replay.
 func TestRetention_ReplayMarkersResumesPendingRunBeforeServing(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	runID, err := database.StartRetentionRun(ctx)
@@ -222,6 +225,7 @@ func TestRetention_ReplayMarkersResumesPendingRunBeforeServing(t *testing.T) {
 // persisted rows out too: a restored backup holds their replay events as
 // well as their rows.
 func TestRetention_ReplayMarkersPurgesPersistedEvents(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()

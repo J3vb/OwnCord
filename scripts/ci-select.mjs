@@ -66,7 +66,7 @@ import { pathToFileURL } from "node:url";
 
 /** Every capability the workflow can gate a job on. */
 export const CAPABILITIES = [
-  "server", // Server Build & Test (both OS legs)
+  "server", // Server Build & Test (both OS legs), Server Deadlock & Tag Tests
   "client", // Client Static Checks, Client Unit Tests, Node policy
   "rust", // Rust Unit Tests
   "browser", // Client E2E (Playwright) + Client E2E (parity subset)

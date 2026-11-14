@@ -10,6 +10,7 @@ import (
 // ─── GetOrCreateDMChannel ───────────────────────────────────────────────────
 
 func TestGetOrCreateDMChannel_CreatesNew(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")
 	user2 := seedUser(t, database, "bob")
@@ -31,6 +32,7 @@ func TestGetOrCreateDMChannel_CreatesNew(t *testing.T) {
 }
 
 func TestGetOrCreateDMChannel_Idempotent(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")
 	user2 := seedUser(t, database, "bob")
@@ -52,6 +54,7 @@ func TestGetOrCreateDMChannel_Idempotent(t *testing.T) {
 }
 
 func TestGetOrCreateDMChannel_IdempotentReversedOrder(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")
 	user2 := seedUser(t, database, "bob")
@@ -76,6 +79,7 @@ func TestGetOrCreateDMChannel_IdempotentReversedOrder(t *testing.T) {
 // scoping) — it must track dm_open_state exactly: present while open, gone
 // after close, per user.
 func TestGetUserDMChannelIDs(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")
 	user2 := seedUser(t, database, "bob")
@@ -117,6 +121,7 @@ func TestGetUserDMChannelIDs(t *testing.T) {
 }
 
 func TestGetOrCreateDMChannel_ReopensForCaller(t *testing.T) {
+	t.Parallel()
 	database, user1, user2, ch := newDMPair(t)
 
 	// Close the DM for user1.
@@ -148,6 +153,7 @@ func TestGetOrCreateDMChannel_ReopensForCaller(t *testing.T) {
 // ─── GetUserDMChannels ──────────────────────────────────────────────────────
 
 func TestGetUserDMChannels_EmptyList(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")
 
@@ -158,6 +164,7 @@ func TestGetUserDMChannels_EmptyList(t *testing.T) {
 }
 
 func TestGetUserDMChannels_ReturnsOpenDMs(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")
 	user2 := seedUser(t, database, "bob")
@@ -187,6 +194,7 @@ func TestGetUserDMChannels_ReturnsOpenDMs(t *testing.T) {
 }
 
 func TestGetUserDMChannels_ExcludesClosedDMs(t *testing.T) {
+	t.Parallel()
 	database, user1, user2, ch := newDMPair(t)
 
 	mustDo(t, "CloseDM", database.CloseDM(context.Background(), user1, ch.ID))
@@ -204,6 +212,7 @@ func TestGetUserDMChannels_ExcludesClosedDMs(t *testing.T) {
 }
 
 func TestGetUserDMChannels_UnreadCount(t *testing.T) {
+	t.Parallel()
 	database, user1, user2, ch := newDMPair(t)
 
 	// Send 3 messages from user2 in the DM channel.
@@ -227,6 +236,7 @@ func TestGetUserDMChannels_UnreadCount(t *testing.T) {
 // GetChannelUnreadCounts: the ready payload's unread_count is capped at 100 so
 // the client can render "99+". A small DM is unaffected.
 func TestGetUserDMChannels_UnreadCountCapsAt100(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "capalice")
 	user2 := seedUser(t, database, "capbob")
@@ -247,6 +257,7 @@ func TestGetUserDMChannels_UnreadCountCapsAt100(t *testing.T) {
 }
 
 func TestGetUserDMChannels_NoMessages(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")
 	user2 := seedUser(t, database, "bob")
@@ -267,6 +278,7 @@ func TestGetUserDMChannels_NoMessages(t *testing.T) {
 }
 
 func TestGetUserDMChannels_LastMessagePreview(t *testing.T) {
+	t.Parallel()
 	database, user1, user2, ch := newDMPair(t)
 
 	_ = mustCreateMessage(t, database, ch.ID, user2, "first message", nil)
@@ -290,6 +302,7 @@ func TestGetUserDMChannels_LastMessagePreview(t *testing.T) {
 // ─── IsDMParticipant ────────────────────────────────────────────────────────
 
 func TestIsDMParticipant_ValidParticipant(t *testing.T) {
+	t.Parallel()
 	database, user1, user2, ch := newDMPair(t)
 
 	ok, err := database.IsDMParticipant(context.Background(), user1, ch.ID)
@@ -306,6 +319,7 @@ func TestIsDMParticipant_ValidParticipant(t *testing.T) {
 }
 
 func TestIsDMParticipant_NonParticipant(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")
 	user2 := seedUser(t, database, "bob")
@@ -322,6 +336,7 @@ func TestIsDMParticipant_NonParticipant(t *testing.T) {
 }
 
 func TestIsDMParticipant_NonExistentChannel(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")
 
@@ -335,6 +350,7 @@ func TestIsDMParticipant_NonExistentChannel(t *testing.T) {
 // ─── OpenDM / CloseDM ──────────────────────────────────────────────────────
 
 func TestOpenDM_Idempotent(t *testing.T) {
+	t.Parallel()
 	database, user1, _, ch := newDMPair(t)
 
 	// Already open from creation — opening again should not error, and must
@@ -353,6 +369,7 @@ func TestOpenDM_Idempotent(t *testing.T) {
 }
 
 func TestCloseDM_RemovesFromOpenList(t *testing.T) {
+	t.Parallel()
 	database, user1, _, ch := newDMPair(t)
 
 	mustDo(t, "CloseDM", database.CloseDM(context.Background(), user1, ch.ID))
@@ -364,6 +381,7 @@ func TestCloseDM_RemovesFromOpenList(t *testing.T) {
 }
 
 func TestCloseDM_Idempotent(t *testing.T) {
+	t.Parallel()
 	database, user1, _, ch := newDMPair(t)
 
 	// Close twice — should not error.
@@ -376,6 +394,7 @@ func TestCloseDM_Idempotent(t *testing.T) {
 }
 
 func TestOpenDM_AfterClose(t *testing.T) {
+	t.Parallel()
 	database, user1, _, ch := newDMPair(t)
 
 	mustDo(t, "CloseDM", database.CloseDM(context.Background(), user1, ch.ID))
@@ -395,6 +414,7 @@ func TestOpenDM_AfterClose(t *testing.T) {
 // ─── GetDMParticipantIDs ────────────────────────────────────────────────────
 
 func TestGetDMParticipantIDs_ReturnsBoth(t *testing.T) {
+	t.Parallel()
 	database, user1, user2, ch := newDMPair(t)
 
 	ids, err := database.GetDMParticipantIDs(context.Background(), ch.ID)
@@ -413,6 +433,7 @@ func TestGetDMParticipantIDs_ReturnsBoth(t *testing.T) {
 }
 
 func TestGetDMParticipantIDs_NonExistentChannel(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	ids, err := database.GetDMParticipantIDs(context.Background(), 99999)
@@ -425,6 +446,7 @@ func TestGetDMParticipantIDs_NonExistentChannel(t *testing.T) {
 // ─── GetDMRecipient ─────────────────────────────────────────────────────────
 
 func TestGetDMRecipient_ReturnsOtherUser(t *testing.T) {
+	t.Parallel()
 	database, user1, user2, ch := newDMPair(t)
 
 	// From user1's perspective, recipient should be user2.
@@ -455,6 +477,7 @@ func TestGetDMRecipient_ReturnsOtherUser(t *testing.T) {
 }
 
 func TestGetDMRecipient_NonExistentChannel(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")
 
@@ -468,6 +491,7 @@ func TestGetDMRecipient_NonExistentChannel(t *testing.T) {
 // GetUserDMChannels carries the viewer's own read pointer: the id they last
 // read, 0 when they have never read the DM, and never the other side's.
 func TestGetUserDMChannels_LastReadMessageID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")

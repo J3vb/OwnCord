@@ -93,6 +93,7 @@ var (
 )
 
 func TestListChannelMedia_KindsOrderAndScope(t *testing.T) {
+	t.Parallel()
 	f := newMediaFixture(t)
 	f.post(t, f.ch, f.alice, "2026-01-05 10:00:00", png("a.png"), pdf("a.pdf"))
 	f.post(t, f.ch, f.bob, "2026-02-05 10:00:00", mp4("b.mp4"), opus("b.ogg"))
@@ -111,6 +112,7 @@ func TestListChannelMedia_KindsOrderAndScope(t *testing.T) {
 }
 
 func TestListChannelMedia_DeletedBlockedAndUnlinkedAreHidden(t *testing.T) {
+	t.Parallel()
 	f := newMediaFixture(t)
 	ctx := context.Background()
 	gone := f.post(t, f.ch, f.alice, "2026-01-01 10:00:00", png("deleted.png"))
@@ -129,6 +131,7 @@ func TestListChannelMedia_DeletedBlockedAndUnlinkedAreHidden(t *testing.T) {
 }
 
 func TestListChannelMedia_NameAndUploaderFilters(t *testing.T) {
+	t.Parallel()
 	f := newMediaFixture(t)
 	f.post(t, f.ch, f.alice, "2026-01-01 10:00:00", png("Holiday_Beach.PNG"), png("100%.png"))
 	f.post(t, f.ch, f.bob, "2026-01-02 10:00:00", png("holidayXbeach.png"))
@@ -143,6 +146,7 @@ func TestListChannelMedia_NameAndUploaderFilters(t *testing.T) {
 // A page boundary inside one message's attachments, and an upload arriving
 // between pages, neither repeats nor skips an item.
 func TestListChannelMedia_CursorIsStableAcrossNewUploads(t *testing.T) {
+	t.Parallel()
 	f := newMediaFixture(t)
 	f.post(t, f.ch, f.alice, "2026-01-01 10:00:00", png("1.png"))
 	f.post(t, f.ch, f.alice, "2026-01-02 10:00:00", png("2a.png"), png("2b.png"), png("2c.png"))
@@ -163,6 +167,7 @@ func TestListChannelMedia_CursorIsStableAcrossNewUploads(t *testing.T) {
 }
 
 func TestListChannelMedia_FromStartsTheWalk(t *testing.T) {
+	t.Parallel()
 	f := newMediaFixture(t)
 	f.post(t, f.ch, f.alice, "2026-01-31 23:59:59", png("jan.png"))
 	f.post(t, f.ch, f.alice, "2026-02-01 00:00:00", png("feb.png"))
@@ -175,6 +180,7 @@ func TestListChannelMedia_FromStartsTheWalk(t *testing.T) {
 }
 
 func TestChannelMediaBuckets_QuarterHours(t *testing.T) {
+	t.Parallel()
 	f := newMediaFixture(t)
 	f.post(t, f.ch, f.alice, "2026-01-31 23:44:59", png("a.png"), png("b.png"))
 	f.post(t, f.ch, f.alice, "2026-01-31 23:45:00", png("c.png"), pdf("d.pdf"))
@@ -194,6 +200,7 @@ func TestChannelMediaBuckets_QuarterHours(t *testing.T) {
 }
 
 func TestListChannelMedia_UnknownKindIsAnError(t *testing.T) {
+	t.Parallel()
 	f := newMediaFixture(t)
 	if _, err := f.database.ListChannelMedia(context.Background(), db.ChannelMediaQuery{ChannelID: f.ch, Kind: "links", Limit: 1}); err == nil {
 		t.Fatal("unknown kind: want an error")

@@ -65,6 +65,7 @@ func TestSendMessage_BackgroundJobsAreBounded(t *testing.T) {
 // shutdown's Stop reaches it: past the grace the group cancels Notify's ctx
 // and Stop returns once Notify has (ARCH-034).
 func TestSendMessage_PushRunsOnInstalledGroup(t *testing.T) {
+	t.Parallel()
 	_, _, database := newMentionFixture(t)
 	svc := NewMessageService(database,
 		NewPermissionService(database, permissions.NewChecker(database)), nil)

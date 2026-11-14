@@ -53,6 +53,7 @@ func newSpiedModerationFixture(t *testing.T) (*moderationActionsFixture, *timeou
 // calls for a user with no timeout issue no per-call timeout query (before
 // the mirror, each of these 100 calls ran HasActiveTimeout).
 func TestSubject_TimeoutMirror_NoPerCallQuery(t *testing.T) {
+	t.Parallel()
 	f, spy := newSpiedModerationFixture(t)
 	ctx := context.Background()
 
@@ -74,6 +75,7 @@ func TestSubject_TimeoutMirror_NoPerCallQuery(t *testing.T) {
 // A timeout issued while the mirror is already warm denies the very next
 // send, and lifting it allows the next one — no staleness window.
 func TestSubject_TimeoutMirror_IssueAndLiftTakeEffectAtOnce(t *testing.T) {
+	t.Parallel()
 	f, _ := newSpiedModerationFixture(t)
 	ctx := context.Background()
 
@@ -97,6 +99,7 @@ func TestSubject_TimeoutMirror_IssueAndLiftTakeEffectAtOnce(t *testing.T) {
 // An expired timeout stops denying on the clock alone: no lift, no sweep and
 // no store read is needed for the next send to pass.
 func TestSubject_TimeoutMirror_ExpiryIsClockEvaluated(t *testing.T) {
+	t.Parallel()
 	f, spy := newSpiedModerationFixture(t)
 	ctx := context.Background()
 

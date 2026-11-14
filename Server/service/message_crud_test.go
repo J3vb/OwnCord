@@ -77,6 +77,7 @@ func newDMFixture(t *testing.T) (*db.DB, *PermissionService) {
 // OC-0033: a sender whose connection drops right after their DM message
 // commits must not silently drop live fan-out to the other participant(s).
 func TestSendMessage_DMFanoutSurvivesSenderDisconnectAfterCommit(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -95,6 +96,7 @@ func TestSendMessage_DMFanoutSurvivesSenderDisconnectAfterCommit(t *testing.T) {
 // other participant even when the editor's connection drops after the DB
 // write commits.
 func TestEditMessage_DMFanoutSurvivesEditorDisconnectAfterCommit(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 	plainSvc := NewMessageService(database, permSvc, nil)
 
@@ -117,6 +119,7 @@ func TestEditMessage_DMFanoutSurvivesEditorDisconnectAfterCommit(t *testing.T) {
 // other participant even when the deleter's connection drops after the
 // soft-delete commits.
 func TestDeleteMessage_DMFanoutSurvivesDeleterDisconnectAfterCommit(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 	plainSvc := NewMessageService(database, permSvc, nil)
 
@@ -153,6 +156,7 @@ func (s erroringDMAudienceStore) GetDMParticipantIDs(ctx context.Context, channe
 // untrusted recipient subscribed to the DM's topic (channel_focus is
 // participant-gated, not trust-gated). It must fail closed to the editor.
 func TestEditMessage_DMAudienceErrorFailsClosedToEditor(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 	plainSvc := NewMessageService(database, permSvc, nil)
 	sent := mustSendMessage(context.Background(), t, plainSvc, SendMessageParams{
@@ -170,6 +174,7 @@ func TestEditMessage_DMAudienceErrorFailsClosedToEditor(t *testing.T) {
 // TestDeleteMessage_DMAudienceErrorFailsClosedToDeleter is DeleteMessage's
 // half of the same Codex P2-5 fix.
 func TestDeleteMessage_DMAudienceErrorFailsClosedToDeleter(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 	plainSvc := NewMessageService(database, permSvc, nil)
 	sent := mustSendMessage(context.Background(), t, plainSvc, SendMessageParams{
@@ -203,6 +208,7 @@ func (s erroringGetChannelStore) GetChannel(ctx context.Context, id int64) (*db.
 // (SEND_MESSAGES|READ_MESSAGES) with no per-channel override to stop it,
 // skipping both the DM-participant check and the block gate entirely.
 func TestEditMessage_FailsClosedWhenChannelLookupErrors(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 	plainSvc := NewMessageService(database, permSvc, nil)
 
@@ -229,6 +235,7 @@ func TestEditMessage_FailsClosedWhenChannelLookupErrors(t *testing.T) {
 // OC-0077: DeleteMessage must refuse to mutate a message in an archived
 // channel, mirroring the SendMessage gate (message_crud.go:54).
 func TestDeleteMessage_RefusedInArchivedChannel(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ctx := context.Background()
 
@@ -259,6 +266,7 @@ func TestDeleteMessage_RefusedInArchivedChannel(t *testing.T) {
 // watermark) on every single message. Once a DM is open for a recipient, a
 // second send must not report it as freshly opened.
 func TestSendMessage_DoesNotReopenAlreadyOpenDM(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 	svc := NewMessageService(database, permSvc, nil)
 	ctx := context.Background()
@@ -285,6 +293,7 @@ func TestSendMessage_DoesNotReopenAlreadyOpenDM(t *testing.T) {
 // OpenDM loop was not, so a canceled request ctx silently skipped the re-open
 // and the recipient's sidebar never learned the DM existed.
 func TestSendMessage_DMReopenSurvivesSenderDisconnectAfterCommit(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 	// Bob has closed the DM; this send must genuinely re-open it for him.
 	mustDo(t, "CloseDM", database.CloseDM(context.Background(), 2, 50))
@@ -306,6 +315,7 @@ func TestSendMessage_DMReopenSurvivesSenderDisconnectAfterCommit(t *testing.T) {
 // fall open into the non-DM permission branch — and past the new archived
 // gate (OC-0077) — when the channel lookup errors.
 func TestDeleteMessage_FailsClosedWhenChannelLookupErrors(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 
 	sendSvc := NewMessageService(database, permSvc, nil)
@@ -330,6 +340,7 @@ func TestDeleteMessage_FailsClosedWhenChannelLookupErrors(t *testing.T) {
 // too long, in this case) still locks the composer for the full slow-mode
 // window even though nothing was ever posted.
 func TestSendMessage_SlowModeNotConsumedByFailedContentValidation(t *testing.T) {
+	t.Parallel()
 	_, database := newTestMessageService(t)
 	mustDo(t, "SetChannelSlowMode", database.SetChannelSlowMode(context.Background(), 10, 3600))
 	checker := permissions.NewChecker(database)
@@ -383,6 +394,7 @@ func (s disconnectAfterLinkStore) GetAttachmentsByMessageIDs(ctx context.Context
 // run on a detached ctx, the same way the compensating deletes in SendMessage
 // already do.
 func TestSendMessage_AttachmentsSurviveSenderDisconnectAfterLink(t *testing.T) {
+	t.Parallel()
 	_, database := newTestMessageService(t)
 	// Grant ATTACH_FILES on top of the base member perms newTestMessageService seeds.
 	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions|permissions.AttachFiles)
@@ -418,6 +430,7 @@ func TestSendMessage_AttachmentsSurviveSenderDisconnectAfterLink(t *testing.T) {
 // does: bail out of the DM side effects entirely (message stays saved,
 // nothing more decided) rather than misclassify a group DM as untrusted 1:1.
 func TestSendMessage_GroupDMLookupFailureDoesNotMisfireFirstContactGate(t *testing.T) {
+	t.Parallel()
 	database, _ := newDMFixture(t)
 	// Promote channel 50 to a 3-person group DM. None of the three trust
 	// each other — group DMs never populate trusted_senders — which is
@@ -450,6 +463,7 @@ func TestSendMessage_GroupDMLookupFailureDoesNotMisfireFirstContactGate(t *testi
 // A failed delivery-target read leaves the message saved and its live
 // frame addressed to the sender alone, never to the channel topic.
 func TestSendMessage_DeliveryTargetsFailureAddressesOnlySender(t *testing.T) {
+	t.Parallel()
 	database, _ := newDMFixture(t)
 	svc := New(&erroringIsGroupDMStore{DB: database}, nil)
 
@@ -519,6 +533,7 @@ func (s *dmSendSpyStore) OpenDM(ctx context.Context, userID, channelID int64) (b
 // participants and group flag for the delivery audience. A member who closed
 // the DM still gets exactly one genuine re-open (OC-0106).
 func TestSendMessage_GroupDMSkipsOpenDMForOpenMembers(t *testing.T) {
+	t.Parallel()
 	database, _ := newDMFixture(t)
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, `UPDATE channels SET is_group = 1 WHERE id = 50`); err != nil {
