@@ -8,7 +8,7 @@
  */
 
 import type { LinkPreviewCard } from "@lib/types";
-import { serverBuildsLinkCards } from "../linkPreviewSession";
+import { linkPreviewsEnabled } from "@lib/net/serverCapabilities";
 import { fetchImageAsObjectUrl } from "./attachments";
 import { resolveServerUrl } from "./attachmentUrls";
 import type { ImageLoadOptions } from "./attachmentExternal";
@@ -21,13 +21,13 @@ export interface CardSource {
 /**
  * The cards a message shows, or null when its server does not build them and
  * the local fetch (the legacy path) applies. A row that holds cards, even an
- * empty list, is a server row. A row with none, on a server that has shown it
- * builds them, has no card yet (a backfill pending, or a link the server could
+ * empty list, is a server row. A row with none, on a server whose `ready`
+ * advertised the link_previews capability, has no card yet (a backfill pending, or a link the server could
  * not fetch): an empty list, never the local fetch.
  */
 export function serverCardsFor(msg: CardSource): readonly LinkPreviewCard[] | null {
   if (msg.linkPreviews !== undefined) return msg.linkPreviews;
-  return serverBuildsLinkCards() ? [] : null;
+  return linkPreviewsEnabled() ? [] : null;
 }
 
 const LINK_PARTS = /^(https?):\/\/([^/?#]*)([^?#]*)(\?[^#]*)?(#.*)?$/i;

@@ -4,7 +4,6 @@
 // stays the only import path consumers use.
 import type { JournalEntry } from "./loadJournal";
 import { linkPreviewFields } from "../../lib/linkPreviewState";
-import { noteServerBuildsCards } from "./linkPreviewSession";
 import type {
   CallInfo,
   GroupEventInfo,
@@ -221,8 +220,6 @@ export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
 }
 
 export function messageResponseToMessage(response: MessageResponse): Message {
-  // A history row with cards shows the server builds them; one without says nothing.
-  if (response.link_previews !== undefined) noteServerBuildsCards();
   return {
     id: response.id,
     channelId: response.channel_id,

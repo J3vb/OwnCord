@@ -247,7 +247,7 @@ function appendTextBody(box: HTMLElement, msg: Message, body: Node): void {
     wrap.style.display = "contents";
     wrap.appendChild(body);
     box.appendChild(wrap);
-  } else if (isLoneImageEmbed(msg.content, serverCardsFor(msg))) {
+  } else if (isLoneImageEmbed(msg.content)) {
     // The image stands in for its link; the text comes back if the embed goes.
     const wrap = createElement("div", { "data-lone-image-text": "" });
     wrap.hidden = true;

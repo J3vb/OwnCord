@@ -28,6 +28,7 @@ export interface ReadyCapabilityFlags {
   readonly game_activity?: boolean;
   readonly listening_activity?: boolean;
   readonly channel_media?: boolean;
+  readonly link_previews?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -245,4 +246,13 @@ export function onGameActivityPolicy(listener: (enabled: boolean) => void): () =
   return () => {
     gameActivityPolicyListeners.delete(listener);
   };
+}
+
+/**
+ * Whether the server builds link previews itself (`link_previews` and the
+ * `message_link_previews` frame). False (an older server, link_previews.enabled
+ * off, or no `ready` yet) keeps the local fetch.
+ */
+export function linkPreviewsEnabled(): boolean {
+  return caps?.link_previews === true;
 }

@@ -59,15 +59,14 @@ per-server external-content consent does not apply to them, and a restart shows
 the previews from disk. The wire side is in [protocol.md](../protocol.md)
 (`message_link_previews`, `link_previews` on messages) and [api.md](../api.md).
 
-The client decides per session whether its server builds cards: a history row
-that carries `link_previews`, or any `message_link_previews` frame, is the
-signal (the protocol has no capability flag). A server that shows neither
-(older, or `link_previews.enabled` off) keeps the legacy path for one release:
-the broker fetch behind the consent gate described above. A direct image on the
-GIF provider's CDN (what the GIF picker sends) is the one link that keeps the
-broker path and its consent on such a server, because the stored thumbnail is a
-still and the GIF must stay animated. Once a server has shown it builds cards, a message with no card yet shows none and never falls
-back to a local fetch.
+The client uses server cards only when `ready.capabilities.link_previews` is
+true (the server sets it while `link_previews.enabled` is on and the unfurl
+workers run). A server that does not advertise it (older, or the setting off)
+keeps the legacy path for one release: the broker fetch behind the consent gate
+described above. Once advertised, a message with no card yet shows none and
+never falls back to a local fetch. Only page previews and YouTube cards use the
+cards: a link that is itself an image (any host, GIFs included) keeps the broker
+path and its consent on every server, because the stored thumbnail is a still.
 
 ## Why the rest stays client-side
 

@@ -616,11 +616,9 @@ export const shards = {
   ],
   "stores-6": [
     "src/features/messaging/attachmentTtl.ts",
-    "src/features/messaging/linkPreviewSession.ts",
     "src/features/messaging/reactionState.ts",
     "src/features/messaging/content/serverPreviews.ts",
     "src/features/messaging/content/serverLinkCard.ts",
-    "src/features/messaging/content/imageUrls.ts",
     "src/stores/blocks.store.ts",
     "src/stores/dm.store.ts",
     "src/stores/stickers.store.ts",

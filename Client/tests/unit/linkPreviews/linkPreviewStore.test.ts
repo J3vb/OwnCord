@@ -18,10 +18,7 @@ import {
 } from "../../../src/stores/messages.store";
 import { handleMessageLinkPreviews } from "../../../src/features/messaging/wsHandlers";
 import { compareContentVersion, mergeMessageLinkPreviews } from "../../../src/lib/linkPreviewState";
-import {
-  resetLinkPreviewSession,
-  serverBuildsLinkCards,
-} from "../../../src/features/messaging/linkPreviewSession";
+import { resetServerCapabilities } from "../../../src/lib/net/serverCapabilities";
 import { runSessionResets } from "../../../src/lib/net/sessionRegistry";
 import type { LinkPreviewCard, MessageResponse } from "../../../src/lib/types";
 
@@ -61,7 +58,7 @@ function historyRow(id: number, extra: Partial<MessageResponse> = {}): MessageRe
 
 beforeEach(() => {
   resetMessagesStore();
-  resetLinkPreviewSession();
+  resetServerCapabilities();
 });
 
 describe("message_link_previews content_version ordering", () => {
@@ -100,26 +97,18 @@ describe("message_link_previews content_version ordering", () => {
       0,
     );
   });
-
-  it("any frame, even for an unloaded message, shows the server builds cards", () => {
-    expect(serverBuildsLinkCards()).toBe(false);
-    handleMessageLinkPreviews(frame(99, "2026-11-13 10:15:30", []));
-    expect(serverBuildsLinkCards()).toBe(true);
-  });
 });
 
 describe("history rows and held cards", () => {
-  it("keeps cards of a history row and notes the server builds them", () => {
+  it("keeps the cards of a history row", () => {
     setMessages(1, [historyRow(7, { link_previews: [CARD_A] })], false);
     expect(row(7)?.linkPreviews).toEqual([CARD_A]);
     expect(row(7)?.linkPreviewsVersion).toBe("2026-11-13T10:15:30Z");
-    expect(serverBuildsLinkCards()).toBe(true);
   });
 
-  it("does not note it for a history row with no cards", () => {
+  it("a history row with no cards holds none", () => {
     setMessages(1, [historyRow(7)], false);
     expect(row(7)?.linkPreviews).toBeUndefined();
-    expect(serverBuildsLinkCards()).toBe(false);
   });
 
   it("a page fetched before a newer frame does not take the cards back", () => {
@@ -143,15 +132,12 @@ describe("history rows and held cards", () => {
 });
 
 describe("a reconnect or server switch", () => {
-  it("forgets the cards and the server's capability with the session", () => {
+  it("forgets the cards with the session", () => {
     addMessage(chat(5));
     handleMessageLinkPreviews(frame(5, "2026-11-13 10:15:30", [CARD_A]));
-    expect(serverBuildsLinkCards()).toBe(true);
-
     runSessionResets("server_switch");
 
     expect(getChannelMessages(1)).toEqual([]);
-    expect(serverBuildsLinkCards()).toBe(false);
     // A late frame for the old server's message finds nothing to write to.
     handleMessageLinkPreviews(frame(5, "2026-11-13 10:15:40", [CARD_B]));
     expect(getChannelMessages(1)).toEqual([]);
@@ -187,11 +173,9 @@ describe("generation isolation on the socket", () => {
     for (const handler of staleHandlers) handler({ payload: stale });
 
     expect(row(5)?.linkPreviews).toBeUndefined();
-    expect(serverBuildsLinkCards()).toBe(false);
 
     // The live attempt's own frame is applied.
     emitTauriEvent("ws-message", stale);
     expect(row(5)?.linkPreviews).toEqual([CARD_A]);
-    expect(serverBuildsLinkCards()).toBe(true);
   });
 });

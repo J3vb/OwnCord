@@ -39,7 +39,6 @@ import {
   notifyLiveMessage,
 } from "./chatNotify";
 import { hasDmPreviewRefetch, reviseDmPreviewAfterDelete } from "./dmPreview";
-import { noteServerBuildsCards } from "./linkPreviewSession";
 import { clearRequestPending } from "../direct-messages/pendingRequests";
 
 export { activateReadyPendingMessages, applyReadyMessageResync } from "./readyResync";
@@ -188,9 +187,8 @@ export function handlePollUpdate(payload: Payload<"poll_update">): void {
 }
 
 /** The cards the server built for a message: kept on its row in content-version order, and a
- *  frame for a message that is not loaded is dropped. Any frame shows the server builds cards. */
+ *  frame for a message that is not loaded is dropped. */
 export function handleMessageLinkPreviews(payload: Payload<"message_link_previews">): void {
-  noteServerBuildsCards();
   updateLinkPreviews(payload);
 }
 

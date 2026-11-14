@@ -103,10 +103,10 @@ release changes the database, and anything an operator must do first.)
 ### Messages & files
 
 - **Link previews show up instantly after a restart.** The server fetches each link once, keeps the preview and its picture, and sends both with the message. Your app no longer fetches them again on every launch.
-- **Your computer no longer contacts the sites people link to.** Previews, YouTube titles and stills, and pictures linked in chat now come from your server, so the linked site never sees your IP address and the "Load external content" prompt does not appear for them.
+- **Your computer no longer contacts the sites people link to.** Page previews and YouTube titles and stills now come from your server, so the linked site never sees your IP address and the "Load external content" prompt does not appear for them.
 - **A message with a link can show its preview a moment after it appears.** The server builds it right after sending; an older message you scroll to gets its preview shortly after it loads.
-- **Servers that do not build previews work as before for one more release** (an older server, or one with `link_previews.enabled` off): the app fetches those previews itself and still asks first.
-- **A picture linked in chat now shows as the server's stored, shrunk copy.** A linked GIF from another site shows as a still picture. GIFs sent from the GIF picker still animate and still ask before they load.
+- **Servers that do not build previews work as before for one more release** (an older server, or one with `link_previews.enabled` off; the server now says so in its `ready` capabilities): the app fetches those previews itself and still asks first.
+- **Pictures and GIFs linked in chat work as before.** A link that is itself an image is still loaded by your app, still animates and still asks first; only page previews and YouTube cards come from your server.
 - **Settings > Text & Images says which content still needs your say-so.** Link previews built by your server no longer do.
 
 ### Under the hood

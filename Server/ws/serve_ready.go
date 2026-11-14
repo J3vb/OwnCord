@@ -375,7 +375,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	return &readyFields{
 		head: readyHead{
 			Activities:   readyActivities(live, userID),
-			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil, h.settings.gameActivity.on.Load()),
+			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil, h.settings.gameActivity.on.Load(), h.settings.linkPreviews.Load()),
 			Categories:   categories,
 			Channels:     channelPayloads,
 			DMChannels:   dmChannels,

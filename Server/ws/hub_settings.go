@@ -143,4 +143,10 @@ type hubSettings struct {
 	uploadPolicyMu syncutil.Ranked[lockRankSerialiser]
 	gameActivity   gameActivityState
 	videoCap       videoCapState
+	// linkPreviews is whether the unfurl workers run; set once at start, read lock-free by ready.
+	linkPreviews atomic.Bool
 }
+
+// SetLinkPreviews records whether the server builds link previews (the unfurl workers are
+// running), which ready advertises as capabilities.link_previews.
+func (h *Hub) SetLinkPreviews(on bool) { h.settings.linkPreviews.Store(on) }

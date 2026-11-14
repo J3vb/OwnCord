@@ -48,22 +48,17 @@ import {
   type ImageBox,
 } from "./imageSizes";
 import { clearMediaCaches, extractYouTubeId, renderYouTubeEmbed } from "./mediaYouTube";
-import { isDirectImageUrl, isGifPickerImage, isGifUrl, isKlipyUrl } from "./imageUrls";
 import { clearEmbedCaches, focusMessageLink, renderGenericLinkPreview } from "./embeds";
 import { renderServerLinkCard } from "./serverLinkCard";
-import { cardForUrl, cardThumbnailUrl, isImageOnlyCard, loadCardThumbnail } from "./serverPreviews";
+import { cardForUrl, cardThumbnailUrl, isImageOnlyCard } from "./serverPreviews";
 import type { LinkPreviewCard } from "@lib/types";
-import type { ImageLoadOptions } from "./attachmentExternal";
-import type {
-  ExternalContentFailure,
-  ExternalContentResult,
-} from "../../../platform/contracts/externalContent";
+import type { ExternalContentFailure } from "../../../platform/contracts/externalContent";
 
 // The lightbox lives in attachments.ts, which renders attachment images and
 // must not import this module (that import was a cycle); re-exported here for
 // existing importers.
 export { closeActiveLightbox, openImageLightbox } from "./attachments";
-export { clearMediaCaches, extractYouTubeId, renderYouTubeEmbed, isDirectImageUrl };
+export { clearMediaCaches, extractYouTubeId, renderYouTubeEmbed };
 
 const log = createLogger("media");
 
@@ -107,7 +102,37 @@ onPrefChange(
   },
 );
 
+/** Check if a URL originates from the Klipy CDN. */
+function isKlipyUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === "klipy.com" || hostname.endsWith(".klipy.com");
+  } catch {
+    return false;
+  }
+}
+
+/** Check if a URL points to an animated GIF. */
+function isGifUrl(url: string): boolean {
+  try {
+    const pathname = new URL(url, "https://placeholder").pathname.toLowerCase();
+    return pathname.endsWith(".gif");
+  } catch {
+    return false;
+  }
+}
+
 // -- Direct images ------------------------------------------------------------
+
+/** Check if a URL points directly to an image or GIF file. */
+export function isDirectImageUrl(url: string): boolean {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    return /\.(gif|png|jpg|jpeg|webp)$/.test(pathname);
+  } catch {
+    return false;
+  }
+}
 
 /** Host shown in an external image's accessible name and alt text. */
 function displayHost(url: string): string {
@@ -125,23 +150,11 @@ export function setInlineImageDecorator(fn: ((url: string) => HTMLElement | null
   imageDecorator = fn;
 }
 
-/** Render a direct image/GIF URL as an inline image with lightbox. With
- *  `thumbUrl`, the picture is the server's stored thumbnail of the link
- *  instead of a fetch of the link itself (a still, with no broker call). */
-export function renderInlineImage(url: string, tapped = false, thumbUrl?: string): HTMLDivElement {
+/** Render a direct image/GIF URL as an inline image with lightbox. */
+export function renderInlineImage(url: string, tapped = false): HTMLDivElement {
   if (!tapped && dataSaverActive()) {
-    return renderDeferredMedia(mediaName(url), () => renderInlineImage(url, true, thumbUrl));
+    return renderDeferredMedia(mediaName(url), () => renderInlineImage(url, true));
   }
-  // The key the picture's box is remembered under, and where its bytes come from.
-  const shownKey = thumbUrl ?? url;
-  const loadShown = (opts: ImageLoadOptions): Promise<ExternalContentResult<string>> =>
-    thumbUrl === undefined
-      ? loadExternalImage({ url }, opts)
-      : loadCardThumbnail(thumbUrl, opts).then((value): ExternalContentResult<string> =>
-          value === null ? { ok: false, failure: "unavailable" } : { ok: true, value },
-        );
-  const fetchShown = (): Promise<string | null> =>
-    thumbUrl === undefined ? fetchExternalImage({ url }) : loadCardThumbnail(thumbUrl);
   // Reserve the box a previous render (this session or an earlier one) or a
   // header sniff measured; otherwise 200px until the bytes say. Either way a
   // virtual-scroll rebuild starts at the right height and nothing shifts on load.
@@ -156,7 +169,7 @@ export function renderInlineImage(url: string, tapped = false, thumbUrl?: string
   };
   // A reset between mount and load must not write this URL into the new session.
   const generation = imageSizeGeneration();
-  const cachedBox = getImageBox(shownKey);
+  const cachedBox = getImageBox(url);
   if (cachedBox !== undefined) reserve(cachedBox);
   else reserveFallback();
 
@@ -172,7 +185,7 @@ export function renderInlineImage(url: string, tapped = false, thumbUrl?: string
   img.hidden = true;
   wrap.appendChild(img);
 
-  if (thumbUrl === undefined && isKlipyUrl(url)) {
+  if (isKlipyUrl(url)) {
     const watermark = createElement("img", {
       class: "klipy-watermark",
       src: klipyWatermark,
@@ -182,7 +195,7 @@ export function renderInlineImage(url: string, tapped = false, thumbUrl?: string
     wrap.appendChild(watermark);
   }
 
-  const extra = thumbUrl === undefined ? imageDecorator?.(url) : null;
+  const extra = imageDecorator?.(url);
   if (extra) wrap.appendChild(extra);
 
   // The failure line and its bounded retry sit beside the image; the image is
@@ -212,7 +225,7 @@ export function renderInlineImage(url: string, tapped = false, thumbUrl?: string
     retry.removeAttribute("aria-disabled");
     failure.hidden = false;
   };
-  recoverEvictedImage(img, { url: shownKey });
+  recoverEvictedImage(img, { url });
   // Bytes that fail to decode, or an evicted image the broker can no longer
   // re-fetch, land in the same typed failed state.
   img.addEventListener("error", () => showFailure("unavailable"));
@@ -230,7 +243,7 @@ export function renderInlineImage(url: string, tapped = false, thumbUrl?: string
     img.hidden = false;
     failure.hidden = true;
     const actual = fitImageBox(img.naturalWidth, img.naturalHeight);
-    const reserved = getImageBox(shownKey);
+    const reserved = getImageBox(url);
     if (actual !== null) {
       // The decoded size is oriented by the browser: it is the measured box,
       // and replaces a sniffed one (an EXIF-rotated header reads swapped).
@@ -241,13 +254,13 @@ export function renderInlineImage(url: string, tapped = false, thumbUrl?: string
         reserved.h !== actual.h
       ) {
         reserve(actual);
-        setImageBox(shownKey, { ...actual, measured: true }, generation);
+        setImageBox(url, { ...actual, measured: true }, generation);
       }
     } else if (reserved === undefined) {
       // No intrinsic size (a host that does not report one): measure the box.
       wrap.style.minHeight = "";
       const measured = fitImageBox(wrap.offsetWidth, wrap.offsetHeight);
-      if (measured !== null) setImageBox(shownKey, { ...measured, measured: true }, generation);
+      if (measured !== null) setImageBox(url, { ...measured, measured: true }, generation);
     }
     if (refocus) img.focus();
   };
@@ -257,7 +270,7 @@ export function renderInlineImage(url: string, tapped = false, thumbUrl?: string
   // When the animateGifs pref is disabled, start frozen so the first frame is
   // shown by default; the user can still click the play button to animate.
   // The blob: source is same-origin, so the freeze canvas stays untainted.
-  if (thumbUrl === undefined && isGifUrl(url)) {
+  if (isGifUrl(url)) {
     img.addEventListener(
       "load",
       () => {
@@ -278,7 +291,7 @@ export function renderInlineImage(url: string, tapped = false, thumbUrl?: string
     img.click();
   });
   img.addEventListener("click", () => {
-    openImageLightbox(img.src, contentText("image.alt", { host }), { url: shownKey });
+    openImageLightbox(img.src, contentText("image.alt", { host }), { url });
   });
   // Save asks the broker for the bytes again rather than reading img.src: a
   // frozen GIF shows a one-frame data: URL there, and the save keeps the
@@ -286,9 +299,10 @@ export function renderInlineImage(url: string, tapped = false, thumbUrl?: string
   bindImageMenu({
     img,
     link: url,
-    full: fetchShown,
-    save: () => fetchShown().then((src) => saveImageBytes(src ?? img.src, url)),
-    share: () => fetchShown().then((src) => saveImageBytes(src ?? img.src, url, "share")),
+    full: () => fetchExternalImage({ url }),
+    save: () => fetchExternalImage({ url }).then((src) => saveImageBytes(src ?? img.src, url)),
+    share: () =>
+      fetchExternalImage({ url }).then((src) => saveImageBytes(src ?? img.src, url, "share")),
   });
 
   function load(): void {
@@ -296,13 +310,13 @@ export function renderInlineImage(url: string, tapped = false, thumbUrl?: string
     // makes loadExternalImage refuse again with nothing fetched.
     // A visible retry stays mounted (and focused) while it re-asks.
     wrap.dataset.mediaState = "loading";
-    const box = getImageBox(shownKey);
+    const box = getImageBox(url);
     if (box !== undefined) reserve(box);
     else reserveFallback();
     retry.setAttribute("aria-disabled", "true");
     if (img.hasAttribute("src")) img.removeAttribute("src");
     img.addEventListener("load", onLoad, { once: true });
-    void loadShown({ sniff: true }).then((result) => {
+    void loadExternalImage({ url }, { sniff: true }).then((result) => {
       if (!result.ok) {
         showFailure(result.failure);
         return;
@@ -312,7 +326,7 @@ export function renderInlineImage(url: string, tapped = false, thumbUrl?: string
       const exact = sniffed === undefined ? null : fitImageBox(sniffed.width, sniffed.height);
       if (exact !== null) {
         // A measured box from an earlier load wins over the header's reading.
-        const held = setImageBox(shownKey, exact, generation);
+        const held = setImageBox(url, exact, generation);
         reserve(held ?? exact);
       }
       img.src = result.value;
@@ -348,19 +362,11 @@ export function extractUrls(content: string): string[] {
 /** True when the message is nothing but one image or GIF link that renders
  *  inline, such as a pick from the GIF picker. The image stands in for the
  *  link, so the row hides the address text, as Discord does. */
-export function isLoneImageEmbed(
-  content: string,
-  /** The message's server cards, or null on the local-fetch path. */
-  cards: readonly LinkPreviewCard[] | null = null,
-): boolean {
+export function isLoneImageEmbed(content: string): boolean {
   const trimmed = content.trim();
-  if (!inlineMediaPref || !isSafeUrl(trimmed)) return false;
+  if (!inlineMediaPref || !isDirectImageUrl(trimmed) || !isSafeUrl(trimmed)) return false;
   const urls = extractUrls(trimmed);
-  if (urls.length !== 1 || urls[0] !== trimmed) return false;
-  if (cards === null || isGifPickerImage(trimmed)) return isDirectImageUrl(trimmed);
-  // With server cards the card says it is a picture; until it arrives the link text stays.
-  const card = cardForUrl(cards, trimmed);
-  return card !== undefined && isImageOnlyCard(card) && cardThumbnailUrl(card) !== null;
+  return urls.length === 1 && urls[0] === trimmed;
 }
 
 /** One URL's embed (YouTube player, inline image, link card), or null when
@@ -396,21 +402,19 @@ function renderUrlEmbed(url: string): HTMLElement | null {
 
 /** One URL's embed drawn from the card the server built for it, or null when
  *  it has no card or the viewer turned that kind of embed off. Nothing is
- *  fetched from the linked site, so no external-content consent applies. */
+ *  fetched from the linked site, so no external-content consent applies. A link
+ *  that is itself an image is not a page preview: it keeps the local fetch, its
+ *  consent and its animation, whatever card the server holds. */
 function renderServerEmbed(url: string, card: LinkPreviewCard | undefined): HTMLElement | null {
-  // A GIF the picker sent stays animated, so it keeps the local fetch and its consent;
-  // the server's thumbnail of it would be a still.
-  if (isGifPickerImage(url)) return renderUrlEmbed(url);
-  if (card === undefined || !isSafeUrl(url)) return null;
-  const thumbUrl = cardThumbnailUrl(card);
+  if (isDirectImageUrl(url)) return renderUrlEmbed(url);
+  if (card === undefined || !isSafeUrl(url) || isImageOnlyCard(card)) return null;
   const ytId = extractYouTubeId(url);
   if (ytId !== null) {
     if (!showEmbedsPref) return null;
-    return renderYouTubeEmbed(ytId, url, false, { title: card.title ?? null, thumbUrl });
-  }
-  if (isImageOnlyCard(card)) {
-    if (!inlineMediaPref || thumbUrl === null) return null;
-    return renderInlineImage(url, false, thumbUrl);
+    return renderYouTubeEmbed(ytId, url, false, {
+      title: card.title ?? null,
+      thumbUrl: cardThumbnailUrl(card),
+    });
   }
   if (!showLinkPreviewsPref) return null;
   return renderServerLinkCard(card, url);
@@ -448,9 +452,9 @@ function refreshExternalItems(): void {
 export const MAX_EMBEDS_PER_MESSAGE = 5;
 
 /** Render URL embeds (YouTube players, generic link previews). `cards` are the
- *  server's cards for the message: only links still in `content` are drawn, each
- *  from its card. Null means the server builds none, and each link is fetched
- *  locally (through the external-content broker, with the viewer's consent). */
+ *  server's cards for the message: a page link or video still in `content` is
+ *  drawn from its card. Null means the server builds none, and each link is
+ *  fetched locally (through the external-content broker, with the viewer's consent). */
 export function renderUrlEmbeds(
   content: string,
   cards: readonly LinkPreviewCard[] | null = null,

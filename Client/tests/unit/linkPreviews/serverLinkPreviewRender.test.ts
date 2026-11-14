@@ -51,9 +51,9 @@ import {
   serverCardsFor,
 } from "../../../src/features/messaging/content/serverPreviews";
 import {
-  noteServerBuildsCards,
-  resetLinkPreviewSession,
-} from "../../../src/features/messaging/linkPreviewSession";
+  applyReadyCapabilities,
+  resetServerCapabilities,
+} from "../../../src/lib/net/serverCapabilities";
 import {
   EXTERNAL_CONSENT_PREF,
   externalAllowed,
@@ -113,7 +113,7 @@ beforeEach(() => {
   URL.createObjectURL = vi.fn(() => `blob:test/${++blobCounter}`);
   URL.revokeObjectURL = vi.fn();
   resetExternalConsent();
-  resetLinkPreviewSession();
+  resetServerCapabilities();
   setServerHost("chat.example");
   setAttachmentCacheScope(null);
   setAttachmentCacheScope("chat.example#1");
@@ -194,22 +194,37 @@ describe("rendering from the server's cards", () => {
     expect(titles).toEqual(["T0", "T1", "T2", "T3", "T4"]);
   });
 
-  it("draws an image-only card as an inline image from the stored thumbnail", async () => {
-    const url = "https://img.example/pic.png";
-    const card: LinkPreviewCard = { url, image: { hash: HASH, width: 10, height: 10 } };
-    const host = mount(url, [card]);
-    await settle();
-    expect(host.querySelector(".msg-image img")).not.toBeNull();
-    expect(imageMock).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it("keeps a link that is itself an image on the consented broker path, whatever card the server holds", async () => {
+    for (const url of ["https://img.example/pic.png", "https://media.klipy.com/a/funny.gif"]) {
+      const card: LinkPreviewCard = { url, image: { hash: HASH, width: 10, height: 10 } };
+      const host = mount(url, [card]);
+      await settle();
+      expect(host.querySelector("[data-external-url]")?.getAttribute("data-external-loaded")).toBe(
+        "false",
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(isLoneImageEmbed(url)).toBe(true);
+    }
   });
 
-  it("hides a lone image link's text only once its card has arrived", () => {
-    const url = "https://img.example/pic.png";
-    const card: LinkPreviewCard = { url, image: { hash: HASH, width: 10, height: 10 } };
-    expect(isLoneImageEmbed(url, [])).toBe(false);
-    expect(isLoneImageEmbed(url, [card])).toBe(true);
-    expect(isLoneImageEmbed(url, null)).toBe(true);
+  it("with consent, a direct image is fetched through the broker as before", async () => {
+    const url = "https://img.example/anim.gif";
+    imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/gif" }) });
+    setExternalConsentChoice("auto");
+    const host = mount(url, [{ url, image: { hash: HASH, width: 10, height: 10 } }]);
+    await settle();
+    expect(imageMock).toHaveBeenCalledTimes(1);
+    expect(host.querySelector(".msg-image img")).not.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("draws nothing for an image-only card on a link that is not an image file", async () => {
+    const url = "https://img.example/render?id=7";
+    const host = mount(url, [{ url, image: { hash: HASH, width: 10, height: 10 } }]);
+    await settle();
+    expect(host.children).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(previewFetches()).toEqual([]);
   });
 
   it("draws a YouTube card's title and still from the server, with no oEmbed or broker call", async () => {
@@ -228,18 +243,6 @@ describe("rendering from the server's cards", () => {
     expect(imageMock).not.toHaveBeenCalled();
   });
 
-  it("keeps a GIF-picker image on the consented broker path so it stays animated", async () => {
-    const url = "https://media.klipy.com/a/b/funny.gif";
-    const card: LinkPreviewCard = { url, image: { hash: HASH, width: 10, height: 10 } };
-    const host = mount(url, [card]);
-    await settle();
-    expect(host.querySelector("[data-external-url]")?.getAttribute("data-external-loaded")).toBe(
-      "false",
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(isLoneImageEmbed(url, [card])).toBe(true);
-  });
-
   it("waits for the tap under data saver, and a tap fetches only the thumbnail", async () => {
     savePref("dataSaver", "always");
     const host = mount(URL_A, [CARD]);
@@ -252,7 +255,7 @@ describe("rendering from the server's cards", () => {
   });
 
   it("a message with no card yet on a cards-capable server shows nothing and never falls back", async () => {
-    noteServerBuildsCards();
+    applyReadyCapabilities({ link_previews: true });
     const cards = serverCardsFor({});
     expect(cards).toEqual([]);
     const host = mount(URL_A, cards);
@@ -263,8 +266,13 @@ describe("rendering from the server's cards", () => {
 });
 
 describe("the legacy path of a server that builds no cards", () => {
-  it("serverCardsFor is null until the server shows it builds cards", () => {
+  it("serverCardsFor is null until ready advertises the link_previews capability", () => {
+    resetServerCapabilities();
     expect(serverCardsFor({})).toBeNull();
+    applyReadyCapabilities({ link_previews: false });
+    expect(serverCardsFor({})).toBeNull();
+    applyReadyCapabilities({ link_previews: true });
+    expect(serverCardsFor({})).toEqual([]);
     expect(serverCardsFor({ linkPreviews: [] })).toEqual([]);
   });
 

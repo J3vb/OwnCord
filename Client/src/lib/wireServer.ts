@@ -122,6 +122,12 @@ export interface ReadyPayload {
      */
     readonly polls?: boolean;
     /**
+     * The server builds link previews: `link_previews` on history messages and
+     * `message_link_previews` frames. False or absent means the client fetches
+     * previews itself.
+     */
+    readonly link_previews?: boolean;
+    /**
      * The server has custom stickers: `sticker_id` on `chat_send`,
      * `sticker` on `chat_message`, `sticker_update` and `/api/v1/stickers`.
      * Absent means an older server: no sticker button.

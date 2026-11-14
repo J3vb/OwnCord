@@ -39,7 +39,7 @@ export const SHAPES: readonly Shape[] = [
   [2,["max_video_bitrate"],[1]],
   [2,["user","server_name","motd"],[7,0,0],["replay_source","upload_policy","game_activity_policy","video_bitrate_cap"],[0,9,10,11]],
   [2,["message"],[0],["code","client_epoch","server_epoch","min_epoch"],[0,1,1,1]],
-  [2,[],[],["message_deduplication","message_retry_window_seconds","message_retry_floor_ms","read_pointer","user_notes","profile_banners","polls","stickers","dm_privacy","threads","forums","multi_role","manage_nicknames","id_mentions","thread_follows","voice_messages","game_activity","listening_activity","channel_media"],[2,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]],
+  [2,[],[],["message_deduplication","message_retry_window_seconds","message_retry_floor_ms","read_pointer","user_notes","profile_banners","polls","link_previews","stickers","dm_privacy","threads","forums","multi_role","manage_nicknames","id_mentions","thread_follows","voice_messages","game_activity","listening_activity","channel_media"],[2,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]],
   [2,["user_id","title","artist","player","started_at","duration_ms"],[1,0,0,0,1,1]],
   [0,15],
   [2,["user_id","name","started_at"],[1,0,1]],
