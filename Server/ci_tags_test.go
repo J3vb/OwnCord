@@ -449,9 +449,9 @@ func TestCIRaceShardMatchesTheExclusion(t *testing.T) {
 		t.Fatal("no `go test -race -p 2` shard line in ci.yml")
 	}
 	var shardPkgs []string
-	for _, f := range strings.Fields(shard) {
-		if strings.HasPrefix(f, "./") {
-			shardPkgs = append(shardPkgs, strings.TrimSuffix(strings.TrimPrefix(f, "./"), "/"))
+	for f := range strings.FieldsSeq(shard) {
+		if pkg, ok := strings.CutPrefix(f, "./"); ok {
+			shardPkgs = append(shardPkgs, strings.TrimSuffix(pkg, "/"))
 		}
 	}
 	slices.Sort(shardPkgs)
