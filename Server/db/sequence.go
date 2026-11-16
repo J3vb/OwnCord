@@ -35,7 +35,7 @@ func (d *DB) RaiseSequences(ctx context.Context, floors map[string]int64) error 
 	if err != nil {
 		return fmt.Errorf("RaiseSequences begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	for table, floor := range floors {
 		if floor <= 0 {
 			continue

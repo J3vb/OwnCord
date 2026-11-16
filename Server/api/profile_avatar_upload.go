@@ -94,6 +94,7 @@ func handleUploadAvatar(
 		// rendered with it may still be cached client-side, and a delete here
 		// would race in-flight requests. Reclaiming them is an operator-side
 		// sweep.
+		prewarmSmallThumbs(r.Context(), svc.Uploads, store, fileID, mimeType, raw)
 		broadcastUserUpdate(broadcaster, updated)
 
 		slog.Info("avatar uploaded", "user_id", user.ID, "id", fileID, "size", written, "mime", mimeType)

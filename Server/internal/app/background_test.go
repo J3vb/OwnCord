@@ -131,7 +131,7 @@ func TestRun_NoLeakAfterCloseWithPushInFlight(t *testing.T) {
 	leakOpt := goleak.IgnoreCurrent()
 	port := freePort(t)
 	a := bootTestApp(t, fmt.Sprint(port), "")
-	a.cfg.Push.Enabled, a.cfg.Push.DispatchEnabled = true, true
+	a.cfg.Push.Enabled = true
 
 	cancel, runErr := runUntilHealthy(t, a, port)
 

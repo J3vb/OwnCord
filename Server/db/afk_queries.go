@@ -30,7 +30,7 @@ func (d *DB) SetAFKChannel(ctx context.Context, channelID *int64) (*int64, error
 	if err != nil {
 		return nil, fmt.Errorf("SetAFKChannel begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	var prev *int64

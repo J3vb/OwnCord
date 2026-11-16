@@ -64,7 +64,7 @@ func (d *DB) ListChannelRetention(ctx context.Context) ([]ChannelRetention, erro
 	if err != nil {
 		return nil, fmt.Errorf("ListChannelRetention: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	out := []ChannelRetention{}
 	for rows.Next() {
 		var c ChannelRetention
@@ -132,7 +132,7 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("RetentionWindows: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	out := []RetentionWindow{}
 	for rows.Next() {
 		var w RetentionWindow
@@ -212,7 +212,7 @@ func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff 
 	if err != nil {
 		return runID, nil, nil, fmt.Errorf("SweepRetention begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM messages WHERE `+retentionCandidates+` ORDER BY id LIMIT ?`,
 		channelID, cutoff.UTC().Format(dbtime.SQLiteLayout), limit)
@@ -361,7 +361,7 @@ func collectAndDeleteAttachments(ctx context.Context, tx *sql.Tx, in string, arg
 	if err != nil {
 		return nil, fmt.Errorf("SweepRetention attachments: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	files := []string{}
 	for rows.Next() {
 		var name string

@@ -59,9 +59,12 @@ serde_json = "1"
 # the trust-on-first-use fingerprint. The plugin's capability is scoped to
 # those loopback proxies only: external content (previews, images, YouTube) is
 # fetched by the external-content broker (external_content.rs), not the plugin.
-tauri-plugin-http = { version = "=2.7.0", features = ["rustls-tls"] }
+# gzip: the server compresses large JSON replies; the client asks for it
+# and decodes it transparently. The decoder (flate2) is already in the tree.
+tauri-plugin-http = { version = "=2.7.0", features = ["rustls-tls", "gzip"] }
 # The external-content broker's client (external_content.rs). Already in the
-# tree via tauri-plugin-http with these same features, so this adds no build:
+# tree via tauri-plugin-http, so this adds no build (its client turns gzip
+# off again, so outside sites see the same requests as before):
 # the broker needs it directly for what the plugin's fetch cannot do — a
 # resolver that answers only with classified addresses, and redirects off.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

@@ -17,6 +17,9 @@ vi.mock("../../src/features/messaging/content/attachments", () => ({
   fetchImageAsObjectUrl,
   hasCachedImage,
   cachedImageBytes,
+  // These avatars are not own-server file URLs, so no small preview applies.
+  smallThumbnailUrl: () => null,
+  isAnimatedThumb: () => false,
   recoverEvictedImage: () => {},
   isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
   resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),

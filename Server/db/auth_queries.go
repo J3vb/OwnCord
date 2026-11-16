@@ -54,7 +54,7 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	if err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	// The durable gate: setup_completed is never cleared by the server, so an
 	// emptied users table (an erasure, or a marker replay past the last-admin
@@ -112,7 +112,7 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	result, err := tx.Exec(
 		`UPDATE invites SET use_count = use_count + 1
@@ -167,7 +167,7 @@ func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash s
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithSession begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	result, err := tx.Exec(
 		`INSERT INTO users (username, password, role_id) VALUES (?, ?, ?)`,

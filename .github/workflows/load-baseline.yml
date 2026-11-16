@@ -92,6 +92,12 @@
 #     scenario (K6_ROLE_FLIP_EVERY=30): the workflow keeps the owner session
 #     token it gets at setup in the run directory, and one admin VU changes
 #     roles with it from steady to the herd.
+#     The `scale-pgo` choice is this profile plus a CPU profile for the
+#     server build's profile-guided optimisation: the server boots with pprof
+#     on (block and mutex samplers off), the run takes back-to-back 25 s CPU
+#     profiles while k6 runs, and merges them into `default.pgo` in the
+#     artifact. pprof costs a little CPU, so a scale-pgo run is a profile
+#     source, never a published capacity number.
 #
 # The restart, ceiling-search and scale profiles set no voice channel: their voice leg
 # is off, both in the script (no K6_VOICE_VUS) and in the server load, because
@@ -118,6 +124,7 @@ on:
           - ceiling-search
           - scale
           - scale-role-flip
+          - scale-pgo
       users:
         description: "Registered users to seed (BPR-030 says 250)"
         required: false
@@ -199,7 +206,8 @@ jobs:
       # scale-role-flip is the scale profile with the WP 4.4a role-flip
       # scenario on: a profile choice rather than an eleventh input, because
       # actionlint caps workflow_dispatch at ten.
-      PROFILE: ${{ inputs.profile == 'scale-role-flip' && 'scale' || inputs.profile || 'capacity' }}
+      PROFILE: ${{ (inputs.profile == 'scale-role-flip' || inputs.profile == 'scale-pgo') && 'scale' || inputs.profile || 'capacity' }}
+      CPU_PROFILE: ${{ inputs.profile == 'scale-pgo' && '1' || '' }}
       TLS_MODE: ${{ matrix.tls }}
       CEILING_MAX: ${{ inputs.ceiling_max || '500' }}
       SEED_USERS_INPUT: ${{ inputs.users || '250' }}
@@ -467,6 +475,14 @@ jobs:
             extra_env+=(-e "OWNCORD_SERVER_MAX_WS_CONNECTIONS=$((CONNECTIONS * 2))")
             ;;
           esac
+          if [ "$CPU_PROFILE" = "1" ]; then
+            # The pprof listener binds 127.0.0.1:6060, which --network=host
+            # puts on the runner's loopback. The block and mutex samplers are
+            # off: the profile is CPU only, and they would add cost.
+            extra_env+=(-e OWNCORD_SERVER_PPROF_ENABLED=true)
+            extra_env+=(-e OWNCORD_SERVER_PPROF_BLOCK_PROFILE_RATE=0)
+            extra_env+=(-e OWNCORD_SERVER_PPROF_MUTEX_PROFILE_FRACTION=0)
+          fi
           if [ "$TLS_MODE" = "off" ]; then
             extra_env+=(-e OWNCORD_TLS_MODE=off)
           fi
@@ -775,6 +791,24 @@ jobs:
             voice_pid=$!
           fi
 
+          # scale-pgo: back-to-back CPU profiles for as long as k6 runs. 25 s
+          # each, because the pprof listener's 30 s WriteTimeout refuses a
+          # longer one. A capture cut short by the end of the run is dropped
+          # by the merge step.
+          pprof_pid=""
+          if [ "$CPU_PROFILE" = "1" ]; then
+            mkdir -p "$WORK/pprof"
+            (
+              n=0
+              while [ ! -f "$WORK/.sampling-done" ]; do
+                n=$((n + 1))
+                curl -sf --max-time 40 -o "$WORK/pprof/cpu-$(printf '%03d' "$n").pb.gz" \
+                  "http://127.0.0.1:6060/debug/pprof/profile?seconds=25" || sleep 1
+              done
+            ) >"$WORK/pprof/capture.log" 2>&1 &
+            pprof_pid=$!
+          fi
+
           drill_pid=""
           if [ "$PROFILE" = "restart" ]; then
             (
@@ -816,6 +850,9 @@ jobs:
 
           touch "$WORK/.sampling-done"
           wait "$sample_pid" || true
+          if [ -n "$pprof_pid" ]; then
+            wait "$pprof_pid" || true
+          fi
 
           voice_rc=0
           if [ -n "$voice_pid" ]; then
@@ -981,13 +1018,38 @@ jobs:
             echo "::warning::at least one window is generator-limited: publish it as such, not as a server result (docs/capacity.md, Scale profile)"
           fi
 
+      # scale-pgo: merge the captures into the one profile `go build` reads
+      # as Server/default.pgo. A capture that failed or holds no samples is
+      # left out, and fewer than 10 usable ones (about 4 of the run's ~11
+      # minutes) fails the step, so a broken run cannot yield a profile that
+      # describes only its start.
+      - name: Merge the CPU profiles into default.pgo
+        if: always() && env.CPU_PROFILE == '1'
+        working-directory: Server
+        run: |
+          usable=()
+          for f in "$WORK"/pprof/cpu-*.pb.gz; do
+            [ -s "$f" ] || continue
+            samples=$(go tool pprof -raw "$f" 2>/dev/null | awk '/^ *[0-9]+ +[0-9]+:/ { n++ } END { print n + 0 }')
+            if [ "$samples" -gt 0 ]; then
+              usable+=("$f")
+            fi
+          done
+          echo "${#usable[@]} usable CPU profile(s)"
+          if [ "${#usable[@]}" -lt 10 ]; then
+            echo "::error::only ${#usable[@]} usable CPU profiles (need 10): the run did not hold load long enough to describe it. See pprof/capture.log."
+            exit 1
+          fi
+          go tool pprof -proto "${usable[@]}" >"$WORK/default.pgo"
+          go tool pprof -top -nodecount=25 "$WORK/default.pgo" | tee "$WORK/pprof/top.txt"
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # capacity keeps B6-9's exact artifact name, so the published runs
           # stay findable; the other profiles name themselves.
-          name: ${{ env.PROFILE == 'capacity' && format('capacity-{0}', matrix.leg) || format('capacity-{0}-{1}{2}{3}', env.PROFILE, matrix.leg, matrix.tls == 'off' && '-off' || '', env.SCALE_ROLE_FLIP_EVERY != '' && '-role-flip' || '') }}
+          name: ${{ env.PROFILE == 'capacity' && format('capacity-{0}', matrix.leg) || format('capacity-{0}-{1}{2}{3}{4}', env.PROFILE, matrix.leg, matrix.tls == 'off' && '-off' || '', env.SCALE_ROLE_FLIP_EVERY != '' && '-role-flip' || '', env.CPU_PROFILE == '1' && '-pgo' || '') }}
           path: |
             ${{ runner.temp }}/loadtest/k6-summary.json
             ${{ runner.temp }}/loadtest/voice-load.txt
@@ -997,4 +1059,6 @@ jobs:
             ${{ runner.temp }}/loadtest/cpu.stat.log
             ${{ runner.temp }}/loadtest/drain.txt
             ${{ runner.temp }}/loadtest/windows-cpu.txt
+            ${{ runner.temp }}/loadtest/default.pgo
+            ${{ runner.temp }}/loadtest/pprof/
           retention-days: 30

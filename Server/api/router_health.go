@@ -84,6 +84,7 @@ func mountPublicV1(r chi.Router, cfg *config.Config, healthHandler http.HandlerF
 		r.Get("/health", healthHandler)
 		r.Get("/info", handleInfo(cfg, svc))
 		r.Get("/server-info", handleServerInfo(cfg, svc))
+		r.Get("/server-icon", handleServerIcon(svc))
 	})
 }
 

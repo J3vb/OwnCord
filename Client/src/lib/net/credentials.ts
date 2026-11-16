@@ -102,7 +102,9 @@ export function parseRelayedLogin(relayed: SavedLoginResponse): Readonly<Record<
       typeof body?.message === "string"
         ? body.message
         : connectText("session.loginFailedStatus", { status: relayed.status });
-    throw httpError(relayed.status, code, message);
+    const appealContact =
+      typeof body?.appeal_contact === "string" ? body.appeal_contact : undefined;
+    throw httpError(relayed.status, code, message, undefined, appealContact);
   }
 
   if (body === null) {

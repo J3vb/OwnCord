@@ -245,14 +245,19 @@ export { K6_HARNESS_PATHS };
 
 /**
  * The permissions mutation hotspot (Client/tests/mutation/stryker.ci.config.mjs mutates only
- * permissions.ts). A path-gated step, not a job: it needs the file, its
- * direct unit test and the inputs of Stryker's dry run.
+ * permissions.ts). A path-gated step, not a job: it needs the file, the
+ * tests that import it and the inputs of Stryker's dry run.
  */
 const PERMISSIONS_MUTATION_PATHS = new Set([
   "Client/src/lib/permissions.ts",
   "Client/tests/unit/permissions.test.ts",
+  "Client/tests/unit/channel-permission-bits-3a13.test.ts",
+  "Client/tests/unit/channel-categories.test.ts",
+  "Client/tests/unit/session-isolation.test.ts",
   "Client/stryker.config.mjs",
   "Client/tests/mutation/stryker.ci.config.mjs",
+  "Client/tests/mutation/vitest.permissions.config.mjs",
+  "Client/tsconfig.mutation-permissions.json",
   // What the dry run executes and compiles: the Vitest config and setup, the
   // TypeScript checker's project, and the pinned Stryker/Vitest versions.
   "Client/vitest.config.ts",

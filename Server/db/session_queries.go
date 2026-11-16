@@ -137,7 +137,7 @@ func (d *DB) GetSessionsWithBanStatusBatch(ctx context.Context, tokenHashes []st
 }
 
 func scanSessionsWithBanStatus(rows *sql.Rows, result map[string]*SessionWithBanStatus) error {
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	for rows.Next() {
 		var s SessionWithBanStatus
 		var device, ip *string

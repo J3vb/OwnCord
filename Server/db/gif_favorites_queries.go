@@ -27,7 +27,7 @@ func (d *DB) AddGIFFavorite(ctx context.Context, userID int64, f GIFFavorite) er
 	if err != nil {
 		return fmt.Errorf("AddGIFFavorite begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	var n int
 	if err := tx.QueryRowContext(ctx,

@@ -1,7 +1,7 @@
 // Pieces of the server rail that need no per-rail state: its icons, drop zone
 // maths, server names, round action buttons and the DM icons under Home.
-import { appendChildren, createElement } from "@lib/dom";
-import { isIpAddressName, type ItemRef } from "@lib/prefs/serverRailLayout";
+import { appendChildren, createElement, setText } from "@lib/dom";
+import { isIpAddressName, serverInitials, type ItemRef } from "@lib/prefs/serverRailLayout";
 import type { ServerProfile } from "@lib/presence/profiles";
 import { uiStore } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
@@ -205,4 +205,23 @@ export function homeLabel(unread: number, requests: number): string {
   return unread === 0
     ? serverRailText("homeRequests", { count: requests })
     : serverRailText("homeUnreadRequests", { count: requests, unread });
+}
+
+/** A server's rail avatar: its icon when one is cached, else its initials (or a server glyph for a bare IP). */
+export function serverAvatar(
+  name: string,
+  color: string,
+  mini: boolean,
+  iconUrl: string | undefined,
+): HTMLElement {
+  const el = createElement("span", { class: mini ? "server-rail-mini" : "server-rail-avatar" });
+  el.style.background = color;
+  if (iconUrl !== undefined) {
+    el.appendChild(createElement("img", { class: "server-rail-icon", src: iconUrl, alt: name }));
+  } else if (!mini && isIpAddressName(name)) {
+    el.appendChild(railIcon("server"));
+  } else {
+    setText(el, serverInitials(name));
+  }
+  return el;
 }

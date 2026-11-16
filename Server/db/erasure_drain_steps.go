@@ -102,7 +102,7 @@ func drainUploadedAttachments(ctx context.Context, tx *sql.Tx, userID, _ int64) 
 	if err != nil {
 		return drainResult{}, fmt.Errorf("delete: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	files := []string{}
 	for rows.Next() {
 		var name string

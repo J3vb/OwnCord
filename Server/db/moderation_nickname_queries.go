@@ -29,7 +29,7 @@ func (d *DB) SetDisplayNameAsModerator(ctx context.Context, actorID, targetID in
 	if err != nil {
 		return nil, fmt.Errorf("SetDisplayNameAsModerator begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	if nicknamePreCheckHook != nil {
 		nicknamePreCheckHook()

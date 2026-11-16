@@ -102,7 +102,7 @@ func (d *DB) GrantUserRole(ctx context.Context, userID, roleID int64) (bool, err
 	if err != nil {
 		return false, fmt.Errorf("AddUserRole begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	res, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)`, userID, roleID)
 	if err != nil {
@@ -134,7 +134,7 @@ func (d *DB) RevokeUserRole(ctx context.Context, userID, roleID int64) (bool, er
 	if err != nil {
 		return false, fmt.Errorf("RemoveUserRole begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	q := d.q.WithTx(tx)
 	n, err := q.CountUserRoles(ctx, userID)
@@ -264,7 +264,7 @@ func (d *DB) UpdateRole(ctx context.Context, id int64, name string, color *strin
 	if err != nil {
 		return nil, fmt.Errorf("UpdateRole begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	q := d.q.WithTx(tx)
 	old, err := q.GetRolePosition(ctx, id)
@@ -350,7 +350,7 @@ func (d *DB) SetRolePositions(ctx context.Context, positions map[int64]int) ([]i
 	if err != nil {
 		return nil, fmt.Errorf("SetRolePositions begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	q := d.q.WithTx(tx)
 	for _, id := range slices.Sorted(maps.Keys(positions)) {
@@ -381,7 +381,7 @@ func (d *DB) DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID i
 	if err != nil {
 		return nil, fmt.Errorf("DeleteRoleReassigning begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	q := d.q.WithTx(tx)
 	moved, err := q.ListUserIDsByRole(ctx, roleID)
@@ -442,7 +442,7 @@ func (d *DB) usersMirroringRoleTx(ctx context.Context, tx *sql.Tx, roleID int64)
 	if err != nil {
 		return nil, fmt.Errorf("DeleteRoleReassigning list mirrors: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var ids []int64
 	for rows.Next() {
 		var id int64

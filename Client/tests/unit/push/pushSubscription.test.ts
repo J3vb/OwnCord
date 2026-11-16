@@ -123,6 +123,63 @@ describe("push subscription", () => {
     expect(host.register).not.toHaveBeenCalled();
   });
 
+  it("a push server on a private network is shown with its host, and tried again when the app comes back", async () => {
+    const { api } = makeApi();
+    host.register.mockResolvedValue({
+      ok: true,
+      keys: { ...KEYS, endpoint: "https://192.168.1.20:8443/up1" },
+    });
+    api.subscribePush.mockRejectedValueOnce(
+      new ApiClientError(400, "PUSH_SERVER_NOT_PUBLIC", "not public"),
+    );
+    onReady(api);
+    await settle();
+    expect(pushStore.getState().setting).toBe("refused");
+    expect(pushStore.getState().host).toBe("192.168.1.20:8443");
+
+    // The push app was pointed at a public server meanwhile.
+    host.register.mockResolvedValue({ ok: true, keys: KEYS });
+    lastEventHandler()({ kind: "resume" });
+    await settle();
+    expect(pushStore.getState().setting).toBe("on");
+    expect(pushStore.getState().host).toBe("");
+  });
+
+  it("a push server on a non-standard port is shown with its host and port", async () => {
+    const { api } = makeApi();
+    host.register.mockResolvedValue({
+      ok: true,
+      keys: { ...KEYS, endpoint: "https://ntfy.example:8443/up1" },
+    });
+    api.subscribePush.mockRejectedValueOnce(
+      new ApiClientError(400, "PUSH_SERVER_PORT_NOT_SUPPORTED", "port"),
+    );
+    onReady(api);
+    await settle();
+    expect(pushStore.getState()).toMatchObject({
+      setting: "port-refused",
+      host: "ntfy.example",
+      port: "8443",
+    });
+  });
+
+  it("a refusal that arrives after the session ended changes nothing", async () => {
+    const { api } = makeApi();
+    const refusal: { reject?: (e: Error) => void } = {};
+    api.subscribePush.mockImplementationOnce(
+      () =>
+        new Promise<never>((_, rej) => {
+          refusal.reject = rej;
+        }),
+    );
+    onReady(api);
+    await settle();
+    runSessionResets("user");
+    refusal.reject?.(new ApiClientError(400, "PUSH_SERVER_NOT_PUBLIC", "not public"));
+    await settle();
+    expect(pushStore.getState().setting).toBe("off");
+  });
+
   it("with no push app it asks for one, and registers by itself once the app is back", async () => {
     const { api } = makeApi();
     host.register.mockResolvedValueOnce({ ok: false, reason: "no-distributor" });
@@ -148,6 +205,8 @@ describe("push subscription", () => {
         { id: "io.heckel.ntfy", name: "ntfy" },
         { id: "org.example.up", name: "Other" },
       ],
+      host: "",
+      port: "",
     });
 
     await chooseDistributor("io.heckel.ntfy");

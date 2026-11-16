@@ -47,7 +47,7 @@ func handleVerifyTOTP(svc AuthService) http.HandlerFunc {
 
 		res, err := svc.VerifyTOTP(r.Context(), partialToken, req.Code)
 		if err != nil {
-			writeAuthError(r.Context(), w, err)
+			writeSignInError(r.Context(), w, svc, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, authResponse(res))

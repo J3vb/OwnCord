@@ -100,6 +100,10 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Push notifications
+
+- **Settings > Notifications says when push cannot work.** Members now see it when their push server is on a private network or a non-standard port, instead of silently getting nothing.
+
 ### Voice
 
 - **Share music in a voice channel.** The new music button in the call controls shares one app's sound, with no screen share needed. Pick the player from the list and everyone in the call hears it beside your voice.
@@ -109,6 +113,8 @@ release changes the database, and anything an operator must do first.)
 
 ### Messages & files
 
+- **Avatars and group icons load faster.** Lists and messages now fetch a small 128 px preview, and profile cards a 256 px one, instead of the full-size picture. An animated GIF avatar shows a still and plays when you hover it.
+- **Servers make the small previews once.** `GET /api/v1/files/{id}/thumb` takes an optional `size` of `128` or `256`, and a GIF with more than one frame is answered with an `X-Image-Animated: 1` header. Avatars and group icons get both sizes when uploaded; older ones get them the first time they are shown.
 - **Link previews show up instantly after a restart.** The server fetches each link once, keeps the preview and its picture, and sends both with the message. Your app no longer fetches them again on every launch.
 - **Your computer no longer contacts the sites people link to.** Page previews and YouTube titles and stills now come from your server, so the linked site never sees your IP address and the "Load external content" prompt does not appear for them.
 - **A message with a link can show its preview a moment after it appears.** The server builds it right after sending; an older message you scroll to gets its preview shortly after it loads.
@@ -118,10 +124,18 @@ release changes the database, and anything an operator must do first.)
 
 ### Accounts & admin
 
+- **One switch turns push on.** `push.enabled` now lets phones register and sends them notifications; the second switch, `push.dispatch_enabled`, is retired. **Upgrade note:** a server that had push on but sending off starts sending after the upgrade (to the push service each phone named, such as ntfy.sh); set `push.enabled: false` before upgrading if you do not want that. A `config.yaml` or admin-panel setting that still names `push.dispatch_enabled` loads fine and is ignored, and the server logs one line at start-up saying so. The admin Settings row "Send push notifications" is gone; "Enable push notifications" covers both.
 - **Moderators can warn a member from the member list.** Right-click a member and choose Warn; until now a warning could only come from a report.
+- **Three new warnings on the admin Attention page.** One says the owner has no recovery kit (without one, a lost owner password means restoring a backup and running setup again). One says fewer than two people can work reports. One says no role besides Owner carries Moderate Members, which a customised Moderator role can be missing. Each clears by itself once fixed.
+- **Owners can set an appeal contact in admin Settings; a banned member sees it when sign-in is refused.**
+- **Owners can give the server an icon.** Choose a picture under Settings > General in the admin panel (it is cropped to a square and shrunk), and it shows in your members' server list in place of the initials. Remove it there to go back to initials.
+- **The settings request no longer takes `server_icon` by hand.** Use the new icon control (`PUT` and `DELETE /admin/api/server-icon`); a request that sets it directly is refused. A regular backup holds the database only, so after a restore on a new machine the icon has to be uploaded again (the full archive carries it).
+
+- **The server owner gets a notice on their phone when something needs fixing.** When a disk, backup, certificate, last-exit, last-restore or voice warning turns critical, the owner's devices get one notice that says only "Your OwnCord server needs attention"; the admin panel says what. At most one per warning every 6 hours while the server runs, and only when `push.enabled` is on.
 
 ### Under the hood
 
+- **Message history, search and other big lists download smaller.** The server gzips them (about a fifth of the size) for the browser client, and the desktop and Android app now ask for it too. Sign-in, tokens, invites, voice and files are sent as before.
 - **The browser client loads faster.** With `server.browser_client_enabled` on, the server sends the browser client's files brotli- or gzip-compressed (about a third of the download). It builds the compressed copies in the background for a few seconds after start and keeps them in memory beside the originals, a few extra MB.
 - **Groundwork for server-side link previews.** Nothing changes for members yet. It adds the storage a later release will use:
   - Database migration 094 adds four tables for link cards and their thumbnails. The server migrates on start, so take a backup first as usual.

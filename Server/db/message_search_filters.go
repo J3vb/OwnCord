@@ -111,7 +111,7 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 	if err != nil {
 		return nil, fmt.Errorf("SearchMessagesFiltered: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	results, err := scanSearchResults(rows, "SearchMessagesFiltered")
 	if err != nil {
@@ -212,7 +212,7 @@ func (d *DB) importedChannelIDs(ctx context.Context) ([]int64, error) {
 	if err != nil {
 		return nil, fmt.Errorf("importedChannelIDs: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var ids []int64
 	for rows.Next() {
 		var id int64
@@ -358,7 +358,7 @@ func (d *DB) allChannelIDs(ctx context.Context) ([]int64, error) {
 	if err != nil {
 		return nil, fmt.Errorf("allChannelIDs: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var ids []int64
 	for rows.Next() {
 		var id int64

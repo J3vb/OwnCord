@@ -67,6 +67,7 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 			writeServiceError(r.Context(), w, err)
 			return
 		}
+		prewarmSmallThumbs(r.Context(), svc.Uploads, store, fileID, mimeType, raw)
 		fanOutGroupChange(r.Context(), svc, broadcaster, channelID, change.Audience, change.Rows)
 		slog.Info("group icon uploaded", "user_id", user.ID, "channel_id", channelID, "id", fileID, "size", written, "mime", mimeType)
 		writeGroupSummary(w, r, svc, user.ID, channelID)

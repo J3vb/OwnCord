@@ -13,7 +13,7 @@ func (d *DB) RecordRemovalAction(ctx context.Context, targetID, actorID int64, r
 	if err != nil {
 		return fmt.Errorf("RecordRemovalAction begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	if err := recordLedgerRow(ctx, tx, "removal", targetID, actorID, nil, reason); err != nil {
 		return err
 	}

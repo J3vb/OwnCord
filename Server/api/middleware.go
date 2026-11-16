@@ -359,6 +359,14 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
+// bannedResponse is the 403 body of a banned member's sign-in refusal: errorResponse plus the owner's optional
+// appeal contact. It is written only after the password check passed.
+type bannedResponse struct {
+	Error         string `json:"error"`
+	Message       string `json:"message"`
+	AppealContact string `json:"appeal_contact,omitempty"`
+}
+
 func writeErr(w http.ResponseWriter, status int, code httperr.Code, msg string) {
 	writeJSON(w, status, errorResponse{Error: string(code), Message: msg})
 }

@@ -89,7 +89,7 @@
     "@tauri-apps/plugin-http": "2.7.0",
     "@tauri-apps/plugin-notification": "^2.8.0",
     "@tauri-apps/plugin-process": "^2.4.0",
-    "livekit-client": "2.23.0"
+    "livekit-client": "2.24.1"
   },
   "overrides": {
     "qs": "6.16.1",

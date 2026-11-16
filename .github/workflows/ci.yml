@@ -841,8 +841,10 @@ jobs:
       # no new status context; it runs only when ci-select's `permissions`
       # capability is true (permissions.ts, its unit test, the Stryker
       # configs, or any non-PR event, which selects everything). The config
-      # mutates one file but Stryker's dry run executes the full Vitest suite
-      # once. Wall time: about 3m40s on ubuntu-latest (first PR run, 2026-10-08).
+      # mutates one file, runs only the tests that import it and type-checks
+      # from it alone (tests/mutation/vitest.permissions.config.mjs,
+      # tsconfig.mutation-permissions.json). It took 10m48s when the dry run
+      # still executed the whole suite; about 1m30s locally after (2026-11-14).
       - name: Permissions mutation hotspot
         if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.permissions == 'true') }}
         run: npx stryker run tests/mutation/stryker.ci.config.mjs

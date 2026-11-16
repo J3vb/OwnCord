@@ -90,7 +90,7 @@ func newSessionToken(persist func(tokenHash string) error) (string, error) {
 
 func sessionIssueError(err error) error {
 	if errors.Is(err, db.ErrAccountErasing) {
-		return ErrBanned
+		return ErrBannedErasing
 	}
 	return ErrSessionIssue
 }

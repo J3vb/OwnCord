@@ -148,7 +148,7 @@ func (d *DB) ListAllUploads(ctx context.Context, q AdminUploadQuery) ([]AdminUpl
 	if err != nil {
 		return nil, fmt.Errorf("ListAllUploads: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	items := []AdminUpload{}
 	for rows.Next() {
@@ -180,7 +180,7 @@ func (d *DB) UploadTotals(ctx context.Context) ([]UploadKindTotal, error) {
 	if err != nil {
 		return nil, fmt.Errorf("UploadTotals: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	out := []UploadKindTotal{}
 	for rows.Next() {
 		var t UploadKindTotal
@@ -278,7 +278,7 @@ func (d *DB) ListMemberStorage(ctx context.Context, userIDs []int64) ([]MemberSt
 	if err != nil {
 		return nil, fmt.Errorf("ListMemberStorage: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	for rows.Next() {
 		var m MemberStorage
 		if err := rows.Scan(&m.UserID, &m.BytesUsed, &m.QuotaMB); err != nil {

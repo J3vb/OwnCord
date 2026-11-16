@@ -98,7 +98,7 @@ func (d *DB) CreateMessageRequest(ctx context.Context, senderID, recipientID, ch
 	if err != nil {
 		return out, fmt.Errorf("CreateMessageRequest begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	priv := DefaultUserPrivacy()
@@ -225,7 +225,7 @@ func (d *DB) AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*
 	if err != nil {
 		return nil, fmt.Errorf("AcceptMessageRequest begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	row, err := q.GetMessageRequestForRecipient(ctx, dbgen.GetMessageRequestForRecipientParams{ID: id, RecipientID: recipientID})

@@ -152,7 +152,7 @@ func (d *DB) FileReport(ctx context.Context, publicID string, reporterID, subjec
 	if err != nil {
 		return 0, fmt.Errorf("FileReport begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := dbgen.New(tx)
 
 	id, err := q.InsertReport(ctx, dbgen.InsertReportParams{
@@ -359,7 +359,7 @@ func forceReassignGuarded(ctx context.Context, writer *sql.DB, actorID, observed
 	if err != nil {
 		return false, fmt.Errorf("forceReassignGuarded begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := dbgen.New(tx)
 
 	if forceReassignInTxHook != nil {

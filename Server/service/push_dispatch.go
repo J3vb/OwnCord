@@ -90,10 +90,13 @@ type pushDispatchStore interface {
 	DeletePushSubscriptionByID(ctx context.Context, id int64) (bool, error)
 	// GetUserByID reads the status a ring's target chose: Do Not Disturb gets no ring push.
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	// GetOwnerUser and GetRoleByID pick the owner an attention push goes to.
+	GetOwnerUser(ctx context.Context) (*db.User, error)
+	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
 }
 
 // PushDispatcher is the composition root's PushNotifier: audience, coalescing, encryption, sending, retries,
-// pruning and counters. Built only when push.enabled and push.dispatch_enabled are true.
+// pruning and counters. Built whenever push.enabled is true.
 type PushDispatcher struct {
 	st     pushDispatchStore
 	perms  *PermissionService

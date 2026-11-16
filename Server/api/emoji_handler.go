@@ -66,7 +66,7 @@ var allowedEmojiMIME = map[string]bool{
 func MountEmojiRoutes(r chi.Router, svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster EmojiBroadcaster) {
 	r.Route("/api/v1/emoji", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
-		r.Get("/", handleListEmoji(svc))
+		r.With(compressJSON).Get("/", handleListEmoji(svc))
 		r.Get("/{id}/image", handleServeEmojiImage(svc, store))
 		r.With(MaxBodySize(emojiMaxBodySize)).
 			Post("/", handleCreateEmoji(svc, store, limiter, broadcaster))
