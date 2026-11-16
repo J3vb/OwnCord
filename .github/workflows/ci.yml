@@ -2303,6 +2303,9 @@ jobs:
       - changes
       - server-fast-checks
       - server-build-test
+      - server-deadlock-tags
+      - server-race-shard
+      - server-coverage-floor
       - client-check
       - docs-consistency
       - hygiene
