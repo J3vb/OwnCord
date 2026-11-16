@@ -517,9 +517,20 @@ jobs:
       # Coverage is profiled on the Linux leg only: the floor check below reads
       # that leg alone, and coverage instrumentation slows the Windows leg,
       # which is the longest job in the workflow, for a profile nothing reads.
+      # db, service, api and internal/app run in Server Race Tests (db,
+      # service, api, app) on their own runner: this runner's cores are full
+      # with the rest, so only a second runner shortens the race run.
       - name: Run tests with race detection and coverage
         if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
-        run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t race_pkgs < <(go list ./... | grep -vE '/Server/(db|service|api|internal/app)$')
+          if [ "${#race_pkgs[@]}" -lt 10 ]; then
+            echo "::error::go list returned ${#race_pkgs[@]} packages for the race run"
+            exit 1
+          fi
+          go test -race -timeout 20m "${race_pkgs[@]}" -coverprofile=coverage.out -cover
 
       # Windows runs db, service and api without -race. Those packages spend
       # most of their race time instrumenting the SQLite driver, which is C
@@ -568,21 +579,13 @@ jobs:
           go test -count=1 ./cmd/dbinventory/ ./migrations/
           go test -count=1 -run TestBundledChangelog ./admin/
 
-      # Coverage ratchet (B3-6 item 1). Reads the profile the race step wrote,
-      # but placed after the other test steps so a floor miss does not hide
-      # their results. Linux leg only: the profile is not the same on both legs
-      # — OS-tagged files swap in and out and several tests skip on Windows —
-      # so the floors are pinned to one leg and the figure stays deterministic.
-      # Ratchet rule in Server/CLAUDE.md.
-      - name: Check coverage floor
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
-        run: bash scripts/coverage-floor.sh coverage.out
-
+      # Half of the Linux profile; Server Coverage Floor merges it with the
+      # race shard's half and checks the floors.
       - name: Upload Go coverage
         if: always() && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: go-coverage-${{ matrix.os }}
+          name: go-coverage-part-main
           path: Server/coverage.out
           retention-days: 7
 
@@ -704,6 +707,96 @@ jobs:
           go test -tags otel -count=1 ./telemetry/... ./api/...
           go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/
           go test -count=1 -run '^TestWriteReady_AllocatesAFifthOfTheRoster$' ./ws/
+
+  # The other half of the Linux race run: the database-heavy packages, whose
+  # tests mostly run in parallel and so need cores of their own to gain.
+  server-race-shard:
+    name: Server Race Tests (db, service, api, app)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: Server/
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache-dependency-path: Server/go.sum
+
+      - name: Run tests with race detection and coverage
+        run: go test -race -timeout 20m ./db/ ./service/ ./api/ ./internal/app/ -coverprofile=coverage.out -cover
+
+      - name: Upload Go coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-coverage-part-shard
+          path: Server/coverage.out
+          retention-days: 7
+
+  # Coverage ratchet (B3-6 item 1) over the two Linux race halves. Linux only:
+  # the profile is not the same on both OS legs (OS-tagged files swap in and
+  # out, several tests skip on Windows), so the floors are pinned to Linux.
+  # Ratchet rule in Server/CLAUDE.md. Both halves are required: a missing one
+  # fails here rather than checking the floor on half the code.
+  server-coverage-floor:
+    name: Server Coverage Floor
+    needs: [changes, server-build-test, server-race-shard]
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: Server/
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # coverage-floor.sh reads the floor file with node.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: go-coverage-part-*
+          path: Server/.coverage-parts
+
+      - name: Merge the two profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          a=.coverage-parts/go-coverage-part-main/coverage.out
+          b=.coverage-parts/go-coverage-part-shard/coverage.out
+          for f in "$a" "$b"; do
+            if [ ! -s "$f" ]; then
+              echo "::error::missing coverage half $f"
+              exit 1
+            fi
+          done
+          if [ "$(head -1 "$a")" != "$(head -1 "$b")" ]; then
+            echo "::error::coverage modes differ: $(head -1 "$a") vs $(head -1 "$b")"
+            exit 1
+          fi
+          { cat "$a"; tail -n +2 "$b"; } > coverage.out
+
+      - name: Check coverage floor
+        run: bash scripts/coverage-floor.sh coverage.out
+
+      - name: Upload Go coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-coverage-ubuntu-latest
+          path: Server/coverage.out
+          retention-days: 7
 
   # ubuntu-latest deliberately: the client TS code has zero win32-conditional
   # paths (no process.platform / path.sep branches in src or the unit suites),

@@ -167,7 +167,6 @@ func assertPreviewJPEG(t *testing.T, rr *httptest.ResponseRecorder, wantW, wantH
 }
 
 func TestServeThumb_HEICIsAJPEGEvenInsideTheBox(t *testing.T) {
-	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -204,7 +203,6 @@ func TestServeThumb_HEICIsAJPEGEvenInsideTheBox(t *testing.T) {
 }
 
 func TestServeThumb_PortraitHEICPreviewIsUpright(t *testing.T) {
-	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	token := uploadCreateToken(t, database, "thumbirot", 4)
@@ -214,7 +212,6 @@ func TestServeThumb_PortraitHEICPreviewIsUpright(t *testing.T) {
 }
 
 func TestServeThumb_LargeHEICIsScaledIntoTheBox(t *testing.T) {
-	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	token := uploadCreateToken(t, database, "thumbbigheic", 4)
@@ -224,7 +221,6 @@ func TestServeThumb_LargeHEICIsScaledIntoTheBox(t *testing.T) {
 }
 
 func TestServeThumb_TIFFIsAJPEG(t *testing.T) {
-	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -253,7 +249,6 @@ func patchedISPE(t *testing.T, heicBytes []byte, w, h uint32) []byte {
 // kept as an empty preview, it is never decoded again, and the raw bytes are
 // never served as an image.
 func TestServeThumb_UnconvertibleImageIs404OnceAndNeverRetried(t *testing.T) {
-	t.Parallel()
 	good := testHEIC(t, 64, 32)
 	tiffGood := testTIFF(t, 50, 30)
 	cases := []struct {
@@ -400,7 +395,6 @@ func multiPictureHEIC(t *testing.T, n int) []byte {
 }
 
 func TestServeThumb_ThePlainStillStillConverts(t *testing.T) {
-	t.Parallel()
 	// The fixtures above are variations of this file: it must pass the check.
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
@@ -413,7 +407,6 @@ func TestServeThumb_ThePlainStillStillConverts(t *testing.T) {
 // A HEIC whose major brand is not an HEVC one but lists one as compatible is
 // still a HEIC: it gets its dimensions and its preview.
 func TestUpload_HEICWithAHEVCCompatibleBrand(t *testing.T) {
-	t.Parallel()
 	data := testHEIC(t, 64, 32)
 	copy(data[8:12], "miaf") // major brand; the compatible brands keep heic
 	database := newUploadTestDB(t)

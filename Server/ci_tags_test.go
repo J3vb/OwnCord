@@ -77,6 +77,11 @@ func parseGoTestInvocations(ciYML string) []goTestInvocation {
 				inv.run = unquote(strings.TrimPrefix(f, "-run="))
 			case strings.HasPrefix(f, "./"), f == "...":
 				inv.packages = append(inv.packages, f)
+			case strings.HasPrefix(f, `"${`) && strings.HasSuffix(f, `[@]}"`):
+				// A race leg split across runners passes `go list ./...` minus the
+				// shard's packages as a bash array. It counts as ./...: the packages
+				// it leaves out run on the shard's own line with the same flags.
+				inv.packages = append(inv.packages, "./...")
 			}
 		}
 		if len(inv.packages) > 0 {
@@ -287,6 +292,17 @@ func TestGuardClosesReviewedGaps(t *testing.T) {
 		src := []byte("// Copyright header.\n// Another line.\n\n//go:build integration\n\npackage foo\n")
 		if got := buildConstraintLine(src); got != "//go:build integration" {
 			t.Fatalf("buildConstraintLine did not find the constraint past a leading comment: got %q", got)
+		}
+	})
+
+	t.Run("a go list package array counts as the whole tree", func(t *testing.T) {
+		invocations := parseGoTestInvocations("go test -race -timeout 20m \"${race_pkgs[@]}\" -coverprofile=coverage.out -cover\n")
+		expr, err := constraint.Parse("//go:build race")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !isConstraintCovered(expr, "ws", nil, invocations) {
+			t.Fatal("a -race line over the go list array must cover a race-tagged file in ws")
 		}
 	})
 

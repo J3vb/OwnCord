@@ -703,7 +703,6 @@ func pngBomb(t *testing.T, width, height uint32) []byte {
 }
 
 func TestServeThumb_PNGFitsTheBox(t *testing.T) {
-	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -736,7 +735,6 @@ func TestServeThumb_PNGFitsTheBox(t *testing.T) {
 }
 
 func TestServeThumb_JPEGFitsTheBox(t *testing.T) {
-	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -758,7 +756,6 @@ func TestServeThumb_JPEGFitsTheBox(t *testing.T) {
 // A phone photo stores its pixels sideways with an EXIF Orientation tag the
 // webview honours for the original; the thumbnail must come out upright too.
 func TestServeThumb_JPEGHonoursEXIFOrientation(t *testing.T) {
-	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	token := uploadCreateToken(t, database, "thumbexif", 4)
@@ -911,7 +908,6 @@ func TestServeThumb_16BitPNG4500IsNotDecoded(t *testing.T) {
 // A baseline JPEG is counted at its decoded image alone, so a 24-megapixel
 // camera photo gets a real thumbnail.
 func TestServeThumb_LargeBaselineJPEGFitsTheBox(t *testing.T) {
-	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -961,7 +957,6 @@ func TestServeThumb_LargeProgressiveJPEGIsNotDecoded(t *testing.T) {
 // without decoding it again. The original is swapped for a decodable one
 // after the first request to show the second never decodes.
 func TestServeThumb_UndecodableJPEGIsDecodedOnce(t *testing.T) {
-	t.Parallel()
 	database := newUploadTestDB(t)
 	dir := t.TempDir()
 	store, err := storage.New(dir, 10)

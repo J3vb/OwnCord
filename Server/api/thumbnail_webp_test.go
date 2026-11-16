@@ -28,7 +28,6 @@ func readWebP(t *testing.T, name string) []byte {
 // thumbnail inside the box instead of passing its original through, and the
 // upload records its size.
 func TestServeThumb_WebPFitsTheBox(t *testing.T) {
-	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -74,7 +73,6 @@ func TestServeThumb_WebPFitsTheBox(t *testing.T) {
 // A WebP with transparent pixels keeps them: its thumbnail is a PNG, from
 // the first request and from the kept file.
 func TestServeThumb_TransparentWebPIsAPNG(t *testing.T) {
-	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	token := uploadCreateToken(t, database, "thumbwebpalpha", 4)

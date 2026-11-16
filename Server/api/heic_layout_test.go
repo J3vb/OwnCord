@@ -263,7 +263,6 @@ func heicRefused(t *testing.T, content []byte) {
 }
 
 func TestHEICLayout_PlainStillAndGridConvert(t *testing.T) {
-	t.Parallel()
 	for name, content := range map[string][]byte{
 		"hand-built still":  plainLayout(t).build(),
 		"hand-built grid":   gridLayout(t, 1, 2, 32, 16).build(),
@@ -302,7 +301,6 @@ func testHEICTiled(t *testing.T, w, h int) []byte {
 }
 
 func TestHEICLayout_Refusals(t *testing.T) {
-	t.Parallel()
 	plain := func() hlayout { return plainLayout(t) }
 	// extraExtents is an iloc whose item 1 lists n extents over the same data.
 	extents := func(n int) func(uint32) []byte {
