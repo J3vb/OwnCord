@@ -280,7 +280,6 @@ func TestSetupService_BootstrapFirstSessionIsSeen(t *testing.T) {
 }
 
 func TestSetupService_BootstrapHashesUnderSharedAdmissionBudget(t *testing.T) {
-	t.Parallel()
 	database := newTestDB(t)
 	seedRole(t, database, &db.Role{ID: permissions.OwnerRoleID, Name: "Owner", Position: permissions.OwnerRolePosition})
 	limiter := auth.NewRateLimiter()

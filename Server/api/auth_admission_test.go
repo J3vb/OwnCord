@@ -27,7 +27,6 @@ import (
 const authBusyMessage = "too many authentication attempts in progress, try again later"
 
 func TestLogin_RefusedWhenAuthBudgetExhausted(t *testing.T) {
-	t.Parallel()
 	database := newAuthTestDB(t)
 	seedUser(t, database, "budgeted", "securePass1", 4)
 	limiter := auth.NewRateLimiter()

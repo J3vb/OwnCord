@@ -541,7 +541,6 @@ func TestPurgeAfterBan_ConcurrentPurgesDoNotDoubleCount(t *testing.T) {
 }
 
 func TestPurgeAfterBan_SemaphoreWaitHonoursContext(t *testing.T) {
-	t.Parallel()
 	f := banPurgeFixture(t)
 	banPurgeBan(t, f, fixtureMember2)
 	f.mod.banPurgeSem <- struct{}{}

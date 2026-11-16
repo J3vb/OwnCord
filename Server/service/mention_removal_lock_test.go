@@ -177,7 +177,6 @@ func TestPurgeAfterBan_MarkUnreadInGapKeepsMentionBadge(t *testing.T) {
 // A delete waits for the channel's emit lock only until its context ends, and
 // writes nothing when it gives up.
 func TestDeleteMessage_LockWaitHonoursContextAndWritesNothing(t *testing.T) {
-	t.Parallel()
 	svc, _, database := gapFixture(t)
 	m1 := sendAs(t, svc, 1, "@bob one").MessageID
 

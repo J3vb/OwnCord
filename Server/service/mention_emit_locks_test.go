@@ -13,7 +13,6 @@ import (
 // worker holds it across a write), a read-pointer move and a delete reversal on
 // another channel go through, and the same channel still waits.
 func TestMentionEmitLocks_OtherChannelDoesNotWait(t *testing.T) {
-	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedChannel(t, database, &db.Channel{ID: 11, Name: "other", Type: "text"})
 	if svc.mentionEmitLocks.forChannel(10) == svc.mentionEmitLocks.forChannel(11) {

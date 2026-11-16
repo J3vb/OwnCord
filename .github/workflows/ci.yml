@@ -517,15 +517,15 @@ jobs:
       # Coverage is profiled on the Linux leg only: the floor check below reads
       # that leg alone, and coverage instrumentation slows the Windows leg,
       # which is the longest job in the workflow, for a profile nothing reads.
-      # db, service, api and internal/app run in Server Race Tests (db,
-      # service, api, app) on their own runner: this runner's cores are full
+      # db, service and api run in Server Race Tests (db, service, api) on
+      # their own runner: this runner's cores are full
       # with the rest, so only a second runner shortens the race run.
       - name: Run tests with race detection and coverage
         if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t race_pkgs < <(go list ./... | grep -vE '/Server/(db|service|api|internal/app)$')
+          mapfile -t race_pkgs < <(go list ./... | grep -vE '/Server/(db|service|api)$')
           if [ "${#race_pkgs[@]}" -lt 10 ]; then
             echo "::error::go list returned ${#race_pkgs[@]} packages for the race run"
             exit 1
@@ -711,7 +711,7 @@ jobs:
   # The other half of the Linux race run: the database-heavy packages, whose
   # tests mostly run in parallel and so need cores of their own to gain.
   server-race-shard:
-    name: Server Race Tests (db, service, api, app)
+    name: Server Race Tests (db, service, api)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
     runs-on: ubuntu-latest
@@ -730,7 +730,10 @@ jobs:
           cache-dependency-path: Server/go.sum
 
       - name: Run tests with race detection and coverage
-        run: go test -race -timeout 20m ./db/ ./service/ ./api/ ./internal/app/ -coverprofile=coverage.out -cover
+        # -p 2: each package already runs its tests in parallel, so two at a
+        # time keep the cores busy without starving tests that wait on a
+        # deadline.
+        run: go test -race -p 2 -timeout 20m ./db/ ./service/ ./api/ -coverprofile=coverage.out -cover
 
       - name: Upload Go coverage
         if: always()
