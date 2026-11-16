@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -426,4 +427,43 @@ func TestGuardClosesReviewedGaps(t *testing.T) {
 			}
 		}
 	})
+}
+
+var (
+	raceExcludeRe = regexp.MustCompile(`grep -vE '/Server/\(([a-z/|]+)\)\$'`)
+	shardLineRe   = regexp.MustCompile(`go test -race -p 2 [^\n]*`)
+)
+
+// TestCIRaceShardMatchesTheExclusion pins the Linux race split: the packages
+// the main leg leaves out of its go list array are exactly the ones the shard
+// job runs, so widening the exclusion cannot drop a package from every -race
+// run while the tag guard above still reads the array as ./... .
+func TestCIRaceShardMatchesTheExclusion(t *testing.T) {
+	ciYML, err := os.ReadFile(filepath.Join("..", ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatalf("read ci.yml: %v", err)
+	}
+	src := string(ciYML)
+	shard := shardLineRe.FindString(src)
+	if shard == "" {
+		t.Fatal("no `go test -race -p 2` shard line in ci.yml")
+	}
+	var shardPkgs []string
+	for _, f := range strings.Fields(shard) {
+		if strings.HasPrefix(f, "./") {
+			shardPkgs = append(shardPkgs, strings.TrimSuffix(strings.TrimPrefix(f, "./"), "/"))
+		}
+	}
+	slices.Sort(shardPkgs)
+	excludes := raceExcludeRe.FindAllStringSubmatch(src, -1)
+	if len(excludes) == 0 {
+		t.Fatal("no go list exclusion in ci.yml")
+	}
+	for _, m := range excludes {
+		excluded := strings.Split(m[1], "|")
+		slices.Sort(excluded)
+		if !slices.Equal(excluded, shardPkgs) {
+			t.Errorf("ci.yml excludes %v from a race array but the shard runs %v", excluded, shardPkgs)
+		}
+	}
 }

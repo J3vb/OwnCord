@@ -588,6 +588,7 @@ jobs:
           name: go-coverage-part-main
           path: Server/coverage.out
           retention-days: 7
+          overwrite: true
 
       # verify: false — the action's default `config verify` pass fetches
       # golangci-lint.run's JSONSchema over HTTPS before linting anything, so a
@@ -742,6 +743,7 @@ jobs:
           name: go-coverage-part-shard
           path: Server/coverage.out
           retention-days: 7
+          overwrite: true
 
   # Coverage ratchet (B3-6 item 1) over the two Linux race halves. Linux only:
   # the profile is not the same on both OS legs (OS-tagged files swap in and
@@ -800,6 +802,7 @@ jobs:
           name: go-coverage-ubuntu-latest
           path: Server/coverage.out
           retention-days: 7
+          overwrite: true
 
   # ubuntu-latest deliberately: the client TS code has zero win32-conditional
   # paths (no process.platform / path.sep branches in src or the unit suites),
