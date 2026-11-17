@@ -21,6 +21,9 @@ func TestPasswordArgon2ProductionSettings(t *testing.T) {
 	if auth.Argon2MemoryBudgetKiBForTest < 4*64*1024 {
 		t.Fatalf("memory budget %d KiB admits fewer than the default four concurrent checks", auth.Argon2MemoryBudgetKiBForTest)
 	}
+	if auth.Argon2MemoryBudgetKiBForTest > 256*1024 {
+		t.Fatalf("memory budget %d KiB lets sign-in checks grow the process past a 1 GB container", auth.Argon2MemoryBudgetKiBForTest)
+	}
 }
 
 func TestVerifyPassword_LegacyBcryptMatchesAndAsksForRehash(t *testing.T) {

@@ -54,10 +54,12 @@ const (
 )
 
 // argon2MemoryBudgetKiB bounds the working memory all argon2id computations
-// hold at once (the process footprint can run higher until the GC returns it). The admission budget counts computations, and an admin may raise it
-// far past what the host's memory allows at 64 MiB each; past this many,
+// hold at once: four checks at 64 MiB. The process footprint runs to about
+// twice this until the GC returns it (~0.6 GB measured however many wait), so it stays inside a
+// 1 GB container. The admission budget counts computations, and an admin may
+// raise it far past what the host's memory allows; past this many,
 // computations wait for one to finish.
-const argon2MemoryBudgetKiB = 512 * 1024
+const argon2MemoryBudgetKiB = 256 * 1024
 
 // bcryptCost is a var so SetCostForTesting can lower it; production never mutates it.
 var (
@@ -220,7 +222,10 @@ func noteHashWork(scheme string) {
 }
 
 func compareBcrypt(hash []byte, password string) bool {
-	noteHashWork("bcrypt")
+	// A malformed hash is refused before any work, so it is not counted.
+	if _, err := bcrypt.Cost(hash); err == nil {
+		noteHashWork("bcrypt")
+	}
 	return bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
 }
 
@@ -236,7 +241,7 @@ func CheckPassword(hash, password string) bool {
 // or bcrypt. needsRehash is true on a match whose hash is not argon2id at the
 // current settings, so the caller can store HashPassword's result in its place.
 // An empty hash (no such user) is a mismatch. Every mismatch on a well-formed
-// or empty hash runs one bcrypt and one argon2id computation.
+// or empty hash, or on a placeholder, runs one bcrypt and one argon2id computation.
 func VerifyPassword(hash, password string) (matched, needsRehash bool) {
 	initDummyHashes()
 	switch {
@@ -254,6 +259,12 @@ func VerifyPassword(hash, password string) (matched, needsRehash bool) {
 			return false, false
 		}
 		return true, p != argon2Cur
+	case !strings.HasPrefix(hash, "$2"):
+		// A placeholder such as "!" (an imported account with no password yet)
+		// matches nothing, but still costs what any other refusal does.
+		_ = compareBcrypt(dummyBcrypt, password)
+		_ = verifyArgon2(dummyHash, password)
+		return false, false
 	case compareBcrypt([]byte(hash), password):
 		return true, true
 	default:
