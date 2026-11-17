@@ -3,6 +3,7 @@ import {
   bindTouchZoom,
   bindVideoZoom,
   createZoomPan,
+  DOUBLE_TAP_MS,
   SWIPE_CLOSE,
   SWIPE_STEP,
   type ZoomPanOptions,
@@ -33,6 +34,14 @@ const wheel = (deltaY: number, x = 100, y = 100, init: WheelEventInit = {}): Whe
   });
 const mouse = (type: string, x: number, y: number, init: MouseEventInit = {}): MouseEvent =>
   new MouseEvent(type, { clientX: x, clientY: y, bubbles: true, cancelable: true, ...init });
+/** A touch pointer event at a given time (ms). */
+function touch(type: string, id: number, x: number, y: number, at = 0): MouseEvent {
+  const e = mouse(type, x, y);
+  Object.defineProperty(e, "pointerId", { value: id });
+  Object.defineProperty(e, "pointerType", { value: "touch" });
+  Object.defineProperty(e, "timeStamp", { value: at });
+  return e;
+}
 
 describe("createZoomPan", () => {
   it("draws nothing until the view changes", () => {
@@ -232,6 +241,74 @@ describe("bindVideoZoom", () => {
     expect(clicks).toHaveBeenCalledTimes(1);
   });
 
+  it("two fingers on the picture pinch it; fingers on its controls do not", () => {
+    const { el, select, other, zp } = host();
+    expect(el.classList.contains("video-touch-zoom")).toBe(true);
+    other.dispatchEvent(touch("pointerdown", 1, 190, 100));
+    other.dispatchEvent(touch("pointerdown", 2, 210, 100));
+    other.dispatchEvent(touch("pointermove", 2, 230, 100));
+    expect(zp.scale).toBe(1);
+    other.dispatchEvent(touch("pointerup", 1, 190, 100));
+    other.dispatchEvent(touch("pointerup", 2, 230, 100));
+
+    select.dispatchEvent(touch("pointerdown", 3, 190, 100));
+    select.dispatchEvent(touch("pointerdown", 4, 210, 100));
+    select.dispatchEvent(touch("pointermove", 4, 230, 100));
+    expect(zp.scale).toBeCloseTo(2);
+    expect(el.classList.contains("video-zoomed")).toBe(true);
+  });
+
+  function tap(target: Element, x: number, at: number): { click: MouseEvent } {
+    target.dispatchEvent(touch("pointerdown", 9, x, 100, at));
+    target.dispatchEvent(touch("pointerup", 9, x, 100, at + 40));
+    const click = mouse("click", x, 100);
+    Object.defineProperty(click, "timeStamp", { value: at + 50 });
+    target.dispatchEvent(click);
+    return { click };
+  }
+
+  it("a double tap on a zoomed-in picture goes back to 1x and keeps its clicks", () => {
+    const { el, select, zp } = host();
+    const clicks = vi.fn();
+    const fullscreen = vi.fn();
+    select.addEventListener("click", clicks);
+    el.addEventListener("dblclick", fullscreen);
+    zp.setScale(3);
+    tap(select, 200, 1000);
+    expect(zp.scale).toBe(3);
+    const second = tap(select, 210, 1000 + DOUBLE_TAP_MS - 60);
+    expect(zp.scale).toBe(1);
+    expect(second.click.defaultPrevented).toBe(true);
+    const dbl = mouse("dblclick", 210, 100);
+    Object.defineProperty(dbl, "timeStamp", { value: 1000 + DOUBLE_TAP_MS });
+    select.dispatchEvent(dbl);
+    expect(fullscreen).not.toHaveBeenCalled();
+    // Only the first tap's click went through, to a picture still zoomed in.
+    expect(clicks).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a double tap at 1x, slow taps and the end of a pinch alone", () => {
+    const { select, zp } = host();
+    const clicks = vi.fn();
+    select.addEventListener("click", clicks);
+    tap(select, 200, 0);
+    tap(select, 200, 100);
+    expect(clicks).toHaveBeenCalledTimes(2);
+
+    zp.setScale(3);
+    tap(select, 200, 5000);
+    tap(select, 200, 5000 + DOUBLE_TAP_MS + 50);
+    expect(zp.scale).toBe(3);
+
+    // A pinch's last finger lifting still is no tap.
+    select.dispatchEvent(touch("pointerdown", 1, 190, 100, 9000));
+    select.dispatchEvent(touch("pointerdown", 2, 210, 100, 9000));
+    select.dispatchEvent(touch("pointerup", 2, 210, 100, 9050));
+    select.dispatchEvent(touch("pointerup", 1, 190, 100, 9060));
+    tap(select, 190, 9100);
+    expect(zp.scale).toBeGreaterThan(1);
+  });
+
   it("stops listening and ends a drag when its signal aborts", () => {
     const { el, select, zp } = host();
     zp.setScale(2);
@@ -240,6 +317,7 @@ describe("bindVideoZoom", () => {
     expect(el.classList.contains("video-panning")).toBe(false);
     el.dispatchEvent(wheel(-1, 0, 0, { ctrlKey: true }));
     expect(zp.scale).toBe(2);
+    expect(el.classList.contains("video-touch-zoom")).toBe(false);
   });
 });
 

@@ -173,6 +173,16 @@ export interface TouchSwipe {
   readonly close?: () => void;
 }
 
+/** How a touch zoom shares its element with other controls. */
+export interface TouchZoomOptions {
+  /** Fingers that land on an element matching this are left alone. */
+  readonly ignore?: string;
+  /** Capture each finger on the element (default). Off, a tap still clicks
+   *  what it landed on: touch already sends a finger's moves to the element
+   *  it went down on. */
+  readonly capture?: boolean;
+}
+
 /**
  * Touch screens have no wheel or mouse drag: two fingers on `target` pinch
  * the view towards their midpoint, and one finger pans it once zoomed in.
@@ -186,7 +196,9 @@ export function bindTouchZoom(
   view: ZoomPan,
   signal: AbortSignal,
   swipe?: TouchSwipe,
+  options: TouchZoomOptions = {},
 ): void {
+  const { ignore, capture = true } = options;
   const fingers = new Map<number, { x: number; y: number }>();
   let pinch: { distance: number; scale: number } | null = null;
   // The finger a swipe may come from; null once a second finger joins.
@@ -213,8 +225,15 @@ export function bindTouchZoom(
     "pointerdown",
     (e) => {
       if (e.pointerType !== "touch") return;
+      if (
+        ignore !== undefined &&
+        e.target instanceof Element &&
+        e.target.closest(ignore) !== null
+      ) {
+        return;
+      }
       fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      target.setPointerCapture?.(e.pointerId);
+      if (capture) target.setPointerCapture?.(e.pointerId);
       swipeStart =
         fingers.size === 1 && view.scale <= PAN_MIN_SCALE
           ? { id: e.pointerId, x: e.clientX, y: e.clientY }
@@ -273,12 +292,73 @@ export function bindTouchZoom(
  *  covers the whole picture, so it does. */
 const NO_PAN = "button:not(.video-cell-select), input";
 
+/** Two taps this close in time (ms) and place (px) are a double tap. */
+export const DOUBLE_TAP_MS = 300;
+export const DOUBLE_TAP_PX = 40;
+
+/**
+ * A double tap on a zoomed-in picture goes back to 1x. The two taps' clicks
+ * and the browser's own double click are the reset's, so the tile neither
+ * loses its focus nor goes full screen. At 1x a double tap is left alone.
+ */
+function bindDoubleTapReset(host: HTMLElement, view: ZoomPan, signal: AbortSignal): void {
+  let fingers = 0;
+  let pinched = false;
+  let down = { x: 0, y: 0 };
+  let lastTap: { x: number; y: number; at: number } | null = null;
+  let swallowUntil = Number.NEGATIVE_INFINITY;
+
+  const onTap = (e: PointerEvent): void => {
+    const prev = lastTap;
+    const near =
+      prev !== null &&
+      e.timeStamp - prev.at <= DOUBLE_TAP_MS &&
+      Math.hypot(e.clientX - prev.x, e.clientY - prev.y) <= DOUBLE_TAP_PX;
+    lastTap = near ? null : { x: e.clientX, y: e.clientY, at: e.timeStamp };
+    if (!near || view.scale <= 1) return;
+    view.reset();
+    swallowUntil = e.timeStamp + DOUBLE_TAP_MS * 2;
+  };
+
+  host.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (e.pointerType !== "touch" || (e.target as Element).closest(NO_PAN) !== null) return;
+      fingers += 1;
+      if (fingers > 1) pinched = true;
+      else down = { x: e.clientX, y: e.clientY };
+    },
+    { signal },
+  );
+  const lift = (e: PointerEvent, tapped: boolean): void => {
+    if (e.pointerType !== "touch" || fingers === 0) return;
+    fingers -= 1;
+    if (fingers > 0) return;
+    const still = Math.hypot(e.clientX - down.x, e.clientY - down.y) <= CLICK_SLOP;
+    if (tapped && still && !pinched) onTap(e);
+    else lastTap = null;
+    pinched = false;
+  };
+  host.addEventListener("pointerup", (e) => lift(e, true), { signal });
+  host.addEventListener("pointercancel", (e) => lift(e, false), { signal });
+  const swallow = (e: MouseEvent): void => {
+    if (e.timeStamp > swallowUntil) return;
+    if (e.type === "dblclick") swallowUntil = Number.NEGATIVE_INFINITY;
+    e.stopPropagation();
+    e.preventDefault();
+  };
+  host.addEventListener("click", swallow, { signal, capture: true });
+  host.addEventListener("dblclick", swallow, { signal, capture: true });
+}
+
 /**
  * Ctrl + wheel zooms the video inside `host` towards the pointer and a drag
  * pans it, as in the image lightbox. A plain wheel is left to scroll the page.
  * The view reaches the <video> (or its canvas surface) through CSS variables
  * on `host` (video.css), so a video moved out of it shows unzoomed. A drag that pans is
- * no click: the host's click handlers never see it.
+ * no click: the host's click handlers never see it. On a touch screen two
+ * fingers pinch, one pans once zoomed in, and a double tap goes back to 1x;
+ * the host's `video-touch-zoom` class gives it `touch-action: none`.
  */
 export function bindVideoZoom(host: HTMLElement, signal: AbortSignal): ZoomPan {
   let updateNavigator: (() => void) | undefined;
@@ -339,6 +419,16 @@ export function bindVideoZoom(host: HTMLElement, signal: AbortSignal): ZoomPan {
     },
     { signal, capture: true },
   );
-  signal.addEventListener("abort", () => view.cancelDrag(), { once: true });
+  host.classList.add("video-touch-zoom");
+  bindTouchZoom(host, view, signal, undefined, { ignore: NO_PAN, capture: false });
+  bindDoubleTapReset(host, view, signal);
+  signal.addEventListener(
+    "abort",
+    () => {
+      view.cancelDrag();
+      host.classList.remove("video-touch-zoom");
+    },
+    { once: true },
+  );
   return view;
 }

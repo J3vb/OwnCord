@@ -225,6 +225,15 @@ video[hidden] + .video-surface {
 .video-panning .video-cell-select {
   cursor: grabbing;
 }
+/* Pinch, pan and double tap on a touch screen (bindVideoZoom): the fingers are
+   the tile's, not the browser's. A swipe at 1x still opens the drawer
+   (lib/ui/swipe.ts). The participant strip scrolls under the finger. */
+.video-touch-zoom {
+  touch-action: none;
+}
+.video-people-strip .video-cell {
+  touch-action: auto;
+}
 
 /* A camera fills its grid tile, cropped at the edges as Discord does. Focused
    or full screen it shows the whole frame again. Screen shares always do. */
