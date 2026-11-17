@@ -15,13 +15,6 @@
 # list whenever a lockfile moves (cargo-deny, below, does fail on its own stale
 # Rust ignores).
 
-# --- Go: reached through the module graph, not called. govulncheck (a
-# separate, call-aware gate in Server Build & Test) is the authority here and
-# reports 0 reachable vulnerabilities; this one is module-level only.
-[[IgnoredVulns]]
-id = "GO-2026-5932"
-reason = "golang.org/x/crypto, module-level only: govulncheck reports it unreachable from our code"
-
 # --- npm: dev-only. minimatch 10.2.6 reaches us only through eslint,
 # typescript-eslint and stryker, ships in no artifact, and `npm audit
 # --omit=dev --audit-level=high` gates the shipped tree. The fix is in 11.0.1,
@@ -77,6 +70,10 @@ reason = "zbus_names unmaintained (merged into zbus 6), reached only via zbus 5 
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0372"
 reason = "zvariant_derive unmaintained (merged into zbus 6), reached only via zbus 5 on Linux D-Bus paths (see deny.toml)"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+reason = "chrono unmaintained, no patched version; reached only via livekit 0.10.0 on the Linux native voice path (see deny.toml)"
 
 # --- Rust: Linux native voice (livekit), phase-0 build plumbing ---
 #
