@@ -182,13 +182,13 @@ func profileImageRoutes(t *testing.T) []profileImageRoute {
 
 // slowUploadIdle is the idle rule for the slow-upload test. Once the last byte
 // arrives the handler has only this long to decode, store and answer: a loaded
-// Windows runner with the race detector took past 500 ms there, and an expired
-// deadline both cancels the request and cuts the answer. slowUploadPad makes
-// the body take about twice the rule at postSlow's pace (4 KiB every 40 ms),
-// so it still only arrives if each chunk re-arms the deadline.
+// Windows runner with the race detector once took past 2 s there, and an
+// expired deadline both cancels the request and cuts the answer. slowUploadPad
+// makes the body take about 1.6 times the rule at postSlow's pace (4 KiB every
+// 40 ms), so it still only arrives if each chunk re-arms the deadline.
 const (
-	slowUploadIdle = 2 * time.Second
-	slowUploadPad  = 400 << 10
+	slowUploadIdle = 5 * time.Second
+	slowUploadPad  = 800 << 10
 )
 
 func TestProfileImageUploads_SlowProgressingBodySurvivesRequestTimeout(t *testing.T) {
