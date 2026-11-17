@@ -100,59 +100,6 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
-### Desktop UI
-
-- **Custom themes can have a background picture.** In Settings > Appearance > Custom themes, pick a PNG, JPEG or WebP picture for a theme. It shows behind the chat, with Dim and Blur sliders so text stays readable. The picture is shrunk and kept in the app, so it keeps working after the original file is deleted; Export and Copy carry only the CSS. Theme CSS can place it anywhere with `var(--theme-background-image)`.
-
-### Push notifications
-
-- **Settings > Notifications says when push cannot work.** Members now see it when their push server is on a private network or a non-standard port, instead of silently getting nothing.
-
-### Voice
-
-- **Share music in a voice channel.** The new music button in the call controls shares one app's sound, with no screen share needed. Pick the player from the list and everyone in the call hears it beside your voice.
-- **Listeners set the music apart from voices.** Right-click someone who is sharing music for a Music volume slider and Mute music. Deafening yourself silences it too.
-- **Windows and Linux only.** The button says why it is off on a computer or a server that cannot share an app's sound.
-- **A music share ends with the call.** After a dropped connection the app shares the same player again when it can, and says so when it cannot.
-- **Zoom into a screen share or camera with your fingers.** On a phone or touch screen, pinch a video tile to zoom, drag with one finger to look around, and double tap to go back.
-
-### Messages & files
-
-- **Avatars and group icons load faster.** Lists and messages now fetch a small 128 px preview, and profile cards a 256 px one, instead of the full-size picture. An animated GIF avatar shows a still and plays when you hover it.
-- **Servers make the small previews once.** `GET /api/v1/files/{id}/thumb` takes an optional `size` of `128` or `256`, and a GIF with more than one frame is answered with an `X-Image-Animated: 1` header. Avatars and group icons get both sizes when uploaded; older ones get them the first time they are shown.
-- **Link previews show up instantly after a restart.** The server fetches each link once, keeps the preview and its picture, and sends both with the message. Your app no longer fetches them again on every launch.
-- **Your computer no longer contacts the sites people link to.** Page previews and YouTube titles and stills now come from your server, so the linked site never sees your IP address and the "Load external content" prompt does not appear for them.
-- **A message with a link can show its preview a moment after it appears.** The server builds it right after sending; an older message you scroll to gets its preview shortly after it loads.
-- **Servers that do not build previews work as before for one more release** (an older server, or one with `link_previews.enabled` off; the server now says so in its `ready` capabilities): the app fetches those previews itself and still asks first.
-- **Pictures and GIFs linked in chat work as before.** A link that is itself an image is still loaded by your app, still animates and still asks first; only page previews and YouTube cards come from your server.
-- **Settings > Text & Images says which content still needs your say-so.** Link previews built by your server no longer do.
-
-### Accounts & admin
-
-- **Passwords are stored as argon2id.** Older accounts switch over at their next sign-in, and both formats keep working.
-- **Do not roll back below 2.10.0 once members have signed in.** Older versions cannot read the new password format, so those members could not sign in until you upgrade again.
-- **One switch turns push on.** `push.enabled` now lets phones register and sends them notifications; the second switch, `push.dispatch_enabled`, is retired. **Upgrade note:** a server that had push on but sending off starts sending after the upgrade (to the push service each phone named, such as ntfy.sh); set `push.enabled: false` before upgrading if you do not want that. A `config.yaml` or admin-panel setting that still names `push.dispatch_enabled` loads fine and is ignored, and the server logs one line at start-up saying so. The admin Settings row "Send push notifications" is gone; "Enable push notifications" covers both.
-- **Moderators can warn a member from the member list.** Right-click a member and choose Warn; until now a warning could only come from a report.
-- **Three new warnings on the admin Attention page.** One says the owner has no recovery kit (without one, a lost owner password means restoring a backup and running setup again). One says fewer than two people can work reports. One says no role besides Owner carries Moderate Members, which a customised Moderator role can be missing. Each clears by itself once fixed.
-- **Owners can set an appeal contact in admin Settings; a banned member sees it when sign-in is refused.**
-- **Owners can give the server an icon.** Choose a picture under Settings > General in the admin panel (it is cropped to a square and shrunk), and it shows in your members' server list in place of the initials. Remove it there to go back to initials.
-- **The settings request no longer takes `server_icon` by hand.** Use the new icon control (`PUT` and `DELETE /admin/api/server-icon`); a request that sets it directly is refused. A regular backup holds the database only, so after a restore on a new machine the icon has to be uploaded again (the full archive carries it).
-
-- **The server owner gets a notice on their phone when something needs fixing.** When a disk, backup, certificate, last-exit, last-restore or voice warning turns critical, the owner's devices get one notice that says only "Your OwnCord server needs attention"; the admin panel says what. At most one per warning every 6 hours while the server runs, and only when `push.enabled` is on.
-
-### Under the hood
-
-- **Message history, search and other big lists download smaller.** The server gzips them (about a fifth of the size) for the browser client, and the desktop and Android app now ask for it too. Sign-in, tokens, invites, voice and files are sent as before.
-- **The browser client loads faster.** With `server.browser_client_enabled` on, the server sends the browser client's files brotli- or gzip-compressed (about a third of the download). It builds the compressed copies in the background for a few seconds after start and keeps them in memory beside the originals, a few extra MB.
-- **Groundwork for server-side link previews.** Nothing changes for members yet. It adds the storage a later release will use:
-  - Database migration 094 adds four tables for link cards and their thumbnails. The server migrates on start, so take a backup first as usual.
-  - A new `link-previews/` folder appears in the server data folder for shrunk thumbnails. The server trims it on its 15-minute maintenance pass.
-  - Three settings in `config.yaml`: `link_previews.enabled` (default on), `link_previews.thumbnail_cache_mb` (default 512, `0` keeps no thumbnails) and `link_previews.thumbnail_unused_days` (default 30).
-- **The server now builds link previews once and keeps them.** The desktop app now shows them (see Messages & files above).
-  - The server fetches the links in a new or edited message once and stores the card (title, description, site name, shrunk image). Message history and a new live event carry the cards; older apps ignore them.
-  - Thumbnails are served to signed-in members from `GET /api/v1/link-previews/images/{hash}`.
-  - `link_previews.enabled` can now be changed in the admin panel; a restart applies it. `false` stops fetching only.
-
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.
@@ -163,9 +110,9 @@ release changes the database, and anything an operator must do first.)
 
 ## v2.10.0
 
-**OwnCord 2.10** (the eleventh public beta) gives the app a new look and new sounds, and brings Android message and call notifications that work while the app is closed. Settings, dialogs, menus and avatars get a cleaner, consistent design; the app sounds are new, with a Classic style to go back to; and the Android app gets UnifiedPush notifications, a sound route button and calls that pause for a phone call. Emoji are now drawn as images, soft speech gets through Enhanced Noise Suppression, search finds thread and forum posts, and many voice, thread and admin fixes are included.
+**OwnCord 2.10** (the eleventh public beta) gives the app a new look and new sounds, and brings Android message and call notifications that work while the app is closed. Settings, dialogs, menus and avatars get a cleaner, consistent design; the app sounds are new, with a Classic style to go back to; and the Android app gets UnifiedPush notifications, a sound route button and calls that pause for a phone call. You can share music in a voice channel, your server now builds link previews so your computer never contacts linked sites, custom themes can have a background picture, and owners can give the server an icon. Emoji are now drawn as images, soft speech gets through Enhanced Noise Suppression, search finds thread and forum posts, and many voice, thread and admin fixes are included.
 
-It is still a **beta and a hobby project**: don't use it for anything sensitive. Update the server and the desktop app together. **This release changes the database** (changes 092 and 093). The server upgrades it on first start and keeps a safety copy first; you cannot go back to 2.9 without restoring that copy. **If you run LiveKit through Docker or manage `livekit.yaml` yourself**, set `audio.active_level` to 60 in that file and restart LiveKit, so the speaking ring lights for soft voices.
+It is still a **beta and a hobby project**: don't use it for anything sensitive. Update the server and the desktop app together. **This release changes the database** (changes 092, 093 and 094). The server upgrades it on first start and keeps a safety copy first; you cannot go back to 2.9 without restoring that copy. **Passwords are stored in a new format**: once members have signed in, do not roll back below 2.10.0, or they cannot sign in until you upgrade again. **Push now has one switch**: a server that had `push.enabled` on but `push.dispatch_enabled` off starts sending pushes after the upgrade; set `push.enabled: false` first if you do not want that. **Link previews are on by default**: the server fetches the links members post (turn it off with `link_previews.enabled: false`). **If you run LiveKit through Docker or manage `livekit.yaml` yourself**, set `audio.active_level` to 60 in that file and restart LiveKit, so the speaking ring lights for soft voices.
 
 ### Highlights
 
@@ -175,6 +122,10 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 - **Emoji as images**: emoji look the same on every computer and the emoji picker scrolls smoothly.
 - **Soft speech**: a soft "hmm" or "yes" gets through Enhanced Noise Suppression, and the speaking ring lights for it.
 - **Search in threads**: search now finds text in threads and forum posts.
+- **Share music in voice**: share one app's sound in a voice channel without a screen share; listeners get their own music volume.
+- **Link previews from your server**: previews and YouTube cards come from your server and show at once, and your computer never contacts the linked site.
+- **Theme background pictures**: a custom theme can show a picture behind the chat, with Dim and Blur.
+- **Server icon**: owners can give the server an icon that shows in members' server lists.
 
 ### Added
 
@@ -186,7 +137,7 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 - The "In a call" notification has Mute and Leave buttons, so you can mute, unmute or hang up without opening the app. It also says when you are muted.
 - A direct message call that comes in while the app is not on screen rings like a phone call: a notification with Accept and Decline and your phone's ringtone, on the lock screen too. Accept joins the call (after you unlock, on a locked phone). A call you missed leaves a notification that opens the conversation. On a phone with Android's notification cooldown switched on, a call that comes right after a message can ring more quietly.
 - A call now rings the phone even when the app is closed or asleep, through the same UnifiedPush setup as message push. The ring says "Incoming call on <server>" (a push names nobody), Accept opens the conversation and joins the call once the app has connected, and the ring stops when you answer or decline on another device or the caller hangs up. Declining from a ring the app was closed for only silences it on the phone: the caller hears no answer until their ring times out. A ring that runs out while the app is closed leaves no missed-call notification. Do Not Disturb gets no ring, and nor does anyone already in that call.
-- New messages reach the phone while the app is closed, through UnifiedPush: install ntfy (Settings > Notifications offers it from the Play Store or F-Droid) and the app sets itself up, with no Google service involved. The phone shows "New messages on <server>", one notification per server, and opening the app clears it. Signing out, or turning off message notifications, stops them. Needs a server with push turned on (`push.enabled` and `push.dispatch_enabled`) and a push server on a public address, such as ntfy.sh.
+- New messages reach the phone while the app is closed, through UnifiedPush: install ntfy (Settings > Notifications offers it from the Play Store or F-Droid) and the app sets itself up, with no Google service involved. The phone shows "New messages on <server>", one notification per server, and opening the app clears it. Signing out, or turning off message notifications, stops them. Needs a server with push turned on (`push.enabled`) and a push server on a public address, such as ntfy.sh.
 - Your status goes Idle once the app has been out of view for ten minutes (in the background, or the screen off) and back to Online as soon as you open it. A phone that sleeps can take several minutes longer, and a phone that stops the app in the background shows you as offline instead.
 - `owncord://` links open the app: an invite link opens the join screen, and a message link copied on the desktop opens that message (after sign-in, if the app was closed).
 - Saved sign-ins, your voice key and unsent messages are kept in the Android Keystore. Updating moves them there once; you stay signed in and your voice safety number does not change.
@@ -194,13 +145,47 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 **Voice**
 
 - Enhanced Noise Suppression has a new switch, "Let more soft speech through", in Settings > Voice & Video. It is on by default, so a soft "hmm" or "yes" gets through. Turn it off if coughs or other short sounds get through too often; soft words are then cut off a little more often. The Linux desktop app does not have it: its gate works differently.
+- **Zoom into a screen share or camera with your fingers.** On a phone or touch screen, pinch a video tile to zoom, drag with one finger to look around, and double tap to go back.
 - A call with no camera or screen share on shows one small card per person instead of large empty tiles, and on desktop the five small view buttons are now one View menu.
 
 **Server**
 
 - A push subscription now ends with the session that made it: signing out, "sign out everywhere", an expired session or a ban stops the pushes to that device (migration 093). A server older than this keeps a signed-out phone's subscription until its staleness sweep; the phone has already let go of it, so nothing shows.
-- A start-up warning says when `push.enabled` is on but `push.dispatch_enabled` is off, so devices can register but nothing is sent.
 - With push on, a direct message call also sends a ring push to the people it rings, whether or not they look online, and a ring-end push when one of them answers or declines on any device or the caller leaves. Both carry only the conversation's id, never a name, and skip a member on Do Not Disturb or already in the call.
+
+**Voice: music**
+
+- **Share music in a voice channel.** The new music button in the call controls shares one app's sound, with no screen share needed. Pick the player from the list and everyone in the call hears it beside your voice.
+- **Listeners set the music apart from voices.** Right-click someone who is sharing music for a Music volume slider and Mute music. Deafening yourself silences it too.
+- **Windows and Linux only.** The button says why it is off on a computer or a server that cannot share an app's sound.
+- **A music share ends with the call.** After a dropped connection the app shares the same player again when it can, and says so when it cannot.
+
+**Desktop UI**
+
+- **Custom themes can have a background picture.** In Settings > Appearance > Custom themes, pick a PNG, JPEG or WebP picture for a theme. It shows behind the chat, with Dim and Blur sliders so text stays readable. The picture is shrunk and kept in the app, so it keeps working after the original file is deleted; Export and Copy carry only the CSS. Theme CSS can place it anywhere with `var(--theme-background-image)`.
+
+**Messages & files**
+
+- **Avatars and group icons load faster.** Lists and messages now fetch a small 128 px preview, and profile cards a 256 px one, instead of the full-size picture. An animated GIF avatar shows a still and plays when you hover it.
+- **Servers make the small previews once.** `GET /api/v1/files/{id}/thumb` takes an optional `size` of `128` or `256`, and a GIF with more than one frame is answered with an `X-Image-Animated: 1` header. Avatars and group icons get both sizes when uploaded; older ones get them the first time they are shown.
+- **Link previews show up instantly after a restart.** The server fetches each link once, keeps the preview and its picture, and sends both with the message. Your app no longer fetches them again on every launch.
+- **Your computer no longer contacts the sites people link to.** Page previews and YouTube titles and stills now come from your server, so the linked site never sees your IP address and the "Load external content" prompt does not appear for them.
+- **A message with a link can show its preview a moment after it appears.** The server builds it right after sending; an older message you scroll to gets its preview shortly after it loads.
+- **Servers that do not build previews work as before for one more release** (an older server, or one with `link_previews.enabled` off; the server now says so in its `ready` capabilities): the app fetches those previews itself and still asks first.
+- **Pictures and GIFs linked in chat work as before.** A link that is itself an image is still loaded by your app, still animates and still asks first; only page previews and YouTube cards come from your server.
+- **Settings > Text & Images says which content still needs your say-so.** Link previews built by your server no longer do.
+
+**Accounts & admin**
+
+- **Moderators can warn a member from the member list.** Right-click a member and choose Warn; until now a warning could only come from a report.
+- **Three new warnings on the admin Attention page.** One says the owner has no recovery kit (without one, a lost owner password means restoring a backup and running setup again). One says fewer than two people can work reports. One says no role besides Owner carries Moderate Members, which a customised Moderator role can be missing. Each clears by itself once fixed.
+- **Owners can set an appeal contact in admin Settings; a banned member sees it when sign-in is refused.**
+- **Owners can give the server an icon.** Choose a picture under Settings > General in the admin panel (it is cropped to a square and shrunk), and it shows in your members' server list in place of the initials. Remove it there to go back to initials.
+- **The server owner gets a notice on their phone when something needs fixing.** When a disk, backup, certificate, last-exit, last-restore or voice warning turns critical, the owner's devices get one notice that says only "Your OwnCord server needs attention"; the admin panel says what. At most one per warning every 6 hours while the server runs, and only when `push.enabled` is on.
+
+**Push**
+
+- **Settings > Notifications says when push cannot work.** Members now see it when their push server is on a private network or a non-standard port, instead of silently getting nothing.
 
 **Direct messages**
 
@@ -229,6 +214,13 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 - Letter avatars use ten clearly different colours with readable white letters, and a person has the same colour everywhere: chat, member list, direct messages, pins, profile card and your own user bar. Colours change once with this update.
 - The admin panel's member list gives each member the same avatar colour as the app.
 - The right-click menu on a video tile shows an icon in front of every action.
+
+**Accounts & admin**
+
+- **Passwords are stored as argon2id.** Older accounts switch over at their next sign-in, and both formats keep working.
+- **Do not roll back below 2.10.0 once members have signed in.** Older versions cannot read the new password format, so those members could not sign in until you upgrade again.
+- **One switch turns push on.** `push.enabled` now lets phones register and sends them notifications; the second switch, `push.dispatch_enabled`, is retired. **Upgrade note:** a server that had push on but sending off starts sending after the upgrade (to the push service each phone named, such as ntfy.sh); set `push.enabled: false` before upgrading if you do not want that. A `config.yaml` or admin-panel setting that still names `push.dispatch_enabled` loads fine and is ignored, and the server logs one line at start-up saying so. The admin Settings row "Send push notifications" is gone; "Enable push notifications" covers both.
+- **The settings request no longer takes `server_icon` by hand.** Use the new icon control (`PUT` and `DELETE /admin/api/server-icon`); a request that sets it directly is refused. A regular backup holds the database only, so after a restore on a new machine the icon has to be uploaded again (the full archive carries it).
 
 ### Fixed
 
@@ -322,6 +314,13 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 
 ### Under the hood
 
+- **Message history, search and other big lists download smaller.** The server gzips them (about a fifth of the size) for the browser client, and the desktop and Android app now ask for it too. Sign-in, tokens, invites, voice and files are sent as before.
+- **The browser client loads faster.** With `server.browser_client_enabled` on, the server sends the browser client's files brotli- or gzip-compressed (about a third of the download). It builds the compressed copies in the background for a few seconds after start and keeps them in memory beside the originals, a few extra MB.
+- **How server-built link previews work** (see Messages & files above):
+  - Database change 094 adds four tables for link cards and their thumbnails.
+  - The server fetches the links in a new or edited message once and stores the card (title, description, site name, shrunk image). Message history and a new live event carry the cards; older apps ignore them.
+  - Thumbnails are kept in a new `link-previews/` folder in the server data folder, trimmed on the 15-minute maintenance pass, and served to signed-in members from `GET /api/v1/link-previews/images/{hash}`.
+  - Three settings in `config.yaml`: `link_previews.enabled` (default on; can be changed in the admin panel, a restart applies it, and `false` stops fetching only), `link_previews.thumbnail_cache_mb` (default 512, `0` keeps no thumbnails) and `link_previews.thumbnail_unused_days` (default 30).
 - Database change 092: eight indexes for the lookups a message or channel delete runs. The first start after the update builds them, which takes a little longer on a large database. Deleting a busy channel, a thread or a group DM, and retention clean-up, are much faster on a server with many channels (a 20,000-message channel on a server with 5,000 channels: 23 s before, under 1 s after).
 
 ## v2.9.0
