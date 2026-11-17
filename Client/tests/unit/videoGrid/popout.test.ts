@@ -588,6 +588,9 @@ describe("VideoGrid", () => {
       // chat (the app window shows the chat); no camera picker (its menu
       // opens in the app window).
       expect(popRow().textContent).toBe("Bring the call back");
+      expect(popRow().querySelector(".menu-item-icon svg")?.getAttribute("data-icon")).toBe(
+        "pop-in",
+      );
       expect(popRow().ownerDocument).toBe(popup.doc);
       expect(chatRow()).toBeNull();
       expect(barButton("camera-device").style.display).toBe("none");

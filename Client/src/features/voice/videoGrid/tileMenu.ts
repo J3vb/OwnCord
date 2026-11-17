@@ -249,7 +249,7 @@ function appendViewRows(menu: HTMLElement, view: TileMenuView, closeMenu: () => 
       actionItem(
         view.poppedOut ? t("tile.popIn") : t("tile.popOut"),
         "popout",
-        "external-link",
+        view.poppedOut ? "pop-in" : "external-link",
         closeMenu,
         view.onPopout,
       ),

@@ -416,8 +416,9 @@ describe("video tile menu icons", () => {
   });
 
   it("gives the other label of each toggled row its own icon", () => {
-    open({ arrange: arrange(true) }, { focused: true, fullscreen: true });
+    open({ arrange: arrange(true) }, { focused: true, fullscreen: true, poppedOut: true });
     const icons = actionIcons();
+    expect(icons["popout"]).toBe("pop-in");
     expect(icons["focus"]).toBe("layout-grid");
     expect(icons["fullscreen"]).toBe("minimize");
     expect(icons["pin"]).toBe("pin-off");

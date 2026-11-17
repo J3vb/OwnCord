@@ -46,7 +46,7 @@ export function createGridViewMenu(st: GridState, api: GridApi) {
     if (!isAndroidApp()) {
       rows.push({
         label: voiceText(st.callPop === null ? "grid.popOutCall" : "grid.popInCall"),
-        icon: "external-link",
+        icon: st.callPop === null ? "external-link" : "pop-in",
         testId: "view-menu-popout",
         onClick: () => {
           if (st.callPop === null) api.popOutCall();
