@@ -42,6 +42,12 @@ ignore = [
   { id = "RUSTSEC-2026-0371", reason = "unmaintained; zbus_names via zbus 5, Linux D-Bus only" },
   { id = "RUSTSEC-2026-0372", reason = "unmaintained; zvariant_derive via zbus 5, Linux D-Bus only" },
 
+  # chrono is unmaintained upstream, with no patched version. It arrives only
+  # through the Linux native voice tree (livekit, livekit-data-stream and
+  # livekit-protocol's pbjson-types), all pinned with livekit 0.10.0. Drop this
+  # when a livekit release moves off chrono.
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained; chrono via livekit 0.10.0, Linux native voice only" },
+
 ]
 # --- Rust: Linux native camera (gstreamer-rs) ---
 #
