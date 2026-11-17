@@ -71,6 +71,7 @@ export type IconName =
   | "circle-x"
   | "circle-dashed"
   | "external-link"
+  | "pop-in"
   | "link"
   | "loader"
   | "arrow-right"
@@ -262,6 +263,8 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // External link arrow out of box
   "external-link": `<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>`,
+  // The same box with the arrow pointing into it: bring a popped-out window back
+  "pop-in": `<path d="M16 14h-6V8"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>`,
 
   // Chain link — message permalinks ("Copy Message Link")
   link: `<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>`,
