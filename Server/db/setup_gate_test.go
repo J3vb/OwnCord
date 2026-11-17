@@ -30,6 +30,7 @@ func openTestMarkersExternal(t *testing.T) *db.MarkerStore {
 // (migration 043), written in the same transaction as the first owner,
 // keeps it closed (Codex's security review of #1522).
 func TestCreateOwnerIfEmpty_SetupStaysClosedOnceAnOwnerExisted(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -76,6 +77,7 @@ func TestCreateOwnerIfEmpty_SetupStaysClosedOnceAnOwnerExisted(t *testing.T) {
 // the gate, so an upgrade cannot lock an unset-up server out of its own
 // first run.
 func TestCreateOwnerIfEmpty_NoFlagFallsBackToTheCount(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, `DELETE FROM settings WHERE key = 'setup_completed'`); err != nil {
@@ -95,6 +97,7 @@ func TestCreateOwnerIfEmpty_NoFlagFallsBackToTheCount(t *testing.T) {
 // tokens are one-way, and the live counter cannot stand in for the floor on
 // a restored database (Codex's review of #1523).
 func TestMarkerStore_LocateSequenceFloor(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := openTestMarkersExternal(t)
 	// A ceiling the test can exceed cheaply; production passes
@@ -140,6 +143,7 @@ func TestMarkerStore_LocateSequenceFloor(t *testing.T) {
 // on the one value that means open. A corrupted or unrecognised flag refuses
 // rather than falling through to the user count.
 func TestCreateOwnerIfEmpty_AnUnrecognisedFlagRefuses(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, value := range []string{"", "2", "true", "TRUE", "0 ", "no"} {
 		t.Run("flag="+value, func(t *testing.T) {

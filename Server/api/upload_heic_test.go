@@ -33,6 +33,7 @@ func ftypHeader(major string, compat ...string) []byte {
 }
 
 func TestSniffMIME_ImageFormats(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		header []byte
@@ -122,6 +123,7 @@ func uploadFull(t *testing.T, router http.Handler, token, name string, content [
 }
 
 func TestUpload_HEICStoresMimeAndUprightDimensions(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	token := uploadCreateToken(t, database, "heicdims", 4)
@@ -138,6 +140,7 @@ func TestUpload_HEICStoresMimeAndUprightDimensions(t *testing.T) {
 }
 
 func TestUpload_TIFFStoresMimeAndDimensions(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
 	token := uploadCreateToken(t, database, "tiffdims", 4)
@@ -437,6 +440,7 @@ func tiffWithTags(first8 []byte, tags [][2]uint16) []byte {
 }
 
 func TestUpload_CameraRAWStaysAFile(t *testing.T) {
+	t.Parallel()
 	cr2 := append([]byte("II*\x00\x10\x00\x00\x00CR\x02\x00"), 0, 0, 0, 0)
 	cases := []struct {
 		name, file string

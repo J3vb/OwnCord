@@ -23,6 +23,7 @@ func countPushRows(t *testing.T, database interface {
 }
 
 func TestPushSubscription_EndsWithItsSession(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
@@ -52,6 +53,7 @@ func TestPushSubscription_EndsWithItsSession(t *testing.T) {
 }
 
 func TestPushSubscription_ResubscribeMovesToTheNewSession(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedPushUser(t, database, 1)

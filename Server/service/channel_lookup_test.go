@@ -9,6 +9,7 @@ import (
 )
 
 func TestLookupChannel_StoreFailureIsInternalNotNotFound(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -23,6 +24,7 @@ func TestLookupChannel_StoreFailureIsInternalNotNotFound(t *testing.T) {
 }
 
 func TestLookupChannel_MissingRowIsNotFound(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 
 	if _, err := lookupChannel(context.Background(), database, 99999); !errors.Is(err, ErrNotFound) {
@@ -37,6 +39,7 @@ func TestLookupChannel_MissingRowIsNotFound(t *testing.T) {
 }
 
 func TestReadSubject_LookupFailureIsInternalAndNonMemberStaysNotFound(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	seedUser(t, database, &db.User{ID: 3, Username: "outsider", Status: "offline"})
 	seedChannel(t, database, &db.Channel{ID: 13, Name: "dm", Type: "dm"})

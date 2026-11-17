@@ -164,6 +164,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
 // ─── GetServerStats ────────────────────────────────────────────────────────────
 
 func TestGetServerStats_EmptyDB(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	stats, err := database.GetServerStats(context.Background())
@@ -189,6 +190,7 @@ func TestGetServerStats_EmptyDB(t *testing.T) {
 }
 
 func TestGetServerStats_WithData(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	_ = mustCreateUser(t, database, "statuser", "hash", 4)
@@ -208,6 +210,7 @@ func TestGetServerStats_WithData(t *testing.T) {
 // ─── ListAllUsers ──────────────────────────────────────────────────────────────
 
 func TestListAllUsers_Empty(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	users, err := database.ListAllUsers(context.Background(), db.UserListFilter{}, 50, 0)
@@ -218,6 +221,7 @@ func TestListAllUsers_Empty(t *testing.T) {
 }
 
 func TestListAllUsers_WithRoleName(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	_ = mustCreateUser(t, database, "alice", "hash", 4)
@@ -237,6 +241,7 @@ func TestListAllUsers_WithRoleName(t *testing.T) {
 }
 
 func TestListAllUsers_Pagination(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	for i := range 5 {
@@ -264,6 +269,7 @@ func TestListAllUsers_Pagination(t *testing.T) {
 }
 
 func TestListAllUsers_ZeroLimit(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 	_, _ = database.CreateUser(context.Background(), "zerotest", "hash", 4)
 
@@ -278,6 +284,7 @@ func TestListAllUsers_ZeroLimit(t *testing.T) {
 // The Members page searches, filters by role and lists bans server-side, so
 // a filter narrows the whole table rather than the fetched page.
 func TestListAllUsers_Filter(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newSchemaTestDB(t, adminTestSchema)
 	ids := map[string]int64{}
@@ -345,6 +352,7 @@ func TestListAllUsers_Filter(t *testing.T) {
 // secondary role is listed, not only one whose top role it is -- and each row
 // carries every held role, top role first.
 func TestListUsers_RoleFilterMatchesAnyHeldRole(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newSchemaTestDB(t, adminTestSchema)
 	ids := make([]int64, 0, 3)
@@ -404,6 +412,7 @@ func TestListUsers_RoleFilterMatchesAnyHeldRole(t *testing.T) {
 // ─── UpdateUserRole ────────────────────────────────────────────────────────────
 
 func TestUpdateUserRole(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid := mustCreateUser(t, database, "roleuser", "hash", 4)
@@ -417,6 +426,7 @@ func TestUpdateUserRole(t *testing.T) {
 }
 
 func TestUpdateUserRole_NonexistentUser(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	// UPDATE with no matching rows is not an error
@@ -429,6 +439,7 @@ func TestUpdateUserRole_NonexistentUser(t *testing.T) {
 // ─── ForceLogoutUser ───────────────────────────────────────────────────────────
 
 func TestForceLogoutUser_DeletesSessions(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid := mustCreateUser(t, database, "logoutuser", "hash", 4)
@@ -452,6 +463,7 @@ func TestForceLogoutUser_DeletesSessions(t *testing.T) {
 }
 
 func TestForceLogoutUser_NoSessions(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid := mustCreateUser(t, database, "nosessions", "hash", 4)
@@ -464,6 +476,7 @@ func TestForceLogoutUser_NoSessions(t *testing.T) {
 // ─── GetUserSessions ──────────────────────────────────────────────────────────
 
 func TestGetUserSessions_Empty(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid := mustCreateUser(t, database, "sessionuser", "hash", 4)
@@ -476,6 +489,7 @@ func TestGetUserSessions_Empty(t *testing.T) {
 }
 
 func TestGetUserSessions_IsolatedByUser(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid1, _ := database.CreateUser(context.Background(), "user1sess", "hash", 4)
@@ -500,6 +514,7 @@ func TestGetUserSessions_IsolatedByUser(t *testing.T) {
 // ─── AdminCreateChannel ────────────────────────────────────────────────────────
 
 func TestAdminCreateChannel(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, err := database.AdminCreateChannel(context.Background(), "announce", "text", "General", "Announcements", 1)
@@ -530,6 +545,7 @@ func TestAdminCreateChannel(t *testing.T) {
 }
 
 func TestAdminCreateChannel_EmptyOptionals(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, err := database.AdminCreateChannel(context.Background(), "simple", "voice", "", "", 0)
@@ -547,6 +563,7 @@ func TestAdminCreateChannel_EmptyOptionals(t *testing.T) {
 // ─── AdminUpdateChannel ────────────────────────────────────────────────────────
 
 func TestAdminUpdateChannel(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, err := database.AdminCreateChannel(context.Background(), "old-name", "text", "", "", 0)
@@ -598,6 +615,7 @@ func TestAdminUpdateChannel(t *testing.T) {
 // that starts from the channel's current values and flips one is the only
 // thing standing between a partial PATCH and a wiped row.
 func TestAdminUpdateChannel_ClearsNSFW(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, _ := database.AdminCreateChannel(context.Background(), "nsfw-ch", "text", "", "", 0)
@@ -617,6 +635,7 @@ func TestAdminUpdateChannel_ClearsNSFW(t *testing.T) {
 // A freshly created channel is not NSFW and carries no voice limits — the
 // migration's defaults, which every client relies on for an unflagged channel.
 func TestAdminCreateChannel_DefaultsNotNSFW(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, _ := database.AdminCreateChannel(context.Background(), "plain", "text", "", "", 0)
@@ -630,6 +649,7 @@ func TestAdminCreateChannel_DefaultsNotNSFW(t *testing.T) {
 }
 
 func TestAdminUpdateChannel_Unarchive(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, _ := database.AdminCreateChannel(context.Background(), "arch-ch", "text", "", "", 0)
@@ -651,6 +671,7 @@ func TestAdminUpdateChannel_Unarchive(t *testing.T) {
 // ─── AdminDeleteChannel ────────────────────────────────────────────────────────
 
 func TestAdminDeleteChannel(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	id, err := database.AdminCreateChannel(context.Background(), "to-delete", "text", "", "", 0)
@@ -665,6 +686,7 @@ func TestAdminDeleteChannel(t *testing.T) {
 }
 
 func TestAdminDeleteChannel_NonExistent(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	// Deleting nonexistent channel should not error
@@ -676,6 +698,7 @@ func TestAdminDeleteChannel_NonExistent(t *testing.T) {
 // ─── LogAudit / GetAuditLog ────────────────────────────────────────────────────
 
 func TestLogAudit_AndRetrieve(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid := mustCreateUser(t, database, "auditor", "hash", 1)
@@ -713,6 +736,7 @@ func TestLogAudit_AndRetrieve(t *testing.T) {
 }
 
 func TestGetAuditLog_Empty(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	entries, err := database.GetAuditLog(context.Background(), 10, 0)
@@ -723,6 +747,7 @@ func TestGetAuditLog_Empty(t *testing.T) {
 }
 
 func TestGetAuditLog_Pagination(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid, _ := database.CreateUser(context.Background(), "auditpager", "hash", 1)
@@ -744,6 +769,7 @@ func TestGetAuditLog_Pagination(t *testing.T) {
 }
 
 func TestGetAuditLog_NewestFirst(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	uid, _ := database.CreateUser(context.Background(), "auditorder", "hash", 1)
@@ -763,6 +789,7 @@ func TestGetAuditLog_NewestFirst(t *testing.T) {
 // ─── GetSetting / SetSetting / GetAllSettings ──────────────────────────────────
 
 func TestGetSetting_Exists(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	val, err := database.GetSetting(context.Background(), "server_name")
@@ -773,6 +800,7 @@ func TestGetSetting_Exists(t *testing.T) {
 }
 
 func TestGetSetting_NotFound(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	_, err := database.GetSetting(context.Background(), "nonexistent_key_xyz")
@@ -782,6 +810,7 @@ func TestGetSetting_NotFound(t *testing.T) {
 }
 
 func TestSetSetting_NewKey(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	mustDo(t, "SetSetting() error", database.SetSetting(context.Background(), "custom_key", "custom_val"))
@@ -794,6 +823,7 @@ func TestSetSetting_NewKey(t *testing.T) {
 }
 
 func TestSetSetting_UpdateExisting(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	mustDo(t, "SetSetting() update error", database.SetSetting(context.Background(), "server_name", "My Custom Server"))
@@ -806,6 +836,7 @@ func TestSetSetting_UpdateExisting(t *testing.T) {
 }
 
 func TestGetAllSettings_ReturnsMap(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	settings, err := database.GetAllSettings(context.Background())
@@ -819,6 +850,7 @@ func TestGetAllSettings_ReturnsMap(t *testing.T) {
 }
 
 func TestGetAllSettings_AfterClearing(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	_, _ = database.ExecContext(context.Background(), "DELETE FROM settings")
@@ -833,6 +865,7 @@ func TestGetAllSettings_AfterClearing(t *testing.T) {
 // ─── BackupToSafe ────────────────────────────────────────────────────────────
 
 func TestBackupToSafe_AdminQueries(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
@@ -848,6 +881,7 @@ func TestBackupToSafe_AdminQueries(t *testing.T) {
 }
 
 func TestBackupToSafe_CreatesDirectoryFile(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
@@ -864,6 +898,7 @@ func TestBackupToSafe_CreatesDirectoryFile(t *testing.T) {
 // ─── UserCount ──────────────────────────────────────────────────────────────
 
 func TestUserCount_Empty(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	count, err := database.UserCount(context.Background())
@@ -874,6 +909,7 @@ func TestUserCount_Empty(t *testing.T) {
 }
 
 func TestUserCount_WithUsers(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 
 	for i := range 3 {
@@ -897,6 +933,7 @@ func TestUserCount_WithUsers(t *testing.T) {
 // ─── BackupTo ───────────────────────────────────────────────────────────────
 
 func TestBackupToSafe_DirectCall(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
@@ -912,6 +949,7 @@ func TestBackupToSafe_DirectCall(t *testing.T) {
 }
 
 func TestBackupToSafe_RejectsTraversal(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	safeRoot := filepath.Join(tmpDir, "safe")
@@ -931,6 +969,7 @@ func TestBackupToSafe_RejectsTraversal(t *testing.T) {
 // a non-trivial database is interrupted mid-copy. handleListBackups would
 // otherwise offer this leftover file as a restorable backup.
 func TestBackupToSafe_CleansUpPartialFileOnFailure(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := openBackupSourceDB(t)
 
 	// Enough rows that VACUUM INTO takes long enough to still be running
@@ -970,6 +1009,7 @@ func TestBackupToSafe_CleansUpPartialFileOnFailure(t *testing.T) {
 // re-running a backup to a name they chose) must not let failure-cleanup
 // destroy the file that was already sitting there.
 func TestBackupToSafe_DoesNotDeleteExistingFileOnCollision(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := openBackupSourceDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
@@ -993,6 +1033,7 @@ func TestBackupToSafe_DoesNotDeleteExistingFileOnCollision(t *testing.T) {
 // one, and leaves the name empty for a target that is gone or has none (an
 // invite's code never shows).
 func TestGetAuditLog_TargetName(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	exec := func(q string, args ...any) int64 {

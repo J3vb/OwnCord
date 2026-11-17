@@ -68,6 +68,7 @@ func attachmentRows(t *testing.T, h *quotaHarness) int {
 }
 
 func TestUploadVoice_StoresAndReturnsDurationAndWaveform(t *testing.T) {
+	t.Parallel()
 	for name, body := range map[string][]byte{"ogg": oggOpusBody(), "wav": wavBody()} {
 		t.Run(name, func(t *testing.T) {
 			h := newQuotaHarness(t, nil)
@@ -122,6 +123,7 @@ func TestUploadVoice_StoresAndReturnsDurationAndWaveform(t *testing.T) {
 }
 
 func TestUploadVoice_WaveformIsStoredCanonically(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	// 0xFF 0xFF 0xFF encodes to "____"; the stored string is the re-encoding.
 	rr := doVoiceUpload(t, h, voiceQuery("1000", "____"), "v.ogg", oggOpusBody())
@@ -136,6 +138,7 @@ func TestUploadVoice_WaveformIsStoredCanonically(t *testing.T) {
 }
 
 func TestUploadVoice_InvalidParametersAre400AndStoreNothing(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"duration alone":      voiceQuery("1000", ""),
 		"waveform alone":      voiceQuery("", voiceWaveform(8)),
@@ -169,6 +172,7 @@ func TestUploadVoice_InvalidParametersAre400AndStoreNothing(t *testing.T) {
 }
 
 func TestUploadVoice_BoundaryValuesAreAccepted(t *testing.T) {
+	t.Parallel()
 	for name, q := range map[string]string{
 		"min duration, 1 byte":   voiceQuery("1", voiceWaveform(1)),
 		"max duration, 256 byte": voiceQuery("300000", voiceWaveform(256)),
@@ -184,6 +188,7 @@ func TestUploadVoice_BoundaryValuesAreAccepted(t *testing.T) {
 // The parameters are validated before the quota is reserved: a user whose
 // quota is full still gets the 400, not a 507.
 func TestUploadVoice_ParametersAreCheckedBeforeQuota(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	h.limits(t, 1, 0, nil)
 	rr := doVoiceUpload(t, h, voiceQuery("0", voiceWaveform(8)), "v.ogg", oggOpusBody())
@@ -191,6 +196,7 @@ func TestUploadVoice_ParametersAreCheckedBeforeQuota(t *testing.T) {
 }
 
 func TestUploadVoice_NonAudioTypeIsRefusedAndItsFileDeleted(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	rr := doVoiceUpload(t, h, voiceQuery("1000", voiceWaveform(8)), "pic.png", makePNGBytes(t, 4, 4))
 	assertErrorCode(t, rr, http.StatusBadRequest, "BAD_REQUEST")
@@ -206,6 +212,7 @@ func TestUploadVoice_NonAudioTypeIsRefusedAndItsFileDeleted(t *testing.T) {
 }
 
 func TestUploadVoice_PlainUploadIsUnchanged(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	rr := doVoiceUpload(t, h, "", "v.ogg", oggOpusBody())
 	requireStatus(t, rr, http.StatusCreated)
@@ -227,6 +234,7 @@ func TestUploadVoice_PlainUploadIsUnchanged(t *testing.T) {
 // A client retries after a network drop with the same clip: each upload is its
 // own attachment, there is no dedupe.
 func TestUploadVoice_SameClipTwiceMakesTwoIndependentRows(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	q := voiceQuery("2500", voiceWaveform(32))
 	ids := map[string]bool{}
@@ -254,6 +262,7 @@ func TestUploadVoice_SameClipTwiceMakesTwoIndependentRows(t *testing.T) {
 
 // A body cut off mid-upload leaves no row and no file, and releases the charge.
 func TestUploadVoice_BodyCutMidUploadLeavesNothing(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	h.limits(t, 0, 0, nil)
 	body, contentType := makeMultipartFile(t, "file", "v.ogg", append(oggOpusBody(), bytes.Repeat([]byte("q"), 4<<20)...))

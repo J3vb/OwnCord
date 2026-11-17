@@ -10,6 +10,7 @@ import (
 // an optional capability on the store at run time, and a part handed a narrower
 // wrapper would quietly lose it.
 func TestMessageServicePartsShareStore(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := New(database, auth.NewRateLimiter()).Messages
 	for name, st := range map[string]any{
@@ -36,6 +37,7 @@ func TestMessageServicePartsShareStore(t *testing.T) {
 // part reverses badges through the same mention state, so the worker it flushes
 // must be the one the service started.
 func TestMessageServiceRemovalSeesStartedMentionWorker(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := New(database, auth.NewRateLimiter()).Messages
 	if svc.mentions != svc.mentionState || svc.messageRemoval.dm != svc.dmDelivery {

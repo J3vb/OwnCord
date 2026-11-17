@@ -14,6 +14,7 @@ import (
 // synchronous write when a store lacks them, so each store that writes audit
 // rows must still carry them.
 func TestAuthServicePartsShareStoreAndAuditCapabilities(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), nil)
 	for name, st := range map[string]any{
@@ -41,6 +42,7 @@ func TestAuthServicePartsShareStoreAndAuditCapabilities(t *testing.T) {
 // the core, must run the swapped one and write its audit row through the core
 // store with the erasure's subject token intact.
 func TestAuthServiceUseErasureReachesDeleteAccount(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()

@@ -10,6 +10,7 @@ import (
 // recipient check asserts an optional reachability reader on its store at run
 // time, and a part handed a narrower wrapper would quietly lose it.
 func TestDMServicePartsShareStore(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	dms := NewDMService(database, nil)
 	for name, st := range map[string]any{
@@ -28,6 +29,7 @@ func TestDMServicePartsShareStore(t *testing.T) {
 // service.New builds the DM service with its group part sharing the permission
 // service, which the part's timeout gate reads.
 func TestServicesWireDMGroupPart(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svcs := New(database, auth.NewRateLimiter())
 	if svcs.DMs.groupManagement == nil {

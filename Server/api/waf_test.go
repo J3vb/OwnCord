@@ -23,6 +23,7 @@ func noContent(called *bool) http.Handler {
 }
 
 func TestHandleWAFInterruption_WritesJSONAndStatus(t *testing.T) {
+	t.Parallel()
 	rr := httptest.NewRecorder()
 	handleWAFInterruption(rr, &types.Interruption{
 		Action: "deny",
@@ -43,6 +44,7 @@ func TestHandleWAFInterruption_WritesJSONAndStatus(t *testing.T) {
 }
 
 func TestWAFMiddleware_AllowsBenignRequest(t *testing.T) {
+	t.Parallel()
 	called := false
 	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
 	handler := middleware(noContent(&called))
@@ -59,6 +61,7 @@ func TestWAFMiddleware_AllowsBenignRequest(t *testing.T) {
 }
 
 func TestWAFMiddleware_InvalidParanoiaLevelStillAllowsBenignRequest(t *testing.T) {
+	t.Parallel()
 	called := false
 	middleware := NewWAFMiddlewareCRS(99, CRSModeDetect)
 	handler := middleware(noContent(&called))
@@ -75,6 +78,7 @@ func TestWAFMiddleware_InvalidParanoiaLevelStillAllowsBenignRequest(t *testing.T
 }
 
 func TestWAFMiddleware_BlocksScannerUserAgent(t *testing.T) {
+	t.Parallel()
 	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream handler should not be called for blocked scanner request")
@@ -186,26 +190,31 @@ func assertWAFPassesBody(t *testing.T, path, contentType string, size int) {
 // 413s the request as soon as its buffer hits 1 MiB — well below these
 // routes' documented, larger caps.
 func TestWAFMiddleware_AllowsLargePluginInstallBody(t *testing.T) {
+	t.Parallel()
 	// 2 MiB; within the 16 MiB plugin-install cap
 	assertWAFPassesBody(t, "/api/v1/admin/plugins/install", "application/zip", 2*1024*1024)
 }
 
 func TestWAFMiddleware_AllowsLargeAvatarUploadBody(t *testing.T) {
+	t.Parallel()
 	// >1 MiB; within the 3 MiB avatar envelope
 	assertWAFPassesBody(t, "/api/v1/users/me/avatar", "image/png", 1_100_000)
 }
 
 func TestWAFMiddleware_AllowsLargeBannerUploadBody(t *testing.T) {
+	t.Parallel()
 	// 3 MiB; within the 5 MiB banner envelope
 	assertWAFPassesBody(t, "/api/v1/users/me/banner", "image/png", 3<<20)
 }
 
 func TestWAFMiddleware_AllowsLargeGroupIconUploadBody(t *testing.T) {
+	t.Parallel()
 	// >1 MiB; within the 3 MiB avatar envelope
 	assertWAFPassesBody(t, "/api/v1/dms/12/icon", "image/png", 1_100_000)
 }
 
 func TestWAFMiddleware_PreservesReadableBodyForDownstream(t *testing.T) {
+	t.Parallel()
 	const requestBody = `{"message":"hello world"}`
 	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +242,7 @@ func TestWAFMiddleware_PreservesReadableBodyForDownstream(t *testing.T) {
 // uninspected. The inline engine must reject such requests; a normal request
 // must still pass.
 func TestWAFMiddleware_BlocksArgumentLimitOverflow(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{CRSModeOff, CRSModeDetect} {
 		t.Run(mode, func(t *testing.T) {
 			called := false
@@ -273,6 +283,7 @@ func TestWAFMiddleware_BlocksArgumentLimitOverflow(t *testing.T) {
 }
 
 func TestWAFMiddleware_AllowsLargeDiscordImportUploadBody(t *testing.T) {
+	t.Parallel()
 	// above the 1 MiB inline body limit
 	assertWAFPassesBody(t, "/admin/api/discord-imports/upload?filename=x.json", "application/octet-stream", 3<<20)
 }
@@ -280,6 +291,7 @@ func TestWAFMiddleware_AllowsLargeDiscordImportUploadBody(t *testing.T) {
 // The WebSocket upgrade is served at /api/v1/ws with no body and no query
 // arguments; it must pass the WAF untouched without an exclusion rule.
 func TestWAFMiddleware_AllowsWebSocketUpgrade(t *testing.T) {
+	t.Parallel()
 	called := false
 	handler := NewWAFMiddlewareCRS(2, CRSModeBlock)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -304,6 +316,7 @@ func TestWAFMiddleware_AllowsWebSocketUpgrade(t *testing.T) {
 // cap reaches the handler, one past it is refused, so the WAF never buffers
 // more than the transport admits.
 func TestWAFMiddleware_InspectBufferMatchesGlobalBodyCap(t *testing.T) {
+	t.Parallel()
 	handler := NewWAFMiddlewareCRS(2, CRSModeOff)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusNoContent)

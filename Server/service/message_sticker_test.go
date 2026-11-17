@@ -24,6 +24,7 @@ func (f *forwardFixture) stickerParams(user, channel, stickerID int64) SendMessa
 }
 
 func TestSendSticker_StoresFallbackAndRow(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	st := f.seedSticker(t, "Wave")
 	res, err := f.svc.SendMessage(context.Background(), f.stickerParams(fwdBob, fwdDstChan, st.ID))
@@ -50,6 +51,7 @@ func TestSendSticker_StoresFallbackAndRow(t *testing.T) {
 }
 
 func TestSendSticker_RetryIsOneMessage(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	st := f.seedSticker(t, "Wave")
 	p := f.stickerParams(fwdBob, fwdDstChan, st.ID)
@@ -68,6 +70,7 @@ func TestSendSticker_RetryIsOneMessage(t *testing.T) {
 }
 
 func TestSendSticker_ShapeIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	st := f.seedSticker(t, "Wave")
 	tests := []struct {
@@ -94,6 +97,7 @@ func TestSendSticker_ShapeIsRefused(t *testing.T) {
 }
 
 func TestSendSticker_UnknownStickerIsAClearError(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	_, err := f.svc.SendMessage(context.Background(), f.stickerParams(fwdBob, fwdDstChan, 4242))
 	if !errors.Is(err, ErrStickerNotFound) || !errors.Is(err, ErrNotFound) {
@@ -106,6 +110,7 @@ func TestSendSticker_UnknownStickerIsAClearError(t *testing.T) {
 
 // Edge case (a): a sticker deleted while a member still has it in the picker.
 func TestSendSticker_DeletedStickerIsRefusedAndOldMessageKeepsItsName(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	st := f.seedSticker(t, "Wave")
 	sent, err := f.svc.SendMessage(context.Background(), f.stickerParams(fwdBob, fwdDstChan, st.ID))
@@ -133,6 +138,7 @@ func TestSendSticker_DeletedStickerIsRefusedAndOldMessageKeepsItsName(t *testing
 }
 
 func TestSendSticker_StillGatedByTheSendChecks(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	st := f.seedSticker(t, "Wave")
 	if _, err := f.svc.SendMessage(context.Background(), f.stickerParams(fwdBob, fwdNoSendChan, st.ID)); !errors.Is(err, ErrForbidden) {
@@ -150,6 +156,7 @@ func TestSendSticker_StillGatedByTheSendChecks(t *testing.T) {
 }
 
 func TestSendSticker_ReplyAndDMAreAllowed(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	st := f.seedSticker(t, "Wave")
 	p := f.stickerParams(fwdBob, fwdDstChan, st.ID)
@@ -170,6 +177,7 @@ func TestSendSticker_ReplyAndDMAreAllowed(t *testing.T) {
 }
 
 func TestSendSticker_SlowModeApplies(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, auth.NewRateLimiter())
 	st := f.seedSticker(t, "Wave")
 	if _, err := f.database.ExecContext(context.Background(), `UPDATE channels SET slow_mode = 60 WHERE id = ?`, fwdDstChan); err != nil {
@@ -184,6 +192,7 @@ func TestSendSticker_SlowModeApplies(t *testing.T) {
 }
 
 func TestEditAndForward_RefuseAStickerMessage(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	st := f.seedSticker(t, "Wave")
 	sent, err := f.svc.SendMessage(context.Background(), f.stickerParams(fwdBob, fwdDstChan, st.ID))

@@ -9,6 +9,7 @@ import (
 // With no imported channel in scope the date bounds render exactly the plain id
 // range plus the timestamp test (the scope's threads ride in one JSON parameter), so a native search keeps its index plans.
 func TestSearchFilters_NoImportedChannelKeepsThePlainIdRange(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemoryInternal(t)
 	q := SearchQuery{ChannelIDs: []int64{1, 2}, AfterTS: "2026-01-01 00:00:00", BeforeTS: "2026-02-01 00:00:00"}
@@ -31,6 +32,7 @@ func TestSearchFilters_NoImportedChannelKeepsThePlainIdRange(t *testing.T) {
 }
 
 func TestSplitImportedScope(t *testing.T) {
+	t.Parallel()
 	native, imp := splitImportedScope([]int64{1, 2, 3}, []int64{2, 9})
 	if len(native) != 2 || native[0] != 1 || native[1] != 3 || len(imp) != 1 || imp[0] != 2 {
 		t.Errorf("native=%v imported=%v", native, imp)
@@ -42,6 +44,7 @@ func TestSplitImportedScope(t *testing.T) {
 }
 
 func TestScopeIDsJSON(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		ids  []int64
 		want string

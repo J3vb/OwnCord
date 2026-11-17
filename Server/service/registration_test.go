@@ -29,6 +29,7 @@ func registerFrom(svc *AuthService, username, ip string) error {
 // Per-mode abuse limits (owner decision 1): the invite-free modes budget
 // registrations per address; invite mode spends invites instead.
 func TestRegister_InviteFreeModesAreBudgetedPerAddress(t *testing.T) {
+	t.Parallel()
 	svc := newRegistrationService(t, RegistrationOpen)
 	for i := range inviteFreeRegistrationsPerIPPerDay {
 		if err := registerFrom(svc, fmt.Sprintf("open%d", i), "203.0.113.7"); err != nil {
@@ -55,6 +56,7 @@ func TestRegister_InviteFreeModesAreBudgetedPerAddress(t *testing.T) {
 }
 
 func TestRegister_ApprovalQueueIsCapped(t *testing.T) {
+	t.Parallel()
 	svc := newRegistrationService(t, RegistrationApproval)
 	for i := range maxPendingRegistrations {
 		if _, err := svc.st.CreatePendingUser(context.Background(), fmt.Sprintf("queued%d", i), "hash", 4, 100); err != nil {
@@ -71,6 +73,7 @@ func TestRegister_ApprovalQueueIsCapped(t *testing.T) {
 }
 
 func TestRegister_InviteModeRefusesAnEmptyCodeBeforeHashing(t *testing.T) {
+	t.Parallel()
 	svc := newRegistrationService(t, RegistrationInvite)
 	err := registerFrom(svc, "codeless", "203.0.113.10")
 	if !errors.Is(err, ErrBadRequest) || !strings.Contains(err.Error(), "invalid invite or credentials") {
@@ -84,6 +87,7 @@ func TestRegister_InviteModeRefusesAnEmptyCodeBeforeHashing(t *testing.T) {
 // The cap is enforced by the insert, not by admitRegistration's count: six
 // applications racing for the last slot admit exactly one.
 func TestRegister_ApprovalQueueCapHoldsUnderConcurrency(t *testing.T) {
+	t.Parallel()
 	svc := newRegistrationService(t, RegistrationApproval)
 	ctx := context.Background()
 	for i := range maxPendingRegistrations - 1 {
@@ -121,6 +125,7 @@ func TestRegister_ApprovalQueueCapHoldsUnderConcurrency(t *testing.T) {
 // Only a committed registration spends the address's daily budget: a taken
 // username or a busy server refuses the attempt and leaves the budget whole.
 func TestRegister_RefusedAttemptsLeaveTheAddressBudget(t *testing.T) {
+	t.Parallel()
 	svc := newRegistrationService(t, RegistrationOpen)
 	const ip = "203.0.113.20"
 	mustDo(t, "seed account", registerFrom(svc, "taken", "198.51.100.99"))

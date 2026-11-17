@@ -9,6 +9,7 @@ import (
 )
 
 func TestTimeoutSnapshot_FiltersExpiredAndCopies(t *testing.T) {
+	t.Parallel()
 	s := NewPermissionService(newTestDB(t), permissions.NewChecker(newTestDB(t)))
 	if m, ok := s.TimeoutSnapshot(); ok || m != nil {
 		t.Fatalf("unloaded mirror: snapshot = %v, %v; want nil, false", m, ok)
@@ -33,6 +34,7 @@ func TestTimeoutSnapshot_FiltersExpiredAndCopies(t *testing.T) {
 }
 
 func TestActiveTimeouts_ReloadsFromStore(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	s := NewPermissionService(database, permissions.NewChecker(database))

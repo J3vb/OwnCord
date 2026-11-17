@@ -45,6 +45,7 @@ func newAppealQueriesTestDB(t *testing.T) (database *db.DB, ownerID, modID, memb
 // path's own transaction directly: a passing checkAuthority commits the
 // assign, and a failing one refuses without writing anything (P2 review).
 func TestAppealQueries_AssignAppealTx(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, ownerID, modID, memberID, _, appealID := newOpenAppeal(t, "pub-assigntx")
 
@@ -80,6 +81,7 @@ func TestAppealQueries_AssignAppealTx(t *testing.T) {
 // reversal audit rows use, so a rename or a dropped kind is caught here
 // directly rather than only through the service-layer test that calls it.
 func TestReversalAuditActionFor(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		kind       string
 		wantAction string
@@ -145,6 +147,7 @@ func TestAppealQueries_InsertAppealConcurrentBothInFlight(t *testing.T) {
 }
 
 func TestAppealQueries_InsertAppealRefusesAnUnknownAction(t *testing.T) {
+	t.Parallel()
 	database, _, _, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
@@ -157,6 +160,7 @@ func TestAppealQueries_InsertAppealRefusesAnUnknownAction(t *testing.T) {
 }
 
 func TestAppealQueries_InsertFindGetLifecycle(t *testing.T) {
+	t.Parallel()
 	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
@@ -542,6 +546,7 @@ func TestAssignAppealForced_EligibilityCheckIsFreshInsideTheTransaction(t *testi
 }
 
 func TestAppealQueries_DecideAppealTxAppliesEachReversalKind(t *testing.T) {
+	t.Parallel()
 	t.Run("timeout", func(t *testing.T) {
 		ctx := context.Background()
 		database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
@@ -624,6 +629,7 @@ func TestAppealQueries_DecideAppealTxAppliesEachReversalKind(t *testing.T) {
 // OBSERVED state and assignee, so this decide must be refused (zero rows
 // affected) and the real assignment must survive untouched.
 func TestAppealQueries_DecideRefusesAssignThatLandedAfterTheCallersRead(t *testing.T) {
+	t.Parallel()
 	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
@@ -685,6 +691,7 @@ func TestAppealQueries_DecideRefusesAssignThatLandedAfterTheCallersRead(t *testi
 // same observed values the precheck itself would accept), isolates the
 // UPDATE's guard.
 func TestAppealQueries_DecideGuardCatchesStateChangeAloneWithAssigneeUnchanged(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, _, modID, memberID, actionID, appealID := newOpenAppeal(t, "pub-state-alone")
 	if ok, err := database.AssignAppeal(ctx, appealID, modID, 0); err != nil || !ok {
@@ -730,6 +737,7 @@ func TestAppealQueries_DecideGuardCatchesStateChangeAloneWithAssigneeUnchanged(t
 // (not DecideAppealTx), so AppealObservedRowExists's precheck cannot mask
 // whether the guarded UPDATE's own assignee predicate is load-bearing.
 func TestAppealQueries_DecideGuardCatchesAssigneeChangeAloneWithStateUnchanged(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, ownerID, modID, _, _, appealID := newOpenAppeal(t, "pub-assignee-alone")
 	if ok, err := database.AssignAppeal(ctx, appealID, modID, 0); err != nil || !ok {
@@ -767,6 +775,7 @@ func TestAppealQueries_DecideGuardCatchesAssigneeChangeAloneWithStateUnchanged(t
 // check and this write cannot land as the appeal's new assignee — the write
 // affects zero rows rather than assigning a dangling id.
 func TestAppealQueries_AssignAppealRefusesAnErasedAssignee(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, _, modID, _, _, appealID := newOpenAppeal(t, "pub-assignee-erased")
 	if _, err := database.EraseAccount(ctx, modID, ""); err != nil {
@@ -790,6 +799,7 @@ func TestAppealQueries_AssignAppealRefusesAnErasedAssignee(t *testing.T) {
 // the whole transaction (DecideAppealTx) reports AppealWriteConflict, not a
 // decision recorded against a dangling id.
 func TestAppealQueries_DecideAppealTxRefusesAnErasedDecider(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, _, modID, memberID, actionID, appealID := newOpenAppeal(t, "pub-decider-erased")
 	if _, err := database.EraseAccount(ctx, modID, ""); err != nil {
@@ -810,6 +820,7 @@ func TestAppealQueries_DecideAppealTxRefusesAnErasedDecider(t *testing.T) {
 }
 
 func TestAppealQueries_AssignAppealForced(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, ownerID, modID, memberID, _, appealID := newOpenAppeal(t, "pub-forced-1")
 	if ok, err := database.AssignAppeal(ctx, appealID, modID, 0); err != nil || !ok {
@@ -860,6 +871,7 @@ func TestAppealQueries_AssignAppealForced(t *testing.T) {
 // before this call, even one a caller elsewhere might still believe is
 // unchanged, is what actually governs the outcome.
 func TestAppealQueries_AssignAppealForced_ActorDemotedIsRefusedOnFreshRank(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, _, modID, memberID, _, appealID := newOpenAppeal(t, "pub-demoted")
 	// Assigned to the plain member (position 40) — modID (position 60) would
@@ -884,6 +896,7 @@ func TestAppealQueries_AssignAppealForced_ActorDemotedIsRefusedOnFreshRank(t *te
 // and this write must be what actually governs the outcome, exactly as the
 // actor's own freshness does above.
 func TestAppealQueries_AssignAppealForced_TargetPromotedIsRefusedOnFreshRank(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, _, modID, memberID, _, appealID := newOpenAppeal(t, "pub-target-promoted")
 	// Assigned to the plain member (position 40) — modID (position 60) would
@@ -902,6 +915,7 @@ func TestAppealQueries_AssignAppealForced_TargetPromotedIsRefusedOnFreshRank(t *
 }
 
 func TestAppealQueries_WithdrawAppeal(t *testing.T) {
+	t.Parallel()
 	database, ownerID, _, memberID, member2ID := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
@@ -928,6 +942,7 @@ func TestAppealQueries_WithdrawAppeal(t *testing.T) {
 }
 
 func TestAppealQueries_CountEligibleModerators(t *testing.T) {
+	t.Parallel()
 	database, ownerID, modID, memberID, member2ID := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
@@ -977,6 +992,7 @@ func TestAppealQueries_CountEligibleModerators(t *testing.T) {
 // F2/F3 review: an effectively-banned moderator must not count as an
 // eligible alternative reviewer.
 func TestAppealQueries_CountEligibleModerators_ExcludesBannedModerators(t *testing.T) {
+	t.Parallel()
 	database, ownerID, modID, memberID, member2ID := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
@@ -1018,6 +1034,7 @@ func sameDayLapsedBanExpiry() time.Time {
 // wrongly exclude an otherwise-eligible moderator. A ban that expired
 // earlier today (see sameDayLapsedBanExpiry) must count as eligible.
 func TestAppealQueries_CountEligibleModerators_LapsedBanCountsAsEligible(t *testing.T) {
+	t.Parallel()
 	database, ownerID, modID, _, member2ID := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
@@ -1042,6 +1059,7 @@ func TestAppealQueries_CountEligibleModerators_LapsedBanCountsAsEligible(t *test
 // as a second eligible moderator regardless of secondModID's ban, masking
 // exactly the bug this test exists to catch.
 func TestDecideAppealTx_LapsedBanOnSecondModeratorCountsAsEligibleForSelfReview(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -1073,6 +1091,7 @@ func TestDecideAppealTx_LapsedBanOnSecondModeratorCountsAsEligibleForSelfReview(
 }
 
 func TestAppealQueries_GetModerationAction(t *testing.T) {
+	t.Parallel()
 	database, ownerID, _, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 

@@ -28,6 +28,7 @@ func (s *totpDisconnectSpy) DisconnectIfSessionRevoked(userID int64) {
 // left to the sweep, and never dropped outright since the caller's session
 // stays.
 func TestTOTPChange_ChecksTheAccountsLiveSocket(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := secondFactorDB(t)
 	hash, err := auth.HashPassword("correctPass1")

@@ -15,6 +15,7 @@ import (
 // keeps a replay from leaking events for channels the client cannot see.
 
 func TestPersistEvent_AndGetEventsSince(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -50,6 +51,7 @@ func TestPersistEvent_AndGetEventsSince(t *testing.T) {
 }
 
 func TestPersistEvents_BatchInsertsAll(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -77,6 +79,7 @@ func TestPersistEvents_BatchInsertsAll(t *testing.T) {
 }
 
 func TestPersistEvents_EmptyBatchIsNoop(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	persisted, err := database.PersistEvents(context.Background(), nil)
@@ -90,6 +93,7 @@ func TestPersistEvents_EmptyBatchIsNoop(t *testing.T) {
 // PRIMARY KEY), and the per-row fallback still lands the good rows —
 // best-effort semantics identical to the old per-event loop.
 func TestPersistEvents_FallbackKeepsGoodRowsOnBadBatch(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -122,6 +126,7 @@ func TestPersistEvents_FallbackKeepsGoodRowsOnBadBatch(t *testing.T) {
 }
 
 func TestGetEventsSince_RespectsLimit(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -140,6 +145,7 @@ func TestGetEventsSince_RespectsLimit(t *testing.T) {
 }
 
 func TestGetEventsSinceForChannels(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -192,6 +198,7 @@ func TestGetEventsSinceForChannels(t *testing.T) {
 }
 
 func TestGetMaxEventSeq(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -217,6 +224,7 @@ func TestGetMaxEventSeq(t *testing.T) {
 }
 
 func TestPruneEventsOlderThan(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -292,6 +300,7 @@ func TestPruneEventsOlderThan_ChunksDelete(t *testing.T) {
 }
 
 func TestPruneEventsOlderThan_NothingToPrune(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -305,6 +314,7 @@ func TestPruneEventsOlderThan_NothingToPrune(t *testing.T) {
 }
 
 func TestPersistEvent_DuplicateSeqRejected(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 

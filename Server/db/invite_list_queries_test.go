@@ -7,6 +7,7 @@ import (
 )
 
 func TestListInvites_LiveDeadAndCursor(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := mustCreateUser(t, database, "inviter", "hash", 4)
@@ -58,6 +59,7 @@ func TestListInvites_LiveDeadAndCursor(t *testing.T) {
 }
 
 func TestListInvites_EmptyAndClosedDB(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	for _, dead := range []bool{false, true} {
@@ -79,6 +81,7 @@ func TestListInvites_EmptyAndClosedDB(t *testing.T) {
 }
 
 func TestGetInviteByID(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := mustCreateUser(t, database, "byid", "hash", 4)

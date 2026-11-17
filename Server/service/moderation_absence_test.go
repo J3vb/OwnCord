@@ -27,6 +27,7 @@ var forbiddenModerationIdentifiers = []string{
 // intermediate helper still has to touch this test to add the capability at
 // all, and reviewing that touch is exactly the point.
 func TestAbsenceContract_NoPluginModerationCapability(t *testing.T) {
+	t.Parallel()
 	files, err := filepath.Glob(filepath.Join("..", "plugin", "host_*.go"))
 	mustDo(t, "glob host_*.go", err)
 	var scanned int
@@ -64,6 +65,7 @@ func TestAbsenceContract_NoPluginModerationCapability(t *testing.T) {
 // schema CHECK enforcing this (erasure sets actor_id to 0 for an erased
 // moderator, and a constraint would forbid that transition).
 func TestModerationService_RefusesNonHumanActor(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 

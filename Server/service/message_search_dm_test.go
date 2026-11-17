@@ -10,6 +10,7 @@ import (
 // in:<name> still finds a group DM the caller is in, by the DM's own name, and
 // nobody outside it.
 func TestSearchScope_InNameMatchesOwnGroupDM(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	a, err := database.CreateUser(ctx, "srch-a", "hash", 4)

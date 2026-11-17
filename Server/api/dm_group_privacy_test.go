@@ -12,6 +12,7 @@ import (
 // WP 6.8d: the group refusal is one 403 whatever the cause, on create and on
 // add, and it never names the target.
 func TestAddGroupMembers_RefusalBodyIdentical(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	causes := map[string]func(t *testing.T, database *db.DB){
 		"privacy": func(t *testing.T, database *db.DB) {

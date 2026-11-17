@@ -53,6 +53,7 @@ func noteUserID(t *testing.T, database *db.DB, name string) int64 {
 func notePath(id int64) string { return fmt.Sprintf("/api/v1/users/me/notes/%d", id) }
 
 func TestUserNote_RequiresAuth(t *testing.T) {
+	t.Parallel()
 	router := buildUserNoteRouter(newMigratedAuthTestDB(t))
 	for _, m := range []string{http.MethodGet, http.MethodPut} {
 		if rr := noteDo(t, router, m, notePath(1), "", `{"note":"x"}`); rr.Code != http.StatusUnauthorized {
@@ -62,6 +63,7 @@ func TestUserNote_RequiresAuth(t *testing.T) {
 }
 
 func TestUserNote_GetMissingIsEmpty(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "note_owner", 4)
 	profileCreateToken(t, database, "note_target", 4)
@@ -79,6 +81,7 @@ func TestUserNote_GetMissingIsEmpty(t *testing.T) {
 }
 
 func TestUserNote_PutTrimsAndCaps(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "cap_owner", 4)
 	profileCreateToken(t, database, "cap_target", 4)
@@ -117,6 +120,7 @@ func TestUserNote_PutTrimsAndCaps(t *testing.T) {
 }
 
 func TestUserNote_EmptyDeletes(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "del_owner", 4)
 	profileCreateToken(t, database, "del_target", 4)
@@ -138,6 +142,7 @@ func TestUserNote_EmptyDeletes(t *testing.T) {
 }
 
 func TestUserNote_OwnerScoped(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	tokenA := profileCreateToken(t, database, "scope_a", 4)
 	tokenB := profileCreateToken(t, database, "scope_b", 4)
@@ -162,6 +167,7 @@ func TestUserNote_OwnerScoped(t *testing.T) {
 }
 
 func TestUserNote_UnknownTarget404(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "nf_owner", 4)
 	router := buildUserNoteRouter(database)
@@ -176,6 +182,7 @@ func TestUserNote_UnknownTarget404(t *testing.T) {
 }
 
 func TestUserNote_ErasedTargetThen404(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "er_owner", 4)
 	profileCreateToken(t, database, "er_target", 4)
@@ -196,6 +203,7 @@ func TestUserNote_ErasedTargetThen404(t *testing.T) {
 }
 
 func TestUserNote_ConcurrentWritersLastWins(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "race_owner", 4)
 	profileCreateToken(t, database, "race_target", 4)
@@ -224,6 +232,7 @@ func TestUserNote_ConcurrentWritersLastWins(t *testing.T) {
 }
 
 func TestUserNote_RateLimited(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "rl_owner", 4)
 	profileCreateToken(t, database, "rl_target", 4)
@@ -240,6 +249,7 @@ func TestUserNote_RateLimited(t *testing.T) {
 }
 
 func TestUserNote_PutWithoutNoteFieldRefused(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "nf_owner", 4)
 	profileCreateToken(t, database, "nf_target", 4)
@@ -259,6 +269,7 @@ func TestUserNote_PutWithoutNoteFieldRefused(t *testing.T) {
 }
 
 func TestUserNote_MaxLengthEscapedBodyAccepted(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "esc_owner", 4)
 	profileCreateToken(t, database, "esc_target", 4)

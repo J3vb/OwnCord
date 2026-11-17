@@ -51,6 +51,7 @@ func explain(t *testing.T, svc *ChannelService, ch *db.Channel, userID int64, a 
 }
 
 func TestExplainAccess_AllowedWithBaseRoleTrace(t *testing.T) {
+	t.Parallel()
 	svc, _, ch := seedExplainFixture(t)
 	res, send := explain(t, svc, ch, explainAlice, permissions.ActionSendMessage)
 	if !send.Allowed || send.Reason != "" {
@@ -69,6 +70,7 @@ func TestExplainAccess_AllowedWithBaseRoleTrace(t *testing.T) {
 }
 
 func TestExplainAccess_RoleDenyAndUserAllowLayers(t *testing.T) {
+	t.Parallel()
 	svc, database, ch := seedExplainFixture(t)
 	ctx := context.Background()
 	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(ctx, ch.ID, explainRole, 0, permissions.SendMessages))
@@ -88,6 +90,7 @@ func TestExplainAccess_RoleDenyAndUserAllowLayers(t *testing.T) {
 }
 
 func TestExplainAccess_NonRoleRestrictions(t *testing.T) {
+	t.Parallel()
 	svc, database, ch := seedExplainFixture(t)
 	ctx := context.Background()
 
@@ -133,6 +136,7 @@ func TestExplainAccess_NonRoleRestrictions(t *testing.T) {
 }
 
 func TestExplainAccess_ActionFilterErrorsAndAudit(t *testing.T) {
+	t.Parallel()
 	svc, database, ch := seedExplainFixture(t)
 	ctx := context.Background()
 	rec := audittest.Install(t, database)
@@ -154,6 +158,7 @@ func TestExplainAccess_ActionFilterErrorsAndAudit(t *testing.T) {
 }
 
 func TestPreviewOverride_RoleLayerListsOnlyChangedMembers(t *testing.T) {
+	t.Parallel()
 	svc, database, ch := seedExplainFixture(t)
 	ctx := context.Background()
 	// Bob keeps READ through his own allow, so hiding the channel from the
@@ -187,6 +192,7 @@ func TestPreviewOverride_RoleLayerListsOnlyChangedMembers(t *testing.T) {
 }
 
 func TestPreviewOverride_UserLayerAndValidation(t *testing.T) {
+	t.Parallel()
 	svc, database, ch := seedExplainFixture(t)
 	ctx := context.Background()
 	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(ctx, ch.ID, explainRole, 0, permissions.ReadMessages))
@@ -222,6 +228,7 @@ func TestPreviewOverride_UserLayerAndValidation(t *testing.T) {
 }
 
 func TestExplainAccess_AdministratorHasNoBitTrace(t *testing.T) {
+	t.Parallel()
 	svc, database, ch := seedExplainFixture(t)
 	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(context.Background(), ch.ID, permissions.OwnerRoleID, 0, permissions.ReadMessages))
 	// The override is never consulted for an Administrator, so no trace
@@ -234,6 +241,7 @@ func TestExplainAccess_AdministratorHasNoBitTrace(t *testing.T) {
 // Explain and the preview disclose members' restriction state, so they
 // follow the override editor's rank rules.
 func TestExplainAndUserPreview_RefuseTargetsRankedAtOrAbove(t *testing.T) {
+	t.Parallel()
 	svc, database, ch := seedExplainFixture(t)
 	ctx := context.Background()
 	mod := &db.Role{ID: 32, Name: "explain-mod", Position: 50, Permissions: permissions.ManageChannels | permissions.ReadMessages}

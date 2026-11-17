@@ -25,6 +25,7 @@ func moverChannelActor(t *testing.T, database *db.DB) (holder, admin *db.Role) {
 }
 
 func TestRoleOverride_OwnerGrantOnlyBit(t *testing.T) {
+	t.Parallel()
 	svc, database, _, low, ch := seedOverrideFixture(t)
 	holder, admin := moverChannelActor(t, database)
 	ctx := context.Background()
@@ -54,6 +55,7 @@ func TestRoleOverride_OwnerGrantOnlyBit(t *testing.T) {
 }
 
 func TestUserOverride_OwnerGrantOnlyBit(t *testing.T) {
+	t.Parallel()
 	svc, database, _, _, ch := seedOverrideFixture(t)
 	holder, admin := moverChannelActor(t, database)
 	seedUser(t, database, &db.User{ID: 41, Username: "u41"})
@@ -72,6 +74,7 @@ func TestUserOverride_OwnerGrantOnlyBit(t *testing.T) {
 }
 
 func TestCategoryOverride_OwnerGrantOnlyBit(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	holder := &db.Role{ID: 33, Name: "cat-mover", Position: 50,

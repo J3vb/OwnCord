@@ -53,6 +53,7 @@ func TestMentionEmitLocks_OtherChannelDoesNotWait(t *testing.T) {
 // A negative or large id picks a valid stripe (no out-of-range panic), and ids
 // a stripe count apart share one.
 func TestMentionEmitLocks_ForChannelStaysInRange(t *testing.T) {
+	t.Parallel()
 	var l mentionEmitLocks
 	for _, id := range []int64{0, 1, 63, 64, -1, -64, 1 << 62, -(1 << 62), -1 << 63} {
 		if l.forChannel(id) == nil {

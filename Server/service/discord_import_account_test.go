@@ -15,6 +15,7 @@ import (
 // password matches nothing, and the login path refuses it on the account kind
 // as well, so a row given a real hash by mistake still cannot sign in.
 func TestLogin_RefusesTheHiddenImportAccount(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	id, err := database.EnsureImportAccount(ctx)
@@ -44,6 +45,7 @@ func TestLogin_RefusesTheHiddenImportAccount(t *testing.T) {
 }
 
 func TestCreateDM_RefusesTheHiddenImportAccount(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 	ctx := context.Background()
 	id, err := database.EnsureImportAccount(ctx)
@@ -66,6 +68,7 @@ func TestCreateDM_RefusesTheHiddenImportAccount(t *testing.T) {
 // Every moderation or admin action that names a user by id must answer for the
 // hidden import account exactly as it does for an id that does not exist.
 func TestModeration_TargetsRefuseTheHiddenImportAccount(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestModerationService(t)
 	ctx := context.Background()
 	sys, err := database.EnsureImportAccount(ctx)
@@ -109,6 +112,7 @@ func TestModeration_TargetsRefuseTheHiddenImportAccount(t *testing.T) {
 
 // Erasing the hidden account would delete every imported message with it.
 func TestEraseUser_RefusesTheHiddenImportAccountAndKeepsImportedMessages(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	owner := mustCreateUser(t, database, "the-owner", "hash", 1)
@@ -139,6 +143,7 @@ func TestEraseUser_RefusesTheHiddenImportAccountAndKeepsImportedMessages(t *test
 }
 
 func TestResolveSocketPrincipal_RefusesTheHiddenImportAccount(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := sessionFixture(t)
 	sys, err := database.EnsureImportAccount(ctx)
 	mustDo(t, "EnsureImportAccount", err)
@@ -151,6 +156,7 @@ func TestResolveSocketPrincipal_RefusesTheHiddenImportAccount(t *testing.T) {
 // Files in a channel an import is still building are not readable by anyone,
 // administrators included, until the channel is published.
 func TestAuthorize_RefusesFilesOfAPendingImportChannel(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	sys, _ := database.EnsureImportAccount(ctx)

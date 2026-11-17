@@ -32,6 +32,7 @@ func (b *batchSpyStore) IncrementMentionCountsBatch(_ context.Context, _ int64, 
 // guarantee: N messages coalesced into one window flush as a single writer
 // transaction per channel, instead of one per message.
 func TestMentionWorker_OneTransactionPerChannelPerWindow(t *testing.T) {
+	t.Parallel()
 	spy := &batchSpyStore{}
 	w := newMentionWorker(spy)
 
@@ -140,6 +141,7 @@ func (s *orderedRaceStore) DecrementMentionCounts(_ context.Context, _ int64, _ 
 // write concurrently. Before the fix the two writes interleave and a reader can
 // be left with the reverse's older total as its last frame.
 func TestMentionWorker_ReverseWaitsForIncrementEmit(t *testing.T) {
+	t.Parallel()
 	st := &orderedRaceStore{
 		incStarted: make(chan struct{}),
 		incRelease: make(chan struct{}),
@@ -208,6 +210,7 @@ func TestMentionWorker_ReverseWaitsForIncrementEmit(t *testing.T) {
 // last mention_count frame bob receives must equal the server's final total —
 // the invariant the unsynchronized emitters broke.
 func TestMentionWorker_ConcurrentDeleteDeliversLatestTotal(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	notifier := &fakeMentionNotifier{}
 	svc.SetMentionNotifier(notifier)
@@ -251,6 +254,7 @@ func TestMentionWorker_ConcurrentDeleteDeliversLatestTotal(t *testing.T) {
 // reader who already read the mentioning message is skipped (no phantom push),
 // and the author is never a recipient.
 func TestMentionWorker_NotifiesOnlyReadersGainingABadge(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	notifier := &fakeMentionNotifier{}
 	svc.SetMentionNotifier(notifier)
@@ -278,6 +282,7 @@ func TestMentionWorker_NotifiesOnlyReadersGainingABadge(t *testing.T) {
 // TestMentionWorker_NotifierNilIsSafe locks that a service with no notifier
 // (every test, any caller without a hub) flushes without panicking.
 func TestMentionWorker_NotifierNilIsSafe(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	ctx := t.Context()
 	stop := svc.StartMentionWorker(ctx)
@@ -294,6 +299,7 @@ func TestMentionWorker_NotifierNilIsSafe(t *testing.T) {
 // of @everyone sends is coalesced and flushed, every reader holds the right
 // count, the author none.
 func TestMentionWorker_FlushesCounts(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	ctx := t.Context()
 	stop := svc.StartMentionWorker(ctx)
@@ -323,6 +329,7 @@ func TestMentionWorker_FlushesCounts(t *testing.T) {
 // plan: the block/visibility filters still apply when the write is deferred to
 // the worker rather than run on the send path.
 func TestMentionWorker_AppliesBlockFilter(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedBlock(t, database, 2, 1) // bob blocked alice
 	ctx := t.Context()
@@ -392,6 +399,7 @@ func TestMentionWorker_BoundsGoroutinesUnderBurst(t *testing.T) {
 // message with no mention must not take a slot, otherwise ordinary chat fills
 // the bounded queue and genuine mention jobs are dropped.
 func TestMentionWorker_PlainSendsDoNotQueue(t *testing.T) {
+	t.Parallel()
 	svc, _, _ := newMentionFixture(t)
 	// A started worker with no loop, so queued jobs stay countable.
 	w := newMentionWorker(svc.mentionState.st)
@@ -418,6 +426,7 @@ func TestMentionWorker_PlainSendsDoNotQueue(t *testing.T) {
 // and the increment had not landed yet, so without a liveness guard the flush
 // raises a permanent phantom badge on a channel with nothing unread.
 func TestMentionWorker_DeleteBeforeFlushLeavesNoBadge(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	ctx := t.Context()
 	stop := svc.StartMentionWorker(ctx)
@@ -442,6 +451,7 @@ func TestMentionWorker_DeleteBeforeFlushLeavesNoBadge(t *testing.T) {
 // genuine badge. Without the pre-delete flush the reversal consumes the
 // prior badge (it cannot tell the two apart), leaving bob at 0.
 func TestMentionWorker_DeleteBeforeFlushPreservesPriorBadge(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	ctx := t.Context()
 	stop := svc.StartMentionWorker(ctx)
@@ -474,6 +484,7 @@ func TestMentionWorker_DeleteBeforeFlushPreservesPriorBadge(t *testing.T) {
 // increments before its reversal, so a purged in-window message does not
 // consume a genuine badge another, still-live message raised.
 func TestMentionWorker_PurgeBeforeFlushPreservesPriorBadge(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	// mod (4) needs MANAGE_MESSAGES on channel 10 to purge.
 	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, permissions.ManageMessages, 0)
@@ -504,6 +515,7 @@ func TestMentionWorker_PurgeBeforeFlushPreservesPriorBadge(t *testing.T) {
 // when the mentioning message is deleted, or a reader not viewing the channel
 // keeps the stale-high badge until their next ready (OC-F1).
 func TestMentionWorker_DeleteNotifiesDecreasedBadge(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	notifier := &fakeMentionNotifier{}
 	svc.SetMentionNotifier(notifier)
@@ -535,6 +547,7 @@ func TestMentionWorker_DeleteNotifiesDecreasedBadge(t *testing.T) {
 // TestMentionWorker_PurgeNotifiesDecreasedBadge is the purge sibling of the
 // delete case: purging a pushed mention must push the lowered total too.
 func TestMentionWorker_PurgeNotifiesDecreasedBadge(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, permissions.ManageMessages, 0)
 	notifier := &fakeMentionNotifier{}
@@ -568,6 +581,7 @@ func TestMentionWorker_PurgeNotifiesDecreasedBadge(t *testing.T) {
 // flushing one message's job leaves another pending job untouched until its own
 // window elapses.
 func TestMentionWorker_FlushMessagesOnlyTargetsNamed(t *testing.T) {
+	t.Parallel()
 	spy := &batchSpyStore{}
 	w := newMentionWorker(spy)
 	ctx := t.Context()
@@ -595,6 +609,7 @@ func TestMentionWorker_FlushMessagesOnlyTargetsNamed(t *testing.T) {
 // TestMentionWorker_DropsWhenStopped locks the non-blocking contract: a send
 // after the worker stopped counts the job as dropped and never blocks.
 func TestMentionWorker_DropsWhenStopped(t *testing.T) {
+	t.Parallel()
 	spy := &batchSpyStore{}
 	w := newMentionWorker(spy)
 	ctx, cancel := context.WithCancel(context.Background())

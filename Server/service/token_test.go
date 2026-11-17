@@ -37,6 +37,7 @@ func seedTokenUser(t *testing.T, database *db.DB, id int64, username string, rol
 // no owner yet" send an operator to different remedies, and the CLI has always
 // printed different messages for them.
 func TestTokenService_BindSeparatesMissingUserFromMissingOwner(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := tokenFixture(t)
 
 	// No users at all: the bootstrap case.
@@ -66,6 +67,7 @@ func TestTokenService_BindSeparatesMissingUserFromMissingOwner(t *testing.T) {
 }
 
 func TestTokenService_CreateStoresOnlyTheHash(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := tokenFixture(t)
 	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
 
@@ -96,6 +98,7 @@ func TestTokenService_CreateStoresOnlyTheHash(t *testing.T) {
 }
 
 func TestTokenService_CreateRefusesUnusableInput(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := tokenFixture(t)
 	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
 
@@ -141,6 +144,7 @@ func TestTokenService_CreateRefusesUnusableInput(t *testing.T) {
 // and says so, which is what stops a script from reporting a revoke it did not
 // perform.
 func TestTokenService_RevokeIsNotIdempotentlySilent(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := tokenFixture(t)
 	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
 	minted, err := svc.Create(ctx, 1, "", "one", 0)
@@ -159,6 +163,7 @@ func TestTokenService_RevokeIsNotIdempotentlySilent(t *testing.T) {
 // revoking a compromised credential by the name they typed must not be left
 // with a duplicate still live.
 func TestTokenService_RevokeByLabelTakesEveryMatch(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := tokenFixture(t)
 	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
 	for range 3 {
@@ -200,6 +205,7 @@ func TestTokenService_RevokeByLabelTakesEveryMatch(t *testing.T) {
 }
 
 func TestTokenService_FailsLoud(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := tokenFixture(t)
 	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
 	mustDo(t, "Close", database.Close())
@@ -228,6 +234,7 @@ func TestTokenService_FailsLoud(t *testing.T) {
 // a real actor id in the audit vocabulary ("the system") and a mint is not a
 // system action — recording one as unattributed loses who the token was for.
 func TestTokenService_ActorSelfAttributesToTheBoundUser(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := tokenFixture(t)
 	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
 	seedTokenUser(t, database, 2, "ci-account", permissions.MemberRoleID)
@@ -262,6 +269,7 @@ func TestTokenService_ActorSelfAttributesToTheBoundUser(t *testing.T) {
 // WP 8.4d: a MANAGE_TOKENS holder who is not the owner sees and revokes only
 // the tokens bound to them, and mints only for themself.
 func TestTokenService_OwnTokensOnly(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := tokenFixture(t)
 	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
 	seedTokenUser(t, database, 2, "holder", permissions.MemberRoleID)
@@ -325,6 +333,7 @@ func TestTokenService_OwnTokensOnly(t *testing.T) {
 // A holder's own tokens stay listable and revocable however many rows other
 // accounts add, and a live token outranks newer revoked ones in every listing.
 func TestTokenService_OwnTokensSurviveTheListCap(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := tokenFixture(t)
 	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
 	seedTokenUser(t, database, 2, "holder", permissions.MemberRoleID)

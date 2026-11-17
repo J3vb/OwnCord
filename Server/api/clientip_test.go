@@ -21,42 +21,49 @@ func inCIDRs(ip string, cidrs []string) bool {
 }
 
 func TestIPInNets_EmptyList_ReturnsFalse(t *testing.T) {
+	t.Parallel()
 	if inCIDRs("10.0.0.1", nil) {
 		t.Error("clientip.InNets(empty list) = true, want false")
 	}
 }
 
 func TestIPInNets_ExactIPMatch(t *testing.T) {
+	t.Parallel()
 	if !inCIDRs("10.0.0.1", []string{"10.0.0.1/32"}) {
 		t.Error("clientip.InNets exact match = false, want true")
 	}
 }
 
 func TestIPInNets_CIDRMatch(t *testing.T) {
+	t.Parallel()
 	if !inCIDRs("192.168.1.50", []string{"192.168.1.0/24"}) {
 		t.Error("clientip.InNets CIDR match = false, want true")
 	}
 }
 
 func TestIPInNets_CIDRNoMatch(t *testing.T) {
+	t.Parallel()
 	if inCIDRs("10.9.9.9", []string{"192.168.1.0/24"}) {
 		t.Error("clientip.InNets CIDR non-match = true, want false")
 	}
 }
 
 func TestIPInNets_MultipleCIDRs_FirstMatches(t *testing.T) {
+	t.Parallel()
 	if !inCIDRs("10.0.0.5", []string{"172.16.0.0/12", "10.0.0.0/8"}) {
 		t.Error("clientip.InNets multi-CIDR first match = false, want true")
 	}
 }
 
 func TestIPInNets_MultipleCIDRs_NoneMatch(t *testing.T) {
+	t.Parallel()
 	if inCIDRs("8.8.8.8", []string{"10.0.0.0/8", "192.168.0.0/16"}) {
 		t.Error("clientip.InNets multi-CIDR no match = true, want false")
 	}
 }
 
 func TestParseCIDRList_InvalidCIDR_Skipped(t *testing.T) {
+	t.Parallel()
 	// Invalid entries are skipped (with a startup warning) — they never match,
 	// so a fully invalid list grants nothing (fail closed at the call sites).
 	if nets := parseCIDRList([]string{"not-a-cidr"}); len(nets) != 0 {
@@ -68,6 +75,7 @@ func TestParseCIDRList_InvalidCIDR_Skipped(t *testing.T) {
 }
 
 func TestParseCIDRList_BarePlainIP_SkippedNotPanic(t *testing.T) {
+	t.Parallel()
 	// Bare IP without mask is not valid CIDR notation — skipped, no panic.
 	if nets := parseCIDRList([]string{"10.0.0.1"}); len(nets) != 0 {
 		t.Errorf("parseCIDRList(bare IP) = %d nets, want 0", len(nets))
@@ -75,6 +83,7 @@ func TestParseCIDRList_BarePlainIP_SkippedNotPanic(t *testing.T) {
 }
 
 func TestParseCIDRList_MixedValidInvalid_KeepsValid(t *testing.T) {
+	t.Parallel()
 	nets := parseCIDRList([]string{"not-a-cidr", "10.0.0.0/8"})
 	if len(nets) != 1 {
 		t.Fatalf("parseCIDRList(mixed) = %d nets, want 1", len(nets))
@@ -85,6 +94,7 @@ func TestParseCIDRList_MixedValidInvalid_KeepsValid(t *testing.T) {
 }
 
 func TestIPInNets_IPv6Match(t *testing.T) {
+	t.Parallel()
 	if !inCIDRs("::1", []string{"::1/128"}) {
 		t.Error("clientip.InNets IPv6 exact match = false, want true")
 	}
@@ -93,6 +103,7 @@ func TestIPInNets_IPv6Match(t *testing.T) {
 // ─── clientIP with trusted proxies ───────────────────────────────────────────
 
 func TestClientIP_NoTrustedProxies_UsesRemoteAddr(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "203.0.113.5:4321"
 	req.Header.Set("X-Real-IP", "1.2.3.4")
@@ -105,6 +116,7 @@ func TestClientIP_NoTrustedProxies_UsesRemoteAddr(t *testing.T) {
 }
 
 func TestClientIP_TrustedProxy_UsesXRealIP(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "10.0.0.1:9999"
 	req.Header.Set("X-Real-IP", "203.0.113.42")
@@ -116,6 +128,7 @@ func TestClientIP_TrustedProxy_UsesXRealIP(t *testing.T) {
 }
 
 func TestClientIP_TrustedProxy_NoXRealIP_FallsBackToRemoteAddr(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "10.0.0.1:9999"
 	// No X-Real-IP header set.
@@ -127,6 +140,7 @@ func TestClientIP_TrustedProxy_NoXRealIP_FallsBackToRemoteAddr(t *testing.T) {
 }
 
 func TestClientIP_UntrustedSource_IgnoresXRealIP(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "8.8.8.8:12345"
 	req.Header.Set("X-Real-IP", "192.168.1.1") // attacker-supplied
@@ -139,6 +153,7 @@ func TestClientIP_UntrustedSource_IgnoresXRealIP(t *testing.T) {
 }
 
 func TestClientIP_XForwardedFor_UsedWhenNoXRealIP(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "10.0.0.1:9999"
 	req.Header.Set("X-Forwarded-For", "203.0.113.10, 10.0.0.1")
@@ -159,6 +174,7 @@ func TestClientIP_XForwardedFor_UsedWhenNoXRealIP(t *testing.T) {
 // an attacker-supplied X-Real-IP must never override it and drive the admin
 // allowlist or a per-IP rate-limit/lockout key.
 func TestClientIP_TrustedProxy_XForwardedForWinsOverXRealIP(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "10.0.0.2:9999"
 	req.Header.Set("X-Real-IP", "192.168.1.50")                // attacker-supplied; proxy never overwrites it
@@ -176,6 +192,7 @@ func TestClientIP_TrustedProxy_XForwardedForWinsOverXRealIP(t *testing.T) {
 // every client into the proxy's own bucket (one user's failed logins would
 // lock out everyone). The leftmost valid XFF entry keeps clients distinct.
 func TestClientIP_BroadTrustedCIDRKeepsClientsDistinct(t *testing.T) {
+	t.Parallel()
 	trusted := parseCIDRList([]string{"10.0.0.0/8"}) // covers proxy AND LAN clients
 
 	newReq := func(xff string) *http.Request {
@@ -202,6 +219,7 @@ func TestClientIP_BroadTrustedCIDRKeepsClientsDistinct(t *testing.T) {
 // address never gets its forwarded headers honoured, exhaustion fallback or
 // not.
 func TestClientIP_SpoofedXFFFromUntrustedRemoteIgnored(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "203.0.113.9:1234"
 	req.Header.Set("X-Forwarded-For", "10.5.1.7")
@@ -218,6 +236,7 @@ func TestClientIP_SpoofedXFFFromUntrustedRemoteIgnored(t *testing.T) {
 // client so the walk actually reaches it. Dropping the guard would return
 // "not-an-ip" / "garbage" as the key.
 func TestClientIP_XForwardedFor_SkipsMalformedEntries(t *testing.T) {
+	t.Parallel()
 	trusted := parseCIDRList([]string{"10.0.0.0/8"})
 
 	tests := []struct {
@@ -246,6 +265,7 @@ func TestClientIP_XForwardedFor_SkipsMalformedEntries(t *testing.T) {
 }
 
 func TestClientIP_RemoteAddrWithoutPort(t *testing.T) {
+	t.Parallel()
 	// RemoteAddr sometimes has no port (e.g. Unix sockets in tests).
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "10.0.0.1"

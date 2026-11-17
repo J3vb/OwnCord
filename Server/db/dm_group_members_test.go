@@ -33,6 +33,7 @@ func assertOwnerIsMember(t *testing.T, database *db.DB, channelID int64) {
 // ─── Add ────────────────────────────────────────────────────────────────────
 
 func TestAddGroupDMMembers_InsertsMembersRowsAndOpenState(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	dave := seedUser(t, f.database, "dave")
@@ -69,6 +70,7 @@ func TestAddGroupDMMembers_InsertsMembersRowsAndOpenState(t *testing.T) {
 }
 
 func TestAddGroupDMMembers_SkipsExistingMembers(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	dave := seedUser(t, f.database, "dave")
 	change, err := f.database.AddGroupDMMembers(context.Background(), f.group, f.alice, []int64{f.carol, dave, dave}, contentOf)
@@ -79,6 +81,7 @@ func TestAddGroupDMMembers_SkipsExistingMembers(t *testing.T) {
 }
 
 func TestAddGroupDMMembers_AllExistingIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	_, err := f.database.AddGroupDMMembers(context.Background(), f.group, f.alice, []int64{f.bob, f.carol}, contentOf)
 	if !errors.Is(err, db.ErrNoNewGroupMembers) {
@@ -90,6 +93,7 @@ func TestAddGroupDMMembers_AllExistingIsRefused(t *testing.T) {
 }
 
 func TestAddGroupDMMembers_NonMemberAndOneToOneRefused(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	dave := seedUser(t, f.database, "dave")
@@ -107,6 +111,7 @@ func TestAddGroupDMMembers_NonMemberAndOneToOneRefused(t *testing.T) {
 // transaction, so exactly one of twenty concurrent single adds into a group of
 // nine wins and the other nineteen get ErrGroupDMFull.
 func TestAddGroupDMMembers_CapCountsInsideTx(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	members := make([]int64, 0, db.MaxGroupDMParticipants-1)
@@ -153,6 +158,7 @@ func TestAddGroupDMMembers_CapCountsInsideTx(t *testing.T) {
 }
 
 func TestAddGroupDMMembers_OverCapInOneCallWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ids := make([]int64, 0, db.MaxGroupDMParticipants)
 	for i := range db.MaxGroupDMParticipants {
@@ -170,6 +176,7 @@ func TestAddGroupDMMembers_OverCapInOneCallWritesNothing(t *testing.T) {
 // ─── Remove ─────────────────────────────────────────────────────────────────
 
 func TestRemoveGroupDMMember_OwnerOnly(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	if _, err := f.database.RemoveGroupDMMember(ctx, f.group, f.bob, f.carol, "x"); !errors.Is(err, db.ErrForbidden) {
@@ -200,6 +207,7 @@ func TestRemoveGroupDMMember_OwnerOnly(t *testing.T) {
 }
 
 func TestRemoveGroupDMMember_SelfRefused(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	if _, err := f.database.RemoveGroupDMMember(context.Background(), f.group, f.alice, f.alice, "x"); !errors.Is(err, db.ErrForbidden) {
 		t.Fatalf("self remove err = %v, want ErrForbidden", err)
@@ -210,6 +218,7 @@ func TestRemoveGroupDMMember_SelfRefused(t *testing.T) {
 }
 
 func TestRemoveGroupDMMember_DeletesReadStateAndOpenState(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	if _, err := f.database.ExecContext(ctx,
@@ -233,6 +242,7 @@ func TestRemoveGroupDMMember_DeletesReadStateAndOpenState(t *testing.T) {
 // Edge case 1, second half: an owner's remove racing the target's own leave
 // yields exactly one row, "left" or "removed", never both.
 func TestRemoveGroupDMMember_RacingLeaveGivesOneRow(t *testing.T) {
+	t.Parallel()
 	for i := range 25 {
 		f := newGroupRowFixture(t)
 		ctx := context.Background()
@@ -265,6 +275,7 @@ func TestRemoveGroupDMMember_RacingLeaveGivesOneRow(t *testing.T) {
 // flight. dm_owner_id names a current member whichever order the writer runs
 // them in.
 func TestRemoveVsOwnerLeave_HandOffWins(t *testing.T) {
+	t.Parallel()
 	for range 25 {
 		f := newGroupRowFixture(t)
 		ctx := context.Background()
@@ -299,6 +310,7 @@ func TestRemoveVsOwnerLeave_HandOffWins(t *testing.T) {
 }
 
 func TestTransferGroupDMOwner_RacingDeparturesKeepAMemberOwner(t *testing.T) {
+	t.Parallel()
 	for i := range 25 {
 		f := newGroupRowFixture(t)
 		ctx := context.Background()
@@ -327,6 +339,7 @@ func TestTransferGroupDMOwner_RacingDeparturesKeepAMemberOwner(t *testing.T) {
 // ─── Transfer ───────────────────────────────────────────────────────────────
 
 func TestTransferGroupDMOwner_OwnerOnlyAndTargetMustBeMember(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	outsider := seedUser(t, f.database, "outsider")
@@ -364,6 +377,7 @@ func TestTransferGroupDMOwner_OwnerOnlyAndTargetMustBeMember(t *testing.T) {
 // ─── Rename ─────────────────────────────────────────────────────────────────
 
 func TestSetGroupDMName_WritesRow(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	change, err := f.database.SetGroupDMName(context.Background(), f.group, f.bob, "Raid night", "bob renamed it")
 	mustDo(t, "SetGroupDMName", err)
@@ -384,6 +398,7 @@ func TestSetGroupDMName_WritesRow(t *testing.T) {
 }
 
 func TestSetGroupDMName_UnchangedNameNoRow(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	change, err := f.database.SetGroupDMName(ctx, f.group, f.bob, "Crew", "same")
@@ -397,6 +412,7 @@ func TestSetGroupDMName_UnchangedNameNoRow(t *testing.T) {
 }
 
 func TestSetGroupDMName_ClearWritesEmptyName(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	change, err := f.database.SetGroupDMName(context.Background(), f.group, f.alice, "", "alice cleared it")
 	mustDo(t, "SetGroupDMName", err)
@@ -409,6 +425,7 @@ func TestSetGroupDMName_ClearWritesEmptyName(t *testing.T) {
 }
 
 func TestSetGroupDMName_NonMemberRefused(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	outsider := seedUser(t, f.database, "outsider")
 	if _, err := f.database.SetGroupDMName(context.Background(), f.group, outsider, "x", "y"); !errors.Is(err, db.ErrNotFound) {
@@ -419,6 +436,7 @@ func TestSetGroupDMName_NonMemberRefused(t *testing.T) {
 // ─── Leave ──────────────────────────────────────────────────────────────────
 
 func TestLeaveGroupDM_WritesLeaveRowAndDeletesReadState(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	if _, err := f.database.ExecContext(ctx,
@@ -439,6 +457,7 @@ func TestLeaveGroupDM_WritesLeaveRowAndDeletesReadState(t *testing.T) {
 }
 
 func TestLeaveGroupDM_NonMemberGetsNotFoundAndNoRow(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	outsider := seedUser(t, f.database, "outsider")
 	if _, err := f.database.LeaveGroupDM(context.Background(), outsider, f.group, "x"); !errors.Is(err, db.ErrNotFound) {
@@ -450,6 +469,7 @@ func TestLeaveGroupDM_NonMemberGetsNotFoundAndNoRow(t *testing.T) {
 }
 
 func TestLeaveGroupDM_LastLeaverWritesNoRow(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	for _, uid := range []int64{f.alice, f.bob} {
@@ -471,6 +491,7 @@ func banUser(t *testing.T, database *db.DB, id int64, expires *time.Time) {
 }
 
 func TestLeaveGroupDM_HandOffSkipsBannedMember(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	banUser(t, f.database, f.bob, nil)
 	if _, err := f.database.LeaveGroupDM(context.Background(), f.alice, f.group, "left"); err != nil {
@@ -482,6 +503,7 @@ func TestLeaveGroupDM_HandOffSkipsBannedMember(t *testing.T) {
 }
 
 func TestLeaveGroupDM_HandOffCountsLapsedBanAsMember(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	lapsed := time.Now().UTC().Add(-time.Hour)
 	banUser(t, f.database, f.bob, &lapsed)
@@ -494,6 +516,7 @@ func TestLeaveGroupDM_HandOffCountsLapsedBanAsMember(t *testing.T) {
 }
 
 func TestLeaveGroupDM_HandOffFallsBackWhenEveryoneLeftIsBanned(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	banUser(t, f.database, f.bob, nil)
 	banUser(t, f.database, f.carol, nil)
@@ -507,6 +530,7 @@ func TestLeaveGroupDM_HandOffFallsBackWhenEveryoneLeftIsBanned(t *testing.T) {
 }
 
 func TestEraseAccount_HandOffSkipsBannedMember(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	banUser(t, f.database, f.bob, nil)
 	if _, err := f.database.EraseAccount(context.Background(), f.alice, ""); err != nil {
@@ -521,6 +545,7 @@ func TestEraseAccount_HandOffSkipsBannedMember(t *testing.T) {
 // A block that lands after the service's check, or a member brought in by an
 // earlier add, is caught inside the transaction.
 func TestAddGroupDMMembers_BlockedPairRefusedInsideTx(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	dave := seedUser(t, f.database, "dave")

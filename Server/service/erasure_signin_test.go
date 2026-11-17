@@ -20,6 +20,7 @@ func sessionCount(t *testing.T, database *db.DB, uid int64) int {
 // Sign-in is refused while an account deletion is being completed: after the
 // lock stage a correct password issues no session.
 func TestAuthService_LoginRefusedWhileDeletionIsBeingCompleted(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	hash, err := auth.HashPassword("correct horse battery")
@@ -41,6 +42,7 @@ func TestAuthService_LoginRefusedWhileDeletionIsBeingCompleted(t *testing.T) {
 
 // The second-factor step is refused the same way.
 func TestAuthService_VerifyTOTPRefusedWhileDeletionIsBeingCompleted(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	uid := mustCreateUser(t, database, "leaving-totp", "$2a$12$x", 4)

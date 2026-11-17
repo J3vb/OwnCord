@@ -6,6 +6,7 @@ import (
 )
 
 func TestListChannels_LeavesDMRowsOut(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 

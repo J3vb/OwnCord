@@ -47,6 +47,7 @@ func tokenWorks(t *testing.T, database *db.DB, raw string) bool {
 }
 
 func TestOwnAPITokens_ListShowsOnlyTheCallersLiveTokens(t *testing.T) {
+	t.Parallel()
 	router, database := fullRouterWithDB(t)
 	ctx := context.Background()
 	alice := createPasswordUser(t, database, "alice-tokens")
@@ -70,6 +71,7 @@ func TestOwnAPITokens_ListShowsOnlyTheCallersLiveTokens(t *testing.T) {
 }
 
 func TestOwnAPITokens_RevokeOwnTokenOnly(t *testing.T) {
+	t.Parallel()
 	router, database := fullRouterWithDB(t)
 	alice := createPasswordUser(t, database, "alice-revoke")
 	bob := createPasswordUser(t, database, "bob-revoke")
@@ -103,6 +105,7 @@ func TestOwnAPITokens_RevokeOwnTokenOnly(t *testing.T) {
 }
 
 func TestChangePassword_RevokeAPITokensOption(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		body       map[string]any

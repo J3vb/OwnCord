@@ -33,6 +33,7 @@ func (s *cancelAfterCommitStore) GetUserByID(ctx context.Context, id int64) (*db
 }
 
 func TestRecovery_CommittedRecoveryReportsSuccessAfterTheDeadline(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	hash, err := auth.HashPassword(causeLogPassword)
 	mustDo(t, "HashPassword", err)
@@ -53,6 +54,7 @@ func TestRecovery_CommittedRecoveryReportsSuccessAfterTheDeadline(t *testing.T) 
 }
 
 func TestRegister_CommittedSignUpReportsSuccessAfterTheDeadline(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	mustDo(t, "SetSetting", database.SetSetting(context.Background(), registrationModeKey, string(RegistrationOpen)))
 	reqCtx, cancel := context.WithCancel(context.Background())
@@ -81,6 +83,7 @@ func (s *cancelBeforeSessionStore) CreateSession(ctx context.Context, userID int
 }
 
 func TestVerifyTOTP_SpentCodeStillStartsTheSessionAfterTheDeadline(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	uid := mustCreateUser(t, database, "lateverify", "$2a$12$x", 4)
 	secret, err := auth.GenerateTOTPSecret()

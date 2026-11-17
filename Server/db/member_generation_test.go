@@ -15,6 +15,7 @@ import (
 // that can change ListMembers must move the generation, and a status stamp,
 // which every connect makes, must not.
 func TestMemberGeneration_MovesOnMemberWritesOnly(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	gen := func() int64 {
@@ -85,6 +86,7 @@ func TestMemberGeneration_MovesOnMemberWritesOnly(t *testing.T) {
 }
 
 func TestNextMemberBanLapse(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	lapse := func() string {
@@ -112,6 +114,7 @@ func TestNextMemberBanLapse(t *testing.T) {
 
 // ListMembers renders created_at in the wire layout, and carries about.
 func TestListMembers_AboutAndCreatedAtRFC3339(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	about := "hello"
@@ -142,6 +145,7 @@ func TestListMembers_AboutAndCreatedAtRFC3339(t *testing.T) {
 
 // Migration 061 re-creates the 057 trigger with about watched.
 func TestMigration061_TriggerWatchesAbout(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	var sql string
 	err := database.SQLDb().QueryRowContext(context.Background(),
@@ -155,6 +159,7 @@ func TestMigration061_TriggerWatchesAbout(t *testing.T) {
 }
 
 func TestFormatMemberCreatedAt(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"2026-10-15 13:04:05":       "2026-10-15T13:04:05Z",
 		"2026-10-15T13:04:05Z":      "2026-10-15T13:04:05Z",

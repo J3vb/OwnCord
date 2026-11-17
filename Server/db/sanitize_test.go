@@ -7,6 +7,7 @@ import (
 )
 
 func TestSanitizeFTSQuery_UTF8Truncation(t *testing.T) {
+	t.Parallel()
 	// BUG-090: sanitizeFTSQuery truncates at byte boundary, producing
 	// invalid UTF-8 when the input contains multi-byte runes (CJK, emoji).
 
@@ -29,6 +30,7 @@ func TestSanitizeFTSQuery_UTF8Truncation(t *testing.T) {
 }
 
 func TestSanitizeFTSQuery_ASCIIUnchanged(t *testing.T) {
+	t.Parallel()
 	// ASCII-only input under 200 chars should pass through unchanged.
 	input := "hello world search query"
 	got := sanitizeFTSQuery(input)
@@ -38,6 +40,7 @@ func TestSanitizeFTSQuery_ASCIIUnchanged(t *testing.T) {
 }
 
 func TestSanitizeFTSQuery_StripsOperators(t *testing.T) {
+	t.Parallel()
 	input := `hello "world" AND (test) NOT foo*`
 	got := sanitizeFTSQuery(input)
 	// Should only contain letters, digits, spaces, hyphens.
@@ -52,6 +55,7 @@ func TestSanitizeFTSQuery_StripsOperators(t *testing.T) {
 // least three runes, and a query that sanitizes to nothing stays empty rather
 // than becoming a bare "*".
 func TestFTSMatchQuery_PrefixesLastTermOnly(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		"deplo":          "deplo*",
 		"deploy the app": "deploy the app*",
@@ -75,6 +79,7 @@ func TestFTSMatchQuery_PrefixesLastTermOnly(t *testing.T) {
 }
 
 func TestSanitizeFTSQuery_CombiningMarksDoNotSplitTokens(t *testing.T) {
+	t.Parallel()
 	// NFD "résumé": unicode61 indexes "resume", so marks must be dropped, not
 	// turned into separators ("re sume").
 	if got := sanitizeFTSQuery("re\u0301sume\u0301"); got != "resume" {
@@ -83,6 +88,7 @@ func TestSanitizeFTSQuery_CombiningMarksDoNotSplitTokens(t *testing.T) {
 }
 
 func TestSanitizeFTSQuery_NonLatinMarksStaySeparators(t *testing.T) {
+	t.Parallel()
 	// unicode61 only folds the combining diacritics block into the token; a
 	// Devanagari vowel sign (Mc) is a separator there, so "काम" indexes as
 	// "क म" and the query must split the same way.

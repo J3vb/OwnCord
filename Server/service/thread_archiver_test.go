@@ -33,6 +33,7 @@ func setActivity(t *testing.T, f *threadFixture, id int64, at time.Time) {
 }
 
 func TestThreadArchiver_DueNotDueAndBootSweep(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	idle := f.start(t, thrMod, "idle")
@@ -69,6 +70,7 @@ func TestThreadArchiver_DueNotDueAndBootSweep(t *testing.T) {
 }
 
 func TestThreadArchiver_NextSleepAndStop(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	a := NewThreadArchiver(f.database)

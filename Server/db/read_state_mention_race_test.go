@@ -21,6 +21,7 @@ import (
 // the snapshot is taken, then mark read.
 
 func TestMarkChannelReadAtLatest_KeepsAMentionRaisedAfterTheSnapshot(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reader := seedUser(t, database, "read-state-reader")
@@ -70,6 +71,7 @@ func TestMarkChannelReadAtLatest_KeepsAMentionRaisedAfterTheSnapshot(t *testing.
 // The other direction still holds: a mention raised AFTER the mark-read
 // survives, because IncrementMentionCounts' guard sees the reader behind it.
 func TestMarkChannelReadAtLatest_LaterMentionStillCounts(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reader := seedUser(t, database, "later-reader")
@@ -94,6 +96,7 @@ func TestMarkChannelReadAtLatest_LaterMentionStillCounts(t *testing.T) {
 // A mark-read on a channel with no messages is a no-op watermark of 0, not an
 // error and not a row that claims to have read something.
 func TestMarkChannelReadAtLatest_EmptyChannel(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reader := seedUser(t, database, "empty-reader")

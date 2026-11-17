@@ -12,6 +12,7 @@ import (
 // WP 6.3c: ListMembers carries every held role, top first, and the role flags
 // and position moves written through the db layer keep the mirror coherent.
 func TestListMembers_CarriesRoleIDsTopFirst(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	multi := mustCreateUser(t, database, "multi", "hash", int(permissions.MemberRoleID))
@@ -36,6 +37,7 @@ func TestListMembers_CarriesRoleIDsTopFirst(t *testing.T) {
 }
 
 func TestRoleFlags_RoundTripAndPositionResync(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	helper := mustCreateRole(t, database, "Helper", nil, permissions.ReadMessages, 50, true, false)

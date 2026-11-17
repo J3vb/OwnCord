@@ -12,6 +12,7 @@ import (
 // stay, and type 'thread' is refused again. It runs with foreign keys off, as
 // the sqlite3 shell runs a reversal, so nothing may depend on a cascade.
 func TestRollback074_Rehearsal(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemoryInternal(t)
 	ctx := context.Background()
 	count := rowCounter(t, database)

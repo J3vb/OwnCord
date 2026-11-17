@@ -9,6 +9,7 @@ import (
 )
 
 func TestOptimizeLoop_RunsThenStopsOnCancel(t *testing.T) {
+	t.Parallel()
 	var runs atomic.Int32
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -38,6 +39,7 @@ func TestOptimizeLoop_RunsThenStopsOnCancel(t *testing.T) {
 }
 
 func TestOptimizeLoop_ExitsWhenClosed(t *testing.T) {
+	t.Parallel()
 	var closed atomic.Bool
 	var runs atomic.Int32
 	done := runOptimizeLoop(context.Background(), 5*time.Millisecond, func(context.Context) error {
@@ -53,6 +55,7 @@ func TestOptimizeLoop_ExitsWhenClosed(t *testing.T) {
 }
 
 func TestDBOptimize_RunsAndIsNoOpAfterClose(t *testing.T) {
+	t.Parallel()
 	database, err := Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -69,6 +72,7 @@ func TestDBOptimize_RunsAndIsNoOpAfterClose(t *testing.T) {
 }
 
 func TestStatsCaches_ServeWithinTTLAndRefreshAfter(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemoryInternal(t)
 	ctx := context.Background()
 	now := time.Unix(5000, 0)

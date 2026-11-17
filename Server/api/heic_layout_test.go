@@ -479,6 +479,7 @@ func TestHEICLayout_Refusals(t *testing.T) {
 }
 
 func TestValidateHEIC_NeverPanicsOnMutations(t *testing.T) {
+	t.Parallel()
 	base := plainLayout(t).build()
 	for i := range base {
 		for _, v := range []byte{0x00, 0xff, 0x7f} {

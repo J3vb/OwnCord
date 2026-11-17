@@ -34,6 +34,7 @@ func assertStillLink(t *testing.T, link, real string) {
 }
 
 func TestStageRestore_ThroughSymlinkKeepsLinkAndFloor(t *testing.T) {
+	t.Parallel()
 	link, real, backup := linkedFixture(t)
 	if err := writeWSSeqFloorFile(real+wsSeqFloorSuffix, 4_000_000_000); err != nil {
 		t.Fatal(err)
@@ -163,6 +164,7 @@ func TestApplyStagedRestore_SymlinkResumesInterruptedRollback(t *testing.T) {
 }
 
 func TestApplyStagedRestore_FinishesRestoreStagedBesideLink(t *testing.T) {
+	t.Parallel()
 	link, real, backup := linkedFixture(t)
 	// An older binary staged beside the link path itself.
 	if err := os.Rename(backup, link+restoreStagedSuffix); err != nil {
@@ -226,6 +228,7 @@ func TestApplyStagedRestore_SymlinkResumesThroughRelativeTargetInLinkedDir(t *te
 }
 
 func TestMessageDeliveryFloor_SymlinkSharesRealSideAndHonoursLinkSide(t *testing.T) {
+	t.Parallel()
 	link, real, _ := linkedFixture(t)
 	if err := AdvanceMessageDeliveryFloorForRestore(real); err != nil {
 		t.Fatal(err)

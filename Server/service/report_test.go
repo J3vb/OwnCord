@@ -50,6 +50,7 @@ func seedReportMessage(t *testing.T, database *db.DB, channelID, userID int64, c
 }
 
 func TestReport_FileMessageSnapshotsElevenRowsByReference(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 100, Name: "general"})
@@ -106,6 +107,7 @@ func containsSubstr(s, sub string) bool {
 }
 
 func TestReport_FileAttachmentByReference(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 101, Name: "general"})
@@ -131,6 +133,7 @@ func TestReport_FileAttachmentByReference(t *testing.T) {
 }
 
 func TestReport_FileUserHasNoEvidence(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 
@@ -147,6 +150,7 @@ func TestReport_FileUserHasNoEvidence(t *testing.T) {
 }
 
 func TestReport_TargetMustBeVisibleToReporter(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 
@@ -173,6 +177,7 @@ func TestReport_TargetMustBeVisibleToReporter(t *testing.T) {
 }
 
 func TestReport_DuplicateIs409(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 300, Name: "general"})
@@ -191,6 +196,7 @@ func TestReport_DuplicateIs409(t *testing.T) {
 }
 
 func TestReport_RateLimited(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	for i := int64(20); i < 20+6; i++ {
@@ -207,6 +213,7 @@ func TestReport_RateLimited(t *testing.T) {
 }
 
 func TestReport_SnapshotSurvivesEditAndDelete(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 400, Name: "general"})
@@ -233,6 +240,7 @@ func TestReport_SnapshotSurvivesEditAndDelete(t *testing.T) {
 }
 
 func TestReport_SubjectIsDerivedNeverSupplied(t *testing.T) {
+	t.Parallel()
 	// FileReportParams carries no subject field at all -- there is no wire
 	// path to supply one. This test pins that the subject the row ends up
 	// with is exactly the target's real owner, for all three target types.
@@ -259,6 +267,7 @@ func TestReport_SubjectIsDerivedNeverSupplied(t *testing.T) {
 // ─── Queue ──────────────────────────────────────────────────────────────────
 
 func TestModerationQueue_RequiresTheBit(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 600, Name: "general"})
@@ -294,6 +303,7 @@ func TestModerationQueue_RequiresTheBit(t *testing.T) {
 }
 
 func TestModerationQueue_StateMachine(t *testing.T) {
+	t.Parallel()
 	t.Run("open to assigned to resolved", func(t *testing.T) {
 		ctx := context.Background()
 		svc, database := newTestReportService(t)
@@ -334,6 +344,7 @@ func TestModerationQueue_StateMachine(t *testing.T) {
 }
 
 func TestModerationQueue_AssignConflictAndForce(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 800, Name: "general"})
@@ -361,6 +372,7 @@ func TestModerationQueue_AssignConflictAndForce(t *testing.T) {
 }
 
 func TestModerationQueue_NotesNeverReachEitherParty(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 900, Name: "general"})
@@ -396,6 +408,7 @@ func TestModerationQueue_NotesNeverReachEitherParty(t *testing.T) {
 }
 
 func TestModerationQueue_ConcurrentCloseOneWins(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 950, Name: "general"})
@@ -424,6 +437,7 @@ func TestModerationQueue_ConcurrentCloseOneWins(t *testing.T) {
 // ─── Confidentiality ────────────────────────────────────────────────────────
 
 func TestReport_SubjectSeesNothing(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 1000, Name: "general"})
@@ -458,6 +472,7 @@ func TestReport_SubjectSeesNothing(t *testing.T) {
 }
 
 func TestReport_ReporterSeesOnlyTheirOwnStatus(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 1100, Name: "general"})
@@ -514,6 +529,7 @@ func TestReport_ReporterSeesOnlyTheirOwnStatus(t *testing.T) {
 // carries the free text a fixture used (the note body, or the report's own
 // detail field) — only the state or outcome word.
 func TestReportEvents_EveryMutationWritesOne(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 1505, Name: "general"})
@@ -573,6 +589,7 @@ func TestReportEvents_EveryMutationWritesOne(t *testing.T) {
 // see must produce the EXACT SAME error text. A distinguishable message is
 // itself an existence oracle.
 func TestReport_MessageTargetErrorsAreIndistinguishable(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 1501, Name: "blind-channel-p25"})
@@ -594,6 +611,7 @@ func TestReport_MessageTargetErrorsAreIndistinguishable(t *testing.T) {
 // Get for the report's own metadata) but never its internal notes, and may
 // not assign/note/close it — that would be reviewing their own filing.
 func TestReport_ModeratorReporterCannotActOnOwnReport(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 1502, Name: "general"})
@@ -630,6 +648,7 @@ func TestReport_ModeratorReporterCannotActOnOwnReport(t *testing.T) {
 // a sequential pre-check. Two goroutines file the identical report at once;
 // exactly one must succeed and the other must see ErrDuplicateReport.
 func TestReport_ConcurrentFilingExactlyOneSucceeds(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 1503, Name: "general"})
@@ -672,6 +691,7 @@ func TestReport_ConcurrentFilingExactlyOneSucceeds(t *testing.T) {
 // state, so two unforced assigns racing on the same open report can never
 // both succeed.
 func TestModerationQueue_ConcurrentUnforcedAssignOneWins(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 1504, Name: "general"})

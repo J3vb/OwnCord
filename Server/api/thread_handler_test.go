@@ -16,6 +16,7 @@ import (
 )
 
 func TestThreadList_PaginationArchivedAndGate(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	ctx := context.Background()
 	r := chi.NewRouter()
@@ -146,6 +147,7 @@ func forumListSetup(t *testing.T) (r chi.Router, token string, forum int64, tags
 }
 
 func TestThreadList_ForumSortTagAndPaging(t *testing.T) {
+	t.Parallel()
 	r, token, forum, tags, posts, _ := forumListSetup(t)
 	base := "/api/v1/channels/" + itoa(forum) + "/threads"
 	get := func(q string) (int, forumListPage) {
@@ -202,6 +204,7 @@ func TestThreadList_ForumSortTagAndPaging(t *testing.T) {
 }
 
 func TestThreadList_ForumParamErrors(t *testing.T) {
+	t.Parallel()
 	r, token, forum, _, posts, database := forumListSetup(t)
 	base := "/api/v1/channels/" + itoa(forum) + "/threads"
 	other, err := database.CreateChannel(context.Background(), "other", "forum", "", "", 1)
@@ -234,6 +237,7 @@ func TestThreadList_ForumParamErrors(t *testing.T) {
 
 // A text-channel parent lists as before; sort is accepted, a tag filter is not.
 func TestThreadList_TextParentKeepsBehaviour(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	ctx := context.Background()
 	r := chi.NewRouter()

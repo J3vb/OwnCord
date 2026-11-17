@@ -246,6 +246,15 @@ func seedAliceAndModBob(t *testing.T, database *db.DB, memberPerms, moderatorPer
 
 // seedAliceBobDM seeds the member role with perms, alice (1) and bob (2) as
 // members, and the one-to-one DM channel 50 between them.
+// newAliceBobDB returns a fresh database holding users 1 (alice) and 2 (bob).
+func newAliceBobDB(t *testing.T) *db.DB {
+	t.Helper()
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	return database
+}
+
 func seedAliceBobDM(t *testing.T, database *db.DB, memberPerms int64) {
 	t.Helper()
 	seedMemberRole(t, database, memberPerms)

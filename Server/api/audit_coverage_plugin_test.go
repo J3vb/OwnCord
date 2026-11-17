@@ -16,6 +16,7 @@ import (
 // table: install and uninstall each emit an audit entry, and neither detail
 // carries anything from the archive beyond the plugin name.
 func TestAuditCoverage_PluginLifecycle(t *testing.T) {
+	t.Parallel()
 	install := func(t *testing.T) (http.Handler, *db.DB, int64) {
 		t.Helper()
 		reg, mem := newTestPluginRegistryWithStore(t)
@@ -84,6 +85,7 @@ func TestAuditCoverage_PluginLifecycle(t *testing.T) {
 // treats an unknown id as an idempotent no-op, so the handler must answer 404
 // and write no plugin_uninstall row for a plugin that never existed.
 func TestPluginsHandlerUninstallUnknownID(t *testing.T) {
+	t.Parallel()
 	reg, mem := newTestPluginRegistryWithStore(t)
 	h := NewPluginAdminHandler(reg, mem, mem)
 	rec := audittest.Install(t, mem)

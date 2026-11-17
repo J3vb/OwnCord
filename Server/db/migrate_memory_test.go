@@ -65,6 +65,7 @@ func migratedFingerprint(t *testing.T, d *DB) []string {
 }
 
 func TestMigrate_FreshMemoryCopyMatchesRunningEveryMigration(t *testing.T) {
+	t.Parallel()
 	slow := openEmptyMemory(t)
 	if err := migrateEmbedded(slow); err != nil {
 		t.Fatalf("migrateEmbedded: %v", err)
@@ -110,6 +111,7 @@ func TestMigrate_FreshMemoryCopyMatchesRunningEveryMigration(t *testing.T) {
 }
 
 func TestMigrate_FreshMemoryCopiesAreIndependent(t *testing.T) {
+	t.Parallel()
 	// Both are filled from the same image at once, which also covers the
 	// first callers racing to build it.
 	dbs := []*DB{openEmptyMemory(t), openEmptyMemory(t), openEmptyMemory(t), openEmptyMemory(t)}
@@ -138,6 +140,7 @@ func TestMigrate_FreshMemoryCopiesAreIndependent(t *testing.T) {
 }
 
 func TestMigrate_SharedCacheMemoryRunsTheMigrations(t *testing.T) {
+	t.Parallel()
 	d, err := Open("file:migrate_memory_shared?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -149,6 +152,7 @@ func TestMigrate_SharedCacheMemoryRunsTheMigrations(t *testing.T) {
 }
 
 func TestMigrate_NonEmptyMemoryRunsTheMigrations(t *testing.T) {
+	t.Parallel()
 	d := openEmptyMemory(t)
 	if _, err := d.writer.Exec("CREATE TABLE preexisting (id INTEGER)"); err != nil {
 		t.Fatalf("create table: %v", err)

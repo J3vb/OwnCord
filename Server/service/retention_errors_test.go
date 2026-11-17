@@ -109,6 +109,7 @@ func newRetentionFixture(t *testing.T) *retentionFixture {
 }
 
 func TestRetentionReadPaths(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newRetentionFixture(t)
 	days, err := f.svc.ServerDays(ctx)
@@ -122,6 +123,7 @@ func TestRetentionReadPaths(t *testing.T) {
 }
 
 func TestRetentionStoreFailuresAreInternal(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	days := 14
 	for _, tc := range []struct {
@@ -174,6 +176,7 @@ func TestRetentionStoreFailuresAreInternal(t *testing.T) {
 // A run journal that cannot be read must not stop the sweep: the tick logs it
 // and still sweeps the live windows.
 func TestRetentionTickSweepsWhenRunJournalFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newRetentionFixture(t)
 	f.store.fail["runs"] = true
@@ -187,6 +190,7 @@ func TestRetentionTickSweepsWhenRunJournalFails(t *testing.T) {
 // replay: the tick still sweeps every later channel and reports no error, and
 // start-up is not refused.
 func TestRetentionRecordFailureDoesNotStopLaterChannelsOrStartUp(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newRetentionFixture(t)
 	f.store.fail["record-swept"] = true
@@ -208,6 +212,7 @@ func TestRetentionRecordFailureDoesNotStopLaterChannelsOrStartUp(t *testing.T) {
 }
 
 func TestRetentionTickReportsWindowFailure(t *testing.T) {
+	t.Parallel()
 	f := newRetentionFixture(t)
 	f.store.fail["windows"] = true
 	if rep, err := f.svc.Tick(context.Background()); !errors.Is(err, errRetentionStore) || rep.Messages != 0 {
@@ -216,6 +221,7 @@ func TestRetentionTickReportsWindowFailure(t *testing.T) {
 }
 
 func TestRetentionChangeErrorMapping(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		store error
 		want  error
@@ -232,6 +238,7 @@ func TestRetentionChangeErrorMapping(t *testing.T) {
 }
 
 func TestRetentionApplyRejectsMalformedTokens(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newRetentionFixture(t)
 	days := 14

@@ -51,6 +51,7 @@ func newRoleCRUDService(t *testing.T) (*RoleService, *db.DB) {
 // ─── Create ──────────────────────────────────────────────────────────────────
 
 func TestCreateRole_HappyPath(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 
 	role, err := svc.CreateRole(context.Background(), 1, RoleInput{
@@ -87,6 +88,7 @@ func TestCreateRole_HappyPath(t *testing.T) {
 }
 
 func TestCreateRole_DefaultsToJustBelowActor(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	// The Admin actor sits at 80, so an unpositioned role lands at 79.
@@ -104,6 +106,7 @@ func TestCreateRole_DefaultsToJustBelowActor(t *testing.T) {
 // tied positions read as equal rank in every hierarchy check, so the second
 // default placement steps past the first.
 func TestCreateRole_DefaultPlacementAvoidsCollision(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	first, err := svc.CreateRole(context.Background(), 2, RoleInput{Name: new("Deputy")})
@@ -121,6 +124,7 @@ func TestCreateRole_DefaultPlacementAvoidsCollision(t *testing.T) {
 // An explicit position already held by another role is refused rather than
 // silently duplicated.
 func TestCreateRole_RejectsExplicitPositionCollision(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	first, err := svc.CreateRole(context.Background(), 2, RoleInput{Name: new("Deputy")})
@@ -132,6 +136,7 @@ func TestCreateRole_RejectsExplicitPositionCollision(t *testing.T) {
 }
 
 func TestCreateRole_NameUniquenessIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	if _, err := svc.CreateRole(context.Background(), 1, RoleInput{Name: new("mEmBeR")}); !errors.Is(err, ErrBadRequest) {
@@ -147,6 +152,7 @@ func TestCreateRole_NameUniquenessIsCaseInsensitive(t *testing.T) {
 }
 
 func TestCreateRole_RejectsBadColor(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	for _, color := range []string{"red", "5865F2", "#12345", "rgb(1,2,3)"} {
@@ -165,6 +171,7 @@ func TestCreateRole_RejectsBadColor(t *testing.T) {
 }
 
 func TestCreateRole_RequiresManageRoles(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	// User 4 holds the default Member role — no MANAGE_ROLES.
@@ -178,6 +185,7 @@ func TestCreateRole_RequiresManageRoles(t *testing.T) {
 }
 
 func TestCreateRole_CannotPlaceAtOrAboveOwnRank(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	// Moderator sits at 60.
@@ -196,6 +204,7 @@ func TestCreateRole_CannotPlaceAtOrAboveOwnRank(t *testing.T) {
 }
 
 func TestCreateRole_CannotGrantUnheldBit(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	// The Moderator role has MANAGE_ROLES but not MANAGE_SERVER.
@@ -228,6 +237,7 @@ func TestCreateRole_CannotGrantUnheldBit(t *testing.T) {
 // as on create: tied positions read as equal rank in every >=/<= hierarchy
 // comparison, silently breaking one role's authority over the other's members.
 func TestUpdateRole_RejectsExplicitPositionCollision(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	// Owner moves Moderator (60) onto Member's slot (40).
@@ -240,6 +250,7 @@ func TestUpdateRole_RejectsExplicitPositionCollision(t *testing.T) {
 
 // Re-stating a role's own current position is not a collision.
 func TestUpdateRole_AllowsKeepingOwnPosition(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	if _, _, err := svc.UpdateRole(context.Background(), 1, permissions.ModeratorRoleID,
@@ -249,6 +260,7 @@ func TestUpdateRole_AllowsKeepingOwnPosition(t *testing.T) {
 }
 
 func TestUpdateRole_PartialBodyLeavesOtherFields(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	created, err := svc.CreateRole(context.Background(), 1, RoleInput{
@@ -282,6 +294,7 @@ func TestUpdateRole_PartialBodyLeavesOtherFields(t *testing.T) {
 }
 
 func TestUpdateRole_ReportsPermissionChange(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 
 	created, err := svc.CreateRole(context.Background(), 1, RoleInput{Name: new("Bots")})
@@ -312,6 +325,7 @@ func TestUpdateRole_ReportsPermissionChange(t *testing.T) {
 // role (clients hold a role NAME, not an id). It comes from the pre-update row
 // this service already reads, so the handler no longer re-reads it itself.
 func TestUpdateRole_ReportsRename(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 	ctx := context.Background()
 
@@ -341,6 +355,7 @@ func TestUpdateRole_ReportsRename(t *testing.T) {
 // AllRoles is the unscoped list the roles_update broadcast ships — every role,
 // no actor filtering, no member counts.
 func TestAllRoles_IsUnscopedAndOrdered(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 
@@ -362,6 +377,7 @@ func TestAllRoles_IsUnscopedAndOrdered(t *testing.T) {
 }
 
 func TestUpdateRole_HierarchyAndGrantRules(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	// A moderator (60) may not edit the Admin role (80) …
@@ -398,6 +414,7 @@ func TestUpdateRole_HierarchyAndGrantRules(t *testing.T) {
 }
 
 func TestUpdateRole_NotFoundAndNameCollision(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	if _, _, err := svc.UpdateRole(context.Background(), 1, 9999, RoleInput{Name: new("Nope")}); !errors.Is(err, ErrNotFound) {
@@ -420,6 +437,7 @@ func TestUpdateRole_NotFoundAndNameCollision(t *testing.T) {
 // ─── Delete ──────────────────────────────────────────────────────────────────
 
 func TestDeleteRole_ReassignsMembersAndDropsOverrides(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 
@@ -469,6 +487,7 @@ func TestDeleteRole_ReassignsMembersAndDropsOverrides(t *testing.T) {
 }
 
 func TestDeleteRole_OwnerAndDefaultAreUndeletable(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 
@@ -499,6 +518,7 @@ func TestDeleteRole_OwnerAndDefaultAreUndeletable(t *testing.T) {
 }
 
 func TestDeleteRole_InvalidatesReassignedMembers(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 
@@ -537,6 +557,7 @@ func TestDeleteRole_InvalidatesReassignedMembers(t *testing.T) {
 // ─── Reorder ─────────────────────────────────────────────────────────────────
 
 func TestReorderRoles_NormalizesPositions(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 
@@ -585,6 +606,7 @@ func TestReorderRoles_NormalizesPositions(t *testing.T) {
 }
 
 func TestReorderRoles_RejectsPartialAndForeignLists(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 	ctx := context.Background()
 
@@ -617,6 +639,7 @@ func TestReorderRoles_RejectsPartialAndForeignLists(t *testing.T) {
 // ─── List ────────────────────────────────────────────────────────────────────
 
 func TestListRoles_CarriesMemberCounts(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	list, err := svc.ListRoles(context.Background(), 1)
@@ -637,6 +660,7 @@ func TestListRoles_CarriesMemberCounts(t *testing.T) {
 }
 
 func TestAffectedUserIDs(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 
 	ids, ok := svc.AffectedUserIDs(context.Background(), permissions.MemberRoleID)
@@ -664,6 +688,7 @@ func assertAudit(t *testing.T, database *db.DB, action string) {
 // ─── Expected permissions (WP 5.1b) ──────────────────────────────────────────
 
 func TestUpdateRole_ExpectedPermissions(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	created, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Bots"), Permissions: new(permissions.ReadMessages)})
@@ -703,6 +728,7 @@ func TestUpdateRole_ExpectedPermissions(t *testing.T) {
 // to take the lock wins, the other is told the role moved, and the stored mask
 // is the winner's.
 func TestUpdateRole_ExpectedPermissionsRaceHasOneWinner(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	loaded := permissions.ReadMessages

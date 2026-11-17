@@ -82,6 +82,7 @@ func ids(b searchBody) []int64 {
 // Edge case 1: an in: target the caller cannot read is exactly a name that
 // matches nothing, alone and combined with channel_id.
 func TestSearch_InUnreadableTargetsLookIdentical(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newSearchFixture(t, "inid")
 	pub := f.channel(t, "pub", 0)
@@ -132,6 +133,7 @@ func TestSearch_InUnreadableTargetsLookIdentical(t *testing.T) {
 }
 
 func TestSearch_InFansOutToSameNameOnlyReadable(t *testing.T) {
+	t.Parallel()
 	f := newSearchFixture(t, "fan")
 	g1 := f.channel(t, "general", 0)
 	g2 := f.channel(t, "General", 1)
@@ -150,6 +152,7 @@ func TestSearch_InFansOutToSameNameOnlyReadable(t *testing.T) {
 }
 
 func TestSearch_InWithChannelIDIntersects(t *testing.T) {
+	t.Parallel()
 	f := newSearchFixture(t, "inx")
 	a := f.channel(t, "alpha", 0)
 	b := f.channel(t, "beta", 1)
@@ -164,6 +167,7 @@ func TestSearch_InWithChannelIDIntersects(t *testing.T) {
 }
 
 func TestSearch_FromUnknownUserEmpty(t *testing.T) {
+	t.Parallel()
 	f := newSearchFixture(t, "unk")
 	ch := f.channel(t, "c", 0)
 	f.say(t, ch, f.owner.ID, "needle")
@@ -179,6 +183,7 @@ func TestSearch_FromUnknownUserEmpty(t *testing.T) {
 // Edge case 2: filter-only queries are newest first and page cleanly; the
 // follow-up page keeps filters and scope.
 func TestSearch_FilterOnlyPagesNewestFirst(t *testing.T) {
+	t.Parallel()
 	f := newSearchFixture(t, "fo")
 	pub := f.channel(t, "pub", 0)
 	hidden := f.channel(t, "hidden", 1)
@@ -217,6 +222,7 @@ func TestSearch_FilterOnlyPagesNewestFirst(t *testing.T) {
 }
 
 func TestSearch_TZShiftsDayBoundary(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newSearchFixture(t, "tz")
 	ch := f.channel(t, "c", 0)
@@ -239,6 +245,7 @@ func TestSearch_TZShiftsDayBoundary(t *testing.T) {
 }
 
 func TestSearch_BadFilterValue400(t *testing.T) {
+	t.Parallel()
 	f := newSearchFixture(t, "bad")
 	code, body, _ := f.search(t, f.memberTok, "hi before:2026-02-30")
 	if code != http.StatusBadRequest || !strings.Contains(body, "BAD_REQUEST") || !strings.Contains(body, "before:") {
@@ -247,6 +254,7 @@ func TestSearch_BadFilterValue400(t *testing.T) {
 }
 
 func TestSearch_InvalidTZ400(t *testing.T) {
+	t.Parallel()
 	f := newSearchFixture(t, "badtz")
 	code, body, _ := f.search(t, f.memberTok, "hi", "tz=Mars/Base")
 	if code != http.StatusBadRequest || !strings.Contains(body, "tz") {
@@ -255,6 +263,7 @@ func TestSearch_InvalidTZ400(t *testing.T) {
 }
 
 func TestSearch_FromValueInert(t *testing.T) {
+	t.Parallel()
 	f := newSearchFixture(t, "inert")
 	ch := f.channel(t, "c", 0)
 	f.say(t, ch, f.owner.ID, "needle")

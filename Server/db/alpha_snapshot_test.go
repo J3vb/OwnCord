@@ -48,6 +48,7 @@ func openSnapshotCopy(t *testing.T) *DB {
 }
 
 func TestAlphaSnapshotMigratesOnHead(t *testing.T) {
+	t.Parallel()
 	database := openSnapshotCopy(t)
 
 	count := rowCounter(t, database)

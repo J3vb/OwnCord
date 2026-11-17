@@ -82,6 +82,7 @@ func wantRP(t *testing.T, got db.ReadPointer, ptr, unread, mentions int64) {
 }
 
 func TestMoveReadPointer_MarkReadIsForwardOnly(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 5)
 	wantRP(t, f.move(t, db.ReadUpTo, f.msgs[3]), f.msgs[3], 1, 0)
 	// A late mark_read from a displaced device must not undo the progress.
@@ -92,6 +93,7 @@ func TestMoveReadPointer_MarkReadIsForwardOnly(t *testing.T) {
 }
 
 func TestMoveReadPointer_ClampsHugeIDToChannelMax(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 3)
 	wantRP(t, f.move(t, db.ReadUpTo, 1<<40), f.msgs[2], 0, 0)
 	// A message added after is still unread, not hidden by the huge id.
@@ -104,6 +106,7 @@ func TestMoveReadPointer_ClampsHugeIDToChannelMax(t *testing.T) {
 }
 
 func TestMoveReadPointer_PartialReadKeepsLaterMentions(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 5)
 	f.mention(t, f.msgs[1])
 	f.mention(t, f.msgs[3])
@@ -112,6 +115,7 @@ func TestMoveReadPointer_PartialReadKeepsLaterMentions(t *testing.T) {
 }
 
 func TestMoveReadPointer_AtLatestMatchesMarkChannelReadAtLatest(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 4)
 	other := seedUser(t, f.database, "rp-other")
 	f.mention(t, f.msgs[2])
@@ -132,6 +136,7 @@ func TestMoveReadPointer_AtLatestMatchesMarkChannelReadAtLatest(t *testing.T) {
 }
 
 func TestMoveReadPointer_UnreadRestoresMentionsAfterPointer(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 5)
 	f.mention(t, f.msgs[1])
 	f.mention(t, f.msgs[3])
@@ -145,6 +150,7 @@ func TestMoveReadPointer_UnreadRestoresMentionsAfterPointer(t *testing.T) {
 }
 
 func TestMoveReadPointer_UnreadOfFirstMessageGivesZero(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 3)
 	f.move(t, db.ReadAtLatest, 0)
 	wantRP(t, f.move(t, db.MarkUnread, f.msgs[0]), 0, 3, 0)
@@ -154,6 +160,7 @@ func TestMoveReadPointer_UnreadOfFirstMessageGivesZero(t *testing.T) {
 }
 
 func TestMoveReadPointer_UnreadDeletedOrForeignMessageNotFound(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 4)
 	f.mention(t, f.msgs[3])
 	f.move(t, db.ReadAtLatest, 0)
@@ -178,6 +185,7 @@ func TestMoveReadPointer_UnreadDeletedOrForeignMessageNotFound(t *testing.T) {
 }
 
 func TestMoveReadPointer_PendingIncrementAfterUnreadCountsOnce(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 3)
 	f.move(t, db.ReadAtLatest, 0)
 	// A new message whose increment is still waiting for the worker.
@@ -197,6 +205,7 @@ func TestMoveReadPointer_PendingIncrementAfterUnreadCountsOnce(t *testing.T) {
 // Edge case: a mention increment racing a backward move ends with a count equal
 // to the receipts after the pointer, whichever commits first.
 func TestMoveReadPointer_IncrementRacingUnreadMatchesReceipts(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 2)
 	ctx := context.Background()
 	for round := range 60 {
@@ -235,6 +244,7 @@ func TestMoveReadPointer_IncrementRacingUnreadMatchesReceipts(t *testing.T) {
 }
 
 func TestMoveReadPointer_ForwardNeverRaisesBackwardNeverLowers(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 5)
 	f.mention(t, f.msgs[3]) // one receipt, after msgs[2]
 
@@ -256,6 +266,7 @@ func TestMoveReadPointer_ForwardNeverRaisesBackwardNeverLowers(t *testing.T) {
 }
 
 func TestMoveReadPointer_PointerMessageDeletedKeepsCounts(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 4)
 	f.mention(t, f.msgs[3])
 	wantRP(t, f.move(t, db.ReadUpTo, f.msgs[1]), f.msgs[1], 2, 1)
@@ -269,6 +280,7 @@ func TestMoveReadPointer_PointerMessageDeletedKeepsCounts(t *testing.T) {
 }
 
 func TestMoveReadPointer_BlockedAuthorReceiptsNotCounted(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 3)
 	f.mention(t, f.msgs[2])
 	f.move(t, db.ReadAtLatest, 0)
@@ -279,6 +291,7 @@ func TestMoveReadPointer_BlockedAuthorReceiptsNotCounted(t *testing.T) {
 // A trailing deleted message keeps the two channel bounds apart: a read up to
 // any id may land on it, a read at latest stops at the newest live message.
 func TestMoveReadPointer_TrailingDeletedMessageSplitsBounds(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 4)
 	f.exec(t, `UPDATE messages SET deleted = 1 WHERE id = ?`, f.msgs[3])
 
@@ -290,6 +303,7 @@ func TestMoveReadPointer_TrailingDeletedMessageSplitsBounds(t *testing.T) {
 
 // An empty channel and one with only deleted messages give a zero live bound.
 func TestMoveReadPointer_NoLiveMessages(t *testing.T) {
+	t.Parallel()
 	f := newRPFixture(t, 0)
 	wantRP(t, f.move(t, db.ReadAtLatest, 0), 0, 0, 0)
 

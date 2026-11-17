@@ -21,6 +21,7 @@ import (
 // live presence dot — contradicting the member list right next to it, which
 // would correctly show the same user offline.
 func TestCreateDM_RecipientStatus_OfflineWhenDisconnected(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	broadcaster := &mockBroadcaster{}
 

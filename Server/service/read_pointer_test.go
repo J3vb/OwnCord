@@ -35,6 +35,7 @@ func newReadPointerService(t *testing.T) (*MessageService, *recordingReadNotifie
 }
 
 func TestMoveReadPointer_AdmissionAndFramesOnlyOnSuccess(t *testing.T) {
+	t.Parallel()
 	svc, n, database := newReadPointerService(t)
 	ctx := context.Background()
 	m1 := mustCreateMessage(t, database, 10, 1, "one", nil)
@@ -89,6 +90,7 @@ func (s *moveCountingStore) MoveReadPointer(ctx context.Context, userID, channel
 // transaction, and must still send a frame that matches what the write path
 // would have returned.
 func TestMoveReadPointer_AtLatestSkipsWriterWhenCurrent(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)

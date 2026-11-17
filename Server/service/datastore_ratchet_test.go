@@ -233,6 +233,7 @@ func readServerFile(t *testing.T, rel string) string {
 }
 
 func TestStoreMethodRatchet(t *testing.T) {
+	t.Parallel()
 	sources := serviceSources(t)
 
 	got, err := measureInterface("Store", sources)
@@ -266,6 +267,7 @@ func TestStoreMethodRatchet(t *testing.T) {
 }
 
 func TestModelsJSONTagRatchet(t *testing.T) {
+	t.Parallel()
 	got, err := countJSONTags(readServerFile(t, "db/models.go"))
 	mustDo(t, "count tags", err)
 	if got != modelsJSONTagBaseline {
@@ -274,6 +276,7 @@ func TestModelsJSONTagRatchet(t *testing.T) {
 }
 
 func TestMeasureInterface(t *testing.T) {
+	t.Parallel()
 	const store = `package p
 type Store interface {
 	Inner
@@ -337,6 +340,7 @@ type Store interface {
 }
 
 func TestCountJSONTags(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		src  string

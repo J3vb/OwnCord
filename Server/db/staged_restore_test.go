@@ -115,6 +115,7 @@ func setStepHook(t *testing.T, fn func(string) error) {
 }
 
 func TestApplyStagedRestore_NoMarkerIsNoop(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	res, err := ApplyStagedRestore(f.live)
 	if err != nil || res != (RestoreResult{}) {
@@ -127,6 +128,7 @@ func TestApplyStagedRestore_NoMarkerIsNoop(t *testing.T) {
 }
 
 func TestApplyStagedRestore_AppliesAndClearsMarker(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	// A -wal a dead server left behind must travel with the old database.
 	if err := os.WriteFile(f.live+"-wal", []byte("stale"), 0o600); err != nil {
@@ -160,6 +162,7 @@ func TestApplyStagedRestore_AppliesAndClearsMarker(t *testing.T) {
 }
 
 func TestApplyStagedRestore_OrphanStagedWithoutMarkerIsDeleted(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	p, _ := newRestorePaths(f.live)
 	if err := os.WriteFile(p.staged, []byte("half a copy"), 0o600); err != nil {
@@ -301,6 +304,7 @@ func TestApplyStagedRestore_ResumesInterruptedRollback(t *testing.T) {
 }
 
 func TestApplyStagedRestore_HashMismatchRefusesWithoutTouchingLive(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	f.stage(t)
 	p, _ := newRestorePaths(f.live)
@@ -318,6 +322,7 @@ func TestApplyStagedRestore_HashMismatchRefusesWithoutTouchingLive(t *testing.T)
 }
 
 func TestApplyStagedRestore_InconsistentStateRefusesNamedError(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	f.stage(t)
 	p, _ := newRestorePaths(f.live)
@@ -346,6 +351,7 @@ func TestApplyStagedRestore_InconsistentStateRefusesNamedError(t *testing.T) {
 }
 
 func TestApplyStagedRestore_MovesLeftoverWALAside(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	// A WAL from the old database must never be replayed onto the restored one.
 	if err := os.WriteFile(f.live+"-wal", []byte("old"), 0o600); err != nil {
@@ -363,6 +369,7 @@ func TestApplyStagedRestore_MovesLeftoverWALAside(t *testing.T) {
 }
 
 func TestApplyStagedRestore_AdvancesRetryFloorBeforeSwap(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	f.stage(t)
 	if floor, err := readMessageDeliveryFloor(f.live); err != nil || floor != 0 {
@@ -377,6 +384,7 @@ func TestApplyStagedRestore_AdvancesRetryFloorBeforeSwap(t *testing.T) {
 }
 
 func TestStageRestore_RefusesSecondStageAndBadSource(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	bad := filepath.Join(f.dir, "bad.db")
 	if err := os.WriteFile(bad, []byte("not a database at all, just text padding the file out"), 0o600); err != nil {
@@ -397,6 +405,7 @@ func TestStageRestore_RefusesSecondStageAndBadSource(t *testing.T) {
 }
 
 func TestOpen_AppliesStagedRestoreUnderTheLock(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "chat.db")
 	backup := filepath.Join(dir, "backup.db")
@@ -469,6 +478,7 @@ func TestApplyStagedRestore_RollbackResumeKeepsOldWAL(t *testing.T) {
 // A refusal whose staged copy vanished (killed after discarding it, or removed
 // by hand) must never be reported as applied.
 func TestApplyStagedRestore_MissingStagedCopyIsNotApplied(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	f.stage(t)
 	p, _ := newRestorePaths(f.live)
@@ -578,6 +588,7 @@ func TestApplyStagedRestore_MarkerDeletedAfterSwapKeepsOldDatabase(t *testing.T)
 // An apply-time failure to preserve a floor refuses the restore and keeps the
 // old database instead of blocking the boot.
 func TestApplyStagedRestore_FloorFailureRefusesAndBoots(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	f.stage(t)
 	if err := os.Mkdir(f.live+".message-retry-floor", 0o700); err != nil {
@@ -613,6 +624,7 @@ func TestApplyStagedRestore_NoLiveDatabaseFailedCheckLeavesNoCorruptFile(t *test
 }
 
 func TestOpen_InconsistentRestoreErrorIsNamed(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	f.stage(t)
 	p, _ := newRestorePaths(f.live)
@@ -654,6 +666,7 @@ func TestApplyStagedRestore_UnrelatedLiveDatabaseKeepsRollback(t *testing.T) {
 }
 
 func TestOpenShared_RefusesWhileRestoreIsInProgress(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	f.stage(t)
 	if _, err := OpenShared(f.live); !errors.Is(err, ErrRestoreInProgress) {

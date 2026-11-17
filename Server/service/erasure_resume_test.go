@@ -52,6 +52,7 @@ func accountGone(t *testing.T, database *db.DB, uid int64) bool {
 // and the next Resume completes the job. The member_ban goes out once, at
 // completion.
 func TestErasureService_FailureAfterLockResumesOnTick(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -120,6 +121,7 @@ func TestErasureService_FailureAfterLockResumesOnTick(t *testing.T) {
 // The routes report success for an erasure that is committed to but not
 // finished.
 func TestAuthService_DeleteAccountReportsSuccessWhileInProgress(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -149,6 +151,7 @@ func TestAuthService_DeleteAccountReportsSuccessWhileInProgress(t *testing.T) {
 // and a queued job. On restart ReplayMarkers finishes the database half and
 // Resume the files; the marker ends recorded.
 func TestErasureService_CrashMidErasureCompletesOnRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
@@ -242,6 +245,7 @@ func TestErasureService_InlineBudgetHandsOffToResume(t *testing.T) {
 // A user an Erase or Resume is already driving is skipped by the other, and a
 // queued job is never run as if its database half were finished.
 func TestErasureService_InFlightUserIsNotDrivenTwice(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()

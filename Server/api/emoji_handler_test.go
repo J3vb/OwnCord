@@ -210,12 +210,14 @@ func webpVP8LBytes(w, h int) []byte {
 // ─── GET /api/v1/emoji ───────────────────────────────────────────────────────
 
 func TestEmojiList_RequiresAuth(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.do(t, http.MethodGet, "/api/v1/emoji", "", nil, "")
 	requireStatus(t, rec, http.StatusUnauthorized)
 }
 
 func TestEmojiList_EmptyIsJSONArray(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.do(t, http.MethodGet, "/api/v1/emoji", h.memberToken, nil, "")
 	requireStatus(t, rec, http.StatusOK)
@@ -225,6 +227,7 @@ func TestEmojiList_EmptyIsJSONArray(t *testing.T) {
 }
 
 func TestEmojiList_AnyMemberMaySee(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	if rec := h.upload(t, h.ownerToken, "wave", pngBytes(t, 64, 64)); rec.Code != http.StatusCreated {
 		t.Fatalf("upload status = %d (%s)", rec.Code, rec.Body.String())
@@ -254,6 +257,7 @@ func TestEmojiList_AnyMemberMaySee(t *testing.T) {
 // ─── POST permission gate ────────────────────────────────────────────────────
 
 func TestEmojiUpload_MemberIsForbidden(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.memberToken, "wave", pngBytes(t, 64, 64))
 	requireStatus(t, rec, http.StatusForbidden)
@@ -263,6 +267,7 @@ func TestEmojiUpload_MemberIsForbidden(t *testing.T) {
 }
 
 func TestEmojiUpload_ManageServerIsEnough(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.adminToken, "wave", pngBytes(t, 64, 64))
 	requireStatus(t, rec, http.StatusCreated)
@@ -275,6 +280,7 @@ func TestEmojiUpload_ManageServerIsEnough(t *testing.T) {
 }
 
 func TestEmojiUpload_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.upload(t, "", "wave", pngBytes(t, 64, 64))
 	requireStatus(t, rec, http.StatusUnauthorized)
@@ -283,6 +289,7 @@ func TestEmojiUpload_Unauthenticated(t *testing.T) {
 // ─── POST validation ─────────────────────────────────────────────────────────
 
 func TestEmojiUpload_AcceptsEveryAllowedFormat(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	cases := map[string][]byte{
 		"apng":  pngBytes(t, 128, 128),
@@ -299,6 +306,7 @@ func TestEmojiUpload_AcceptsEveryAllowedFormat(t *testing.T) {
 }
 
 func TestEmojiUpload_RejectsNonImage(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	// A plain-text body sniffs as text/plain, which is not in the allowlist.
 	rec := h.upload(t, h.ownerToken, "wave", []byte("this is definitely not an image at all"))
@@ -309,6 +317,7 @@ func TestEmojiUpload_RejectsNonImage(t *testing.T) {
 }
 
 func TestEmojiUpload_RejectsSVG(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	svg := []byte(`<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">` +
 		`<script>alert(1)</script></svg>`)
@@ -317,6 +326,7 @@ func TestEmojiUpload_RejectsSVG(t *testing.T) {
 }
 
 func TestEmojiUpload_RejectsOversizeDimensions(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.ownerToken, "toobig", pngBytes(t, 129, 64))
 	requireStatus(t, rec, http.StatusBadRequest)
@@ -333,6 +343,7 @@ func TestEmojiUpload_RejectsOversizeDimensions(t *testing.T) {
 }
 
 func TestEmojiUpload_AcceptsExactlyMaxDimension(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	if rec := h.upload(t, h.ownerToken, "edge", pngBytes(t, 128, 128)); rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201 (%s)", rec.Code, rec.Body.String())
@@ -340,6 +351,7 @@ func TestEmojiUpload_AcceptsExactlyMaxDimension(t *testing.T) {
 }
 
 func TestEmojiUpload_RejectsOversizeFile(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	// A 128x128 PNG of pure noise compresses badly enough to blow the 512 KB
 	// budget while staying inside the pixel cap, which is the case the byte
@@ -351,6 +363,7 @@ func TestEmojiUpload_RejectsOversizeFile(t *testing.T) {
 }
 
 func TestEmojiUpload_RejectsBadShortcode(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	for _, sc := range []string{"", "a", "has space", "dash-es", strings.Repeat("x", 33)} {
 		rec := h.upload(t, h.ownerToken, sc, pngBytes(t, 32, 32))
@@ -361,12 +374,14 @@ func TestEmojiUpload_RejectsBadShortcode(t *testing.T) {
 }
 
 func TestEmojiUpload_MissingFile(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.ownerToken, "wave", nil)
 	requireStatus(t, rec, http.StatusBadRequest)
 }
 
 func TestEmojiUpload_DuplicateShortcodeIsConflict(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	if rec := h.upload(t, h.ownerToken, "wave", pngBytes(t, 32, 32)); rec.Code != http.StatusCreated {
 		t.Fatalf("first upload status = %d", rec.Code)
@@ -386,6 +401,7 @@ func TestEmojiUpload_DuplicateShortcodeIsConflict(t *testing.T) {
 // ─── GET image ───────────────────────────────────────────────────────────────
 
 func TestEmojiImage_ServesStoredBytes(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	content := gifBytes(t, 40, 40)
 	rec := h.upload(t, h.ownerToken, "wave", content)
@@ -409,12 +425,14 @@ func TestEmojiImage_ServesStoredBytes(t *testing.T) {
 }
 
 func TestEmojiImage_RequiresAuth(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.do(t, http.MethodGet, "/api/v1/emoji/1/image", "", nil, "")
 	requireStatus(t, rec, http.StatusUnauthorized)
 }
 
 func TestEmojiImage_UnknownIDIs404(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	for _, path := range []string{"/api/v1/emoji/999/image", "/api/v1/emoji/abc/image", "/api/v1/emoji/0/image"} {
 		rec := h.do(t, http.MethodGet, path, h.memberToken, nil, "")
@@ -427,6 +445,7 @@ func TestEmojiImage_UnknownIDIs404(t *testing.T) {
 // ─── DELETE ──────────────────────────────────────────────────────────────────
 
 func TestEmojiDelete_RemovesRowFileAndBroadcasts(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.ownerToken, "wave", pngBytes(t, 32, 32))
 	requireStatus(t, rec, http.StatusCreated)
@@ -462,6 +481,7 @@ func TestEmojiDelete_RemovesRowFileAndBroadcasts(t *testing.T) {
 }
 
 func TestEmojiDelete_MemberIsForbidden(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.ownerToken, "wave", pngBytes(t, 32, 32))
 	requireStatus(t, rec, http.StatusCreated)
@@ -477,12 +497,14 @@ func TestEmojiDelete_MemberIsForbidden(t *testing.T) {
 }
 
 func TestEmojiDelete_UnknownIDIs404(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.do(t, http.MethodDelete, "/api/v1/emoji/999", h.ownerToken, nil, "")
 	requireStatus(t, rec, http.StatusNotFound)
 }
 
 func TestEmojiDelete_BadIDIs400(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	rec := h.do(t, http.MethodDelete, "/api/v1/emoji/not-a-number", h.ownerToken, nil, "")
 	requireStatus(t, rec, http.StatusBadRequest)
@@ -498,6 +520,7 @@ func TestEmojiDelete_BadIDIs400(t *testing.T) {
 // fan-out silently never happens and every connected client keeps the stale
 // set even though the row is already gone (or already created).
 func TestBroadcastEmojiSet_SurvivesCanceledRequestContext(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	// Seed a row directly, bypassing the upload handler (which broadcasts on
 	// its own success), so this isolates broadcastEmojiSet itself.
@@ -522,6 +545,7 @@ func TestBroadcastEmojiSet_SurvivesCanceledRequestContext(t *testing.T) {
 // ─── WebP header parsing ─────────────────────────────────────────────────────
 
 func TestWebPDimensions_AllChunkFlavours(t *testing.T) {
+	t.Parallel()
 	// VP8L is covered by webpVP8LBytes; build a VP8 (lossy) and a VP8X
 	// (extended) container too, since each encodes its size differently.
 	vp8 := make([]byte, 30)
@@ -560,6 +584,7 @@ func TestWebPDimensions_AllChunkFlavours(t *testing.T) {
 }
 
 func TestWebPDimensions_RejectsMalformed(t *testing.T) {
+	t.Parallel()
 	bad := [][]byte{
 		nil,
 		[]byte("RIFF"),

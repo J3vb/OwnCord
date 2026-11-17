@@ -15,6 +15,7 @@ import (
 // The value below is 3600 + 2^55, which the old multiply collapsed to
 // exactly one hour and the 1-minute..28-day gate then accepted.
 func TestModerationTimeout_RejectsOverflowingDuration(t *testing.T) {
+	t.Parallel()
 	const overflow = `{"reason":"cool off","duration_seconds":36028797018967568}`
 
 	t.Run("direct timeout route", func(t *testing.T) {

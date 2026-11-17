@@ -29,6 +29,7 @@ func uploadedID(t *testing.T, rr *httptest.ResponseRecorder) string {
 }
 
 func TestDiscardUpload_FreesQuotaForTheNextUpload(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	envelopeBody, _ := makeMultipartFile(t, "file", "a.bin", bytes.Repeat([]byte("x"), 1024))
 	h.limits(t, int64(envelopeBody.Len()), 0, nil)
@@ -53,6 +54,7 @@ func TestDiscardUpload_FreesQuotaForTheNextUpload(t *testing.T) {
 }
 
 func TestDiscardUpload_LeavesFilesItMayNotRemove(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	ctx := context.Background()
 	other := uploadCreateToken(t, h.database, "discard_other", int(permissions.MemberRoleID))
@@ -95,6 +97,7 @@ func TestDiscardUpload_LeavesFilesItMayNotRemove(t *testing.T) {
 }
 
 func TestDiscardUpload_RequiresAuth(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	id := uploadedID(t, doUpload(t, h.router, h.token, "file", "a.txt", []byte("a")))
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/uploads/"+id, nil)

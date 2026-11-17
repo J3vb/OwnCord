@@ -7,6 +7,7 @@ import (
 )
 
 func TestEditMessage_EmptyTextKeptWhenAttachmentRemains(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, _ := f.sendWithFile(t, fwdBob, fwdDstChan, "caption", "0123456789")
@@ -25,6 +26,7 @@ func TestEditMessage_EmptyTextKeptWhenAttachmentRemains(t *testing.T) {
 }
 
 func TestEditMessage_EmptyTextRefusedWithoutAttachment(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "caption", "0123456789")

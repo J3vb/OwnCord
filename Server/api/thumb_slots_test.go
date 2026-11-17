@@ -7,6 +7,7 @@ import (
 )
 
 func TestThumbSlotCount_HalfTheCPUsBetweenOneAndFour(t *testing.T) {
+	t.Parallel()
 	for cpus, want := range map[int]int{0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 6: 3, 8: 4, 64: 4} {
 		if got := thumbSlotCount(cpus); got != want {
 			t.Errorf("thumbSlotCount(%d) = %d, want %d", cpus, got, want)
@@ -17,6 +18,7 @@ func TestThumbSlotCount_HalfTheCPUsBetweenOneAndFour(t *testing.T) {
 // Two slots let two thumbnails run side by side; a third waits only as long
 // as the slot wait and then gives up.
 func TestThumbSlots_TwoRunAtOnceAndAThirdWaitIsBounded(t *testing.T) {
+	t.Parallel()
 	slots := makeThumbSlots(2, 30*time.Millisecond)
 	first, ok := slots.acquire(context.Background(), 1)
 	if !ok {
@@ -43,6 +45,7 @@ func TestThumbSlots_TwoRunAtOnceAndAThirdWaitIsBounded(t *testing.T) {
 // A HEIC conversion asks for more slots than a one-slot machine has; it takes
 // the one there is instead of never starting.
 func TestThumbSlots_HEICWeightIsCappedAtTheSlotCount(t *testing.T) {
+	t.Parallel()
 	slots := makeThumbSlots(1, 30*time.Millisecond)
 	release, ok := slots.acquire(context.Background(), heicSlotWeight)
 	if !ok {
@@ -56,6 +59,7 @@ func TestThumbSlots_HEICWeightIsCappedAtTheSlotCount(t *testing.T) {
 
 // A request that ends while it waits stops waiting.
 func TestThumbSlots_WaitEndsWithTheRequest(t *testing.T) {
+	t.Parallel()
 	slots := makeThumbSlots(1, time.Minute)
 	release, _ := slots.acquire(context.Background(), 1)
 	defer release()

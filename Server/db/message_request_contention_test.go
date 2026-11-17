@@ -76,6 +76,7 @@ func contentionSeedUser(t *testing.T, database *DB, username string) int64 {
 // outcome (Accept wins, Ignore loses) is deterministic — assert the exact
 // final state, trust row and OpenDM effect.
 func TestAcceptMessageRequest_ConcurrentDecisionsOneWins(t *testing.T) {
+	t.Parallel()
 	database := contentionOpenMigrated(t)
 	ctx := context.Background()
 
@@ -166,6 +167,7 @@ func TestAcceptMessageRequest_ConcurrentDecisionsOneWins(t *testing.T) {
 // fail here must roll back the WHOLE transaction, so the recipient never has
 // an open-state row at all, rather than a permanently-open one.
 func TestGetOrCreateDMChannelGated_FailureAfterParticipantsLeavesRecipientNeverOpened(t *testing.T) {
+	t.Parallel()
 	database := contentionOpenMigrated(t)
 	ctx := context.Background()
 	caller := contentionSeedUser(t, database, "gated-fail-caller")
@@ -197,6 +199,7 @@ func TestGetOrCreateDMChannelGated_FailureAfterParticipantsLeavesRecipientNeverO
 // tests live in a different package and so contribute nothing to this
 // package's own coverage.
 func TestGetOrCreateDMChannelGated_UntrustedOpensCallerOnly(t *testing.T) {
+	t.Parallel()
 	database := contentionOpenMigrated(t)
 	ctx := context.Background()
 	caller := contentionSeedUser(t, database, "gated-untrusted-caller")
@@ -218,6 +221,7 @@ func TestGetOrCreateDMChannelGated_UntrustedOpensCallerOnly(t *testing.T) {
 }
 
 func TestGetOrCreateDMChannelGated_TrustedOpensBoth(t *testing.T) {
+	t.Parallel()
 	database := contentionOpenMigrated(t)
 	ctx := context.Background()
 	caller := contentionSeedUser(t, database, "gated-trusted-caller")
@@ -268,6 +272,7 @@ func openStateCount(t *testing.T, database *DB, userID, channelID int64) int {
 // request's state all land together, and the accepted request is returned so
 // the caller can announce it.
 func TestGetOrCreateDMChannelGated_RecipientWithPendingRequestAccepts(t *testing.T) {
+	t.Parallel()
 	for _, preState := range []string{"pending", "ignored", "deleted"} {
 		t.Run(preState, func(t *testing.T) {
 			database := contentionOpenMigrated(t)
@@ -320,6 +325,7 @@ func TestGetOrCreateDMChannelGated_RecipientWithPendingRequestAccepts(t *testing
 // the recipient gains no trust of the sender, the sender's trust of the
 // recipient is unchanged, and the request's state is unchanged.
 func TestGetOrCreateDMChannelGated_SenderReopenDoesNotAcceptOwnRequest(t *testing.T) {
+	t.Parallel()
 	for _, preState := range []string{"pending", "ignored", "deleted"} {
 		t.Run(preState, func(t *testing.T) {
 			database := contentionOpenMigrated(t)
@@ -379,6 +385,7 @@ func TestGetOrCreateDMChannelGated_SenderReopenDoesNotAcceptOwnRequest(t *testin
 // no request from the other user returns no accepted request and writes no
 // trust.
 func TestGetOrCreateDMChannelGated_OpenDoesNotAcceptBlockedOrAbsentRequest(t *testing.T) {
+	t.Parallel()
 	for _, preState := range []string{"blocked", "none"} {
 		t.Run(preState, func(t *testing.T) {
 			database := contentionOpenMigrated(t)

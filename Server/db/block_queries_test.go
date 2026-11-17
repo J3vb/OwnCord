@@ -11,6 +11,7 @@ import (
 // authorization path, and the listing order.
 
 func TestBlockUser_And_IsBlocked(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedBlockUser(t, database, 1, "alice")
@@ -39,6 +40,7 @@ func TestBlockUser_And_IsBlocked(t *testing.T) {
 }
 
 func TestBlockUser_Idempotent(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedBlockUser(t, database, 1, "alice")
@@ -59,6 +61,7 @@ func TestBlockUser_Idempotent(t *testing.T) {
 }
 
 func TestUnblockUser(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedBlockUser(t, database, 1, "alice")
@@ -75,6 +78,7 @@ func TestUnblockUser(t *testing.T) {
 }
 
 func TestUnblockUser_NotBlockedIsNoOp(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedBlockUser(t, database, 1, "alice")
@@ -88,6 +92,7 @@ func TestUnblockUser_NotBlockedIsNoOp(t *testing.T) {
 }
 
 func TestIsEitherBlocked(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name             string
 		blockerID        int64
@@ -125,6 +130,7 @@ func TestIsEitherBlocked(t *testing.T) {
 }
 
 func TestListBlockedUsers(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedBlockUser(t, database, 1, "alice")
@@ -161,6 +167,7 @@ func TestListBlockedUsers(t *testing.T) {
 }
 
 func TestBlockUser_SelfBlockIsSilentlyDropped(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	seedBlockUser(t, database, 1, "alice")

@@ -41,6 +41,7 @@ func (f *forwardFixture) expirer() (*PollExpirer, *recordingPollNotifier) {
 }
 
 func TestPollExpirer_EndsDueAndNotifies(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	e, n := f.expirer()
 	due := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
@@ -70,6 +71,7 @@ func TestPollExpirer_EndsDueAndNotifies(t *testing.T) {
 }
 
 func TestPollExpirer_DeletedEndedSilently(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	e, n := f.expirer()
 	poll := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
@@ -87,6 +89,7 @@ func TestPollExpirer_DeletedEndedSilently(t *testing.T) {
 }
 
 func TestPollExpirer_BootSweepCatchesUp(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	e, n := f.expirer()
 	e.batch = 2 // three batches' worth, so the sweep has to loop
@@ -129,6 +132,7 @@ func (e failingEnder) ExpirePoll(ctx context.Context, id int64) (*PollUpdate, er
 }
 
 func TestPollExpirer_OnePoisonedPollDoesNotBlockTheRest(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	a := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
 	b := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
@@ -147,6 +151,7 @@ func TestPollExpirer_OnePoisonedPollDoesNotBlockTheRest(t *testing.T) {
 }
 
 func TestPollExpirer_WakeOnCreate(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	e, n := f.expirer()
 	e.maxSleep = time.Hour // only a wake can bring the next deadline in
@@ -176,6 +181,7 @@ func TestPollExpirer_WakeOnCreate(t *testing.T) {
 }
 
 func TestPollExpirer_ExitsOnCancel(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	e, _ := f.expirer()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -200,6 +206,7 @@ func (s brokenPollStore) ListDuePolls(context.Context, string, int) ([]db.DuePol
 }
 
 func TestPollExpirer_StoreErrorsAreReportedAndRetried(t *testing.T) {
+	t.Parallel()
 	e := NewPollExpirer(brokenPollStore{err: errors.New("disk")}, nil)
 	if err := e.Sweep(context.Background()); err == nil {
 		t.Fatal("Sweep hid a read error")
@@ -222,6 +229,7 @@ func TestPollExpirer_StoreErrorsAreReportedAndRetried(t *testing.T) {
 }
 
 func TestPollExpirer_NextSleepFollowsTheSoonestExpiry(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	e, _ := f.expirer()
 	if sleep, failed := e.nextSleep(context.Background()); failed || sleep != e.maxSleep {
@@ -254,6 +262,7 @@ func TestPollExpirer_NextSleepFollowsTheSoonestExpiry(t *testing.T) {
 }
 
 func TestNew_WiresThePollExpirer(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	svc := New(f.database, nil)
 	if svc.PollExpiry == nil {

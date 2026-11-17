@@ -19,6 +19,7 @@ func adminUploadIDs(items []db.AdminUpload) string {
 }
 
 func TestListAllUploads_FiltersSortAndPaging(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	ctx := context.Background()
 	f.file(t, "a-big", f.alice, "Raid.MP4", 900, "2026-01-01 10:00:00")
@@ -96,6 +97,7 @@ func TestListAllUploads_FiltersSortAndPaging(t *testing.T) {
 }
 
 func TestUploadTotals_GroupsByKind(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	ctx := context.Background()
 	f.file(t, "v1", f.alice, "a.mp4", 100, "2026-01-01 10:00:00")
@@ -117,6 +119,7 @@ func TestUploadTotals_GroupsByKind(t *testing.T) {
 }
 
 func TestDeleteAttachmentByAdmin_AndInUse(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	ctx := context.Background()
 	f.file(t, "gone", f.alice, "x.bin", 42, "2026-01-01 10:00:00")
@@ -150,6 +153,7 @@ func TestDeleteAttachmentByAdmin_AndInUse(t *testing.T) {
 }
 
 func TestUserStorageQuotaMB_SetAndList(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	ctx := context.Background()
 	if q, err := f.database.UserStorageQuotaMB(ctx, f.alice); err != nil || q != nil {

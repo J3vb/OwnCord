@@ -11,6 +11,7 @@ import (
 )
 
 func TestInsertWelcomeRow_WritesKind8AndAdvancesReadState(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice")
@@ -37,6 +38,7 @@ func TestInsertWelcomeRow_WritesKind8AndAdvancesReadState(t *testing.T) {
 }
 
 func TestGetReferencedMessages_WelcomeRowIsRepliable(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice")
@@ -52,6 +54,7 @@ func TestGetReferencedMessages_WelcomeRowIsRepliable(t *testing.T) {
 // welcome.sql is exempt from TestCallLog_OnlyWriterOfKind, so it must hold
 // only the kind-8 insert: a later query there cannot create or retype rows.
 func TestWelcomeSQL_HoldsOnlyTheKind8Insert(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("queries/sqlite/welcome.sql")
 	mustDo(t, "read welcome.sql", err)
 	src := string(raw)

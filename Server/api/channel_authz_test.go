@@ -30,6 +30,7 @@ func denyReadMessages(t *testing.T, database *db.DB, channelID, roleID int64) {
 // ─── GET /api/v1/channels: permission filtering ─────────────────────────────
 
 func TestChannelList_FiltersOutDeniedChannels(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -59,6 +60,7 @@ func TestChannelList_FiltersOutDeniedChannels(t *testing.T) {
 }
 
 func TestChannelList_AdminSeesAllChannels(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -84,6 +86,7 @@ func TestChannelList_AdminSeesAllChannels(t *testing.T) {
 // ─── GET /api/v1/channels/{id}/messages: permission check ───────────────────
 
 func TestChannelMessages_DeniedByPermission(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -98,6 +101,7 @@ func TestChannelMessages_DeniedByPermission(t *testing.T) {
 }
 
 func TestChannelMessages_AdminBypassesDeny(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -114,6 +118,7 @@ func TestChannelMessages_AdminBypassesDeny(t *testing.T) {
 // ─── GET /api/v1/search: permission filtering ───────────────────────────────
 
 func TestSearch_FiltersResultsByPermission(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -151,6 +156,7 @@ func TestSearch_FiltersResultsByPermission(t *testing.T) {
 // the caller's DMs stay in (OC-0087), a channel they cannot read and a
 // labelled one they have not acknowledged stay out (B9-7), on every page.
 func TestSearch_RecentPagingKeepsReadableScope(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
@@ -208,6 +214,7 @@ func TestSearch_RecentPagingKeepsReadableScope(t *testing.T) {
 }
 
 func TestSearch_AdminSeesAllResults(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -237,6 +244,7 @@ func TestSearch_AdminSeesAllResults(t *testing.T) {
 // ─── DM exclusion from channel list (BUG-093) ─────────────────────────────
 
 func TestChannelList_ExcludesDMChannels_Member(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "dm-excl-member", 4)
 
@@ -259,6 +267,7 @@ func TestChannelList_ExcludesDMChannels_Member(t *testing.T) {
 }
 
 func TestChannelList_ExcludesDMChannels_Admin(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "dm-excl-admin", 1) // Owner

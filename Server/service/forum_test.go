@@ -51,6 +51,7 @@ func verdicts(t *testing.T, permSvc *PermissionService, database *db.DB, userID,
 // verdict for view, send, react, pin and read-content equals its forum's,
 // except that a locked post refuses members a send and a reaction.
 func TestForumPostInheritsForum(t *testing.T) {
+	t.Parallel()
 	const forum, post, userID = 12, 22, 2
 	cases := []struct {
 		name      string
@@ -131,6 +132,7 @@ func newForumSettingsService(t *testing.T) (*ChannelService, *db.DB, *db.Channel
 }
 
 func TestAdminUpdateForumSettings(t *testing.T) {
+	t.Parallel()
 	svc, database, forum := newForumSettingsService(t)
 	ctx := context.Background()
 
@@ -169,6 +171,7 @@ func TestAdminUpdateForumSettings(t *testing.T) {
 // Requiring a tag with no tag to pick, or deleting the last tag while the
 // switch stays on, is refused and leaves the stored settings as they were.
 func TestAdminUpdateForumSettings_RequireTagNeedsATag(t *testing.T) {
+	t.Parallel()
 	svc, _, forum := newForumSettingsService(t)
 	ctx := context.Background()
 	if _, err := svc.AdminUpdateForumSettings(ctx, 7, forum, ForumSettingsInput{
@@ -190,6 +193,7 @@ func TestAdminUpdateForumSettings_RequireTagNeedsATag(t *testing.T) {
 
 // Every validation refusal answers ErrBadRequest and writes nothing.
 func TestAdminUpdateForumSettings_RefusalsWriteNothing(t *testing.T) {
+	t.Parallel()
 	svc, database, forum := newForumSettingsService(t)
 	ctx := context.Background()
 	if _, err := svc.AdminUpdateForumSettings(ctx, 7, forum, ForumSettingsInput{
@@ -235,6 +239,7 @@ func TestAdminUpdateForumSettings_RefusalsWriteNothing(t *testing.T) {
 // a member who cannot read it learns nothing about its type, and typing is
 // dropped silently.
 func TestSendAndTypingIntoForumRefused(t *testing.T) {
+	t.Parallel()
 	msgSvc, database := newTestMessageService(t)
 	seedChannel(t, database, &db.Channel{ID: 40, Name: "ideas", Type: "forum"})
 	seedChannel(t, database, &db.Channel{ID: 41, Name: "hidden", Type: "forum"})
@@ -272,6 +277,7 @@ func msgSvcCount(t *testing.T, database *db.DB, channelID int64) int {
 // A forum is focusable (its view subscribes to its posts' changes) and writes
 // no read state; a post of it is refused like any thread.
 func TestForumFocusAdmittedPostRefused(t *testing.T) {
+	t.Parallel()
 	channels, _, database := newOverrideFixture(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 12, Name: "ideas", Type: "forum"})

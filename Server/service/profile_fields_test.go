@@ -26,6 +26,7 @@ func newUserSvc(t *testing.T) (*UserService, *db.DB) {
 }
 
 func TestUpdateProfile_SetsAndClearsDisplayNameAndAbout(t *testing.T) {
+	t.Parallel()
 	svc, _ := newUserSvc(t)
 	ctx := context.Background()
 
@@ -76,6 +77,7 @@ func (r *raceDetectingStore) GetUserByID(ctx context.Context, id int64) (*db.Use
 }
 
 func TestUpdateProfile_ConcurrentUpdatesSerializePerUser(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
 	rs := &raceDetectingStore{Store: database}
@@ -128,6 +130,7 @@ func TestUpdateProfile_ConcurrentUpdatesSerializePerUser(t *testing.T) {
 // leave it alone" contract via its own zero value, since it is a plain
 // string rather than a pointer.
 func TestUpdateProfile_AvatarOnlyPatchDoesNotOverwriteUsername(t *testing.T) {
+	t.Parallel()
 	svc, database := newUserSvc(t)
 	ctx := context.Background()
 
@@ -157,6 +160,7 @@ func TestUpdateProfile_AvatarOnlyPatchDoesNotOverwriteUsername(t *testing.T) {
 }
 
 func TestUpdateProfile_SanitizesAndTrims(t *testing.T) {
+	t.Parallel()
 	svc, _ := newUserSvc(t)
 	name := "  <b>Ada</b>  "
 	about := "<script>alert(1)</script>hello"
@@ -175,6 +179,7 @@ func TestUpdateProfile_SanitizesAndTrims(t *testing.T) {
 }
 
 func TestUpdateProfile_RejectsOverlongFields(t *testing.T) {
+	t.Parallel()
 	svc, _ := newUserSvc(t)
 	ctx := context.Background()
 
@@ -239,6 +244,7 @@ func TestUpdateProfile_OversizedDisplayNameAndAboutRejectedBeforeSanitizing(t *t
 }
 
 func TestSetCustomStatus_RoundTripClearAndBound(t *testing.T) {
+	t.Parallel()
 	svc, database := newUserSvc(t)
 	ctx := context.Background()
 
@@ -260,6 +266,7 @@ func TestSetCustomStatus_RoundTripClearAndBound(t *testing.T) {
 }
 
 func TestClearCustomStatus(t *testing.T) {
+	t.Parallel()
 	svc, database := newUserSvc(t)
 	ctx := context.Background()
 	mustDo(t, "SetCustomStatus", svc.SetCustomStatus(ctx, 1, "afk"))
@@ -271,12 +278,14 @@ func TestClearCustomStatus(t *testing.T) {
 }
 
 func TestAvatarFileURL(t *testing.T) {
+	t.Parallel()
 	if got := AvatarFileURL("abc"); got != "/api/v1/files/abc" {
 		t.Errorf("AvatarFileURL = %q", got)
 	}
 }
 
 func TestHandlePresenceUpdate_AcceptsInvisibleAndCarriesCustomStatus(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
 	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
@@ -351,6 +360,7 @@ func TestHandlePresenceUpdate_OversizedCustomStatusRejectedBeforeSanitizing(t *t
 }
 
 func TestHandlePresenceUpdate_RejectsUnknownStatusAndOverlongText(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
 	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
@@ -401,6 +411,7 @@ var visibleTextCases = []struct {
 }
 
 func TestSetCustomStatus_CharacterRules(t *testing.T) {
+	t.Parallel()
 	for _, tc := range visibleTextCases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, database := newUserSvc(t)
@@ -424,6 +435,7 @@ func TestSetCustomStatus_CharacterRules(t *testing.T) {
 }
 
 func TestHandlePresenceUpdate_CustomStatusCharacterRules(t *testing.T) {
+	t.Parallel()
 	for _, tc := range visibleTextCases {
 		t.Run(tc.name, func(t *testing.T) {
 			database := newTestDB(t)
@@ -448,6 +460,7 @@ func TestHandlePresenceUpdate_CustomStatusCharacterRules(t *testing.T) {
 }
 
 func TestUpdateProfile_DisplayNameCharacterRules(t *testing.T) {
+	t.Parallel()
 	for _, tc := range visibleTextCases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, _ := newUserSvc(t)
@@ -473,6 +486,7 @@ func TestUpdateProfile_DisplayNameCharacterRules(t *testing.T) {
 // because of repeated spaces fits, and one that is over it after collapsing
 // does not.
 func TestVisibleText_CapCountsAfterCollapse(t *testing.T) {
+	t.Parallel()
 	svc, database := newUserSvc(t)
 	ctx := context.Background()
 
@@ -496,9 +510,8 @@ func TestVisibleText_CapCountsAfterCollapse(t *testing.T) {
 }
 
 func TestGroupDMName_CharacterRules(t *testing.T) {
-	database := newTestDB(t)
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	t.Parallel()
+	database := newAliceBobDB(t)
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	ctx := context.Background()

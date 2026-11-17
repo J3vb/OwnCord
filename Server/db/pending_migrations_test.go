@@ -31,6 +31,7 @@ func expectedPending(t *testing.T, cutoff string) []string {
 // the two cases that run no migration SQL — a fresh database and one already
 // at HEAD — or the backup would fire pointlessly on every boot.
 func TestPendingMigrations(t *testing.T) {
+	t.Parallel()
 	t.Run("fresh database reports nothing", func(t *testing.T) {
 		database := openMemory(t)
 		pending, err := db.PendingMigrations(database)

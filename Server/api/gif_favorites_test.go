@@ -37,6 +37,7 @@ func gifFavList(t *testing.T, router http.Handler, token string) []map[string]st
 }
 
 func TestGIFFavorites_RequireAuth(t *testing.T) {
+	t.Parallel()
 	router := buildGIFFavoritesRouter(newMigratedAuthTestDB(t))
 	for _, m := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
 		if rr := gifFavDo(t, router, m, "/api/v1/gif/favorites", "", ""); rr.Code != http.StatusUnauthorized {
@@ -46,6 +47,7 @@ func TestGIFFavorites_RequireAuth(t *testing.T) {
 }
 
 func TestGIFFavorites_AddListRemove(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "favuser", 4)
 	router := buildGIFFavoritesRouter(database)
@@ -69,6 +71,7 @@ func TestGIFFavorites_AddListRemove(t *testing.T) {
 }
 
 func TestGIFFavorites_EmptyPreviewIsRejected(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "favuser", 4)
 	router := buildGIFFavoritesRouter(database)
@@ -80,6 +83,7 @@ func TestGIFFavorites_EmptyPreviewIsRejected(t *testing.T) {
 }
 
 func TestGIFFavorites_LongTitleIsTruncatedOnRuneBoundary(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "favuser", 4)
 	router := buildGIFFavoritesRouter(database)
@@ -98,6 +102,7 @@ func TestGIFFavorites_LongTitleIsTruncatedOnRuneBoundary(t *testing.T) {
 }
 
 func TestGIFFavorites_RejectsDisallowedURLs(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "favuser", 4)
 	router := buildGIFFavoritesRouter(database)
@@ -125,6 +130,7 @@ func TestGIFFavorites_RejectsDisallowedURLs(t *testing.T) {
 }
 
 func TestGIFFavorites_CapReturnsConflict(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	token := profileCreateToken(t, database, "favuser", 4)
 	router := buildGIFFavoritesRouter(database)
@@ -141,6 +147,7 @@ func TestGIFFavorites_CapReturnsConflict(t *testing.T) {
 }
 
 func TestGIFFavorites_AreIsolatedPerUser(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	alice := profileCreateToken(t, database, "alice", 4)
 	bob := profileCreateToken(t, database, "bob", 4)

@@ -84,6 +84,7 @@ func decodeMediaPage(t *testing.T, router http.Handler, path, token string) medi
 }
 
 func TestChannelMedia_PagesWithCursor(t *testing.T) {
+	t.Parallel()
 	database, router := newMediaRouter(t)
 	token := chTestCreateToken(t, database, "media-member", int(permissions.MemberRoleID))
 	ch := mustCreateChannel(t, database, "photos", "text")
@@ -105,6 +106,7 @@ func TestChannelMedia_PagesWithCursor(t *testing.T) {
 }
 
 func TestChannelMedia_RespectsReadPermission(t *testing.T) {
+	t.Parallel()
 	database, router := newMediaRouter(t)
 	token := chTestCreateToken(t, database, "media-denied", int(permissions.MemberRoleID))
 	ch := mustCreateChannel(t, database, "secret", "text")
@@ -125,6 +127,7 @@ func TestChannelMedia_RespectsReadPermission(t *testing.T) {
 }
 
 func TestChannelMedia_RejectsBadParameters(t *testing.T) {
+	t.Parallel()
 	database, router := newMediaRouter(t)
 	token := chTestCreateToken(t, database, "media-bad", int(permissions.MemberRoleID))
 	ch := mustCreateChannel(t, database, "photos", "text")
@@ -144,6 +147,7 @@ func TestChannelMedia_RejectsBadParameters(t *testing.T) {
 }
 
 func TestChannelMedia_MonthsUseTheCallersZone(t *testing.T) {
+	t.Parallel()
 	database, router := newMediaRouter(t)
 	token := chTestCreateToken(t, database, "media-tz", int(permissions.MemberRoleID))
 	ch := mustCreateChannel(t, database, "photos", "text")
@@ -176,6 +180,7 @@ func TestChannelMedia_MonthsUseTheCallersZone(t *testing.T) {
 // Access is checked on every page: a cursor from before a role change does not
 // keep the gallery open.
 func TestChannelMedia_LostReadMidBrowseStopsPaging(t *testing.T) {
+	t.Parallel()
 	database, router, svc := newMediaRouterWithServices(t)
 	token := chTestCreateToken(t, database, "media-revoked", int(permissions.MemberRoleID))
 	ch := mustCreateChannel(t, database, "photos", "text")

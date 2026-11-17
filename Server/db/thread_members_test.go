@@ -26,6 +26,7 @@ func seedThreadUser(t *testing.T, d *db.DB, name string) int64 {
 // transactions: the author and each direct mention follow, an @everyone does
 // not, and only a user the call newly inserted is reported.
 func TestThreadPost_JoinsAuthorAndDirectMentionsOnly(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"mentions", "delivery"} {
 		t.Run(path, func(t *testing.T) {
 			f := newThreadFixture(t)
@@ -76,6 +77,7 @@ func TestThreadPost_JoinsAuthorAndDirectMentionsOnly(t *testing.T) {
 }
 
 func TestThreadPost_InAnOrdinaryChannelJoinsNobody(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	m, err := f.db.CreateMessageWithMentions(context.Background(), f.parent, f.user, "hi", nil, []int64{f.user}, 0, false, nil)
 	mustDo(t, "CreateMessageWithMentions", err)
@@ -89,6 +91,7 @@ func TestThreadPost_InAnOrdinaryChannelJoinsNobody(t *testing.T) {
 }
 
 func TestFollowThread_IsIdempotentBothWays(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	bob := seedThreadUser(t, f.db, "bob")
@@ -114,6 +117,7 @@ func TestFollowThread_IsIdempotentBothWays(t *testing.T) {
 // A follow only ever names a thread: an ordinary channel id writes nothing,
 // and the table's own trigger refuses a direct insert.
 func TestFollowThread_RefusesANonThread(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	if got, err := f.db.FollowThread(ctx, f.parent, f.user); err != nil || got {
@@ -125,6 +129,7 @@ func TestFollowThread_RefusesANonThread(t *testing.T) {
 }
 
 func TestThreadMembers_CascadeOnThreadAndUserDelete(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	bob := seedThreadUser(t, f.db, "bob")
@@ -146,6 +151,7 @@ func TestThreadMembers_CascadeOnThreadAndUserDelete(t *testing.T) {
 }
 
 func TestCreateThread_JoinsTheOwner(t *testing.T) {
+	t.Parallel()
 	d := openMigratedMemory(t)
 	ctx := context.Background()
 	owner := seedThreadUser(t, d, "owner")
@@ -165,6 +171,7 @@ func TestCreateThread_JoinsTheOwner(t *testing.T) {
 }
 
 func TestListFollowedThreads_OpenOnlyWithReadPosition(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	bob := seedThreadUser(t, f.db, "bob")

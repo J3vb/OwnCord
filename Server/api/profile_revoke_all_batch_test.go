@@ -23,6 +23,7 @@ import (
 // lands, and the revoke must still take the API tokens and drop the live
 // socket in that request.
 func TestSignOutEverywhere_BeatsAQueuedSessionTouch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()

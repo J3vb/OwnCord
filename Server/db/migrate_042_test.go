@@ -16,6 +16,7 @@ import (
 // in 038's representation on a migrated database, with the statements taken
 // from the migration file itself.
 func TestMigration042_BackfillsLegacyActorTokens(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemoryInternal(t)
 	ctx := context.Background()
 	raw, err := fs.ReadFile(migrations.FS, "042_audit_actor_token_backfill.sql")

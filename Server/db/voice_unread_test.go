@@ -8,6 +8,7 @@ import (
 // WP 6.1a: a voice channel has a text chat, so its unread and mention state is
 // counted like a text channel's.
 func TestGetChannelUnreadCounts_IncludesVoice(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	userID := seedUser(t, database, "voiceunread")

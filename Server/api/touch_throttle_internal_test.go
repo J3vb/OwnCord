@@ -9,6 +9,7 @@ import (
 // Stale entries go once per interval however many sessions are live, and a
 // session inside its interval is never touched twice.
 func TestTouchThrottle_SweepsByAgeOncePerInterval(t *testing.T) {
+	t.Parallel()
 	tt := &touchThrottle{seen: make(map[string]time.Time)}
 	start := time.Unix(1_700_000_000, 0)
 	const live = 100

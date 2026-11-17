@@ -22,6 +22,7 @@ func seedRecoveringUser(t *testing.T, database *db.DB, name string) int64 {
 }
 
 func TestRecoveryAssist_IssueReplacesAndRedeemConsumes(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedRecoveringUser(t, database, "assisted")
@@ -67,6 +68,7 @@ func TestRecoveryAssist_IssueReplacesAndRedeemConsumes(t *testing.T) {
 }
 
 func TestRedeemRecoveryAssist_RefusesAnExpiredCredential(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedRecoveringUser(t, database, "late")
@@ -90,6 +92,7 @@ func TestRedeemRecoveryAssist_RefusesAnExpiredCredential(t *testing.T) {
 // the redeem leaves the credential live, the password unchanged and the
 // sessions in place (the restart-mid-flow case).
 func TestRedeemRecoveryAssist_RollsBackAsAWhole(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedRecoveringUser(t, database, "unlucky")
@@ -119,6 +122,7 @@ func TestRedeemRecoveryAssist_RollsBackAsAWhole(t *testing.T) {
 }
 
 func TestRedeemRecoveryKit_WithdrawsTheOutstandingCredential(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedRecoveringUser(t, database, "both")
@@ -133,6 +137,7 @@ func TestRedeemRecoveryKit_WithdrawsTheOutstandingCredential(t *testing.T) {
 }
 
 func TestEraseAccount_PurgesTheRecoveryCredential(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	mustCreateUser(t, database, "owner", "hash", 1)
@@ -147,6 +152,7 @@ func TestEraseAccount_PurgesTheRecoveryCredential(t *testing.T) {
 }
 
 func TestDeleteRecoveryAssist_WithdrawsTheCredential(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedRecoveringUser(t, database, "withdrawn")
@@ -165,6 +171,7 @@ func TestDeleteRecoveryAssist_WithdrawsTheCredential(t *testing.T) {
 }
 
 func TestDeleteRecoveryKit_RemovesTheKit(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "rotating", "hash", 4)
@@ -182,6 +189,7 @@ func TestDeleteRecoveryKit_RemovesTheKit(t *testing.T) {
 // #1513): a credential replaced between the compare and the redeem cannot
 // spend its replacement.
 func TestRedeemRecoveryAssist_OnlyConsumesTheCredentialItVerified(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedRecoveringUser(t, database, "reissued")

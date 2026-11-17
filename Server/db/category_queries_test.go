@@ -10,6 +10,7 @@ import (
 )
 
 func TestChannelCategories_CreateRenameDeleteRoundTrip(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -49,6 +50,7 @@ func TestChannelCategories_CreateRenameDeleteRoundTrip(t *testing.T) {
 // Edge case 1 at the db layer: a reorder whose id set is not exactly the
 // current set writes nothing.
 func TestChannelCategories_ReorderRefusesAStaleSetAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	ids := make([]int64, 0, 3)
@@ -91,6 +93,7 @@ func TestChannelCategories_ReorderRefusesAStaleSetAndWritesNothing(t *testing.T)
 // commits and the other, holding the same list, still succeeds only if its set
 // is current, and the table never ends up with duplicate or missing positions.
 func TestChannelCategories_ConcurrentReordersLeaveAPermutation(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	ids := make([]int64, 0, 4)
@@ -122,6 +125,7 @@ func TestChannelCategories_ConcurrentReordersLeaveAPermutation(t *testing.T) {
 // Edge case 2 at the db layer: a create that resolves its category by name and
 // a rename of that category cannot split into two rows.
 func TestChannelCategories_RenameRacingResolveOrCreate(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	games, err := database.CreateChannelCategory(ctx, "Games")
@@ -176,6 +180,7 @@ func TestChannelCategories_RenameRacingResolveOrCreate(t *testing.T) {
 }
 
 func TestChannelCategories_UnknownCategoryIDWritesNothing(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	if _, err := database.CreateChannelIn(ctx, db.NewChannel{Name: "x", Type: "text", CategoryID: 42}); !errors.Is(err, db.ErrNotFound) {
@@ -194,6 +199,7 @@ func TestChannelCategories_UnknownCategoryIDWritesNothing(t *testing.T) {
 // A category made by the legacy name is reported through CreatedCategory, on
 // create and on update, and only when the write actually made one.
 func TestChannelCategories_LegacyNameReportsTheCategoryItCreated(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -218,6 +224,7 @@ func TestChannelCategories_LegacyNameReportsTheCategoryItCreated(t *testing.T) {
 // CategoryIfExists turns a vanished carried category into "none"; without it
 // the same write is ErrNotFound.
 func TestChannelCategories_IfExistsFallsBackToNone(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	cat, err := database.CreateChannelCategory(ctx, "Doomed")

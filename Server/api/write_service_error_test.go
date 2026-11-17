@@ -17,6 +17,7 @@ import (
 // action". 404 is wrong for this route (the client clears the report on 404),
 // so the twin of DUPLICATE_REPORT's 409 is the clean typed refusal.
 func TestWriteServiceError_DeletedMessageIsConflict(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	writeServiceError(context.Background(), rec, fmt.Errorf("%w: cannot delete this message", service.ErrDeletedMessage))
 
@@ -38,6 +39,7 @@ func TestWriteServiceError_DeletedMessageIsConflict(t *testing.T) {
 // to writeServiceError — the same mapping must reach them, not only the routes
 // that call writeServiceError directly.
 func TestWriteReportServiceError_DeletedMessageIsConflict(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	writeReportServiceError(context.Background(), rec, fmt.Errorf("%w: cannot delete this message", service.ErrDeletedMessage))
 

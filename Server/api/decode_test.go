@@ -39,6 +39,7 @@ func wantReply(t *testing.T, rr *httptest.ResponseRecorder, status int, code str
 }
 
 func TestDecodeJSON_ValidBody(t *testing.T) {
+	t.Parallel()
 	ok, v, rr := runDecode(t, decodeJSON, `{"name":"a"}`, 0)
 	if !ok || v.Name != "a" || rr.Body.Len() != 0 {
 		t.Fatalf("ok=%v v=%+v body=%q, want decoded and nothing written", ok, v, rr.Body.String())
@@ -46,6 +47,7 @@ func TestDecodeJSON_ValidBody(t *testing.T) {
 }
 
 func TestDecodeJSON_BadBodiesShareOneReply(t *testing.T) {
+	t.Parallel()
 	for _, body := range []string{``, `{`, `[1]`, `{"name":3}`, `not json`} {
 		ok, _, rr := runDecode(t, decodeJSON, body, 0)
 		if ok {
@@ -58,6 +60,7 @@ func TestDecodeJSON_BadBodiesShareOneReply(t *testing.T) {
 // The cap trips mid-value: the decoder has read part of the string when the
 // reader refuses, and the reply is 413, not the 400 of a malformed body.
 func TestDecodeJSON_OverCapIs413(t *testing.T) {
+	t.Parallel()
 	body := `{"name":"` + strings.Repeat("x", 4096) + `"}`
 	for name, decode := range map[string]func(http.ResponseWriter, *http.Request, any) bool{
 		"required": decodeJSON, "optional": decodeOptionalJSON, "strict": decodeStrictJSON,
@@ -71,6 +74,7 @@ func TestDecodeJSON_OverCapIs413(t *testing.T) {
 }
 
 func TestDecodeOptionalJSON_EmptyBodyKeepsTheZeroValue(t *testing.T) {
+	t.Parallel()
 	ok, v, rr := runDecode(t, decodeOptionalJSON, ``, 0)
 	if !ok || v != (decodeTarget{}) || rr.Body.Len() != 0 {
 		t.Fatalf("ok=%v v=%+v body=%q, want accepted with nothing written", ok, v, rr.Body.String())
@@ -83,6 +87,7 @@ func TestDecodeOptionalJSON_EmptyBodyKeepsTheZeroValue(t *testing.T) {
 }
 
 func TestDecodeStrictJSON_RefusesUnknownFieldsAndTrailingData(t *testing.T) {
+	t.Parallel()
 	for _, body := range []string{`{"name":"a","extra":1}`, `{"name":"a"}{}`, `{"name":"a"} x`} {
 		ok, _, rr := runDecode(t, decodeStrictJSON, body, 0)
 		if ok {
@@ -98,6 +103,7 @@ func TestDecodeStrictJSON_RefusesUnknownFieldsAndTrailingData(t *testing.T) {
 // The cap trips only on the trailing-data read: the first value fits, the
 // padding after it does not.
 func TestDecodeStrictJSON_OverCapAfterTheValueIs413(t *testing.T) {
+	t.Parallel()
 	body := `{"name":"a"}` + strings.Repeat(" ", 4096) + `{}`
 	ok, _, rr := runDecode(t, decodeStrictJSON, body, 1024)
 	if ok {

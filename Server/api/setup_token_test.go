@@ -19,6 +19,7 @@ import (
 // alone therefore cannot decide who creates the owner account; the token
 // printed at start-up does.
 func TestSetupRequiresTokenFromAdmittedPeers(t *testing.T) {
+	t.Parallel()
 	const token = "test-setup-token"
 	peers := []string{"127.0.0.1:40000", "172.18.0.1:40000", "[::1]:40000"}
 

@@ -57,6 +57,7 @@ func storedMentions(t *testing.T, database *db.DB, msgID int64) []int64 {
 }
 
 func TestSendMessage_ReplyPingMentionsParentAuthor(t *testing.T) {
+	t.Parallel()
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, parent := replyPingFixture(t)
 
@@ -74,6 +75,7 @@ func TestSendMessage_ReplyPingMentionsParentAuthor(t *testing.T) {
 }
 
 func TestSendMessage_ReplyPingOffOrAbsentNoMention(t *testing.T) {
+	t.Parallel()
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, parent := replyPingFixture(t)
 
@@ -98,6 +100,7 @@ func TestSendMessage_ReplyPingOffOrAbsentNoMention(t *testing.T) {
 }
 
 func TestSendMessage_ReplyPingWithoutReplyToIgnored(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	res := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", Content: "hello", ReplyPing: true,
@@ -111,6 +114,7 @@ func TestSendMessage_ReplyPingWithoutReplyToIgnored(t *testing.T) {
 }
 
 func TestSendMessage_ReplyPingSelfReplyNoPing(t *testing.T) {
+	t.Parallel()
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, _ := replyPingFixture(t)
 		own := mustCreateMessage(t, database, 10, 1, "my own", nil)
@@ -129,6 +133,7 @@ func TestSendMessage_ReplyPingSelfReplyNoPing(t *testing.T) {
 }
 
 func TestSendMessage_ReplyPingBlockedByParentNoBadge(t *testing.T) {
+	t.Parallel()
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, parent := replyPingFixture(t)
 		seedBlock(t, database, 2, 1) // bob blocked alice
@@ -145,6 +150,7 @@ func TestSendMessage_ReplyPingBlockedByParentNoBadge(t *testing.T) {
 }
 
 func TestSendMessage_ReplyPingParentCannotReadNoBadge(t *testing.T) {
+	t.Parallel()
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, parent := replyPingFixture(t)
 		mustDo(t, "UpsertChannelUserOverride", database.UpsertChannelUserOverride(context.Background(), 10, 2, 0, permissions.ReadMessages))
@@ -157,6 +163,7 @@ func TestSendMessage_ReplyPingParentCannotReadNoBadge(t *testing.T) {
 }
 
 func TestSendMessage_ReplyPingTwentyContentMentionsKeepTarget(t *testing.T) {
+	t.Parallel()
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, parent := replyPingFixture(t)
 		content := ""
@@ -198,6 +205,7 @@ func seedExtras(t *testing.T, database *db.DB, n int) string {
 // A reply target the content also names takes no content slot: @bob plus
 // twenty others keeps all twenty, on send and again on edit.
 func TestReplyPing_TargetNamedInContentTakesNoSlot(t *testing.T) {
+	t.Parallel()
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, parent := replyPingFixture(t)
 		content := "@bob" + seedExtras(t, database, maxMentionsPerMessage)
@@ -225,6 +233,7 @@ func TestReplyPing_TargetNamedInContentTakesNoSlot(t *testing.T) {
 // Without a reply ping the content cap is unchanged: the spare id
 // resolveMentions keeps never reaches the stored set.
 func TestSendMessage_NoReplyPingStillCapsAtTwenty(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	content := seedExtras(t, database, maxMentionsPerMessage+1)
 	res := mustSendMessage(context.Background(), t, svc, SendMessageParams{
@@ -244,6 +253,7 @@ func TestSendMessage_NoReplyPingStillCapsAtTwenty(t *testing.T) {
 }
 
 func TestEditMessage_KeepsReplyPing(t *testing.T) {
+	t.Parallel()
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, parent := replyPingFixture(t)
 		res := replyAs(t, svc, keyed, 1, parent, true, "agreed")
@@ -266,6 +276,7 @@ func TestEditMessage_KeepsReplyPing(t *testing.T) {
 }
 
 func TestDeleteMessage_ReversesReplyPingBadgeAfterEdit(t *testing.T) {
+	t.Parallel()
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, parent := replyPingFixture(t)
 		res := replyAs(t, svc, keyed, 1, parent, true, "agreed")
@@ -286,6 +297,7 @@ func TestDeleteMessage_ReversesReplyPingBadgeAfterEdit(t *testing.T) {
 }
 
 func TestSendMessage_ReplyPingFingerprint(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	parent := mustCreateMessage(t, database, 10, 2, "the parent", nil)
 	key := deliveryTestID(time.Now())
@@ -312,6 +324,7 @@ func TestSendMessage_ReplyPingFingerprint(t *testing.T) {
 // A false ping must hash exactly as the fingerprint did before the field
 // existed, so receipts written before the deploy still match their retries.
 func TestSendMessage_ReplyPingFalseHashIsUnchanged(t *testing.T) {
+	t.Parallel()
 	parent := int64(1040)
 	p := SendMessageParams{
 		ChannelID: 10, UserID: 1, Content: "agreed", ReplyTo: &parent,
@@ -344,6 +357,7 @@ func TestSendMessage_ReplyPingFalseHashIsUnchanged(t *testing.T) {
 // An imported parent belongs to the hidden import account: replying with the
 // ping on writes no mention row and raises no badge for it.
 func TestSendMessage_ReplyPingToImportedParentMentionsNobody(t *testing.T) {
+	t.Parallel()
 	eachSendPath(t, func(t *testing.T, keyed bool) {
 		svc, database, parent := replyPingFixture(t)
 		if _, err := database.ExecContext(context.Background(),

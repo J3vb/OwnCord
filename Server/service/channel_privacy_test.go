@@ -8,6 +8,7 @@ import (
 )
 
 func TestChannelPrivacyService(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	svc := NewChannelPrivacyService(database)
@@ -58,6 +59,7 @@ func TestChannelPrivacyService(t *testing.T) {
 // A thread is private exactly when its parent is: the exported verdict resolves
 // the thread to its parent instead of judging the thread id on base permissions.
 func TestChannelPrivacySnapshot_PrivateOfThread(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	mustDo(t, "override", f.database.UpsertChannelOverride(bg(), thrParent, permissions.MemberRoleID, 0, permissions.ReadMessages))
 	starter := f.post(t, thrParent, thrMod, "s")

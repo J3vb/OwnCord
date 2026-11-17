@@ -287,6 +287,7 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 // TestAuditCoverage_InviteRevokeFailureEmitsNothing pins S-02's failure half:
 // a revoke that finds no invite is NotFound and writes no audit row.
 func TestAuditCoverage_InviteRevokeFailureEmitsNothing(t *testing.T) {
+	t.Parallel()
 	_, database := newTestModerationService(t)
 	rec := audittest.Install(t, database)
 	err := NewInviteService(database).RevokeInvite(context.Background(), 1, "no-such-code")
@@ -316,6 +317,7 @@ func (s *cancelAfterCreateStore) CreateInvite(ctx context.Context, createdBy int
 // the invite row is committed, a canceled request context must neither turn
 // the creation into an error nor skip its audit row.
 func TestCreateInvite_AuditSurvivesCanceledLookup(t *testing.T) {
+	t.Parallel()
 	_, database := newTestModerationService(t)
 	rec := audittest.Install(t, database)
 	ctx, cancel := context.WithCancel(context.Background())

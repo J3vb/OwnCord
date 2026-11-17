@@ -50,6 +50,7 @@ func setupDiagnosticsRouter(t *testing.T) (http.Handler, string, *db.DB) {
 }
 
 func TestDiagnosticsConnectivity_ReturnsData(t *testing.T) {
+	t.Parallel()
 	router, token, _ := setupDiagnosticsRouter(t)
 
 	rr := doAPI(t, router, http.MethodGet, "/api/v1/diagnostics/connectivity", token, nil)
@@ -78,6 +79,7 @@ func TestDiagnosticsConnectivity_ReturnsData(t *testing.T) {
 // matching the same route's RateLimitMiddleware, which already honours
 // cfg.Server.TrustedProxies.
 func TestDiagnosticsConnectivity_HonoursTrustedProxies(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 
 	cfg := &config.Config{
@@ -126,6 +128,7 @@ func TestDiagnosticsConnectivity_HonoursTrustedProxies(t *testing.T) {
 }
 
 func TestDiagnosticsConnectivity_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	router, _, _ := setupDiagnosticsRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/diagnostics/connectivity", nil)
@@ -139,6 +142,7 @@ func TestDiagnosticsConnectivity_Unauthenticated(t *testing.T) {
 // covered, so deleting the ADMINISTRATOR gate broke no test while exposing the
 // server's network topology to every member.
 func TestDiagnosticsConnectivity_MemberForbidden(t *testing.T) {
+	t.Parallel()
 	router, _, database := setupDiagnosticsRouter(t)
 
 	uid := mustCreateUser(t, database, "diagmember", "$2a$12$fake", int(permissions.MemberRoleID))
@@ -159,6 +163,7 @@ func TestDiagnosticsConnectivity_MemberForbidden(t *testing.T) {
 // ─── isPrivateIP tests ──────────────────────────────────────────────────────
 
 func TestIsPrivateIP(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		ip   string
@@ -245,6 +250,7 @@ func fetchDiagnostics(t *testing.T, router http.Handler, token string) map[strin
 // TestDiagnosticsReportsReachabilityWhenEnabled — with the owner's opt-in set,
 // the block is present and carries the honesty payload.
 func TestDiagnosticsReportsReachabilityWhenEnabled(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{Server: config.ServerConfig{
 		Name:                      "Test Server",
 		Port:                      8443,
@@ -281,6 +287,7 @@ func TestDiagnosticsReportsReachabilityWhenEnabled(t *testing.T) {
 // present-and-empty, so an operator cannot read "switched off" as "nothing to
 // report".
 func TestDiagnosticsOmitsReachabilityWhenDisabled(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{Server: config.ServerConfig{Name: "Test Server", Port: 8443}}
 	router, token := diagnosticsWithConfig(t, cfg)
 
@@ -301,6 +308,7 @@ func TestDiagnosticsOmitsReachabilityWhenDisabled(t *testing.T) {
 // with an ambiguous meaning for a 100.64/10 address. address_class disambiguates
 // it, and is not behind the gate: it describes the caller, not this host.
 func TestDiagnosticsReportsClientAddressClass(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{Server: config.ServerConfig{Name: "Test Server", Port: 8443}}
 	router, token := diagnosticsWithConfig(t, cfg)
 
@@ -318,6 +326,7 @@ func TestDiagnosticsReportsClientAddressClass(t *testing.T) {
 // topology. The gate is asserted, not assumed: the flag is switched ON here,
 // so a handler that leaked the block into /health would be caught.
 func TestHealthResponseCarriesNoReachabilityFields(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{Server: config.ServerConfig{
 		Name:                      "Test Server",
 		Port:                      8443,

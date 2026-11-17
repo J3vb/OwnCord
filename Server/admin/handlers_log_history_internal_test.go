@@ -224,12 +224,19 @@ func TestLogHistory_ReadsDuringRotationAndCleanup(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// A loaded Windows runner took over 5 s to drain the queue, since every
+	// rotation lists the folder and retries deletes a history read holds open.
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer stopCancel()
 	lf.Stop(stopCtx)
 	cancel()
 	close(stop)
 	wg.Wait()
+	select {
+	case <-lf.done:
+	default:
+		t.Fatal("the log writer was still running after Stop")
+	}
 
 	var total int64
 	files, _ := listLogFiles(dir)

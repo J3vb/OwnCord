@@ -11,6 +11,7 @@ import (
 )
 
 func TestThreadUpdate_RateLimitedPerUser(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "t")
 	for i := range threadUpdateLimit {
@@ -31,6 +32,7 @@ func TestThreadUpdate_RateLimitedPerUser(t *testing.T) {
 
 // Two sockets of one user reach the service concurrently and still share one budget.
 func TestThreadUpdate_ConcurrentCallersShareBudget(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "t")
 	var ok, limited atomic.Int32
@@ -66,6 +68,7 @@ func (c *countingThreadStore) UpdateThread(ctx context.Context, id int64, patch 
 }
 
 func TestThreadUpdate_NoopWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	counter := &countingThreadStore{ThreadStore: f.threads.ts}
 	f.threads.ts = counter
@@ -86,6 +89,7 @@ func TestThreadUpdate_NoopWritesNothing(t *testing.T) {
 
 // A patch repeating current values next to one real change still writes.
 func TestThreadUpdate_PartialChangeStillWrites(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	counter := &countingThreadStore{ThreadStore: f.threads.ts}
 	f.threads.ts = counter

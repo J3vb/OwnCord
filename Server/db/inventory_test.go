@@ -11,6 +11,7 @@ import (
 // username containing a LIKE metacharacter (auth.ValidateUsername permits `_`
 // and `%`) must not widen the match onto an unrelated account's lockout key.
 func TestTakeInventory_LockoutClassMatchesExactSuffixNotLIKE(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 

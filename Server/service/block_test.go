@@ -15,13 +15,12 @@ import (
 
 func newBlockService(t *testing.T) (*BlockService, *db.DB) {
 	t.Helper()
-	database := newTestDB(t)
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	database := newAliceBobDB(t)
 	return NewBlockService(database), database
 }
 
 func TestBlockService_BlockUser(t *testing.T) {
+	t.Parallel()
 	svc, database := newBlockService(t)
 	ctx := context.Background()
 
@@ -35,6 +34,7 @@ func TestBlockService_BlockUser(t *testing.T) {
 }
 
 func TestBlockService_BlockUser_Rejections(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		blockerID int64
@@ -71,6 +71,7 @@ func TestBlockService_BlockUser_Rejections(t *testing.T) {
 }
 
 func TestBlockService_BlockUser_Idempotent(t *testing.T) {
+	t.Parallel()
 	svc, database := newBlockService(t)
 	ctx := context.Background()
 
@@ -88,6 +89,7 @@ func TestBlockService_BlockUser_Idempotent(t *testing.T) {
 }
 
 func TestBlockService_UnblockUser(t *testing.T) {
+	t.Parallel()
 	svc, database := newBlockService(t)
 	ctx := context.Background()
 
@@ -102,6 +104,7 @@ func TestBlockService_UnblockUser(t *testing.T) {
 }
 
 func TestBlockService_UnblockUser_Rejections(t *testing.T) {
+	t.Parallel()
 	svc, _ := newBlockService(t)
 	ctx := context.Background()
 
@@ -119,6 +122,7 @@ func TestBlockService_UnblockUser_Rejections(t *testing.T) {
 }
 
 func TestBlockService_ListBlocked(t *testing.T) {
+	t.Parallel()
 	svc, database := newBlockService(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
@@ -155,6 +159,7 @@ func TestBlockService_ListBlocked(t *testing.T) {
 // target's next message is a request again rather than silently delivered. The
 // target's own trust in the blocker is left alone.
 func TestBlockUser_RevokesBlockersTrustInTarget(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 	mustDo(t, "TrustSender(2,1)", database.TrustSender(ctx, 2, 1, "accepted"))
@@ -180,6 +185,7 @@ func TestBlockUser_RevokesBlockersTrustInTarget(t *testing.T) {
 // A request the blocker already decided (here: accepted) must not swallow the
 // sender's first message after block + unblock: the pair gets a fresh request.
 func TestBlockUser_ResetsDecidedRequestSoNextSendIsARequestAgain(t *testing.T) {
+	t.Parallel()
 	_, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 	first, err := svc.Messages.SendMessage(ctx, SendMessageParams{
@@ -206,6 +212,7 @@ func TestBlockUser_ResetsDecidedRequestSoNextSendIsARequestAgain(t *testing.T) {
 // Unblocking someone who is not blocked is a no-op: it must not erase an
 // ignored request, or the sender's next message would raise a fresh one.
 func TestUnblockUser_NotBlockedKeepsIgnoredRequest(t *testing.T) {
+	t.Parallel()
 	_, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 	first, err := svc.Messages.SendMessage(ctx, SendMessageParams{
@@ -232,6 +239,7 @@ func TestUnblockUser_NotBlockedKeepsIgnoredRequest(t *testing.T) {
 // trusting them: their reply is delivered into the DM, not held as a request,
 // and not refused when the writer takes no direct messages from strangers.
 func TestUnblock_UnblockerWritingFirstLetsTheReplyThrough(t *testing.T) {
+	t.Parallel()
 	for _, dmsOff := range []bool{false, true} {
 		t.Run(fmt.Sprintf("dms_off=%v", dmsOff), func(t *testing.T) {
 			database, svc := newMessageRequestFixture(t)
