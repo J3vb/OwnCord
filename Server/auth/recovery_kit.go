@@ -131,8 +131,7 @@ func HashRecoveryKitSecret(canonical string) (string, error) {
 // kits issued under earlier parameters keep verifying. A malformed verifier
 // is a mismatch, never a panic.
 func VerifyRecoveryKitSecret(verifier, canonical string) bool {
-	_, matched := verifyArgon2(verifier, canonical)
-	return matched
+	return verifyArgon2(verifier, canonical)
 }
 
 var (

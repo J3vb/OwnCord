@@ -33,9 +33,8 @@ type argon2Params struct {
 }
 
 // productionArgon2 costs about what bcrypt at cost 12 does on the same core
-// (measured: ~240 ms on 2 vCPU), so a check takes as long whichever format the
-// account holds and the unknown-user dummy check matches both, and a slot of
-// the admission budget is held as long as before.
+// (measured: ~160-240 ms depending on the host), so a slot of the admission
+// budget is held about as long as before.
 var productionArgon2 = argon2Params{memoryKiB: 64 * 1024, time: 4, threads: 1, saltLen: 16, keyLen: 32}
 
 // testArgon2 is what SetCostForTesting switches to.
@@ -54,8 +53,8 @@ const (
 	maxStoredArgon2SaltLen   = 64
 )
 
-// argon2MemoryBudgetKiB bounds the memory all argon2id computations hold at
-// once. The admission budget counts computations, and an admin may raise it
+// argon2MemoryBudgetKiB bounds the working memory all argon2id computations
+// hold at once (the process footprint can run higher until the GC returns it). The admission budget counts computations, and an admin may raise it
 // far past what the host's memory allows at 64 MiB each; past this many,
 // computations wait for one to finish.
 const argon2MemoryBudgetKiB = 512 * 1024
@@ -76,6 +75,7 @@ func SetCostForTesting(cost int) {
 	argon2Cur = testArgon2
 	dummyHashOnce = sync.Once{}
 	dummyHash = ""
+	dummyBcrypt = nil
 }
 
 // ErrPasswordTooShort is returned when the password is below the minimum length.
@@ -87,6 +87,9 @@ var ErrPasswordTooLong = errors.New("password must not exceed 72 characters")
 const argon2Prefix = "$argon2id$"
 
 var b64 = base64.RawStdEncoding
+
+// MaxPasswordBytes is the longest password HashPassword accepts.
+const MaxPasswordBytes = maxPassLen
 
 // errHashTooLong keeps the 72-byte ceiling bcrypt enforced at hash time, so a
 // path that hashes without validating first still refuses a longer password.
@@ -117,6 +120,7 @@ func hashArgon2(password string, p argon2Params) (string, error) {
 
 // computeArgon2 runs argon2id inside the process-wide memory budget.
 func computeArgon2(password string, salt []byte, p argon2Params) []byte {
+	noteHashWork("argon2id")
 	release := argon2Mem.acquire(p.memoryKiB)
 	defer release()
 	return argon2.IDKey([]byte(password), salt, p.time, p.memoryKiB, p.threads, p.keyLen)
@@ -181,29 +185,48 @@ func decodeBounded(s string, minLen, maxLen int) ([]byte, bool) {
 	return b, true
 }
 
-// dummyHash is a lazily computed argon2id hash so CheckPassword takes roughly
-// constant time whether or not a user exists.
+// dummyHash and dummyBcrypt are lazily computed hashes of a password nobody
+// holds. A failed check runs one bcrypt and one argon2id computation whatever
+// the account holds (no account, a bcrypt hash or an argon2id hash), so the
+// work a refusal costs does not depend on the account's state.
 var (
 	dummyHash     string
+	dummyBcrypt   []byte
 	dummyHashOnce sync.Once
 )
 
-// getDummyHash returns the dummy hash, initialising it on first call.
-func getDummyHash() string {
+func initDummyHashes() {
 	dummyHashOnce.Do(func() {
 		h, err := hashArgon2("dummy-timing-pad", argon2Cur)
 		if err != nil {
 			// crypto/rand is required for the server to function; no recovery path.
 			panic("auth: failed to generate dummy password hash: " + err.Error())
 		}
-		dummyHash = h
+		b, err := bcrypt.GenerateFromPassword([]byte("dummy-timing-pad"), bcryptCost)
+		if err != nil {
+			panic("auth: failed to generate dummy bcrypt hash: " + err.Error())
+		}
+		dummyHash, dummyBcrypt = h, b
 	})
-	return dummyHash
+}
+
+// hashWorkHook, when set by a test, is told of each password-hash computation.
+var hashWorkHook func(scheme string)
+
+func noteHashWork(scheme string) {
+	if hashWorkHook != nil {
+		hashWorkHook(scheme)
+	}
+}
+
+func compareBcrypt(hash []byte, password string) bool {
+	noteHashWork("bcrypt")
+	return bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
 }
 
 // CheckPassword reports whether password matches hash; any error, including an
-// empty or malformed hash, is false. An empty hash (no such user) still runs a
-// dummy comparison to prevent timing-based username enumeration.
+// empty or malformed hash, is false. An empty hash (no such user) still runs
+// the same work as a wrong password.
 func CheckPassword(hash, password string) bool {
 	matched, _ := VerifyPassword(hash, password)
 	return matched
@@ -212,32 +235,39 @@ func CheckPassword(hash, password string) bool {
 // VerifyPassword reports whether password matches hash, which may be argon2id
 // or bcrypt. needsRehash is true on a match whose hash is not argon2id at the
 // current settings, so the caller can store HashPassword's result in its place.
-// An empty hash (no such user) runs a dummy comparison and returns false.
+// An empty hash (no such user) is a mismatch. Every mismatch on a well-formed
+// or empty hash runs one bcrypt and one argon2id computation.
 func VerifyPassword(hash, password string) (matched, needsRehash bool) {
-	if hash == "" {
-		_, _ = verifyArgon2(getDummyHash(), password)
+	initDummyHashes()
+	switch {
+	case hash == "":
+		_ = compareBcrypt(dummyBcrypt, password)
+		_ = verifyArgon2(dummyHash, password)
 		return false, false
-	}
-	if strings.HasPrefix(hash, argon2Prefix) {
-		p, ok := verifyArgon2(hash, password)
+	case strings.HasPrefix(hash, argon2Prefix):
+		p, salt, key, ok := parseArgon2(hash)
 		if !ok {
 			return false, false
 		}
+		if subtle.ConstantTimeCompare(computeArgon2(password, salt, p), key) != 1 {
+			_ = compareBcrypt(dummyBcrypt, password)
+			return false, false
+		}
 		return true, p != argon2Cur
-	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+	case compareBcrypt([]byte(hash), password):
+		return true, true
+	default:
+		_ = verifyArgon2(dummyHash, password)
 		return false, false
 	}
-	return true, true
 }
 
-func verifyArgon2(encoded, password string) (p argon2Params, matched bool) {
+func verifyArgon2(encoded, password string) bool {
 	p, salt, key, ok := parseArgon2(encoded)
 	if !ok {
-		return argon2Params{}, false
+		return false
 	}
-	got := computeArgon2(password, salt, p)
-	return p, subtle.ConstantTimeCompare(got, key) == 1
+	return subtle.ConstantTimeCompare(computeArgon2(password, salt, p), key) == 1
 }
 
 // memorySemaphore hands out KiB of the argon2id memory budget; a request

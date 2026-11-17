@@ -88,3 +88,21 @@ func TestLogin_UpgradeNeverOverwritesAChangedPassword(t *testing.T) {
 		t.Fatalf("stored hash = %q, want the changed password's hash kept", got)
 	}
 }
+
+// A legacy password typed with bytes past bcrypt's 72 still signs in, keeps its hash, and
+// does not try (and fail) an upgrade on every sign-in.
+func TestLogin_OverlongLegacyPasswordKeepsItsHash(t *testing.T) {
+	database := newTestDB(t)
+	exact := strings.Repeat("p", 72)
+	legacy, err := bcrypt.GenerateFromPassword([]byte(exact), bcrypt.MinCost)
+	mustDo(t, "bcrypt", err)
+	uid := mustCreateUser(t, database, "legacy-user", string(legacy), 4)
+	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), nil)
+
+	if _, err := upgradeLogin(svc, exact+"extra"); err != nil {
+		t.Fatalf("login with trailing bytes past 72: %v", err)
+	}
+	if got := mustGetUserByID(t, database, uid).PasswordHash; got != string(legacy) {
+		t.Fatalf("stored hash = %q, want the bcrypt hash kept", got)
+	}
+}

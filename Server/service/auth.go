@@ -273,19 +273,23 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	if !successVouched && !s.limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
 		return nil, ErrLockedOut
 	}
-	// Always run the check, with an empty hash for an unknown user: CheckPassword then does a
-	// dummy bcrypt, keeping response time constant. A `user == nil || ...` short-circuit
+	// Always run the check, with an empty hash for an unknown user: VerifyPassword then does the
+	// same work as a wrong password, keeping response time constant. A `user == nil || ...` short-circuit
 	// would reintroduce the timing side-channel.
 	storedHash := ""
 	if user != nil {
 		storedHash = user.PasswordHash
 	}
 	matched, needsRehash := auth.VerifyPassword(storedHash, in.Password)
+	upgradedHash := ""
 	if matched && needsRehash {
 		// Still inside the admitted slot: the new hash is the same deliberate cost.
-		s.upgradePasswordHash(ctx, user, in.Password)
+		upgradedHash = newUpgradedHash(user.ID, in.Password)
 	}
 	release()
+	if upgradedHash != "" {
+		s.storeUpgradedHash(ctx, user, upgradedHash)
+	}
 	if !matched {
 		// The attempt was reserved up-front; Check is read-only, so only the lockouts are decided here.
 		if !s.limiter.Check(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) {
@@ -304,16 +308,25 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	return user, nil
 }
 
-// upgradePasswordHash stores an argon2id hash in place of an older one after a correct
-// password. It writes only while the stored hash is still the one just checked, so a
-// password changed meanwhile is never overwritten. Any failure leaves the old hash, which
-// still signs in; the sign-in itself never fails on it.
-func (s *AuthService) upgradePasswordHash(ctx context.Context, user *db.User, password string) {
+// newUpgradedHash is the argon2id hash that replaces an older one after a correct password,
+// or "" when none can be made. A password past 72 bytes only matched a bcrypt hash because
+// bcrypt ignores the rest; it keeps that hash, which still signs in.
+func newUpgradedHash(userID int64, password string) string {
+	if len(password) > auth.MaxPasswordBytes {
+		return ""
+	}
 	newHash, err := auth.HashPassword(password)
 	if err != nil {
-		slog.Warn("login: password hash upgrade failed", "err", err, "user_id", user.ID)
-		return
+		slog.Warn("login: password hash upgrade failed", "err", err, "user_id", userID)
+		return ""
 	}
+	return newHash
+}
+
+// storeUpgradedHash writes newHash only while the stored hash is still the one just checked,
+// so a password changed meanwhile is never overwritten. Any failure leaves the old hash, which
+// still signs in; the sign-in itself never fails on it.
+func (s *AuthService) storeUpgradedHash(ctx context.Context, user *db.User, newHash string) {
 	upgraded, err := s.st.UpgradeUserPasswordHash(context.WithoutCancel(ctx), user.ID, user.PasswordHash, newHash)
 	if err != nil {
 		slog.Warn("login: storing upgraded password hash failed", "err", err, "user_id", user.ID)

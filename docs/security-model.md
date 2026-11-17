@@ -75,10 +75,11 @@ documents. Any disagreement is a bug in this page.
 ### Authentication and sessions
 
 - Passwords are hashed with argon2id (64 MiB, 4 passes), about the cost of
-  the earlier bcrypt at cost 12, so a sign-in costs the same whichever format
-  an account holds. A bcrypt hash is replaced at the account's next sign-in,
-  and only if it is still the stored one. All argon2id work together holds at
-  most 512 MiB; past that it waits. TOTP codes are compared in
+  the earlier bcrypt at cost 12. A bcrypt hash is replaced at the account's
+  next sign-in, and only if it is still the stored one. A wrong password runs
+  the same work whether the account exists or which format it holds. All
+  argon2id work together uses at most 512 MiB of working memory; past that it
+  waits. TOTP codes are compared in
   constant time (`subtle.ConstantTimeCompare`).
 - **One shared budget for password hashing.** Every hash computation on a sign-in
   route goes through one process-wide limit. This covers password checks,
